@@ -5,10 +5,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
-	"github.com/resonatehq/resonate/pkg/promise"
 )
 
 // Promise Handlers
@@ -16,185 +13,219 @@ import (
 func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
 	var payload t_api.ReadPromiseRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.ReadPromiseResponse)
+	responseBytes, err := json.Marshal(responseData.Promise)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleSearchPromises(kafkaReq *KafkaRequest) {
 	var payload t_api.SearchPromisesRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.SearchPromisesResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"promises": responseData.Promises,
+		"cursor":   responseData.Cursor,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id             string            `json:"id"`
-		IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-		Strict         bool              `json:"strict"`
-		Param          promise.Value     `json:"param"`
-		Timeout        int64             `json:"timeout"`
-		Tags           map[string]string `json:"tags,omitempty"`
-	}
+	var payload t_api.CreatePromiseRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	var idempotencyKey *idempotency.Key
-	if payloadRaw.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(payloadRaw.IdempotencyKey))
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
 	}
 
-	payload := &t_api.CreatePromiseRequest{
-		Id:             payloadRaw.Id,
-		IdempotencyKey: idempotencyKey,
-		Strict:         payloadRaw.Strict,
-		Param:          payloadRaw.Param,
-		Timeout:        payloadRaw.Timeout,
-		Tags:           payloadRaw.Tags,
+	responseData := res.(*t_api.CreatePromiseResponse)
+	responseBytes, err := json.Marshal(responseData.Promise)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
 	}
 
-	s.processRequest(kafkaReq, payload)
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id             string            `json:"id"`
-		IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-		Strict         bool              `json:"strict"`
-		Param          promise.Value     `json:"param"`
-		Timeout        int64             `json:"timeout"`
-		Tags           map[string]string `json:"tags,omitempty"`
-		TaskProcessId  string            `json:"taskProcessId,omitempty"`
-		TaskTtl        int64             `json:"taskTtl,omitempty"`
-		TaskTimeout    int64             `json:"taskTimeout,omitempty"`
-	}
+	var payload t_api.CreatePromiseAndTaskRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
+		return
+	}
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
 		return
 	}
 
-	var idempotencyKey *idempotency.Key
-	if payloadRaw.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(payloadRaw.IdempotencyKey))
+	responseData := res.(*t_api.CreatePromiseAndTaskResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"promise": responseData.Promise,
+		"task":    responseData.Task,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
 	}
 
-	payload := &t_api.CreatePromiseAndTaskRequest{
-		Promise: &t_api.CreatePromiseRequest{
-			Id:             payloadRaw.Id,
-			IdempotencyKey: idempotencyKey,
-			Strict:         payloadRaw.Strict,
-			Param:          payloadRaw.Param,
-			Timeout:        payloadRaw.Timeout,
-			Tags:           payloadRaw.Tags,
-		},
-		Task: &t_api.CreateTaskRequest{
-			PromiseId: payloadRaw.Id,
-			ProcessId: payloadRaw.TaskProcessId,
-			Ttl:       payloadRaw.TaskTtl,
-			Timeout:   payloadRaw.TaskTimeout,
-		},
-	}
-
-	s.processRequest(kafkaReq, payload)
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id             string        `json:"id"`
-		IdempotencyKey string        `json:"idempotencyKey,omitempty"`
-		Strict         bool          `json:"strict"`
-		State          string        `json:"state"`
-		Value          promise.Value `json:"value"`
-	}
+	var payload t_api.CompletePromiseRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	var idempotencyKey *idempotency.Key
-	if payloadRaw.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(payloadRaw.IdempotencyKey))
-	}
-
-	var state promise.State
-	switch payloadRaw.State {
-	case "RESOLVED":
-		state = promise.Resolved
-	case "REJECTED":
-		state = promise.Rejected
-	case "REJECTED_CANCELED":
-		state = promise.Canceled
-	case "REJECTED_TIMEDOUT":
-		state = promise.Timedout
-	default:
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid state: %s", payloadRaw.State))
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
 		return
 	}
 
-	payload := &t_api.CompletePromiseRequest{
-		Id:             payloadRaw.Id,
-		IdempotencyKey: idempotencyKey,
-		Strict:         payloadRaw.Strict,
-		State:          state,
-		Value:          payloadRaw.Value,
+	responseData := res.(*t_api.CompletePromiseResponse)
+	responseBytes, err := json.Marshal(responseData.Promise)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
 	}
 
-	s.processRequest(kafkaReq, payload)
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
 	var payload t_api.CreateCallbackRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.CreateCallbackResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"callback": responseData.Callback,
+		"promise":  responseData.Promise,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id        string          `json:"id"`
-		PromiseId string          `json:"promiseId"`
-		Recv      json.RawMessage `json:"recv"`
-		Timeout   int64           `json:"timeout"`
-	}
+	var payload t_api.CreateCallbackRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	head := map[string]string{}
-	if kafkaReq.Metadata != nil {
-		if traceparent, ok := kafkaReq.Metadata["traceparent"]; ok {
-			head["traceparent"] = traceparent
-			if tracestate, ok := kafkaReq.Metadata["tracestate"]; ok {
-				head["tracestate"] = tracestate
-			}
-		}
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
 	}
 
-	payload := &t_api.CreateCallbackRequest{
-		Id:        util.NotifyId(payloadRaw.PromiseId, payloadRaw.Id),
-		PromiseId: payloadRaw.PromiseId,
-		Recv:      payloadRaw.Recv,
-		Mesg:      &message.Mesg{Type: "notify", Head: head, Root: payloadRaw.PromiseId},
-		Timeout:   payloadRaw.Timeout,
+	responseData := res.(*t_api.CreateCallbackResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"callback": responseData.Callback,
+		"promise":  responseData.Promise,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
 	}
 
-	s.processRequest(kafkaReq, payload)
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 // Schedule Handlers
@@ -202,69 +233,111 @@ func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
 func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
 	var payload t_api.ReadScheduleRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.ReadScheduleResponse)
+	responseBytes, err := json.Marshal(responseData.Schedule)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleSearchSchedules(kafkaReq *KafkaRequest) {
 	var payload t_api.SearchSchedulesRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.SearchSchedulesResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"schedules": responseData.Schedules,
+		"cursor":    responseData.Cursor,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id             string            `json:"id"`
-		Description    string            `json:"description,omitempty"`
-		Cron           string            `json:"cron"`
-		Tags           map[string]string `json:"tags,omitempty"`
-		PromiseId      string            `json:"promiseId"`
-		PromiseTimeout int64             `json:"promiseTimeout"`
-		PromiseParam   promise.Value     `json:"promiseParam"`
-		PromiseTags    map[string]string `json:"promiseTags,omitempty"`
-		IdempotencyKey string            `json:"idempotencyKey,omitempty"`
-	}
+	var payload t_api.CreateScheduleRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	var idempotencyKey *idempotency.Key
-	if payloadRaw.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(payloadRaw.IdempotencyKey))
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
 	}
 
-	payload := &t_api.CreateScheduleRequest{
-		Id:             payloadRaw.Id,
-		Description:    payloadRaw.Description,
-		Cron:           payloadRaw.Cron,
-		Tags:           payloadRaw.Tags,
-		PromiseId:      payloadRaw.PromiseId,
-		PromiseTimeout: payloadRaw.PromiseTimeout,
-		PromiseParam:   payloadRaw.PromiseParam,
-		PromiseTags:    payloadRaw.PromiseTags,
-		IdempotencyKey: idempotencyKey,
+	responseData := res.(*t_api.CreateScheduleResponse)
+	responseBytes, err := json.Marshal(responseData.Schedule)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
 	}
 
-	s.processRequest(kafkaReq, payload)
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleDeleteSchedule(kafkaReq *KafkaRequest) {
 	var payload t_api.DeleteScheduleRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	_, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	s.sendReply(kafkaReq, nil)
 }
 
 // Lock Handlers
@@ -272,84 +345,208 @@ func (s *server) handleDeleteSchedule(kafkaReq *KafkaRequest) {
 func (s *server) handleAcquireLock(kafkaReq *KafkaRequest) {
 	var payload t_api.AcquireLockRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.AcquireLockResponse)
+	responseBytes, err := json.Marshal(responseData.Lock)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleReleaseLock(kafkaReq *KafkaRequest) {
 	var payload t_api.ReleaseLockRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	_, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	s.sendReply(kafkaReq, nil)
 }
 
 func (s *server) handleHeartbeatLocks(kafkaReq *KafkaRequest) {
 	var payload t_api.HeartbeatLocksRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.HeartbeatLocksResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"locksAffected": responseData.LocksAffected,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 // Task Handlers
 
 func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
-	var payloadRaw struct {
-		Id        string `json:"id"`
-		Counter   int    `json:"counter"`
-		ProcessId string `json:"processId"`
-		Ttl       int64  `json:"ttl"`
-	}
+	var payload t_api.ClaimTaskRequest
 
-	if err := json.Unmarshal(kafkaReq.Payload, &payloadRaw); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	payload := &t_api.ClaimTaskRequest{
-		Id:        payloadRaw.Id,
-		Counter:   payloadRaw.Counter,
-		ProcessId: payloadRaw.ProcessId,
-		Ttl:       payloadRaw.Ttl,
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
 	}
 
-	s.processRequest(kafkaReq, payload)
+	responseData := res.(*t_api.ClaimTaskResponse)
+
+	promises := map[string]any{
+		"root": map[string]any{
+			"id":   responseData.Task.Mesg.Root,
+			"href": responseData.RootPromiseHref,
+			"data": responseData.RootPromise,
+		},
+	}
+	if responseData.Task.Mesg.Type == message.Resume {
+		promises["leaf"] = map[string]any{
+			"id":   responseData.Task.Mesg.Leaf,
+			"href": responseData.LeafPromiseHref,
+			"data": responseData.LeafPromise,
+		}
+	}
+
+	responseBytes, err := json.Marshal(map[string]any{
+		"type":     responseData.Task.Mesg.Type,
+		"promises": promises,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
 	var payload t_api.CompleteTaskRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.CompleteTaskResponse)
+	responseBytes, err := json.Marshal(responseData.Task)
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }
 
 func (s *server) handleDropTask(kafkaReq *KafkaRequest) {
 	var payload t_api.DropTaskRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	_, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	s.sendReply(kafkaReq, nil)
 }
 
 func (s *server) handleHeartbeatTasks(kafkaReq *KafkaRequest) {
 	var payload t_api.HeartbeatTasksRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("invalid payload: %v", err))
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("invalid payload: %v", err),
+		})
 		return
 	}
 
-	s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &payload)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	responseData := res.(*t_api.HeartbeatTasksResponse)
+	responseBytes, err := json.Marshal(map[string]any{
+		"tasksAffected": responseData.TasksAffected,
+	})
+	if err != nil {
+		s.respondError(kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
+		})
+		return
+	}
+
+	s.sendReply(kafkaReq, responseBytes)
 }

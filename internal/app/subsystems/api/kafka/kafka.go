@@ -222,7 +222,10 @@ func (s *server) handleRequest(msg *kafka.Message) {
 	// Validate replyTo
 	if kafkaReq.ReplyTo.Topic == "" || kafkaReq.ReplyTo.Target == "" {
 		slog.Warn("missing replyTo information", "correlationId", kafkaReq.CorrelationId)
-		s.respondError(&kafkaReq, 400, "missing replyTo.topic or replyTo.target")
+		s.respondError(&kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: "missing replyTo.topic or replyTo.target",
+		})
 		return
 	}
 
@@ -273,7 +276,10 @@ func (s *server) handleRequest(msg *kafka.Message) {
 		s.handleHeartbeatTasks(&kafkaReq)
 
 	default:
-		s.respondError(&kafkaReq, 400, fmt.Sprintf("unknown operation: %s", kafkaReq.Operation))
+		s.respondError(&kafkaReq, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("unknown operation: %s", kafkaReq.Operation),
+		})
 	}
 }
 
@@ -281,18 +287,16 @@ func (s *server) log(operation string, err error) {
 	slog.Debug("kafka", "operation", operation, "error", err)
 }
 
-func (s *server) code(status t_api.StatusCode) int {
-	return int(status) / 100
-}
-
 // Helper function to process requests
-func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPayload) {
+func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPayload) (t_api.ResponsePayload, *ErrorResponse) {
 	defer s.log(kafkaReq.Operation, nil)
 
 	// Validate payload
 	if err := payload.Validate(); err != nil {
-		s.respondError(kafkaReq, 400, fmt.Sprintf("validation error: %v", err))
-		return
+		return nil, &ErrorResponse{
+			Code:    400,
+			Message: fmt.Sprintf("validation error: %v", err),
+		}
 	}
 
 	// Process the request
@@ -302,43 +306,21 @@ func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPay
 	})
 
 	if apiErr != nil {
-		s.respondError(kafkaReq, s.code(apiErr.Code), apiErr.Error())
-		return
+		return nil, &ErrorResponse{
+			Code:    int(apiErr.Code),
+			Message: apiErr.Message,
+		}
 	}
 
-	// Encode and send response
-	responseData, err := json.Marshal(res)
-	if err != nil {
-		s.respondError(kafkaReq, 500, fmt.Sprintf("failed to encode response: %v", err))
-		return
-	}
-
-	response := &KafkaResponse{
-		Target:        kafkaReq.ReplyTo.Target,
-		CorrelationId: kafkaReq.CorrelationId,
-		Success:       true,
-		Response:      responseData,
-	}
-
-	responseBytes, err := json.Marshal(response)
-	if err != nil {
-		s.respondError(kafkaReq, 500, fmt.Sprintf("failed to encode response envelope: %v", err))
-		return
-	}
-
-	// Send reply to specified topic
-	s.sendReply(kafkaReq.ReplyTo, responseBytes)
+	return res.Payload, nil
 }
 
-func (s *server) respondError(kafkaReq *KafkaRequest, code int, message string) {
+func (s *server) respondError(kafkaReq *KafkaRequest, error *ErrorResponse) {
 	response := &KafkaResponse{
 		Target:        kafkaReq.ReplyTo.Target,
 		CorrelationId: kafkaReq.CorrelationId,
 		Success:       false,
-		Error: &ErrorResponse{
-			Code:    code,
-			Message: message,
-		},
+		Error:         error,
 	}
 
 	responseBytes, err := json.Marshal(response)
@@ -347,27 +329,44 @@ func (s *server) respondError(kafkaReq *KafkaRequest, code int, message string) 
 		return
 	}
 
-	s.sendReply(kafkaReq.ReplyTo, responseBytes)
+	s.send(kafkaReq, responseBytes)
 }
 
-func (s *server) sendReply(replyTo ReplyTo, data []byte) {
-	msg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &replyTo.Topic,
-			Partition: kafka.PartitionAny,
-		},
-		Value: data,
+func (s *server) sendReply(kafkaReq *KafkaRequest, data []byte) {
+	response := &KafkaResponse{
+		Target:        kafkaReq.ReplyTo.Target,
+		CorrelationId: kafkaReq.CorrelationId,
+		Success:       true,
+		Response:      data,
 	}
 
-	if replyTo.Key != nil {
-		msg.Key = []byte(*replyTo.Key)
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		slog.Error("failed to encode error response", "error", err)
+		return
+	}
+
+	s.send(kafkaReq, responseBytes)
+}
+
+func (s *server) send(kafkaReq *KafkaRequest, value []byte) {
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic:     &kafkaReq.ReplyTo.Topic,
+			Partition: kafka.PartitionAny,
+		},
+		Value: value,
+	}
+
+	if kafkaReq.ReplyTo.Key != nil {
+		msg.Key = []byte(*kafkaReq.ReplyTo.Key)
 	}
 
 	deliveryChan := make(chan kafka.Event, 1)
 	defer close(deliveryChan)
 
 	if err := s.kafka.producer.Produce(msg, deliveryChan); err != nil {
-		slog.Error("failed to send reply", "error", err, "topic", replyTo.Topic, "target", replyTo.Target)
+		slog.Error("failed to send reply", "error", err, "topic", kafkaReq.ReplyTo.Topic, "target", kafkaReq.ReplyTo.Target)
 		return
 	}
 
@@ -381,15 +380,15 @@ func (s *server) sendReply(replyTo ReplyTo, data []byte) {
 	if m.TopicPartition.Error != nil {
 		slog.Error("failed to deliver reply",
 			"error", m.TopicPartition.Error,
-			"topic", replyTo.Topic,
-			"target", replyTo.Target,
+			"topic", kafkaReq.ReplyTo.Topic,
+			"target", kafkaReq.ReplyTo.Target,
 		)
 		return
 	}
 
 	slog.Debug("sent reply",
-		"topic", replyTo.Topic,
-		"target", replyTo.Target,
+		"topic", kafkaReq.ReplyTo.Topic,
+		"target", kafkaReq.ReplyTo.Target,
 		"partition", m.TopicPartition.Partition,
 		"offset", m.TopicPartition.Offset,
 	)
