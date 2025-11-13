@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	i_api "github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -24,31 +25,54 @@ type Config struct {
 type Kafka struct {
 	config         *Config
 	api            *api.API
-	consumerGroup  sarama.ConsumerGroup
-	producer       sarama.SyncProducer
+	consumer       *kafka.Consumer
+	producer       *kafka.Producer
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 }
 
 func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
-	// Configure Sarama
-	saramaConfig := sarama.NewConfig()
-	saramaConfig.Version = sarama.V3_0_0_0
-	saramaConfig.Consumer.Return.Errors = true
-	saramaConfig.Producer.Return.Successes = true
-	saramaConfig.Producer.RequiredAcks = sarama.WaitForAll
-	saramaConfig.Producer.Retry.Max = 3
+	bootstrapServers := strings.Join(config.Brokers, ",")
 
-	// Create consumer group
-	consumerGroup, err := sarama.NewConsumerGroup(config.Brokers, config.ConsumerGroup, saramaConfig)
+	// Create admin client
+	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{"bootstrap.servers": bootstrapServers})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create kafka consumer group: %w", err)
+		return nil, fmt.Errorf("failed to create kafka admin client: %w", err)
+	}
+	defer admin.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
+	defer cancel()
+
+	// Create topic if it doesn't exist
+	if _, err := admin.CreateTopics(ctx, []kafka.TopicSpecification{{Topic: config.Topic, NumPartitions: 1}}); err != nil {
+		return nil, fmt.Errorf("failed to create topic %q: %w", config.Topic, err)
 	}
 
-	// Create producer for sending replies
-	producer, err := sarama.NewSyncProducer(config.Brokers, saramaConfig)
+	// Create consumer
+	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers":        bootstrapServers,
+		"allow.auto.create.topics": true,
+		"group.id":                 config.ConsumerGroup,
+		"auto.offset.reset":        "earliest",
+		"enable.auto.commit":       false,
+	})
 	if err != nil {
-		consumerGroup.Close()
+		return nil, fmt.Errorf("failed to create kafka consumer: %w", err)
+	}
+
+	if err := consumer.Subscribe(config.Topic, nil); err != nil {
+		return nil, fmt.Errorf("failed to subscribe to topic %q: %w", config.Topic, err)
+	}
+
+	// Create producer
+	producer, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers":        bootstrapServers,
+		"allow.auto.create.topics": true,
+		"acks":                     "all",
+		"retries":                  3,
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to create kafka producer: %w", err)
 	}
 
@@ -57,13 +81,18 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	k := &Kafka{
 		config:         config,
 		api:            api.New(a, "kafka"),
-		consumerGroup:  consumerGroup,
+		consumer:       consumer,
 		producer:       producer,
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 	}
 
-	slog.Info("kafka initialized", "brokers", config.Brokers, "topic", config.Topic, "target", config.Target, "consumerGroup", config.ConsumerGroup)
+	slog.Debug("kafka initialized",
+		"brokers", config.Brokers,
+		"topic", config.Topic,
+		"target", config.Target,
+		"consumerGroup", config.ConsumerGroup,
+	)
 
 	return k, nil
 }
@@ -83,97 +112,54 @@ func (k *Kafka) Addr() string {
 func (k *Kafka) Start(errors chan<- error) {
 	slog.Info("starting kafka consumer", "topic", k.config.Topic, "target", k.config.Target)
 
-	// Note: api will be set when this subsystem is added via AddSubsystem
-	handler := &consumerGroupHandler{
+	server := &server{
+		api:    k.api,
 		config: k.config,
 		kafka:  k,
 	}
 
-	// Consume messages in a loop (handles rebalancing)
-	go func() {
-		for {
-			select {
-			case <-k.shutdownCtx.Done():
+	for {
+		select {
+		case <-k.shutdownCtx.Done():
+			return
+		default:
+			msg, err := k.consumer.ReadMessage(-1)
+			if err != nil {
+				slog.Error("kafka consumer error", "error", err)
+				errors <- err
 				return
-			default:
-				if err := k.consumerGroup.Consume(k.shutdownCtx, []string{k.config.Topic}, handler); err != nil {
-					select {
-					case <-k.shutdownCtx.Done():
-						return
-					default:
-						slog.Error("kafka consumer error", "error", err)
-						errors <- err
-						return
-					}
-				}
+			}
+
+			server.handleRequest(msg)
+
+			if _, err := k.consumer.CommitMessage(msg); err != nil {
+				slog.Warn("failed to commit message", "error", err)
 			}
 		}
-	}()
-
-	// Wait for shutdown signal
-	<-k.shutdownCtx.Done()
+	}
 }
 
 func (k *Kafka) Stop() error {
-	slog.Info("stopping kafka server")
-
 	// Cancel shutdown context
 	k.shutdownCancel()
 
-	// Close consumer group
-	if err := k.consumerGroup.Close(); err != nil {
-		slog.Warn("failed to close consumer group", "error", err)
+	if err := k.consumer.Close(); err != nil {
+		slog.Warn("failed to close consumer", "error", err)
 	}
 
-	// Close producer
-	if err := k.producer.Close(); err != nil {
-		slog.Warn("failed to close producer", "error", err)
-	}
+	// Ensure all outstanding messages are flushed before closing producer
+	// (optional but closer to SyncProducer semantics)
+	k.producer.Flush(int(k.config.Timeout.Milliseconds()))
+
+	k.producer.Close()
 
 	return nil
-}
-
-// consumerGroupHandler implements sarama.ConsumerGroupHandler
-type consumerGroupHandler struct {
-	config *Config
-	kafka  *Kafka
-}
-
-func (h *consumerGroupHandler) Setup(sarama.ConsumerGroupSession) error {
-	return nil
-}
-
-func (h *consumerGroupHandler) Cleanup(sarama.ConsumerGroupSession) error {
-	return nil
-}
-
-func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	server := &server{
-		api:     h.kafka.api,
-		config:  h.config,
-		kafka:   h.kafka,
-		session: session,
-	}
-
-	for {
-		select {
-		case <-session.Context().Done():
-			return nil
-		case message := <-claim.Messages():
-			if message == nil {
-				return nil
-			}
-			server.handleRequest(message)
-			session.MarkMessage(message, "")
-		}
-	}
 }
 
 type server struct {
-	api     *api.API
-	config  *Config
-	kafka   *Kafka
-	session sarama.ConsumerGroupSession
+	api    *api.API
+	config *Config
+	kafka  *Kafka
 }
 
 // KafkaRequest wraps a t_api request with Kafka-specific metadata
@@ -188,9 +174,9 @@ type KafkaRequest struct {
 }
 
 type ReplyTo struct {
-	Topic        string `json:"topic"`
-	Target       string `json:"target"`
-	PartitionKey string `json:"partitionKey,omitempty"`
+	Topic  string `json:"topic"`
+	Target string `json:"target"`
+	Key    string `json:"key,omitempty"`
 }
 
 // KafkaResponse wraps a response or error for Kafka
@@ -207,16 +193,29 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-func (s *server) handleRequest(msg *sarama.ConsumerMessage) {
+func (s *server) handleRequest(msg *kafka.Message) {
 	var kafkaReq KafkaRequest
 	if err := json.Unmarshal(msg.Value, &kafkaReq); err != nil {
-		slog.Warn("failed to unmarshal kafka message", "error", err, "partition", msg.Partition, "offset", msg.Offset)
+		topic := ""
+		if msg.TopicPartition.Topic != nil {
+			topic = *msg.TopicPartition.Topic
+		}
+		slog.Warn("failed to unmarshal kafka message",
+			"error", err,
+			"topic", topic,
+			"partition", msg.TopicPartition.Partition,
+			"offset", msg.TopicPartition.Offset,
+		)
 		return
 	}
 
 	// Filter by target - discard if not for this server
 	if kafkaReq.Target != s.config.Target {
-		slog.Debug("discarding message with wrong target", "expected", s.config.Target, "actual", kafkaReq.Target, "operation", kafkaReq.Operation)
+		slog.Debug("discarding message with wrong target",
+			"expected", s.config.Target,
+			"actual", kafkaReq.Target,
+			"operation", kafkaReq.Operation,
+		)
 		return
 	}
 
@@ -352,21 +351,46 @@ func (s *server) respondError(kafkaReq *KafkaRequest, code int, message string) 
 }
 
 func (s *server) sendReply(replyTo ReplyTo, data []byte) {
-	msg := &sarama.ProducerMessage{
-		Topic: replyTo.Topic,
-		Value: sarama.ByteEncoder(data),
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{
+			Topic:     &replyTo.Topic,
+			Partition: kafka.PartitionAny,
+		},
+		Value: data,
 	}
 
-	// Use partition key if specified
-	if replyTo.PartitionKey != "" {
-		msg.Key = sarama.StringEncoder(replyTo.PartitionKey)
+	if replyTo.Key != "" {
+		msg.Key = []byte(replyTo.Key)
 	}
 
-	partition, offset, err := s.kafka.producer.SendMessage(msg)
-	if err != nil {
+	deliveryChan := make(chan kafka.Event, 1)
+	defer close(deliveryChan)
+
+	if err := s.kafka.producer.Produce(msg, deliveryChan); err != nil {
 		slog.Error("failed to send reply", "error", err, "topic", replyTo.Topic, "target", replyTo.Target)
 		return
 	}
 
-	slog.Debug("sent reply", "topic", replyTo.Topic, "target", replyTo.Target, "partition", partition, "offset", offset)
+	ev := <-deliveryChan
+	m, ok := ev.(*kafka.Message)
+	if !ok {
+		slog.Error("unexpected event type from producer", "event", ev)
+		return
+	}
+
+	if m.TopicPartition.Error != nil {
+		slog.Error("failed to deliver reply",
+			"error", m.TopicPartition.Error,
+			"topic", replyTo.Topic,
+			"target", replyTo.Target,
+		)
+		return
+	}
+
+	slog.Debug("sent reply",
+		"topic", replyTo.Topic,
+		"target", replyTo.Target,
+		"partition", m.TopicPartition.Partition,
+		"offset", m.TopicPartition.Offset,
+	)
 }
