@@ -174,9 +174,9 @@ type KafkaRequest struct {
 }
 
 type ReplyTo struct {
-	Topic  string `json:"topic"`
-	Target string `json:"target"`
-	Key    string `json:"key,omitempty"`
+	Topic  string  `json:"topic"`
+	Target string  `json:"target"`
+	Key    *string `json:"key,omitempty"`
 }
 
 // KafkaResponse wraps a response or error for Kafka
@@ -359,8 +359,8 @@ func (s *server) sendReply(replyTo ReplyTo, data []byte) {
 		Value: data,
 	}
 
-	if replyTo.Key != "" {
-		msg.Key = []byte(replyTo.Key)
+	if replyTo.Key != nil {
+		msg.Key = []byte(*replyTo.Key)
 	}
 
 	deliveryChan := make(chan kafka.Event, 1)
