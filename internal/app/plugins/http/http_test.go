@@ -50,6 +50,7 @@ func TestHttpPlugin(t *testing.T) {
 
 	okUrl := fmt.Sprintf("%s/ok", server.URL)
 	koUrl := fmt.Sprintf("%s/ko", server.URL)
+	toUrl := fmt.Sprintf("%s/to", server.URL)
 
 	for _, tc := range []struct {
 		name string
@@ -57,6 +58,8 @@ func TestHttpPlugin(t *testing.T) {
 	}{
 		{"ok", &Addr{Url: okUrl}},
 		{"ko", &Addr{Url: koUrl}},
+		{"to", &Addr{Url: toUrl}},
+		{"connTo", &Addr{Url: "http://localhost:32412124"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
@@ -68,20 +71,31 @@ func TestHttpPlugin(t *testing.T) {
 			err = http.Start(nil)
 			assert.Nil(t, err)
 
-			ok := http.Enqueue(&aio.Message{
+			res := make(chan bool, 1)
+			msg := &aio.Message{
 				Addr: data,
 				Head: map[string]string{"foo": "bar", "baz": "qux"},
 				Body: []byte("ok"),
 				Done: func(completion *t_aio.SenderCompletion) {
+					res <- completion.Success
 					assert.NotNil(t, completion)
 				},
-			})
+			}
+			assert.True(t, http.Enqueue(msg))
 
-			res := <-ch
-			assert.True(t, ok)
-			assert.Equal(t, []string{"bar"}, res.head["Foo"])
-			assert.Equal(t, []string{"qux"}, res.head["Baz"])
-			assert.Equal(t, []byte("ok"), res.body)
+			success := <-res
+
+			switch tc.name {
+			case "ok", "ko", "to":
+				req := <-ch
+				assert.Equal(t, []string{"bar"}, req.head["Foo"])
+				assert.Equal(t, []string{"qux"}, req.head["Baz"])
+				assert.Equal(t, []byte("ok"), req.body)
+				assert.True(t, success)
+
+			case "connTo":
+				assert.False(t, success)
+			}
 
 			err = http.Stop()
 			assert.Nil(t, err)
