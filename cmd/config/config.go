@@ -108,7 +108,9 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if c.API.Subsystems.Grpc.Enabled {
+	// Disable gRPC if basic auth is enabled for HTTP
+	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
+	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
 		if err != nil {
 			return nil, err
@@ -221,7 +223,9 @@ func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr 
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if c.API.Subsystems.Grpc.Enabled {
+	// Disable gRPC if basic auth is enabled for HTTP
+	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
+	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
 		if err != nil {
 			return nil, err
