@@ -111,6 +111,11 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 		})
 		return
 	}
+
+	// hack
+	payload.Task.PromiseId = payload.Promise.Id
+	payload.Task.Timeout = payload.Promise.Timeout
+
 	res, error := s.processRequest(kafkaReq, &payload)
 	if error != nil {
 		s.respondError(kafkaReq, error)
