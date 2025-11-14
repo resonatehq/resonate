@@ -183,6 +183,7 @@ type ReplyTo struct {
 type KafkaResponse struct {
 	Target        string          `json:"target"`
 	CorrelationId string          `json:"correlationId"`
+	Operation     string          `json:"operation"`
 	Success       bool            `json:"success"`
 	Response      json.RawMessage `json:"response,omitempty"`
 	Error         *ErrorResponse  `json:"error,omitempty"`
@@ -319,6 +320,7 @@ func (s *server) respondError(kafkaReq *KafkaRequest, error *ErrorResponse) {
 	response := &KafkaResponse{
 		Target:        kafkaReq.ReplyTo.Target,
 		CorrelationId: kafkaReq.CorrelationId,
+		Operation:     kafkaReq.Operation,
 		Success:       false,
 		Error:         error,
 	}
@@ -336,6 +338,7 @@ func (s *server) sendReply(kafkaReq *KafkaRequest, data []byte) {
 	response := &KafkaResponse{
 		Target:        kafkaReq.ReplyTo.Target,
 		CorrelationId: kafkaReq.CorrelationId,
+		Operation:     kafkaReq.Operation,
 		Success:       true,
 		Response:      data,
 	}
