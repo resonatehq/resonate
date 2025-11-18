@@ -4,23 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Promise Handlers
 
 func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
-	var payload t_api.ReadPromiseRequest
+	var payload ReadPromisePayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.ReadPromiseRequest{
+		Id: payload.ID,
+	})
+
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -29,7 +34,7 @@ func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.ReadPromiseResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -40,16 +45,28 @@ func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleSearchPromises(kafkaReq *KafkaRequest) {
-	var payload t_api.SearchPromisesRequest
+	var payload SearchPromisesPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	req, error := s.api.SearchPromises(
+		payload.ID,
+		util.SafeDeref(payload.State),
+		nil,
+		util.SafeDeref(payload.Limit),
+		util.SafeDeref(payload.Cursor),
+	)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	res, error := s.processRequest(kafkaReq, req)
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -61,7 +78,7 @@ func (s *server) handleSearchPromises(kafkaReq *KafkaRequest) {
 		"cursor":   responseData.Cursor,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -72,17 +89,24 @@ func (s *server) handleSearchPromises(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
-	var payload t_api.CreatePromiseRequest
+	var payload CreatePromisePayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseRequest{
+		Id:             payload.ID,
+		IdempotencyKey: payload.IKey,
+		Strict:         payload.Strict,
+		Param:          payload.Param,
+		Timeout:        payload.Timeout,
+		Tags:           payload.Tags,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -91,7 +115,7 @@ func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.CreatePromiseResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -102,21 +126,32 @@ func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
-	var payload t_api.CreatePromiseAndTaskRequest
+	var payload CreatePromiseAndTaskPayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	// hack
-	payload.Task.PromiseId = payload.Promise.Id
-	payload.Task.Timeout = payload.Promise.Timeout
-
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseAndTaskRequest{
+		Promise: &t_api.CreatePromiseRequest{
+			Id:             payload.Promise.ID,
+			IdempotencyKey: payload.IKey,
+			Strict:         payload.Strict,
+			Param:          payload.Promise.Param,
+			Timeout:        payload.Promise.Timeout,
+			Tags:           payload.Promise.Tags,
+		},
+		Task: &t_api.CreateTaskRequest{
+			PromiseId: payload.Promise.ID,
+			ProcessId: payload.Task.ProcessID,
+			Ttl:       payload.Task.TTL,
+			Timeout:   payload.Promise.Timeout,
+		},
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -128,7 +163,7 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 		"task":    responseData.Task,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -139,17 +174,23 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
-	var payload t_api.CompletePromiseRequest
+	var payload CompletePromisePayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CompletePromiseRequest{
+		Id:             payload.ID,
+		IdempotencyKey: payload.IKey,
+		Strict:         payload.Strict,
+		State:          payload.State,
+		Value:          payload.Value,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -158,7 +199,7 @@ func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.CompletePromiseResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -169,16 +210,22 @@ func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
-	var payload t_api.CreateCallbackRequest
+	var payload CreateCallbackPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CreateCallbackRequest{
+		Id:        util.ResumeId(payload.RootPromiseID, payload.PromiseID),
+		PromiseId: payload.PromiseID,
+		Recv:      payload.Recv,
+		Mesg:      &message.Mesg{Type: "resume", Head: nil, Root: payload.RootPromiseID, Leaf: payload.PromiseID},
+		Timeout:   payload.Timeout,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -190,7 +237,7 @@ func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
 		"promise":  responseData.Promise,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -201,17 +248,23 @@ func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
-	var payload t_api.CreateCallbackRequest
+	var payload CreateSubscriptionPayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CreateCallbackRequest{
+		Id:        util.NotifyId(payload.PromiseID, payload.ID),
+		PromiseId: payload.PromiseID,
+		Recv:      payload.Recv,
+		Mesg:      &message.Mesg{Type: "notify", Head: nil, Root: payload.PromiseID},
+		Timeout:   payload.Timeout,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -223,7 +276,7 @@ func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
 		"promise":  responseData.Promise,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -236,16 +289,18 @@ func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
 // Schedule Handlers
 
 func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
-	var payload t_api.ReadScheduleRequest
+	var payload ReadSchedulePayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.ReadScheduleRequest{
+		Id: payload.ID,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -254,7 +309,7 @@ func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.ReadScheduleResponse)
 	responseBytes, err := json.Marshal(responseData.Schedule)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -265,16 +320,27 @@ func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleSearchSchedules(kafkaReq *KafkaRequest) {
-	var payload t_api.SearchSchedulesRequest
+	var payload SearchSchedulesPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	req, error := s.api.SearchSchedules(
+		util.SafeDeref(payload.ID),
+		nil,
+		util.SafeDeref(payload.Limit),
+		util.SafeDeref(payload.Cursor),
+	)
+	if error != nil {
+		s.respondError(kafkaReq, error)
+		return
+	}
+
+	res, error := s.processRequest(kafkaReq, req)
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -286,7 +352,7 @@ func (s *server) handleSearchSchedules(kafkaReq *KafkaRequest) {
 		"cursor":    responseData.Cursor,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -297,17 +363,27 @@ func (s *server) handleSearchSchedules(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
-	var payload t_api.CreateScheduleRequest
+	var payload CreateSchedulePayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CreateScheduleRequest{
+		Id:             payload.ID,
+		Description:    payload.Description,
+		Cron:           payload.Cron,
+		Tags:           payload.Tags,
+		PromiseId:      payload.PromiseID,
+		PromiseTimeout: payload.PromiseTimeout,
+		PromiseParam:   payload.PromiseParam,
+		PromiseTags:    payload.PromiseTags,
+		IdempotencyKey: payload.IKey,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -316,7 +392,7 @@ func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.CreateScheduleResponse)
 	responseBytes, err := json.Marshal(responseData.Schedule)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -327,16 +403,18 @@ func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleDeleteSchedule(kafkaReq *KafkaRequest) {
-	var payload t_api.DeleteScheduleRequest
+	var payload DeleteSchedulePayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	_, error := s.processRequest(kafkaReq, &payload)
+	_, error := s.processRequest(kafkaReq, &t_api.DeleteScheduleRequest{
+		Id: payload.ID,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -350,7 +428,7 @@ func (s *server) handleDeleteSchedule(kafkaReq *KafkaRequest) {
 func (s *server) handleAcquireLock(kafkaReq *KafkaRequest) {
 	var payload t_api.AcquireLockRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
@@ -366,7 +444,7 @@ func (s *server) handleAcquireLock(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.AcquireLockResponse)
 	responseBytes, err := json.Marshal(responseData.Lock)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -379,7 +457,7 @@ func (s *server) handleAcquireLock(kafkaReq *KafkaRequest) {
 func (s *server) handleReleaseLock(kafkaReq *KafkaRequest) {
 	var payload t_api.ReleaseLockRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
@@ -398,7 +476,7 @@ func (s *server) handleReleaseLock(kafkaReq *KafkaRequest) {
 func (s *server) handleHeartbeatLocks(kafkaReq *KafkaRequest) {
 	var payload t_api.HeartbeatLocksRequest
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
@@ -416,7 +494,7 @@ func (s *server) handleHeartbeatLocks(kafkaReq *KafkaRequest) {
 		"locksAffected": responseData.LocksAffected,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -429,17 +507,22 @@ func (s *server) handleHeartbeatLocks(kafkaReq *KafkaRequest) {
 // Task Handlers
 
 func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
-	var payload t_api.ClaimTaskRequest
+	var payload ClaimTaskPayload
 
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.ClaimTaskRequest{
+		Id:        payload.ID,
+		Counter:   payload.Counter,
+		ProcessId: payload.ProcessID,
+		Ttl:       payload.TTL,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -467,7 +550,7 @@ func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
 		"promises": promises,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -478,16 +561,19 @@ func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
-	var payload t_api.CompleteTaskRequest
+	var payload CompleteTaskPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.CompleteTaskRequest{
+		Id:      payload.ID,
+		Counter: payload.Counter,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -496,7 +582,7 @@ func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
 	responseData := res.(*t_api.CompleteTaskResponse)
 	responseBytes, err := json.Marshal(responseData.Task)
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})
@@ -507,16 +593,20 @@ func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleDropTask(kafkaReq *KafkaRequest) {
-	var payload t_api.DropTaskRequest
+	var payload DropTaskPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	_, error := s.processRequest(kafkaReq, &payload)
+	_, error := s.processRequest(kafkaReq, &t_api.DropTaskRequest{
+		Id:      payload.ID,
+		Counter: payload.Counter,
+	})
+
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -526,16 +616,18 @@ func (s *server) handleDropTask(kafkaReq *KafkaRequest) {
 }
 
 func (s *server) handleHeartbeatTasks(kafkaReq *KafkaRequest) {
-	var payload t_api.HeartbeatTasksRequest
+	var payload HeartbeatTasksPayload
 	if err := json.Unmarshal(kafkaReq.Payload, &payload); err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("invalid payload: %v", err),
 		})
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &payload)
+	res, error := s.processRequest(kafkaReq, &t_api.HeartbeatTasksRequest{
+		ProcessId: payload.ProcessID,
+	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
 		return
@@ -546,7 +638,7 @@ func (s *server) handleHeartbeatTasks(kafkaReq *KafkaRequest) {
 		"tasksAffected": responseData.TasksAffected,
 	})
 	if err != nil {
-		s.respondError(kafkaReq, &ErrorResponse{
+		s.respondError(kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("failed to encode response envelope: %v", err),
 		})

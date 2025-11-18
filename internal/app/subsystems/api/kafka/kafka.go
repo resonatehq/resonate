@@ -12,7 +12,117 @@ import (
 	i_api "github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/promise"
 )
+
+// ----------------- PROMISES -----------------
+
+type CreatePromisePayload struct {
+	ID      string            `json:"id"`
+	Timeout int64             `json:"timeout"`
+	Param   promise.Value     `json:"param,omitempty"`
+	Tags    map[string]string `json:"tags,omitempty"`
+	IKey    *idempotency.Key  `json:"iKey,omitempty"`
+	Strict  bool              `json:"strict,omitempty"`
+}
+
+type CreatePromiseAndTaskPayload struct {
+	Promise CreatePromisePayload `json:"promise"`
+	Task    CreateTaskPart       `json:"task"`
+	IKey    *idempotency.Key     `json:"iKey,omitempty"`
+	Strict  bool                 `json:"strict,omitempty"`
+}
+
+// helper struct for the "task" field inside CreatePromiseAndTaskPayload
+type CreateTaskPart struct {
+	ProcessID string `json:"processId"`
+	TTL       int64  `json:"ttl"`
+}
+
+type ReadPromisePayload struct {
+	ID string `json:"id"`
+}
+
+type CompletePromisePayload struct {
+	ID     string           `json:"id"`
+	State  promise.State    `json:"state"`
+	Value  promise.Value    `json:"value,omitempty"`
+	IKey   *idempotency.Key `json:"iKey,omitempty"`
+	Strict bool             `json:"strict,omitempty"`
+}
+
+type CreateCallbackPayload struct {
+	PromiseID     string          `json:"promiseId"`
+	RootPromiseID string          `json:"rootPromiseId"`
+	Timeout       int64           `json:"timeout"`
+	Recv          json.RawMessage `json:"recv"`
+}
+
+type CreateSubscriptionPayload struct {
+	ID        string          `json:"id"`
+	PromiseID string          `json:"promiseId"`
+	Timeout   int64           `json:"timeout"`
+	Recv      json.RawMessage `json:"recv"`
+}
+
+type SearchPromisesPayload struct {
+	ID     string  `json:"id"`
+	State  *string `json:"state,omitempty"`
+	Limit  *int    `json:"limit,omitempty"`
+	Cursor *string `json:"cursor,omitempty"`
+}
+
+// ----------------- SCHEDULES -----------------
+
+type CreateSchedulePayload struct {
+	ID             string            `json:"id,omitempty"`
+	Description    string            `json:"description,omitempty"`
+	Cron           string            `json:"cron,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	PromiseID      string            `json:"promiseId,omitempty"`
+	PromiseTimeout int64             `json:"promiseTimeout,omitempty"`
+	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
+	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
+	IKey           *idempotency.Key  `json:"iKey,omitempty"`
+}
+
+type ReadSchedulePayload struct {
+	ID string `json:"id"`
+}
+
+type DeleteSchedulePayload struct {
+	ID string `json:"id"`
+}
+
+type SearchSchedulesPayload struct {
+	ID     *string `json:"id"`
+	Limit  *int    `json:"limit,omitempty"`
+	Cursor *string `json:"cursor,omitempty"`
+}
+
+// ----------------- TASKS -----------------
+
+type ClaimTaskPayload struct {
+	ID        string `json:"id"`
+	Counter   int    `json:"counter"`
+	ProcessID string `json:"processId"`
+	TTL       int64  `json:"ttl"`
+}
+
+type CompleteTaskPayload struct {
+	ID      string `json:"id"`
+	Counter int    `json:"counter"`
+}
+
+type DropTaskPayload struct {
+	ID      string `json:"id"`
+	Counter int    `json:"counter"`
+}
+
+type HeartbeatTasksPayload struct {
+	ProcessID string `json:"processId"`
+}
 
 type Config struct {
 	Brokers       []string      `flag:"brokers" desc:"kafka broker addresses" default:"localhost:9092"`
@@ -186,12 +296,7 @@ type KafkaResponse struct {
 	Operation     string          `json:"operation"`
 	Success       bool            `json:"success"`
 	Response      json.RawMessage `json:"response,omitempty"`
-	Error         *ErrorResponse  `json:"error,omitempty"`
-}
-
-type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Error         *api.Error      `json:"error,omitempty"`
 }
 
 func (s *server) handleRequest(msg *kafka.Message) {
@@ -223,7 +328,7 @@ func (s *server) handleRequest(msg *kafka.Message) {
 	// Validate replyTo
 	if kafkaReq.ReplyTo.Topic == "" || kafkaReq.ReplyTo.Target == "" {
 		slog.Warn("missing replyTo information", "correlationId", kafkaReq.CorrelationId)
-		s.respondError(&kafkaReq, &ErrorResponse{
+		s.respondError(&kafkaReq, &api.Error{
 			Code:    400,
 			Message: "missing replyTo.topic or replyTo.target",
 		})
@@ -277,7 +382,7 @@ func (s *server) handleRequest(msg *kafka.Message) {
 		s.handleHeartbeatTasks(&kafkaReq)
 
 	default:
-		s.respondError(&kafkaReq, &ErrorResponse{
+		s.respondError(&kafkaReq, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("unknown operation: %s", kafkaReq.Operation),
 		})
@@ -289,12 +394,12 @@ func (s *server) log(operation string, err error) {
 }
 
 // Helper function to process requests
-func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPayload) (t_api.ResponsePayload, *ErrorResponse) {
+func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPayload) (t_api.ResponsePayload, *api.Error) {
 	defer s.log(kafkaReq.Operation, nil)
 
 	// Validate payload
 	if err := payload.Validate(); err != nil {
-		return nil, &ErrorResponse{
+		return nil, &api.Error{
 			Code:    400,
 			Message: fmt.Sprintf("validation error: %v", err),
 		}
@@ -307,16 +412,13 @@ func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPay
 	})
 
 	if apiErr != nil {
-		return nil, &ErrorResponse{
-			Code:    int(apiErr.Code),
-			Message: apiErr.Message,
-		}
+		return nil, apiErr
 	}
 
 	return res.Payload, nil
 }
 
-func (s *server) respondError(kafkaReq *KafkaRequest, error *ErrorResponse) {
+func (s *server) respondError(kafkaReq *KafkaRequest, error *api.Error) {
 	response := &KafkaResponse{
 		Target:        kafkaReq.ReplyTo.Target,
 		CorrelationId: kafkaReq.CorrelationId,
