@@ -81,9 +81,10 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string)
 	// CORS
 	if len(config.Cors.AllowOrigins) > 0 {
 		handler.Use(cors.New(cors.Config{
-			AllowOrigins: config.Cors.AllowOrigins,
-			AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders: []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			AllowOrigins:  config.Cors.AllowOrigins,
+			AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			ExposeHeaders: []string{"Resonate-Version"},
 		}))
 	}
 
