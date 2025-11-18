@@ -28,6 +28,7 @@ import (
 type Config struct {
 	Addr          string            `flag:"addr" desc:"http server address" default:":8001"`
 	Auth          map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
+	PublicKeyPath string            `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
 	Cors          Cors              `flag:"cors" desc:"http cors settings"`
 	Timeout       time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 	TaskFrequency time.Duration     `flag:"task-frequency" desc:"default task frequency" default:"1m"`
@@ -96,6 +97,16 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string)
 	// Resonate header middleware
 	authorized.Use(func(c *gin.Context) {
 		c.Header("Resonate-Version", internal.Version())
+		c.Next()
+	})
+
+	// TODO(avillega): Extract the Auth header in a cross cutting way and put it in the request metadata
+	// Extract bearer token from Authorization header and add to context
+	authorized.Use(func(c *gin.Context) {
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			// Store the bearer token for later use by request handlers
+			c.Set("authorization", authHeader)
+		}
 		c.Next()
 	})
 

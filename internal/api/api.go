@@ -34,19 +34,21 @@ type API interface {
 // API
 
 type api struct {
-	sq         chan *bus.SQE[t_api.Request, t_api.Response]
-	buffer     *bus.SQE[t_api.Request, t_api.Response]
-	subsystems []Subsystem
-	done       bool
-	errors     chan error
-	metrics    *metrics.Metrics
+	sq            chan *bus.SQE[t_api.Request, t_api.Response]
+	buffer        *bus.SQE[t_api.Request, t_api.Response]
+	subsystems    []Subsystem
+	done          bool
+	errors        chan error
+	metrics       *metrics.Metrics
+	authenticator Authenticator
 }
 
-func New(size int, metrics *metrics.Metrics) *api {
+func New(size int, metrics *metrics.Metrics, authenticator Authenticator) *api {
 	return &api{
-		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
-		errors:  make(chan error),
-		metrics: metrics,
+		sq:            make(chan *bus.SQE[t_api.Request, t_api.Response], size),
+		errors:        make(chan error),
+		metrics:       metrics,
+		authenticator: authenticator,
 	}
 }
 
@@ -181,6 +183,20 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	if err := sqe.Submission.Validate(); err != nil {
 		sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
 		return
+	}
+
+	// authenticate and authorize the request
+	if a.authenticator != nil {
+		claims, err := a.authenticator.Authenticate(*sqe.Submission)
+		if err != nil {
+			sqe.Callback(nil, t_api.NewError(t_api.StatusUnauthorized, err))
+			return
+		}
+
+		if err := a.authenticator.Authorize(claims, *sqe.Submission); err != nil {
+			sqe.Callback(nil, t_api.NewError(t_api.StatusForbidden, err))
+			return
+		}
 	}
 
 	select {

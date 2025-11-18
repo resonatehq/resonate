@@ -102,7 +102,21 @@ func Serve(config *config.Config) error {
 	metrics := metrics.New(reg)
 
 	// api/aio
-	api := api.New(config.API.Size, metrics)
+	var authenticator api.Authenticator = &api.NoopAuthenticator{}
+
+	if config.API.Subsystems.Http.Config.PublicKeyPath != "" {
+		// Read the public key file
+		publicKeyPEM, err := os.ReadFile(config.API.Subsystems.Http.Config.PublicKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to read public key file: %w", err)
+		}
+		authenticator, err = api.NewJWTAuthenticator(publicKeyPEM)
+		if err != nil {
+			return err
+		}
+	}
+
+	api := api.New(config.API.Size, metrics, authenticator)
 	aio := aio.New(config.AIO.Size, metrics)
 
 	// plugins

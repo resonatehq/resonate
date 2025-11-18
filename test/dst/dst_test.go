@@ -46,7 +46,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	}
 
 	// instatiate api/aio
-	api := api.New(1000, metrics)
+	api := api.New(1000, metrics, &api.NoopAuthenticator{})
 	aio := aio.NewDST(r, p, metrics)
 
 	// instantiate backchannel

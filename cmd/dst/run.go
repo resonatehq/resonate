@@ -136,7 +136,7 @@ func RunDSTCmd() *cobra.Command {
 			backchannel := make(chan interface{}, backchannelSize.Resolve(r))
 
 			// api/aio
-			api := api.New(config.API.Size, metrics)
+			api := api.New(config.API.Size, metrics, &api.NoopAuthenticator{})
 			aio := aio.NewDST(r, p, metrics)
 
 			// api subsystems
