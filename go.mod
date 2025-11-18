@@ -6,7 +6,7 @@ require (
 	github.com/anishathalye/porcupine v1.0.3
 	github.com/aws/aws-sdk-go-v2 v1.39.6
 	github.com/aws/aws-sdk-go-v2/config v1.31.18
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.13
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.15
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.28.0
