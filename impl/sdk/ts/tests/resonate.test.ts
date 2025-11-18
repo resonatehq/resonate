@@ -3,6 +3,7 @@ import type { Context, InnerContext } from "../src/context";
 import { JsonEncoder } from "../src/encoder";
 import { Resonate } from "../src/resonate";
 import { Constant, Exponential, Linear, Never, type RetryPolicy } from "../src/retries";
+import type { Value } from "../src/types";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
@@ -820,7 +821,7 @@ describe("Resonate usage tests", () => {
       expect(ctxRetryPolicy).toEqual(retryPolicy);
 
       const p = await resonate.promises.get(`f${i}`);
-      expect(JSON.parse(util.base64Decode(p.param?.data!)).retry).toEqual(retryPolicy.encode());
+      expect(JSON.parse(util.base64Decode((p.param as Value<string>).data!)).retry).toEqual(retryPolicy.encode());
     }
   });
 });
@@ -979,7 +980,7 @@ describe("Context usage tests", () => {
 
       if (f === "rfi" || f === "rfc" || f === "detached") {
         const p = await resonate.promises.get(`f${i}.0`);
-        expect(JSON.parse(util.base64Decode(p.param?.data!)).retry).toEqual(retryPolicy.encode());
+        expect(JSON.parse(util.base64Decode((p.param as Value<string>).data!)).retry).toEqual(retryPolicy.encode());
       }
     }
   });
