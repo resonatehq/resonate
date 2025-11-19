@@ -34,21 +34,20 @@ type API interface {
 // API
 
 type api struct {
-	sq            chan *bus.SQE[t_api.Request, t_api.Response]
-	buffer        *bus.SQE[t_api.Request, t_api.Response]
-	subsystems    []Subsystem
-	done          bool
-	errors        chan error
-	metrics       *metrics.Metrics
-	authenticator Authenticator
+	sq          chan *bus.SQE[t_api.Request, t_api.Response]
+	buffer      *bus.SQE[t_api.Request, t_api.Response]
+	subsystems  []Subsystem
+	done        bool
+	errors      chan error
+	metrics     *metrics.Metrics
+	middlewares []Middleware
 }
 
-func New(size int, metrics *metrics.Metrics, authenticator Authenticator) *api {
+func New(size int, metrics *metrics.Metrics) *api {
 	return &api{
-		sq:            make(chan *bus.SQE[t_api.Request, t_api.Response], size),
-		errors:        make(chan error),
-		metrics:       metrics,
-		authenticator: authenticator,
+		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
+		errors:  make(chan error),
+		metrics: metrics,
 	}
 }
 
@@ -62,6 +61,10 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
+}
+
+func (a *api) AddMiddleware(middleware Middleware) {
+	a.middlewares = append(a.middlewares, middleware)
 }
 
 func (a *api) Addr() string {
@@ -185,17 +188,11 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		return
 	}
 
-	// authenticate and authorize the request
-	if a.authenticator != nil {
-		claims, err := a.authenticator.Authenticate(*sqe.Submission)
+	// Run all the middlewares
+	for _, m := range a.middlewares {
+		err := m.Process(sqe.Submission)
 		if err != nil {
-			sqe.Callback(nil, t_api.NewError(t_api.StatusUnauthorized, err))
-			return
-		}
-
-		if err := a.authenticator.Authorize(claims, *sqe.Submission); err != nil {
-			sqe.Callback(nil, t_api.NewError(t_api.StatusForbidden, err))
-			return
+			sqe.Callback(nil, err)
 		}
 	}
 

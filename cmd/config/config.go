@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -120,6 +121,25 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 	}
 
 	return subsystems, nil
+}
+
+func (c *Config) APIMiddlewares() ([]api.Middleware, error) {
+	middlewares := []api.Middleware{}
+
+	if c.API.Subsystems.Http.Config.PublicKeyPath != "" {
+		pem, err := os.ReadFile(c.API.Subsystems.Http.Config.PublicKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		middleware, err := api.NewJWTAuthenticator(pem)
+		if err != nil {
+			return nil, err
+		}
+		middlewares = append(middlewares, middleware)
+	}
+
+	return middlewares, nil
+
 }
 
 func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {

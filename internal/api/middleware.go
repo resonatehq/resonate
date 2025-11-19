@@ -12,23 +12,20 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-type Authenticator interface {
-	Authenticate(request t_api.Request) (any, error)
-	Authorize(claims any, request t_api.Request) error
+type Middleware interface {
+	Process(r *t_api.Request) *t_api.Error
 }
 
-type NoopAuthenticator struct{}
-
-func (a *NoopAuthenticator) Authenticate(t_api.Request) (any, error) {
-	return nil, nil
-}
-
-func (a *NoopAuthenticator) Authorize(any, t_api.Request) error {
-	return nil
-}
-
+// TODO(avillega): This authenticator is the first middleware that we currently have
+// as we have more middlewares we should rethink where they to put them
 type JwtAuthenticator struct {
 	publicKey *rsa.PublicKey
+}
+
+type Claims struct {
+	Prefix *string `json:"prefix"`
+	Role   string  `json:"role"`
+	jwt.RegisteredClaims
 }
 
 func NewJWTAuthenticator(publicKeyPEM []byte) (*JwtAuthenticator, error) {
@@ -52,13 +49,21 @@ func NewJWTAuthenticator(publicKeyPEM []byte) (*JwtAuthenticator, error) {
 	}, nil
 }
 
-type Claims struct {
-	PromisePrefix string `json:"promisePrefix"`
-	Role          string `json:"role"`
-	jwt.RegisteredClaims
+func (a *JwtAuthenticator) Process(req *t_api.Request) *t_api.Error {
+	claims, err := a.authenticate(req)
+	if err != nil {
+		return t_api.NewError(t_api.StatusUnauthorized, err)
+	}
+
+	err = a.authorize(claims, req)
+	if err != nil {
+		return t_api.NewError(t_api.StatusForbidden, err)
+	}
+
+	return nil
 }
 
-func (a *JwtAuthenticator) Authenticate(req t_api.Request) (any, error) {
+func (a *JwtAuthenticator) authenticate(req *t_api.Request) (*Claims, error) {
 	authHeader, ok := req.Metadata["Authorization"]
 	if !ok {
 		return nil, fmt.Errorf("missing authorization header")
@@ -72,8 +77,10 @@ func (a *JwtAuthenticator) Authenticate(req t_api.Request) (any, error) {
 
 	tokenString := parts[1]
 
+	claims := &Claims{}
+
 	// ParseWithClaims also checks registered claims like expiry time
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		// Only support RSA (private/public key) signed method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -89,37 +96,30 @@ func (a *JwtAuthenticator) Authenticate(req t_api.Request) (any, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 
-	claims, ok := token.Claims.(*Claims)
-	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
-	}
-
 	return claims, nil
 }
 
-func (a *JwtAuthenticator) Authorize(claims any, req t_api.Request) error {
-	// TODO(avillega): empty prefix should match everything, consider a
-	// DSL that uses '*' as a wildcard
-	// TODO(avillega): support a list of prefixes instead of just a single
-	// prefix. 
-	c, ok := claims.(*Claims)
-	if !ok {
-		return fmt.Errorf("invalid claims type")
+func (a *JwtAuthenticator) authorize(claims *Claims, req *t_api.Request) error {
+	if claims == nil {
+		return fmt.Errorf("found no claims")
 	}
-
 	// Admins have access to all promise prefixes
-	if strings.ToLower(c.Role) == "admin" {
+	if strings.ToLower(claims.Role) == "admin" {
 		return nil
 	}
 
-	if c.PromisePrefix == "" {
-		return fmt.Errorf("not matched authorized prefix")
+	if claims.Prefix == nil {
+		return fmt.Errorf("unauthorized prefix")
 	}
 
-	return matchPromisePrefix(req, c.PromisePrefix)
+	if *claims.Prefix == "" {
+		return nil
+	}
+
+	return matchPromisePrefix(req, *claims.Prefix)
 }
 
-func matchPromisePrefix(req t_api.Request, prefix string) error {
+func matchPromisePrefix(req *t_api.Request, prefix string) error {
 	var id string
 	switch r := req.Payload.(type) {
 	case *t_api.ReadPromiseRequest:

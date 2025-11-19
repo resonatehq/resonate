@@ -46,7 +46,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	}
 
 	// instatiate api/aio
-	api := api.New(1000, metrics, &api.NoopAuthenticator{})
+	api := api.New(1000, metrics)
 	aio := aio.NewDST(r, p, metrics)
 
 	// instantiate backchannel
@@ -68,7 +68,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		t.Fatal(err)
 	}
 
-	// add api subsystems
+	// add aio subsystems
 	aio.AddSubsystem(router)
 	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)

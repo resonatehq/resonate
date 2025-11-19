@@ -20,7 +20,7 @@ import (
 func TestSystemLoop(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	api := api.New(100, metrics, &api.NoopAuthenticator{})
+	api := api.New(100, metrics)
 	aio := aio.New(100, metrics)
 
 	echo, err := echo.New(aio, metrics, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
