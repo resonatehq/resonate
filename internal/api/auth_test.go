@@ -153,9 +153,10 @@ func TestAuthenticate(t *testing.T) {
 		}
 		if returnedClaims == nil {
 			t.Errorf("Expected claims, got nil")
-		}
-		if returnedClaims.Role != role {
-			t.Errorf("Expected role %s, got %s", role, returnedClaims.Role)
+		} else {
+			if returnedClaims.Role != role {
+				t.Errorf("Expected role %s, got %s", role, returnedClaims.Role)
+			}
 		}
 	})
 
