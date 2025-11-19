@@ -50,25 +50,25 @@ func (v *Validator) Validate(model *Model, reqTime int64, resTime int64, req *t_
 
 func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	readPromiseReq := req.Payload.(*t_api.ReadPromiseRequest)
+	readPromiseRes := res.Payload.(*t_api.ReadPromiseResponse)
 	p := model.promises.get(readPromiseReq.Id)
 
 	switch res.Status {
 	case t_api.StatusOK:
-		resPromise := res.Payload.(*t_api.ReadPromiseResponse).Promise
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", readPromiseReq.Id)
 		}
-		if resPromise.State == promise.Pending && reqTime > p.Timeout {
+		if readPromiseRes.Promise.State == promise.Pending && reqTime > p.Timeout {
 			return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
 		}
-		if p.State != resPromise.State {
+		if p.State != readPromiseRes.Promise.State {
 			// the only way this can happen is if the promise timedout
-			if resPromise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if readPromiseRes.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
-				model.promises.set(readPromiseReq.Id, resPromise)
+				model.promises.set(readPromiseReq.Id, readPromiseRes.Promise)
 				return model, nil
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, readPromiseReq.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, readPromiseRes.Promise.State, readPromiseReq.Id)
 			}
 		}
 		return model, nil
@@ -83,13 +83,13 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 }
 func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	searchPromisesReq := req.Payload.(*t_api.SearchPromisesRequest)
+	searchPromisesRes := res.Payload.(*t_api.SearchPromisesResponse)
 
 	switch res.Status {
 	case t_api.StatusOK:
 		regex := v.regexes[searchPromisesReq.Id]
-		promises := res.Payload.(*t_api.SearchPromisesResponse).Promises
 
-		for _, p := range promises {
+		for _, p := range searchPromisesRes.Promises {
 			// ignore scheduled promises
 			if _, ok := p.Tags["resonate:schedule"]; ok {
 				continue
@@ -129,7 +129,9 @@ func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime 
 
 func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createPromiseReq := req.Payload.(*t_api.CreatePromiseRequest)
-	return v.validateCreatePromise(model, reqTime, resTime, createPromiseReq, res.Status, res.Payload.(*t_api.CreatePromiseResponse))
+	createPromiseRes := res.Payload.(*t_api.CreatePromiseResponse)
+
+	return v.validateCreatePromise(model, reqTime, resTime, createPromiseReq, res.Status, createPromiseRes)
 }
 
 func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
@@ -201,50 +203,50 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 
 func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	completePromiseReq := req.Payload.(*t_api.CompletePromiseRequest)
+	completePromiseRes := res.Payload.(*t_api.CompletePromiseResponse)
 	p := model.promises.get(completePromiseReq.Id)
-	resPromise := res.Payload.(*t_api.CompletePromiseResponse).Promise
 
 	switch res.Status {
 	case t_api.StatusCreated:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
 		}
-		if p.State != promise.Pending || resPromise.State == promise.Pending || resPromise.State == promise.Timedout {
-			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, completePromiseReq.Id)
+		if p.State != promise.Pending || completePromiseRes.Promise.State == promise.Pending || completePromiseRes.Promise.State == promise.Timedout {
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, completePromiseRes.Promise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Resolved && resPromise.State != promise.Resolved {
-			return model, fmt.Errorf("unexpected state '%s' after resolve for promise '%s'", resPromise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Resolved && completePromiseRes.Promise.State != promise.Resolved {
+			return model, fmt.Errorf("unexpected state '%s' after resolve for promise '%s'", completePromiseRes.Promise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Rejected && resPromise.State != promise.Rejected {
-			return model, fmt.Errorf("unexpected state '%s' after reject for promise '%s'", resPromise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Rejected && completePromiseRes.Promise.State != promise.Rejected {
+			return model, fmt.Errorf("unexpected state '%s' after reject for promise '%s'", completePromiseRes.Promise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Canceled && resPromise.State != promise.Canceled {
-			return model, fmt.Errorf("unexpected state '%s' after cancel for promise '%s'", resPromise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Canceled && completePromiseRes.Promise.State != promise.Canceled {
+			return model, fmt.Errorf("unexpected state '%s' after cancel for promise '%s'", completePromiseRes.Promise.State, completePromiseReq.Id)
 		}
 
 		// update model state
 		model = model.Copy()
-		model.promises.set(completePromiseReq.Id, resPromise)
+		model.promises.set(completePromiseReq.Id, completePromiseRes.Promise)
 		return model, nil
 	case t_api.StatusOK:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
 		}
-		if resPromise.State == promise.Pending {
-			return model, fmt.Errorf("unexpected state '%s' after complete for promise '%s'", resPromise.State, completePromiseReq.Id)
+		if completePromiseRes.Promise.State == promise.Pending {
+			return model, fmt.Errorf("unexpected state '%s' after complete for promise '%s'", completePromiseRes.Promise.State, completePromiseReq.Id)
 		}
-		if p.State != resPromise.State {
+		if p.State != completePromiseRes.Promise.State {
 			// the only way this can happen is if the promise timedout
-			if resPromise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if completePromiseRes.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
-				model.promises.set(completePromiseReq.Id, resPromise)
+				model.promises.set(completePromiseReq.Id, completePromiseRes.Promise)
 				return model, nil
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, completePromiseReq.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, completePromiseRes.Promise.State, completePromiseReq.Id)
 			}
 		}
-		if !p.IdempotencyKeyForComplete.Match(resPromise.IdempotencyKeyForComplete) && (completePromiseReq.Strict || resPromise.State != promise.Timedout) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, resPromise.IdempotencyKeyForCreate, completePromiseReq.Id)
+		if !p.IdempotencyKeyForComplete.Match(completePromiseRes.Promise.IdempotencyKeyForComplete) && (completePromiseReq.Strict || completePromiseRes.Promise.State != promise.Timedout) {
+			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, completePromiseRes.Promise.IdempotencyKeyForCreate, completePromiseReq.Id)
 		} else if completePromiseReq.Strict && p.State != completePromiseReq.State {
 			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, completePromiseReq.Id)
 		}
@@ -603,14 +605,17 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", completeTaskReq.Id)
 		}
-
-		// the task should be in state completed if:
-		// - the task is init, enqueued, or claimed
-		// - the task has not expired
-		// - the root promise has not completed or timedout (if known to the model)
-		p := model.promises.get(t.RootPromiseId)
-		if !t.State.In(task.Completed|task.Timedout) && p != nil && p.State == promise.Pending && t.ExpiresAt >= resTime && resTime >= p.Timeout {
+		if !completeTaskRes.Task.State.In(task.Completed | task.Timedout) {
 			return model, fmt.Errorf("task '%s' not completed", completeTaskReq.Id)
+		}
+
+		// the response should have been created if:
+		// - the task was not already completed or timedout
+		// - the task has not timedout
+		// - the root promise is still pending
+		p := model.promises.get(t.RootPromiseId)
+		if !t.State.In(task.Completed|task.Timedout) && t.Timeout > resTime && p != nil && p.State == promise.Pending {
+			return model, fmt.Errorf("task '%s' should have been completed", completeTaskReq.Id)
 		}
 
 		model = model.Copy()
@@ -670,12 +675,12 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 			return model, fmt.Errorf("task '%s' does not exist", dropTaskReq.Id)
 		}
 
-		// the task should be in state init if:
-		// - the task is claimed
-		// - the task has not expired
-		// - the root promise has not completed or timedout (if known to the model)
+		// the response should have been created if:
+		// - the task was claimed
+		// - the task has not expired or timedout
+		// - the root promise is still pending
 		p := model.promises.get(t.RootPromiseId)
-		if t.State == task.Claimed && p != nil && p.State == promise.Pending && t.ExpiresAt >= resTime && resTime >= p.Timeout {
+		if t.State == task.Claimed && t.ExpiresAt >= resTime && t.Timeout >= resTime && p != nil && p.State == promise.Pending {
 			return model, fmt.Errorf("task '%s' not init", dropTaskReq.Id)
 		}
 
