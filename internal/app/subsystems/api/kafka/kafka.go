@@ -29,13 +29,12 @@ type CreatePromisePayload struct {
 
 type CreatePromiseAndTaskPayload struct {
 	Promise CreatePromisePayload `json:"promise"`
-	Task    CreateTaskPart       `json:"task"`
+	Task    CreateTaskPayload    `json:"task"`
 	IKey    *idempotency.Key     `json:"iKey,omitempty"`
 	Strict  bool                 `json:"strict,omitempty"`
 }
 
-// helper struct for the "task" field inside CreatePromiseAndTaskPayload
-type CreateTaskPart struct {
+type CreateTaskPayload struct {
 	ProcessID string `json:"processId"`
 	TTL       int64  `json:"ttl"`
 }
@@ -126,7 +125,7 @@ type HeartbeatTasksPayload struct {
 
 type Config struct {
 	Brokers       []string      `flag:"brokers" desc:"kafka broker addresses" default:"localhost:9092"`
-	Topic         string        `flag:"topic" desc:"kafka topic to consume from" default:"resonate.requests"`
+	Topic         string        `flag:"topic" desc:"kafka request topic" default:"resonate"`
 	Target        string        `flag:"target" desc:"target identifier for this server" default:"resonate.server"`
 	ConsumerGroup string        `flag:"consumer-group" desc:"kafka consumer group" default:"resonate-servers"`
 	Timeout       time.Duration `flag:"timeout" desc:"kafka server graceful shutdown timeout" default:"10s"`
@@ -144,28 +143,13 @@ type Kafka struct {
 func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	bootstrapServers := strings.Join(config.Brokers, ",")
 
-	// Create admin client
-	admin, err := kafka.NewAdminClient(&kafka.ConfigMap{"bootstrap.servers": bootstrapServers})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kafka admin client: %w", err)
-	}
-	defer admin.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
-	defer cancel()
-
-	// Create topic if it doesn't exist
-	if _, err := admin.CreateTopics(ctx, []kafka.TopicSpecification{{Topic: config.Topic, NumPartitions: 1}}); err != nil {
-		return nil, fmt.Errorf("failed to create topic %q: %w", config.Topic, err)
-	}
-
 	// Create consumer
 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":        bootstrapServers,
 		"allow.auto.create.topics": true,
-		"group.id":                 config.ConsumerGroup,
 		"auto.offset.reset":        "earliest",
+		"bootstrap.servers":        bootstrapServers,
 		"enable.auto.commit":       false,
+		"group.id":                 config.ConsumerGroup,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kafka consumer: %w", err)
@@ -177,9 +161,9 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 
 	// Create producer
 	producer, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers":        bootstrapServers,
-		"allow.auto.create.topics": true,
 		"acks":                     "all",
+		"allow.auto.create.topics": true,
+		"bootstrap.servers":        bootstrapServers,
 		"retries":                  3,
 	})
 	if err != nil {
@@ -235,6 +219,15 @@ func (k *Kafka) Start(errors chan<- error) {
 		default:
 			msg, err := k.consumer.ReadMessage(-1)
 			if err != nil {
+				// if topic does not exist, continue
+				if kafkaErr, ok := err.(kafka.Error); ok && kafkaErr.Code() == kafka.ErrUnknownTopicOrPart {
+					slog.Warn("kafka topic does not exist, retrying", "topic", k.config.Topic)
+
+					// it appears that the second call to ReadMessage will block
+					// until the topic exists, so don't sleep (!!)
+					continue
+				}
+
 				slog.Error("kafka consumer error", "error", err)
 				errors <- err
 				return
@@ -284,9 +277,10 @@ type KafkaRequest struct {
 }
 
 type ReplyTo struct {
-	Topic  string  `json:"topic"`
-	Target string  `json:"target"`
-	Key    *string `json:"key,omitempty"`
+	Topic     string  `json:"topic"`
+	Target    string  `json:"target"`
+	Partition *int32  `json:"partition,omitempty"`
+	Key       *string `json:"key,omitempty"`
 }
 
 // KafkaResponse wraps a response or error for Kafka
@@ -322,16 +316,6 @@ func (s *server) handleRequest(msg *kafka.Message) {
 			"actual", kafkaReq.Target,
 			"operation", kafkaReq.Operation,
 		)
-		return
-	}
-
-	// Validate replyTo
-	if kafkaReq.ReplyTo.Topic == "" || kafkaReq.ReplyTo.Target == "" {
-		slog.Warn("missing replyTo information", "correlationId", kafkaReq.CorrelationId)
-		s.respondError(&kafkaReq, &api.Error{
-			Code:    400,
-			Message: "missing replyTo.topic or replyTo.target",
-		})
 		return
 	}
 
@@ -397,14 +381,6 @@ func (s *server) log(operation string, err error) {
 func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPayload) (t_api.ResponsePayload, *api.Error) {
 	defer s.log(kafkaReq.Operation, nil)
 
-	// Validate payload
-	if err := payload.Validate(); err != nil {
-		return nil, &api.Error{
-			Code:    400,
-			Message: fmt.Sprintf("validation error: %v", err),
-		}
-	}
-
 	// Process the request
 	res, apiErr := s.api.Process(kafkaReq.RequestId, &t_api.Request{
 		Metadata: kafkaReq.Metadata,
@@ -463,6 +439,9 @@ func (s *server) send(kafkaReq *KafkaRequest, value []byte) {
 		Value: value,
 	}
 
+	if kafkaReq.ReplyTo.Partition != nil {
+		msg.TopicPartition.Partition = *kafkaReq.ReplyTo.Partition
+	}
 	if kafkaReq.ReplyTo.Key != nil {
 		msg.Key = []byte(*kafkaReq.ReplyTo.Key)
 	}
