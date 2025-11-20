@@ -9,7 +9,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Middleware interface {
@@ -17,7 +16,7 @@ type Middleware interface {
 }
 
 // TODO(avillega): This authenticator is the first middleware that we currently have
-// as we have more middlewares we should rethink where they to put them
+// as we have more middleware we should rethink where they to put them
 type JwtAuthenticator struct {
 	publicKey *rsa.PublicKey
 }
@@ -122,6 +121,13 @@ func (a *JwtAuthenticator) authorize(claims *Claims, req *t_api.Request) error {
 func matchPromisePrefix(req *t_api.Request, prefix string) error {
 	var id string
 	switch r := req.Payload.(type) {
+	// Tasks have their own way of matching prefix to their ids
+	case *t_api.ClaimTaskRequest:
+		return matchTaskId(r.Id, prefix)
+	case *t_api.CompleteTaskRequest:
+		return matchTaskId(r.Id, prefix)
+	case *t_api.DropTaskRequest:
+		return matchTaskId(r.Id, prefix)
 	case *t_api.ReadPromiseRequest:
 		id = r.Id
 	case *t_api.CreatePromiseRequest:
@@ -130,12 +136,6 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 		id = r.Promise.Id
 	case *t_api.CompletePromiseRequest:
 		id = r.Id
-	case *t_api.ClaimTaskRequest:
-		id = extractPromiseId(r.Id)
-	case *t_api.CompleteTaskRequest:
-		id = extractPromiseId(r.Id)
-	case *t_api.DropTaskRequest:
-		id = extractPromiseId(r.Id)
 	case *t_api.CreateCallbackRequest:
 		id = r.PromiseId
 	case *t_api.ReadScheduleRequest:
@@ -152,11 +152,7 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 		id = r.Id
 	case *t_api.SearchSchedulesRequest:
 		id = r.Id
-	case *t_api.HeartbeatLocksRequest:
-		return nil
-	case *t_api.HeartbeatTasksRequest:
-		return nil
-	case *t_api.EchoRequest:
+	case *t_api.HeartbeatLocksRequest, *t_api.HeartbeatTasksRequest, *t_api.EchoRequest:
 		return nil
 	default:
 		panic("unreachable: unexpected request type")
@@ -170,18 +166,16 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 
 }
 
-func extractPromiseId(taskId string) string {
+func matchTaskId(taskId, prefix string) error {
 	// We expect the taskId to have the one of following formats
 	// __resume:{promiseId}:{another}
 	// __notify:{promiseId}:{another}
 	// __invoke:{promiseId}
 	// if that changes we need to change this code
-	if !strings.HasPrefix(taskId, "__resume") &&
-		!strings.HasPrefix(taskId, "__invoke") &&
-		!strings.HasPrefix(taskId, "__notify") {
-		panic("taskId must start with __resume, __invoke, or __notify")
+	if strings.HasPrefix(taskId, fmt.Sprintf("__resume:%s", prefix)) ||
+		strings.HasPrefix(taskId, fmt.Sprintf("__invoke:%s", prefix)) ||
+		strings.HasPrefix(taskId, fmt.Sprintf("__notify:%s", prefix)) {
+		return nil
 	}
-	start := strings.Index(taskId, ":")
-	util.Assert(start != -1, "taskId prefix must be separated by ':'")
-	return taskId[start+1:]
+	return fmt.Errorf("unauthorized prefix")
 }

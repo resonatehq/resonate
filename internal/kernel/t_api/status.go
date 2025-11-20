@@ -54,7 +54,7 @@ func (s StatusCode) String() string {
 	case StatusFieldValidationError:
 		return "The request is invalid"
 	case StatusUnauthorized:
-		return "The request is missing valid authentication credentials"
+		return "The request is unauthorized"
 	case StatusForbidden:
 		return "The request is forbidden"
 	case StatusPromiseAlreadyResolved:

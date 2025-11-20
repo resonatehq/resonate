@@ -120,13 +120,13 @@ func Serve(config *config.Config) error {
 		api.AddSubsystem(subsystem)
 	}
 
-	// api middlewares
-	apiMiddlewares, err := config.APIMiddlewares()
+	// api middleware
+	apiMiddleware, err := config.APIMiddleware()
 	if err != nil {
 		return err
 	}
 
-	for _, middleware := range apiMiddlewares {
+	for _, middleware := range apiMiddleware {
 		api.AddMiddleware(middleware)
 	}
 

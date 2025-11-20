@@ -123,22 +123,22 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 	return subsystems, nil
 }
 
-func (c *Config) APIMiddlewares() ([]api.Middleware, error) {
-	middlewares := []api.Middleware{}
+func (c *Config) APIMiddleware() ([]api.Middleware, error) {
+	middleware := []api.Middleware{}
 
 	if c.API.Subsystems.Http.Config.PublicKeyPath != "" {
 		pem, err := os.ReadFile(c.API.Subsystems.Http.Config.PublicKeyPath)
 		if err != nil {
 			return nil, err
 		}
-		middleware, err := api.NewJWTAuthenticator(pem)
+		m, err := api.NewJWTAuthenticator(pem)
 		if err != nil {
 			return nil, err
 		}
-		middlewares = append(middlewares, middleware)
+		middleware = append(middleware, m)
 	}
 
-	return middlewares, nil
+	return middleware, nil
 
 }
 

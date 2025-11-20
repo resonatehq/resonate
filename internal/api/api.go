@@ -34,13 +34,13 @@ type API interface {
 // API
 
 type api struct {
-	sq          chan *bus.SQE[t_api.Request, t_api.Response]
-	buffer      *bus.SQE[t_api.Request, t_api.Response]
-	subsystems  []Subsystem
-	done        bool
-	errors      chan error
-	metrics     *metrics.Metrics
-	middlewares []Middleware
+	sq         chan *bus.SQE[t_api.Request, t_api.Response]
+	buffer     *bus.SQE[t_api.Request, t_api.Response]
+	subsystems []Subsystem
+	done       bool
+	errors     chan error
+	metrics    *metrics.Metrics
+	middleware []Middleware
 }
 
 func New(size int, metrics *metrics.Metrics) *api {
@@ -64,7 +64,7 @@ func (a *api) AddSubsystem(subsystem Subsystem) {
 }
 
 func (a *api) AddMiddleware(middleware Middleware) {
-	a.middlewares = append(a.middlewares, middleware)
+	a.middleware = append(a.middleware, middleware)
 }
 
 func (a *api) Addr() string {
@@ -188,11 +188,12 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		return
 	}
 
-	// Run all the middlewares
-	for _, m := range a.middlewares {
+	// Run all the middleware
+	for _, m := range a.middleware {
 		err := m.Process(sqe.Submission)
 		if err != nil {
 			sqe.Callback(nil, err)
+			return
 		}
 	}
 
