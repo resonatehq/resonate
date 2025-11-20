@@ -68,7 +68,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		t.Fatal(err)
 	}
 
-	// add api subsystems
+	// add aio subsystems
 	aio.AddSubsystem(router)
 	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)

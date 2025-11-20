@@ -120,6 +120,16 @@ func Serve(config *config.Config) error {
 		api.AddSubsystem(subsystem)
 	}
 
+	// api middleware
+	apiMiddleware, err := config.APIMiddleware()
+	if err != nil {
+		return err
+	}
+
+	for _, middleware := range apiMiddleware {
+		api.AddMiddleware(middleware)
+	}
+
 	// aio subsystems
 	aioSubsystems, err := config.AIOSubsystems(aio, metrics, aioPlugins)
 	if err != nil {

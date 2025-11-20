@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -56,8 +57,9 @@ func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
 }
 
 type API struct {
-	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems APISubsystems `flag:"-"`
+	Size          int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	PublicKeyPath string        `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
+	Subsystems    APISubsystems `flag:"-"`
 }
 
 type APIDST struct {
@@ -120,6 +122,25 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 	}
 
 	return subsystems, nil
+}
+
+func (c *Config) APIMiddleware() ([]api.Middleware, error) {
+	middleware := []api.Middleware{}
+
+	if c.API.PublicKeyPath != "" {
+		pem, err := os.ReadFile(c.API.PublicKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		m, err := api.NewJWTAuthenticator(pem)
+		if err != nil {
+			return nil, err
+		}
+		middleware = append(middleware, m)
+	}
+
+	return middleware, nil
+
 }
 
 func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {

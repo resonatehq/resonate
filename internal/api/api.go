@@ -40,6 +40,7 @@ type api struct {
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
+	middleware []Middleware
 }
 
 func New(size int, metrics *metrics.Metrics) *api {
@@ -60,6 +61,10 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
+}
+
+func (a *api) AddMiddleware(middleware Middleware) {
+	a.middleware = append(a.middleware, middleware)
 }
 
 func (a *api) Addr() string {
@@ -181,6 +186,15 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	if err := sqe.Submission.Validate(); err != nil {
 		sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
 		return
+	}
+
+	// Run all the middleware
+	for _, m := range a.middleware {
+		err := m.Process(sqe.Submission)
+		if err != nil {
+			sqe.Callback(nil, err)
+			return
+		}
 	}
 
 	select {
