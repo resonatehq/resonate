@@ -57,8 +57,9 @@ func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
 }
 
 type API struct {
-	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems APISubsystems `flag:"-"`
+	Size          int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	PublicKeyPath string        `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
+	Subsystems    APISubsystems `flag:"-"`
 }
 
 type APIDST struct {
@@ -126,8 +127,8 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 func (c *Config) APIMiddleware() ([]api.Middleware, error) {
 	middleware := []api.Middleware{}
 
-	if c.API.Subsystems.Http.Config.PublicKeyPath != "" {
-		pem, err := os.ReadFile(c.API.Subsystems.Http.Config.PublicKeyPath)
+	if c.API.PublicKeyPath != "" {
+		pem, err := os.ReadFile(c.API.PublicKeyPath)
 		if err != nil {
 			return nil, err
 		}
