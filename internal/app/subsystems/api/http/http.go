@@ -131,11 +131,12 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 		c.Next()
 	})
 
-	// TODO(avillega): Extract the Auth header in a cross cutting way and put it in the request metadata
-	// Extract bearer token from Authorization header and add to context
+	// Extract and normalize Authorization header
 	authorized.Use(func(c *gin.Context) {
 		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-			// Store the bearer token for later use by request handlers
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				authHeader = authHeader[7:] // Skip "Bearer "
+			}
 			c.Set("authorization", authHeader)
 		}
 		c.Next()
