@@ -83,7 +83,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 				if !ok {
 					panic("plugin config not found")
 				}
-				if err := plugin.Decode(value, hooks); err != nil {
+				if err := plugin.Config().Decode(value, hooks); err != nil {
 					return err
 				}
 			}
@@ -104,7 +104,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
 
-		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
+		plugin.Config().Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
 	}
 
 	// bind other flags
@@ -144,10 +144,22 @@ func Serve(cfg *config.Config) error {
 		api.AddMiddleware(middleware)
 	}
 
+	// plugins
+	for _, p := range cfg.AIO.Plugins {
+		if p.Enabled() {
+			p, err := p.Plugin.New(metrics)
+			if err != nil {
+				return err
+			}
+			api.AddPlugin(p)
+			aio.AddPlugin(p)
+		}
+	}
+
 	// api subsystems
-	for _, subsystem := range cfg.API.Subsystems {
-		if subsystem.Enabled() {
-			s, err := subsystem.New(api, metrics)
+	for _, s := range cfg.API.Subsystems {
+		if s.Enabled() {
+			s, err := s.Plugin.New(api, metrics)
 			if err != nil {
 				return err
 			}
@@ -156,24 +168,13 @@ func Serve(cfg *config.Config) error {
 	}
 
 	// aio subsystems
-	for _, subsystem := range cfg.AIO.Subsystems {
-		if subsystem.Enabled() {
-			s, err := subsystem.New(aio, metrics)
+	for _, s := range cfg.AIO.Subsystems {
+		if s.Enabled() {
+			s, err := s.Plugin.New(aio, metrics)
 			if err != nil {
 				return err
 			}
 			aio.AddSubsystem(s)
-		}
-	}
-
-	// aio plugins
-	for _, plugin := range cfg.AIO.Plugins {
-		if plugin.Enabled() {
-			p, err := plugin.New(aio, metrics)
-			if err != nil {
-				return err
-			}
-			aio.AddPlugin(p)
 		}
 	}
 

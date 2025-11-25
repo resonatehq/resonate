@@ -65,7 +65,7 @@ func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error
 }
 
 func (c *Config) New(a i_api.API, metrics *metrics.Metrics) (i_api.Subsystem, error) {
-	return New(a, metrics, c, "")
+	return New(a, metrics, c)
 }
 
 type Http struct {
@@ -75,7 +75,7 @@ type Http struct {
 	shutdown chan struct{}
 }
 
-func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string) (i_api.Subsystem, error) {
+func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	handler := gin.New()
@@ -180,6 +180,14 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
 	// Poller proxy
+	var pollAddr string
+	for _, plugin := range a.Plugins() {
+		if plugin.Type() == "poll" {
+			pollAddr = plugin.Addr()
+			break
+		}
+	}
+
 	if pollAddr != "" {
 		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
 		if err != nil {

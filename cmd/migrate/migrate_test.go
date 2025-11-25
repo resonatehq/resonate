@@ -227,8 +227,8 @@ aio:
 			err = cmd.PersistentPreRunE(cmd, []string{})
 			require.NoError(t, err)
 
-			sqliteCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*sqlite.Config)
-			postgresCfg := cfg.AIO.Subsystems[1].AIOSubsystem.(*postgres.Config)
+			sqliteCfg := cfg.AIO.Subsystems[0].Plugin.(*sqlite.Config)
+			postgresCfg := cfg.AIO.Subsystems[1].Plugin.(*postgres.Config)
 
 			if tt.wantSqlitePath != "" {
 				assert.Equal(t, tt.wantSqlitePath, sqliteCfg.Path, "sqlite path")
@@ -341,7 +341,7 @@ aio:
 	err = cmd.PersistentPreRunE(cmd, []string{})
 	require.NoError(t, err)
 
-	sqliteCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*sqlite.Config)
+	sqliteCfg := cfg.AIO.Subsystems[0].Plugin.(*sqlite.Config)
 
 	// Verify that the flag overrode the config file value
 	assert.Equal(t, "override.db", sqliteCfg.Path)
@@ -413,7 +413,7 @@ aio:
 	err = cmd.PersistentPreRunE(cmd, []string{})
 	require.NoError(t, err)
 
-	postgresCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*postgres.Config)
+	postgresCfg := cfg.AIO.Subsystems[0].Plugin.(*postgres.Config)
 
 	// Verify query params
 	assert.Equal(t, "require", postgresCfg.Query["sslmode"])

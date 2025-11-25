@@ -67,7 +67,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 				if !ok {
 					panic("plugin config not found")
 				}
-				if err := plugin.Decode(value, hooks); err != nil {
+				if err := plugin.Config().Decode(value, hooks); err != nil {
 					return err
 				}
 			}
@@ -88,7 +88,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
 
-		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
+		plugin.Config().Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
 	}
 
 	cmd.Flags().SortFlags = false

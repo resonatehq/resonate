@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/receiver"
@@ -88,6 +89,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Sender, error) {
 
 	worker := &SenderWorker{
 		sq:      sq,
+		plugins: map[string]plugins.Plugin{},
 		targets: targets,
 		aio:     a,
 		metrics: metrics,
@@ -139,7 +141,7 @@ func (s *Sender) Flush(t int64) {}
 
 type SenderWorker struct {
 	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	plugins map[string]aio.Plugin
+	plugins map[string]plugins.Plugin
 	targets map[string]*receiver.Recv
 	aio     aio.AIO
 	metrics *metrics.Metrics
@@ -149,7 +151,7 @@ func (w *SenderWorker) String() string {
 	return t_aio.Sender.String()
 }
 
-func (w *SenderWorker) AddPlugin(plugin aio.Plugin) {
+func (w *SenderWorker) AddPlugin(plugin plugins.Plugin) {
 	w.plugins[plugin.Type()] = plugin
 }
 
@@ -247,7 +249,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 
 	counter := w.metrics.AioInFlight.WithLabelValues(plugin.String())
 
-	ok := plugin.Enqueue(&aio.Message{
+	ok := plugin.Enqueue(&plugins.Message{
 		Type: sqe.Submission.Sender.Task.Mesg.Type,
 		Addr: recv.Data,
 		Head: sqe.Submission.Sender.Task.Mesg.Head,

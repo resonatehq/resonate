@@ -15,9 +15,9 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -63,12 +63,12 @@ func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error
 	return nil
 }
 
-func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Plugin, error) {
-	return New(aio, metrics, c)
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type Poll struct {
-	sq         chan *aio.Message
+	sq         chan *plugins.Message
 	connect    chan *connection
 	disconnect chan *connection
 	worker     *PollWorker
@@ -164,8 +164,8 @@ func (cs *connections) rmv(conn *connection, match bool) {
 	}
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Poll, error) {
-	sq := make(chan *aio.Message, config.Size)
+func New(metrics *metrics.Metrics, config *Config) (*Poll, error) {
+	sq := make(chan *plugins.Message, config.Size)
 
 	// connect channel is used to register new connections with the
 	// connection manager (worker)
@@ -251,7 +251,7 @@ func (p *Poll) Stop() error {
 	return p.server.Stop()
 }
 
-func (p *Poll) Enqueue(msg *aio.Message) bool {
+func (p *Poll) Enqueue(msg *plugins.Message) bool {
 	select {
 	case p.sq <- msg:
 		return true
@@ -263,7 +263,7 @@ func (p *Poll) Enqueue(msg *aio.Message) bool {
 // Worker
 
 type PollWorker struct {
-	sq          <-chan *aio.Message
+	sq          <-chan *plugins.Message
 	config      *Config
 	metrics     *metrics.Metrics
 	counter     prometheus.Gauge
@@ -349,7 +349,7 @@ func (w *PollWorker) Start() {
 	}
 }
 
-func (w *PollWorker) Process(mesg *aio.Message) {
+func (w *PollWorker) Process(mesg *plugins.Message) {
 	// unmarshal message
 	var addr *Addr
 	if err := json.Unmarshal(mesg.Addr, &addr); err != nil {

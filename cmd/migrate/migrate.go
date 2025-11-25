@@ -61,14 +61,14 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			// decode plugins
-			for _, plugin := range cfg.AIO.Subsystems {
-				if strings.HasPrefix(plugin.Name(), "store-") {
-					value, ok := util.Extract(vip.AllSettings(), plugin.Key())
+			// decode subsystems
+			for _, s := range cfg.AIO.Subsystems {
+				if strings.HasPrefix(s.Name(), "store-") {
+					value, ok := util.Extract(vip.AllSettings(), s.Key())
 					if !ok {
 						panic("plugin config not found")
 					}
-					if err := plugin.Decode(value, hooks); err != nil {
+					if err := s.Plugin.Decode(value, hooks); err != nil {
 						return err
 					}
 				}
@@ -87,7 +87,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 		cmd.PersistentFlags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.PersistentFlags().Lookup(enabled))
 
-		plugin.Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
+		plugin.Config().Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
 	}
 
 	// add subcommands
@@ -241,9 +241,9 @@ func newUpCmd(cfg *config.Config) *cobra.Command {
 // and returns the appropriate migration store. The store owns the database
 // connection and the caller is responsible for calling Close() on the store.
 func getMigrationStore(cfg *config.Config) (migrations.MigrationStore, error) {
-	for _, plugin := range cfg.AIO.Subsystems {
-		if plugin.Name() == "store-sqlite" && plugin.Enabled() {
-			subsystem, err := plugin.New(nil, nil)
+	for _, p := range cfg.AIO.Subsystems {
+		if p.Name() == "store-sqlite" && p.Enabled() {
+			subsystem, err := p.Plugin.New(nil, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -251,8 +251,8 @@ func getMigrationStore(cfg *config.Config) (migrations.MigrationStore, error) {
 			store := subsystem.(*sqlite.SqliteStore)
 			return migrations.NewSqliteMigrationStore(store.DB()), nil
 		}
-		if plugin.Name() == "store-postgres" && plugin.Enabled() {
-			subsystem, err := plugin.New(nil, nil)
+		if p.Name() == "store-postgres" && p.Enabled() {
+			subsystem, err := p.Plugin.New(nil, nil)
 			if err != nil {
 				return nil, err
 			}

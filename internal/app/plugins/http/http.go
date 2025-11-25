@@ -11,9 +11,9 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -51,8 +51,8 @@ func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error
 	return nil
 }
 
-func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Plugin, error) {
-	return New(aio, metrics, c)
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type Http struct {
@@ -68,7 +68,7 @@ type processor struct {
 	client *http.Client
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
+func New(metrics *metrics.Metrics, config *Config) (*Http, error) {
 	proc := &processor{
 		client: &http.Client{
 			Timeout: config.Timeout,
@@ -88,7 +88,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 	}
 
 	return &Http{
-		Plugin: base.NewPlugin(a, "http", baseConfig, metrics, proc, nil),
+		Plugin: base.NewPlugin("http", baseConfig, metrics, proc, nil),
 	}, nil
 }
 

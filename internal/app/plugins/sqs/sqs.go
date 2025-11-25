@@ -18,9 +18,9 @@ import (
 	"github.com/spf13/viper"
 
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type Config struct {
@@ -53,8 +53,8 @@ func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error
 	return nil
 }
 
-func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Plugin, error) {
-	return New(aio, metrics, c)
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type Client interface {
@@ -75,17 +75,17 @@ type processor struct {
 	timeout time.Duration
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
+func New(metrics *metrics.Metrics, config *Config) (*SQS, error) {
 	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
 	client := sqs.NewFromConfig(awsConfig)
-	return NewWithClient(a, metrics, config, client)
+	return NewWithClient(metrics, config, client)
 }
 
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
+func NewWithClient(metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
 	proc := &processor{
 		client:  client,
 		timeout: config.Timeout,
@@ -98,7 +98,7 @@ func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client C
 		TimeToClaim: config.TimeToClaim,
 	}
 
-	plugin := base.NewPlugin(a, "sqs", baseConfig, metrics, proc, nil)
+	plugin := base.NewPlugin("sqs", baseConfig, metrics, proc, nil)
 
 	return &SQS{
 		Plugin: plugin,

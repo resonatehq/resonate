@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/plugins"
 
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
@@ -24,7 +25,7 @@ type AIO interface {
 	Signal(<-chan interface{}) <-chan interface{}
 	Flush(int64)
 
-	Plugins() []Plugin
+	Plugins() []plugins.Plugin
 
 	// dispatch is required by gocoro
 	Dispatch(*t_aio.Submission, func(*t_aio.Completion, error))
@@ -40,7 +41,7 @@ type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	buffer     *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]Subsystem
-	plugins    []Plugin
+	plugins    []plugins.Plugin
 	errors     chan error
 	metrics    *metrics.Metrics
 }
@@ -66,11 +67,11 @@ func (a *aio) AddSubsystem(subsystem Subsystem) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
 
-func (a *aio) AddPlugin(plugin Plugin) {
+func (a *aio) AddPlugin(plugin plugins.Plugin) {
 	a.plugins = append(a.plugins, plugin)
 }
 
-func (a *aio) Plugins() []Plugin {
+func (a *aio) Plugins() []plugins.Plugin {
 	return a.plugins
 }
 

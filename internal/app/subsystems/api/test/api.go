@@ -5,6 +5,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,6 +45,10 @@ func (a *API) Errors() <-chan error {
 
 func (a *API) Signal(cancel <-chan interface{}) <-chan interface{} {
 	panic("not implemented")
+}
+
+func (a *API) Plugins() []plugins.Plugin {
+	return nil
 }
 
 func (a *API) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {

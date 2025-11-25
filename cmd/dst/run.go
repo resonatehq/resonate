@@ -104,7 +104,7 @@ func RunDSTCmd() *cobra.Command {
 				if !ok {
 					panic("plugin config not found")
 				}
-				if err := plugin.Decode(value, hooks); err != nil {
+				if err := plugin.Config().Decode(value, hooks); err != nil {
 					return err
 				}
 			}
@@ -164,9 +164,9 @@ func RunDSTCmd() *cobra.Command {
 			aio := aio.NewDST(r, p, metrics)
 
 			// aio subsystems
-			for _, subsystem := range cfg.AIO.Subsystems {
-				if subsystem.Enabled() {
-					subsystem, err := subsystem.NewDST(aio, metrics, r, backchannel)
+			for _, s := range cfg.AIO.Subsystems {
+				if s.Enabled() {
+					subsystem, err := s.Plugin.NewDST(aio, metrics, r, backchannel)
 					if err != nil {
 						return err
 					}
@@ -277,8 +277,6 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(tags, "tags", "promise tags set size")
 	cmd.Flags().Var(backchannelSize, "backchannel-size", "backchannel size")
 
-	fmt.Println("The commands parent is ", cmd.Parent())
-
 	// bind config
 	util.Bind(cfg, cmd, cmd.Flags(), vip, "dst")
 
@@ -288,7 +286,7 @@ func RunDSTCmd() *cobra.Command {
 		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
 
-		plugin.Bind(cmd, cmd.Flags(), vip, "dst", plugin.Prefix(), plugin.Key())
+		plugin.Config().Bind(cmd, cmd.Flags(), vip, "dst", plugin.Prefix(), plugin.Key())
 	}
 
 	cmd.SilenceUsage = true
