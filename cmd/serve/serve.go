@@ -178,16 +178,16 @@ func Serve(cfg *config.Config) error {
 	}
 
 	// start api/aio
-	if err := api.Start(); err != nil {
-		slog.Error("failed to start api", "error", err)
-		return err
-	}
 	if err := aio.Start(); err != nil {
 		if migrationErr, ok := err.(*migrations.MigrationError); ok {
 			slog.Error("failed to start aio", "error", fmt.Sprintf("Migration %03d_%s failed: %v", migrationErr.Version, migrationErr.Name, migrationErr.Err))
 		} else {
 			slog.Error("failed to start aio", "error", err)
 		}
+		return err
+	}
+	if err := api.Start(); err != nil {
+		slog.Error("failed to start api", "error", err)
 		return err
 	}
 
