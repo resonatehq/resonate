@@ -138,7 +138,7 @@ func RangeFloat63n(r *rand.Rand, min float64, max float64) float64 {
 
 func RangeMap[K comparable, V any](r *rand.Rand, m map[K]V) K {
 	i := r.Intn(len(m))
-	for k := range m {
+	for k := range m { // nosemgrep: range-over-map
 		if i == 0 {
 			return k
 		}
