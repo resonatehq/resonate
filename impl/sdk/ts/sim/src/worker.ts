@@ -12,6 +12,7 @@ import type {
   Response,
   ResponseFor,
 } from "../../src/network/network";
+import { OptionsBuilder } from "../../src/options";
 import type { Registry } from "../../src/registry";
 import { ResonateInner } from "../../src/resonate-inner";
 import { NoopTracer } from "../../src/tracer";
@@ -24,13 +25,23 @@ interface DeliveryOptions {
 }
 
 class SimulatedMessageSource implements MessageSource {
+  readonly unicast: string;
+  readonly anycast: string;
+
   private subscriptions: {
     invoke: Array<(msg: NetworkMessage) => void>;
     resume: Array<(msg: NetworkMessage) => void>;
     notify: Array<(msg: NetworkMessage) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor(private maybeCorruptData: (data: NetworkMessage) => any) {}
+  constructor(
+    iaddr: string,
+    gaddr: string,
+    private maybeCorruptData: (data: NetworkMessage) => any,
+  ) {
+    this.unicast = `sim://uni@${gaddr}/${iaddr}`;
+    this.anycast = `sim://any@${gaddr}/${iaddr}`;
+  }
 
   recv(msg: NetworkMessage): void {
     for (const callback of this.subscriptions[msg.type]) {
@@ -43,6 +54,10 @@ class SimulatedMessageSource implements MessageSource {
   }
 
   stop(): void {}
+
+  match(target: string): string {
+    return `sim://any@${target}`;
+  }
 }
 
 class SimulatedNetwork implements Network {
@@ -56,6 +71,8 @@ class SimulatedNetwork implements Network {
   private messageSource: SimulatedMessageSource;
 
   constructor(
+    iaddr: string,
+    gaddr: string,
     prng: Random,
     { charFlipProb = 0 }: DeliveryOptions,
     public readonly source: Address,
@@ -63,7 +80,7 @@ class SimulatedNetwork implements Network {
   ) {
     this.prng = prng;
     this.deliveryOptions = { charFlipProb };
-    this.messageSource = new SimulatedMessageSource((data) => this.maybeCorruptData(data));
+    this.messageSource = new SimulatedMessageSource(iaddr, gaddr, (data) => this.maybeCorruptData(data));
   }
 
   getMessageSource(): MessageSource {
@@ -167,12 +184,12 @@ export class WorkerProcess extends Process {
   ) {
     super(iaddr, gaddr);
     this.clock = clock;
-    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
+    this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
     this.registry = registry;
+    const messageSource = this.network.getMessageSource();
     this.resonate = new ResonateInner({
-      unicast: `sim://uni@${gaddr}/${iaddr}`,
-      anycastPreference: `sim://any@${gaddr}/${iaddr}`,
-      anycastNoPreference: `sim://any@${gaddr}`,
+      unicast: messageSource.unicast,
+      anycast: messageSource.anycast,
       pid: iaddr,
       ttl: 5000,
       clock: this.clock,
@@ -182,6 +199,7 @@ export class WorkerProcess extends Process {
       registry: registry,
       heartbeat: new NoopHeartbeat(),
       dependencies: new Map(),
+      optsBuilder: new OptionsBuilder({ match: messageSource.match }),
       verbose: false,
       tracer: new NoopTracer(),
     });

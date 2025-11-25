@@ -316,7 +316,10 @@ export interface Network {
 }
 
 export interface MessageSource {
+  readonly unicast: string;
+  readonly anycast: string;
   recv(msg: Message): void;
   subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void;
   stop(): void;
+  match(target: string): string;
 }

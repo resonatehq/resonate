@@ -6,6 +6,7 @@ import type { Handler } from "./handler";
 import type { Heartbeat } from "./heartbeat";
 import type { CallbackRecord, DurablePromiseRecord, Network, TaskRecord } from "./network/network";
 import { Nursery } from "./nursery";
+import type { OptionsBuilder } from "./options";
 import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
 import type { ClaimedTask, Task } from "./resonate-inner";
@@ -39,13 +40,13 @@ export class Computation {
   private ttl: number;
   private clock: Clock;
   private unicast: string;
-  private anycastPreference: string;
-  private anycastNoPreference: string;
+  private anycast: string;
   private network: Network;
   private handler: Handler;
   private retries: Map<string, RetryPolicyConstructor>;
   private registry: Registry;
   private dependencies: Map<string, any>;
+  private optsBuilder: OptionsBuilder;
   private verbose: boolean;
   private heartbeat: Heartbeat;
   private processor: Processor;
@@ -58,8 +59,7 @@ export class Computation {
   constructor(
     id: string,
     unicast: string,
-    anycastPreference: string,
-    anycastNoPreference: string,
+    anycast: string,
     pid: string,
     ttl: number,
     clock: Clock,
@@ -69,6 +69,7 @@ export class Computation {
     registry: Registry,
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
+    optsBuilder: OptionsBuilder,
     verbose: boolean,
     tracer: Tracer,
     span: Span,
@@ -76,8 +77,7 @@ export class Computation {
   ) {
     this.id = id;
     this.unicast = unicast;
-    this.anycastPreference = anycastPreference;
-    this.anycastNoPreference = anycastNoPreference;
+    this.anycast = anycast;
     this.pid = pid;
     this.ttl = ttl;
     this.clock = clock;
@@ -87,6 +87,7 @@ export class Computation {
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
+    this.optsBuilder = optsBuilder;
     this.verbose = verbose;
     this.processor = processor ?? new AsyncProcessor();
     this.span = span;
@@ -193,10 +194,10 @@ export class Computation {
       const ctx = new InnerContext({
         id: this.id,
         func: registered.func.name,
-        anycast: this.anycastNoPreference,
         clock: this.clock,
         registry: this.registry,
         dependencies: this.dependencies,
+        optsBuilder: this.optsBuilder,
         timeout: rootPromise.timeout,
         version: registered.version,
         retryPolicy: retryPolicy,
@@ -332,7 +333,7 @@ export class Computation {
             promiseId: id,
             rootPromiseId: this.id,
             timeout: timeout,
-            recv: this.anycastPreference,
+            recv: this.anycast,
           },
           (err, res) => {
             if (err) {

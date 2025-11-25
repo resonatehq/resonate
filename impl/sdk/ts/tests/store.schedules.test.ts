@@ -11,7 +11,7 @@ describe("schedule transitions", () => {
 
   beforeAll(() => {
     server = new Server();
-    schedules = new Schedules(new LocalNetwork(server));
+    schedules = new Schedules(new LocalNetwork({ server }));
   });
 
   beforeEach(async () => {

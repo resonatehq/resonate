@@ -636,6 +636,9 @@ export class HttpNetwork implements Network {
 }
 
 export class HttpMessageSource implements MessageSource {
+  readonly unicast: string;
+  readonly anycast: string;
+
   private url: string;
   private group: string;
   private pid: string;
@@ -648,6 +651,8 @@ export class HttpMessageSource implements MessageSource {
   } = { invoke: [], resume: [], notify: [] };
 
   constructor({ url, pid, group, auth }: HttpMessageSourceConfig) {
+    this.unicast = `poll://uni@${group}/${pid}`;
+    this.anycast = `poll://any@${group}/${pid}`;
     this.url = url;
     this.group = group;
     this.pid = pid;
@@ -718,6 +723,9 @@ export class HttpMessageSource implements MessageSource {
 
   public subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void {
     this.subscriptions[type].push(callback);
+  }
+  match(target: string): string {
+    return `poll://any@${target}`;
   }
 }
 

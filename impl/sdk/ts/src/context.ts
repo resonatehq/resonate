@@ -1,7 +1,7 @@
 import type { Clock } from "./clock";
 import exceptions, { type ResonateError } from "./exceptions";
 import type { CreatePromiseReq } from "./network/network";
-import { Options } from "./options";
+import type { Options, OptionsBuilder } from "./options";
 import type { Registry } from "./registry";
 import { Exponential, Never, type RetryPolicy } from "./retries";
 import type { Span } from "./tracer";
@@ -209,12 +209,13 @@ export interface Context {
   sleep(msOrOpts: number | { for?: number; until?: Date }): RFC<void>;
 
   // promise
+  promise<T>(): RFI<T>;
   promise<T>({
     id,
     timeout,
     data,
     tags,
-  }?: {
+  }: {
     id?: string;
     timeout?: number;
     data?: any;
@@ -260,9 +261,9 @@ export class InnerContext implements Context {
   private pId: string;
   readonly clock: Clock;
   readonly span: Span;
-  private anycast: string;
   private registry: Registry;
   private dependencies: Map<string, any>;
+  private optsBuilder: OptionsBuilder;
   private seq = 0;
 
   run = this.lfc.bind(this);
@@ -275,10 +276,10 @@ export class InnerContext implements Context {
     rId = id,
     pId = id,
     func,
-    anycast,
     clock,
     registry,
     dependencies,
+    optsBuilder,
     timeout,
     version,
     retryPolicy,
@@ -288,10 +289,10 @@ export class InnerContext implements Context {
     rId?: string;
     pId?: string;
     func: string;
-    anycast: string;
     clock: Clock;
     registry: Registry;
     dependencies: Map<string, any>;
+    optsBuilder: OptionsBuilder;
     timeout: number;
     version: number;
     retryPolicy: RetryPolicy;
@@ -301,10 +302,10 @@ export class InnerContext implements Context {
     this.rId = rId;
     this.pId = pId;
     this.func = func;
-    this.anycast = anycast;
     this.clock = clock;
     this.registry = registry;
     this.dependencies = dependencies;
+    this.optsBuilder = optsBuilder;
     this.retryPolicy = retryPolicy;
     this.span = span;
 
@@ -335,10 +336,10 @@ export class InnerContext implements Context {
       rId: this.rId,
       pId: this.id,
       func,
-      anycast: this.anycast,
       clock: this.clock,
       registry: this.registry,
       dependencies: this.dependencies,
+      optsBuilder: this.optsBuilder,
       timeout,
       version,
       retryPolicy,
@@ -560,8 +561,10 @@ export class InnerContext implements Context {
     return this.dependencies.get(name);
   }
 
-  options(opts: Partial<Options> = {}): Options {
-    return new Options({ target: this.anycast, ...opts });
+  options(
+    opts: Partial<Pick<Options, "id" | "tags" | "target" | "timeout" | "version" | "retryPolicy">> = {},
+  ): Options {
+    return this.optsBuilder.build(opts);
   }
 
   readonly date = {

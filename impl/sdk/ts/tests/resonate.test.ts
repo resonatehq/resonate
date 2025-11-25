@@ -553,7 +553,7 @@ describe("Resonate usage tests", () => {
       "resonate:scope": "global",
       "resonate:root": "f",
       "resonate:parent": "f",
-      "resonate:invoke": "poll://any@test",
+      "resonate:invoke": "poll://any@default",
     });
     resonate.stop();
   });
@@ -649,7 +649,7 @@ describe("Resonate usage tests", () => {
       "resonate:scope": "global",
       "resonate:root": "fid",
       "resonate:parent": "fid",
-      "resonate:invoke": "poll://any@test",
+      "resonate:invoke": "poll://any@default",
     });
     resonate.stop();
   });
