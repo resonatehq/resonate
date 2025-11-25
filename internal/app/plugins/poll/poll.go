@@ -20,6 +20,7 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -40,12 +41,8 @@ type Cors struct {
 	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

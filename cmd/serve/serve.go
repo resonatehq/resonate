@@ -96,7 +96,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate.yaml)")
 
 	// bind config
-	util.Bind(cfg, cmd, vip)
+	util.Bind(cfg, cmd, cmd.Flags(), vip)
 
 	// bind plugins
 	for _, plugin := range cfg.Plugins() {
@@ -104,7 +104,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
 
-		plugin.Bind(cmd, vip, plugin.Prefix(), plugin.Key())
+		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
 	}
 
 	// bind other flags

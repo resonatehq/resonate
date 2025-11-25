@@ -12,6 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -35,13 +36,13 @@ func (c *Config) Plugins() []Plugin {
 }
 
 type API struct {
-	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" run:"1:1000"`
+	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
 	Auth       Auth          `flag:"auth"`
 	Subsystems apiSubsystems `mapstructure:"-"`
 }
 
 type AIO struct {
-	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" run:"1:1000"`
+	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
 	Subsystems aioSubsystems `mapstructure:"-"`
 	Plugins    aioPlugins    `mapstructure:"-"`
 }
@@ -164,29 +165,25 @@ type Plugin interface {
 	Name() string
 	Enabled() bool
 	EnabledP() *bool
-	Bind(*cobra.Command, *viper.Viper, string, string)
-	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 }
 
 type APISubsystem interface {
-	Bind(*cobra.Command, *viper.Viper, string, string)
-	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(api.API, *metrics.Metrics) (api.Subsystem, error)
 }
 
 type AIOSubsystem interface {
-	Bind(*cobra.Command, *viper.Viper, string, string)
-	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(aio.AIO, *metrics.Metrics) (aio.Subsystem, error)
 	NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan any) (aio.SubsystemDST, error)
 }
 
 type AIOPlugin interface {
-	Bind(*cobra.Command, *viper.Viper, string, string)
-	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(aio.AIO, *metrics.Metrics) (aio.Plugin, error)
 }

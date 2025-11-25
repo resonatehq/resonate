@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"net/url"
 	"strings"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/receiver"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -34,12 +35,8 @@ type TargetConfig struct {
 	Data json.RawMessage
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

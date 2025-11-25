@@ -12,21 +12,18 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 // Config
 
 type ConfigDST struct {
-	P float64 `flag:"p" desc:"probability of simulated unsuccessful request" default:"0.5" run:"0:1"`
+	P float64 `flag:"p" desc:"probability of simulated unsuccessful request" default:"0.5" dst:"0:1"`
 }
 
-func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *ConfigDST) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *ConfigDST) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *ConfigDST) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

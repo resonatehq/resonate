@@ -20,6 +20,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
@@ -308,23 +309,19 @@ const (
 type Config struct {
 	Size      int               `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int               `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Workers   int               `flag:"workers" desc:"number of workers" default:"1" run:"1"`
+	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
 	Host      string            `flag:"host" desc:"postgres host" default:"localhost"`
 	Port      string            `flag:"port" desc:"postgres port" default:"5432"`
 	Username  string            `flag:"username" desc:"postgres username"`
 	Password  string            `flag:"password" desc:"postgres password"`
-	Database  string            `flag:"database" desc:"postgres database" default:"resonate" run:"resonate_dst"`
-	Query     map[string]string `flag:"query" desc:"postgres query options" run:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
+	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
 	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
-	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" run:"true"`
+	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

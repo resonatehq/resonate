@@ -61,26 +61,23 @@ func MapToBytes() mapstructure.DecodeHookFunc {
 }
 
 // Bind configuration struct fields to cobra flags and viper config
-func Bind(cfg any, cmd *cobra.Command, vip *viper.Viper, prefixes ...string) {
-	bind(cfg, cmd, cmd.Flags(), vip, prefixes...)
-}
-
-func BindPersistent(cfg any, cmd *cobra.Command, vip *viper.Viper, prefixes ...string) {
-	bind(cfg, cmd, cmd.PersistentFlags(), vip, prefixes...)
-}
-
-func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, prefixes ...string) {
+func Bind(cfg any, cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, prefixes ...string) {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
-	fPrefix := ""
+	name := ""
 	if len(prefixes) > 0 {
-		fPrefix = prefixes[0]
+		name = prefixes[0]
+	}
+
+	fPrefix := ""
+	if len(prefixes) > 1 {
+		fPrefix = prefixes[1]
 	}
 
 	kPrefix := ""
-	if len(prefixes) > 1 {
-		kPrefix = prefixes[1]
+	if len(prefixes) > 2 {
+		kPrefix = prefixes[2]
 	}
 
 	for i := range v.NumField() {
@@ -89,7 +86,7 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 		desc := field.Tag.Get("desc")
 
 		var value string
-		if v := field.Tag.Get(cmd.Name()); v != "" {
+		if v := field.Tag.Get(name); v != "" {
 			value = v
 		} else {
 			value = field.Tag.Get("default")
@@ -113,22 +110,22 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 
 		switch field.Type.Kind() {
 		case reflect.String:
-			flags.String(n, value, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
+			flg.String(n, value, desc)
+			_ = vip.BindPFlag(k, flg.Lookup(n))
 		case reflect.Bool:
-			flags.Bool(n, value == "true", desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
+			flg.Bool(n, value == "true", desc)
+			_ = vip.BindPFlag(k, flg.Lookup(n))
 		case reflect.Int:
 			if strings.Contains(value, ":") {
 				flag := NewRangeIntFlag(0, 0)
 				_ = flag.Set(value)
 
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
+				flg.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flg.Lookup(n))
 			} else {
 				v, _ := strconv.Atoi(value)
-				flags.Int(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
+				flg.Int(n, v, desc)
+				_ = vip.BindPFlag(k, flg.Lookup(n))
 			}
 		case reflect.Int64:
 			if field.Type == reflect.TypeOf(time.Duration(0)) {
@@ -136,24 +133,24 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 					flag := NewRangeDurationFlag(0, 0)
 					_ = flag.Set(value)
 
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
+					flg.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flg.Lookup(n))
 				} else {
 					v, _ := time.ParseDuration(value)
-					flags.Duration(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
+					flg.Duration(n, v, desc)
+					_ = vip.BindPFlag(k, flg.Lookup(n))
 				}
 			} else {
 				if strings.Contains(value, ":") {
 					flag := NewRangeInt64Flag(0, 0)
 					_ = flag.Set(value)
 
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
+					flg.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flg.Lookup(n))
 				} else {
 					v, _ := strconv.ParseInt(value, 10, 64)
-					flags.Int64(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
+					flg.Int64(n, v, desc)
+					_ = vip.BindPFlag(k, flg.Lookup(n))
 				}
 			}
 		case reflect.Float64:
@@ -161,12 +158,12 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 				flag := NewRangeFloat64Flag(0, 0)
 				_ = flag.Set(value)
 
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
+				flg.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flg.Lookup(n))
 			} else {
 				v, _ := strconv.ParseFloat(value, 64)
-				flags.Float64(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
+				flg.Float64(n, v, desc)
+				_ = vip.BindPFlag(k, flg.Lookup(n))
 			}
 		case reflect.Slice:
 			// TODO: support additional slice types
@@ -180,8 +177,8 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 			} else {
 				v = []string{value}
 			}
-			flags.StringArray(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
+			flg.StringArray(n, v, desc)
+			_ = vip.BindPFlag(k, flg.Lookup(n))
 		case reflect.Map:
 			// TODO: support additional map types
 			if field.Type != reflect.TypeOf(map[string]string{}) {
@@ -195,10 +192,10 @@ func bind(cfg any, cmd *cobra.Command, flags *pflag.FlagSet, vip *viper.Viper, p
 			if err := json.Unmarshal([]byte(value), &v); err != nil {
 				panic("invalid json")
 			}
-			flags.StringToString(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
+			flg.StringToString(n, v, desc)
+			_ = vip.BindPFlag(k, flg.Lookup(n))
 		case reflect.Struct:
-			bind(v.Field(i).Addr().Interface(), cmd, flags, vip, n, k)
+			Bind(v.Field(i).Addr().Interface(), cmd, flg, vip, name, n, k)
 		default:
 			panic(fmt.Sprintf("unsupported type %s", field.Type.Kind()))
 		}

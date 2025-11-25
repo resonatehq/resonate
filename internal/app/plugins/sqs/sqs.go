@@ -14,6 +14,7 @@ import (
 	awstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
@@ -30,12 +31,8 @@ type Config struct {
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"0"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

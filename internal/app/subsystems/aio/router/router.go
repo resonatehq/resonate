@@ -18,12 +18,13 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/receiver"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 type Config struct {
 	Size    int            `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers int            `flag:"workers" desc:"number of workers" default:"1" run:"1"`
+	Workers int            `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
 	Sources []SourceConfig `flag:"sources" desc:"source config"`
 }
 
@@ -33,12 +34,8 @@ type SourceConfig struct {
 	Data json.RawMessage
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
-}
-
-func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
-	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
 }
 
 func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {

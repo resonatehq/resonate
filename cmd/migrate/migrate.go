@@ -87,7 +87,7 @@ func NewCmd(cfg *config.Config) *cobra.Command {
 		cmd.PersistentFlags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
 		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.PersistentFlags().Lookup(enabled))
 
-		plugin.BindPersistent(cmd, vip, plugin.Prefix(), plugin.Key())
+		plugin.Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
 	}
 
 	// add subcommands

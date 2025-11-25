@@ -20,13 +20,13 @@ import (
 
 type Config struct {
 	Url                 string        `flag:"url" desc:"resonate server url"`
-	CoroutineMaxSize    int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" run:"1:1000"`
-	SubmissionBatchSize int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" run:"1:1000"`
-	CompletionBatchSize int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" run:"1:1000"`
-	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" run:"1:100"`
-	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" run:"1:100"`
-	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" run:"1:100"`
-	SignalTimeout       time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" run:"1s:10s"`
+	CoroutineMaxSize    int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" dst:"1:1000"`
+	SubmissionBatchSize int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" dst:"1:1000"`
+	CompletionBatchSize int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" dst:"1:1000"`
+	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
+	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
+	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
+	SignalTimeout       time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" dst:"1s:10s"`
 }
 
 func (c *Config) String() string {
