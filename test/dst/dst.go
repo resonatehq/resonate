@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anishathalye/porcupine"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -210,7 +211,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
-						Ttl:       RangeInt63n(r, 1000, 5000),
+						Ttl:       cmdUtil.RangeInt63n(r, 1000, 5000),
 					},
 				})
 			case *promise.Promise:

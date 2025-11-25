@@ -1,6 +1,7 @@
 package dev
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -11,10 +12,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-func NewCmd() *cobra.Command {
+func NewCmd(cfg *config.Config) *cobra.Command {
 	var (
-		v      = viper.New()
-		config = &config.Config{}
+		vip = viper.New()
 	)
 
 	cmd := &cobra.Command{
@@ -23,20 +23,28 @@ func NewCmd() *cobra.Command {
 		Long:  "Start Resonate server with development-friendly defaults (in-memory SQLite store).\n\nThis command is an alias for: resonate serve --aio-store-sqlite-path ':memory:' --aio-store-postgres-query 'sslmode=disable'\n",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if file, _ := cmd.Flags().GetString("config"); file != "" {
-				v.SetConfigFile(file)
+				vip.SetConfigFile(file)
 			} else {
-				v.SetConfigName("resonate-dev")
-				v.AddConfigPath(".")
-				v.AddConfigPath("$HOME")
+				vip.SetConfigName("resonate-dev")
+				vip.AddConfigPath(".")
+				vip.AddConfigPath("$HOME")
 			}
 
-			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-			v.AutomaticEnv()
+			vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			vip.AutomaticEnv()
 
-			if err := v.ReadInConfig(); err != nil {
+			if err := vip.ReadInConfig(); err != nil {
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return err
 				}
+			}
+
+			// flipy flip
+			sFlag := cmd.PersistentFlags().Lookup("aio-store-sqlite-enable")
+			pFlag := cmd.PersistentFlags().Lookup("aio-store-postgres-enable")
+			if sFlag != nil && pFlag != nil && sFlag.Value.String() == "true" && pFlag.Value.String() == "true" {
+				// postgres takes precedence
+				_ = sFlag.Value.Set("false")
 			}
 
 			return nil
@@ -48,11 +56,23 @@ func NewCmd() *cobra.Command {
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+			// decode config
+			if err := vip.Unmarshal(&cfg, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
-			return serve.Serve(config)
+			// decode plugins
+			for _, plugin := range cfg.Plugins() {
+				value, ok := util.Extract(vip.AllSettings(), plugin.Key())
+				if !ok {
+					panic("plugin config not found")
+				}
+				if err := plugin.Decode(value, hooks); err != nil {
+					return err
+				}
+			}
+
+			return serve.Serve(cfg)
 		},
 	}
 
@@ -60,8 +80,17 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate-dev.yaml)")
 
 	// bind config
-	_ = config.Bind(cmd, v, "dev")
-	cmd.Flags().SortFlags = false
+	util.Bind(cfg, cmd, vip)
 
+	// bind plugins
+	for _, plugin := range cfg.Plugins() {
+		enabled := fmt.Sprintf("%s-enabled", plugin.Prefix())
+		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
+		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
+
+		plugin.Bind(cmd, vip, plugin.Prefix(), plugin.Key())
+	}
+
+	cmd.Flags().SortFlags = false
 	return cmd
 }

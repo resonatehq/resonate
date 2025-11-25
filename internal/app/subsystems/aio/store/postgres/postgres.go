@@ -6,18 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand" // nosemgrep
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -303,15 +308,49 @@ const (
 type Config struct {
 	Size      int               `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int               `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
+	Workers   int               `flag:"workers" desc:"number of workers" default:"1" run:"1"`
 	Host      string            `flag:"host" desc:"postgres host" default:"localhost"`
 	Port      string            `flag:"port" desc:"postgres port" default:"5432"`
 	Username  string            `flag:"username" desc:"postgres username"`
 	Password  string            `flag:"password" desc:"postgres password"`
-	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
-	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
+	Database  string            `flag:"database" desc:"postgres database" default:"resonate" run:"resonate_dst"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" run:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
 	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
-	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
+	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" run:"true"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return New(aio, metrics, c)
+}
+
+func (c *Config) NewDST(aio aio.AIO, metrics *metrics.Metrics, _ *rand.Rand, _ chan any) (aio.SubsystemDST, error) {
+	return New(aio, metrics, c)
 }
 
 // Subsystem
@@ -321,6 +360,10 @@ type PostgresStore struct {
 	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db      *sql.DB
 	workers []*PostgresStoreWorker
+}
+
+func (s *PostgresStore) DB() *sql.DB {
+	return s.db
 }
 
 type ConnConfig struct {

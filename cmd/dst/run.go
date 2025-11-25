@@ -17,6 +17,10 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -28,8 +32,8 @@ import (
 
 func RunDSTCmd() *cobra.Command {
 	var (
-		v      = viper.New()
-		config = &config.ConfigDST{}
+		vip = viper.New()
+		cfg = &config.Config{}
 
 		seed              int64
 		ticks             int64
@@ -53,20 +57,28 @@ func RunDSTCmd() *cobra.Command {
 		Short: "Run deterministic simulation test",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if file, _ := cmd.Flags().GetString("config"); file != "" {
-				v.SetConfigFile(file)
+				vip.SetConfigFile(file)
 			} else {
-				v.SetConfigName("resonate-dst")
-				v.AddConfigPath(".")
-				v.AddConfigPath("$HOME")
+				vip.SetConfigName("resonate-dst")
+				vip.AddConfigPath(".")
+				vip.AddConfigPath("$HOME")
 			}
 
-			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-			v.AutomaticEnv()
+			vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			vip.AutomaticEnv()
 
-			if err := v.ReadInConfig(); err != nil {
+			if err := vip.ReadInConfig(); err != nil {
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return err
 				}
+			}
+
+			// flipy flip
+			sFlag := cmd.PersistentFlags().Lookup("aio-store-sqlite-enable")
+			pFlag := cmd.PersistentFlags().Lookup("aio-store-postgres-enable")
+			if sFlag != nil && pFlag != nil && sFlag.Value.String() == "true" && pFlag.Value.String() == "true" {
+				// postgres takes precedence
+				_ = sFlag.Value.Set("false")
 			}
 
 			return nil
@@ -81,12 +93,24 @@ func RunDSTCmd() *cobra.Command {
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+			// decode config
+			if err := vip.Unmarshal(&cfg, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
+			// decode plugins
+			for _, plugin := range cfg.Plugins() {
+				value, ok := util.Extract(vip.AllSettings(), plugin.Key())
+				if !ok {
+					panic("plugin config not found")
+				}
+				if err := plugin.Decode(value, hooks); err != nil {
+					return err
+				}
+			}
+
 			// logger
-			logLevel, err := log.ParseLevel(config.LogLevel)
+			logLevel, err := log.ParseLevel(cfg.LogLevel)
 			if err != nil {
 				slog.Error("failed to parse log level", "error", err)
 				return err
@@ -136,25 +160,18 @@ func RunDSTCmd() *cobra.Command {
 			backchannel := make(chan interface{}, backchannelSize.Resolve(r))
 
 			// api/aio
-			api := api.New(config.API.Size, metrics)
+			api := api.New(cfg.API.Size, metrics)
 			aio := aio.NewDST(r, p, metrics)
 
-			// api subsystems
-			apiSubsystems, err := config.APISubsystems(api, metrics, "")
-			if err != nil {
-				return err
-			}
-			for _, subsystem := range apiSubsystems {
-				api.AddSubsystem(subsystem)
-			}
-
 			// aio subsystems
-			aioSubsystems, err := config.AIOSubsystems(aio, metrics, r, backchannel)
-			if err != nil {
-				return err
-			}
-			for _, subsystem := range aioSubsystems {
-				aio.AddSubsystem(subsystem)
+			for _, subsystem := range cfg.AIO.Subsystems {
+				if subsystem.Enabled() {
+					subsystem, err := subsystem.NewDST(aio, metrics, r, backchannel)
+					if err != nil {
+						return err
+					}
+					aio.AddSubsystem(subsystem)
+				}
 			}
 
 			// start api/aio
@@ -166,7 +183,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			// instantiate system
-			system := system.New(api, aio, &config.System, metrics)
+			system := system.New(api, aio, &cfg.System, metrics)
 
 			// request coroutines
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
@@ -235,6 +252,12 @@ func RunDSTCmd() *cobra.Command {
 		},
 	}
 
+	// add dst subsystems
+	cfg.AIO.Subsystems.Add("sender", true, &sender.ConfigDST{})
+	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
+	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+
 	// bind config file flag
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate-dst.yaml)")
 
@@ -255,10 +278,18 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(backchannelSize, "backchannel-size", "backchannel size")
 
 	// bind config
-	_ = config.Bind(cmd, v)
+	util.Bind(cfg, cmd, vip)
+
+	// bind plugins
+	for _, plugin := range cfg.Plugins() {
+		enabled := fmt.Sprintf("%s-enabled", plugin.Prefix())
+		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
+		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
+
+		plugin.Bind(cmd, vip, plugin.Prefix(), plugin.Key())
+	}
+
 	cmd.SilenceUsage = true
-
 	cmd.Flags().SortFlags = false
-
 	return cmd
 }

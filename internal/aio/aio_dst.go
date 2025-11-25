@@ -44,6 +44,14 @@ func (a *aioDST) AddSubsystem(subsystem SubsystemDST) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
 
+func (a *aioDST) AddPlugin(plugin Plugin) {
+	panic("not implemented")
+}
+
+func (a *aioDST) Plugins() []Plugin {
+	panic("not implemented")
+}
+
 func (a *aioDST) Start() error {
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Start(nil); err != nil {

@@ -1,134 +1,60 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
 	"os"
-	"reflect"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/resonatehq/resonate/cmd/util"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
-	"github.com/resonatehq/resonate/internal/app/plugins/poll"
-	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type Config config[API, AIO]
-type ConfigDST config[APIDST, AIODST]
+// Config
 
-type t_api interface {
-	API | APIDST
-}
-
-type t_aio interface {
-	AIO | AIODST
-}
-
-type config[T t_api, U t_aio] struct {
+type Config struct {
 	System      system.Config `flag:"system"`
-	API         T             `flag:"api"`
-	AIO         U             `flag:"aio"`
+	API         API           `flag:"api"`
+	AIO         AIO           `flag:"aio"`
 	MetricsAddr string        `flag:"metrics-addr" desc:"prometheus metrics server address" default:":9090"`
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, tag string) error {
-	return Bind(cmd, c, vip, tag, "", "")
-}
+func (c *Config) Plugins() []Plugin {
+	plugins := []Plugin{}
+	plugins = append(plugins, c.API.Subsystems.AsPlugins()...)
+	plugins = append(plugins, c.AIO.Subsystems.AsPlugins()...)
+	plugins = append(plugins, c.AIO.Plugins.AsPlugins()...)
 
-func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
-	return Bind(cmd, c, vip, "dst", "", "")
+	return plugins
 }
 
 type API struct {
-	Size          int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	PublicKeyPath string        `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
-	Subsystems    APISubsystems `flag:"-"`
-}
-
-type APIDST struct {
-	Size       int              `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems APIDSTSubsystems `flag:"-"`
+	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" run:"1:1000"`
+	Auth       Auth          `flag:"auth"`
+	Subsystems apiSubsystems `mapstructure:"-"`
 }
 
 type AIO struct {
-	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems AIOSubsystems `flag:"-"`
+	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" run:"1:1000"`
+	Subsystems aioSubsystems `mapstructure:"-"`
+	Plugins    aioPlugins    `mapstructure:"-"`
 }
 
-type AIODST struct {
-	Size       int              `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems AIODSTSubsystems `flag:"-"`
+type Auth struct {
+	PublicKeyPath string `flag:"public-key" desc:"public key path used for jwt based authentication"`
 }
 
-type APISubsystems struct {
-	Http EnabledSubsystem[http.Config] `flag:"http"`
-	Grpc EnabledSubsystem[grpc.Config] `flag:"grpc"`
-}
-
-type AIOSubsystems struct {
-	Echo          DisabledSubsystem[echo.Config]     `flag:"echo"`
-	Router        EnabledSubsystem[router.Config]    `flag:"router"`
-	Sender        EnabledSubsystem[sender.Config]    `flag:"sender"`
-	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
-	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
-}
-
-type EnabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true"`
-	Config  T    `flag:"-"`
-}
-
-type DisabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false"`
-	Config  T    `flag:"-"`
-}
-
-func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
-	subsystems := []api.Subsystem{}
-	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	// Disable gRPC if basic auth is enabled for HTTP
-	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
-	if grpcEnabled {
-		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	return subsystems, nil
-}
-
-func (c *Config) APIMiddleware() ([]api.Middleware, error) {
+func (a *API) Middleware() ([]api.Middleware, error) {
 	middleware := []api.Middleware{}
 
-	if c.API.PublicKeyPath != "" {
-		pem, err := os.ReadFile(c.API.PublicKeyPath)
+	if a.Auth.PublicKeyPath != "" {
+		pem, err := os.ReadFile(a.Auth.PublicKeyPath)
 		if err != nil {
 			return nil, err
 		}
@@ -140,303 +66,184 @@ func (c *Config) APIMiddleware() ([]api.Middleware, error) {
 	}
 
 	return middleware, nil
-
 }
 
-func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {
-	subsystems := []aio.Subsystem{}
-	if c.AIO.Subsystems.Echo.Enabled {
-		subsystem, err := echo.New(a, metrics, &c.AIO.Subsystems.Echo.Config)
-		if err != nil {
-			return nil, err
-		}
+// Plugins
 
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
-		if err != nil {
-			return nil, err
-		}
+type apiSubsystems []*apiSubsystem
+type aioSubsystems []*aioSubsystem
+type aioPlugins []*aioPlugin
 
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Sender.Enabled {
-		subsystem, err := sender.New(a, metrics, &c.AIO.Subsystems.Sender.Config, plugins)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	subsystem, err := c.store(a, metrics)
-	if err != nil {
-		return nil, err
-	}
-
-	subsystems = append(subsystems, subsystem)
-	return subsystems, nil
+type apiSubsystem struct {
+	APISubsystem
+	prefix  string
+	key     string
+	name    string
+	enabled bool
 }
 
-func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, string, error) {
-	plugins := []aio.Plugin{}
-	var pollAddr string
-
-	if c.AIO.Subsystems.Sender.Config.Plugins.Poll.Enabled {
-		plugin, err := poll.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Poll.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		pollAddr = plugin.Addr() // grab the address to pass to the API
-		plugins = append(plugins, plugin)
-	}
-	if c.AIO.Subsystems.Sender.Config.Plugins.Http.Enabled {
-		plugin, err := httpPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Http.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-	if c.AIO.Subsystems.Sender.Config.Plugins.SQS.Enabled {
-		plugin, err := sqs.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.SQS.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-
-	return plugins, pollAddr, nil
+func (a *apiSubsystem) Prefix() string {
+	return a.prefix
 }
 
-func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
-	if c.AIO.Subsystems.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
-	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
-	}
-
-	return nil, fmt.Errorf("no store enabled")
+func (a *apiSubsystem) Key() string {
+	return a.key
 }
 
-type APIDSTSubsystems struct {
-	Http DisabledSubsystem[http.Config] `flag:"http"`
-	Grpc DisabledSubsystem[grpc.Config] `flag:"grpc"`
+func (a *apiSubsystem) Name() string {
+	return a.name
 }
 
-type AIODSTSubsystems struct {
-	Router        EnabledSubsystem[router.Config]    `flag:"router"`
-	Sender        EnabledSubsystem[sender.ConfigDST] `flag:"sender"`
-	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
-	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
+func (a *apiSubsystem) Enabled() bool {
+	return a.enabled
 }
 
-func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
-	subsystems := []api.Subsystem{}
-	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	// Disable gRPC if basic auth is enabled for HTTP
-	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
-	if grpcEnabled {
-		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	return subsystems, nil
+func (a *apiSubsystem) EnabledP() *bool {
+	return &a.enabled
 }
 
-func (c *ConfigDST) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
-	subsystems := []aio.SubsystemDST{}
-	if c.AIO.Subsystems.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Sender.Enabled {
-		subsystem, err := sender.NewDST(r, backchannel, &c.AIO.Subsystems.Sender.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	subsystem, err := c.store(a, metrics)
-	if err != nil {
-		return nil, err
-	}
-
-	subsystems = append(subsystems, subsystem)
-	return subsystems, nil
+type aioSubsystem struct {
+	AIOSubsystem
+	prefix  string
+	key     string
+	name    string
+	enabled bool
 }
 
-func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST, error) {
-	if c.AIO.Subsystems.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
-	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
-	}
-
-	return nil, fmt.Errorf("no store enabled")
+func (a *aioSubsystem) Prefix() string {
+	return a.prefix
 }
 
-// Helper functions
+func (a *aioSubsystem) Key() string {
+	return a.key
+}
 
-// Bind binds configuration struct fields to cobra flags and viper config
-func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
-	v := reflect.ValueOf(cfg).Elem()
-	t := v.Type()
+func (a *aioSubsystem) Name() string {
+	return a.name
+}
 
-	for i := range v.NumField() {
-		field := t.Field(i)
-		flag := field.Tag.Get("flag")
-		desc := field.Tag.Get("desc")
-		persistent := field.Tag.Get("persistent")
+func (a *aioSubsystem) Enabled() bool {
+	return a.enabled
+}
 
-		flags := cmd.Flags()
-		if persistent == "true" {
-			flags = cmd.PersistentFlags()
-		}
+func (a *aioSubsystem) EnabledP() *bool {
+	return &a.enabled
+}
 
-		var value string
-		if v := field.Tag.Get(tag); v != "" {
-			value = v
-		} else {
-			value = field.Tag.Get("default")
-		}
+type aioPlugin struct {
+	AIOPlugin
+	prefix  string
+	key     string
+	name    string
+	enabled bool
+}
 
-		var n string
-		if fPrefix == "" {
-			n = flag
-		} else if flag == "-" {
-			n = fPrefix
-		} else {
-			n = fmt.Sprintf("%s-%s", fPrefix, flag)
-		}
+func (a *aioPlugin) Prefix() string {
+	return a.prefix
+}
 
-		var k string
-		if kPrefix == "" {
-			k = field.Name
-		} else {
-			k = fmt.Sprintf("%s.%s", kPrefix, field.Name)
-		}
+func (a *aioPlugin) Key() string {
+	return a.key
+}
 
-		switch field.Type.Kind() {
-		case reflect.String:
-			flags.String(n, value, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Bool:
-			flags.Bool(n, value == "true", desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Int:
-			if strings.Contains(value, ":") {
-				flag := util.NewRangeIntFlag(0, 0)
-				if err := flag.Set(value); err != nil {
-					return err
-				}
+func (a *aioPlugin) Name() string {
+	return a.name
+}
 
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			} else {
-				v, _ := strconv.Atoi(value)
-				flags.Int(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			}
-		case reflect.Int64:
-			if field.Type == reflect.TypeOf(time.Duration(0)) {
-				if strings.Contains(value, ":") {
-					flag := util.NewRangeDurationFlag(0, 0)
-					if err := flag.Set(value); err != nil {
-						return err
-					}
+func (a *aioPlugin) Enabled() bool {
+	return a.enabled
+}
 
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				} else {
-					v, _ := time.ParseDuration(value)
-					flags.Duration(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				}
-			} else {
-				if strings.Contains(value, ":") {
-					flag := util.NewRangeInt64Flag(0, 0)
-					if err := flag.Set(value); err != nil {
-						return err
-					}
+func (a *aioPlugin) EnabledP() *bool {
+	return &a.enabled
+}
 
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				} else {
-					v, _ := strconv.ParseInt(value, 10, 64)
-					flags.Int64(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				}
-			}
-		case reflect.Float64:
-			if strings.Contains(value, ":") {
-				flag := util.NewRangeFloat64Flag(0, 0)
-				if err := flag.Set(value); err != nil {
-					return err
-				}
+type Plugin interface {
+	Prefix() string
+	Key() string
+	Name() string
+	Enabled() bool
+	EnabledP() *bool
+	Bind(*cobra.Command, *viper.Viper, string, string)
+	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+}
 
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			} else {
-				v, _ := strconv.ParseFloat(value, 64)
-				flags.Float64(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			}
-		case reflect.Slice:
-			// TODO: support additional slice types via flags
-			if field.Type != reflect.TypeOf([]string{}) {
-				continue
-			}
+type APISubsystem interface {
+	Bind(*cobra.Command, *viper.Viper, string, string)
+	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(api.API, *metrics.Metrics) (api.Subsystem, error)
+}
 
-			var v []string
-			if value == "" {
-				v = []string{}
-			} else {
-				v = []string{value}
-			}
-			flags.StringArray(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Map:
-			if field.Type != reflect.TypeOf(map[string]string{}) {
-				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
-			}
-			if value == "" {
-				value = "{}"
-			}
-			var v map[string]string
-			if err := json.Unmarshal([]byte(value), &v); err != nil {
-				return err
-			}
-			flags.StringToString(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Struct:
-			if err := Bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
-				return err
-			}
-		default:
-			panic(fmt.Sprintf("unsupported type %s", field.Type.Kind()))
-		}
+type AIOSubsystem interface {
+	Bind(*cobra.Command, *viper.Viper, string, string)
+	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(aio.AIO, *metrics.Metrics) (aio.Subsystem, error)
+	NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan any) (aio.SubsystemDST, error)
+}
+
+type AIOPlugin interface {
+	Bind(*cobra.Command, *viper.Viper, string, string)
+	BindPersistent(*cobra.Command, *viper.Viper, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(aio.AIO, *metrics.Metrics) (aio.Plugin, error)
+}
+
+func (a *apiSubsystems) Add(name string, enabled bool, subsystem APISubsystem) {
+	*a = append(*a, &apiSubsystem{
+		APISubsystem: subsystem,
+		prefix:       fmt.Sprintf("api-%s", name),
+		key:          fmt.Sprintf("api.subsystems.%s.config", strings.ReplaceAll(name, "-", ".")),
+		name:         name,
+		enabled:      enabled,
+	})
+}
+
+func (a *apiSubsystems) AsPlugins() []Plugin {
+	result := make([]Plugin, len(*a))
+	for i, plugin := range *a {
+		result[i] = plugin
 	}
 
-	return nil
+	return result
+}
+
+func (a *aioSubsystems) Add(name string, enabled bool, subsystem AIOSubsystem) {
+	*a = append(*a, &aioSubsystem{
+		AIOSubsystem: subsystem,
+		prefix:       fmt.Sprintf("aio-%s", name),
+		key:          fmt.Sprintf("aio.subsystems.%s.config", strings.ReplaceAll(name, "-", ".")),
+		name:         name,
+		enabled:      enabled,
+	})
+}
+
+func (a *aioSubsystems) AsPlugins() []Plugin {
+	result := make([]Plugin, len(*a))
+	for i, plugin := range *a {
+		result[i] = plugin
+	}
+
+	return result
+}
+
+func (a *aioPlugins) Add(name string, enabled bool, plugin AIOPlugin) {
+	*a = append(*a, &aioPlugin{
+		AIOPlugin: plugin,
+		prefix:    fmt.Sprintf("aio-sender-plugin-%s", name),
+		key:       fmt.Sprintf("aio.subsystems.sender.plugins.%s.config", strings.ReplaceAll(name, "-", ".")),
+		name:      name,
+		enabled:   enabled,
+	})
+}
+
+func (a *aioPlugins) AsPlugins() []Plugin {
+	result := make([]Plugin, len(*a))
+	for i, plugin := range *a {
+		result[i] = plugin
+	}
+
+	return result
 }

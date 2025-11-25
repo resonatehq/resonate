@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/resonatehq/resonate/test/dst"
 )
 
 type _range interface {
@@ -30,7 +29,7 @@ func NewRangeIntFlag(min int, max int) *rangeFlag[int] {
 		max:     max,
 		format:  func(i int) string { return fmt.Sprintf("%d", i) },
 		parse:   func(s string) (int, error) { return strconv.Atoi(s) },
-		resolve: func(f *rangeFlag[int], r *rand.Rand) int { return dst.RangeIntn(r, f.min, f.max) },
+		resolve: func(f *rangeFlag[int], r *rand.Rand) int { return RangeIntn(r, f.min, f.max) },
 	}
 }
 
@@ -40,7 +39,7 @@ func NewRangeInt64Flag(min int64, max int64) *rangeFlag[int64] {
 		max:     max,
 		format:  func(i int64) string { return fmt.Sprintf("%d", i) },
 		parse:   func(s string) (int64, error) { return strconv.ParseInt(s, 10, 64) },
-		resolve: func(f *rangeFlag[int64], r *rand.Rand) int64 { return dst.RangeInt63n(r, f.min, f.max) },
+		resolve: func(f *rangeFlag[int64], r *rand.Rand) int64 { return RangeInt63n(r, f.min, f.max) },
 	}
 }
 
@@ -50,7 +49,7 @@ func NewRangeFloat64Flag(min float64, max float64) *rangeFlag[float64] {
 		max:     max,
 		format:  func(f float64) string { return fmt.Sprintf("%.2f", f) },
 		parse:   func(s string) (float64, error) { return strconv.ParseFloat(s, 64) },
-		resolve: func(f *rangeFlag[float64], r *rand.Rand) float64 { return dst.RangeFloat63n(r, f.min, f.max) },
+		resolve: func(f *rangeFlag[float64], r *rand.Rand) float64 { return RangeFloat63n(r, f.min, f.max) },
 	}
 }
 
@@ -67,7 +66,7 @@ func NewRangeDurationFlag(min time.Duration, max time.Duration) *rangeFlag[time.
 			return d, nil
 		},
 		resolve: func(f *rangeFlag[time.Duration], r *rand.Rand) time.Duration {
-			return time.Duration(dst.RangeInt63n(r, int64(f.min), int64(f.max)))
+			return time.Duration(RangeInt63n(r, int64(f.min), int64(f.max)))
 		},
 	}
 }
@@ -123,6 +122,30 @@ func (f *rangeFlag[T]) Resolve(r *rand.Rand) T {
 	}
 
 	return f.resolve(f, r)
+}
+
+func RangeIntn(r *rand.Rand, min int, max int) int {
+	return r.Intn(max-min) + min
+}
+
+func RangeInt63n(r *rand.Rand, min int64, max int64) int64 {
+	return r.Int63n(max-min) + min
+}
+
+func RangeFloat63n(r *rand.Rand, min float64, max float64) float64 {
+	return r.Float64()*(max-min) + min
+}
+
+func RangeMap[K comparable, V any](r *rand.Rand, m map[K]V) K {
+	i := r.Intn(len(m))
+	for k := range m {
+		if i == 0 {
+			return k
+		}
+		i--
+	}
+	var zero K
+	return zero
 }
 
 // Helper functions

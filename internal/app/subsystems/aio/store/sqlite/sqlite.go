@@ -6,17 +6,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand" // nosemgrep
 	"os"
 	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -29,7 +34,7 @@ import (
 const (
 	// Schema is now managed by migrations (see internal/migrationfiles/migrations/sqlite/)
 	// We create the migrations table to handle
-	CREATE_TABLE_STATEMENT = `		
+	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER PRIMARY KEY
 	);`
@@ -297,9 +302,43 @@ const (
 type Config struct {
 	Size      int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:" dev:":memory:"`
+	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" run:":memory:" dev:":memory:"`
 	TxTimeout time.Duration `flag:"tx-timeout" desc:"sqlite transaction timeout" default:"10s"`
-	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" dst:"true"`
+	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" run:"true"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return New(aio, metrics, c)
+}
+
+func (c *Config) NewDST(aio aio.AIO, metrics *metrics.Metrics, _ *rand.Rand, _ chan any) (aio.SubsystemDST, error) {
+	return New(aio, metrics, c)
 }
 
 // Subsystem
@@ -309,6 +348,10 @@ type SqliteStore struct {
 	sq     chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db     *sql.DB
 	worker *SqliteStoreWorker
+}
+
+func (s *SqliteStore) DB() *sql.DB {
+	return s.db
 }
 
 func NewConn(path string) (*sql.DB, error) {

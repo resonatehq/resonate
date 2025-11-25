@@ -14,11 +14,15 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -35,6 +39,36 @@ type Config struct {
 
 type Cors struct {
 	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(a i_api.API, metrics *metrics.Metrics) (i_api.Subsystem, error) {
+	return New(a, metrics, c, "")
 }
 
 type Http struct {

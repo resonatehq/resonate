@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-viper/mapstructure/v2"
-	"github.com/resonatehq/resonate/cmd/util"
+	"github.com/resonatehq/resonate/cmd/config"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,21 +27,6 @@ import (
 // 3. Override tests verify that flags take precedence over config files
 //    - Uses bind + parse flags + unmarshal approach
 //    - This simulates: ./resonate migrate --config=file.yaml --flag=override
-
-// unmarshalConfig unmarshals viper config into MigrateConfig using the same hooks as the actual command
-func unmarshalConfig(v *viper.Viper) (*MigrateConfig, error) {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	config := &MigrateConfig{}
-	if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-		return nil, err
-	}
-	return config, nil
-}
 
 func TestMigrateCmd_FlagBinding(t *testing.T) {
 	tests := []struct {
@@ -76,7 +61,7 @@ func TestMigrateCmd_FlagBinding(t *testing.T) {
 				"--aio-store-postgres-port", "5433",
 				"--aio-store-postgres-database", "testdb",
 			},
-			wantSqliteEnabled:   true,
+			wantSqliteEnabled:   false,
 			wantPostgresEnabled: true,
 			wantPostgresHost:    "pghost",
 			wantPostgresPort:    "5433",
@@ -95,9 +80,15 @@ func TestMigrateCmd_FlagBinding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCmd()
+			cfg := &config.Config{}
+			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+			cmd := NewCmd(cfg)
 
 			err := cmd.ParseFlags(tt.args)
+			require.NoError(t, err)
+
+			err = cmd.PersistentPreRunE(cmd, []string{})
 			require.NoError(t, err)
 
 			sqliteEnabled, err := cmd.PersistentFlags().GetBool("aio-store-sqlite-enable")
@@ -152,10 +143,11 @@ func TestMigrateCmd_ConfigFile(t *testing.T) {
 			configContent: `
 aio:
   subsystems:
-    storeSqlite:
-      enabled: true
-      config:
-        path: "/tmp/test.db"
+    store:
+      sqlite:
+        enabled: true
+        config:
+          path: "/tmp/test.db"
 `,
 			wantSqliteEnabled:   true,
 			wantPostgresEnabled: false,
@@ -166,18 +158,19 @@ aio:
 			configContent: `
 aio:
   subsystems:
-    storePostgress:
-      enabled: true
-      config:
-        host: "testhost"
-        port: "5432"
-        username: "testuser"
-        password: "testpass"
-        database: "testdb"
-        query:
-          sslmode: "disable"
-    storeSqlite:
-      enabled: false
+    store:
+      postgres:
+        enabled: true
+        config:
+          host: "testhost"
+          port: "5432"
+          username: "testuser"
+          password: "testpass"
+          database: "testdb"
+          query:
+            sslmode: "disable"
+      sqlite:
+        enabled: false
 `,
 			wantSqliteEnabled:    false,
 			wantPostgresEnabled:  true,
@@ -191,16 +184,17 @@ aio:
 			configContent: `
 aio:
   subsystems:
-    storePostgress:
-      enabled: true
-      config:
-        host: "pghost"
-        port: "5433"
-        database: "pgdb"
-    storeSqlite:
-      enabled: true
-      config:
-        path: "both.db"
+    store:
+      postgres:
+        enabled: true
+        config:
+          host: "pghost"
+          port: "5433"
+          database: "pgdb"
+      sqlite:
+        enabled: true
+        config:
+          path: "both.db"
 `,
 			wantSqliteEnabled:   true,
 			wantPostgresEnabled: true,
@@ -219,39 +213,41 @@ aio:
 			err := os.WriteFile(configFile, []byte(tt.configContent), 0644)
 			require.NoError(t, err)
 
-			// This test simulates loading a config file the same way PersistentPreRunE does
-			// We can't directly test the internal config struct from NewCmd(), so we replicate
-			// the config loading logic to verify it works correctly
-			v := viper.New()
-			v.SetConfigFile(configFile)
-			err = v.ReadInConfig()
+			cfg := &config.Config{}
+			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+
+			cmd := NewCmd(cfg)
+			err = cmd.PersistentFlags().Set("config", configFile)
 			require.NoError(t, err)
 
-			config, err := unmarshalConfig(v)
+			_, err = cmd.PersistentFlags().GetString("config")
 			require.NoError(t, err)
 
-			// Verify the configuration was loaded correctly
-			assert.Equal(t, tt.wantSqliteEnabled, config.AIO.Subsystems.StoreSqlite.Enabled, "sqlite enabled")
-			assert.Equal(t, tt.wantPostgresEnabled, config.AIO.Subsystems.StorePostgress.Enabled, "postgres enabled")
+			err = cmd.PersistentPreRunE(cmd, []string{})
+			require.NoError(t, err)
+
+			sqliteCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*sqlite.Config)
+			postgresCfg := cfg.AIO.Subsystems[1].AIOSubsystem.(*postgres.Config)
 
 			if tt.wantSqlitePath != "" {
-				assert.Equal(t, tt.wantSqlitePath, config.AIO.Subsystems.StoreSqlite.Config.Path, "sqlite path")
+				assert.Equal(t, tt.wantSqlitePath, sqliteCfg.Path, "sqlite path")
 			}
 
 			if tt.wantPostgresHost != "" {
-				assert.Equal(t, tt.wantPostgresHost, config.AIO.Subsystems.StorePostgress.Config.Host, "postgres host")
+				assert.Equal(t, tt.wantPostgresHost, postgresCfg.Host, "postgres host")
 			}
 
 			if tt.wantPostgresPort != "" {
-				assert.Equal(t, tt.wantPostgresPort, config.AIO.Subsystems.StorePostgress.Config.Port, "postgres port")
+				assert.Equal(t, tt.wantPostgresPort, postgresCfg.Port, "postgres port")
 			}
 
 			if tt.wantPostgresUsername != "" {
-				assert.Equal(t, tt.wantPostgresUsername, config.AIO.Subsystems.StorePostgress.Config.Username, "postgres username")
+				assert.Equal(t, tt.wantPostgresUsername, postgresCfg.Username, "postgres username")
 			}
 
 			if tt.wantPostgresDB != "" {
-				assert.Equal(t, tt.wantPostgresDB, config.AIO.Subsystems.StorePostgress.Config.Database, "postgres database")
+				assert.Equal(t, tt.wantPostgresDB, postgresCfg.Database, "postgres database")
 			}
 		})
 	}
@@ -282,7 +278,10 @@ func TestMigrateCmd_SubcommandFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := NewCmd()
+			cfg := &config.Config{}
+			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+			cmd := NewCmd(cfg)
 
 			// Find the subcommand
 			var subCmd *cobra.Command
@@ -316,42 +315,43 @@ func TestMigrateCmd_FlagsOverrideConfigFile(t *testing.T) {
 	configContent := `
 aio:
   subsystems:
-    storeSqlite:
-      enabled: true
-      config:
-        path: "config.db"
+    store:
+      sqlite:
+        enabled: true
+        config:
+          path: "config.db"
 `
 	err := os.WriteFile(configFile, []byte(configContent), 0644)
 	require.NoError(t, err)
 
-	// This test replicates how PersistentPreRunE works: load config, bind flags, parse args
-	// Then verify flags override config file values
-	v := viper.New()
-	v.SetConfigFile(configFile)
-	err = v.ReadInConfig()
-	require.NoError(t, err)
+	cfg := &config.Config{}
+	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 
-	config := &MigrateConfig{}
-	cmd := &cobra.Command{Use: "migrate"}
-
-	// Bind config to set up flags and viper bindings
-	err = config.Bind(cmd, v)
+	cmd := NewCmd(cfg)
+	err = cmd.PersistentFlags().Set("config", configFile)
 	require.NoError(t, err)
 
 	// Parse flag that should override config
 	err = cmd.ParseFlags([]string{"--aio-store-sqlite-path", "override.db"})
 	require.NoError(t, err)
 
-	// Unmarshal - viper will use flag value over config file value
-	config, err = unmarshalConfig(v)
+	_, err = cmd.PersistentFlags().GetString("config")
 	require.NoError(t, err)
 
+	err = cmd.PersistentPreRunE(cmd, []string{})
+	require.NoError(t, err)
+
+	sqliteCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*sqlite.Config)
+
 	// Verify that the flag overrode the config file value
-	assert.Equal(t, "override.db", config.AIO.Subsystems.StoreSqlite.Config.Path)
+	assert.Equal(t, "override.db", sqliteCfg.Path)
 }
 
 func TestMigrateCmd_DefaultValues(t *testing.T) {
-	cmd := NewCmd()
+	cfg := &config.Config{}
+	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+	cmd := NewCmd(cfg)
 
 	// Don't set any flags, just verify defaults
 	sqliteEnabled, err := cmd.PersistentFlags().GetBool("aio-store-sqlite-enable")
@@ -386,28 +386,36 @@ func TestMigrateCmd_PostgresQueryParams(t *testing.T) {
 	configContent := `
 aio:
   subsystems:
-    storePostgress:
-      enabled: true
-      config:
-        host: "localhost"
-        port: "5432"
-        database: "testdb"
-        query:
-          sslmode: "require"
-          connect_timeout: "10"
+    store:
+      postgres:
+        enabled: true
+        config:
+          host: "localhost"
+          port: "5432"
+          database: "testdb"
+          query:
+            sslmode: "require"
+            connect_timeout: "10"
 `
 	err := os.WriteFile(configFile, []byte(configContent), 0644)
 	require.NoError(t, err)
 
-	v := viper.New()
-	v.SetConfigFile(configFile)
-	err = v.ReadInConfig()
+	cfg := &config.Config{}
+	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+
+	cmd := NewCmd(cfg)
+	err = cmd.PersistentFlags().Set("config", configFile)
 	require.NoError(t, err)
 
-	config, err := unmarshalConfig(v)
+	_, err = cmd.PersistentFlags().GetString("config")
 	require.NoError(t, err)
+
+	err = cmd.PersistentPreRunE(cmd, []string{})
+	require.NoError(t, err)
+
+	postgresCfg := cfg.AIO.Subsystems[0].AIOSubsystem.(*postgres.Config)
 
 	// Verify query params
-	assert.Equal(t, "require", config.AIO.Subsystems.StorePostgress.Config.Query["sslmode"])
-	assert.Equal(t, "10", config.AIO.Subsystems.StorePostgress.Config.Query["connect_timeout"])
+	assert.Equal(t, "require", postgresCfg.Query["sslmode"])
+	assert.Equal(t, "10", postgresCfg.Query["connect_timeout"])
 }

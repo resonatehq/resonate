@@ -1,13 +1,9 @@
 package test
 
 import (
-	"reflect"
 	"testing"
 
-	"github.com/resonatehq/resonate/cmd/migrate"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 )
 
 func TestParseMigrationFilename(t *testing.T) {
@@ -245,78 +241,4 @@ func contains(s, substr string) bool {
 			}
 			return false
 		}())
-}
-
-func TestMigrationConfigAndServeConfigMatch(t *testing.T) {
-	// If this test fails it means that the config for `resonate migrate` and `resonate serve` have diverge and should
-	// be reconciled.
-	tests := []struct {
-		srcName    string
-		destName   string
-		srcConfig  any
-		destConfig any
-	}{
-		{
-			srcName:    "PostgresMigrateConfig",
-			destName:   "postgres.Config",
-			srcConfig:  &migrate.PostgresConfig{},
-			destConfig: &postgres.Config{},
-		},
-		{
-			srcName:    "SqliteMigrateConfig",
-			destName:   "sqlite.Config",
-			srcConfig:  &migrate.SqliteConfig{},
-			destConfig: &sqlite.Config{},
-		},
-	}
-	for _, tt := range tests {
-		checkConfigMatch(t, tt.srcConfig, tt.destConfig, tt.srcName, tt.destName)
-	}
-}
-
-func checkConfigMatch(t *testing.T, src, dst any, srcName, dstName string) {
-	srcVal := reflect.ValueOf(src).Elem()
-	srcType := srcVal.Type()
-	destVal := reflect.ValueOf(dst).Elem()
-	destType := destVal.Type()
-
-	// Skip the Enabled field as it's specific to migrate config
-	for i := 0; i < srcType.NumField(); i++ {
-		srcField := srcType.Field(i)
-		if srcField.Name == "Enabled" {
-			continue
-		}
-
-		// Find matching field in dst
-		dstField, found := destType.FieldByName(srcField.Name)
-		if !found {
-			t.Errorf("%s has field %s but %s does not", srcName, srcField.Name, dstName)
-			continue
-		}
-
-		// Check type matches
-		if srcField.Type != dstField.Type {
-			t.Errorf("%s.%s type %s does not match %s.%s type %s",
-				srcName, srcField.Name, srcField.Type,
-				dstName, dstField.Name, dstField.Type)
-		}
-
-		// Check default tag matches
-		srcDefault := srcField.Tag.Get("default")
-		dstDefault := dstField.Tag.Get("default")
-		if srcDefault != dstDefault {
-			t.Errorf("%s.%s default '%s' does not match %s.%s default '%s'",
-				srcName, srcField.Name, srcDefault,
-				dstName, dstField.Name, dstDefault)
-		}
-
-		// Check desc tag matches
-		srcDesc := srcField.Tag.Get("desc")
-		dstDesc := dstField.Tag.Get("desc")
-		if srcDesc != dstDesc {
-			t.Errorf("%s.%s desc '%s' does not match %s.%s desc '%s'",
-				srcName, srcField.Name, srcDesc,
-				dstName, dstField.Name, dstDesc)
-		}
-	}
 }

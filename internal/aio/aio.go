@@ -24,6 +24,8 @@ type AIO interface {
 	Signal(<-chan interface{}) <-chan interface{}
 	Flush(int64)
 
+	Plugins() []Plugin
+
 	// dispatch is required by gocoro
 	Dispatch(*t_aio.Submission, func(*t_aio.Completion, error))
 
@@ -38,6 +40,7 @@ type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	buffer     *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]Subsystem
+	plugins    []Plugin
 	errors     chan error
 	metrics    *metrics.Metrics
 }
@@ -63,9 +66,25 @@ func (a *aio) AddSubsystem(subsystem Subsystem) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
 
+func (a *aio) AddPlugin(plugin Plugin) {
+	a.plugins = append(a.plugins, plugin)
+}
+
+func (a *aio) Plugins() []Plugin {
+	return a.plugins
+}
+
 // Lifecycle functions
 
 func (a *aio) Start() error {
+	// start plugins
+	for _, plugin := range a.plugins {
+		if err := plugin.Start(a.errors); err != nil {
+			return err
+		}
+	}
+
+	// start subsystems
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Start(a.errors); err != nil {
 			return err
@@ -78,8 +97,16 @@ func (a *aio) Start() error {
 func (a *aio) Stop() error {
 	defer close(a.cq)
 
+	// stop subsystems
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
+			return err
+		}
+	}
+
+	// stop plugins
+	for _, plugin := range a.plugins {
+		if err := plugin.Stop(); err != nil {
 			return err
 		}
 	}

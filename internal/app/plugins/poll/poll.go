@@ -12,11 +12,15 @@ import (
 
 	"net/http"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -34,6 +38,36 @@ type Config struct {
 
 type Cors struct {
 	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Plugin, error) {
+	return New(aio, metrics, c)
 }
 
 type Poll struct {

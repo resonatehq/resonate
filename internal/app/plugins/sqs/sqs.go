@@ -12,7 +12,11 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -24,6 +28,36 @@ type Config struct {
 	Timeout     time.Duration `flag:"timeout" desc:"request timeout" default:"30s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"0"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) BindPersistent(cmd *cobra.Command, vip *viper.Viper, prefix string, keyPrefix string) {
+	cmdUtil.BindPersistent(c, cmd, vip, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Plugin, error) {
+	return New(aio, metrics, c)
 }
 
 type Client interface {
@@ -42,6 +76,36 @@ type Addr struct {
 type processor struct {
 	client  Client
 	timeout time.Duration
+}
+
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
+	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := sqs.NewFromConfig(awsConfig)
+	return NewWithClient(a, metrics, config, client)
+}
+
+func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
+	proc := &processor{
+		client:  client,
+		timeout: config.Timeout,
+	}
+
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
+	plugin := base.NewPlugin(a, "sqs", baseConfig, metrics, proc, nil)
+
+	return &SQS{
+		Plugin: plugin,
+	}, nil
 }
 
 func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
@@ -79,36 +143,6 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	}
 
 	return true, nil
-}
-
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
-	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
-	}
-
-	client := sqs.NewFromConfig(awsConfig)
-	return NewWithClient(a, metrics, config, client)
-}
-
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
-	proc := &processor{
-		client:  client,
-		timeout: config.Timeout,
-	}
-
-	baseConfig := &base.BaseConfig{
-		Size:        config.Size,
-		Workers:     config.Workers,
-		TimeToRetry: config.TimeToRetry,
-		TimeToClaim: config.TimeToClaim,
-	}
-
-	plugin := base.NewPlugin(a, "sqs", baseConfig, metrics, proc, nil)
-
-	return &SQS{
-		Plugin: plugin,
-	}, nil
 }
 
 func parseSQSRegion(sqsUrl string) (string, bool) {
