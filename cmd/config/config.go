@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
+	kafkaPlugin "github.com/resonatehq/resonate/internal/app/plugins/kafka"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
@@ -23,6 +24,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/kafka"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
@@ -48,66 +50,18 @@ type config[T t_api, U t_aio] struct {
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command) error {
-	return bind(cmd, c, "default", "", "")
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, tag string) error {
+	return Bind(cmd, c, vip, tag, "", "")
 }
 
-func (c *Config) BindDev(cmd *cobra.Command) error {
-	return bind(cmd, c, "dev", "", "dev")
-}
-
-func (c *ConfigDST) BindDST(cmd *cobra.Command) error {
-	return bind(cmd, c, "dst", "", "dst")
-}
-
-func (c *Config) Parse() error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	if err := viper.Unmarshal(&c, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *Config) ParseDev() error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	config := struct{ Dev *Config }{Dev: c}
-	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *ConfigDST) Parse(r *rand.Rand) error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.StringToRange(r),
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	config := struct{ DST *ConfigDST }{DST: c}
-	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
+func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
+	return Bind(cmd, c, vip, "dst", "", "")
 }
 
 type API struct {
-	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems APISubsystems `flag:"-"`
+	Size          int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	PublicKeyPath string        `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
+	Subsystems    APISubsystems `flag:"-"`
 }
 
 type APIDST struct {
@@ -126,8 +80,9 @@ type AIODST struct {
 }
 
 type APISubsystems struct {
-	Http EnabledSubsystem[http.Config] `flag:"http"`
-	Grpc EnabledSubsystem[grpc.Config] `flag:"grpc"`
+	Http  EnabledSubsystem[http.Config]   `flag:"http"`
+	Grpc  EnabledSubsystem[grpc.Config]   `flag:"grpc"`
+	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
 }
 
 type AIOSubsystems struct {
@@ -148,18 +103,28 @@ type DisabledSubsystem[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (c *Config) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
+func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
+		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if c.API.Subsystems.Grpc.Enabled {
+	// Disable gRPC if basic auth is enabled for HTTP
+	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
+	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Kafka.Enabled {
+		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -168,6 +133,25 @@ func (c *Config) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, err
 	}
 
 	return subsystems, nil
+}
+
+func (c *Config) APIMiddleware() ([]api.Middleware, error) {
+	middleware := []api.Middleware{}
+
+	if c.API.PublicKeyPath != "" {
+		pem, err := os.ReadFile(c.API.PublicKeyPath)
+		if err != nil {
+			return nil, err
+		}
+		m, err := api.NewJWTAuthenticator(pem)
+		if err != nil {
+			return nil, err
+		}
+		middleware = append(middleware, m)
+	}
+
+	return middleware, nil
+
 }
 
 func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {
@@ -235,6 +219,14 @@ func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, 
 
 		plugins = append(plugins, plugin)
 	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Enabled {
+		plugin, err := kafkaPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
 
 	return plugins, pollAddr, nil
 }
@@ -250,8 +242,9 @@ func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, erro
 }
 
 type APIDSTSubsystems struct {
-	Http DisabledSubsystem[http.Config] `flag:"http"`
-	Grpc DisabledSubsystem[grpc.Config] `flag:"grpc"`
+	Http  DisabledSubsystem[http.Config]  `flag:"http"`
+	Grpc  DisabledSubsystem[grpc.Config]  `flag:"grpc"`
+	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
 }
 
 type AIODSTSubsystems struct {
@@ -261,18 +254,28 @@ type AIODSTSubsystems struct {
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
 
-func (c *ConfigDST) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
+func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
+		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if c.API.Subsystems.Grpc.Enabled {
+	// Disable gRPC if basic auth is enabled for HTTP
+	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
+	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Kafka.Enabled {
+		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +326,8 @@ func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST
 
 // Helper functions
 
-func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix string) error {
+// Bind binds configuration struct fields to cobra flags and viper config
+func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
@@ -331,6 +335,12 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 		field := t.Field(i)
 		flag := field.Tag.Get("flag")
 		desc := field.Tag.Get("desc")
+		persistent := field.Tag.Get("persistent")
+
+		flags := cmd.Flags()
+		if persistent == "true" {
+			flags = cmd.PersistentFlags()
+		}
 
 		var value string
 		if v := field.Tag.Get(tag); v != "" {
@@ -357,11 +367,11 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 
 		switch field.Type.Kind() {
 		case reflect.String:
-			cmd.Flags().String(n, value, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.String(n, value, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Bool:
-			cmd.Flags().Bool(n, value == "true", desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.Bool(n, value == "true", desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Int:
 			if strings.Contains(value, ":") {
 				flag := util.NewRangeIntFlag(0, 0)
@@ -369,12 +379,12 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 					return err
 				}
 
-				cmd.Flags().Var(flag, n, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			} else {
 				v, _ := strconv.Atoi(value)
-				cmd.Flags().Int(n, v, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Int(n, v, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			}
 		case reflect.Int64:
 			if field.Type == reflect.TypeOf(time.Duration(0)) {
@@ -384,12 +394,12 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 						return err
 					}
 
-					cmd.Flags().Var(flag, n, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				} else {
 					v, _ := time.ParseDuration(value)
-					cmd.Flags().Duration(n, v, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Duration(n, v, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				}
 			} else {
 				if strings.Contains(value, ":") {
@@ -398,12 +408,12 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 						return err
 					}
 
-					cmd.Flags().Var(flag, n, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				} else {
 					v, _ := strconv.ParseInt(value, 10, 64)
-					cmd.Flags().Int64(n, v, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Int64(n, v, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				}
 			}
 		case reflect.Float64:
@@ -413,12 +423,12 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 					return err
 				}
 
-				cmd.Flags().Var(flag, n, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			} else {
 				v, _ := strconv.ParseFloat(value, 64)
-				cmd.Flags().Float64(n, v, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Float64(n, v, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			}
 		case reflect.Slice:
 			// TODO: support additional slice types via flags
@@ -432,8 +442,8 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 			} else {
 				v = []string{value}
 			}
-			cmd.Flags().StringArray(n, v, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.StringArray(n, v, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
@@ -445,10 +455,10 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 			if err := json.Unmarshal([]byte(value), &v); err != nil {
 				return err
 			}
-			cmd.Flags().StringToString(n, v, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.StringToString(n, v, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Struct:
-			if err := bind(cmd, v.Field(i).Addr().Interface(), tag, n, k); err != nil {
+			if err := Bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
 				return err
 			}
 		default:

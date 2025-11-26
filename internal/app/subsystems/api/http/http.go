@@ -14,9 +14,11 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -42,7 +44,7 @@ type Http struct {
 	shutdown chan struct{}
 }
 
-func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) {
+func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string) (i_api.Subsystem, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	handler := gin.New()
@@ -62,15 +64,27 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		_ = v.RegisterValidation("oneofcaseinsensitive", oneOfCaseInsensitive)
 	}
 
-	// Middleware
-	handler.Use(server.log)
+	// Middleware for logging and metrics
+	handler.Use(func(c *gin.Context) {
+		path := c.FullPath()
+		slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI)
+
+		if !strings.HasPrefix(path, "/poll/") {
+			timer := prometheus.NewTimer(metrics.HttpRequestsDuration.WithLabelValues(c.Request.Method, path))
+			defer timer.ObserveDuration()
+		}
+
+		c.Next()
+		metrics.HttpRequestsTotal.WithLabelValues(c.Request.Method, path, fmt.Sprintf("%d", c.Writer.Status())).Inc()
+	})
 
 	// CORS
 	if len(config.Cors.AllowOrigins) > 0 {
 		handler.Use(cors.New(cors.Config{
-			AllowOrigins: config.Cors.AllowOrigins,
-			AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders: []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			AllowOrigins:  config.Cors.AllowOrigins,
+			AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			ExposeHeaders: []string{"Resonate-Version"},
 		}))
 	}
 
@@ -83,6 +97,16 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	// Resonate header middleware
 	authorized.Use(func(c *gin.Context) {
 		c.Header("Resonate-Version", internal.Version())
+		c.Next()
+	})
+
+	// TODO(avillega): Extract the Auth header in a cross cutting way and put it in the request metadata
+	// Extract bearer token from Authorization header and add to context
+	authorized.Use(func(c *gin.Context) {
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			// Store the bearer token for later use by request handlers
+			c.Set("authorization", authHeader)
+		}
 		c.Next()
 	})
 
@@ -199,11 +223,6 @@ type server struct {
 
 func (s *server) code(status t_api.StatusCode) int {
 	return int(status) / 100
-}
-
-func (s *server) log(c *gin.Context) {
-	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
-	c.Next()
 }
 
 // Helper functions

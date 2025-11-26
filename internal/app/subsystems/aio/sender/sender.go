@@ -9,6 +9,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/kafka"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -28,9 +29,10 @@ type Config struct {
 }
 
 type PluginConfig struct {
-	Http EnabledPlugin[http.Config] `flag:"http"`
-	Poll EnabledPlugin[poll.Config] `flag:"poll"`
-	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
+	Http  EnabledPlugin[http.Config]   `flag:"http"`
+	Kafka DisabledPlugin[kafka.Config] `flag:"kafka"`
+	Poll  EnabledPlugin[poll.Config]   `flag:"poll"`
+	SQS   DisabledPlugin[sqs.Config]   `flag:"sqs"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -223,17 +225,15 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	var body []byte
 	var err error
 
-	mesgType := sqe.Submission.Sender.Task.Mesg.Type
-
-	if mesgType == message.Notify {
+	if sqe.Submission.Sender.Task.Mesg.Type == message.Notify {
 		util.Assert(sqe.Submission.Sender.Promise != nil, "promise must not be nil for a notify message")
 		body, err = json.Marshal(map[string]interface{}{
-			"type":    mesgType,
+			"type":    sqe.Submission.Sender.Task.Mesg.Type,
 			"promise": sqe.Submission.Sender.Promise,
 		})
 	} else {
 		body, err = json.Marshal(map[string]interface{}{
-			"type": mesgType,
+			"type": sqe.Submission.Sender.Task.Mesg.Type,
 			"task": sqe.Submission.Sender.Task,
 			"href": map[string]string{
 				"base":      sqe.Submission.Sender.BaseHref,
@@ -253,8 +253,9 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	counter := w.metrics.AioInFlight.WithLabelValues(plugin.String())
 
 	ok := plugin.Enqueue(&aio.Message{
-		Type: mesgType,
+		Type: sqe.Submission.Sender.Task.Mesg.Type,
 		Addr: recv.Data,
+		Head: sqe.Submission.Sender.Task.Mesg.Head,
 		Body: body,
 		Done: func(completion *t_aio.SenderCompletion) {
 			cqe.Completion = &t_aio.Completion{
@@ -333,6 +334,24 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
+
+	case "kafka":
+		topic := u.Host
+		if topic == "" {
+			return nil, false
+		}
+
+		addr := map[string]string{"topic": topic}
+		if key := u.Query().Get("key"); key != "" {
+			addr["key"] = key
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "kafka", Data: data}, true
 
 	default:
 		return nil, false

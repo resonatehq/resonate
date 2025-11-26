@@ -68,7 +68,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		t.Fatal(err)
 	}
 
-	// add api subsystems
+	// add aio subsystems
 	aio.AddSubsystem(router)
 	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)
@@ -130,6 +130,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		Tags:               10,
 		FaultInjection:     p != 0,
 		Backchannel:        backchannel,
+		Verbose:            false,
 	})
 
 	ok := dst.Run(r, api, aio, system)

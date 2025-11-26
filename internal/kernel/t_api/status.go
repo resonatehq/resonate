@@ -14,15 +14,17 @@ const (
 	StatusNoContent StatusCode = 20400
 
 	StatusFieldValidationError   StatusCode = 40000
-	StatusPromiseAlreadyResolved StatusCode = 40300
-	StatusPromiseAlreadyRejected StatusCode = 40301
-	StatusPromiseAlreadyCanceled StatusCode = 40302
-	StatusPromiseAlreadyTimedout StatusCode = 40303
-	StatusLockAlreadyAcquired    StatusCode = 40304
-	StatusTaskAlreadyClaimed     StatusCode = 40305
-	StatusTaskAlreadyCompleted   StatusCode = 40306
-	StatusTaskInvalidCounter     StatusCode = 40307
-	StatusTaskInvalidState       StatusCode = 40308
+	StatusUnauthorized           StatusCode = 40100
+	StatusForbidden              StatusCode = 40300
+	StatusPromiseAlreadyResolved StatusCode = 40301
+	StatusPromiseAlreadyRejected StatusCode = 40302
+	StatusPromiseAlreadyCanceled StatusCode = 40303
+	StatusPromiseAlreadyTimedout StatusCode = 40304
+	StatusLockAlreadyAcquired    StatusCode = 40305
+	StatusTaskAlreadyClaimed     StatusCode = 40306
+	StatusTaskAlreadyCompleted   StatusCode = 40307
+	StatusTaskInvalidCounter     StatusCode = 40308
+	StatusTaskInvalidState       StatusCode = 40309
 	StatusPromiseNotFound        StatusCode = 40400
 	StatusScheduleNotFound       StatusCode = 40401
 	StatusLockNotFound           StatusCode = 40402
@@ -51,6 +53,10 @@ func (s StatusCode) String() string {
 		return "The request was successful"
 	case StatusFieldValidationError:
 		return "The request is invalid"
+	case StatusUnauthorized:
+		return "The request is unauthorized"
+	case StatusForbidden:
+		return "The request is forbidden"
 	case StatusPromiseAlreadyResolved:
 		return "The promise has already been resolved"
 	case StatusPromiseAlreadyRejected:

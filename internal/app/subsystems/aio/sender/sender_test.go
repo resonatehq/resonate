@@ -107,9 +107,76 @@ func TestUrlParse(t *testing.T) {
 			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"url":"https://sqs.us-west-2.amazonaws.com/123456789012/my-queue_123-456"}`)},
 			ok:   true,
 		},
+		// kafka scheme
+		{
+			name: "valid kafka url",
+			url:  "kafka://my-topic",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid kafka url with key",
+			url:  "kafka://my-topic?key=partition-key",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"key":"partition-key","topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid kafka url with underscore in topic",
+			url:  "kafka://my_topic_123",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"my_topic_123"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid kafka url with hyphen in topic",
+			url:  "kafka://my-topic-123",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"my-topic-123"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid kafka url with numbers in topic",
+			url:  "kafka://topic123",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"topic123"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid kafka url with dot in topic",
+			url:  "kafka://my.topic.name",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"my.topic.name"}`)},
+			ok:   true,
+		},
+		{
+			name: "kafka url with empty topic",
+			url:  "kafka://",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "kafka url with empty host",
+			url:  "kafka:///",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "kafka url with query params but no key",
+			url:  "kafka://my-topic?other=value",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "kafka url with multiple query params",
+			url:  "kafka://my-topic?key=partition-key&other=value",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"key":"partition-key","topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "kafka url with URL encoded key",
+			url:  "kafka://my-topic?key=partition%20key",
+			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"key":"partition key","topic":"my-topic"}`)},
+			ok:   true,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, poll, or sqs+https",
+			name: "scheme must be http, https, poll, sqs+https, or kafka",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

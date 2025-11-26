@@ -11,16 +11,16 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-type ResponsePayload interface {
-	Kind() Kind
-	String() string
-	isResponsePayload()
-}
-
 type Response struct {
 	Status   StatusCode
 	Metadata map[string]string
 	Payload  ResponsePayload
+}
+
+type ResponsePayload interface {
+	Kind() Kind
+	String() string
+	isResponsePayload()
 }
 
 // Promises

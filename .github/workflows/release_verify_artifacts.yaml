@@ -64,9 +64,9 @@ jobs:
           - file: resonate_linux_aarch64.tar.gz
             runner: ubuntu-24.04-arm
           - file: resonate_darwin_x86_64.tar.gz
-            runner: macos-13
+            runner: macos-15-intel
           - file: resonate_darwin_aarch64.tar.gz
-            runner: macos-14
+            runner: macos-15
     steps:
       - name: Download and test GH release
         env:

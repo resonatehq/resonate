@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -61,10 +62,18 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		CreatedOn:      c.Time(),
 	}
 
+	head := map[string]string{}
+	if traceparent, ok := r.Metadata["traceparent"]; ok {
+		head["traceparent"] = traceparent
+	}
+	if tracestate, ok := r.Metadata["tracestate"]; ok {
+		head["tracestate"] = tracestate
+	}
+
 	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, nil, cmd, &t_aio.CreateTaskCommand{
 		Id:        util.InvokeId(req.Task.PromiseId),
 		Recv:      nil,
-		Mesg:      &message.Mesg{Type: message.Invoke, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
+		Mesg:      &message.Mesg{Type: message.Invoke, Head: head, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
 		Timeout:   req.Task.Timeout,
 		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
@@ -112,6 +121,8 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, *promiseAndTask]) (*promiseAndTask, error) {
+		metrics := c.Get("metrics").(*metrics.Metrics)
+
 		// first read the promise to see if it already exists
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -187,11 +198,19 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 						}
 					}
 
+					head := map[string]string{}
+					if traceparent, ok := tags["traceparent"]; ok {
+						head["traceparent"] = traceparent
+					}
+					if tracestate, ok := tags["tracestate"]; ok {
+						head["tracestate"] = tracestate
+					}
+
 					// add the task command
 					taskCmd = &t_aio.CreateTaskCommand{
 						Id:        util.InvokeId(promiseCmd.Id),
 						Recv:      completion.Router.Recv,
-						Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
+						Mesg:      &message.Mesg{Type: message.Invoke, Head: head, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 						Timeout:   promiseCmd.Timeout,
 						State:     task.Init,
 						ExpiresAt: expiresAt,
@@ -252,6 +271,14 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
 				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
+			}
+
+			// count promise
+			metrics.PromisesTotal.WithLabelValues("created").Inc()
+
+			// count task (if applicable)
+			if t != nil {
+				metrics.TasksTotal.WithLabelValues("created").Inc()
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil

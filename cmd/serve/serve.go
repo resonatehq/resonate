@@ -6,15 +6,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/cmd/config"
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -25,14 +29,41 @@ import (
 
 func NewCmd() *cobra.Command {
 	var (
+		v      = viper.New()
 		config = &config.Config{}
 	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start Resonate server",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if file, _ := cmd.Flags().GetString("config"); file != "" {
+				v.SetConfigFile(file)
+			} else {
+				v.SetConfigName("resonate")
+				v.AddConfigPath(".")
+				v.AddConfigPath("$HOME")
+			}
+
+			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			v.AutomaticEnv()
+
+			if err := v.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return err
+				}
+			}
+
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := config.Parse(); err != nil {
+			hooks := mapstructure.ComposeDecodeHookFunc(
+				util.MapToBytes(),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+			)
+
+			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
@@ -40,8 +71,11 @@ func NewCmd() *cobra.Command {
 		},
 	}
 
+	// bind config file flag
+	cmd.Flags().StringP("config", "c", "", "config file (default resonate.yaml)")
+
 	// bind config
-	_ = config.Bind(cmd)
+	_ = config.Bind(cmd, v, "default")
 
 	// bind other flags
 	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
@@ -78,12 +112,22 @@ func Serve(config *config.Config) error {
 	}
 
 	// api subsystems
-	apiSubsystems, err := config.APISubsystems(api, pollAddr)
+	apiSubsystems, err := config.APISubsystems(api, metrics, pollAddr)
 	if err != nil {
 		return err
 	}
 	for _, subsystem := range apiSubsystems {
 		api.AddSubsystem(subsystem)
+	}
+
+	// api middleware
+	apiMiddleware, err := config.APIMiddleware()
+	if err != nil {
+		return err
+	}
+
+	for _, middleware := range apiMiddleware {
+		api.AddMiddleware(middleware)
 	}
 
 	// aio subsystems
@@ -101,7 +145,11 @@ func Serve(config *config.Config) error {
 		return err
 	}
 	if err := aio.Start(); err != nil {
-		slog.Error("failed to start aio", "error", err)
+		if migrationErr, ok := err.(*migrations.MigrationError); ok {
+			slog.Error("failed to start aio", "error", fmt.Sprintf("Migration %03d_%s failed: %v", migrationErr.Version, migrationErr.Name, migrationErr.Err))
+		} else {
+			slog.Error("failed to start aio", "error", err)
+		}
 		return err
 	}
 

@@ -2,29 +2,30 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
-	"log/slog"
+	"net"
 	"net/http"
-	"strconv"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Config struct {
 	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"3"`
+	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"3m"`
+	ConnTimeout time.Duration `flag:"conn-timeout" desc:"http connection timeout" default:"10s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Http struct {
-	sq      chan *aio.Message
-	workers []*HttpWorker
+	*base.Plugin
 }
 
 type Addr struct {
@@ -32,99 +33,11 @@ type Addr struct {
 	Url     string            `json:"url"`
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
-	sq := make(chan *aio.Message, config.Size)
-	workers := make([]*HttpWorker, config.Workers)
-
-	for i := 0; i < config.Workers; i++ {
-		workers[i] = &HttpWorker{
-			i:       i,
-			sq:      sq,
-			config:  config,
-			client:  &http.Client{Timeout: config.Timeout},
-			aio:     a,
-			metrics: metrics,
-		}
-	}
-
-	return &Http{
-		sq:      sq,
-		workers: workers,
-	}, nil
+type processor struct {
+	client *http.Client
 }
 
-func (h *Http) String() string {
-	return fmt.Sprintf("%s:http", t_aio.Sender.String())
-}
-
-func (h *Http) Type() string {
-	return "http"
-}
-
-func (h *Http) Start(chan<- error) error {
-	for _, worker := range h.workers {
-		go worker.Start()
-	}
-
-	return nil
-}
-
-func (h *Http) Stop() error {
-	close(h.sq)
-	return nil
-}
-
-func (h *Http) Enqueue(msg *aio.Message) bool {
-	select {
-	case h.sq <- msg:
-		return true
-	default:
-		return false
-	}
-}
-
-// Worker
-
-type HttpWorker struct {
-	i       int
-	sq      <-chan *aio.Message
-	config  *Config
-	client  *http.Client
-	aio     aio.AIO
-	metrics *metrics.Metrics
-}
-
-func (w *HttpWorker) String() string {
-	return fmt.Sprintf("%s:http", t_aio.Sender.String())
-}
-
-func (w *HttpWorker) Start() {
-	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
-	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
-	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
-
-	for {
-		msg, ok := <-w.sq
-		if !ok {
-			return
-		}
-
-		counter.Inc()
-		success, err := w.Process(msg.Addr, msg.Body)
-		if err != nil {
-			slog.Warn("failed to send task", "err", err)
-		}
-
-		msg.Done(&t_aio.SenderCompletion{
-			Success:     success,
-			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
-			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
-		})
-		counter.Dec()
-	}
-}
-
-func (w *HttpWorker) Process(data []byte, body []byte) (bool, error) {
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
 	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
@@ -139,6 +52,10 @@ func (w *HttpWorker) Process(data []byte, body []byte) (bool, error) {
 		addr.Headers = map[string]string{}
 	}
 
+	for k, v := range head { // nosemgrep: range-over-map
+		req.Header.Set(k, v)
+	}
+
 	for k, v := range addr.Headers { // nosemgrep: range-over-map
 		req.Header.Set(k, v)
 	}
@@ -146,10 +63,61 @@ func (w *HttpWorker) Process(data []byte, body []byte) (bool, error) {
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := w.client.Do(req)
-	if err != nil {
-		return false, err
+	succeeded := false
+	connected := make(chan struct{})
+
+	trace := &httptrace.ClientTrace{
+		ConnectDone: func(network, addr string, err error) {
+			// when a connection is established, close the channel and return
+			// true
+			if err == nil {
+				util.Assert(!succeeded, "connect done cannot be called multiple times successfully")
+
+				succeeded = true
+				close(connected)
+			}
+		},
 	}
 
-	return res.StatusCode == http.StatusOK, nil
+	// perform request asynchronously
+	go func() {
+		res, err := p.client.Do(req.WithContext(httptrace.WithClientTrace(context.Background(), trace)))
+
+		if res != nil {
+			_ = res.Body.Close()
+		}
+
+		// when request fails and the connection was not established, close
+		// the channel and return false
+		if err != nil && !succeeded {
+			close(connected)
+		}
+	}()
+
+	<-connected
+	return succeeded, nil
+}
+
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
+	proc := &processor{
+		client: &http.Client{
+			Timeout: config.Timeout,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: config.ConnTimeout,
+				}).DialContext,
+			},
+		},
+	}
+
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
+	return &Http{
+		Plugin: base.NewPlugin(a, "http", baseConfig, metrics, proc, nil),
+	}, nil
 }

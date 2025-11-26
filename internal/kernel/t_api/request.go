@@ -12,17 +12,17 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
+type Request struct {
+	Metadata map[string]string
+	Fence    *task.FencingToken
+	Payload  RequestPayload
+}
+
 type RequestPayload interface {
 	Kind() Kind
 	String() string
 	Validate() error
 	isRequestPayload()
-}
-
-type Request struct {
-	Metadata map[string]string
-	Fence    *task.FencingToken
-	Payload  RequestPayload
 }
 
 // Promises
@@ -65,7 +65,7 @@ func (r *SearchPromisesRequest) Kind() Kind {
 
 type CreatePromiseRequest struct {
 	Id             string            `json:"id"`
-	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
+	IdempotencyKey *idempotency.Key  `json:"idempotencyKey,omitempty"`
 	Strict         bool              `json:"strict"`
 	Param          promise.Value     `json:"param,omitempty"`
 	Timeout        int64             `json:"timeout"`
@@ -103,7 +103,7 @@ func (r *CreatePromiseAndTaskRequest) Kind() Kind {
 
 type CompletePromiseRequest struct {
 	Id             string           `json:"id"`
-	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	IdempotencyKey *idempotency.Key `json:"idempotencyKey,omitempty"`
 	Strict         bool             `json:"strict"`
 	State          promise.State    `json:"state"`
 	Value          promise.Value    `json:"value,omitempty"`
@@ -192,7 +192,7 @@ type CreateScheduleRequest struct {
 	PromiseTimeout int64             `json:"promiseTimeout"`
 	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
-	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
+	IdempotencyKey *idempotency.Key  `json:"idempotencyKey,omitempty"`
 }
 
 func (r *CreateScheduleRequest) String() string {

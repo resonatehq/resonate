@@ -7,6 +7,7 @@ import (
 
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -39,6 +40,7 @@ type api struct {
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
+	middleware []Middleware
 }
 
 func New(size int, metrics *metrics.Metrics) *api {
@@ -59,6 +61,10 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
+}
+
+func (a *api) AddMiddleware(middleware Middleware) {
+	a.middleware = append(a.middleware, middleware)
 }
 
 func (a *api) Addr() string {
@@ -137,10 +143,13 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
 	util.Assert(sqe.Submission.Metadata != nil, "submission tags must not be nil")
 
-	requestKind := sqe.Submission.Kind().String()
+	kind := sqe.Submission.Kind().String()
+	protocol := sqe.Submission.Metadata["protocol"]
 
 	slog.Debug("api:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
-	a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Inc()
+	timer := prometheus.NewTimer(a.metrics.ApiDuration.WithLabelValues(kind, protocol))
+	count := a.metrics.ApiInFlight.WithLabelValues(kind, protocol)
+	count.Inc()
 
 	// replace callback with a function that emits metrics
 	callback := sqe.Callback
@@ -157,8 +166,9 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 			status = res.Status
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"], strconv.Itoa(int(status))).Inc()
-		a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Dec()
+		timer.ObserveDuration()
+		count.Dec()
+		a.metrics.ApiTotal.WithLabelValues(kind, protocol, strconv.Itoa(int(status))).Inc()
 
 		callback(res, err)
 	}
@@ -176,6 +186,15 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	if err := sqe.Submission.Validate(); err != nil {
 		sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
 		return
+	}
+
+	// Run all the middleware
+	for _, m := range a.middleware {
+		err := m.Process(sqe.Submission)
+		if err != nil {
+			sqe.Callback(nil, err)
+			return
+		}
 	}
 
 	select {
