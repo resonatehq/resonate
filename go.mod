@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/anishathalye/porcupine v1.0.3
-	github.com/aws/aws-sdk-go-v2 v1.39.6
+	github.com/aws/aws-sdk-go-v2 v1.40.0
 	github.com/aws/aws-sdk-go-v2/config v1.31.20
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.15
 	github.com/confluentinc/confluent-kafka-go/v2 v2.12.0
