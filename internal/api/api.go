@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -25,6 +26,8 @@ type API interface {
 
 	Signal(<-chan interface{}) <-chan interface{}
 
+	Plugins() []plugins.Plugin
+
 	EnqueueSQE(*bus.SQE[t_api.Request, t_api.Response])
 	DequeueSQE(int) []*bus.SQE[t_api.Request, t_api.Response]
 	EnqueueCQE(*bus.CQE[t_api.Request, t_api.Response])
@@ -37,6 +40,7 @@ type api struct {
 	sq         chan *bus.SQE[t_api.Request, t_api.Response]
 	buffer     *bus.SQE[t_api.Request, t_api.Response]
 	subsystems []Subsystem
+	plugins    []plugins.Plugin
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
@@ -61,6 +65,14 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
+}
+
+func (a *api) AddPlugin(plugin plugins.Plugin) {
+	a.plugins = append(a.plugins, plugin)
+}
+
+func (a *api) Plugins() []plugins.Plugin {
+	return a.plugins
 }
 
 func (a *api) AddMiddleware(middleware Middleware) {

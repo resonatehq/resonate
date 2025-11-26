@@ -1,4 +1,4 @@
-package aio
+package plugins
 
 import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -19,4 +19,5 @@ type Plugin interface {
 	Start(chan<- error) error
 	Stop() error
 	Enqueue(*Message) bool
+	Addr() string
 }

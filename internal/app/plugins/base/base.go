@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type BaseConfig struct {
@@ -24,23 +24,22 @@ type Processor interface {
 
 type Worker struct {
 	id        int
-	sq        <-chan *aio.Message
+	sq        <-chan *plugins.Message
 	processor Processor
 	config    *BaseConfig
-	aio       aio.AIO
 	metrics   *metrics.Metrics
 	name      string
 }
 
 type Plugin struct {
 	name    string
-	sq      chan *aio.Message
+	sq      chan *plugins.Message
 	workers []*Worker
 	cleanup func() error
 }
 
-func NewPlugin(a aio.AIO, name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, cleanup func() error) *Plugin {
-	sq := make(chan *aio.Message, config.Size)
+func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, cleanup func() error) *Plugin {
+	sq := make(chan *plugins.Message, config.Size)
 	workers := make([]*Worker, config.Workers)
 
 	for i := 0; i < config.Workers; i++ {
@@ -49,7 +48,6 @@ func NewPlugin(a aio.AIO, name string, config *BaseConfig, metrics *metrics.Metr
 			sq:        sq,
 			processor: processor,
 			config:    config,
-			aio:       a,
 			metrics:   metrics,
 			name:      name,
 		}
@@ -88,7 +86,7 @@ func (p *Plugin) Stop() error {
 	return nil
 }
 
-func (p *Plugin) Enqueue(msg *aio.Message) bool {
+func (p *Plugin) Enqueue(msg *plugins.Message) bool {
 	if p.sq == nil || msg == nil {
 		return false
 	}
@@ -99,6 +97,10 @@ func (p *Plugin) Enqueue(msg *aio.Message) bool {
 	default:
 		return false
 	}
+}
+
+func (p *Plugin) Addr() string {
+	return ""
 }
 
 func (w *Worker) String() string {

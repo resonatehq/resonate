@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
@@ -121,7 +122,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		VisualizationPath:  vp,
 		TimeElapsedPerTick: 1000, // ms
 		TimeoutTicks:       timeoutTicks,
-		ReqsPerTick:        func() int { return RangeIntn(r, 0, 15) },
+		ReqsPerTick:        func() int { return util.RangeIntn(r, 0, 15) },
 		MaxReqsPerTick:     25,
 		Ids:                10,
 		IdempotencyKeys:    10,

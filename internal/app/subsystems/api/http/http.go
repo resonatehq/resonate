@@ -14,11 +14,16 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -37,6 +42,32 @@ type Cors struct {
 	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
 }
 
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(a i_api.API, metrics *metrics.Metrics) (i_api.Subsystem, error) {
+	return New(a, metrics, c)
+}
+
 type Http struct {
 	config   *Config
 	listen   net.Listener
@@ -44,7 +75,7 @@ type Http struct {
 	shutdown chan struct{}
 }
 
-func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string) (i_api.Subsystem, error) {
+func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	handler := gin.New()
@@ -149,6 +180,14 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config, pollAddr string)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
 	// Poller proxy
+	var pollAddr string
+	for _, plugin := range a.Plugins() {
+		if plugin.Type() == "poll" {
+			pollAddr = plugin.Addr()
+			break
+		}
+	}
+
 	if pollAddr != "" {
 		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
 		if err != nil {

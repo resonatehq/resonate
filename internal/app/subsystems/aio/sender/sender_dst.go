@@ -4,15 +4,52 @@ import (
 	"fmt"
 	"math/rand" // nosemgrep
 
+	"github.com/go-viper/mapstructure/v2"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/message"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // Config
 
 type ConfigDST struct {
 	P float64 `flag:"p" desc:"probability of simulated unsuccessful request" default:"0.5" dst:"0:1"`
+}
+
+func (c *ConfigDST) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *ConfigDST) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *ConfigDST) New(aio.AIO, *metrics.Metrics) (aio.Subsystem, error) {
+	panic("not implemented")
+}
+
+func (c *ConfigDST) NewDST(aio aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) (aio.SubsystemDST, error) {
+	return NewDST(r, backchannel, c)
 }
 
 // Subsystem

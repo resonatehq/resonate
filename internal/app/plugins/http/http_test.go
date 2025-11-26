@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,7 +63,7 @@ func TestHttpPlugin(t *testing.T) {
 		{"connTo", &Addr{Url: "http://localhost:32412124"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
+			http, err := New(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
 			assert.Nil(t, err)
 
 			data, err := json.Marshal(tc.data)
@@ -72,7 +72,7 @@ func TestHttpPlugin(t *testing.T) {
 			err = http.Start(nil)
 			assert.Nil(t, err)
 
-			msg := &aio.Message{
+			msg := &plugins.Message{
 				Addr: data,
 				Head: map[string]string{"foo": "bar", "baz": "qux"},
 				Body: []byte("ok"),
