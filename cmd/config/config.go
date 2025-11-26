@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
+	kafkaPlugin "github.com/resonatehq/resonate/internal/app/plugins/kafka"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
@@ -23,6 +24,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/kafka"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
@@ -78,8 +80,9 @@ type AIODST struct {
 }
 
 type APISubsystems struct {
-	Http EnabledSubsystem[http.Config] `flag:"http"`
-	Grpc EnabledSubsystem[grpc.Config] `flag:"grpc"`
+	Http  EnabledSubsystem[http.Config]   `flag:"http"`
+	Grpc  EnabledSubsystem[grpc.Config]   `flag:"grpc"`
+	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
 }
 
 type AIOSubsystems struct {
@@ -114,6 +117,14 @@ func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr str
 	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
 	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Kafka.Enabled {
+		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -208,6 +219,14 @@ func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, 
 
 		plugins = append(plugins, plugin)
 	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Enabled {
+		plugin, err := kafkaPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
 
 	return plugins, pollAddr, nil
 }
@@ -223,8 +242,9 @@ func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, erro
 }
 
 type APIDSTSubsystems struct {
-	Http DisabledSubsystem[http.Config] `flag:"http"`
-	Grpc DisabledSubsystem[grpc.Config] `flag:"grpc"`
+	Http  DisabledSubsystem[http.Config]  `flag:"http"`
+	Grpc  DisabledSubsystem[grpc.Config]  `flag:"grpc"`
+	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
 }
 
 type AIODSTSubsystems struct {
@@ -248,6 +268,14 @@ func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr 
 	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
 	if grpcEnabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Kafka.Enabled {
+		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
 		if err != nil {
 			return nil, err
 		}
