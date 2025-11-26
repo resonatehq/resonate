@@ -17,10 +17,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -30,11 +26,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-func RunDSTCmd() *cobra.Command {
+func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	var (
-		vip = viper.New()
-		cfg = &config.Config{}
-
 		seed              int64
 		ticks             int64
 		timeout           time.Duration
@@ -251,12 +244,6 @@ func RunDSTCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	// add dst subsystems
-	cfg.AIO.Subsystems.Add("sender", true, &sender.ConfigDST{})
-	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
-	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
-	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 
 	// bind config file flag
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate-dst.yaml)")

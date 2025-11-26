@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +84,7 @@ func TestMigrateCmd_FlagBinding(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
-			cmd := NewCmd(cfg)
+			cmd := NewCmd(cfg, viper.New())
 
 			err := cmd.ParseFlags(tt.args)
 			require.NoError(t, err)
@@ -217,7 +218,7 @@ aio:
 			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 
-			cmd := NewCmd(cfg)
+			cmd := NewCmd(cfg, viper.New())
 			err = cmd.PersistentFlags().Set("config", configFile)
 			require.NoError(t, err)
 
@@ -281,7 +282,7 @@ func TestMigrateCmd_SubcommandFlags(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 			cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
-			cmd := NewCmd(cfg)
+			cmd := NewCmd(cfg, viper.New())
 
 			// Find the subcommand
 			var subCmd *cobra.Command
@@ -327,7 +328,7 @@ aio:
 	cfg := &config.Config{}
 	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 
-	cmd := NewCmd(cfg)
+	cmd := NewCmd(cfg, viper.New())
 	err = cmd.PersistentFlags().Set("config", configFile)
 	require.NoError(t, err)
 
@@ -351,7 +352,7 @@ func TestMigrateCmd_DefaultValues(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
-	cmd := NewCmd(cfg)
+	cmd := NewCmd(cfg, viper.New())
 
 	// Don't set any flags, just verify defaults
 	sqliteEnabled, err := cmd.PersistentFlags().GetBool("aio-store-sqlite-enable")
@@ -403,7 +404,7 @@ aio:
 	cfg := &config.Config{}
 	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 
-	cmd := NewCmd(cfg)
+	cmd := NewCmd(cfg, viper.New())
 	err = cmd.PersistentFlags().Set("config", configFile)
 	require.NoError(t, err)
 

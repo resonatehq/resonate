@@ -27,11 +27,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func NewCmd(cfg *config.Config) *cobra.Command {
-	var (
-		vip = viper.New()
-	)
-
+func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start Resonate server",

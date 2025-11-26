@@ -25,6 +25,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var rootCmd = &cobra.Command{
@@ -36,6 +37,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Create config
 	cfg := &config.Config{}
+	vip := viper.New()
 
 	// Add Subsystems
 	cfg.API.Subsystems.Add("http", true, &http.Config{})
@@ -51,14 +53,14 @@ func init() {
 	cfg.AIO.Plugins.Add("sqs", true, &sqs.Config{})
 
 	// Add Subcommands
-	rootCmd.AddCommand(dev.NewCmd(cfg))
+	rootCmd.AddCommand(dev.NewCmd(cfg, vip))
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
-	rootCmd.AddCommand(migrate.NewCmd(cfg))
+	rootCmd.AddCommand(migrate.NewCmd(cfg, vip))
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
-	rootCmd.AddCommand(serve.NewCmd(cfg))
+	rootCmd.AddCommand(serve.NewCmd(cfg, vip))
 	rootCmd.AddCommand(tasks.NewCmd())
 	rootCmd.AddCommand(tree.NewCmd())
 

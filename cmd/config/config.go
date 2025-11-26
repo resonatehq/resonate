@@ -49,14 +49,14 @@ type AIO struct {
 }
 
 type Auth struct {
-	PublicKeyPath string `flag:"public-key" desc:"public key path used for jwt based authentication"`
+	PublicKey string `flag:"public-key" desc:"public key path used for jwt based authentication"`
 }
 
 func (a *API) Middleware() ([]api.Middleware, error) {
 	middleware := []api.Middleware{}
 
-	if a.Auth.PublicKeyPath != "" {
-		pem, err := os.ReadFile(a.Auth.PublicKeyPath)
+	if a.Auth.PublicKey != "" {
+		pem, err := os.ReadFile(a.Auth.PublicKey)
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +77,7 @@ type aioSubsystems []*aioSubsystem
 type aioPlugins []*aioPlugin
 
 type apiSubsystem struct {
-	Plugin  iAPISubsystem
+	Plugin  APISubsystem
 	prefix  string
 	key     string
 	name    string
@@ -109,7 +109,7 @@ func (a *apiSubsystem) Config() config {
 }
 
 type aioSubsystem struct {
-	Plugin  iAIOSubsystem
+	Plugin  AIOSubsystem
 	prefix  string
 	key     string
 	name    string
@@ -141,7 +141,7 @@ func (a *aioSubsystem) Config() config {
 }
 
 type aioPlugin struct {
-	Plugin  iAIOPlugin
+	Plugin  AIOPlugin
 	prefix  string
 	key     string
 	name    string
@@ -186,26 +186,26 @@ type config interface {
 	Decode(any, mapstructure.DecodeHookFunc) error
 }
 
-type iAPISubsystem interface {
+type APISubsystem interface {
 	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(api.API, *metrics.Metrics) (api.Subsystem, error)
 }
 
-type iAIOSubsystem interface {
+type AIOSubsystem interface {
 	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(aio.AIO, *metrics.Metrics) (aio.Subsystem, error)
 	NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan any) (aio.SubsystemDST, error)
 }
 
-type iAIOPlugin interface {
+type AIOPlugin interface {
 	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(*metrics.Metrics) (plugins.Plugin, error)
 }
 
-func (a *apiSubsystems) Add(name string, enabled bool, subsystem iAPISubsystem) {
+func (a *apiSubsystems) Add(name string, enabled bool, subsystem APISubsystem) {
 	*a = append(*a, &apiSubsystem{
 		Plugin:  subsystem,
 		prefix:  fmt.Sprintf("api-%s", name),
@@ -224,7 +224,7 @@ func (a *apiSubsystems) AsPlugins() []plugin {
 	return result
 }
 
-func (a *aioSubsystems) Add(name string, enabled bool, subsystem iAIOSubsystem) {
+func (a *aioSubsystems) Add(name string, enabled bool, subsystem AIOSubsystem) {
 	*a = append(*a, &aioSubsystem{
 		Plugin:  subsystem,
 		prefix:  fmt.Sprintf("aio-%s", name),
@@ -243,7 +243,7 @@ func (a *aioSubsystems) AsPlugins() []plugin {
 	return result
 }
 
-func (a *aioPlugins) Add(name string, enabled bool, plugin iAIOPlugin) {
+func (a *aioPlugins) Add(name string, enabled bool, plugin AIOPlugin) {
 	*a = append(*a, &aioPlugin{
 		Plugin:  plugin,
 		prefix:  fmt.Sprintf("aio-sender-plugin-%s", name),
