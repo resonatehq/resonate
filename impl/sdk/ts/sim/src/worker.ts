@@ -25,6 +25,8 @@ interface DeliveryOptions {
 }
 
 class SimulatedMessageSource implements MessageSource {
+  readonly pid: string;
+  readonly group: string;
   readonly unicast: string;
   readonly anycast: string;
 
@@ -39,6 +41,8 @@ class SimulatedMessageSource implements MessageSource {
     gaddr: string,
     private maybeCorruptData: (data: NetworkMessage) => any,
   ) {
+    this.pid = iaddr;
+    this.group = gaddr;
     this.unicast = `sim://uni@${gaddr}/${iaddr}`;
     this.anycast = `sim://any@${gaddr}/${iaddr}`;
   }

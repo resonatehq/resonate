@@ -4,6 +4,8 @@ import * as util from "../src/util";
 import { Server } from "./server";
 
 export class LocalMessageSource implements MessageSource {
+  readonly pid: string;
+  readonly group: string;
   readonly unicast: string;
   readonly anycast: string;
   private server: Server;
@@ -16,6 +18,8 @@ export class LocalMessageSource implements MessageSource {
   } = { invoke: [], resume: [], notify: [] };
 
   constructor(pid: string, group: string, server: Server) {
+    this.pid = pid;
+    this.group = group;
     this.unicast = `poll://uni@${group}/${pid}`;
     this.anycast = `poll://any@${group}/${pid}`;
     this.server = server;

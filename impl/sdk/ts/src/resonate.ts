@@ -84,12 +84,13 @@ export class Resonate {
   constructor({
     url = undefined,
     group = "default",
-    pid = crypto.randomUUID().replace(/-/g, ""),
+    pid = undefined,
     ttl = 1 * util.MIN,
     auth = undefined,
     verbose = false,
     encryptor = undefined,
     tracer = undefined,
+    transport = undefined,
   }: {
     url?: string;
     group?: string;
@@ -99,9 +100,9 @@ export class Resonate {
     verbose?: boolean;
     encryptor?: Encryptor;
     tracer?: Tracer;
+    transport?: Network & MessageSource;
   } = {}) {
     this.clock = new WallClock();
-    this.pid = pid;
     this.ttl = ttl;
     this.tracer = tracer ?? new NoopTracer();
     this.encryptor = encryptor ?? new NoopEncryptor();
@@ -137,21 +138,30 @@ export class Resonate {
       }
     }
 
-    if (!resolvedUrl) {
-      const localNetwork = new LocalNetwork({ pid, group });
-      this.network = localNetwork;
-      this.messageSource = localNetwork.getMessageSource();
-      this.heartbeat = new NoopHeartbeat();
+    if (transport) {
+      this.network = transport;
+      this.messageSource = transport;
+      this.pid = pid ?? this.messageSource.pid;
+      this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
     } else {
-      this.network = new HttpNetwork({
-        verbose: this.verbose,
-        url: resolvedUrl,
-        auth: resolvedAuth,
-        timeout: 1 * util.MIN,
-        headers: {},
-      });
-      this.messageSource = new HttpMessageSource({ url: resolvedUrl, pid, group, auth: resolvedAuth });
-      this.heartbeat = new AsyncHeartbeat(pid, ttl / 2, this.network);
+      if (!resolvedUrl) {
+        const localNetwork = new LocalNetwork({ pid, group });
+        this.network = localNetwork;
+        this.messageSource = localNetwork.getMessageSource();
+        this.pid = pid ?? this.messageSource.pid;
+        this.heartbeat = new NoopHeartbeat();
+      } else {
+        this.network = new HttpNetwork({
+          verbose: this.verbose,
+          url: resolvedUrl,
+          auth: resolvedAuth,
+          timeout: 1 * util.MIN,
+          headers: {},
+        });
+        this.messageSource = new HttpMessageSource({ url: resolvedUrl, pid, group, auth: resolvedAuth });
+        this.pid = pid ?? this.messageSource.pid;
+        this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
+      }
     }
 
     this.handler = new Handler(this.network, this.encoder, this.encryptor);

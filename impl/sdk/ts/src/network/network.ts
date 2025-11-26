@@ -316,6 +316,8 @@ export interface Network {
 }
 
 export interface MessageSource {
+  readonly pid: string;
+  readonly group: string;
   readonly unicast: string;
   readonly anycast: string;
   recv(msg: Message): void;

@@ -139,7 +139,7 @@ export interface HttpNetworkConfig {
 
 export interface HttpMessageSourceConfig {
   url: string;
-  pid: string;
+  pid?: string;
   group: string;
   auth?: { username: string; password: string };
 }
@@ -636,12 +636,12 @@ export class HttpNetwork implements Network {
 }
 
 export class HttpMessageSource implements MessageSource {
+  readonly pid: string;
+  readonly group: string;
   readonly unicast: string;
   readonly anycast: string;
 
   private url: string;
-  private group: string;
-  private pid: string;
   private headers: Record<string, string>;
   private eventSource: EventSource;
   private subscriptions: {
@@ -650,7 +650,9 @@ export class HttpMessageSource implements MessageSource {
     notify: Array<(msg: Message) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor({ url, pid, group, auth }: HttpMessageSourceConfig) {
+  constructor({ url, pid = crypto.randomUUID().replace(/-/g, ""), group, auth }: HttpMessageSourceConfig) {
+    this.pid = pid;
+    this.group = group;
     this.unicast = `poll://uni@${group}/${pid}`;
     this.anycast = `poll://any@${group}/${pid}`;
     this.url = url;
