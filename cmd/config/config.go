@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -39,13 +40,13 @@ func (c *Config) Plugins() []plugin {
 type API struct {
 	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
 	Auth       Auth          `flag:"auth"`
-	Subsystems apiSubsystems `mapstructure:"-"`
+	Subsystems APISubsystems `flag:"-"`
 }
 
 type AIO struct {
 	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems aioSubsystems `mapstructure:"-"`
-	Plugins    aioPlugins    `mapstructure:"-"`
+	Subsystems AIOSubsystems `flag:"-"`
+	Plugins    AIOPlugins    `flag:"-"`
 }
 
 type Auth struct {
@@ -72,24 +73,56 @@ func (a *API) Middleware() ([]api.Middleware, error) {
 
 // Plugins
 
-type apiSubsystems []*apiSubsystem
-type aioSubsystems []*aioSubsystem
-type aioPlugins []*aioPlugin
+type plugin interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string)
+	Decode(*viper.Viper, mapstructure.DecodeHookFunc) error
+}
+
+type enabledFlag struct {
+	key string
+	val bool
+}
+
+type APISubsystems struct {
+	subsystems []*apiSubsystem `mapstructure:"-"`
+}
+
+func (a *APISubsystems) Add(name string, enabled bool, subsystem APISubsystem) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.subsystems = append(a.subsystems, &apiSubsystem{
+		prefix:    fmt.Sprintf("api-%s", name),
+		key:       fmt.Sprintf("api.subsystems.%s.config", kName),
+		name:      name,
+		enabled:   &enabledFlag{fmt.Sprintf("api.subsystems.%s.enabled", kName), enabled},
+		subsystem: subsystem,
+	})
+}
+
+func (a *APISubsystems) All() []*apiSubsystem {
+	return a.subsystems
+}
+
+func (a *APISubsystems) AsPlugins() []plugin {
+	subsystems := []plugin{}
+	for _, s := range a.subsystems {
+		subsystems = append(subsystems, s)
+	}
+
+	return subsystems
+}
 
 type apiSubsystem struct {
-	Plugin  APISubsystem
-	prefix  string
-	key     string
-	name    string
-	enabled bool
+	subsystem APISubsystem
+	prefix    string
+	key       string
+	name      string
+	enabled   *enabledFlag
 }
 
-func (a *apiSubsystem) Prefix() string {
-	return a.prefix
-}
-
-func (a *apiSubsystem) Key() string {
-	return a.key
+type APISubsystem interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(api.API, *metrics.Metrics) (api.Subsystem, error)
 }
 
 func (a *apiSubsystem) Name() string {
@@ -97,99 +130,65 @@ func (a *apiSubsystem) Name() string {
 }
 
 func (a *apiSubsystem) Enabled() bool {
-	return a.enabled
+	return a.enabled.val
 }
 
-func (a *apiSubsystem) EnabledP() *bool {
-	return &a.enabled
+func (a *apiSubsystem) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable subsystem")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
+
+	a.subsystem.Bind(cmd, flg, vip, name, a.prefix, a.key)
 }
 
-func (a *apiSubsystem) Config() config {
-	return a.Plugin
+func (a *apiSubsystem) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
+	}
+
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	return a.subsystem.Decode(value, hooks)
+}
+
+func (a *apiSubsystem) New(api api.API, metrics *metrics.Metrics) (api.Subsystem, error) {
+	return a.subsystem.New(api, metrics)
+}
+
+type AIOSubsystems struct {
+	subsystems []*aioSubsystem `mapstructure:"-"`
+}
+
+func (a *AIOSubsystems) Add(name string, enabled bool, subsystem AIOSubsystem) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.subsystems = append(a.subsystems, &aioSubsystem{
+		subsystem: subsystem,
+		prefix:    fmt.Sprintf("aio-%s", name),
+		key:       fmt.Sprintf("aio.subsystems.%s.config", kName),
+		name:      name,
+		enabled:   &enabledFlag{fmt.Sprintf("aio.subsystems.%s.enabled", kName), enabled},
+	})
+}
+
+func (a *AIOSubsystems) All() []*aioSubsystem {
+	return a.subsystems
+}
+
+func (a *AIOSubsystems) AsPlugins() []plugin {
+	subsystems := []plugin{}
+	for _, s := range a.subsystems {
+		subsystems = append(subsystems, s)
+	}
+
+	return subsystems
 }
 
 type aioSubsystem struct {
-	Plugin  AIOSubsystem
-	prefix  string
-	key     string
-	name    string
-	enabled bool
-}
-
-func (a *aioSubsystem) Prefix() string {
-	return a.prefix
-}
-
-func (a *aioSubsystem) Key() string {
-	return a.key
-}
-
-func (a *aioSubsystem) Name() string {
-	return a.name
-}
-
-func (a *aioSubsystem) Enabled() bool {
-	return a.enabled
-}
-
-func (a *aioSubsystem) EnabledP() *bool {
-	return &a.enabled
-}
-
-func (a *aioSubsystem) Config() config {
-	return a.Plugin
-}
-
-type aioPlugin struct {
-	Plugin  AIOPlugin
-	prefix  string
-	key     string
-	name    string
-	enabled bool
-}
-
-func (a *aioPlugin) Prefix() string {
-	return a.prefix
-}
-
-func (a *aioPlugin) Key() string {
-	return a.key
-}
-
-func (a *aioPlugin) Name() string {
-	return a.name
-}
-
-func (a *aioPlugin) Enabled() bool {
-	return a.enabled
-}
-
-func (a *aioPlugin) EnabledP() *bool {
-	return &a.enabled
-}
-
-func (a *aioPlugin) Config() config {
-	return a.Plugin
-}
-
-type plugin interface {
-	Config() config
-	Prefix() string
-	Key() string
-	Name() string
-	Enabled() bool
-	EnabledP() *bool
-}
-
-type config interface {
-	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
-	Decode(any, mapstructure.DecodeHookFunc) error
-}
-
-type APISubsystem interface {
-	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
-	Decode(any, mapstructure.DecodeHookFunc) error
-	New(api.API, *metrics.Metrics) (api.Subsystem, error)
+	subsystem AIOSubsystem
+	prefix    string
+	key       string
+	name      string
+	enabled   *enabledFlag
 }
 
 type AIOSubsystem interface {
@@ -199,65 +198,108 @@ type AIOSubsystem interface {
 	NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan any) (aio.SubsystemDST, error)
 }
 
+func (a *aioSubsystem) Name() string {
+	return a.name
+}
+
+func (a *aioSubsystem) Enabled() bool {
+	return a.enabled.val
+}
+
+func (a *aioSubsystem) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable subsystem")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
+
+	a.subsystem.Bind(cmd, flg, vip, name, a.prefix, a.key)
+}
+
+func (a *aioSubsystem) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
+	}
+
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	return a.subsystem.Decode(value, hooks)
+}
+
+func (a *aioSubsystem) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return a.subsystem.New(aio, metrics)
+}
+
+func (a *aioSubsystem) NewDST(aio aio.AIO, metrics *metrics.Metrics, r *rand.Rand, c chan any) (aio.SubsystemDST, error) {
+	return a.subsystem.NewDST(aio, metrics, r, c)
+}
+
+type AIOPlugins struct {
+	plugins []*aioPlugin `mapstructure:"-"`
+}
+
+func (a *AIOPlugins) Add(name string, enabled bool, plugin AIOPlugin) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.plugins = append(a.plugins, &aioPlugin{
+		plugin:  plugin,
+		prefix:  fmt.Sprintf("aio-%s", name),
+		key:     fmt.Sprintf("aio.plugins.%s.config", kName),
+		name:    name,
+		enabled: &enabledFlag{fmt.Sprintf("aio.plugins.%s.enabled", kName), enabled},
+	})
+}
+
+func (a *AIOPlugins) All() []*aioPlugin {
+	return a.plugins
+}
+
+func (a *AIOPlugins) AsPlugins() []plugin {
+	plugins := []plugin{}
+	for _, p := range a.plugins {
+		plugins = append(plugins, p)
+	}
+
+	return plugins
+}
+
+type aioPlugin struct {
+	plugin  AIOPlugin
+	prefix  string
+	key     string
+	name    string
+	enabled *enabledFlag
+}
+
 type AIOPlugin interface {
 	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
 	Decode(any, mapstructure.DecodeHookFunc) error
 	New(*metrics.Metrics) (plugins.Plugin, error)
 }
 
-func (a *apiSubsystems) Add(name string, enabled bool, subsystem APISubsystem) {
-	*a = append(*a, &apiSubsystem{
-		Plugin:  subsystem,
-		prefix:  fmt.Sprintf("api-%s", name),
-		key:     fmt.Sprintf("api.subsystems.%s.config", strings.ReplaceAll(name, "-", ".")),
-		name:    name,
-		enabled: enabled,
-	})
+func (a *aioPlugin) Name() string {
+	return a.name
 }
 
-func (a *apiSubsystems) AsPlugins() []plugin {
-	result := make([]plugin, len(*a))
-	for i, subsystem := range *a {
-		result[i] = subsystem
+func (a *aioPlugin) Enabled() bool {
+	return a.enabled.val
+}
+
+func (a *aioPlugin) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable plugin")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
+
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	a.plugin.Bind(cmd, flg, vip, name, a.prefix, a.key)
+}
+
+func (a *aioPlugin) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
 	}
 
-	return result
+	return a.plugin.Decode(value, hooks)
 }
 
-func (a *aioSubsystems) Add(name string, enabled bool, subsystem AIOSubsystem) {
-	*a = append(*a, &aioSubsystem{
-		Plugin:  subsystem,
-		prefix:  fmt.Sprintf("aio-%s", name),
-		key:     fmt.Sprintf("aio.subsystems.%s.config", strings.ReplaceAll(name, "-", ".")),
-		name:    name,
-		enabled: enabled,
-	})
-}
-
-func (a *aioSubsystems) AsPlugins() []plugin {
-	result := make([]plugin, len(*a))
-	for i, subsystem := range *a {
-		result[i] = subsystem
-	}
-
-	return result
-}
-
-func (a *aioPlugins) Add(name string, enabled bool, plugin AIOPlugin) {
-	*a = append(*a, &aioPlugin{
-		Plugin:  plugin,
-		prefix:  fmt.Sprintf("aio-sender-plugin-%s", name),
-		key:     fmt.Sprintf("aio.subsystems.sender.plugins.%s.config", strings.ReplaceAll(name, "-", ".")),
-		name:    name,
-		enabled: enabled,
-	})
-}
-
-func (a *aioPlugins) AsPlugins() []plugin {
-	result := make([]plugin, len(*a))
-	for i, plugin := range *a {
-		result[i] = plugin
-	}
-
-	return result
+func (a *aioPlugin) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return a.plugin.New(metrics)
 }

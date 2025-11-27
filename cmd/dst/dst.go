@@ -26,8 +26,8 @@ func NewCmd() *cobra.Command {
 	// Add dst subsystems
 	cfg.AIO.Subsystems.Add("sender", true, &sender.ConfigDST{})
 	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
+	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{}) // do not change order
 	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
-	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 
 	// Add subcommands
 	cmd.AddCommand(RunDSTCmd(cfg, vip))

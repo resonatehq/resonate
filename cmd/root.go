@@ -44,13 +44,13 @@ func init() {
 	cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 	cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
+	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{}) // do not change order
 	cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
-	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 
 	// Add Plugins
 	cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
 	cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
-	cfg.AIO.Plugins.Add("sqs", true, &sqs.Config{})
+	cfg.AIO.Plugins.Add("sqs", false, &sqs.Config{})
 
 	// Add Subcommands
 	rootCmd.AddCommand(dev.NewCmd(cfg, vip))

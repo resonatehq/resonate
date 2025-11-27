@@ -41,16 +41,6 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 				}
 			}
 
-			// TODO: find a more flexible solution
-			// if multiple stores are enabled, postgres takes precedence, we
-			// need a different strategy if more than two stores are supported
-			sFlag := cmd.PersistentFlags().Lookup("aio-store-sqlite-enable")
-			pFlag := cmd.PersistentFlags().Lookup("aio-store-postgres-enable")
-			if sFlag != nil && pFlag != nil && sFlag.Value.String() == "true" && pFlag.Value.String() == "true" {
-				// postgres takes precedence
-				_ = sFlag.Value.Set("false")
-			}
-
 			hooks := mapstructure.ComposeDecodeHookFunc(
 				util.MapToBytes(),
 				mapstructure.StringToTimeDurationHookFunc(),
@@ -58,15 +48,9 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 			)
 
 			// decode subsystems
-			for _, s := range cfg.AIO.Subsystems {
-				if strings.HasPrefix(s.Name(), "store-") {
-					value, ok := util.Extract(vip.AllSettings(), s.Key())
-					if !ok {
-						panic("plugin config not found")
-					}
-					if err := s.Plugin.Decode(value, hooks); err != nil {
-						return err
-					}
+			for _, subsystem := range cfg.AIO.Subsystems.All() {
+				if err := subsystem.Decode(vip, hooks); err != nil {
+					return err
 				}
 			}
 
@@ -79,11 +63,7 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 
 	// bind plugins
 	for _, plugin := range cfg.Plugins() {
-		enabled := fmt.Sprintf("%s-enable", plugin.Prefix())
-		cmd.PersistentFlags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
-		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.PersistentFlags().Lookup(enabled))
-
-		plugin.Config().Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
+		plugin.Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name())
 	}
 
 	// add subcommands
@@ -237,24 +217,24 @@ func newUpCmd(cfg *config.Config) *cobra.Command {
 // and returns the appropriate migration store. The store owns the database
 // connection and the caller is responsible for calling Close() on the store.
 func getMigrationStore(cfg *config.Config) (migrations.MigrationStore, error) {
-	for _, p := range cfg.AIO.Subsystems {
-		if p.Name() == "store-sqlite" && p.Enabled() {
-			subsystem, err := p.Plugin.New(nil, nil)
-			if err != nil {
-				return nil, err
-			}
-
-			store := subsystem.(*sqlite.SqliteStore)
-			return migrations.NewSqliteMigrationStore(store.DB()), nil
-		}
-		if p.Name() == "store-postgres" && p.Enabled() {
-			subsystem, err := p.Plugin.New(nil, nil)
+	for _, plugin := range cfg.AIO.Subsystems.All() {
+		if plugin.Name() == "store-postgres" && plugin.Enabled() {
+			subsystem, err := plugin.New(nil, nil)
 			if err != nil {
 				return nil, err
 			}
 
 			store := subsystem.(*postgres.PostgresStore)
 			return migrations.NewPostgresMigrationStore(store.DB()), nil
+		}
+		if plugin.Name() == "store-sqlite" && plugin.Enabled() {
+			subsystem, err := plugin.New(nil, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			store := subsystem.(*sqlite.SqliteStore)
+			return migrations.NewSqliteMigrationStore(store.DB()), nil
 		}
 	}
 

@@ -603,9 +603,7 @@ logLevel: "warn"`,
 
 					// decode plugins
 					for _, plugin := range cfg.Plugins() {
-						value, ok := util.Extract(vip.AllSettings(), plugin.Key())
-						assert.True(t, ok)
-						err := plugin.Config().Decode(value, hooks)
+						err := plugin.Decode(vip, hooks)
 						require.NoError(t, err)
 					}
 

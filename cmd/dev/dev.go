@@ -1,7 +1,6 @@
 package dev
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -35,14 +34,6 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 				}
 			}
 
-			// flipy flip
-			sFlag := cmd.PersistentFlags().Lookup("aio-store-sqlite-enable")
-			pFlag := cmd.PersistentFlags().Lookup("aio-store-postgres-enable")
-			if sFlag != nil && pFlag != nil && sFlag.Value.String() == "true" && pFlag.Value.String() == "true" {
-				// postgres takes precedence
-				_ = sFlag.Value.Set("false")
-			}
-
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -59,11 +50,7 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 
 			// decode plugins
 			for _, plugin := range cfg.Plugins() {
-				value, ok := util.Extract(vip.AllSettings(), plugin.Key())
-				if !ok {
-					panic("plugin config not found")
-				}
-				if err := plugin.Config().Decode(value, hooks); err != nil {
+				if err := plugin.Decode(vip, hooks); err != nil {
 					return err
 				}
 			}
@@ -80,11 +67,7 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 
 	// bind plugins
 	for _, plugin := range cfg.Plugins() {
-		enabled := fmt.Sprintf("%s-enabled", plugin.Prefix())
-		cmd.Flags().BoolVar(plugin.EnabledP(), enabled, plugin.Enabled(), "enable plugin")
-		_ = vip.BindPFlag(fmt.Sprintf("%s.enabled", plugin.Key()), cmd.Flags().Lookup(enabled))
-
-		plugin.Config().Bind(cmd, cmd.Flags(), vip, cmd.Name(), plugin.Prefix(), plugin.Key())
+		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name())
 	}
 
 	cmd.Flags().SortFlags = false
