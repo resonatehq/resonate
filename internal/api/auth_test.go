@@ -112,24 +112,6 @@ func TestAuthenticate(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid authorization header format", func(t *testing.T) {
-		tests := []string{
-			"InvalidFormat",
-			"Bearer",
-			"bearer token extra",
-		}
-		for _, headerValue := range tests {
-			req := &t_api.Request{
-				Metadata: map[string]string{"Authorization": headerValue},
-				Payload:  &t_api.EchoRequest{Data: "test"},
-			}
-			_, err := auth.authenticate(req)
-			if err == nil {
-				t.Errorf("Expected error for invalid format '%s', got nil", headerValue)
-			}
-		}
-	})
-
 	t.Run("valid token", func(t *testing.T) {
 		claims := &Claims{
 			Role:   role,
@@ -144,7 +126,7 @@ func TestAuthenticate(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"Authorization": "Bearer " + token},
+			Metadata: map[string]string{"authorization": token},
 			Payload:  &t_api.EchoRequest{Data: "test"},
 		}
 		returnedClaims, err := auth.authenticate(req)
@@ -174,7 +156,7 @@ func TestAuthenticate(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"Authorization": "Bearer " + token},
+			Metadata: map[string]string{"authorization": token},
 			Payload:  &t_api.EchoRequest{Data: "test"},
 		}
 		_, err = auth.authenticate(req)
@@ -423,7 +405,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"Authorization": "Bearer " + token},
+			Metadata: map[string]string{"authorization": token},
 			Payload:  &t_api.ReadPromiseRequest{Id: "app.promise.1"},
 		}
 		apiErr := auth.Process(req)
@@ -445,7 +427,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"Authorization": "Bearer " + token},
+			Metadata: map[string]string{"authorization": token},
 			Payload:  &t_api.ReadPromiseRequest{Id: "any.prefix.promise"},
 		}
 		apiErr := auth.Process(req)
@@ -468,7 +450,7 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"Authorization": "Bearer " + token},
+			Metadata: map[string]string{"authorization": token},
 			Payload:  &t_api.ReadPromiseRequest{Id: "other.promise.1"},
 		}
 		apiErr := auth.Process(req)
@@ -519,7 +501,7 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		t.Fatalf("Failed to create token: %v", err)
 	}
 
-	metadata := map[string]string{"Authorization": "Bearer " + token}
+	metadata := map[string]string{"authorization": token}
 
 	tests := []struct {
 		name       string

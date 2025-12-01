@@ -16,7 +16,7 @@ type Middleware interface {
 }
 
 // TODO(avillega): This authenticator is the first middleware that we currently have
-// as we have more middleware we should rethink where they to put them
+// as we have more middleware we should rethink where to put them
 type JwtAuthenticator struct {
 	publicKey *rsa.PublicKey
 }
@@ -63,18 +63,12 @@ func (a *JwtAuthenticator) Process(req *t_api.Request) *t_api.Error {
 }
 
 func (a *JwtAuthenticator) authenticate(req *t_api.Request) (*Claims, error) {
-	authHeader, ok := req.Metadata["Authorization"]
+	// Assume what ever is in the metadata["authorization"] is just the token without
+	// 'Bearer' or other prefixes
+	tokenString, ok := req.Metadata["authorization"]
 	if !ok {
 		return nil, fmt.Errorf("missing authorization header")
 	}
-
-	// Extract token from "Bearer <token>" format
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return nil, fmt.Errorf("invalid authorization header format")
-	}
-
-	tokenString := parts[1]
 
 	claims := &Claims{}
 
@@ -111,6 +105,8 @@ func (a *JwtAuthenticator) authorize(claims *Claims, req *t_api.Request) error {
 		return fmt.Errorf("unauthorized prefix")
 	}
 
+	// "aaabb" is more restrictive than "aaa" which is more restrictive than "a" which is more restrictive that ""
+	// Empty string gets access to all promises
 	if *claims.Prefix == "" {
 		return nil
 	}
@@ -152,7 +148,7 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 		id = r.Id
 	case *t_api.SearchSchedulesRequest:
 		id = r.Id
-	case *t_api.HeartbeatLocksRequest, *t_api.HeartbeatTasksRequest, *t_api.EchoRequest:
+	case *t_api.HeartbeatLocksRequest, *t_api.HeartbeatTasksRequest, *t_api.EchoRequest, *t_api.NoopRequest:
 		return nil
 	default:
 		panic("unreachable: unexpected request type")

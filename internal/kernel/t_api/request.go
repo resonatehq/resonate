@@ -402,6 +402,22 @@ func (r *EchoRequest) Kind() Kind {
 	return Echo
 }
 
+// Noop
+
+type NoopRequest struct{}
+
+func (r *NoopRequest) String() string {
+	return "Noop()"
+}
+
+func (r *NoopRequest) Validate() error {
+	return nil
+}
+
+func (r *NoopRequest) Kind() Kind {
+	return Noop
+}
+
 // Marker methods that make each of the request types be a
 // RequestPayload type.
 func (r *ReadPromiseRequest) isRequestPayload()          {}
@@ -422,6 +438,7 @@ func (r *CompleteTaskRequest) isRequestPayload()         {}
 func (r *DropTaskRequest) isRequestPayload()             {}
 func (r *HeartbeatTasksRequest) isRequestPayload()       {}
 func (r *EchoRequest) isRequestPayload()                 {}
+func (r *NoopRequest) isRequestPayload()                 {}
 
 // Request Methods
 

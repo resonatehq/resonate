@@ -23,7 +23,12 @@ func (s *server) readSchedule(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.ReadScheduleRequest{
 			Id: extractId(c.Param("id")),
 		},
@@ -79,8 +84,13 @@ func (s *server) searchSchedules(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: req,
+		Metadata: metadata,
+		Payload:  req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -132,7 +142,12 @@ func (s *server) createSchedule(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.CreateScheduleRequest{
 			Id:             body.Id,
 			Description:    body.Description,
@@ -167,7 +182,12 @@ func (s *server) deleteSchedule(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.DeleteScheduleRequest{
 			Id: extractId(c.Param("id")),
 		},

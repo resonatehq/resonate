@@ -201,6 +201,21 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 			ctx, cancel := context.WithCancel(c.Request.Context())
 			defer cancel()
 
+			// Run this request through the api middleware
+			metadata := map[string]string{}
+			if auth := c.GetString("authorization"); auth != "" {
+				metadata["authorization"] = auth
+			}
+			_, err := server.api.Process("", &t_api.Request{
+				Metadata: metadata,
+				Payload:  &t_api.NoopRequest{},
+			})
+
+			if err != nil {
+				c.JSON(server.code(err.Code), gin.H{"error": err})
+				return
+			}
+
 			go func() {
 				select {
 				case <-shutdown:
