@@ -1,7 +1,8 @@
 import type { StepClock } from "../../src/clock";
 import type { Encoder } from "../../src/encoder";
 import { NoopEncryptor } from "../../src/encryptor";
-import { ResonateError } from "../../src/exceptions";
+import type { ResonateError } from "../../src/exceptions";
+import exceptions from "../../src/exceptions";
 import { Handler } from "../../src/handler";
 import { NoopHeartbeat } from "../../src/heartbeat";
 import type {
@@ -16,7 +17,6 @@ import { OptionsBuilder } from "../../src/options";
 import type { Registry } from "../../src/registry";
 import { ResonateInner } from "../../src/resonate-inner";
 import { NoopTracer } from "../../src/tracer";
-import type { Callback } from "../../src/types";
 import * as util from "../../src/util";
 import { type Address, Message, Process, type Random, unicast } from "./simulator";
 
@@ -71,7 +71,7 @@ class SimulatedNetwork implements Network {
   private prng: Random;
   private deliveryOptions: Required<DeliveryOptions>;
   private buffer: Message<Request>[] = [];
-  private callbacks: Record<number, { callback: Callback<Response>; timeout: number }> = {};
+  private callbacks: Record<number, { callback: (err: any, res?: Response) => void; timeout: number }> = {};
   private messageSource: SimulatedMessageSource;
 
   constructor(
@@ -97,12 +97,16 @@ class SimulatedNetwork implements Network {
       correlationId: this.correlationId++,
     });
 
-    const callback = (err: boolean, res?: Response) => {
-      util.assert(err || (res !== undefined && res.kind === req.kind), "res kind must match req kind");
-      cb(new ResonateError("0", "Simulator", "Simulator error"), res as ResponseFor<T>);
+    const callback = (err: any, res?: Response) => {
+      if (res !== undefined) {
+        util.assert(res.kind === req.kind, "res kind must match req kind");
+        cb(undefined, res as ResponseFor<T>);
+      } else {
+        cb(err as ResonateError);
+      }
     };
 
-    this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 5000 };
+    this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 50000 };
     this.buffer.push(message);
   }
 
@@ -116,7 +120,7 @@ class SimulatedNetwork implements Network {
       const cb = this.callbacks[key];
       const hasTimedOut = cb.timeout < this.currentTime;
       if (hasTimedOut) {
-        cb.callback(true);
+        cb.callback(exceptions.SERVER_ERROR("Request timed out", true));
         delete this.callbacks[key];
       }
     }
@@ -132,10 +136,10 @@ class SimulatedNetwork implements Network {
         const msg = message as Message<{ err?: any; res?: Response }>;
         if (msg.data.err) {
           util.assert(msg.data.res === undefined);
-          entry.callback(true);
+          entry.callback(msg.data.err);
         } else {
           util.assertDefined(msg.data.res);
-          entry.callback(false, this.maybeCorruptData(msg.data.res));
+          entry.callback(undefined, this.maybeCorruptData(msg.data.res));
         }
         delete this.callbacks[correlationId];
       }

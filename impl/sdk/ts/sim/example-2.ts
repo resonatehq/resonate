@@ -111,4 +111,4 @@ function f(n: number, memo: Record<number, number> = {}): number {
   return memo[n];
 }
 
-util.assert(server.server.promises.get(id)?.value === f(n));
+util.assert(encoder.decode(server.server.promises.get(id)?.value) === f(n));
