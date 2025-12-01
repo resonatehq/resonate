@@ -9,11 +9,17 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/go-viper/mapstructure/v2"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	i_api "github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // ----------------- PROMISES -----------------
@@ -129,6 +135,32 @@ type Config struct {
 	Target        string        `flag:"target" desc:"target identifier for this server" default:"resonate.server"`
 	ConsumerGroup string        `flag:"consumer-group" desc:"kafka consumer group" default:"resonate-servers"`
 	Timeout       time.Duration `flag:"timeout" desc:"kafka server graceful shutdown timeout" default:"10s"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(a i_api.API, _ *metrics.Metrics) (i_api.Subsystem, error) {
+	return New(a, c)
 }
 
 type Kafka struct {

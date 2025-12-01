@@ -139,11 +139,14 @@ func TestKafkaPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			kafka, err := NewWithProducer(nil, metrics, &Config{
-				Size:    1,
-				Workers: 1,
-				Timeout: 100 * time.Millisecond,
-			}, tc.producer)
+			kafka, err := NewWithProducer(
+				metrics, &Config{
+					Size:    1,
+					Workers: 1,
+					Timeout: 100 * time.Millisecond,
+				},
+				tc.producer,
+			)
 			assert.Nil(t, err)
 
 			err = kafka.Start(nil)
