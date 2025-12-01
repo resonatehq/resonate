@@ -1,5 +1,5 @@
 package internal
 
 func Version() string {
-	return "0.7.24" // This needs to be bumped when new versions are released.
+	return "0.7.25" // This needs to be bumped when new versions are released.
 }

@@ -332,6 +332,24 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
 
+	case "kafka":
+		topic := u.Host
+		if topic == "" {
+			return nil, false
+		}
+
+		addr := map[string]string{"topic": topic}
+		if key := u.Query().Get("key"); key != "" {
+			addr["key"] = key
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "kafka", Data: data}, true
+
 	default:
 		return nil, false
 	}
