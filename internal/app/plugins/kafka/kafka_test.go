@@ -9,9 +9,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type MockKafkaProducer struct {
@@ -139,17 +139,20 @@ func TestKafkaPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			kafka, err := NewWithProducer(nil, metrics, &Config{
-				Size:    1,
-				Workers: 1,
-				Timeout: 100 * time.Millisecond,
-			}, tc.producer)
+			kafka, err := NewWithProducer(
+				metrics, &Config{
+					Size:    1,
+					Workers: 1,
+					Timeout: 100 * time.Millisecond,
+				},
+				tc.producer,
+			)
 			assert.Nil(t, err)
 
 			err = kafka.Start(nil)
 			assert.Nil(t, err)
 
-			ok := kafka.Enqueue(&aio.Message{
+			ok := kafka.Enqueue(&plugins.Message{
 				Addr: tc.addr,
 				Body: []byte("test message"),
 				Done: func(completion *t_aio.SenderCompletion) {

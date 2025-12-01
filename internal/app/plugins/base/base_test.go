@@ -8,9 +8,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type MockProcessor struct {
@@ -36,7 +36,7 @@ func TestNewPlugin(t *testing.T) {
 	}
 
 	proc := &MockProcessor{}
-	plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+	plugin := NewPlugin("test", config, metrics, proc, nil)
 
 	assert.NotNil(t, plugin)
 	assert.Equal(t, "test", plugin.name)
@@ -49,7 +49,7 @@ func TestPluginString(t *testing.T) {
 	config := &BaseConfig{Size: 1, Workers: 1}
 	proc := &MockProcessor{}
 
-	plugin := NewPlugin(nil, "myplugin", config, metrics, proc, nil)
+	plugin := NewPlugin("myplugin", config, metrics, proc, nil)
 	assert.Contains(t, plugin.String(), "myplugin")
 }
 
@@ -58,7 +58,7 @@ func TestPluginType(t *testing.T) {
 	config := &BaseConfig{Size: 1, Workers: 1}
 	proc := &MockProcessor{}
 
-	plugin := NewPlugin(nil, "mytype", config, metrics, proc, nil)
+	plugin := NewPlugin("mytype", config, metrics, proc, nil)
 	assert.Equal(t, "mytype", plugin.Type())
 }
 
@@ -67,10 +67,10 @@ func TestPluginEnqueue(t *testing.T) {
 	config := &BaseConfig{Size: 2, Workers: 1}
 	proc := &MockProcessor{}
 
-	plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+	plugin := NewPlugin("test", config, metrics, proc, nil)
 
 	t.Run("SuccessfulEnqueue", func(t *testing.T) {
-		msg := &aio.Message{
+		msg := &plugins.Message{
 			Addr: []byte("addr"),
 			Body: []byte("body"),
 			Done: func(c *t_aio.SenderCompletion) {},
@@ -83,10 +83,10 @@ func TestPluginEnqueue(t *testing.T) {
 	})
 
 	t.Run("QueueFull", func(t *testing.T) {
-		new := NewPlugin(nil, "test", &BaseConfig{Size: 1, Workers: 1}, metrics, proc, nil)
+		new := NewPlugin("test", &BaseConfig{Size: 1, Workers: 1}, metrics, proc, nil)
 
-		msg1 := &aio.Message{Addr: []byte("1"), Body: []byte("1"), Done: func(c *t_aio.SenderCompletion) {}}
-		msg2 := &aio.Message{Addr: []byte("2"), Body: []byte("2"), Done: func(c *t_aio.SenderCompletion) {}}
+		msg1 := &plugins.Message{Addr: []byte("1"), Body: []byte("1"), Done: func(c *t_aio.SenderCompletion) {}}
+		msg2 := &plugins.Message{Addr: []byte("2"), Body: []byte("2"), Done: func(c *t_aio.SenderCompletion) {}}
 
 		assert.True(t, new.Enqueue(msg1))
 		assert.False(t, new.Enqueue(msg2))
@@ -98,7 +98,7 @@ func TestPluginStartStop(t *testing.T) {
 	config := &BaseConfig{Size: 10, Workers: 2}
 	proc := &MockProcessor{}
 
-	plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+	plugin := NewPlugin("test", config, metrics, proc, nil)
 
 	t.Run("Start", func(t *testing.T) {
 		err := plugin.Start(nil)
@@ -122,7 +122,7 @@ func TestPluginStopWithCleanup(t *testing.T) {
 		return nil
 	}
 
-	plugin := NewPlugin(nil, "test", config, metrics, proc, cleanup)
+	plugin := NewPlugin("test", config, metrics, proc, cleanup)
 	err := plugin.Stop()
 
 	assert.Nil(t, err)
@@ -139,7 +139,7 @@ func TestPluginStopWithCleanupError(t *testing.T) {
 		return expected_err
 	}
 
-	plugin := NewPlugin(nil, "test", config, metrics, proc, cleanup)
+	plugin := NewPlugin("test", config, metrics, proc, cleanup)
 	err := plugin.Stop()
 
 	assert.Equal(t, expected_err, err)
@@ -164,14 +164,14 @@ func TestWorkerProcessing(t *testing.T) {
 			},
 		}
 
-		plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+		plugin := NewPlugin("test", config, metrics, proc, nil)
 		assert.Nil(t, plugin.Start(nil))
 		defer func() {
 			assert.Nil(t, plugin.Stop())
 		}()
 
 		done := make(chan bool, 1)
-		msg := &aio.Message{
+		msg := &plugins.Message{
 			Addr: []byte("test addr"),
 			Head: map[string]string{"foo": "bar"},
 			Body: []byte("test body"),
@@ -202,14 +202,14 @@ func TestWorkerProcessing(t *testing.T) {
 			},
 		}
 
-		plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+		plugin := NewPlugin("test", config, metrics, proc, nil)
 		assert.Nil(t, plugin.Start(nil))
 		defer func() {
 			assert.Nil(t, plugin.Stop())
 		}()
 
 		done := make(chan bool, 1)
-		msg := &aio.Message{
+		msg := &plugins.Message{
 			Addr: []byte("addr"),
 			Body: []byte("body"),
 			Done: func(c *t_aio.SenderCompletion) {
@@ -234,7 +234,7 @@ func TestWorkerString(t *testing.T) {
 	config := &BaseConfig{Size: 1, Workers: 1}
 	proc := &MockProcessor{}
 
-	plugin := NewPlugin(nil, "testplugin", config, metrics, proc, nil)
+	plugin := NewPlugin("testplugin", config, metrics, proc, nil)
 	assert.Contains(t, plugin.workers[0].String(), "testplugin")
 }
 
@@ -246,7 +246,7 @@ func TestMultipleWorkers(t *testing.T) {
 	}
 
 	proc := &MockProcessor{}
-	plugin := NewPlugin(nil, "test", config, metrics, proc, nil)
+	plugin := NewPlugin("test", config, metrics, proc, nil)
 
 	assert.Equal(t, 3, len(plugin.workers))
 	for i, worker := range plugin.workers {

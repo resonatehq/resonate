@@ -11,29 +11,24 @@ import (
 	"github.com/spf13/viper"
 )
 
-func NewCmd() *cobra.Command {
-	var (
-		v      = viper.New()
-		config = &config.Config{}
-	)
-
+func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dev",
 		Short: "Start Resonate server in development mode",
 		Long:  "Start Resonate server with development-friendly defaults (in-memory SQLite store).\n\nThis command is an alias for: resonate serve --aio-store-sqlite-path ':memory:' --aio-store-postgres-query 'sslmode=disable'\n",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if file, _ := cmd.Flags().GetString("config"); file != "" {
-				v.SetConfigFile(file)
+				vip.SetConfigFile(file)
 			} else {
-				v.SetConfigName("resonate-dev")
-				v.AddConfigPath(".")
-				v.AddConfigPath("$HOME")
+				vip.SetConfigName("resonate-dev")
+				vip.AddConfigPath(".")
+				vip.AddConfigPath("$HOME")
 			}
 
-			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-			v.AutomaticEnv()
+			vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			vip.AutomaticEnv()
 
-			if err := v.ReadInConfig(); err != nil {
+			if err := vip.ReadInConfig(); err != nil {
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return err
 				}
@@ -48,11 +43,19 @@ func NewCmd() *cobra.Command {
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+			// decode config
+			if err := vip.Unmarshal(&cfg, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
-			return serve.Serve(config)
+			// decode plugins
+			for _, plugin := range cfg.Plugins() {
+				if err := plugin.Decode(vip, hooks); err != nil {
+					return err
+				}
+			}
+
+			return serve.Serve(cfg)
 		},
 	}
 
@@ -60,8 +63,13 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate-dev.yaml)")
 
 	// bind config
-	_ = config.Bind(cmd, v, "dev")
-	cmd.Flags().SortFlags = false
+	util.Bind(cfg, cmd, cmd.Flags(), vip, cmd.Name())
 
+	// bind plugins
+	for _, plugin := range cfg.Plugins() {
+		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name())
+	}
+
+	cmd.Flags().SortFlags = false
 	return cmd
 }

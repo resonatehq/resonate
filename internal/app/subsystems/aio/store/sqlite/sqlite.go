@@ -6,17 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand" // nosemgrep
 	"os"
 	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -29,7 +35,7 @@ import (
 const (
 	// Schema is now managed by migrations (see internal/migrationfiles/migrations/sqlite/)
 	// We create the migrations table to handle
-	CREATE_TABLE_STATEMENT = `		
+	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER PRIMARY KEY
 	);`
@@ -302,6 +308,36 @@ type Config struct {
 	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" dst:"true"`
 }
 
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return New(aio, metrics, c)
+}
+
+func (c *Config) NewDST(aio aio.AIO, metrics *metrics.Metrics, _ *rand.Rand, _ chan any) (aio.SubsystemDST, error) {
+	return New(aio, metrics, c)
+}
+
 // Subsystem
 
 type SqliteStore struct {
@@ -309,6 +345,10 @@ type SqliteStore struct {
 	sq     chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db     *sql.DB
 	worker *SqliteStoreWorker
+}
+
+func (s *SqliteStore) DB() *sql.DB {
+	return s.db
 }
 
 func NewConn(path string) (*sql.DB, error) {

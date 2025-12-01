@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
-	"github.com/resonatehq/resonate/internal/aio"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type Config struct {
@@ -25,6 +30,32 @@ type Config struct {
 	Compression string        `flag:"compression" desc:"compression type (none, gzip, snappy, lz4, zstd)" default:"none"`
 }
 
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
+}
+
 type Producer interface {
 	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
 	Close()
@@ -32,16 +63,15 @@ type Producer interface {
 
 type Worker struct {
 	i        int
-	sq       <-chan *aio.Message
+	sq       <-chan *plugins.Message
 	timeout  time.Duration
-	aio      aio.AIO
 	metrics  *metrics.Metrics
 	config   *Config
 	producer Producer
 }
 
 type Kafka struct {
-	sq      chan *aio.Message
+	sq      chan *plugins.Message
 	workers []*Worker
 }
 
@@ -58,7 +88,7 @@ func (a *Addr) validate() error {
 	return nil
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Kafka, error) {
+func New(metrics *metrics.Metrics, config *Config) (*Kafka, error) {
 	producerConfig := &kafka.ConfigMap{
 		"bootstrap.servers":   strings.Join(config.Brokers, ", "),
 		"delivery.timeout.ms": strconv.FormatInt(config.Timeout.Milliseconds(), 10),
@@ -70,11 +100,11 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Kafka, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kafka producer: %w", err)
 	}
-	return NewWithProducer(a, metrics, config, producer)
+	return NewWithProducer(metrics, config, producer)
 }
 
-func NewWithProducer(a aio.AIO, metrics *metrics.Metrics, config *Config, producer Producer) (*Kafka, error) {
-	sq := make(chan *aio.Message, config.Size)
+func NewWithProducer(metrics *metrics.Metrics, config *Config, producer Producer) (*Kafka, error) {
+	sq := make(chan *plugins.Message, config.Size)
 	workers := make([]*Worker, config.Workers)
 
 	for i := range workers {
@@ -82,7 +112,6 @@ func NewWithProducer(a aio.AIO, metrics *metrics.Metrics, config *Config, produc
 			i:        i,
 			sq:       sq,
 			timeout:  config.Timeout,
-			aio:      a,
 			metrics:  metrics,
 			config:   config,
 			producer: producer,
@@ -98,6 +127,10 @@ func (k *Kafka) String() string {
 
 func (k *Kafka) Type() string {
 	return "kafka"
+}
+
+func (k *Kafka) Addr() string {
+	return ""
 }
 
 func (k *Kafka) Start(chan<- error) error {
@@ -116,7 +149,7 @@ func (k *Kafka) Stop() error {
 	return nil
 }
 
-func (k *Kafka) Enqueue(msg *aio.Message) bool {
+func (k *Kafka) Enqueue(msg *plugins.Message) bool {
 	select {
 	case k.sq <- msg:
 		return true

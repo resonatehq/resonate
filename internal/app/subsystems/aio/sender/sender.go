@@ -4,45 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand" // nosemgrep
 	"net/url"
 	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/plugins/http"
-	"github.com/resonatehq/resonate/internal/app/plugins/kafka"
-	"github.com/resonatehq/resonate/internal/app/plugins/poll"
-	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/receiver"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // Config
 
 type Config struct {
 	Size    int            `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Plugins PluginConfig   `flag:"plugin"`
 	Targets []TargetConfig `flag:"targets" desc:"target config"`
-}
-
-type PluginConfig struct {
-	Http  EnabledPlugin[http.Config]   `flag:"http"`
-	Kafka DisabledPlugin[kafka.Config] `flag:"kafka"`
-	Poll  EnabledPlugin[poll.Config]   `flag:"poll"`
-	SQS   DisabledPlugin[sqs.Config]   `flag:"sqs"`
-}
-
-type EnabledPlugin[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable plugin" default:"true"`
-	Config  T    `flag:"-"`
-}
-
-type DisabledPlugin[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable plugin" default:"false"`
-	Config  T    `flag:"-"`
 }
 
 type TargetConfig struct {
@@ -51,16 +36,45 @@ type TargetConfig struct {
 	Data json.RawMessage
 }
 
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return New(aio, metrics, c)
+}
+
+func (c *Config) NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan interface{}) (aio.SubsystemDST, error) {
+	panic("not implemented")
+}
+
 // Subsystem
 
 type Sender struct {
-	config  *Config
-	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
-	plugins []aio.Plugin
-	worker  *SenderWorker
+	config *Config
+	sq     chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
+	worker *SenderWorker
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config, plugins []aio.Plugin) (*Sender, error) {
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Sender, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
 	targets := map[string]*receiver.Recv{}
@@ -75,21 +89,20 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config, plugins []aio.Plug
 
 	worker := &SenderWorker{
 		sq:      sq,
-		plugins: map[string]aio.Plugin{},
+		plugins: map[string]plugins.Plugin{},
 		targets: targets,
 		aio:     a,
 		metrics: metrics,
 	}
 
-	for _, plugin := range plugins {
+	for _, plugin := range a.Plugins() {
 		worker.AddPlugin(plugin)
 	}
 
 	return &Sender{
-		config:  config,
-		sq:      sq,
-		worker:  worker,
-		plugins: plugins,
+		config: config,
+		sq:     sq,
+		worker: worker,
 	}, nil
 }
 
@@ -102,13 +115,6 @@ func (s *Sender) Kind() t_aio.Kind {
 }
 
 func (s *Sender) Start(errors chan<- error) error {
-	// start plugins
-	for _, plugin := range s.plugins {
-		if err := plugin.Start(errors); err != nil {
-			return err
-		}
-	}
-
 	// start worker
 	go s.worker.Start()
 
@@ -116,16 +122,7 @@ func (s *Sender) Start(errors chan<- error) error {
 }
 
 func (s *Sender) Stop() error {
-	// first close sq
 	close(s.sq)
-
-	// then stop plugins
-	for _, plugin := range s.plugins {
-		if err := plugin.Stop(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -144,7 +141,7 @@ func (s *Sender) Flush(t int64) {}
 
 type SenderWorker struct {
 	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	plugins map[string]aio.Plugin
+	plugins map[string]plugins.Plugin
 	targets map[string]*receiver.Recv
 	aio     aio.AIO
 	metrics *metrics.Metrics
@@ -154,7 +151,7 @@ func (w *SenderWorker) String() string {
 	return t_aio.Sender.String()
 }
 
-func (w *SenderWorker) AddPlugin(plugin aio.Plugin) {
+func (w *SenderWorker) AddPlugin(plugin plugins.Plugin) {
 	w.plugins[plugin.Type()] = plugin
 }
 
@@ -252,7 +249,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 
 	counter := w.metrics.AioInFlight.WithLabelValues(plugin.String())
 
-	ok := plugin.Enqueue(&aio.Message{
+	ok := plugin.Enqueue(&plugins.Message{
 		Type: sqe.Submission.Sender.Task.Mesg.Type,
 		Addr: recv.Data,
 		Head: sqe.Submission.Sender.Task.Mesg.Head,

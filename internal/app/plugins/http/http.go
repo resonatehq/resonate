@@ -9,10 +9,15 @@ import (
 	"net/http/httptrace"
 	"time"
 
-	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/go-viper/mapstructure/v2"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -22,6 +27,32 @@ type Config struct {
 	ConnTimeout time.Duration `flag:"conn-timeout" desc:"http connection timeout" default:"10s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type Http struct {
@@ -35,6 +66,30 @@ type Addr struct {
 
 type processor struct {
 	client *http.Client
+}
+
+func New(metrics *metrics.Metrics, config *Config) (*Http, error) {
+	proc := &processor{
+		client: &http.Client{
+			Timeout: config.Timeout,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: config.ConnTimeout,
+				}).DialContext,
+			},
+		},
+	}
+
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
+	return &Http{
+		Plugin: base.NewPlugin("http", baseConfig, metrics, proc, nil),
+	}, nil
 }
 
 func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
@@ -96,28 +151,4 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 
 	<-connected
 	return succeeded, nil
-}
-
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
-	proc := &processor{
-		client: &http.Client{
-			Timeout: config.Timeout,
-			Transport: &http.Transport{
-				DialContext: (&net.Dialer{
-					Timeout: config.ConnTimeout,
-				}).DialContext,
-			},
-		},
-	}
-
-	baseConfig := &base.BaseConfig{
-		Size:        config.Size,
-		Workers:     config.Workers,
-		TimeToRetry: config.TimeToRetry,
-		TimeToClaim: config.TimeToClaim,
-	}
-
-	return &Http{
-		Plugin: base.NewPlugin(a, "http", baseConfig, metrics, proc, nil),
-	}, nil
 }

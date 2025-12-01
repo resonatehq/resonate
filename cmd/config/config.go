@@ -1,145 +1,63 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
 	"os"
-	"reflect"
-	"strconv"
 	"strings"
-	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
-	kafkaPlugin "github.com/resonatehq/resonate/internal/app/plugins/kafka"
-	"github.com/resonatehq/resonate/internal/app/plugins/poll"
-	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/kafka"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
-type Config config[API, AIO]
-type ConfigDST config[APIDST, AIODST]
+// Config
 
-type t_api interface {
-	API | APIDST
-}
-
-type t_aio interface {
-	AIO | AIODST
-}
-
-type config[T t_api, U t_aio] struct {
+type Config struct {
 	System      system.Config `flag:"system"`
-	API         T             `flag:"api"`
-	AIO         U             `flag:"aio"`
+	API         API           `flag:"api"`
+	AIO         AIO           `flag:"aio"`
 	MetricsAddr string        `flag:"metrics-addr" desc:"prometheus metrics server address" default:":9090"`
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, tag string) error {
-	return Bind(cmd, c, vip, tag, "", "")
-}
+func (c *Config) Plugins() []plugin {
+	plugins := []plugin{}
+	plugins = append(plugins, c.API.Subsystems.AsPlugins()...)
+	plugins = append(plugins, c.AIO.Subsystems.AsPlugins()...)
+	plugins = append(plugins, c.AIO.Plugins.AsPlugins()...)
 
-func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
-	return Bind(cmd, c, vip, "dst", "", "")
+	return plugins
 }
 
 type API struct {
-	Size          int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	PublicKeyPath string        `flag:"auth-public-key" desc:"public key path used for jwt based authentication"`
-	Subsystems    APISubsystems `flag:"-"`
-}
-
-type APIDST struct {
-	Size       int              `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems APIDSTSubsystems `flag:"-"`
+	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	Auth       Auth          `flag:"auth"`
+	Subsystems APISubsystems `flag:"-"`
 }
 
 type AIO struct {
 	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
 	Subsystems AIOSubsystems `flag:"-"`
+	Plugins    AIOPlugins    `flag:"-"`
 }
 
-type AIODST struct {
-	Size       int              `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems AIODSTSubsystems `flag:"-"`
+type Auth struct {
+	PublicKey string `flag:"public-key" desc:"public key path used for jwt based authentication"`
 }
 
-type APISubsystems struct {
-	Http  EnabledSubsystem[http.Config]   `flag:"http"`
-	Grpc  EnabledSubsystem[grpc.Config]   `flag:"grpc"`
-	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
-}
-
-type AIOSubsystems struct {
-	Echo          DisabledSubsystem[echo.Config]     `flag:"echo"`
-	Router        EnabledSubsystem[router.Config]    `flag:"router"`
-	Sender        EnabledSubsystem[sender.Config]    `flag:"sender"`
-	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
-	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
-}
-
-type EnabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true"`
-	Config  T    `flag:"-"`
-}
-
-type DisabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false"`
-	Config  T    `flag:"-"`
-}
-
-func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
-	subsystems := []api.Subsystem{}
-	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	// Disable gRPC if basic auth is enabled for HTTP
-	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
-	if grpcEnabled {
-		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.API.Subsystems.Kafka.Enabled {
-		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	return subsystems, nil
-}
-
-func (c *Config) APIMiddleware() ([]api.Middleware, error) {
+func (a *API) Middleware() ([]api.Middleware, error) {
 	middleware := []api.Middleware{}
 
-	if c.API.PublicKeyPath != "" {
-		pem, err := os.ReadFile(c.API.PublicKeyPath)
+	if a.Auth.PublicKey != "" {
+		pem, err := os.ReadFile(a.Auth.PublicKey)
 		if err != nil {
 			return nil, err
 		}
@@ -151,320 +69,237 @@ func (c *Config) APIMiddleware() ([]api.Middleware, error) {
 	}
 
 	return middleware, nil
-
 }
 
-func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {
-	subsystems := []aio.Subsystem{}
-	if c.AIO.Subsystems.Echo.Enabled {
-		subsystem, err := echo.New(a, metrics, &c.AIO.Subsystems.Echo.Config)
-		if err != nil {
-			return nil, err
-		}
+// Plugins
 
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Sender.Enabled {
-		subsystem, err := sender.New(a, metrics, &c.AIO.Subsystems.Sender.Config, plugins)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	subsystem, err := c.store(a, metrics)
-	if err != nil {
-		return nil, err
-	}
-
-	subsystems = append(subsystems, subsystem)
-	return subsystems, nil
+type plugin interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string)
+	Decode(*viper.Viper, mapstructure.DecodeHookFunc) error
 }
 
-func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, string, error) {
-	plugins := []aio.Plugin{}
-	var pollAddr string
-
-	if c.AIO.Subsystems.Sender.Config.Plugins.Poll.Enabled {
-		plugin, err := poll.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Poll.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		pollAddr = plugin.Addr() // grab the address to pass to the API
-		plugins = append(plugins, plugin)
-	}
-	if c.AIO.Subsystems.Sender.Config.Plugins.Http.Enabled {
-		plugin, err := httpPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Http.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-	if c.AIO.Subsystems.Sender.Config.Plugins.SQS.Enabled {
-		plugin, err := sqs.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.SQS.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-	if c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Enabled {
-		plugin, err := kafkaPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Kafka.Config)
-		if err != nil {
-			return nil, "", err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-
-	return plugins, pollAddr, nil
+type enabledFlag struct {
+	key string
+	val bool
 }
 
-func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
-	if c.AIO.Subsystems.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
-	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
-	}
-
-	return nil, fmt.Errorf("no store enabled")
+type APISubsystems struct {
+	subsystems []*apiSubsystem `mapstructure:"-"`
 }
 
-type APIDSTSubsystems struct {
-	Http  DisabledSubsystem[http.Config]  `flag:"http"`
-	Grpc  DisabledSubsystem[grpc.Config]  `flag:"grpc"`
-	Kafka DisabledSubsystem[kafka.Config] `flag:"kafka"`
+func (a *APISubsystems) Add(name string, enabled bool, subsystem APISubsystem) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.subsystems = append(a.subsystems, &apiSubsystem{
+		prefix:    fmt.Sprintf("api-%s", name),
+		key:       fmt.Sprintf("api.subsystems.%s.config", kName),
+		name:      name,
+		enabled:   &enabledFlag{fmt.Sprintf("api.subsystems.%s.enabled", kName), enabled},
+		subsystem: subsystem,
+	})
 }
 
-type AIODSTSubsystems struct {
-	Router        EnabledSubsystem[router.Config]    `flag:"router"`
-	Sender        EnabledSubsystem[sender.ConfigDST] `flag:"sender"`
-	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
-	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
+func (a *APISubsystems) All() []*apiSubsystem {
+	return a.subsystems
 }
 
-func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
-	subsystems := []api.Subsystem{}
-	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	// Disable gRPC if basic auth is enabled for HTTP
-	grpcEnabled := c.API.Subsystems.Grpc.Enabled && len(c.API.Subsystems.Http.Config.Auth) == 0
-	if grpcEnabled {
-		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.API.Subsystems.Kafka.Enabled {
-		subsystem, err := kafka.New(a, &c.API.Subsystems.Kafka.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
+func (a *APISubsystems) AsPlugins() []plugin {
+	subsystems := []plugin{}
+	for _, s := range a.subsystems {
+		subsystems = append(subsystems, s)
 	}
 
-	return subsystems, nil
+	return subsystems
 }
 
-func (c *ConfigDST) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
-	subsystems := []aio.SubsystemDST{}
-	if c.AIO.Subsystems.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-	if c.AIO.Subsystems.Sender.Enabled {
-		subsystem, err := sender.NewDST(r, backchannel, &c.AIO.Subsystems.Sender.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		subsystems = append(subsystems, subsystem)
-	}
-
-	subsystem, err := c.store(a, metrics)
-	if err != nil {
-		return nil, err
-	}
-
-	subsystems = append(subsystems, subsystem)
-	return subsystems, nil
+type apiSubsystem struct {
+	subsystem APISubsystem
+	prefix    string
+	key       string
+	name      string
+	enabled   *enabledFlag
 }
 
-func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST, error) {
-	if c.AIO.Subsystems.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
-	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
-	}
-
-	return nil, fmt.Errorf("no store enabled")
+type APISubsystem interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(api.API, *metrics.Metrics) (api.Subsystem, error)
 }
 
-// Helper functions
+func (a *apiSubsystem) Name() string {
+	return a.name
+}
 
-// Bind binds configuration struct fields to cobra flags and viper config
-func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
-	v := reflect.ValueOf(cfg).Elem()
-	t := v.Type()
+func (a *apiSubsystem) Enabled() bool {
+	return a.enabled.val
+}
 
-	for i := range v.NumField() {
-		field := t.Field(i)
-		flag := field.Tag.Get("flag")
-		desc := field.Tag.Get("desc")
-		persistent := field.Tag.Get("persistent")
+func (a *apiSubsystem) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable subsystem")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
 
-		flags := cmd.Flags()
-		if persistent == "true" {
-			flags = cmd.PersistentFlags()
-		}
+	a.subsystem.Bind(cmd, flg, vip, name, a.prefix, a.key)
+}
 
-		var value string
-		if v := field.Tag.Get(tag); v != "" {
-			value = v
-		} else {
-			value = field.Tag.Get("default")
-		}
-
-		var n string
-		if fPrefix == "" {
-			n = flag
-		} else if flag == "-" {
-			n = fPrefix
-		} else {
-			n = fmt.Sprintf("%s-%s", fPrefix, flag)
-		}
-
-		var k string
-		if kPrefix == "" {
-			k = field.Name
-		} else {
-			k = fmt.Sprintf("%s.%s", kPrefix, field.Name)
-		}
-
-		switch field.Type.Kind() {
-		case reflect.String:
-			flags.String(n, value, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Bool:
-			flags.Bool(n, value == "true", desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Int:
-			if strings.Contains(value, ":") {
-				flag := util.NewRangeIntFlag(0, 0)
-				if err := flag.Set(value); err != nil {
-					return err
-				}
-
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			} else {
-				v, _ := strconv.Atoi(value)
-				flags.Int(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			}
-		case reflect.Int64:
-			if field.Type == reflect.TypeOf(time.Duration(0)) {
-				if strings.Contains(value, ":") {
-					flag := util.NewRangeDurationFlag(0, 0)
-					if err := flag.Set(value); err != nil {
-						return err
-					}
-
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				} else {
-					v, _ := time.ParseDuration(value)
-					flags.Duration(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				}
-			} else {
-				if strings.Contains(value, ":") {
-					flag := util.NewRangeInt64Flag(0, 0)
-					if err := flag.Set(value); err != nil {
-						return err
-					}
-
-					flags.Var(flag, n, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				} else {
-					v, _ := strconv.ParseInt(value, 10, 64)
-					flags.Int64(n, v, desc)
-					_ = vip.BindPFlag(k, flags.Lookup(n))
-				}
-			}
-		case reflect.Float64:
-			if strings.Contains(value, ":") {
-				flag := util.NewRangeFloat64Flag(0, 0)
-				if err := flag.Set(value); err != nil {
-					return err
-				}
-
-				flags.Var(flag, n, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			} else {
-				v, _ := strconv.ParseFloat(value, 64)
-				flags.Float64(n, v, desc)
-				_ = vip.BindPFlag(k, flags.Lookup(n))
-			}
-		case reflect.Slice:
-			// TODO: support additional slice types via flags
-			if field.Type != reflect.TypeOf([]string{}) {
-				continue
-			}
-
-			var v []string
-			if value == "" {
-				v = []string{}
-			} else {
-				v = []string{value}
-			}
-			flags.StringArray(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Map:
-			if field.Type != reflect.TypeOf(map[string]string{}) {
-				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
-			}
-			if value == "" {
-				value = "{}"
-			}
-			var v map[string]string
-			if err := json.Unmarshal([]byte(value), &v); err != nil {
-				return err
-			}
-			flags.StringToString(n, v, desc)
-			_ = vip.BindPFlag(k, flags.Lookup(n))
-		case reflect.Struct:
-			if err := Bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
-				return err
-			}
-		default:
-			panic(fmt.Sprintf("unsupported type %s", field.Type.Kind()))
-		}
+func (a *apiSubsystem) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
 	}
 
-	return nil
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	return a.subsystem.Decode(value, hooks)
+}
+
+func (a *apiSubsystem) New(api api.API, metrics *metrics.Metrics) (api.Subsystem, error) {
+	return a.subsystem.New(api, metrics)
+}
+
+type AIOSubsystems struct {
+	subsystems []*aioSubsystem `mapstructure:"-"`
+}
+
+func (a *AIOSubsystems) Add(name string, enabled bool, subsystem AIOSubsystem) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.subsystems = append(a.subsystems, &aioSubsystem{
+		subsystem: subsystem,
+		prefix:    fmt.Sprintf("aio-%s", name),
+		key:       fmt.Sprintf("aio.subsystems.%s.config", kName),
+		name:      name,
+		enabled:   &enabledFlag{fmt.Sprintf("aio.subsystems.%s.enabled", kName), enabled},
+	})
+}
+
+func (a *AIOSubsystems) All() []*aioSubsystem {
+	return a.subsystems
+}
+
+func (a *AIOSubsystems) AsPlugins() []plugin {
+	subsystems := []plugin{}
+	for _, s := range a.subsystems {
+		subsystems = append(subsystems, s)
+	}
+
+	return subsystems
+}
+
+type aioSubsystem struct {
+	subsystem AIOSubsystem
+	prefix    string
+	key       string
+	name      string
+	enabled   *enabledFlag
+}
+
+type AIOSubsystem interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(aio.AIO, *metrics.Metrics) (aio.Subsystem, error)
+	NewDST(aio.AIO, *metrics.Metrics, *rand.Rand, chan any) (aio.SubsystemDST, error)
+}
+
+func (a *aioSubsystem) Name() string {
+	return a.name
+}
+
+func (a *aioSubsystem) Enabled() bool {
+	return a.enabled.val
+}
+
+func (a *aioSubsystem) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable subsystem")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
+
+	a.subsystem.Bind(cmd, flg, vip, name, a.prefix, a.key)
+}
+
+func (a *aioSubsystem) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
+	}
+
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	return a.subsystem.Decode(value, hooks)
+}
+
+func (a *aioSubsystem) New(aio aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	return a.subsystem.New(aio, metrics)
+}
+
+func (a *aioSubsystem) NewDST(aio aio.AIO, metrics *metrics.Metrics, r *rand.Rand, c chan any) (aio.SubsystemDST, error) {
+	return a.subsystem.NewDST(aio, metrics, r, c)
+}
+
+type AIOPlugins struct {
+	plugins []*aioPlugin `mapstructure:"-"`
+}
+
+func (a *AIOPlugins) Add(name string, enabled bool, plugin AIOPlugin) {
+	kName := strings.ReplaceAll(name, "-", ".")
+	a.plugins = append(a.plugins, &aioPlugin{
+		plugin:  plugin,
+		prefix:  fmt.Sprintf("aio-%s", name),
+		key:     fmt.Sprintf("aio.plugins.%s.config", kName),
+		name:    name,
+		enabled: &enabledFlag{fmt.Sprintf("aio.plugins.%s.enabled", kName), enabled},
+	})
+}
+
+func (a *AIOPlugins) All() []*aioPlugin {
+	return a.plugins
+}
+
+func (a *AIOPlugins) AsPlugins() []plugin {
+	plugins := []plugin{}
+	for _, p := range a.plugins {
+		plugins = append(plugins, p)
+	}
+
+	return plugins
+}
+
+type aioPlugin struct {
+	plugin  AIOPlugin
+	prefix  string
+	key     string
+	name    string
+	enabled *enabledFlag
+}
+
+type AIOPlugin interface {
+	Bind(*cobra.Command, *pflag.FlagSet, *viper.Viper, string, string, string)
+	Decode(any, mapstructure.DecodeHookFunc) error
+	New(*metrics.Metrics) (plugins.Plugin, error)
+}
+
+func (a *aioPlugin) Name() string {
+	return a.name
+}
+
+func (a *aioPlugin) Enabled() bool {
+	return a.enabled.val
+}
+
+func (a *aioPlugin) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string) {
+	n := fmt.Sprintf("%s-enable", a.prefix)
+	flg.Bool(n, a.enabled.val, "enable plugin")
+	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
+
+	a.enabled.val = vip.GetBool(a.enabled.key)
+	a.plugin.Bind(cmd, flg, vip, name, a.prefix, a.key)
+}
+
+func (a *aioPlugin) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) error {
+	value, ok := util.Extract(vip.AllSettings(), a.key)
+	if !ok {
+		panic("plugin config not found")
+	}
+
+	return a.plugin.Decode(value, hooks)
+}
+
+func (a *aioPlugin) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return a.plugin.New(metrics)
 }
