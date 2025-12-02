@@ -52,7 +52,7 @@ func NewCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")
 	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
-	cmd.PersistentFlags().StringVarP(&token, "token", "T", "", "JWT bearer token")
+	cmd.PersistentFlags().StringVarP(&token, "token", "J", "", "JWT bearer token")
 
 	return cmd
 }

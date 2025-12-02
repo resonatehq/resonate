@@ -147,7 +147,7 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8001", "resonate server url")
 	cmd.Flags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.Flags().StringVarP(&password, "password", "P", "", "basic auth password")
-	cmd.Flags().StringVarP(&token, "token", "T", "", "JWT bearer token")
+	cmd.Flags().StringVarP(&token, "token", "J", "", "JWT bearer token")
 
 	cmd.Flags().SortFlags = false
 	_ = cmd.MarkFlagRequired("func")
