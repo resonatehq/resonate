@@ -287,7 +287,6 @@ func (a *aioPlugin) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Vipe
 	flg.Bool(n, a.enabled.val, "enable plugin")
 	_ = vip.BindPFlag(a.enabled.key, flg.Lookup(n))
 
-	a.enabled.val = vip.GetBool(a.enabled.key)
 	a.plugin.Bind(cmd, flg, vip, name, a.prefix, a.key)
 }
 
@@ -297,6 +296,7 @@ func (a *aioPlugin) Decode(vip *viper.Viper, hooks mapstructure.DecodeHookFunc) 
 		panic("plugin config not found")
 	}
 
+	a.enabled.val = vip.GetBool(a.enabled.key)
 	return a.plugin.Decode(value, hooks)
 }
 

@@ -16,7 +16,6 @@ import (
 	"github.com/resonatehq/resonate/cmd/util"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
-	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
@@ -30,13 +29,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type cmd func(*config.Config, *viper.Viper) *cobra.Command
+type cmd struct {
+	cmd        func(*config.Config, *viper.Viper) *cobra.Command
+	persistent bool
+}
+
+var devCmd = cmd{cmd: dev.NewCmd, persistent: false}
+var dstCmd = cmd{cmd: dst.RunDSTCmd, persistent: false}
+var migrateCmd = cmd{cmd: migrate.NewCmd, persistent: true}
+var serveCmd = cmd{cmd: serve.NewCmd, persistent: false}
 
 func TestConfig(t *testing.T) {
 	tests := []struct {
 		name     string
 		cmds     []cmd
-		pers     bool
 		file     string
 		args     []string
 		plugins  func(*config.Config)
@@ -44,7 +50,7 @@ func TestConfig(t *testing.T) {
 	}{
 		{
 			name: "default serve and dev",
-			cmds: []cmd{serve.NewCmd, dev.NewCmd},
+			cmds: []cmd{serveCmd, devCmd},
 			expected: &config.Config{
 				System: system.Config{
 					Url:                 "",
@@ -71,13 +77,12 @@ func TestConfig(t *testing.T) {
 		},
 		{
 			name:     "default migrate",
-			cmds:     []cmd{migrate.NewCmd},
-			pers:     true,
+			cmds:     []cmd{migrateCmd},
 			expected: &config.Config{}, // migrate only uses plugins
 		},
 		{
 			name: "config from file",
-			cmds: []cmd{serve.NewCmd, dev.NewCmd, dst.RunDSTCmd},
+			cmds: []cmd{serveCmd, devCmd, dstCmd},
 			file: `
 system:
   url: https://resonatehq.io:9000
@@ -122,7 +127,7 @@ logLevel: "warn"`,
 		},
 		{
 			name: "config from flags",
-			cmds: []cmd{serve.NewCmd, dev.NewCmd, dst.RunDSTCmd},
+			cmds: []cmd{serveCmd, devCmd, dstCmd},
 			args: []string{
 				"--system-url", "https://resonatehq.io:9001",
 				"--system-coroutine-max-size", "2",
@@ -164,7 +169,7 @@ logLevel: "warn"`,
 		},
 		{
 			name: "config flags take precedence",
-			cmds: []cmd{serve.NewCmd, dev.NewCmd, dst.RunDSTCmd},
+			cmds: []cmd{serveCmd, devCmd, dstCmd},
 			file: `
 system:
   url: https://resonatehq.io:9000
@@ -218,7 +223,7 @@ logLevel: "warn"`,
 		},
 		{
 			name: "with plugins serve",
-			cmds: []cmd{serve.NewCmd},
+			cmds: []cmd{serveCmd},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
 				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
@@ -228,7 +233,6 @@ logLevel: "warn"`,
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
 				cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
-				cfg.AIO.Plugins.Add("sqs", true, &sqs.Config{})
 			},
 			expected: &config.Config{
 				System: system.Config{
@@ -344,17 +348,6 @@ logLevel: "warn"`,
 								TimeToClaim:     1 * time.Minute,
 							},
 						},
-						{
-							name:    "sqs",
-							enabled: true,
-							config: &sqs.Config{
-								Size:        100,
-								Workers:     1,
-								Timeout:     30 * time.Second,
-								TimeToRetry: 15 * time.Second,
-								TimeToClaim: 0,
-							},
-						},
 					},
 				),
 				MetricsAddr: ":9090",
@@ -363,7 +356,7 @@ logLevel: "warn"`,
 		},
 		{
 			name: "with plugins dev",
-			cmds: []cmd{dev.NewCmd},
+			cmds: []cmd{devCmd},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
 				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
@@ -373,7 +366,6 @@ logLevel: "warn"`,
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
 				cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
-				cfg.AIO.Plugins.Add("sqs", true, &sqs.Config{})
 			},
 			expected: &config.Config{
 				System: system.Config{
@@ -489,17 +481,6 @@ logLevel: "warn"`,
 								TimeToClaim:     1 * time.Minute,
 							},
 						},
-						{
-							name:    "sqs",
-							enabled: true,
-							config: &sqs.Config{
-								Size:        100,
-								Workers:     1,
-								Timeout:     30 * time.Second,
-								TimeToRetry: 15 * time.Second,
-								TimeToClaim: 0,
-							},
-						},
 					},
 				),
 				MetricsAddr: ":9090",
@@ -508,8 +489,7 @@ logLevel: "warn"`,
 		},
 		{
 			name: "with plugins migrate",
-			cmds: []cmd{migrate.NewCmd},
-			pers: true,
+			cmds: []cmd{migrateCmd},
 			plugins: func(cfg *config.Config) {
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
@@ -549,6 +529,735 @@ logLevel: "warn"`,
 				),
 			},
 		},
+		{
+			name: "with serve plugins switched",
+			cmds: []cmd{serveCmd},
+			args: []string{
+				"--api-http-enable=false",
+				"--api-grpc-enable=true",
+				"--aio-store-sqlite-enable=false",
+				"--aio-store-postgres-enable=true",
+				"--aio-http-enable=false",
+				"--aio-poll-enable=true",
+			},
+			plugins: func(cfg *config.Config) {
+				cfg.API.Subsystems.Add("http", true, &http.Config{})
+				cfg.API.Subsystems.Add("grpc", false, &grpc.Config{})
+				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
+				cfg.AIO.Plugins.Add("poll", false, &poll.Config{})
+			},
+			expected: &config.Config{
+				System: system.Config{
+					Url:                 "",
+					CoroutineMaxSize:    1000,
+					SubmissionBatchSize: 1000,
+					CompletionBatchSize: 1000,
+					PromiseBatchSize:    100,
+					ScheduleBatchSize:   100,
+					TaskBatchSize:       100,
+					SignalTimeout:       1 * time.Second,
+				},
+				API: withAPISubsystems(
+					config.API{
+						Size: 1000,
+						Auth: config.Auth{
+							PublicKey: "",
+						},
+					}, []plugin[config.APISubsystem]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &http.Config{
+								Addr:          ":8001",
+								Auth:          map[string]string{},
+								Cors:          http.Cors{AllowOrigins: []string{}},
+								Timeout:       10 * time.Second,
+								TaskFrequency: 1 * time.Minute,
+							},
+						},
+						{
+							name:    "grpc",
+							enabled: true,
+							config: &grpc.Config{
+								Addr: ":50051",
+							},
+						},
+					},
+				),
+				AIO: withAIOSubsystemsAndPlugins(
+					config.AIO{
+						Size: 1000,
+					},
+					[]plugin[config.AIOSubsystem]{
+						{
+							name:    "store-sqlite",
+							enabled: false,
+							config: &sqlite.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Path:      "resonate.db",
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+						{
+							name:    "store-postgres",
+							enabled: true,
+							config: &postgres.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Workers:   1,
+								Host:      "localhost",
+								Port:      "5432",
+								Database:  "resonate",
+								Query:     map[string]string{},
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+					},
+					[]plugin[config.AIOPlugin]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &httpPlugin.Config{
+								Size:        100,
+								Workers:     3,
+								Timeout:     3 * time.Minute,
+								ConnTimeout: 10 * time.Second,
+								TimeToRetry: 15 * time.Second,
+								TimeToClaim: 1 * time.Minute,
+							},
+						},
+						{
+							name:    "poll",
+							enabled: true,
+							config: &poll.Config{
+								Size:            100,
+								BufferSize:      100,
+								MaxConnections:  1000,
+								Addr:            ":8002",
+								Cors:            poll.Cors{AllowOrigins: []string{}},
+								Timeout:         10 * time.Second,
+								DisconnectAfter: 0,
+								Auth:            map[string]string{},
+								TimeToRetry:     15 * time.Second,
+								TimeToClaim:     1 * time.Minute,
+							},
+						},
+					},
+				),
+				MetricsAddr: ":9090",
+				LogLevel:    "info",
+			},
+		},
+		{
+			name: "with dev plugins switched",
+			cmds: []cmd{devCmd},
+			args: []string{
+				"--api-http-enable=false",
+				"--api-grpc-enable=true",
+				"--aio-store-sqlite-enable=false",
+				"--aio-store-postgres-enable=true",
+				"--aio-http-enable=false",
+				"--aio-poll-enable=true",
+			},
+			plugins: func(cfg *config.Config) {
+				cfg.API.Subsystems.Add("http", true, &http.Config{})
+				cfg.API.Subsystems.Add("grpc", false, &grpc.Config{})
+				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
+				cfg.AIO.Plugins.Add("poll", false, &poll.Config{})
+			},
+			expected: &config.Config{
+				System: system.Config{
+					Url:                 "",
+					CoroutineMaxSize:    1000,
+					SubmissionBatchSize: 1000,
+					CompletionBatchSize: 1000,
+					PromiseBatchSize:    100,
+					ScheduleBatchSize:   100,
+					TaskBatchSize:       100,
+					SignalTimeout:       1 * time.Second,
+				},
+				API: withAPISubsystems(
+					config.API{
+						Size: 1000,
+						Auth: config.Auth{
+							PublicKey: "",
+						},
+					}, []plugin[config.APISubsystem]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &http.Config{
+								Addr:          ":8001",
+								Auth:          map[string]string{},
+								Cors:          http.Cors{AllowOrigins: []string{}},
+								Timeout:       10 * time.Second,
+								TaskFrequency: 1 * time.Minute,
+							},
+						},
+						{
+							name:    "grpc",
+							enabled: true,
+							config: &grpc.Config{
+								Addr: ":50051",
+							},
+						},
+					},
+				),
+				AIO: withAIOSubsystemsAndPlugins(
+					config.AIO{
+						Size: 1000,
+					},
+					[]plugin[config.AIOSubsystem]{
+						{
+							name:    "store-sqlite",
+							enabled: false,
+							config: &sqlite.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Path:      ":memory:",
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+						{
+							name:    "store-postgres",
+							enabled: true,
+							config: &postgres.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Workers:   1,
+								Host:      "localhost",
+								Port:      "5432",
+								Database:  "resonate",
+								Query:     map[string]string{"sslmode": "disable"},
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+					},
+					[]plugin[config.AIOPlugin]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &httpPlugin.Config{
+								Size:        100,
+								Workers:     3,
+								Timeout:     3 * time.Minute,
+								ConnTimeout: 10 * time.Second,
+								TimeToRetry: 15 * time.Second,
+								TimeToClaim: 1 * time.Minute,
+							},
+						},
+						{
+							name:    "poll",
+							enabled: true,
+							config: &poll.Config{
+								Size:            100,
+								BufferSize:      100,
+								MaxConnections:  1000,
+								Addr:            ":8002",
+								Cors:            poll.Cors{AllowOrigins: []string{}},
+								Timeout:         10 * time.Second,
+								DisconnectAfter: 0,
+								Auth:            map[string]string{},
+								TimeToRetry:     15 * time.Second,
+								TimeToClaim:     1 * time.Minute,
+							},
+						},
+					},
+				),
+				MetricsAddr: ":9090",
+				LogLevel:    "info",
+			},
+		},
+		{
+			name: "with migrate plugins switched",
+			cmds: []cmd{migrateCmd},
+			args: []string{
+				"--aio-store-sqlite-enable=false",
+				"--aio-store-postgres-enable=true",
+			},
+			plugins: func(cfg *config.Config) {
+				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+			},
+			expected: &config.Config{
+				AIO: withAIOSubsystemsAndPlugins(
+					config.AIO{},
+					[]plugin[config.AIOSubsystem]{
+						{
+							name:    "store-sqlite",
+							enabled: false,
+							config: &sqlite.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Path:      "resonate.db",
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+						{
+							name:    "store-postgres",
+							enabled: true,
+							config: &postgres.Config{
+								Size:      1000,
+								BatchSize: 1000,
+								Workers:   1,
+								Host:      "localhost",
+								Port:      "5432",
+								Database:  "resonate",
+								Query:     map[string]string{},
+								TxTimeout: 10 * time.Second,
+								Reset:     false,
+							},
+						},
+					},
+					nil,
+				),
+			},
+		},
+		{
+			name: "config from file with plugins",
+			cmds: []cmd{serveCmd, devCmd, dstCmd},
+			file: `
+system:
+  url: https://resonatehq.io:9000
+  coroutineMaxSize: 1
+  submissionBatchSize: 2
+  completionBatchSize: 3
+  promiseBatchSize: 4
+  scheduleBatchSize: 5
+  taskBatchSize: 6
+  signalTimeout: 7s
+api:
+  size: 1
+  auth:
+    publicKey: "key1.pub"
+  subsystems:
+    http:
+      enabled: true
+      config:
+        addr: ":9998"
+        auth:
+          foo: bar
+          baz: qux
+        cors:
+          allowOrigins:
+          - "https://example1.com"
+          - "https://example2.com"
+        timeout: 15s
+        taskFrequency: 2m
+    grpc:
+      enabled: false
+      config:
+        addr: ":9999"
+aio:
+  size: 2
+  subsystems:
+    store:
+      sqlite:
+        enabled: true
+        config:
+          size: 3
+          batchSize: 4
+          path: "alt.db"
+          txTimeout: 5s
+          reset: true
+      postgres:
+        enabled: false
+        config:
+          size: 6
+          batchSize: 7
+          workers: 8
+          host: "postgres.local"
+          port: "9999"
+          database: "alt"
+          query:
+            sslmode: "enable"
+          txTimeout: 11s
+          reset: true
+  plugins:
+    http:
+      enabled: true
+      config:
+        size: 12
+        workers: 13
+        timeout: 13s
+        connTimeout: 15s
+        timeToRetry: 16s
+        timeToClaim: 17m
+    poll:
+        enabled: false
+        config:
+          size: 18
+          bufferSize: 19
+          maxConnections: 20
+          addr: ":2121"
+          cors:
+            allowOrigins: []
+          timeout: 22s
+          disconnectAfter: 23m
+          auth: {}
+          timeToRetry: 24s
+          timeToClaim: 25m
+metricsAddr: "localhost:8080"
+logLevel: "warn"`,
+			plugins: func(cfg *config.Config) {
+				cfg.API.Subsystems.Add("http", true, &http.Config{})
+				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
+				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
+				cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
+			},
+			expected: &config.Config{
+				System: system.Config{
+					Url:                 "https://resonatehq.io:9000",
+					CoroutineMaxSize:    1,
+					SubmissionBatchSize: 2,
+					CompletionBatchSize: 3,
+					PromiseBatchSize:    4,
+					ScheduleBatchSize:   5,
+					TaskBatchSize:       6,
+					SignalTimeout:       7 * time.Second,
+				},
+				API: withAPISubsystems(
+					config.API{
+						Size: 1,
+						Auth: config.Auth{
+							PublicKey: "key1.pub",
+						},
+					}, []plugin[config.APISubsystem]{
+						{
+							name:    "http",
+							enabled: true,
+							config: &http.Config{
+								Addr: ":9998",
+								Auth: map[string]string{
+									"foo": "bar",
+									"baz": "qux",
+								},
+								Cors: http.Cors{
+									AllowOrigins: []string{
+										"https://example1.com",
+										"https://example2.com",
+									},
+								},
+								Timeout:       15 * time.Second,
+								TaskFrequency: 2 * time.Minute,
+							},
+						},
+						{
+							name:    "grpc",
+							enabled: false,
+							config: &grpc.Config{
+								Addr: ":9999",
+							},
+						},
+					},
+				),
+				AIO: withAIOSubsystemsAndPlugins(
+					config.AIO{
+						Size: 2,
+					},
+					[]plugin[config.AIOSubsystem]{
+						{
+							name:    "store-sqlite",
+							enabled: true,
+							config: &sqlite.Config{
+								Size:      3,
+								BatchSize: 4,
+								Path:      "alt.db",
+								TxTimeout: 5 * time.Second,
+								Reset:     true,
+							},
+						},
+						{
+							name:    "store-postgres",
+							enabled: false,
+							config: &postgres.Config{
+								Size:      6,
+								BatchSize: 7,
+								Workers:   8,
+								Host:      "postgres.local",
+								Port:      "9999",
+								Database:  "alt",
+								Query:     map[string]string{"sslmode": "enable"},
+								TxTimeout: 11 * time.Second,
+								Reset:     true,
+							},
+						},
+					},
+					[]plugin[config.AIOPlugin]{
+						{
+							name:    "http",
+							enabled: true,
+							config: &httpPlugin.Config{
+								Size:        12,
+								Workers:     13,
+								Timeout:     13 * time.Second,
+								ConnTimeout: 15 * time.Second,
+								TimeToRetry: 16 * time.Second,
+								TimeToClaim: 17 * time.Minute,
+							},
+						},
+						{
+							name:    "poll",
+							enabled: false,
+							config: &poll.Config{
+								Size:            18,
+								BufferSize:      19,
+								MaxConnections:  20,
+								Addr:            ":2121",
+								Cors:            poll.Cors{AllowOrigins: []string{}},
+								Timeout:         22 * time.Second,
+								DisconnectAfter: 23 * time.Minute,
+								Auth:            map[string]string{},
+								TimeToRetry:     24 * time.Second,
+								TimeToClaim:     25 * time.Minute,
+							},
+						},
+					},
+				),
+				MetricsAddr: "localhost:8080",
+				LogLevel:    "warn",
+			},
+		},
+		{
+			name: "config flags take precedence with plugins",
+			cmds: []cmd{serveCmd, devCmd, dstCmd},
+			file: `
+system:
+  url: https://resonatehq.io:9000
+  coroutineMaxSize: 1
+  submissionBatchSize: 2
+  completionBatchSize: 3
+  promiseBatchSize: 4
+  scheduleBatchSize: 5
+  taskBatchSize: 6
+  signalTimeout: 7s
+api:
+  size: 1
+  auth:
+    publicKey: "key1.pub"
+  subsystems:
+    http:
+      enabled: true
+      config:
+        addr: ":9998"
+        auth:
+          foo: bar
+          baz: qux
+        cors:
+          allowOrigins:
+          - "https://example1.com"
+          - "https://example2.com"
+        timeout: 15s
+        taskFrequency: 2m
+    grpc:
+      enabled: false
+      config:
+        addr: ":9999"
+aio:
+  size: 2
+  subsystems:
+    store:
+      sqlite:
+        enabled: true
+        config:
+          size: 3
+          batchSize: 4
+          path: "alt.db"
+          txTimeout: 5s
+          reset: true
+      postgres:
+        enabled: false
+        config:
+          size: 6
+          batchSize: 7
+          workers: 8
+          host: "postgres.local"
+          port: "9999"
+          database: "alt"
+          query:
+            sslmode: "enable"
+          txTimeout: 11s
+          reset: true
+  plugins:
+    http:
+      enabled: true
+      config:
+        size: 12
+        workers: 13
+        timeout: 13s
+        connTimeout: 15s
+        timeToRetry: 16s
+        timeToClaim: 17m
+    poll:
+        enabled: false
+        config:
+          size: 18
+          bufferSize: 19
+          maxConnections: 20
+          addr: ":2121"
+          cors:
+            allowOrigins: []
+          timeout: 22s
+          disconnectAfter: 23m
+          auth: {}
+          timeToRetry: 24s
+          timeToClaim: 25m
+metricsAddr: "localhost:8080"
+logLevel: "warn"`,
+			args: []string{
+				"--api-http-enable=false",
+				"--api-http-auth", "x=y",
+				"--api-http-timeout", "1h",
+				"--api-grpc-enable=true",
+				"--aio-store-sqlite-enable=false",
+				"--aio-store-sqlite-batch-size", "10",
+				"--aio-store-sqlite-tx-timeout", "20s",
+				"--aio-store-postgres-enable=true",
+				"--aio-store-postgres-batch-size", "10",
+				"--aio-store-postgres-host", "postgres.remote",
+				"--aio-store-postgres-database", "postgres",
+				"--aio-store-postgres-tx-timeout", "11h",
+				"--aio-http-enable=false",
+				"--aio-http-size", "100",
+				"--aio-http-ttr", "1m",
+				"--aio-http-ttc", "2m",
+				"--aio-poll-enable=true",
+				"--aio-poll-size", "1000",
+				"--aio-poll-ttr", "1h",
+				"--aio-poll-ttc", "2h",
+			},
+			plugins: func(cfg *config.Config) {
+				cfg.API.Subsystems.Add("http", true, &http.Config{})
+				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
+				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
+				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
+				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
+				cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
+			},
+			expected: &config.Config{
+				System: system.Config{
+					Url:                 "https://resonatehq.io:9000",
+					CoroutineMaxSize:    1,
+					SubmissionBatchSize: 2,
+					CompletionBatchSize: 3,
+					PromiseBatchSize:    4,
+					ScheduleBatchSize:   5,
+					TaskBatchSize:       6,
+					SignalTimeout:       7 * time.Second,
+				},
+				API: withAPISubsystems(
+					config.API{
+						Size: 1,
+						Auth: config.Auth{
+							PublicKey: "key1.pub",
+						},
+					}, []plugin[config.APISubsystem]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &http.Config{
+								Addr: ":9998",
+								Auth: map[string]string{
+									"x": "y",
+								},
+								Cors: http.Cors{
+									AllowOrigins: []string{
+										"https://example1.com",
+										"https://example2.com",
+									},
+								},
+								Timeout:       1 * time.Hour,
+								TaskFrequency: 2 * time.Minute,
+							},
+						},
+						{
+							name:    "grpc",
+							enabled: true,
+							config: &grpc.Config{
+								Addr: ":9999",
+							},
+						},
+					},
+				),
+				AIO: withAIOSubsystemsAndPlugins(
+					config.AIO{
+						Size: 2,
+					},
+					[]plugin[config.AIOSubsystem]{
+						{
+							name:    "store-sqlite",
+							enabled: false,
+							config: &sqlite.Config{
+								Size:      3,
+								BatchSize: 10,
+								Path:      "alt.db",
+								TxTimeout: 20 * time.Second,
+								Reset:     true,
+							},
+						},
+						{
+							name:    "store-postgres",
+							enabled: true,
+							config: &postgres.Config{
+								Size:      6,
+								BatchSize: 10,
+								Workers:   8,
+								Host:      "postgres.remote",
+								Port:      "9999",
+								Database:  "postgres",
+								Query:     map[string]string{"sslmode": "enable"},
+								TxTimeout: 11 * time.Hour,
+								Reset:     true,
+							},
+						},
+					},
+					[]plugin[config.AIOPlugin]{
+						{
+							name:    "http",
+							enabled: false,
+							config: &httpPlugin.Config{
+								Size:        100,
+								Workers:     13,
+								Timeout:     13 * time.Second,
+								ConnTimeout: 15 * time.Second,
+								TimeToRetry: 1 * time.Minute,
+								TimeToClaim: 2 * time.Minute,
+							},
+						},
+						{
+							name:    "poll",
+							enabled: true,
+							config: &poll.Config{
+								Size:            1000,
+								BufferSize:      19,
+								MaxConnections:  20,
+								Addr:            ":2121",
+								Cors:            poll.Cors{AllowOrigins: []string{}},
+								Timeout:         22 * time.Second,
+								DisconnectAfter: 23 * time.Minute,
+								Auth:            map[string]string{},
+								TimeToRetry:     1 * time.Hour,
+								TimeToClaim:     2 * time.Hour,
+							},
+						},
+					},
+				),
+				MetricsAddr: "localhost:8080",
+				LogLevel:    "warn",
+			},
+		},
 	}
 
 	hooks := mapstructure.ComposeDecodeHookFunc(
@@ -560,23 +1269,23 @@ logLevel: "warn"`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, cmdFunc := range tt.cmds {
+			for _, c := range tt.cmds {
 				cfg := &config.Config{}
 				if tt.plugins != nil {
 					tt.plugins(cfg)
 				}
 
 				vip := viper.New()
-				cmd := cmdFunc(cfg, vip)
+				cmd := c.cmd(cfg, vip)
 
 				t.Run(cmd.Name(), func(t *testing.T) {
 					flags := cmd.Flags()
-					if tt.pers {
+					if c.persistent {
 						flags = cmd.PersistentFlags()
 					}
 
 					prerun := cmd.PreRunE
-					if tt.pers {
+					if c.persistent {
 						prerun = cmd.PersistentPreRunE
 					}
 

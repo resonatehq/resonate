@@ -99,9 +99,6 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
 	_ = viper.BindPFlag("ignore-asserts", cmd.Flags().Lookup("ignore-asserts"))
 
-	// maintain defined order of flags
-	cmd.Flags().SortFlags = false
-
 	return cmd
 }
 

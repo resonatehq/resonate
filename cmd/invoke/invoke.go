@@ -143,7 +143,6 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.Flags().StringVarP(&password, "password", "P", "", "basic auth password")
 
-	cmd.Flags().SortFlags = false
 	_ = cmd.MarkFlagRequired("func")
 
 	return cmd
