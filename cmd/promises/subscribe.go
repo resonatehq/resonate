@@ -85,9 +85,9 @@ func CreateSubscriptionCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&id, "id", "", "subscription id")
+	cmd.Flags().StringVarP(&id, "id", "i", "", "subscription id")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 0, "task timeout")
 	cmd.Flags().StringVar(&recvStr, "recv", "default", "task receiver")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "task timeout")
 
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("timeout")

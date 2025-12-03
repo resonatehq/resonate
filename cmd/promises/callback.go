@@ -85,9 +85,9 @@ func CreatePromiseCallbackCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&rootPromiseId, "root-promise-id", "", "root promise id")
+	cmd.Flags().StringVarP(&rootPromiseId, "root-promise-id", "p", "", "root promise id")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 0, "task timeout")
 	cmd.Flags().StringVar(&recvStr, "recv", "default", "task receiver")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "task timeout")
 
 	_ = cmd.MarkFlagRequired("root-promise-id")
 	_ = cmd.MarkFlagRequired("timeout")

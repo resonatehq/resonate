@@ -84,11 +84,11 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 	}
 
 	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 0, "promise timeout")
-	cmd.Flags().StringToStringVarP(&headers, "header", "H", map[string]string{}, "promise param header")
-	cmd.Flags().StringVarP(&data, "data", "D", "", "promise param data")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "promise tags")
-	cmd.Flags().StringVarP(&idempotencyKey, "idempotency-key", "i", "", "idempotency key")
-	cmd.Flags().BoolVarP(&strict, "strict", "s", true, "strict mode")
+	cmd.Flags().StringToStringVar(&headers, "header", map[string]string{}, "promise param header")
+	cmd.Flags().StringVar(&data, "data", "", "promise param data")
+	cmd.Flags().StringToStringVar(&tags, "tag", map[string]string{}, "promise tags")
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "idempotency key")
+	cmd.Flags().BoolVar(&strict, "strict", true, "strict mode")
 
 	_ = cmd.MarkFlagRequired("timeout")
 

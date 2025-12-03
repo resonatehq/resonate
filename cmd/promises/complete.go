@@ -90,13 +90,10 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 			},
 		}
 
-		cmd.Flags().StringToStringVarP(&headers, "header", "H", map[string]string{}, "promise value header")
-		cmd.Flags().StringVarP(&data, "data", "D", "", "promise value data")
-		cmd.Flags().StringVarP(&idempotencyKey, "idempotency-key", "i", "", "idempotency key")
-		cmd.Flags().BoolVarP(&strict, "strict", "s", true, "strict mode")
-
-		_ = cmd.MarkFlagRequired("id")
-		_ = cmd.MarkFlagRequired("state")
+		cmd.Flags().StringToStringVar(&headers, "header", map[string]string{}, "promise value header")
+		cmd.Flags().StringVar(&data, "data", "", "promise value data")
+		cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "idempotency key")
+		cmd.Flags().BoolVar(&strict, "strict", true, "strict mode")
 
 		cmds[i] = cmd
 	}

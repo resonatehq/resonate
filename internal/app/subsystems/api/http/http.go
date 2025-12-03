@@ -206,7 +206,7 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 			if auth := c.GetString("authorization"); auth != "" {
 				metadata["authorization"] = auth
 			}
-			_, err := server.api.Process("", &t_api.Request{
+			_, err := server.api.Process(c.GetHeader("RequestId"), &t_api.Request{
 				Metadata: metadata,
 				Payload:  &t_api.NoopRequest{},
 			})
