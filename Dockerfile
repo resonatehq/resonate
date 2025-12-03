@@ -1,12 +1,12 @@
-# Build. 
+# Build.
 FROM cgr.dev/chainguard/go AS builder
 
 WORKDIR /app
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -o resonate . 
+RUN CGO_ENABLED=1 GOOS=linux go build -tags=all -o resonate .
 
-# Distribute. 
+# Distribute.
 FROM cgr.dev/chainguard/glibc-dynamic
 
 WORKDIR /app
@@ -18,4 +18,3 @@ EXPOSE 50051
 
 #nosemgrep
 ENTRYPOINT ["./resonate"]
-

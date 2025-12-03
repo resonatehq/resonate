@@ -39,7 +39,7 @@ jobs:
       - name: Build resonate
         if: steps.cache.outputs.cache-hit != 'true' # Only run if cache missed
         run: |
-          go build -o resonate main.go
+          go build -o resonate .
 
       - name: Save resonate to cache
         if: steps.cache.outputs.cache-hit != 'true' # Only save if cache was missed
