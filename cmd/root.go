@@ -39,7 +39,6 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Create config
 	cfg := &config.Config{}
-	vip := viper.New()
 
 	// Add Subsystems
 	cfg.API.Subsystems.Add("http", true, &http.Config{})
@@ -57,14 +56,14 @@ func init() {
 	cfg.AIO.Plugins.Add("kafka", false, &kafkaPlugin.Config{})
 
 	// Add Subcommands
-	rootCmd.AddCommand(dev.NewCmd(cfg, vip))
+	rootCmd.AddCommand(dev.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
-	rootCmd.AddCommand(migrate.NewCmd(cfg, vip))
+	rootCmd.AddCommand(migrate.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
-	rootCmd.AddCommand(serve.NewCmd(cfg, vip))
+	rootCmd.AddCommand(serve.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(tasks.NewCmd())
 	rootCmd.AddCommand(tree.NewCmd())
 

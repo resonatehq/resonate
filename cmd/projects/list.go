@@ -1,7 +1,6 @@
 package projects
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,7 +30,7 @@ func ListProjectCmd() *cobra.Command {
 				templates = filterByLang(templates, lang)
 			}
 
-			display(templates)
+			display(cmd, templates)
 			return nil
 		},
 	}
@@ -43,12 +42,12 @@ func ListProjectCmd() *cobra.Command {
 	return cmd
 }
 
-func display(templates Projects) {
-	fmt.Printf("\n✨ Available templates ✨\n\n")
+func display(cmd *cobra.Command, templates Projects) {
+	cmd.Printf("\n✨ Available templates ✨\n\n")
 	for name, t := range templates {
-		fmt.Printf("✨ %s\n\n\t%s\n\n", name, t.Desc)
-		fmt.Printf("\tTo use this template, run:\n\n")
-		fmt.Printf("\tresonate project create --name your-project --template %s\n\n", name)
+		cmd.Printf("✨ %s\n\n\t%s\n\n", name, t.Desc)
+		cmd.Printf("\tTo use this template, run:\n\n")
+		cmd.Printf("\tresonate project create --name your-project --template %s\n\n", name)
 	}
 }
 
