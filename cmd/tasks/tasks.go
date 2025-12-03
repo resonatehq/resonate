@@ -12,6 +12,7 @@ func NewCmd() *cobra.Command {
 		server   string
 		username string
 		password string
+		token    string
 	)
 
 	cmd := &cobra.Command{
@@ -24,6 +25,9 @@ func NewCmd() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
+			}
+			if token != "" {
+				c.SetBearerToken(token)
 			}
 			return c.Setup(server)
 		},
@@ -38,6 +42,7 @@ func NewCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "Resonate server URL")
 	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "Basic auth username")
 	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "Basic auth password")
+	cmd.PersistentFlags().StringVarP(&token, "token", "J", "", "JWT bearer token")
 
 	return cmd
 }

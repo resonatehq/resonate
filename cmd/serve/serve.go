@@ -215,6 +215,7 @@ func Serve(cfg *config.Config) error {
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
 	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+	system.AddOnRequest(t_api.Noop, coroutines.Noop)
 
 	// background coroutines
 	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
