@@ -53,7 +53,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().StringVarP(&pid, "pid", "p", "default", "claimant pid")
+	cmd.Flags().StringVar(&pid, "pid", "default", "claimant pid")
 
 	return cmd
 }

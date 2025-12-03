@@ -66,7 +66,6 @@ func CompleteTaskCmd(c client.Client) *cobra.Command {
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "task counter")
 
 	// Mark flags as required
-	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("counter")
 
 	return cmd

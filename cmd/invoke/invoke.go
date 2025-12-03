@@ -43,6 +43,7 @@ func NewCmd() *cobra.Command {
 		server   string
 		username string
 		password string
+		token    string
 	)
 
 	cmd := &cobra.Command{
@@ -52,6 +53,9 @@ func NewCmd() *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, cmdArgs []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
+			}
+			if token != "" {
+				c.SetBearerToken(token)
 			}
 
 			return c.Setup(server)
@@ -132,16 +136,18 @@ func NewCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&funcName, "func", "", "function to invoke")
-	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be provided multiple times")
-	cmd.Flags().StringVar(&jsonArgs, "json-args", "", "function arguments as json array")
-	cmd.Flags().IntVar(&version, "version", 1, "function version")
-	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "promise timeout")
-	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
-	cmd.Flags().DurationVar(&delay, "delay", 0, "promise delay")
-	cmd.Flags().StringVar(&server, "server", "http://localhost:8001", "resonate server url")
+	cmd.Flags().StringVarP(&server, "server", "S", "http://localhost:8001", "resonate server url")
+	cmd.Flags().StringVarP(&token, "token", "T", "", "JWT bearer token")
 	cmd.Flags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.Flags().StringVarP(&password, "password", "P", "", "basic auth password")
+
+	cmd.Flags().StringVarP(&funcName, "func", "f", "", "function to invoke")
+	cmd.Flags().StringArrayVar(&args, "arg", []string{}, "function argument, can be provided multiple times")
+	cmd.Flags().StringVar(&jsonArgs, "json-args", "", "function arguments as json array")
+	cmd.Flags().IntVar(&version, "version", 1, "function version")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", time.Hour, "promise timeout")
+	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
+	cmd.Flags().DurationVar(&delay, "delay", 0, "promise delay")
 
 	_ = cmd.MarkFlagRequired("func")
 

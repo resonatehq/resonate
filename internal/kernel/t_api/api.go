@@ -32,6 +32,9 @@ const (
 
 	// Echo
 	Echo
+
+	// Noop
+	Noop
 )
 
 func (k Kind) String() string {
@@ -78,6 +81,9 @@ func (k Kind) String() string {
 	// ECHO
 	case Echo:
 		return "Echo"
+	// NOOP
+	case Noop:
+		return "Noop"
 	default:
 		panic("invalid api")
 	}

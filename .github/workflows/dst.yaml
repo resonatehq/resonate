@@ -74,11 +74,11 @@ jobs:
         run: [1, 2]
 
     env:
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_dst"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_HOST: "localhost"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PORT: "5432"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME: "username"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD: "password"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE: "resonate_dst"
 
     services:
       postgres:
@@ -87,9 +87,9 @@ jobs:
         # see: https://github.com/actions/runner/issues/822
         image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
-          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
-          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
+          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s

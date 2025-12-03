@@ -12,6 +12,7 @@ func NewCmd() *cobra.Command {
 		server   string
 		username string
 		password string
+		token    string
 	)
 
 	cmd := &cobra.Command{
@@ -25,6 +26,10 @@ func NewCmd() *cobra.Command {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
+			if token != "" {
+				c.SetBearerToken(token)
+			}
+
 			return c.Setup(server)
 		},
 	}
@@ -35,9 +40,10 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(HeartbeatTaskCmd(c)) // Heartbeat task subcommand
 
 	// Flags
-	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "Resonate server URL")
-	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "Basic auth username")
-	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "Basic auth password")
+	cmd.PersistentFlags().StringVarP(&server, "server", "S", "http://localhost:8001", "resonate url")
+	cmd.PersistentFlags().StringVarP(&token, "token", "T", "", "JWT bearer token")
+	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "basic auth username")
+	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
 
 	return cmd
 }

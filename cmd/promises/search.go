@@ -92,10 +92,10 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&state, "state", "s", "", "promise state, can be one of: pending, resolved, rejected")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "promise tags")
-	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "results per page")
-	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "pagination cursor")
+	cmd.Flags().StringVar(&state, "state", "", "promise state, can be one of: pending, resolved, rejected")
+	cmd.Flags().StringToStringVar(&tags, "tag", map[string]string{}, "promise tags")
+	cmd.Flags().IntVar(&limit, "limit", 100, "results per page")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "pagination cursor")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output format, can be one of: json")
 
 	return cmd

@@ -27,14 +27,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+var cfg = &config.Config{}
+
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
 	Short:   "Resonate: distributed async await",
 	Version: internal.Version(),
 }
-
-var cfg = &config.Config{}
-var vip = viper.New()
 
 func init() {
 	// Add Subsystems
@@ -50,14 +49,14 @@ func init() {
 	cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
 
 	// Add Subcommands
-	rootCmd.AddCommand(dev.NewCmd(cfg, vip))
+	rootCmd.AddCommand(dev.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
-	rootCmd.AddCommand(migrate.NewCmd(cfg, vip))
+	rootCmd.AddCommand(migrate.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
-	rootCmd.AddCommand(serve.NewCmd(cfg, vip))
+	rootCmd.AddCommand(serve.NewCmd(cfg, viper.New()))
 	rootCmd.AddCommand(tasks.NewCmd())
 	rootCmd.AddCommand(tree.NewCmd())
 

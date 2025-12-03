@@ -49,16 +49,6 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 				}
 			}
 
-			// TODO: find a more flexible solution
-			// if multiple stores are enabled, postgres takes precedence, we
-			// need a different strategy if more than two stores are supported
-			// sFlag := cmd.PersistentFlags().Lookup("aio-store-sqlite-enable")
-			// pFlag := cmd.PersistentFlags().Lookup("aio-store-postgres-enable")
-			// if sFlag != nil && pFlag != nil && sFlag.Value.String() == "true" && pFlag.Value.String() == "true" {
-			// 	// postgres takes precedence
-			// 	_ = sFlag.Value.Set("false")
-			// }
-
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -212,6 +202,7 @@ func Serve(cfg *config.Config) error {
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
 	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+	system.AddOnRequest(t_api.Noop, coroutines.Noop)
 
 	// background coroutines
 	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)

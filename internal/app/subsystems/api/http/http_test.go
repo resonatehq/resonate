@@ -60,6 +60,7 @@ func TestHttp(t *testing.T) {
 	for _, ts := range []struct {
 		name         string
 		auth         map[string]string
+		bearer       *string
 		reqUsername  string
 		reqPassword  string
 		codeOverride int
@@ -76,6 +77,10 @@ func TestHttp(t *testing.T) {
 			reqUsername:  "user",
 			reqPassword:  "notthepassword",
 			codeOverride: 401,
+		},
+		{
+			name:   "BearerTokenCredentials",
+			bearer: util.ToPointer("MyToken"),
 		},
 	} {
 		// start the server
@@ -108,6 +113,19 @@ func TestHttp(t *testing.T) {
 					// set authorization
 					if ts.auth != nil {
 						req.SetBasicAuth(ts.reqUsername, ts.reqPassword)
+
+						// Workaround to make the test Request have the same Authorization header than the test setup
+						if tc.Req != nil {
+							tc.Req.Metadata["authorization"] = req.Header.Get("Authorization")
+						}
+					} else if ts.bearer != nil {
+						req.Header.Add("Authorization", "Bearer "+*ts.bearer)
+
+						// This tests that the http api subsytem correctly removes "Bearer" before handling the
+						// token to the api
+						if tc.Req != nil {
+							tc.Req.Metadata["authorization"] = *ts.bearer
+						}
 					}
 
 					res, err := httpTest.client.Do(req)
@@ -131,6 +149,11 @@ func TestHttp(t *testing.T) {
 
 					if tc.Http.Res.Body != nil && code >= 200 && code < 300 {
 						assert.Equal(t, tc.Http.Res.Body, body)
+					}
+
+					// Reset changes to tc.Req.Metadata["authorization"] for other tests to work
+					if tc.Req != nil {
+						delete(tc.Req.Metadata, "authorization")
 					}
 
 					select {
