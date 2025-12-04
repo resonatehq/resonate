@@ -13,6 +13,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/nats-io/nats.go v1.47.0
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/resonatehq/gocoro v0.0.0-20240928015848-78539a59dab0
@@ -69,6 +70,8 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nats-io/nkeys v0.4.11 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect

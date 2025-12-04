@@ -350,6 +350,22 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 		return &receiver.Recv{Type: "kafka", Data: data}, true
 
+	case "nats":
+		group := u.Host
+		if group == "" {
+			return nil, false
+		}
+
+		// Use the NATS message subject format: resonate.messages.<group>
+		addr := map[string]string{"subject": fmt.Sprintf("resonate.messages.%s", group)}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "nats", Data: data}, true
+
 	default:
 		return nil, false
 	}
