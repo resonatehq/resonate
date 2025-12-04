@@ -16,19 +16,18 @@ import (
 	"github.com/resonatehq/resonate/cmd/tree"
 	"github.com/resonatehq/resonate/internal"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
-	kafkaPlugin "github.com/resonatehq/resonate/internal/app/plugins/kafka"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
-	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/kafka"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+var cfg = &config.Config{}
 
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
@@ -37,13 +36,9 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	// Create config
-	cfg := &config.Config{}
-
 	// Add Subsystems
 	cfg.API.Subsystems.Add("http", true, &http.Config{})
 	cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
-	cfg.API.Subsystems.Add("kafka", false, &kafka.Config{})
 	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 	cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
 	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{}) // do not change order
@@ -52,8 +47,6 @@ func init() {
 	// Add Plugins
 	cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
 	cfg.AIO.Plugins.Add("poll", true, &poll.Config{})
-	cfg.AIO.Plugins.Add("sqs", false, &sqs.Config{})
-	cfg.AIO.Plugins.Add("kafka", false, &kafkaPlugin.Config{})
 
 	// Add Subcommands
 	rootCmd.AddCommand(dev.NewCmd(cfg, viper.New()))

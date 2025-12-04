@@ -70,6 +70,5 @@ func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name())
 	}
 
-	cmd.Flags().SortFlags = false
 	return cmd
 }

@@ -52,7 +52,7 @@ jobs:
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate
-          go build -o resonate main.go
+          go build -tags=all -o resonate .
 
           # Verify binary
           file resonate | grep "${{ matrix.systems.arch_grep }}"

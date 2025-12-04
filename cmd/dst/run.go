@@ -270,6 +270,5 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	}
 
 	cmd.SilenceUsage = true
-	cmd.Flags().SortFlags = false
 	return cmd
 }

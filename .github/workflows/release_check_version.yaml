@@ -22,7 +22,7 @@ jobs:
 
       - name: Build resonate
         run: |
-          go build -o resonate main.go
+          go build -o resonate .
 
       - name: Check version
         env:

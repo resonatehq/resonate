@@ -149,7 +149,6 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
 	cmd.Flags().DurationVar(&delay, "delay", 0, "promise delay")
 
-	cmd.Flags().SortFlags = false
 	_ = cmd.MarkFlagRequired("func")
 
 	return cmd
