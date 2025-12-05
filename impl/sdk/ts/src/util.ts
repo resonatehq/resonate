@@ -1,4 +1,4 @@
-import type { DurablePromiseRecord, TaskRecord } from "./network/network";
+import type { DurablePromiseRecord, MessageSource, TaskRecord } from "./network/network";
 import { type Options, RESONATE_OPTIONS } from "./options";
 
 // time
@@ -69,6 +69,10 @@ export function isDurablePromiseRecord(obj: unknown): obj is DurablePromiseRecor
 
 export function isOptions(obj: unknown): obj is Options {
   return typeof obj === "object" && obj !== null && RESONATE_OPTIONS in obj;
+}
+
+export function isMessageSource(v: unknown): v is MessageSource {
+  return typeof v === "object" && v !== null && "recv" in v && typeof (v as any).recv === "function";
 }
 
 // helpers

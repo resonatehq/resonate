@@ -137,13 +137,6 @@ export interface HttpNetworkConfig {
   headers?: Record<string, string>;
 }
 
-export interface HttpMessageSourceConfig {
-  url: string;
-  pid?: string;
-  group: string;
-  auth?: { username: string; password: string };
-}
-
 export type RetryPolicy = {
   retries?: number;
   delay?: number;
@@ -152,15 +145,27 @@ export type RetryPolicy = {
 export class HttpNetwork implements Network {
   private EXCPECTED_RESONATE_VERSION = "0.7.15";
 
-  private verbose: boolean;
   private url: string;
   private timeout: number;
   private headers: Record<string, string>;
+  private verbose: boolean;
 
-  constructor({ verbose, url, auth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
-    this.verbose = verbose;
+  constructor({
+    url = "http://localhost:8001",
+    timeout = 30 * util.SEC,
+    headers = {},
+    auth = undefined,
+    verbose = false,
+  }: {
+    url?: string;
+    timeout?: number;
+    headers?: Record<string, string>;
+    auth?: { username: string; password: string };
+    verbose: boolean;
+  }) {
     this.url = url;
     this.timeout = timeout;
+    this.verbose = verbose;
 
     this.headers = { "Content-Type": "application/json", ...headers };
     if (auth) {
@@ -187,9 +192,8 @@ export class HttpNetwork implements Network {
     );
   }
 
-  public stop(): void {
-    // No-op for HttpNetwork, MessageSource handles connection cleanup
-  }
+  public start(): void {}
+  public stop(): void {}
 
   private async handleRequest(
     req: Request,
@@ -635,7 +639,7 @@ export class HttpNetwork implements Network {
   }
 }
 
-export class HttpMessageSource implements MessageSource {
+export class PollMessageSource implements MessageSource {
   readonly pid: string;
   readonly group: string;
   readonly unicast: string;
@@ -650,14 +654,23 @@ export class HttpMessageSource implements MessageSource {
     notify: Array<(msg: Message) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor({ url, pid = crypto.randomUUID().replace(/-/g, ""), group, auth }: HttpMessageSourceConfig) {
+  constructor({
+    url = "http://localhost:8001",
+    pid = crypto.randomUUID().replace(/-/g, ""),
+    group = "default",
+    auth = undefined,
+  }: {
+    url?: string;
+    pid?: string;
+    group?: string;
+    auth?: { username: string; password: string };
+  }) {
+    this.url = url;
     this.pid = pid;
     this.group = group;
     this.unicast = `poll://uni@${group}/${pid}`;
     this.anycast = `poll://any@${group}/${pid}`;
-    this.url = url;
-    this.group = group;
-    this.pid = pid;
+
     this.headers = {};
     if (auth) {
       this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
@@ -718,6 +731,8 @@ export class HttpMessageSource implements MessageSource {
       callback(msg);
     }
   }
+
+  public start(): void {}
 
   public stop(): void {
     this.eventSource.close();

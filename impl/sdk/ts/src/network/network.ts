@@ -306,13 +306,16 @@ export type Message =
 export type ResponseFor<T extends Request> = Extract<Response, { kind: T["kind"] }>;
 
 export interface Network {
+  start(): void;
+  stop(): void;
+
   send<T extends Request>(
     req: T,
     callback: (err?: ResonateError, res?: ResponseFor<T>) => void,
     headers?: Record<string, string>,
     retryForever?: boolean,
   ): void;
-  stop(): void;
+  getMessageSource?: () => MessageSource;
 }
 
 export interface MessageSource {
@@ -320,8 +323,11 @@ export interface MessageSource {
   readonly group: string;
   readonly unicast: string;
   readonly anycast: string;
+
+  start(): void;
+  stop(): void;
+
   recv(msg: Message): void;
   subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void;
-  stop(): void;
   match(target: string): string;
 }

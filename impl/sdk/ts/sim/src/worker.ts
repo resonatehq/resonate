@@ -47,6 +47,8 @@ class SimulatedMessageSource implements MessageSource {
     this.anycast = `sim://any@${gaddr}/${iaddr}`;
   }
 
+  start(): void {}
+
   recv(msg: NetworkMessage): void {
     for (const callback of this.subscriptions[msg.type]) {
       callback(this.maybeCorruptData(msg));
@@ -87,6 +89,7 @@ class SimulatedNetwork implements Network {
     this.messageSource = new SimulatedMessageSource(iaddr, gaddr, (data) => this.maybeCorruptData(data));
   }
 
+  start(): void {}
   getMessageSource(): MessageSource {
     return this.messageSource;
   }

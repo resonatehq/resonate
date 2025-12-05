@@ -16,7 +16,7 @@ import type {
   ReadPromiseReq,
   TaskRecord,
 } from "./network/network";
-import { HttpMessageSource, HttpNetwork } from "./network/remote";
+import { HttpNetwork, PollMessageSource } from "./network/remote";
 import { type Options, OptionsBuilder } from "./options";
 import { Promises } from "./promises";
 import { Registry } from "./registry";
@@ -100,7 +100,7 @@ export class Resonate {
     verbose?: boolean;
     encryptor?: Encryptor;
     tracer?: Tracer;
-    transport?: Network & MessageSource;
+    transport?: Network | (Network & MessageSource);
   } = {}) {
     this.clock = new WallClock();
     this.ttl = ttl;
@@ -140,7 +140,16 @@ export class Resonate {
 
     if (transport) {
       this.network = transport;
-      this.messageSource = transport;
+
+      if (util.isMessageSource(transport)) {
+        this.messageSource = transport;
+      } else if (transport.getMessageSource) {
+        this.messageSource = transport.getMessageSource();
+      } else {
+        // TODO: instantiate default message source instead
+        throw new Error("transport must implement both network and message source");
+      }
+
       this.pid = pid ?? this.messageSource.pid;
       this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
     } else {
@@ -158,7 +167,7 @@ export class Resonate {
           timeout: 1 * util.MIN,
           headers: {},
         });
-        this.messageSource = new HttpMessageSource({ url: resolvedUrl, pid, group, auth: resolvedAuth });
+        this.messageSource = new PollMessageSource({ url: resolvedUrl, pid, group, auth: resolvedAuth });
         this.pid = pid ?? this.messageSource.pid;
         this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
       }

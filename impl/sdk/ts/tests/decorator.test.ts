@@ -1,7 +1,7 @@
 import { WallClock } from "../src/clock";
 import { type Context, Future, InnerContext, type LFI } from "../src/context";
 import { Decorator } from "../src/decorator";
-import { HttpMessageSource } from "../src/network/remote";
+import { PollMessageSource } from "../src/network/remote";
 import { OptionsBuilder } from "../src/options";
 import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
@@ -31,7 +31,7 @@ describe("Decorator", () => {
       yield* ctx.beginRun((_ctx: Context) => 42);
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -80,7 +80,7 @@ describe("Decorator", () => {
       return v1 + v2;
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -156,7 +156,7 @@ describe("Decorator", () => {
       return 30;
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -203,7 +203,7 @@ describe("Decorator", () => {
       return 30; // D
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -257,7 +257,7 @@ describe("Decorator", () => {
       return 42; // D
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -313,7 +313,7 @@ describe("Decorator", () => {
       return "should not reach here";
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({
@@ -348,7 +348,7 @@ describe("Decorator", () => {
       return 42;
     }
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     const d = new Decorator(
       foo(
         new InnerContext({

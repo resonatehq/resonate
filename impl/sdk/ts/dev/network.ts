@@ -3,6 +3,41 @@ import type { Message, MessageSource, Network, Request, ResponseFor } from "../s
 import * as util from "../src/util";
 import { Server } from "./server";
 
+export class LocalNetwork implements Network {
+  private server: Server;
+  private messageSource: LocalMessageSource;
+
+  constructor({
+    pid = "pid",
+    group = "default",
+    server = new Server(),
+  }: { pid?: string; group?: string; server?: Server } = {}) {
+    this.server = server;
+    this.messageSource = new LocalMessageSource(pid, group, server);
+  }
+
+  getMessageSource(): MessageSource {
+    return this.messageSource;
+  }
+
+  start() {}
+  stop() {}
+
+  send<T extends Request>(req: Request, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
+    setTimeout(() => {
+      try {
+        const res = this.server.process(req, Date.now());
+        util.assert(res.kind === req.kind, "res kind must match req kind");
+
+        callback(undefined, res as ResponseFor<T>);
+        this.messageSource.enqueueNext();
+      } catch (err) {
+        callback(err as ResonateError);
+      }
+    });
+  }
+}
+
 export class LocalMessageSource implements MessageSource {
   readonly pid: string;
   readonly group: string;
@@ -25,6 +60,8 @@ export class LocalMessageSource implements MessageSource {
     this.server = server;
     this.timeoutId = undefined;
   }
+
+  start() {}
 
   stop() {
     clearTimeout(this.timeoutId);
@@ -60,42 +97,5 @@ export class LocalMessageSource implements MessageSource {
 
   match(target: string): string {
     return `poll://any@${target}`;
-  }
-}
-
-export interface LocalNetworkConfig {
-  pid?: string;
-  group?: string;
-  server?: Server;
-}
-export class LocalNetwork implements Network {
-  private server: Server;
-  private messageSource: LocalMessageSource;
-
-  constructor({ pid = "pid", group = "default", server = new Server() }: LocalNetworkConfig = {}) {
-    this.server = server;
-    this.messageSource = new LocalMessageSource(pid, group, server);
-  }
-
-  getMessageSource(): MessageSource {
-    return this.messageSource;
-  }
-
-  stop() {
-    // No-op for LocalNetwork, MessageSource handles polling cleanup
-  }
-
-  send<T extends Request>(req: Request, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
-    setTimeout(() => {
-      try {
-        const res = this.server.process(req, Date.now());
-        util.assert(res.kind === req.kind, "res kind must match req kind");
-
-        callback(undefined, res as ResponseFor<T>);
-        this.messageSource.enqueueNext();
-      } catch (err) {
-        callback(err as ResonateError);
-      }
-    });
   }
 }

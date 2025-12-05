@@ -6,7 +6,7 @@ import { NoopEncryptor } from "../src/encryptor";
 import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
-import { HttpMessageSource } from "../src/network/remote";
+import { PollMessageSource } from "../src/network/remote";
 import { OptionsBuilder } from "../src/options";
 import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
@@ -16,6 +16,7 @@ import { ok, type Result } from "../src/types";
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
 
+  start(): void {}
   send<T extends Request>(request: T, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
     switch (request.kind) {
       case "createPromise": {
@@ -63,7 +64,7 @@ class DummyNetwork implements Network {
 describe("Coroutine", () => {
   // Helper functions to write test easily
   const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
 
     return new Promise<any>((resolve) => {
       Coroutine.exec(
@@ -307,7 +308,7 @@ describe("Coroutine", () => {
 
     const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
 
-    const m = new HttpMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     // DIE with condition=true causes callback to be called with err=true
     const result = await new Promise<any>((resolve) => {
       Coroutine.exec(
