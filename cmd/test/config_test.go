@@ -53,14 +53,17 @@ func TestConfig(t *testing.T) {
 			cmds: []cmd{serveCmd, devCmd},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "",
-					CoroutineMaxSize:    1000,
-					SubmissionBatchSize: 1000,
-					CompletionBatchSize: 1000,
-					PromiseBatchSize:    100,
-					ScheduleBatchSize:   100,
-					TaskBatchSize:       100,
-					SignalTimeout:       1 * time.Second,
+					Url:                   "",
+					CoroutineMaxSize:      1000,
+					SubmissionBatchSize:   1000,
+					CompletionBatchSize:   1000,
+					PromiseBatchSize:      100,
+					PromiseMaxIterations:  1000,
+					ScheduleBatchSize:     100,
+					ScheduleMaxIterations: 1000,
+					TaskBatchSize:         100,
+					TaskMaxIterations:     1000,
+					SignalTimeout:         1 * time.Second,
 				},
 				API: config.API{
 					Size: 1000,
@@ -90,8 +93,11 @@ system:
   submissionBatchSize: 2
   completionBatchSize: 3
   promiseBatchSize: 4
+  promiseMaxIterations: 40
   scheduleBatchSize: 5
+  scheduleMaxIterations: 50
   taskBatchSize: 6
+  taskMaxIterations: 60
   signalTimeout: 7s
 api:
   size: 1
@@ -103,14 +109,17 @@ metricsAddr: "localhost:8080"
 logLevel: "warn"`,
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "https://resonatehq.io:9000",
-					CoroutineMaxSize:    1,
-					SubmissionBatchSize: 2,
-					CompletionBatchSize: 3,
-					PromiseBatchSize:    4,
-					ScheduleBatchSize:   5,
-					TaskBatchSize:       6,
-					SignalTimeout:       7 * time.Second,
+					Url:                   "https://resonatehq.io:9000",
+					CoroutineMaxSize:      1,
+					SubmissionBatchSize:   2,
+					CompletionBatchSize:   3,
+					PromiseBatchSize:      4,
+					PromiseMaxIterations:  40,
+					ScheduleBatchSize:     5,
+					ScheduleMaxIterations: 50,
+					TaskBatchSize:         6,
+					TaskMaxIterations:     60,
+					SignalTimeout:         7 * time.Second,
 				},
 				API: config.API{
 					Size: 1,
@@ -134,8 +143,11 @@ logLevel: "warn"`,
 				"--system-submission-batch-size", "3",
 				"--system-completion-batch-size", "4",
 				"--system-promise-batch-size", "5",
+				"--system-promise-max-iterations", "50",
 				"--system-schedule-batch-size", "6",
+				"--system-schedule-max-iterations", "60",
 				"--system-task-batch-size", "7",
+				"--system-task-max-iterations", "70",
 				"--system-signal-timeout", "8s",
 				"--api-size", "2",
 				"--api-auth-public-key", "key2.pub",
@@ -145,14 +157,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "https://resonatehq.io:9001",
-					CoroutineMaxSize:    2,
-					SubmissionBatchSize: 3,
-					CompletionBatchSize: 4,
-					PromiseBatchSize:    5,
-					ScheduleBatchSize:   6,
-					TaskBatchSize:       7,
-					SignalTimeout:       8 * time.Second,
+					Url:                   "https://resonatehq.io:9001",
+					CoroutineMaxSize:      2,
+					SubmissionBatchSize:   3,
+					CompletionBatchSize:   4,
+					PromiseBatchSize:      5,
+					PromiseMaxIterations:  50,
+					ScheduleBatchSize:     6,
+					ScheduleMaxIterations: 60,
+					TaskBatchSize:         7,
+					TaskMaxIterations:     70,
+					SignalTimeout:         8 * time.Second,
 				},
 				API: config.API{
 					Size: 2,
@@ -177,8 +192,11 @@ system:
   submissionBatchSize: 2
   completionBatchSize: 3
   promiseBatchSize: 4
+  promiseMaxIterations: 40
   scheduleBatchSize: 5
+  scheduleMaxIterations: 50
   taskBatchSize: 6
+  taskMaxIterations: 60
   signalTimeout: 7s
 api:
   size: 1
@@ -199,14 +217,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "https://resonatehq.io:9001",
-					CoroutineMaxSize:    1,
-					SubmissionBatchSize: 3,
-					CompletionBatchSize: 3,
-					PromiseBatchSize:    5,
-					ScheduleBatchSize:   5,
-					TaskBatchSize:       7,
-					SignalTimeout:       7 * time.Second,
+					Url:                   "https://resonatehq.io:9001",
+					CoroutineMaxSize:      1,
+					SubmissionBatchSize:   3,
+					CompletionBatchSize:   3,
+					PromiseBatchSize:      5,
+					PromiseMaxIterations:  40,
+					ScheduleBatchSize:     5,
+					ScheduleMaxIterations: 50,
+					TaskBatchSize:         7,
+					TaskMaxIterations:     60,
+					SignalTimeout:         7 * time.Second,
 				},
 				API: config.API{
 					Size: 2,
@@ -236,14 +257,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "",
-					CoroutineMaxSize:    1000,
-					SubmissionBatchSize: 1000,
-					CompletionBatchSize: 1000,
-					PromiseBatchSize:    100,
-					ScheduleBatchSize:   100,
-					TaskBatchSize:       100,
-					SignalTimeout:       1 * time.Second,
+					Url:                   "",
+					CoroutineMaxSize:      1000,
+					SubmissionBatchSize:   1000,
+					CompletionBatchSize:   1000,
+					PromiseBatchSize:      100,
+					PromiseMaxIterations:  1000,
+					ScheduleBatchSize:     100,
+					ScheduleMaxIterations: 1000,
+					TaskBatchSize:         100,
+					TaskMaxIterations:     1000,
+					SignalTimeout:         1 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
@@ -369,14 +393,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "",
-					CoroutineMaxSize:    1000,
-					SubmissionBatchSize: 1000,
-					CompletionBatchSize: 1000,
-					PromiseBatchSize:    100,
-					ScheduleBatchSize:   100,
-					TaskBatchSize:       100,
-					SignalTimeout:       1 * time.Second,
+					Url:                   "",
+					CoroutineMaxSize:      1000,
+					SubmissionBatchSize:   1000,
+					CompletionBatchSize:   1000,
+					PromiseBatchSize:      100,
+					PromiseMaxIterations:  1000,
+					ScheduleBatchSize:     100,
+					ScheduleMaxIterations: 1000,
+					TaskBatchSize:         100,
+					TaskMaxIterations:     1000,
+					SignalTimeout:         1 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
@@ -550,14 +577,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "",
-					CoroutineMaxSize:    1000,
-					SubmissionBatchSize: 1000,
-					CompletionBatchSize: 1000,
-					PromiseBatchSize:    100,
-					ScheduleBatchSize:   100,
-					TaskBatchSize:       100,
-					SignalTimeout:       1 * time.Second,
+					Url:                   "",
+					CoroutineMaxSize:      1000,
+					SubmissionBatchSize:   1000,
+					CompletionBatchSize:   1000,
+					PromiseBatchSize:      100,
+					PromiseMaxIterations:  1000,
+					ScheduleBatchSize:     100,
+					ScheduleMaxIterations: 1000,
+					TaskBatchSize:         100,
+					TaskMaxIterations:     1000,
+					SignalTimeout:         1 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
@@ -674,14 +704,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "",
-					CoroutineMaxSize:    1000,
-					SubmissionBatchSize: 1000,
-					CompletionBatchSize: 1000,
-					PromiseBatchSize:    100,
-					ScheduleBatchSize:   100,
-					TaskBatchSize:       100,
-					SignalTimeout:       1 * time.Second,
+					Url:                   "",
+					CoroutineMaxSize:      1000,
+					SubmissionBatchSize:   1000,
+					CompletionBatchSize:   1000,
+					PromiseBatchSize:      100,
+					PromiseMaxIterations:  1000,
+					ScheduleBatchSize:     100,
+					ScheduleMaxIterations: 1000,
+					TaskBatchSize:         100,
+					TaskMaxIterations:     1000,
+					SignalTimeout:         1 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
@@ -833,8 +866,11 @@ system:
   submissionBatchSize: 2
   completionBatchSize: 3
   promiseBatchSize: 4
+  promiseMaxIterations: 40
   scheduleBatchSize: 5
+  scheduleMaxIterations: 50
   taskBatchSize: 6
+  taskMaxIterations: 60
   signalTimeout: 7s
 api:
   size: 1
@@ -919,14 +955,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "https://resonatehq.io:9000",
-					CoroutineMaxSize:    1,
-					SubmissionBatchSize: 2,
-					CompletionBatchSize: 3,
-					PromiseBatchSize:    4,
-					ScheduleBatchSize:   5,
-					TaskBatchSize:       6,
-					SignalTimeout:       7 * time.Second,
+					Url:                   "https://resonatehq.io:9000",
+					CoroutineMaxSize:      1,
+					SubmissionBatchSize:   2,
+					CompletionBatchSize:   3,
+					PromiseBatchSize:      4,
+					PromiseMaxIterations:  40,
+					ScheduleBatchSize:     5,
+					ScheduleMaxIterations: 50,
+					TaskBatchSize:         6,
+					TaskMaxIterations:     60,
+					SignalTimeout:         7 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
@@ -1040,8 +1079,11 @@ system:
   submissionBatchSize: 2
   completionBatchSize: 3
   promiseBatchSize: 4
+  promiseMaxIterations: 40
   scheduleBatchSize: 5
+  scheduleMaxIterations: 50
   taskBatchSize: 6
+  taskMaxIterations: 60
   signalTimeout: 7s
 api:
   size: 1
@@ -1148,14 +1190,17 @@ logLevel: "warn"`,
 			},
 			expected: &config.Config{
 				System: system.Config{
-					Url:                 "https://resonatehq.io:9000",
-					CoroutineMaxSize:    1,
-					SubmissionBatchSize: 2,
-					CompletionBatchSize: 3,
-					PromiseBatchSize:    4,
-					ScheduleBatchSize:   5,
-					TaskBatchSize:       6,
-					SignalTimeout:       7 * time.Second,
+					Url:                   "https://resonatehq.io:9000",
+					CoroutineMaxSize:      1,
+					SubmissionBatchSize:   2,
+					CompletionBatchSize:   3,
+					PromiseBatchSize:      4,
+					PromiseMaxIterations:  40,
+					ScheduleBatchSize:     5,
+					ScheduleMaxIterations: 50,
+					TaskBatchSize:         6,
+					TaskMaxIterations:     60,
+					SignalTimeout:         7 * time.Second,
 				},
 				API: withAPISubsystems(
 					config.API{
