@@ -153,7 +153,7 @@ func (s *System) Tick(t int64) {
 			continue
 		}
 
-		// wait until signal timeout or request received
+		// wait min amount of time between scheduling
 		if t-bg.last < s.config.SignalTimeout.Milliseconds() {
 			continue
 		}
