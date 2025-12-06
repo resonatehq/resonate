@@ -16,11 +16,12 @@ import (
 )
 
 type testCase struct {
-	Name string
-	Req  *t_api.Request
-	Res  *t_api.Response
-	Http *httpTestCase
-	Grpc *grpcTestCase
+	Name   string
+	Req    *t_api.Request
+	Res    *t_api.Response
+	Http   *httpTestCase
+	Grpc   *grpcTestCase
+	NoAuth bool
 }
 
 type httpTestCase struct {
@@ -47,6 +48,23 @@ type grpcTestCase struct {
 }
 
 var TestCases = []*testCase{
+	// Ping
+	{
+		Name:   "Ping",
+		NoAuth: true,
+		Req:    nil,
+		Res:    nil,
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "GET",
+				Path:   "ping",
+			},
+			Res: &httpTestCaseResponse{
+				Code: 200,
+				Body: []byte(`{"status":"ok"}`),
+			},
+		},
+	},
 	// Promises
 	{
 		Name: "ReadPromise",
