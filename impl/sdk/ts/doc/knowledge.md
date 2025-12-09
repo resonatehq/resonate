@@ -77,18 +77,30 @@ These function calls should always be awaited (eg: `await ctx.run(...)`, `await 
 Example:
 
 ```ts
-const result = await resonate.run("greet-001", "greet", "Bob");
+// run greet locally and await result
+const result = await resonate.run("greet-001", greet, "Bob");
 console.log(result)  // "Hello, Bob!"
 
-const result = await resonate.rpc("greet-002", "greet", "Alice");
+// run greet remotely and await result
+const result = await resonate.rpc("greet-002", greet, "Alice");
 console.log(result)  // "Hello, Alice!"
 
-const handle = await resonate.beginRun("greet-003", "greet", "Bob");
+// begin run locally
+const handle = await resonate.beginRun("greet-003", greet, "Bob");
+// now await the result
 const result = await handle.result();
 console.log(result)  // "Hello, Bob!"
 
-const handle = await resonate.beginRpc("greet-004", "greet", "Alice");
+// begin run remotely
+const handle = await resonate.beginRpc("greet-004", greet, "Alice");
+// now await the result
 const result = await handle.result();
+console.log(result)  // "Hello, Alice!"
+
+// run greet remotely in group "otherGroup"
+const result = await resonate.rpc("greet-005", greet, "Alice", resonate.options({
+  target: "otherGroup",
+}));
 console.log(result)  // "Hello, Alice!"
 ```
 
@@ -96,7 +108,7 @@ console.log(result)  // "Hello, Alice!"
 
 `resonate.options({})` returns an `Options` object you can pass as the last argument to `run`, `rpc`, `beginRun`, and `beginRpc`. Resonate supports the following options:
 
-- **target** - the rpc call target, can be a url (eg: http://localhost:8080) or a group name (eg: gpu), defaults to "default"
+- **target** - the rpc call target, can be a url (eg: http://localhost:8080) or a group name (eg: gpu, sm, md, lg), defaults to "default"
 - **timeout** - the time at which the execution times out, defaults to 24 hours
 - **version** - the function version to use, defaults to 0 (latest)
 
@@ -107,6 +119,7 @@ Use `get(id)` when you know a durable promise already exists:
 ```ts
 const handle = await resonate.get<string>("greet-001");
 const result = await handle.getResult();
+console.log(result)  // "Hello, Bob!"
 ```
 
 ### Dependency injection
@@ -114,6 +127,10 @@ const result = await handle.getResult();
 You can attach dependencies to a Resonate instance. These dependencies can be used later with Context.
 
 ```ts
+// construct a database connection
+const myDb = new MyDbConnection(...);
+
+// set the dependency on the Resonate instance
 resonate.setDependency("db", myDb);
 ```
 
@@ -123,7 +140,9 @@ A `Context` instance is provided only as an **argument to registered functions**
 
 Example:
 ```ts
-function* foo(ctx: Context) {}
+function* someFunction(ctx: Context) {
+  // ctx is available here
+}
 ```
 
 ### Durable function invocation
@@ -151,20 +170,32 @@ Resonate enforces structured concurrency, that is, all recursive function calls 
 Example:
 
 ```ts
-function* foo(ctx: Context) {
-  const result1 = yield* ctx.run(greet, "Bob")
-  console.log(result1)  // "Hello, Bob!"
+function* someFunction(ctx: Context) {
+  // execute greet locally and await result
+  const r1 = yield* ctx.run(greet, "Bob");
+  console.log(r1);  // "Hello, Bob!"
 
-  const result2 = yield* ctx.rpc(greet, "Alice")
-  console.log(result2)  // "Hello, Alice!"
+  // execute greet remotely and await result
+  const r2 = yield* ctx.rpc(greet, "Alice");
+  console.log(r2);  // "Hello, Alice!"
 
-  const promise1 = yield* ctx.beginRun(greet, "Bob")
-  const result3 = yield* p;
-  console.log(result3)  // "Hello, Bob!"
+  // begin execute greet locally
+  const p1 = yield* ctx.beginRun(greet, "Bob");
+  // await the result
+  const r3 = yield* p;
+  console.log(r3);  // "Hello, Bob!"
 
-  const promise2 = yield* ctx.beginRpc(greet, "Alice")
-  const result4 = yield* p;
-  console.log(result4)  // "Hello, Alice!"
+  // begin execute greet remotely
+  const p2 = yield* ctx.beginRpc(greet, "Alice");
+  // await the result
+  const r4 = yield* p;
+  console.log(r4);  // "Hello, Alice!"
+  
+  // execute greet remotely in group "otherGroup"
+  const r5 = yield* ctx.rpc(greet, "Alice", ctx.options({
+    target: "otherGroup",
+  }));
+  console.log(r5);  // "Hello, Alice!"
 }
 ```
 
@@ -173,18 +204,47 @@ function* foo(ctx: Context) {
 Use `ctx.detached(...)` to fire off a durable invocation without including it in the structured concurrency.
 
 ```ts
-yield* ctx.detached(greet, "Eve");
+function* someFunction(ctx: Context) {
+  // ...
+
+  // p1 and p2 are references to durable promises
+  const p1 = yield* ctx.beginRun(...);
+  const p2 = yield* ctx.beginRpc(...);
+  
+  // await p1 and p2 and use the results as args
+  const v1 = yield* p1;
+  const v2 = yield* p2;
+  const args = [ v1, v2 ];
+  
+  // fire off a detached invocation, this invocation is not part of
+  // the structured concurrency so someFunction will complete and
+  // someOtherFunction will run durably in the background
+  yield* ctx.detached("some-detached-id", someOtherFunction, ...args);
+  
+  // ...
+}
 ```
 
-### Manual resolution
+### Manual promise completion
 
-Use `ctx.promise(...)` to create a promise that can be resolved elsewhere. This is useful for interacting with external promises, or human based control gates.
+Use `ctx.promise(...)` to create a promise that can be completed elsewhere. This is useful for interacting with external systems, or human based control gates.
 
 ```ts
-const promise = yield* ctx.promise();
+function* someFunction(context : Context) {
+  // ...
 
-// manually resolve the promise (this may occur anywhere)
-resonate.promises.resolve(promise.id);
+  // p is a reference to a durable promise
+  const p = yield* context.promise();
+
+  // publish p's id, so an external process can resolve or reject p
+  // publish could write to a database, a queue, or send an email
+  yield* context.run(publish, p.id)
+
+  // await p
+  yield* p
+
+  // ...
+}
 ```
 
 ### Sleep
@@ -192,7 +252,19 @@ resonate.promises.resolve(promise.id);
 You may wait for arbitrary lengths of time with `ctx.sleep(...)`. During this time your function is suspended and does not consume resources.
 
 ```ts
-yield* ctx.sleep(15_000); // sleep for 15s
+function* someFunction(ctx: Context) {
+  // ...
+
+  // sleep for 5s
+  const p1 = yield* ctx.sleep(5000); // alt: ctx.sleep({ for: 5000 })
+  
+  // ...
+
+  // sleep until Jan 1, 2100
+  const p1 = yield* ctx.sleep({ until: new Date(2100, 0, 1) });
+  
+  // ...
+}
 ```
 
 ### Options
@@ -209,7 +281,10 @@ yield* ctx.sleep(15_000); // sleep for 15s
 Get dependencies that were set on the `Resonate` instance:
 
 ```ts
-const db = ctx.getDependency<MyDb>("db");
+async function query(ctx: Context) {
+  const db = ctx.getDependency<MyDb>("db");
+  return await db.query("SELECT * FROM my_table;");
+}
 ```
 
 ### Assertions
@@ -218,6 +293,20 @@ Context provides helpers to stop a durable execution. Like function invocations 
 
 - **`ctx.assert(condition, msg?)`** - stops the execution if the condition evaluates to `false`
 - **`ctx.panic(condition, msg?)`**  - stops the execution if the condition evaluates to `true`
+
+```ts
+function* someFunction(ctx: Context) {
+  const value = yield* ctx.run(getValue)
+
+  // panic if value is null
+  yield* ctx.panic(value === null, "value must not be null");
+
+  // assert value is greater than 0
+  yield* ctx.assert(value > 0, "value must be greater than 0");
+  
+  // ...
+}
+```
 
 ---
 
@@ -237,4 +326,3 @@ When generating TypeScript for this repo:
    - then `run()` or `rpc()` by reference
 7. Don’t invent APIs. If a method isn’t in this file, don’t use it without confirming in docs.
 8. Keep examples minimal and runnable.
-
