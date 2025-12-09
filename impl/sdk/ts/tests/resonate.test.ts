@@ -1454,3 +1454,150 @@ describe("Resonate environment variable initialization", () => {
     resonate.stop();
   });
 });
+
+describe("Bearer token authentication", () => {
+  test("Bearer token auth", async () => {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+
+    global.fetch = jest.fn((url, options) => {
+      const urlStr = url instanceof URL ? url.href : url;
+      if (urlStr === "http://localhost:9999/promises") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer test-token-123");
+        p1.resolve(null);
+      } else if (urlStr === "http://localhost:9999/poll/default/0") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer test-token-123");
+        p2.resolve(null);
+      } else {
+        throw new Error(`Unexpected URL called: ${urlStr}`);
+      }
+
+      return new Promise(() => {});
+    });
+
+    const resonate = new Resonate({
+      url: "http://localhost:9999",
+      group: "default",
+      pid: "0",
+      ttl: 60_000,
+      token: "test-token-123",
+    });
+
+    resonate.promises.create("foo", 0);
+
+    await p1.promise;
+    await p2.promise;
+    resonate.stop();
+  });
+
+  test("Bearer token takes priority over basic auth", async () => {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+
+    global.fetch = jest.fn((url, options) => {
+      const urlStr = url instanceof URL ? url.href : url;
+      if (urlStr === "http://localhost:9999/promises") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer priority-token");
+        p1.resolve(null);
+      } else if (urlStr === "http://localhost:9999/poll/default/0") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer priority-token");
+        p2.resolve(null);
+      } else {
+        throw new Error(`Unexpected URL called: ${urlStr}`);
+      }
+
+      return new Promise(() => {});
+    });
+
+    const resonate = new Resonate({
+      url: "http://localhost:9999",
+      group: "default",
+      pid: "0",
+      ttl: 60_000,
+      token: "priority-token",
+      auth: { username: "ignored", password: "ignored" },
+    });
+
+    resonate.promises.create("foo", 0);
+
+    await p1.promise;
+    await p2.promise;
+    resonate.stop();
+  });
+
+  test("RESONATE_TOKEN used when token arg not set", async () => {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+
+    process.env.RESONATE_TOKEN = "env-token-456";
+
+    global.fetch = jest.fn((url, options) => {
+      const urlStr = url instanceof URL ? url.href : url;
+      if (urlStr === "http://localhost:9999/promises") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-456");
+        p1.resolve(null);
+      } else if (urlStr === "http://localhost:9999/poll/default/0") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-456");
+        p2.resolve(null);
+      } else {
+        throw new Error(`Unexpected URL called: ${urlStr}`);
+      }
+
+      return new Promise(() => {});
+    });
+
+    const resonate = new Resonate({
+      url: "http://localhost:9999",
+      group: "default",
+      pid: "0",
+      ttl: 60_000,
+    });
+
+    resonate.promises.create("test", 0);
+
+    await p1.promise;
+    await p2.promise;
+    resonate.stop();
+    delete process.env.RESONATE_TOKEN;
+  });
+
+  test("RESONATE_TOKEN takes priority over RESONATE_USERNAME and RESONATE_PASSWORD", async () => {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+
+    process.env.RESONATE_TOKEN = "env-token-priority";
+    process.env.RESONATE_USERNAME = "ignored";
+    process.env.RESONATE_PASSWORD = "ignored";
+
+    global.fetch = jest.fn((url, options) => {
+      const urlStr = url instanceof URL ? url.href : url;
+      if (urlStr === "http://localhost:9999/promises") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-priority");
+        p1.resolve(null);
+      } else if (urlStr === "http://localhost:9999/poll/default/0") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-priority");
+        p2.resolve(null);
+      } else {
+        throw new Error(`Unexpected URL called: ${urlStr}`);
+      }
+
+      return new Promise(() => {});
+    });
+
+    const resonate = new Resonate({
+      url: "http://localhost:9999",
+      group: "default",
+      pid: "0",
+      ttl: 60_000,
+    });
+
+    resonate.promises.create("test", 0);
+
+    await p1.promise;
+    await p2.promise;
+    resonate.stop();
+    delete process.env.RESONATE_TOKEN;
+    delete process.env.RESONATE_USERNAME;
+    delete process.env.RESONATE_PASSWORD;
+  });
+});

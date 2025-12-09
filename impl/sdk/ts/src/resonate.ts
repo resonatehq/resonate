@@ -87,6 +87,7 @@ export class Resonate {
     pid = undefined,
     ttl = 1 * util.MIN,
     auth = undefined,
+    token = undefined,
     verbose = false,
     encryptor = undefined,
     tracer = undefined,
@@ -97,6 +98,7 @@ export class Resonate {
     pid?: string;
     ttl?: number;
     auth?: { username: string; password: string };
+    token?: string;
     verbose?: boolean;
     encryptor?: Encryptor;
     tracer?: Tracer;
@@ -126,6 +128,9 @@ export class Resonate {
         }
       }
     }
+
+    // Determine the token based on priority: token arg > RESONATE_TOKEN
+    const resolvedToken = token ?? process.env.RESONATE_TOKEN;
 
     // Determine the auth based on priority: auth arg > RESONATE_USERNAME+RESONATE_PASSWORD
     let resolvedAuth = auth;
@@ -164,10 +169,17 @@ export class Resonate {
           verbose: this.verbose,
           url: resolvedUrl,
           auth: resolvedAuth,
+          token: resolvedToken,
           timeout: 1 * util.MIN,
           headers: {},
         });
-        this.messageSource = new PollMessageSource({ url: resolvedUrl, pid, group, auth: resolvedAuth });
+        this.messageSource = new PollMessageSource({
+          url: resolvedUrl,
+          pid,
+          group,
+          auth: resolvedAuth,
+          token: resolvedToken,
+        });
         this.pid = pid ?? this.messageSource.pid;
         this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
       }
@@ -289,6 +301,7 @@ export class Resonate {
    * @param options.pid - Optional process identifier for the client. Defaults to a randomly generated UUID.
    * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
    * @param options.auth - Optional authentication credentials for connecting to the remote server.
+   * @param options.token - Optional bearer token for authentication. Takes priority over basic auth.
    *
    * @returns A {@link Resonate} client instance configured for remote operation.
    *
@@ -298,7 +311,7 @@ export class Resonate {
    *   url: "https://resonate.example.com",
    *   group: "analytics",
    *   ttl: 30,
-   *   auth: { username: "user", password: "secret" },
+   *   token: "bearer-token-here",
    * });
    *
    * const result = await resonate.run("task-42", "processData", { input: "dataset.csv" });
@@ -311,6 +324,7 @@ export class Resonate {
     pid = crypto.randomUUID().replace(/-/g, ""),
     ttl = 1 * util.MIN,
     auth = undefined,
+    token = undefined,
     verbose = false,
     encryptor = undefined,
     tracer = undefined,
@@ -320,12 +334,12 @@ export class Resonate {
     pid?: string;
     ttl?: number;
     auth?: { username: string; password: string };
+    token?: string;
     verbose?: boolean;
     encryptor?: Encryptor;
     tracer?: Tracer;
-    messageSourceAuth?: { username: string; password: string };
   } = {}): Resonate {
-    return new Resonate({ url, group, pid, ttl, auth, verbose, encryptor, tracer });
+    return new Resonate({ url, group, pid, ttl, auth, token, verbose, encryptor, tracer });
   }
 
   /**
@@ -585,7 +599,7 @@ export class Resonate {
    *
    * This method schedules a registered function for **remote execution** under a durable promise
    * identified by the provided `id`. The function runs on a remote worker or process as part of
-   * Resonate’s distributed execution environment.
+   * Resonate's distributed execution environment.
    *
    * Unlike {@link rpc}, this method is **non-blocking** and immediately returns a
    * {@link ResonateHandle} that can be awaited or queried later to retrieve the final result once

@@ -133,6 +133,7 @@ export interface HttpNetworkConfig {
   verbose: boolean;
   url: string;
   auth?: { username: string; password: string };
+  token?: string;
   timeout?: number;
   headers?: Record<string, string>;
 }
@@ -155,12 +156,14 @@ export class HttpNetwork implements Network {
     timeout = 30 * util.SEC,
     headers = {},
     auth = undefined,
+    token = undefined,
     verbose = false,
   }: {
     url?: string;
     timeout?: number;
     headers?: Record<string, string>;
     auth?: { username: string; password: string };
+    token?: string;
     verbose: boolean;
   }) {
     this.url = url;
@@ -168,7 +171,9 @@ export class HttpNetwork implements Network {
     this.verbose = verbose;
 
     this.headers = { "Content-Type": "application/json", ...headers };
-    if (auth) {
+    if (token) {
+      this.headers.Authorization = `Bearer ${token}`;
+    } else if (auth) {
       this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
     }
   }
@@ -659,11 +664,13 @@ export class PollMessageSource implements MessageSource {
     pid = crypto.randomUUID().replace(/-/g, ""),
     group = "default",
     auth = undefined,
+    token = undefined,
   }: {
     url?: string;
     pid?: string;
     group?: string;
     auth?: { username: string; password: string };
+    token?: string;
   }) {
     this.url = url;
     this.pid = pid;
@@ -672,7 +679,9 @@ export class PollMessageSource implements MessageSource {
     this.anycast = `poll://any@${group}/${pid}`;
 
     this.headers = {};
-    if (auth) {
+    if (token) {
+      this.headers.Authorization = `Bearer ${token}`;
+    } else if (auth) {
       this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
     }
 
