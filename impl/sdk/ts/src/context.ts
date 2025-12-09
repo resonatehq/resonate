@@ -594,7 +594,7 @@ export class InnerContext implements Context {
       timeout: timeout,
       param: { data },
       tags,
-      iKey: opts.id,
+      iKey: id,
       strict: false,
     };
   }
@@ -617,7 +617,7 @@ export class InnerContext implements Context {
       timeout,
       tags,
       param: { data },
-      iKey: opts.id,
+      iKey: id,
       strict: false,
     };
   }
