@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type testCase struct {
@@ -62,6 +63,12 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 200,
 				Body: []byte(`{"status":"ok"}`),
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &grpc_health_v1.HealthCheckRequest{},
+			Res: &grpc_health_v1.HealthCheckResponse{
+				Status: grpc_health_v1.HealthCheckResponse_SERVING,
 			},
 		},
 	},

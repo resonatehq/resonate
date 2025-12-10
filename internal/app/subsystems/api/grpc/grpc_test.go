@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -27,6 +28,7 @@ type grpcTest struct {
 	schedules pb.SchedulesClient
 	locks     pb.LocksClient
 	tasks     pb.TasksClient
+	health    grpc_health_v1.HealthClient
 }
 
 func setup() (*grpcTest, error) {
@@ -55,6 +57,7 @@ func setup() (*grpcTest, error) {
 		schedules: pb.NewSchedulesClient(conn),
 		locks:     pb.NewLocksClient(conn),
 		tasks:     pb.NewTasksClient(conn),
+		health:    grpc_health_v1.NewHealthClient(conn),
 	}, nil
 }
 
@@ -135,6 +138,8 @@ func TestGrpc(t *testing.T) {
 				_, err = grpcTest.tasks.DropTask(ctx, req)
 			case *pb.HeartbeatTasksRequest:
 				_, err = grpcTest.tasks.HeartbeatTasks(ctx, req)
+			case *grpc_health_v1.HealthCheckRequest:
+				res, err = grpcTest.health.Check(ctx, req)
 			default:
 				t.Fatalf("unexpected type %T", req)
 			}
