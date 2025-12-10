@@ -320,9 +320,12 @@ When generating TypeScript for this repo:
 4. Use async functions for leaf functions and prefer leaf functions that perform a single side effect.
 5. Orchestrate leaf functions using generator functions, never use async generator functions.
 6. Prefer code that:
-   - constructs a `Resonate` client once
+   - constructs a `Resonate` client once, prefer the constructor over static methods
    - uses a local server by not specifying a url, unless otherwise instructed
    - `register()` functions on startup and do not provide a name (use function name)
    - then `run()` or `rpc()` by reference
 7. Don’t invent APIs. If a method isn’t in this file, don’t use it without confirming in docs.
 8. Keep examples minimal and runnable.
+9. Avoid using context.log inside durable functions.
+10. Use ctx.math.random() to generate "random" numbers
+11. Use ctx.date.now() to get the current time
