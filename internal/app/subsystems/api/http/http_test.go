@@ -141,7 +141,7 @@ func TestHttp(t *testing.T) {
 
 					// apply override code if applicable
 					code := tc.Http.Res.Code
-					if ts.codeOverride != 0 {
+					if ts.codeOverride != 0 && !tc.NoAuth {
 						code = ts.codeOverride
 					}
 

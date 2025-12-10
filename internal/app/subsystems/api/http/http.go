@@ -119,6 +119,13 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 		}))
 	}
 
+	// Ping endpoint, no auth required
+	handler.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+		})
+	})
+
 	// Authentication
 	authorized := handler.Group("/")
 	if len(config.Auth) > 0 {

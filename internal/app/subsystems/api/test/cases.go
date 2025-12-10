@@ -13,14 +13,16 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type testCase struct {
-	Name string
-	Req  *t_api.Request
-	Res  *t_api.Response
-	Http *httpTestCase
-	Grpc *grpcTestCase
+	Name   string
+	Req    *t_api.Request
+	Res    *t_api.Response
+	Http   *httpTestCase
+	Grpc   *grpcTestCase
+	NoAuth bool
 }
 
 type httpTestCase struct {
@@ -47,6 +49,29 @@ type grpcTestCase struct {
 }
 
 var TestCases = []*testCase{
+	// Ping
+	{
+		Name:   "Ping",
+		NoAuth: true,
+		Req:    nil,
+		Res:    nil,
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "GET",
+				Path:   "ping",
+			},
+			Res: &httpTestCaseResponse{
+				Code: 200,
+				Body: []byte(`{"status":"ok"}`),
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &grpc_health_v1.HealthCheckRequest{},
+			Res: &grpc_health_v1.HealthCheckResponse{
+				Status: grpc_health_v1.HealthCheckResponse_SERVING,
+			},
+		},
+	},
 	// Promises
 	{
 		Name: "ReadPromise",
