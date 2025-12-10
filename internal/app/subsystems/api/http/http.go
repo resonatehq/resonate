@@ -120,7 +120,11 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 	}
 
 	// Ping endpoint, no auth required
-	handler.GET("/ping", server.ping)
+	handler.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+		})
+	})
 
 	// Authentication
 	authorized := handler.Group("/")
@@ -281,12 +285,6 @@ type server struct {
 
 func (s *server) code(status t_api.StatusCode) int {
 	return int(status) / 100
-}
-
-func (s *server) ping(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-	})
 }
 
 // Helper functions
