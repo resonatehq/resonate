@@ -78,7 +78,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
 		Ttl:       req.Task.Ttl,
-		ExpiresAt: c.Time() + int64(req.Task.Ttl),
+		ExpiresAt: util.ClampAddInt64(c.Time(), req.Task.Ttl),
 		CreatedOn: c.Time(),
 	}))
 
