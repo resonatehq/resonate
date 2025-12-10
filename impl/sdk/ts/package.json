@@ -34,7 +34,7 @@
     "eventsource": "^4.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.3.6",
+    "@biomejs/biome": "2.3.8",
     "@jest/globals": "^30.0.0",
     "@types/jest": "30.0.0",
     "@types/node": "^24.0.0",
