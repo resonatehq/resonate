@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -143,4 +144,11 @@ func ResumeId(rootPromiseId, promiseId string) string {
 
 func NotifyId(promiseId, id string) string {
 	return fmt.Sprintf("__notify:%s:%s", promiseId, id)
+}
+
+func ClampAddInt64(a, b int64) int64 {
+	if b > 0 && a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }
