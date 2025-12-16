@@ -128,7 +128,7 @@ describe("Computation Event Queue Concurrency", () => {
       registry,
       new NoopHeartbeat(),
       new Map(),
-      new OptionsBuilder({ match: messsageSource.match }),
+      new OptionsBuilder({ match: messsageSource.match, idPrefix: "" }),
       false,
       new NoopTracer(),
       new NoopSpan(),

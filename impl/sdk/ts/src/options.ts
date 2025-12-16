@@ -5,8 +5,10 @@ export const RESONATE_OPTIONS: unique symbol = Symbol("ResonateOptions");
 
 export class OptionsBuilder {
   private match: (target: string) => string;
-  constructor({ match }: { match: (target: string) => string }) {
+  private idPrefix: string;
+  constructor({ match, idPrefix }: { match: (target: string) => string; idPrefix: string }) {
     this.match = (target: string) => (util.isUrl(target) ? target : match(target));
+    this.idPrefix = idPrefix;
   }
 
   build({
@@ -24,6 +26,7 @@ export class OptionsBuilder {
     timeout?: number;
     version?: number;
   } = {}): Options {
+    id = id ? `${this.idPrefix}${id}` : id;
     return new Options({ id, retryPolicy, tags, target: this.match(target), timeout, version });
   }
 }

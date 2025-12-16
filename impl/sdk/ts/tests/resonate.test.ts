@@ -824,6 +824,51 @@ describe("Resonate usage tests", () => {
       expect(JSON.parse(util.base64Decode((p.param as Value<string>).data!)).retry).toEqual(retryPolicy.encode());
     }
   });
+
+  test("Using prefix at Resonate class prefixes all the promises", async () => {
+    const prefix = "myPrefix";
+    const resonate = new Resonate({ prefix });
+
+    function qux(ctx: Context) {
+      expect(ctx.id.startsWith(prefix));
+      expect(ctx.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
+      return "qux";
+    }
+
+    function* baz(ctx: Context) {
+      expect(ctx.id.startsWith(prefix)).toBe(true);
+      expect(ctx.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
+      yield* ctx.run(qux);
+      return "baz";
+    }
+
+    function* bar(ctx: Context) {
+      console.log(ctx.id);
+      expect(ctx.id.startsWith(prefix)).toBe(true);
+      expect(ctx.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
+      return "bar";
+    }
+
+    function* foo(ctx: Context) {
+      const p = yield* ctx.beginRun(bar);
+      yield* ctx.run(baz, ctx.options({ id: "bazId" }));
+      yield* ctx.run(qux);
+      yield* p;
+      return "ok";
+    }
+    const f = resonate.register("foo", foo);
+    await f.run("fooId");
+
+    const results = [];
+    for await (const page of resonate.promises.search("*")) {
+      expect(Array.isArray(page)).toBe(true);
+      results.push(...page);
+    }
+
+    for (const promise of results) {
+      expect(promise.id.startsWith(prefix)).toBe(true);
+    }
+  });
 });
 
 describe("Context usage tests", () => {
@@ -1456,6 +1501,21 @@ describe("Resonate environment variable initialization", () => {
 });
 
 describe("Bearer token authentication", () => {
+  const originalEnv = process.env;
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.RESONATE_TOKEN;
+    delete process.env.RESONATE_USERNAME;
+    delete process.env.RESONATE_PASSWORD;
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+    global.fetch = originalFetch;
+  });
+
   test("Bearer token auth", async () => {
     const p1 = Promise.withResolvers();
     const p2 = Promise.withResolvers();
@@ -1558,7 +1618,6 @@ describe("Bearer token authentication", () => {
     await p1.promise;
     await p2.promise;
     resonate.stop();
-    delete process.env.RESONATE_TOKEN;
   });
 
   test("RESONATE_TOKEN takes priority over RESONATE_USERNAME and RESONATE_PASSWORD", async () => {
@@ -1596,8 +1655,5 @@ describe("Bearer token authentication", () => {
     await p1.promise;
     await p2.promise;
     resonate.stop();
-    delete process.env.RESONATE_TOKEN;
-    delete process.env.RESONATE_USERNAME;
-    delete process.env.RESONATE_PASSWORD;
   });
 });

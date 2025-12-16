@@ -56,6 +56,7 @@ export class Resonate {
 
   private pid: string;
   private ttl: number;
+  private idPrefix;
 
   private unicast: string;
   private anycast: string;
@@ -92,6 +93,7 @@ export class Resonate {
     encryptor = undefined,
     tracer = undefined,
     transport = undefined,
+    prefix = undefined,
   }: {
     url?: string;
     group?: string;
@@ -103,12 +105,16 @@ export class Resonate {
     encryptor?: Encryptor;
     tracer?: Tracer;
     transport?: Network | (Network & MessageSource);
+    prefix?: string;
   } = {}) {
     this.clock = new WallClock();
     this.ttl = ttl;
     this.tracer = tracer ?? new NoopTracer();
     this.encryptor = encryptor ?? new NoopEncryptor();
     this.encoder = new JsonEncoder();
+
+    const resolvedPrefix = prefix ?? process.env.RESONATE_PREFIX;
+    this.idPrefix = resolvedPrefix ? `${resolvedPrefix}:` : "";
 
     this.verbose = verbose;
     this.subscribeEvery = 60 * 1000; // make this configurable
@@ -193,7 +199,7 @@ export class Resonate {
     this.anycast = this.messageSource.anycast;
     this.match = this.messageSource.match;
 
-    this.optsBuilder = new OptionsBuilder({ match: this.match });
+    this.optsBuilder = new OptionsBuilder({ match: this.match, idPrefix: this.idPrefix });
 
     this.inner = new ResonateInner({
       unicast: this.unicast,
@@ -328,6 +334,7 @@ export class Resonate {
     verbose = false,
     encryptor = undefined,
     tracer = undefined,
+    prefix = undefined,
   }: {
     url?: string;
     group?: string;
@@ -338,8 +345,9 @@ export class Resonate {
     verbose?: boolean;
     encryptor?: Encryptor;
     tracer?: Tracer;
+    prefix?: string;
   } = {}): Resonate {
-    return new Resonate({ url, group, pid, ttl, auth, token, verbose, encryptor, tracer });
+    return new Resonate({ url, group, pid, ttl, auth, token, verbose, encryptor, tracer, prefix });
   }
 
   /**
@@ -499,6 +507,8 @@ export class Resonate {
       );
     }
 
+    id = `${this.idPrefix}${id}`;
+
     util.assert(registered.version > 0, "function version must be greater than zero");
 
     const span = this.tracer.startSpan(id, this.clock.now());
@@ -641,6 +651,8 @@ export class Resonate {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
+    id = `${this.idPrefix}${id}`;
+
     const func = registered ? registered.name : (funcOrName as string);
     const version = registered ? registered.version : opts.version || 1;
 
@@ -718,7 +730,7 @@ export class Resonate {
       }),
     );
 
-    await this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", opts.timeout, {
+    await this.schedules.create(name, cron, `${this.idPrefix}{{.id}}.{{.timestamp}}`, opts.timeout, {
       ikey: name,
       promiseHeaders: headers,
       promiseData: data,
@@ -749,6 +761,7 @@ export class Resonate {
    *   The handle can be awaited or queried to retrieve the final result.
    */
   public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
+    id = `${this.idPrefix}${id}`;
     const promise = await this.readPromise({
       kind: "readPromise",
       id: id,
