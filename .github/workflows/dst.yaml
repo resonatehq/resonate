@@ -129,12 +129,12 @@ jobs:
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
             --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-logs
           path: logs.txt
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && matrix.scenario != 'fault' }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-visualization
