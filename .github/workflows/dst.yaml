@@ -30,7 +30,7 @@ jobs:
           cache: false
 
       - name: Restore resonate from cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         id: cache
         with:
           path: resonate
@@ -43,7 +43,7 @@ jobs:
 
       - name: Save resonate to cache
         if: steps.cache.outputs.cache-hit != 'true' # Only save if cache was missed
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Restore resonate
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
@@ -162,7 +162,7 @@ jobs:
 
     steps:
       - name: Restore resonate
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
