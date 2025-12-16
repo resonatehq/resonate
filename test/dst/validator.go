@@ -140,6 +140,9 @@ func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, re
 
 	switch res.Status {
 	case t_api.StatusCreated:
+		if createPromiseAndTaskRes.Task.ExpiresAt < 0 {
+			return model, fmt.Errorf("invalid task expiry %d", createPromiseAndTaskRes.Task.ExpiresAt)
+		}
 		if model.tasks.get(createPromiseAndTaskRes.Task.Id) != nil {
 			return model, fmt.Errorf("task '%s' exists", createPromiseAndTaskRes.Task.Id)
 		}
@@ -540,6 +543,9 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		if claimTaskReq.Counter != t.Counter {
 			return model, fmt.Errorf("task '%s' counter mismatch (%d != %d)", claimTaskReq.Id, claimTaskReq.Counter, t.Counter)
 		}
+		if claimTaskRes.Task.ExpiresAt < 0 {
+			return model, fmt.Errorf("invalid task expiry %d", claimTaskRes.Task.ExpiresAt)
+		}
 
 		model = model.Copy()
 		model.tasks.set(claimTaskReq.Id, claimTaskRes.Task)
@@ -666,6 +672,9 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 		if dropTaskReq.Counter != t.Counter {
 			return model, fmt.Errorf("task '%s' counter mismatch (%d != %d)", dropTaskReq.Id, dropTaskReq.Counter, t.Counter)
 		}
+		if dropTaskRes.Task.ExpiresAt < 0 {
+			return model, fmt.Errorf("invalid task expiry %d", dropTaskRes.Task.ExpiresAt)
+		}
 
 		model = model.Copy()
 		model.tasks.set(dropTaskReq.Id, dropTaskRes.Task)
@@ -742,7 +751,7 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 
 			// we can only update the model for tasks that are unambiguously
 			// heartbeated, and it's only an approximation
-			t.ExpiresAt = reqTime + int64(t.Ttl)
+			t.ExpiresAt = util.ClampAddInt64(reqTime, t.Ttl)
 			model.tasks.set(t.Id, t)
 		}
 

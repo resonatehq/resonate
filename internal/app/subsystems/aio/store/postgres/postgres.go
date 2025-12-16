@@ -299,7 +299,11 @@ const (
 	UPDATE
 		tasks
 	SET
-		expires_at = $1 + ttl
+		expires_at =
+			CASE
+				WHEN $1 > 9223372036854775807 - ttl THEN 9223372036854775807 -- max int64
+				ELSE $1 + ttl
+			END
 	WHERE
 		process_id = $2 AND state = 4`
 )

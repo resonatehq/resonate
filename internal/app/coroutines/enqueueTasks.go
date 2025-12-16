@@ -186,7 +186,7 @@ func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			} else if err == nil && completion.Sender.Success {
 				var expiresAt int64
 				if completion.Sender.TimeToClaim > 0 {
-					expiresAt = c.Time() + completion.Sender.TimeToClaim
+					expiresAt = util.ClampAddInt64(c.Time(), completion.Sender.TimeToClaim)
 				} else {
 					expiresAt = 0
 				}
@@ -205,9 +205,9 @@ func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			} else {
 				var expiresAt int64
 				if err != nil {
-					expiresAt = c.Time() + 15000 // fallback to 15s
+					expiresAt = util.ClampAddInt64(c.Time(), 15000) // fallback to 15s
 				} else if completion.Sender.TimeToRetry > 0 {
-					expiresAt = c.Time() + completion.Sender.TimeToRetry
+					expiresAt = util.ClampAddInt64(c.Time(), completion.Sender.TimeToRetry)
 				} else {
 					expiresAt = 0
 				}

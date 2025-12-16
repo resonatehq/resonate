@@ -62,7 +62,9 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		} else if t.Counter != req.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
-			expiresAt := c.Time() + int64(req.Ttl)
+			// guard against overflow
+			expiresAt := util.ClampAddInt64(c.Time(), req.Ttl)
+
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Metadata,
