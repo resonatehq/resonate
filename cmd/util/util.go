@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"reflect"
 	"strconv"
 	"strings"

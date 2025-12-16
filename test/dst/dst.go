@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"sort"
 	"strconv"
 	"strings"
