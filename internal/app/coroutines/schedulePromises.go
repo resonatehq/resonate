@@ -82,7 +82,7 @@ func SchedulePromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, a
 			commands[i] = &t_aio.CreatePromiseCommand{
 				Id:        id,
 				Param:     s.PromiseParam,
-				Timeout:   s.PromiseTimeout + s.NextRunTime,
+				Timeout:   util.ClampAddInt64(s.PromiseTimeout, s.NextRunTime),
 				Tags:      s.PromiseTags,
 				CreatedOn: c.Time(),
 			}
