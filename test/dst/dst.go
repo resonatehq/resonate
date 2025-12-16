@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -129,6 +130,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// backchannel validators
 	d.bcValidator.AddBcValidator(ValidateTasksWithSameRootPromiseId)
 	d.bcValidator.AddBcValidator(ValidateNotify)
+	d.bcValidator.AddBcValidator(ValidateTaskExpiry)
 
 	// porcupine ops
 	var ops []porcupine.Operation
@@ -159,7 +161,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 					if d.config.PrintOps {
 						// log
-						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err)
+						slog.Info("DST", "id", req.Metadata["id"], "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err)
 					}
 
 					// add operation to porcupine
@@ -211,7 +213,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
-						Ttl:       cmdUtil.RangeInt63n(r, 1000, 5000),
+						Ttl:       cmdUtil.Choose(r, 1000, 2000, 3000, 4000, 5000, int64(math.MaxInt64)),
 					},
 				})
 			case *promise.Promise:

@@ -293,7 +293,7 @@ const (
 	UPDATE
 		tasks
 	SET
-		expires_at = ? + ttl
+		expires_at = MIN(? + ttl, 9223372036854775807) -- max int64
 	WHERE
 		process_id = ? AND state = 4`
 )

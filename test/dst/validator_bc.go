@@ -92,3 +92,11 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 
 	return model, nil
 }
+
+func ValidateTaskExpiry(model *Model, reqTime int64, _ int64, req *Req) (*Model, error) {
+	if req.bc.Task != nil && req.bc.Task.ExpiresAt < 0 {
+		return model, fmt.Errorf("invalid task expiry %d", req.bc.Task.ExpiresAt)
+	}
+
+	return model, nil
+}

@@ -205,7 +205,7 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: createPromiseReq.Id,
 				ProcessId: createPromiseReq.Id,
-				Ttl:       cmdUtil.RangeInt63n(r, 1000, 5000),
+				Ttl:       cmdUtil.Choose(r, 1000, 2000, 3000, 4000, 5000, int64(math.MaxInt64)),
 				Timeout:   createPromiseReq.Timeout,
 			},
 		},
@@ -467,7 +467,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 					Id:        id,
 					ProcessId: pid,
 					Counter:   counter,
-					Ttl:       cmdUtil.RangeInt63n(r, 1000, 5000),
+					Ttl:       cmdUtil.Choose(r, 1000, 2000, 3000, 4000, 5000, int64(math.MaxInt64)),
 				},
 			})
 		case 1:
