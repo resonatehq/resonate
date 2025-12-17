@@ -17,7 +17,7 @@ on:
 jobs:
   run:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     env:
       RESONATE_HOST: http://localhost
