@@ -302,6 +302,7 @@ describe("Resonate usage tests", () => {
       expect(p1.tags["resonate:invoke"]).toBe(target);
       expect(p2.tags["resonate:invoke"]).toBe(target);
     }
+    resonate.stop();
   });
 
   test("Correctly sets options on inner functions without defined opts", async () => {
@@ -448,6 +449,7 @@ describe("Resonate usage tests", () => {
 
     const handle = await resonate.get("foo");
     expect(await handle.result()).toBe("foo");
+    resonate.stop();
   });
 
   test("Date", async () => {
@@ -472,6 +474,8 @@ describe("Resonate usage tests", () => {
       const n = await f.run(`g${i}`);
       expect(n).toBe(0);
     }
+
+    resonate.stop();
   });
 
   test("Math", async () => {
@@ -497,6 +501,7 @@ describe("Resonate usage tests", () => {
       const n = await f.run(`g${i}`);
       expect(n).toBe(1);
     }
+    resonate.stop();
   });
 
   test("Basic auth", async () => {
@@ -504,7 +509,7 @@ describe("Resonate usage tests", () => {
     const p2 = Promise.withResolvers();
 
     // mock fetch
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic Zm9vOmJhcg==");
@@ -532,6 +537,8 @@ describe("Resonate usage tests", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
+    resonate.stop();
   });
 
   test("Target is set to anycast without preference by default", async () => {
@@ -823,6 +830,8 @@ describe("Resonate usage tests", () => {
       const p = await resonate.promises.get(`f${i}`);
       expect(JSON.parse(util.base64Decode((p.param as Value<string>).data!)).retry).toEqual(retryPolicy.encode());
     }
+
+    resonate.stop();
   });
 
   test("Using prefix at Resonate class prefixes all the promises", async () => {
@@ -868,6 +877,8 @@ describe("Resonate usage tests", () => {
     for (const promise of results) {
       expect(promise.id.startsWith(prefix)).toBe(true);
     }
+
+    resonate.stop();
   });
 });
 
@@ -1028,6 +1039,8 @@ describe("Context usage tests", () => {
         expect(JSON.parse(util.base64Decode((p.param as Value<string>).data!)).retry).toEqual(retryPolicy.encode());
       }
     }
+
+    resonate.stop();
   });
 });
 
@@ -1058,7 +1071,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_PORT = "8080";
     process.env.RESONATE_URL = "http://url-from-env:9000";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://arg-url:3000/promises") {
         p1.resolve(null);
@@ -1075,6 +1088,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1085,7 +1099,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_HOST = "localhost";
     process.env.RESONATE_PORT = "8001";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:8001/promises") {
         p1.resolve(null);
@@ -1102,6 +1116,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1111,7 +1126,7 @@ describe("Resonate environment variable initialization", () => {
 
     process.env.RESONATE_URL = "http://resonate-server:9000";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://resonate-server:9000/promises") {
         p1.resolve(null);
@@ -1128,11 +1143,12 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
   test("LocalNetwork used when no url sources are set", async () => {
-    global.fetch = jest.fn(() => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation(() => {
       throw new Error("Fetch should not be called for LocalNetwork");
     });
 
@@ -1144,7 +1160,8 @@ describe("Resonate environment variable initialization", () => {
     expect(result).toBe("result");
 
     // Verify fetch was never called
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1156,7 +1173,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_PORT = "7000";
     process.env.RESONATE_URL = "http://priority-url:9000";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://priority-url:9000/promises") {
         p1.resolve(null);
@@ -1173,6 +1190,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1184,7 +1202,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_PORT = "8080";
     process.env.RESONATE_URL = "";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://fallback:8080/promises") {
         p1.resolve(null);
@@ -1201,13 +1219,14 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
   test("Empty RESONATE_URL and no url arg falls back to LocalNetwork", async () => {
     process.env.RESONATE_URL = "";
 
-    global.fetch = jest.fn(() => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation(() => {
       throw new Error("Fetch should not be called for LocalNetwork");
     });
 
@@ -1216,8 +1235,8 @@ describe("Resonate environment variable initialization", () => {
     const f = resonate.register("f", async (_ctx: Context) => "result");
     const result = await f.run("test");
     expect(result).toBe("result");
-
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1228,7 +1247,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_USERNAME = "envuser";
     process.env.RESONATE_PASSWORD = "envpass";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic YXJndXNlcjphcmdwYXNz");
@@ -1254,6 +1273,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1264,7 +1284,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_USERNAME = "envuser";
     process.env.RESONATE_PASSWORD = "envpass";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic ZW52dXNlcjplbnZwYXNz");
@@ -1289,6 +1309,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1298,7 +1319,7 @@ describe("Resonate environment variable initialization", () => {
 
     process.env.RESONATE_USERNAME = "envuser";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic ZW52dXNlcjo=");
@@ -1323,6 +1344,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1332,7 +1354,7 @@ describe("Resonate environment variable initialization", () => {
 
     process.env.RESONATE_PASSWORD = "envpass";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBeUndefined();
@@ -1357,6 +1379,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1364,7 +1387,7 @@ describe("Resonate environment variable initialization", () => {
     const p1 = Promise.withResolvers();
     const p2 = Promise.withResolvers();
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBeUndefined();
@@ -1389,6 +1412,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1399,7 +1423,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_HOST = "localhost";
     process.env.RESONATE_PORT = "8001";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:8001/promises") {
         p1.resolve(null);
@@ -1416,6 +1440,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1427,7 +1452,7 @@ describe("Resonate environment variable initialization", () => {
     process.env.RESONATE_HOST = "secure-host";
     process.env.RESONATE_PORT = "8443";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "https://secure-host:8443/promises") {
         p1.resolve(null);
@@ -1444,6 +1469,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1453,7 +1479,7 @@ describe("Resonate environment variable initialization", () => {
 
     process.env.RESONATE_HOST = "default-port-host";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://default-port-host:8001/promises") {
         p1.resolve(null);
@@ -1470,6 +1496,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1479,7 +1506,7 @@ describe("Resonate environment variable initialization", () => {
 
     process.env.RESONATE_HOST = "defaults-host";
 
-    global.fetch = jest.fn((url) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://defaults-host:8001/promises") {
         p1.resolve(null);
@@ -1496,6 +1523,7 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 });
@@ -1520,7 +1548,7 @@ describe("Bearer token authentication", () => {
     const p1 = Promise.withResolvers();
     const p2 = Promise.withResolvers();
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer test-token-123");
@@ -1547,6 +1575,7 @@ describe("Bearer token authentication", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1554,7 +1583,7 @@ describe("Bearer token authentication", () => {
     const p1 = Promise.withResolvers();
     const p2 = Promise.withResolvers();
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer priority-token");
@@ -1582,6 +1611,7 @@ describe("Bearer token authentication", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1591,7 +1621,7 @@ describe("Bearer token authentication", () => {
 
     process.env.RESONATE_TOKEN = "env-token-456";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-456");
@@ -1617,6 +1647,7 @@ describe("Bearer token authentication", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 
@@ -1628,7 +1659,7 @@ describe("Bearer token authentication", () => {
     process.env.RESONATE_USERNAME = "ignored";
     process.env.RESONATE_PASSWORD = "ignored";
 
-    global.fetch = jest.fn((url, options) => {
+    const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Bearer env-token-priority");
@@ -1654,6 +1685,7 @@ describe("Bearer token authentication", () => {
 
     await p1.promise;
     await p2.promise;
+    mockFetch.mockReset();
     resonate.stop();
   });
 });
