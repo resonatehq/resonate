@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/stretchr/testify/assert"
 )
@@ -23,13 +25,14 @@ type httpTest struct {
 
 func setup(auth map[string]string) (*httpTest, error) {
 	api := &test.API{}
+	metrics := metrics.New(prometheus.NewRegistry())
 	errors := make(chan error)
-	subsystem, err := New(api, &Config{
+	subsystem, err := New(api, metrics, &Config{
 		Addr:          ":0",
 		Auth:          auth,
 		Timeout:       1 * time.Second,
 		TaskFrequency: 1 * time.Minute, // used as default
-	}, "")
+	})
 
 	if err != nil {
 		return nil, err
@@ -57,6 +60,7 @@ func TestHttp(t *testing.T) {
 	for _, ts := range []struct {
 		name         string
 		auth         map[string]string
+		bearer       *string
 		reqUsername  string
 		reqPassword  string
 		codeOverride int
@@ -73,6 +77,10 @@ func TestHttp(t *testing.T) {
 			reqUsername:  "user",
 			reqPassword:  "notthepassword",
 			codeOverride: 401,
+		},
+		{
+			name:   "BearerTokenCredentials",
+			bearer: util.ToPointer("MyToken"),
 		},
 	} {
 		// start the server
@@ -105,6 +113,19 @@ func TestHttp(t *testing.T) {
 					// set authorization
 					if ts.auth != nil {
 						req.SetBasicAuth(ts.reqUsername, ts.reqPassword)
+
+						// Workaround to make the test Request have the same Authorization header than the test setup
+						if tc.Req != nil {
+							tc.Req.Metadata["authorization"] = req.Header.Get("Authorization")
+						}
+					} else if ts.bearer != nil {
+						req.Header.Add("Authorization", "Bearer "+*ts.bearer)
+
+						// This tests that the http api subsytem correctly removes "Bearer" before handling the
+						// token to the api
+						if tc.Req != nil {
+							tc.Req.Metadata["authorization"] = *ts.bearer
+						}
 					}
 
 					res, err := httpTest.client.Do(req)
@@ -120,7 +141,7 @@ func TestHttp(t *testing.T) {
 
 					// apply override code if applicable
 					code := tc.Http.Res.Code
-					if ts.codeOverride != 0 {
+					if ts.codeOverride != 0 && !tc.NoAuth {
 						code = ts.codeOverride
 					}
 
@@ -128,6 +149,11 @@ func TestHttp(t *testing.T) {
 
 					if tc.Http.Res.Body != nil && code >= 200 && code < 300 {
 						assert.Equal(t, tc.Http.Res.Body, body)
+					}
+
+					// Reset changes to tc.Req.Metadata["authorization"] for other tests to work
+					if tc.Req != nil {
+						delete(tc.Req.Metadata, "authorization")
 					}
 
 					select {

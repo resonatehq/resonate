@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -77,7 +78,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
 		Ttl:       req.Task.Ttl,
-		ExpiresAt: c.Time() + int64(req.Task.Ttl),
+		ExpiresAt: util.ClampAddInt64(c.Time(), req.Task.Ttl),
 		CreatedOn: c.Time(),
 	}))
 
@@ -120,6 +121,8 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, *promiseAndTask]) (*promiseAndTask, error) {
+		metrics := c.Get("metrics").(*metrics.Metrics)
+
 		// first read the promise to see if it already exists
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -268,6 +271,14 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
 				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
+			}
+
+			// count promise
+			metrics.PromisesTotal.WithLabelValues("created").Inc()
+
+			// count task (if applicable)
+			if t != nil {
+				metrics.TasksTotal.WithLabelValues("created").Inc()
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil

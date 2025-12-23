@@ -11,16 +11,16 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-type ResponsePayload interface {
-	Kind() Kind
-	String() string
-	isResponsePayload()
-}
-
 type Response struct {
 	Status   StatusCode
 	Metadata map[string]string
 	Payload  ResponsePayload
+}
+
+type ResponsePayload interface {
+	Kind() Kind
+	String() string
+	isResponsePayload()
 }
 
 // Promises
@@ -220,6 +220,16 @@ func (r *EchoResponse) String() string {
 
 func (r *EchoResponse) Kind() Kind { return Echo }
 
+// Noop
+
+type NoopResponse struct{}
+
+func (r *NoopResponse) String() string {
+	return "Noop()"
+}
+
+func (r *NoopResponse) Kind() Kind { return Noop }
+
 // Marker methods that make each of the request types be a
 // ResponsePayload type.
 func (r *ReadPromiseResponse) isResponsePayload()          {}
@@ -240,6 +250,7 @@ func (r *CompleteTaskResponse) isResponsePayload()         {}
 func (r *DropTaskResponse) isResponsePayload()             {}
 func (r *HeartbeatTasksResponse) isResponsePayload()       {}
 func (r *EchoResponse) isResponsePayload()                 {}
+func (r *NoopResponse) isResponsePayload()                 {}
 
 func (r *Response) String() string {
 	util.Assert(r.Payload != nil, "Payload must not be nil")

@@ -13,14 +13,16 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(metadata != nil, "metadata must be set")
+func SchedulePromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
 
-	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+	config := c.Get("config").(*system.Config)
+
+	for i := 0; i < config.ScheduleMaxIterations; i++ {
 		// read elapsed schedules
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: metadata,
+			Tags: m,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -41,7 +43,9 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
 		result := t_aio.AsQuerySchedules(completion.Store.Results[0])
-		util.Assert(result != nil, "result must not be nil")
+		if len(result.Records) == 0 {
+			break
+		}
 
 		awaiting := make([]gocoroPromise.Awaitable[*promiseAndTask], len(result.Records))
 		commands := make([]*t_aio.CreatePromiseCommand, len(result.Records))
@@ -78,19 +82,19 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 			commands[i] = &t_aio.CreatePromiseCommand{
 				Id:        id,
 				Param:     s.PromiseParam,
-				Timeout:   s.PromiseTimeout + s.NextRunTime,
+				Timeout:   util.ClampAddInt64(s.PromiseTimeout, s.NextRunTime),
 				Tags:      s.PromiseTags,
 				CreatedOn: c.Time(),
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, nil, commands[i], nil, &t_aio.UpdateScheduleCommand{
+			awaiting[i] = gocoro.Spawn(c, createPromise(m, nil, commands[i], nil, &t_aio.UpdateScheduleCommand{
 				Id:          s.Id,
 				LastRunTime: &s.NextRunTime,
 				NextRunTime: next,
 			}))
 		}
 
-		for i := 0; i < len(awaiting); i++ {
+		for i := range awaiting {
 			if awaiting[i] == nil {
 				continue
 			}
@@ -105,8 +109,9 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 			}
 		}
-		return nil, nil
 	}
+
+	return nil, nil
 }
 
 // Helper functions

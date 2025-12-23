@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/aio"
@@ -18,14 +19,17 @@ import (
 )
 
 type Config struct {
-	Url                 string        `flag:"url" desc:"resonate server url"`
-	CoroutineMaxSize    int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" dst:"1:1000"`
-	SubmissionBatchSize int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" dst:"1:1000"`
-	CompletionBatchSize int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" dst:"1:1000"`
-	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
-	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
-	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
-	SignalTimeout       time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" dst:"1s:10s"`
+	Url                   string        `flag:"url" desc:"resonate server url"`
+	CoroutineMaxSize      int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" dst:"1:1000"`
+	SubmissionBatchSize   int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" dst:"1:1000"`
+	CompletionBatchSize   int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" dst:"1:1000"`
+	PromiseBatchSize      int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
+	PromiseMaxIterations  int           `flag:"promise-max-iterations" desc:"max promise iterations per coroutine" default:"1000" dst:"1:1000"`
+	ScheduleBatchSize     int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
+	ScheduleMaxIterations int           `flag:"schedule-max-iterations" desc:"max schedule iterations per coroutine" default:"1000" dst:"1:1000"`
+	TaskBatchSize         int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
+	TaskMaxIterations     int           `flag:"task-max-iterations" desc:"max task iterations per coroutine" default:"1000" dst:"1:1000"`
+	SignalTimeout         time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" dst:"1s:10s"`
 }
 
 func (c *Config) String() string {
@@ -41,7 +45,7 @@ func (c *Config) String() string {
 }
 
 type backgroundCoroutine struct {
-	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
+	coroutine func(map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	name      string
 	last      int64
 	promise   promise.Promise[any]
@@ -55,8 +59,8 @@ type System struct {
 	scheduler    gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
 	onRequest    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	background   []*backgroundCoroutine
-	shutdown     chan interface{}
-	shortCircuit chan interface{}
+	shutdown     chan any
+	shortCircuit chan any
 }
 
 func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *System {
@@ -68,8 +72,8 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		scheduler:    gocoro.New(aio, config.CoroutineMaxSize),
 		onRequest:    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]{},
 		background:   []*backgroundCoroutine{},
-		shutdown:     make(chan interface{}),
-		shortCircuit: make(chan interface{}),
+		shutdown:     make(chan any),
+		shortCircuit: make(chan any),
 	}
 }
 
@@ -122,35 +126,55 @@ func (s *System) Tick(t int64) {
 	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
-	// dequeue cqes
-	for i, cqe := range s.aio.DequeueCQE(s.config.CompletionBatchSize) {
-		util.Assert(i < s.config.CompletionBatchSize, "cqes length be no greater than the completion batch size")
+	// dequeue sqes and cqes
+	sqes := s.api.DequeueSQE(s.config.SubmissionBatchSize)
+	cqes := s.aio.DequeueCQE(s.config.CompletionBatchSize)
+	util.Assert(len(sqes) <= s.config.SubmissionBatchSize, "sqe length must be no greater than the submission batch size")
+	util.Assert(len(cqes) <= s.config.CompletionBatchSize, "cqe length must be no greater than the completion batch size")
+
+	// call completion callbacks
+	for _, cqe := range cqes {
 		cqe.Callback(cqe.Completion, cqe.Error)
 	}
 
 	// add background coroutines
 	for _, bg := range s.background {
-		if !s.api.Done() && (t-bg.last) >= int64(s.config.SignalTimeout.Milliseconds()) && (bg.promise == nil || bg.promise.Completed()) {
-			bg.last = t
+		if len(sqes) > 0 {
+			bg.last = 0
+		}
 
-			tags := map[string]string{
-				"id":   fmt.Sprintf("%s:%d", bg.name, t),
-				"name": bg.name,
-			}
+		// system is shutting down
+		if s.api.Done() {
+			break
+		}
 
-			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(s.config, tags)); ok {
-				bg.promise = p
-				s.coroutineMetrics(p, tags)
-			} else {
-				slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-			}
+		// background coroutines are mutually exclusive
+		if bg.promise != nil && bg.promise.Pending() {
+			continue
+		}
+
+		// wait min amount of time between scheduling
+		if t-bg.last < s.config.SignalTimeout.Milliseconds() {
+			continue
+		}
+
+		bg.last = t
+
+		tags := map[string]string{
+			"id":   fmt.Sprintf("%s:%d", bg.name, t),
+			"name": bg.name,
+		}
+
+		if p, ok := gocoro.Add(s.scheduler, bg.coroutine(tags)); ok {
+			bg.promise = p
+			s.coroutineMetrics(p, tags)
+		} else {
+			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
 		}
 	}
 
-	// dequeue sqes
-	for i, sqe := range s.api.DequeueSQE(s.config.SubmissionBatchSize) {
-		util.Assert(i < s.config.SubmissionBatchSize, "sqes length be no greater than the submission batch size")
-
+	// add request coroutines
+	for _, sqe := range sqes {
 		coroutine, ok := s.onRequest[sqe.Submission.Kind()]
 		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind()))
 
@@ -169,7 +193,7 @@ func (s *System) Tick(t int64) {
 	s.aio.Flush(t)
 }
 
-func (s *System) Shutdown() <-chan interface{} {
+func (s *System) Shutdown() <-chan any {
 	// start by shutting down the api
 	s.api.Shutdown()
 
@@ -194,6 +218,12 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			// set config
 			c.Set("config", s.config)
 
+			// set metrics
+			c.Set("metrics", s.metrics)
+
+			timer := prometheus.NewTimer(s.metrics.CoroutinesDuration.WithLabelValues(kind.String()))
+			defer timer.ObserveDuration()
+
 			// run coroutine
 			res, err := constructor(c, req)
 
@@ -209,10 +239,24 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 	}
 }
 
-func (s *System) AddBackground(name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
+func (s *System) AddBackground(name string, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], map[string]string) (any, error)) {
 	s.background = append(s.background, &backgroundCoroutine{
-		coroutine: constructor,
-		name:      name,
+		name: name,
+		coroutine: func(m map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+			return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+				// set config
+				c.Set("config", s.config)
+
+				// set metrics
+				c.Set("metrics", s.metrics)
+
+				timer := prometheus.NewTimer(s.metrics.CoroutinesDuration.WithLabelValues(name))
+				defer timer.ObserveDuration()
+
+				// run coroutine
+				return constructor(c, m)
+			}
+		},
 	})
 }
 

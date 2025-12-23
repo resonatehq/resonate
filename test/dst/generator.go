@@ -7,6 +7,7 @@ import (
 	"math/rand" // nosemgrep
 	"strconv"
 
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
@@ -136,7 +137,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	}
 
 	id := g.promiseSearch(r)
-	limit := RangeIntn(r, 1, 11)
+	limit := cmdUtil.RangeIntn(r, 1, 11)
 	tags := g.tags(r)
 	states := []promise.State{}
 
@@ -172,7 +173,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	strict := r.Intn(2) == 0
 	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
-	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
+	timeout := cmdUtil.RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
 	tags := g.tags(r)
 
 	return &t_api.Request{
@@ -204,7 +205,7 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: createPromiseReq.Id,
 				ProcessId: createPromiseReq.Id,
-				Ttl:       RangeInt63n(r, 1000, 5000),
+				Ttl:       cmdUtil.Choose(r, 1000, 2000, 3000, 4000, 5000, int64(math.MaxInt64)),
 				Timeout:   createPromiseReq.Timeout,
 			},
 		},
@@ -236,7 +237,7 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.promiseId(r)
 	rootPromiseId := g.promiseId(r)
-	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	timeout := cmdUtil.RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
 	switch r.Intn(2) {
 	case 0:
@@ -284,7 +285,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 	}
 
 	id := g.scheduleSearch(r)
-	limit := RangeIntn(r, 1, 11)
+	limit := cmdUtil.RangeIntn(r, 1, 11)
 	tags := g.tags(r)
 
 	return &t_api.Request{
@@ -302,7 +303,7 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	tags := g.tags(r)
 	idempotencyKey := g.idempotencyKey(r)
 
-	promiseTimeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	promiseTimeout := cmdUtil.RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	promiseHeaders := g.headers(r)
 	promiseData := g.dataSet[r.Intn(len(g.dataSet))]
 	promiseTags := g.tags(r)
@@ -340,7 +341,7 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	resourceId := g.idSet[r.Intn(len(g.idSet))]
 	executionId := g.idSet[r.Intn(len(g.idSet))]
 	processId := g.idSet[r.Intn(len(g.idSet))]
-	ttl := RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
+	ttl := cmdUtil.RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
 
 	return &t_api.Request{
 		Metadata: map[string]string{"partitionId": resourceId},
@@ -466,7 +467,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 					Id:        id,
 					ProcessId: pid,
 					Counter:   counter,
-					Ttl:       RangeInt63n(r, 1000, 5000),
+					Ttl:       cmdUtil.Choose(r, 1000, 2000, 3000, 4000, 5000, int64(math.MaxInt64)),
 				},
 			})
 		case 1:

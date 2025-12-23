@@ -8,19 +8,23 @@ import (
 	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(metadata != nil, "metadata must be set")
+func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
 
-	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+	config := c.Get("config").(*system.Config)
+	metrics := c.Get("metrics").(*metrics.Metrics)
+
+	for i := 0; i < config.TaskMaxIterations; i++ {
 		tasksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: metadata,
+			Tags: m,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -42,10 +46,8 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		util.Assert(len(tasksCompletion.Store.Results) == 1, "completion must have one result")
 
 		tasksResult := t_aio.AsQueryTasks(tasksCompletion.Store.Results[0])
-		util.Assert(tasksResult != nil, "tasksResult must not be nil")
-
 		if len(tasksResult.Records) == 0 {
-			return nil, nil
+			break
 		}
 
 		promiseCmds := make([]t_aio.Command, len(tasksResult.Records))
@@ -56,7 +58,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 
 		promisesCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: metadata,
+			Tags: m,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: promiseCmds,
@@ -126,7 +128,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			} else {
 				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
 					Kind: t_aio.Sender,
-					Tags: metadata,
+					Tags: m,
 					Sender: &t_aio.SenderSubmission{
 						Task: &task.Task{
 							Id:            t.Id,
@@ -184,7 +186,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			} else if err == nil && completion.Sender.Success {
 				var expiresAt int64
 				if completion.Sender.TimeToClaim > 0 {
-					expiresAt = c.Time() + completion.Sender.TimeToClaim
+					expiresAt = util.ClampAddInt64(c.Time(), completion.Sender.TimeToClaim)
 				} else {
 					expiresAt = 0
 				}
@@ -203,9 +205,9 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			} else {
 				var expiresAt int64
 				if err != nil {
-					expiresAt = c.Time() + 15000 // fallback to 15s
+					expiresAt = util.ClampAddInt64(c.Time(), 15000) // fallback to 15s
 				} else if completion.Sender.TimeToRetry > 0 {
-					expiresAt = c.Time() + completion.Sender.TimeToRetry
+					expiresAt = util.ClampAddInt64(c.Time(), completion.Sender.TimeToRetry)
 				} else {
 					expiresAt = 0
 				}
@@ -224,9 +226,9 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		}
 
 		if len(commands) > 0 {
-			_, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
+			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: metadata,
+				Tags: m,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: commands,
@@ -236,9 +238,25 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 
 			if err != nil {
 				slog.Error("failed to update tasks", "err", err)
+				return nil, nil
+			}
+
+			util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
+
+			for i, r := range completion.Store.Results {
+				result := t_aio.AsAlterTasks(r)
+				command := commands[i].(*t_aio.UpdateTaskCommand)
+				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
+				if command.State == task.Completed && result.RowsAffected == 1 {
+					metrics.TasksTotal.WithLabelValues("completed").Inc()
+				}
+				if command.State == task.Timedout && result.RowsAffected == 1 {
+					metrics.TasksTotal.WithLabelValues("timedout").Inc()
+				}
 			}
 		}
-
-		return nil, nil
 	}
+
+	return nil, nil
 }

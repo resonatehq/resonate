@@ -64,8 +64,13 @@ func (s *server) claimTask(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: claimTask,
+		Metadata: metadata,
+		Payload:  claimTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -148,8 +153,13 @@ func (s *server) completeTask(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: completeTask,
+		Metadata: metadata,
+		Payload:  completeTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -206,8 +216,13 @@ func (s *server) dropTask(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: dropTask,
+		Metadata: metadata,
+		Payload:  dropTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -262,8 +277,13 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: heartbeatTasks,
+		Metadata: metadata,
+		Payload:  heartbeatTasks,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})

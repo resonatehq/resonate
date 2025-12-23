@@ -11,13 +11,15 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(metadata != nil, "metadata must be set")
+func TimeoutPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
 
-	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+	config := c.Get("config").(*system.Config)
+
+	for i := 0; i < config.PromiseMaxIterations; i++ {
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: metadata,
+			Tags: m,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -39,6 +41,9 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
 		result := t_aio.AsQueryPromises(completion.Store.Results[0])
+		if len(result.Records) == 0 {
+			break
+		}
 
 		awaiting := make([]gocoroPromise.Awaitable[bool], len(result.Records))
 		for i, r := range result.Records {
@@ -51,7 +56,7 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 				continue
 			}
 
-			awaiting[i] = gocoro.Spawn(c, completePromise(metadata, nil, &t_aio.UpdatePromiseCommand{
+			awaiting[i] = gocoro.Spawn(c, completePromise(m, nil, &t_aio.UpdatePromiseCommand{
 				Id:             p.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
@@ -60,7 +65,7 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 			}))
 		}
 
-		for i := 0; i < len(awaiting); i++ {
+		for i := range awaiting {
 			if awaiting[i] == nil {
 				continue
 			}
@@ -69,7 +74,7 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 				slog.Error("failed to complete promise", "err", err)
 			}
 		}
-
-		return nil, nil
 	}
+
+	return nil, nil
 }

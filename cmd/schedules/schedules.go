@@ -17,21 +17,25 @@ func NewCmd() *cobra.Command {
 		server   string
 		username string
 		password string
+		token    string
 	)
 
 	cmd := &cobra.Command{
 		Use:     "schedules",
 		Aliases: []string{"schedule"},
 		Short:   "Resonate schedules",
-		Run: func(cmd *cobra.Command, args []string) {
-			_ = cmd.Help()
-		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
+			if token != "" {
+				c.SetBearerToken(token)
+			}
 
 			return c.Setup(server)
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
 		},
 	}
 
@@ -42,7 +46,8 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(DeleteScheduleCmd(c))
 
 	// Flags
-	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")
+	cmd.PersistentFlags().StringVarP(&server, "server", "S", "http://localhost:8001", "resonate url")
+	cmd.PersistentFlags().StringVarP(&token, "token", "T", "", "JWT bearer token")
 	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
 

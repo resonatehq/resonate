@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -25,26 +25,26 @@ jobs:
           cache: false
 
       - name: Rum golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.1
 
   test:
     runs-on: ubuntu-24.04
     env:
-      TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
-      TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
-      TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
-      TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
-      TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_test"
+      TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_HOST: "localhost"
+      TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PORT: "5432"
+      TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME: "username"
+      TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD: "password"
+      TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE: "resonate_test"
 
     services:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: ${{ env.TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
-          POSTGRES_DB: ${{ env.TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
+          POSTGRES_USER: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -64,8 +64,7 @@ jobs:
           cache: false
 
       - name: Run go test and generate coverage report
-        run: |
-          go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+        run: make test
 
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v5
@@ -73,7 +72,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: dst-results
@@ -83,7 +82,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -93,7 +92,7 @@ jobs:
 
       - name: Build resonate
         run: |
-          go build -o resonate main.go
+          go build -tags=all -o resonate .
 
   scan:
     runs-on: ubuntu-24.04
@@ -106,7 +105,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Run semgrep
         run: |
@@ -117,10 +116,10 @@ jobs:
     needs: [build]
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check out durable-promise-test-harness repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: resonatehq/durable-promise-test-harness
           path: durable-promise-test-harness
@@ -148,7 +147,7 @@ jobs:
         run: |
           ./dpth verify -r 1000 -c 10
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: test-harness-results

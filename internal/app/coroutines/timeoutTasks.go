@@ -6,17 +6,21 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(metadata != nil, "metadata must be set")
+func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
 
-	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+	config := c.Get("config").(*system.Config)
+	metrics := c.Get("metrics").(*metrics.Metrics)
+
+	for i := 0; i < config.TaskMaxIterations; i++ {
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: metadata,
+			Tags: m,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -39,7 +43,9 @@ func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
 		result := t_aio.AsQueryTasks(completion.Store.Results[0])
-		util.Assert(result != nil, "result must not be nil")
+		if len(result.Records) == 0 {
+			break
+		}
 
 		commands := make([]t_aio.Command, len(result.Records))
 
@@ -75,9 +81,9 @@ func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		}
 
 		if len(commands) > 0 {
-			_, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
+			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: metadata,
+				Tags: m,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: commands,
@@ -87,9 +93,22 @@ func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 
 			if err != nil {
 				slog.Error("failed to update tasks", "err", err)
+				return nil, nil
+			}
+
+			util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
+
+			for i, r := range completion.Store.Results {
+				result := t_aio.AsAlterTasks(r)
+				command := commands[i].(*t_aio.UpdateTaskCommand)
+				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
+				if command.State == task.Timedout && result.RowsAffected == 1 {
+					metrics.TasksTotal.WithLabelValues("timedout").Inc()
+				}
 			}
 		}
-
-		return nil, nil
 	}
+
+	return nil, nil
 }

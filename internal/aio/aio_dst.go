@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/util"
@@ -42,6 +43,10 @@ func (a *aioDST) String() string {
 
 func (a *aioDST) AddSubsystem(subsystem SubsystemDST) {
 	a.subsystems[subsystem.Kind()] = subsystem
+}
+
+func (a *aioDST) Plugins() []plugins.Plugin {
+	return nil
 }
 
 func (a *aioDST) Start() error {

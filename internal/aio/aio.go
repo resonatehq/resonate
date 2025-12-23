@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/plugins"
 
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
@@ -23,6 +25,8 @@ type AIO interface {
 	Signal(<-chan interface{}) <-chan interface{}
 	Flush(int64)
 
+	Plugins() []plugins.Plugin
+
 	// dispatch is required by gocoro
 	Dispatch(*t_aio.Submission, func(*t_aio.Completion, error))
 
@@ -37,6 +41,7 @@ type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	buffer     *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]Subsystem
+	plugins    []plugins.Plugin
 	errors     chan error
 	metrics    *metrics.Metrics
 }
@@ -62,9 +67,25 @@ func (a *aio) AddSubsystem(subsystem Subsystem) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
 
+func (a *aio) AddPlugin(plugin plugins.Plugin) {
+	a.plugins = append(a.plugins, plugin)
+}
+
+func (a *aio) Plugins() []plugins.Plugin {
+	return a.plugins
+}
+
 // Lifecycle functions
 
 func (a *aio) Start() error {
+	// start plugins
+	for _, plugin := range a.plugins {
+		if err := plugin.Start(a.errors); err != nil {
+			return err
+		}
+	}
+
+	// start subsystems
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Start(a.errors); err != nil {
 			return err
@@ -77,8 +98,16 @@ func (a *aio) Start() error {
 func (a *aio) Stop() error {
 	defer close(a.cq)
 
+	// stop subsystems
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
+			return err
+		}
+	}
+
+	// stop plugins
+	for _, plugin := range a.plugins {
+		if err := plugin.Stop(); err != nil {
 			return err
 		}
 	}
@@ -143,7 +172,10 @@ func (a *aio) EnqueueSQE(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	}
 
 	slog.Debug("aio:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
-	a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Inc()
+	kind := sqe.Submission.Kind.String()
+	timer := prometheus.NewTimer(a.metrics.AioDuration.WithLabelValues(kind))
+	count := a.metrics.AioInFlight.WithLabelValues(kind)
+	count.Inc()
 
 	callback := sqe.Callback
 	sqe.Callback = func(completion *t_aio.Completion, err error) {
@@ -156,8 +188,9 @@ func (a *aio) EnqueueSQE(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			status = "success"
 		}
 
-		a.metrics.AioTotal.WithLabelValues(sqe.Submission.Kind.String(), status).Inc()
-		a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Dec()
+		timer.ObserveDuration()
+		count.Dec()
+		a.metrics.AioTotal.WithLabelValues(kind, status).Inc()
 
 		callback(completion, err)
 	}

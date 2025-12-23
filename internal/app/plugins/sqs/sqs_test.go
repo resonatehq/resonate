@@ -9,12 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	awstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type MockSQSClient struct {
@@ -128,13 +128,13 @@ func TestSQSPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sqs, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 30 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 0}, tc.client)
+			sqs, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 30 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 0}, tc.client)
 			assert.Nil(t, err)
 
 			err = sqs.Start(nil)
 			assert.Nil(t, err)
 
-			ok := sqs.Enqueue(&aio.Message{
+			ok := sqs.Enqueue(&plugins.Message{
 				Addr: tc.addr,
 				Head: map[string]string{
 					"foo": "bar",

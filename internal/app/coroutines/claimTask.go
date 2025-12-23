@@ -16,14 +16,10 @@ import (
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.ClaimTaskRequest)
-
 	util.Assert(req.ProcessId != "", "process id must be set")
 	util.Assert(req.Ttl >= 0, "ttl must be greater than or equal to 0")
 
-	config, ok := c.Get("config").(*system.Config)
-	if !ok {
-		panic("coroutine must have config dependency")
-	}
+	config := c.Get("config").(*system.Config)
 
 	var status t_api.StatusCode
 	var t *task.Task
@@ -66,7 +62,9 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		} else if t.Counter != req.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
-			expiresAt := c.Time() + int64(req.Ttl)
+			// guard against overflow
+			expiresAt := util.ClampAddInt64(c.Time(), req.Ttl)
+
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Metadata,
