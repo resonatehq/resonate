@@ -75,11 +75,10 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 
 	// Define command flags
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "task counter")
-	cmd.Flags().StringVarP(&pid, "pid", "p", "default", "claimant pid")
-	cmd.Flags().DurationVarP(&ttl, "ttl", "t", time.Minute, "task ttl, time before which a heartbeat must be sent")
+	cmd.Flags().StringVar(&pid, "pid", "default", "claimant pid")
+	cmd.Flags().DurationVar(&ttl, "ttl", time.Minute, "task ttl, time before which a heartbeat must be sent")
 
 	// Mark flags as required
-	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("counter")
 
 	return cmd

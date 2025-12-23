@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -30,7 +30,7 @@ jobs:
           cache: false
 
       - name: Restore resonate from cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         id: cache
         with:
           path: resonate
@@ -39,11 +39,11 @@ jobs:
       - name: Build resonate
         if: steps.cache.outputs.cache-hit != 'true' # Only run if cache missed
         run: |
-          go build -o resonate main.go
+          go build -o resonate .
 
       - name: Save resonate to cache
         if: steps.cache.outputs.cache-hit != 'true' # Only save if cache was missed
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
@@ -74,11 +74,11 @@ jobs:
         run: [1, 2]
 
     env:
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
-      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_dst"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_HOST: "localhost"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PORT: "5432"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME: "username"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD: "password"
+      AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE: "resonate_dst"
 
     services:
       postgres:
@@ -87,9 +87,9 @@ jobs:
         # see: https://github.com/actions/runner/issues/822
         image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
-          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
-          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
+          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STORE_POSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -100,7 +100,7 @@ jobs:
 
     steps:
       - name: Restore resonate
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
@@ -129,12 +129,12 @@ jobs:
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
             --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-logs
           path: logs.txt
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ always() && matrix.scenario != 'fault' }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-visualization
@@ -162,18 +162,18 @@ jobs:
 
     steps:
       - name: Restore resonate
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: resonate
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
       - name: Download logs from run 1
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs1 }}
           path: logs-1.txt
       - name: Download logs from run 2
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs2 }}
           path: logs-2.txt

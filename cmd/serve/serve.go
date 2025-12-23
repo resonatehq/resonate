@@ -27,28 +27,23 @@ import (
 	"github.com/spf13/viper"
 )
 
-func NewCmd() *cobra.Command {
-	var (
-		v      = viper.New()
-		config = &config.Config{}
-	)
-
+func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start Resonate server",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if file, _ := cmd.Flags().GetString("config"); file != "" {
-				v.SetConfigFile(file)
+				vip.SetConfigFile(file)
 			} else {
-				v.SetConfigName("resonate")
-				v.AddConfigPath(".")
-				v.AddConfigPath("$HOME")
+				vip.SetConfigName("resonate")
+				vip.AddConfigPath(".")
+				vip.AddConfigPath("$HOME")
 			}
 
-			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-			v.AutomaticEnv()
+			vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			vip.AutomaticEnv()
 
-			if err := v.ReadInConfig(); err != nil {
+			if err := vip.ReadInConfig(); err != nil {
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return err
 				}
@@ -63,11 +58,19 @@ func NewCmd() *cobra.Command {
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+			// decode config
+			if err := vip.Unmarshal(&cfg, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
-			return Serve(config)
+			// decode plugins
+			for _, plugin := range cfg.Plugins() {
+				if err := plugin.Decode(vip, hooks); err != nil {
+					return err
+				}
+			}
+
+			return Serve(cfg)
 		},
 	}
 
@@ -75,21 +78,23 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringP("config", "c", "", "config file (default resonate.yaml)")
 
 	// bind config
-	_ = config.Bind(cmd, v, "default")
+	util.Bind(cfg, cmd, cmd.Flags(), vip)
+
+	// bind plugins
+	for _, plugin := range cfg.Plugins() {
+		plugin.Bind(cmd, cmd.Flags(), vip, cmd.Name())
+	}
 
 	// bind other flags
 	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
 	_ = viper.BindPFlag("ignore-asserts", cmd.Flags().Lookup("ignore-asserts"))
 
-	// maintain defined order of flags
-	cmd.Flags().SortFlags = false
-
 	return cmd
 }
 
-func Serve(config *config.Config) error {
+func Serve(cfg *config.Config) error {
 	// logger
-	logLevel, err := log.ParseLevel(config.LogLevel)
+	logLevel, err := log.ParseLevel(cfg.LogLevel)
 	if err != nil {
 		slog.Error("failed to parse log level", "error", err)
 		return err
@@ -102,38 +107,62 @@ func Serve(config *config.Config) error {
 	metrics := metrics.New(reg)
 
 	// api/aio
-	api := api.New(config.API.Size, metrics)
-	aio := aio.New(config.AIO.Size, metrics)
+	api := api.New(cfg.API.Size, metrics)
+	aio := aio.New(cfg.AIO.Size, metrics)
 
-	// plugins
-	aioPlugins, pollAddr, err := config.AIOPlugins(aio, metrics)
+	// api middleware
+	apiMiddleware, err := cfg.API.Middleware()
 	if err != nil {
 		return err
+	}
+	for _, middleware := range apiMiddleware {
+		api.AddMiddleware(middleware)
+	}
+
+	// plugins
+	for _, plugin := range cfg.AIO.Plugins.All() {
+		if plugin.Enabled() {
+			p, err := plugin.New(metrics)
+			if err != nil {
+				return err
+			}
+			api.AddPlugin(p)
+			aio.AddPlugin(p)
+		}
 	}
 
 	// api subsystems
-	apiSubsystems, err := config.APISubsystems(api, pollAddr)
-	if err != nil {
-		return err
-	}
-	for _, subsystem := range apiSubsystems {
-		api.AddSubsystem(subsystem)
+	for _, subsystem := range cfg.API.Subsystems.All() {
+		if subsystem.Enabled() {
+			s, err := subsystem.New(api, metrics)
+			if err != nil {
+				return err
+			}
+			api.AddSubsystem(s)
+		}
 	}
 
 	// aio subsystems
-	aioSubsystems, err := config.AIOSubsystems(aio, metrics, aioPlugins)
-	if err != nil {
-		return err
-	}
-	for _, subsystem := range aioSubsystems {
-		aio.AddSubsystem(subsystem)
+	var storeCreated bool
+	for _, subsystem := range cfg.AIO.Subsystems.All() {
+		if subsystem.Enabled() {
+			// ensure only one store is enabled at a time,
+			// this is a hack
+			if strings.HasPrefix(subsystem.Name(), "store-") {
+				if storeCreated {
+					continue
+				}
+				storeCreated = true
+			}
+			s, err := subsystem.New(aio, metrics)
+			if err != nil {
+				return err
+			}
+			aio.AddSubsystem(s)
+		}
 	}
 
 	// start api/aio
-	if err := api.Start(); err != nil {
-		slog.Error("failed to start api", "error", err)
-		return err
-	}
 	if err := aio.Start(); err != nil {
 		if migrationErr, ok := err.(*migrations.MigrationError); ok {
 			slog.Error("failed to start aio", "error", fmt.Sprintf("Migration %03d_%s failed: %v", migrationErr.Version, migrationErr.Name, migrationErr.Err))
@@ -142,14 +171,18 @@ func Serve(config *config.Config) error {
 		}
 		return err
 	}
+	if err := api.Start(); err != nil {
+		slog.Error("failed to start api", "error", err)
+		return err
+	}
 
 	// set default url
-	if config.System.Url == "" {
-		config.System.Url = fmt.Sprintf("http://%s", api.Addr())
+	if cfg.System.Url == "" {
+		cfg.System.Url = fmt.Sprintf("http://%s", api.Addr())
 	}
 
 	// instantiate system
-	system := system.New(api, aio, &config.System, metrics)
+	system := system.New(api, aio, &cfg.System, metrics)
 
 	// request coroutines
 	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
@@ -169,6 +202,7 @@ func Serve(config *config.Config) error {
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
 	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+	system.AddOnRequest(t_api.Noop, coroutines.Noop)
 
 	// background coroutines
 	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
@@ -180,7 +214,7 @@ func Serve(config *config.Config) error {
 	// metrics server
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	metricsServer := &http.Server{Addr: config.MetricsAddr, Handler: mux}
+	metricsServer := &http.Server{Addr: cfg.MetricsAddr, Handler: mux}
 
 	go func() {
 		for {

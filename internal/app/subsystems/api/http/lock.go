@@ -34,7 +34,12 @@ func (s *server) acquireLock(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.AcquireLockRequest{
 			ResourceId:  body.ResourceId,
 			ExecutionId: body.ExecutionId,
@@ -77,7 +82,12 @@ func (s *server) releaseLock(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.ReleaseLockRequest{
 			ResourceId:  body.ResourceId,
 			ExecutionId: body.ExecutionId,
@@ -117,7 +127,12 @@ func (s *server) heartbeatLocks(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.HeartbeatLocksRequest{
 			ProcessId: body.ProcessId,
 		},

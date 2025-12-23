@@ -77,9 +77,9 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "schedule tags")
-	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "results per page")
-	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "pagination cursor")
+	cmd.Flags().StringToStringVar(&tags, "tag", map[string]string{}, "schedule tags")
+	cmd.Flags().IntVar(&limit, "limit", 100, "results per page")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "pagination cursor")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output format, can be one of: json")
 
 	return cmd

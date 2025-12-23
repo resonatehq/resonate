@@ -29,7 +29,12 @@ func (s *server) readPromise(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.ReadPromiseRequest{
 			Id: extractId(c.Param("id")),
 		},
@@ -87,8 +92,13 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Payload: req,
+		Metadata: metadata,
+		Payload:  req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -154,6 +164,10 @@ func (s *server) createPromise(c *gin.Context) {
 		}
 	}
 
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Metadata: metadata,
 		Fence:    fence,
@@ -207,6 +221,10 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 		if header.Tracestate != "" {
 			metadata["tracestate"] = header.Tracestate
 		}
+	}
+
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
@@ -284,8 +302,14 @@ func (s *server) completePromise(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: fence,
+		Metadata: metadata,
+		Fence:    fence,
 		Payload: &t_api.CompletePromiseRequest{
 			Id:             extractId(c.Param("id")),
 			IdempotencyKey: header.IdempotencyKey,
@@ -357,8 +381,14 @@ func (s *server) createCallback(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: fence,
+		Metadata: metadata,
+		Fence:    fence,
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
@@ -423,8 +453,13 @@ func (s *server) createSubscription(c *gin.Context) {
 			head["tracestate"] = header.Tracestate
 		}
 	}
+	metadata := map[string]string{}
+	if auth := c.GetString("authorization"); auth != "" {
+		metadata["authorization"] = auth
+	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.NotifyId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,

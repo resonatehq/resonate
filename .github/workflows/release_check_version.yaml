@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -22,7 +22,7 @@ jobs:
 
       - name: Build resonate
         run: |
-          go build -o resonate main.go
+          go build -o resonate .
 
       - name: Check version
         env:

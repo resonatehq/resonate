@@ -14,9 +14,16 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -35,6 +42,32 @@ type Cors struct {
 	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
 }
 
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(a i_api.API, metrics *metrics.Metrics) (i_api.Subsystem, error) {
+	return New(a, metrics, c)
+}
+
 type Http struct {
 	config   *Config
 	listen   net.Listener
@@ -42,7 +75,7 @@ type Http struct {
 	shutdown chan struct{}
 }
 
-func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) {
+func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	handler := gin.New()
@@ -62,17 +95,36 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		_ = v.RegisterValidation("oneofcaseinsensitive", oneOfCaseInsensitive)
 	}
 
-	// Middleware
-	handler.Use(server.log)
+	// Middleware for logging and metrics
+	handler.Use(func(c *gin.Context) {
+		path := c.FullPath()
+		slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI)
+
+		if !strings.HasPrefix(path, "/poll/") {
+			timer := prometheus.NewTimer(metrics.HttpRequestsDuration.WithLabelValues(c.Request.Method, path))
+			defer timer.ObserveDuration()
+		}
+
+		c.Next()
+		metrics.HttpRequestsTotal.WithLabelValues(c.Request.Method, path, fmt.Sprintf("%d", c.Writer.Status())).Inc()
+	})
 
 	// CORS
 	if len(config.Cors.AllowOrigins) > 0 {
 		handler.Use(cors.New(cors.Config{
-			AllowOrigins: config.Cors.AllowOrigins,
-			AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders: []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			AllowOrigins:  config.Cors.AllowOrigins,
+			AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			ExposeHeaders: []string{"Resonate-Version"},
 		}))
 	}
+
+	// Ping endpoint, no auth required
+	handler.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+		})
+	})
 
 	// Authentication
 	authorized := handler.Group("/")
@@ -83,6 +135,17 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	// Resonate header middleware
 	authorized.Use(func(c *gin.Context) {
 		c.Header("Resonate-Version", internal.Version())
+		c.Next()
+	})
+
+	// Extract and normalize Authorization header
+	authorized.Use(func(c *gin.Context) {
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				authHeader = authHeader[7:] // Skip "Bearer "
+			}
+			c.Set("authorization", authHeader)
+		}
 		c.Next()
 	})
 
@@ -125,6 +188,14 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
 	// Poller proxy
+	var pollAddr string
+	for _, plugin := range a.Plugins() {
+		if plugin.Type() == "poll" {
+			pollAddr = plugin.Addr()
+			break
+		}
+	}
+
 	if pollAddr != "" {
 		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
 		if err != nil {
@@ -136,6 +207,21 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		authorized.GET("/poll/*rest", func(c *gin.Context) {
 			ctx, cancel := context.WithCancel(c.Request.Context())
 			defer cancel()
+
+			// Run this request through the api middleware
+			metadata := map[string]string{}
+			if auth := c.GetString("authorization"); auth != "" {
+				metadata["authorization"] = auth
+			}
+			_, err := server.api.Process(c.GetHeader("RequestId"), &t_api.Request{
+				Metadata: metadata,
+				Payload:  &t_api.NoopRequest{},
+			})
+
+			if err != nil {
+				c.JSON(server.code(err.Code), gin.H{"error": err})
+				return
+			}
 
 			go func() {
 				select {
@@ -199,11 +285,6 @@ type server struct {
 
 func (s *server) code(status t_api.StatusCode) int {
 	return int(status) / 100
-}
-
-func (s *server) log(c *gin.Context) {
-	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
-	c.Next()
 }
 
 // Helper functions

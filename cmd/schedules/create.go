@@ -88,11 +88,11 @@ func CreateScheduleCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&description, "description", "d", "", "schedule description")
 	cmd.Flags().StringVarP(&cron, "cron", "c", "", "schedule cron expression")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "schedule tags")
-	cmd.Flags().StringVar(&promiseId, "promise-id", "", "templated schedule id, can include {{.timestamp}}")
-	cmd.Flags().DurationVar(&promiseTimeout, "promise-timeout", 0, "promise timeout")
+	cmd.Flags().StringVarP(&promiseId, "promise-id", "i", "", "templated schedule id, can include {{.timestamp}}")
+	cmd.Flags().DurationVarP(&promiseTimeout, "promise-timeout", "t", 0, "promise timeout")
+	cmd.Flags().StringVar(&description, "description", "", "schedule description")
+	cmd.Flags().StringToStringVar(&tags, "tag", map[string]string{}, "schedule tags")
 	cmd.Flags().StringToStringVar(&promiseHeaders, "promise-header", map[string]string{}, "promise param header")
 	cmd.Flags().StringVar(&promiseData, "promise-data", "", "promise param data")
 	cmd.Flags().StringToStringVar(&promiseTags, "promise-tag", map[string]string{}, "promise tags")

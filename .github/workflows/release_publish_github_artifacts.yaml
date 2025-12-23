@@ -30,15 +30,15 @@ jobs:
           - os: darwin
             arch: x86_64
             arch_grep: x86_64
-            runner: macos-13
+            runner: macos-15-intel
           - os: darwin
             arch: aarch64
             arch_grep: arm64
-            runner: macos-14
+            runner: macos-15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -52,7 +52,7 @@ jobs:
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate
-          go build -o resonate main.go
+          go build -tags=all -o resonate .
 
           # Verify binary
           file resonate | grep "${{ matrix.systems.arch_grep }}"

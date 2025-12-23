@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,6 +50,7 @@ func TestHttpPlugin(t *testing.T) {
 
 	okUrl := fmt.Sprintf("%s/ok", server.URL)
 	koUrl := fmt.Sprintf("%s/ko", server.URL)
+	toUrl := fmt.Sprintf("%s/to", server.URL)
 
 	for _, tc := range []struct {
 		name    string
@@ -57,10 +58,12 @@ func TestHttpPlugin(t *testing.T) {
 		success bool
 	}{
 		{"ok", &Addr{Url: okUrl}, true},
-		{"ko", &Addr{Url: koUrl}, false},
+		{"ko", &Addr{Url: koUrl}, true},
+		{"to", &Addr{Url: toUrl}, true},
+		{"connTo", &Addr{Url: "http://localhost:32412124"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
+			http, err := New(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
 			assert.Nil(t, err)
 
 			data, err := json.Marshal(tc.data)
@@ -69,20 +72,24 @@ func TestHttpPlugin(t *testing.T) {
 			err = http.Start(nil)
 			assert.Nil(t, err)
 
-			ok := http.Enqueue(&aio.Message{
+			msg := &plugins.Message{
 				Addr: data,
 				Head: map[string]string{"foo": "bar", "baz": "qux"},
 				Body: []byte("ok"),
 				Done: func(completion *t_aio.SenderCompletion) {
-					assert.Equal(t, tc.success, completion.Success)
+					assert.Equal(t, completion.Success, tc.success)
+					assert.NotNil(t, completion)
 				},
-			})
+			}
+			assert.True(t, http.Enqueue(msg))
 
-			res := <-ch
-			assert.True(t, ok)
-			assert.Equal(t, []string{"bar"}, res.head["Foo"])
-			assert.Equal(t, []string{"qux"}, res.head["Baz"])
-			assert.Equal(t, []byte("ok"), res.body)
+			switch tc.name {
+			case "ok", "ko", "to":
+				req := <-ch
+				assert.Equal(t, []string{"bar"}, req.head["Foo"])
+				assert.Equal(t, []string{"qux"}, req.head["Baz"])
+				assert.Equal(t, []byte("ok"), req.body)
+			}
 
 			err = http.Stop()
 			assert.Nil(t, err)

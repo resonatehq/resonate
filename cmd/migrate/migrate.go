@@ -18,86 +18,40 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// MigrateConfig holds configuration for the migrate command
-type MigrateConfig struct {
-	AIO MigrateAIO `flag:"aio"`
-}
-
-type MigrateAIO struct {
-	Subsystems MigrateSubsystems `flag:"-"`
-}
-
-type PersistentEnabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true" persistent:"true"`
-	Config  T    `flag:"-"`
-}
-
-type PersistentDisabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false" persistent:"true"`
-	Config  T    `flag:"-"`
-}
-
-type MigrateSubsystems struct {
-	StorePostgress PersistentDisabledSubsystem[PostgresConfig] `flag:"store-postgres"`
-	StoreSqlite    PersistentEnabledSubsystem[SqliteConfig]    `flag:"store-sqlite"`
-}
-
-// PostgresConfig holds postgres-specific configuration
-type PostgresConfig struct {
-	Host     string            `flag:"host" desc:"postgres host" default:"localhost" persistent:"true"`
-	Port     string            `flag:"port" desc:"postgres port" default:"5432" persistent:"true"`
-	Username string            `flag:"username" desc:"postgres username" persistent:"true"`
-	Password string            `flag:"password" desc:"postgres password" persistent:"true"`
-	Database string            `flag:"database" desc:"postgres database" default:"resonate" persistent:"true"`
-	Query    map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}" persistent:"true"`
-}
-
-// SqliteConfig holds sqlite-specific configuration
-type SqliteConfig struct {
-	Path string `flag:"path" desc:"sqlite database path" default:"resonate.db" persistent:"true"`
-}
-
-func (c *MigrateConfig) Bind(cmd *cobra.Command, vip *viper.Viper) error {
-	return config.Bind(cmd, c, vip, "default", "", "")
-}
-
-func NewCmd() *cobra.Command {
-	var (
-		v      = viper.New()
-		config = &MigrateConfig{}
-	)
-
-	migrateCmd := &cobra.Command{
+func NewCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Database migration commands",
 		Long:  "Manage database migrations for Resonate",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if file, _ := cmd.Flags().GetString("config"); file != "" {
-				v.SetConfigFile(file)
+			if file, _ := cmd.PersistentFlags().GetString("config"); file != "" {
+				vip.SetConfigFile(file)
 			} else {
-				v.SetConfigName("resonate")
-				v.AddConfigPath(".")
-				v.AddConfigPath("$HOME")
+				vip.SetConfigName("resonate")
+				vip.AddConfigPath(".")
+				vip.AddConfigPath("$HOME")
 			}
 
-			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-			v.AutomaticEnv()
+			vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			vip.AutomaticEnv()
 
-			if err := v.ReadInConfig(); err != nil {
+			if err := vip.ReadInConfig(); err != nil {
 				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 					return err
 				}
 			}
 
-			// Unmarshal config
 			hooks := mapstructure.ComposeDecodeHookFunc(
 				util.MapToBytes(),
 				mapstructure.StringToTimeDurationHookFunc(),
 				mapstructure.StringToSliceHookFunc(","),
 			)
 
-			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-				return err
+			// decode subsystems
+			for _, subsystem := range cfg.AIO.Subsystems.All() {
+				if err := subsystem.Decode(vip, hooks); err != nil {
+					return err
+				}
 			}
 
 			return nil
@@ -105,25 +59,27 @@ func NewCmd() *cobra.Command {
 	}
 
 	// bind config file flag
-	migrateCmd.PersistentFlags().StringP("config", "c", "", "config file (default resonate.yaml)")
+	cmd.PersistentFlags().StringP("config", "c", "", "config file (default resonate.yaml)")
 
-	// bind config
-	_ = config.Bind(migrateCmd, v)
+	// bind plugins
+	for _, plugin := range cfg.Plugins() {
+		plugin.Bind(cmd, cmd.PersistentFlags(), vip, cmd.Name())
+	}
 
-	// Add subcommands
-	migrateCmd.AddCommand(newStatusCmd(config))
-	migrateCmd.AddCommand(newDryRunCmd(config))
-	migrateCmd.AddCommand(newUpCmd(config))
+	// add subcommands
+	cmd.AddCommand(newStatusCmd(cfg))
+	cmd.AddCommand(newDryRunCmd(cfg))
+	cmd.AddCommand(newUpCmd(cfg))
 
-	return migrateCmd
+	return cmd
 }
 
-func newStatusCmd(config *MigrateConfig) *cobra.Command {
+func newStatusCmd(cfg *config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show current migration status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore(config)
+			store, err := getMigrationStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -171,12 +127,12 @@ func newStatusCmd(config *MigrateConfig) *cobra.Command {
 	}
 }
 
-func newDryRunCmd(config *MigrateConfig) *cobra.Command {
+func newDryRunCmd(cfg *config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "dry-run",
 		Short: "Show which migrations would be applied",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore(config)
+			store, err := getMigrationStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -208,12 +164,12 @@ func newDryRunCmd(config *MigrateConfig) *cobra.Command {
 	}
 }
 
-func newUpCmd(config *MigrateConfig) *cobra.Command {
+func newUpCmd(cfg *config.Config) *cobra.Command {
 	return &cobra.Command{
 		Use:   "up",
 		Short: "Apply all pending migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore(config)
+			store, err := getMigrationStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -260,35 +216,27 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 // getMigrationStore infers the store type, opens the database connection,
 // and returns the appropriate migration store. The store owns the database
 // connection and the caller is responsible for calling Close() on the store.
-func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error) {
-	// Infer store type from enable flags
-	sqliteEnabled := config.AIO.Subsystems.StoreSqlite.Enabled
-	postgresEnabled := config.AIO.Subsystems.StorePostgress.Enabled
+func getMigrationStore(cfg *config.Config) (migrations.MigrationStore, error) {
+	for _, plugin := range cfg.AIO.Subsystems.All() {
+		if plugin.Name() == "store-postgres" && plugin.Enabled() {
+			subsystem, err := plugin.New(nil, nil)
+			if err != nil {
+				return nil, err
+			}
 
-	if !postgresEnabled && !sqliteEnabled {
-		return nil, fmt.Errorf("no store enabled; enable either sqlite or postgres")
+			store := subsystem.(*postgres.PostgresStore)
+			return migrations.NewPostgresMigrationStore(store.DB()), nil
+		}
+		if plugin.Name() == "store-sqlite" && plugin.Enabled() {
+			subsystem, err := plugin.New(nil, nil)
+			if err != nil {
+				return nil, err
+			}
+
+			store := subsystem.(*sqlite.SqliteStore)
+			return migrations.NewSqliteMigrationStore(store.DB()), nil
+		}
 	}
 
-	if postgresEnabled {
-		pgConfig := config.AIO.Subsystems.StorePostgress.Config
-
-		db, err := postgres.NewConn(&postgres.ConnConfig{
-			Host:     pgConfig.Host,
-			Port:     pgConfig.Port,
-			Username: pgConfig.Username,
-			Password: pgConfig.Password,
-			Database: pgConfig.Database,
-			Query:    pgConfig.Query,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return migrations.NewPostgresMigrationStore(db), nil
-	} else {
-		db, err := sqlite.NewConn(config.AIO.Subsystems.StoreSqlite.Config.Path)
-		if err != nil {
-			return nil, err
-		}
-		return migrations.NewSqliteMigrationStore(db), nil
-	}
+	return nil, fmt.Errorf("no enabled aio store plugin found for migrations")
 }

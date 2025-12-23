@@ -78,7 +78,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
 		Ttl:       req.Task.Ttl,
-		ExpiresAt: c.Time() + int64(req.Task.Ttl),
+		ExpiresAt: util.ClampAddInt64(c.Time(), req.Task.Ttl),
 		CreatedOn: c.Time(),
 	}))
 
@@ -274,11 +274,11 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			}
 
 			// count promise
-			metrics.Promises.WithLabelValues("created").Inc()
+			metrics.PromisesTotal.WithLabelValues("created").Inc()
 
 			// count task (if applicable)
 			if t != nil {
-				metrics.Tasks.WithLabelValues("created").Inc()
+				metrics.TasksTotal.WithLabelValues("created").Inc()
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil
