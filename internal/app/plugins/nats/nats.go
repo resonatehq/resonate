@@ -7,10 +7,15 @@ import (
 	"time"
 
 	natsgo "github.com/nats-io/nats.go"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
-	"github.com/resonatehq/resonate/internal/aio"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type Config struct {
@@ -20,6 +25,32 @@ type Config struct {
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 	URL         string        `flag:"url" desc:"nats server URL" default:"nats://localhost:4222"`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type Client interface {
@@ -40,13 +71,13 @@ type processor struct {
 	timeout time.Duration
 }
 
-func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
-	var addr *Addr
-	if err := json.Unmarshal(data, &addr); err != nil {
+func (p *processor) Process(addr []byte, head map[string]string, body []byte) (bool, error) {
+	var a Addr
+	if err := json.Unmarshal(addr, &a); err != nil {
 		return false, err
 	}
 
-	if addr.Subject == "" {
+	if a.Subject == "" {
 		return false, fmt.Errorf("missing subject")
 	}
 
@@ -55,7 +86,7 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 
 	done := make(chan error, 1)
 	go func() {
-		done <- p.client.Publish(addr.Subject, body)
+		done <- p.client.Publish(a.Subject, body)
 	}()
 
 	select {
@@ -69,7 +100,7 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	}
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*NATS, error) {
+func New(metrics *metrics.Metrics, config *Config) (*NATS, error) {
 	if config.URL == "" {
 		return nil, fmt.Errorf("NATS URL is required")
 	}
@@ -86,10 +117,10 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*NATS, error) {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
 
-	return NewWithClient(a, metrics, config, nc)
+	return NewWithClient(metrics, config, nc)
 }
 
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*NATS, error) {
+func NewWithClient(metrics *metrics.Metrics, config *Config, client Client) (*NATS, error) {
 	proc := &processor{
 		client:  client,
 		timeout: config.Timeout,
@@ -109,7 +140,7 @@ func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client C
 		return nil
 	}
 
-	plugin := base.NewPlugin(a, "nats", baseConfig, metrics, proc, cleanup)
+	plugin := base.NewPlugin("nats", baseConfig, metrics, proc, cleanup)
 
 	return &NATS{
 		Plugin: plugin,

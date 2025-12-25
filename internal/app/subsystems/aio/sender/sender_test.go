@@ -174,9 +174,46 @@ func TestUrlParse(t *testing.T) {
 			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"key":"partition key","topic":"my-topic"}`)},
 			ok:   true,
 		},
+		// nats scheme
+		{
+			name: "valid nats url",
+			url:  "nats://my-subject",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"my-subject"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with dots in subject",
+			url:  "nats://orders.created.v1",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"orders.created.v1"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with underscores in subject",
+			url:  "nats://my_subject_123",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"my_subject_123"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with hyphens in subject",
+			url:  "nats://my-subject-123",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"my-subject-123"}`)},
+			ok:   true,
+		},
+		{
+			name: "nats url with empty subject",
+			url:  "nats://",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "nats url with empty host (slash path)",
+			url:  "nats:///",
+			recv: nil,
+			ok:   false,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, poll, sqs+https, or kafka",
+			name: "scheme must be http, https, poll, sqs+https, kafka, or nats",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

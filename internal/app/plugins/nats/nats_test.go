@@ -8,9 +8,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type MockNATSClient struct {
@@ -146,14 +146,14 @@ func TestNATSPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, tc.client)
+			nats, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, tc.client)
 			assert.Nil(t, err)
 
 			err = nats.Start(nil)
 			assert.Nil(t, err)
 
 			done := make(chan bool, 1)
-			ok := nats.Enqueue(&aio.Message{
+			ok := nats.Enqueue(&plugins.Message{
 				Addr: tc.addr,
 				Body: []byte("test message"),
 				Done: func(completion *t_aio.SenderCompletion) {
@@ -195,26 +195,26 @@ func TestNATSPlugin(t *testing.T) {
 func TestNew(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	_, err := New(nil, metrics, &Config{URL: ""})
+	_, err := New(metrics, &Config{URL: ""})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "NATS URL is required")
 }
 
 func TestNATSString(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
-	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+	nats, _ := NewWithClient(metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
 	assert.Contains(t, nats.String(), "sender:nats")
 }
 
 func TestNATSType(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
-	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+	nats, _ := NewWithClient(metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
 	assert.Equal(t, "nats", nats.Type())
 }
 
 func TestNATSEnqueue(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
-	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+	nats, _ := NewWithClient(metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
 
 	assert.False(t, nats.Enqueue(nil))
 }
@@ -228,11 +228,11 @@ func TestWorkerProcessTimeout(t *testing.T) {
 		},
 	}
 
-	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 100 * time.Millisecond}, slowClient)
+	nats, _ := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 100 * time.Millisecond}, slowClient)
 	_ = nats.Start(nil)
 
 	done := make(chan bool, 1)
-	nats.Enqueue(&aio.Message{
+	nats.Enqueue(&plugins.Message{
 		Addr: []byte(`{"subject": "test.subject"}`),
 		Body: []byte("test message"),
 		Done: func(completion *t_aio.SenderCompletion) {
@@ -260,7 +260,7 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		error_client := &MockNATSClient{ch: ch, ok: false}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, error_client)
+		nats, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, error_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
@@ -269,7 +269,7 @@ func TestNATSErrorHandling(t *testing.T) {
 		addr := []byte(`{"subject": "test.subject"}`)
 
 		done := make(chan bool, 1)
-		ok := nats.Enqueue(&aio.Message{
+		ok := nats.Enqueue(&plugins.Message{
 			Addr: addr,
 			Body: []byte("test message"),
 			Done: func(completion *t_aio.SenderCompletion) {
@@ -299,7 +299,7 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
+		nats, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
@@ -308,7 +308,7 @@ func TestNATSErrorHandling(t *testing.T) {
 		addr := []byte(`{"subject": "test.subject"`)
 
 		done := make(chan bool, 1)
-		ok := nats.Enqueue(&aio.Message{
+		ok := nats.Enqueue(&plugins.Message{
 			Addr: addr,
 			Body: []byte("test message"),
 			Done: func(completion *t_aio.SenderCompletion) {
@@ -338,7 +338,7 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 10, Workers: 2, Timeout: 1 * time.Second}, success_client)
+		nats, err := NewWithClient(metrics, &Config{Size: 10, Workers: 2, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
@@ -349,7 +349,7 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		for i := 0; i < num_messages; i++ {
 			addr := []byte(`{"subject": "test.subject"}`)
-			ok := nats.Enqueue(&aio.Message{
+			ok := nats.Enqueue(&plugins.Message{
 				Addr: addr,
 				Body: []byte("test message"),
 				Done: func(completion *t_aio.SenderCompletion) {
@@ -388,21 +388,21 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
+		nats, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
 		assert.Nil(t, err)
 
 		addr := []byte(`{"subject": "test.subject"}`)
-		ok := nats.Enqueue(&aio.Message{
+		ok := nats.Enqueue(&plugins.Message{
 			Addr: addr,
 			Body: []byte("test message 1"),
 			Done: func(completion *t_aio.SenderCompletion) {},
 		})
 		assert.True(t, ok)
 
-		ok = nats.Enqueue(&aio.Message{
+		ok = nats.Enqueue(&plugins.Message{
 			Addr: addr,
 			Body: []byte("test message 2"),
 			Done: func(completion *t_aio.SenderCompletion) {},
