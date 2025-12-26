@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -91,13 +91,13 @@ func TestPubSubPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pubsub, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, tc.client)
+			pubsub, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, tc.client)
 			assert.Nil(t, err)
 
 			err = pubsub.Start(nil)
 			assert.Nil(t, err)
 
-			ok := pubsub.Enqueue(&aio.Message{
+			ok := pubsub.Enqueue(&plugins.Message{
 				Addr: tc.addr,
 				Head: map[string]string{
 					"foo": "bar",
@@ -125,7 +125,7 @@ func TestPubSubBasics(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
 	t.Run("ConfigValidation", func(t *testing.T) {
-		_, err := New(nil, metrics, &Config{
+		_, err := New(metrics, &Config{
 			Size:      10,
 			Workers:   2,
 			Timeout:   1 * time.Second,
@@ -171,7 +171,7 @@ func TestProcessorProcessing(t *testing.T) {
 func TestPubSubWithNilClient(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	pubsub, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, nil)
+	pubsub, err := NewWithClient(metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, nil)
 	assert.Nil(t, err)
 
 	err = pubsub.Stop()

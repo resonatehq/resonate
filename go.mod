@@ -3,7 +3,6 @@ module github.com/resonatehq/resonate
 go 1.24.0
 
 require (
-	cloud.google.com/go/pubsub/v2 v2.0.0
 	github.com/anishathalye/porcupine v1.0.3
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
@@ -18,6 +17,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/resonatehq/gocoro v0.0.0-20240928015848-78539a59dab0
 	github.com/resonatehq/resonate/internal/app/plugins/kafka v0.0.0-00010101000000-000000000000
+	github.com/resonatehq/resonate/internal/app/plugins/pubsub v0.0.0-00010101000000-000000000000
 	github.com/resonatehq/resonate/internal/app/plugins/sqs v0.0.0-00010101000000-000000000000
 	github.com/resonatehq/resonate/internal/app/subsystems/api/kafka v0.0.0-00010101000000-000000000000
 	github.com/robfig/cron/v3 v3.0.1
@@ -36,6 +36,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.5.2 // indirect
+	cloud.google.com/go/pubsub/v2 v2.0.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.40.1 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.3 // indirect
@@ -123,6 +124,7 @@ require (
 // plugins
 replace (
 	github.com/resonatehq/resonate/internal/app/plugins/kafka => ./internal/app/plugins/kafka
+	github.com/resonatehq/resonate/internal/app/plugins/pubsub => ./internal/app/plugins/pubsub
 	github.com/resonatehq/resonate/internal/app/plugins/sqs => ./internal/app/plugins/sqs
 	github.com/resonatehq/resonate/internal/app/subsystems/api/kafka => ./internal/app/subsystems/api/kafka
 )

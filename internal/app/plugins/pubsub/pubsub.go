@@ -7,10 +7,15 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
-	"github.com/resonatehq/resonate/internal/aio"
+	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/plugins"
 )
 
 type Config struct {
@@ -20,6 +25,32 @@ type Config struct {
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 	ProjectID   string        `flag:"project-id" desc:"GCP project ID" default:""`
+}
+
+func (c *Config) Bind(cmd *cobra.Command, flg *pflag.FlagSet, vip *viper.Viper, name string, prefix string, keyPrefix string) {
+	cmdUtil.Bind(c, cmd, flg, vip, name, prefix, keyPrefix)
+}
+
+func (c *Config) Decode(value any, decodeHook mapstructure.DecodeHookFunc) error {
+	decoderConfig := &mapstructure.DecoderConfig{
+		Result:     c,
+		DecodeHook: decodeHook,
+	}
+
+	decoder, err := mapstructure.NewDecoder(decoderConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) New(metrics *metrics.Metrics) (plugins.Plugin, error) {
+	return New(metrics, c)
 }
 
 type PubSub struct {
@@ -50,7 +81,7 @@ type Addr struct {
 	Topic string `json:"topic"`
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
+func New(metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 	if config.ProjectID == "" {
 		return nil, fmt.Errorf("GCP project ID is required")
 	}
@@ -62,10 +93,10 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 	}
 
 	wrapper := &ClientWrapper{client}
-	return NewWithClient(a, metrics, config, wrapper)
+	return NewWithClient(metrics, config, wrapper)
 }
 
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*PubSub, error) {
+func NewWithClient(metrics *metrics.Metrics, config *Config, client Client) (*PubSub, error) {
 	proc := &processor{
 		client:  client,
 		timeout: config.Timeout,
@@ -78,7 +109,7 @@ func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client C
 		TimeToClaim: config.TimeToClaim,
 	}
 
-	plugin := base.NewPlugin(a, "pubsub", baseConfig, metrics, proc, func() error {
+	plugin := base.NewPlugin("pubsub", baseConfig, metrics, proc, func() error {
 		if client != nil {
 			return client.Close()
 		}
