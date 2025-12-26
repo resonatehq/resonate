@@ -174,9 +174,58 @@ func TestUrlParse(t *testing.T) {
 			recv: &receiver.Recv{Type: "kafka", Data: []byte(`{"key":"partition key","topic":"my-topic"}`)},
 			ok:   true,
 		},
+		// pubsub scheme
+		{
+			name: "valid pubsub url",
+			url:  "pubsub://my-topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with underscore in topic",
+			url:  "pubsub://my_topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my_topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with dot in topic",
+			url:  "pubsub://my.topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my.topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with tilde in topic",
+			url:  "pubsub://my~topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my~topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with numbers in topic",
+			url:  "pubsub://topic123",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"topic123"}`)},
+			ok:   true,
+		},
+		{
+			name: "pubsub url with query params",
+			url:  "pubsub://my-topic?key=value",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "pubsub url with empty topic",
+			url:  "pubsub://",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "pubsub url with empty host",
+			url:  "pubsub:///",
+			recv: nil,
+			ok:   false,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, poll, sqs+https, or kafka",
+			name: "scheme must be http, https, poll, sqs+https, kafka, or pubsub",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

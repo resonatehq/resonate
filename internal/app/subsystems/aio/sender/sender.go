@@ -350,6 +350,19 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 		return &receiver.Recv{Type: "kafka", Data: data}, true
 
+	case "pubsub":
+		topic := u.Host
+		if topic == "" {
+			return nil, false
+		}
+
+		data, err := json.Marshal(map[string]string{"topic": topic})
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "pubsub", Data: data}, true
+
 	default:
 		return nil, false
 	}
