@@ -20,7 +20,6 @@ require (
 	github.com/resonatehq/resonate/internal/app/plugins/nats v0.0.0-00010101000000-000000000000
 	github.com/resonatehq/resonate/internal/app/plugins/sqs v0.0.0-00010101000000-000000000000
 	github.com/resonatehq/resonate/internal/app/subsystems/api/kafka v0.0.0-00010101000000-000000000000
-	github.com/resonatehq/resonate/internal/app/subsystems/api/nats v0.0.0-00010101000000-000000000000
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -104,7 +103,7 @@ require (
 replace (
 	github.com/resonatehq/resonate/internal/app/plugins/kafka => ./internal/app/plugins/kafka
 	github.com/resonatehq/resonate/internal/app/plugins/nats => ./internal/app/plugins/nats
+	github.com/resonatehq/resonate/internal/app/plugins/pubsub => ./internal/app/plugins/pubsub
 	github.com/resonatehq/resonate/internal/app/plugins/sqs => ./internal/app/plugins/sqs
 	github.com/resonatehq/resonate/internal/app/subsystems/api/kafka => ./internal/app/subsystems/api/kafka
-	github.com/resonatehq/resonate/internal/app/subsystems/api/nats => ./internal/app/subsystems/api/nats
 )
