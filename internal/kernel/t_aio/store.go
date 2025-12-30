@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -264,52 +263,6 @@ func (c *CreatePromiseAndTaskCommand) String() string {
 	return "CreatePromiseAndTask"
 }
 
-type ReadLockCommand struct {
-	ResourceId string
-}
-
-func (c *ReadLockCommand) String() string {
-	return "ReadLock"
-}
-
-type AcquireLockCommand struct {
-	ResourceId  string
-	ProcessId   string
-	ExecutionId string
-	Ttl         int64
-	ExpiresAt   int64
-}
-
-func (c *AcquireLockCommand) String() string {
-	return "AcquireLock"
-}
-
-type ReleaseLockCommand struct {
-	ResourceId  string
-	ExecutionId string
-}
-
-func (c *ReleaseLockCommand) String() string {
-	return "ReleaseLock"
-}
-
-type HeartbeatLocksCommand struct {
-	ProcessId string
-	Time      int64
-}
-
-func (c *HeartbeatLocksCommand) String() string {
-	return "HeartbeatLocks"
-}
-
-type TimeoutLocksCommand struct {
-	Timeout int64
-}
-
-func (c *TimeoutLocksCommand) String() string {
-	return "TimeoutLocks"
-}
-
 func (*ReadPromiseCommand) isCommand()          {}
 func (*ReadPromisesCommand) isCommand()         {}
 func (*SearchPromisesCommand) isCommand()       {}
@@ -332,11 +285,6 @@ func (*CompleteTasksCommand) isCommand()        {}
 func (*UpdateTaskCommand) isCommand()           {}
 func (*HeartbeatTasksCommand) isCommand()       {}
 func (*CreatePromiseAndTaskCommand) isCommand() {}
-func (*ReadLockCommand) isCommand()             {}
-func (*AcquireLockCommand) isCommand()          {}
-func (*ReleaseLockCommand) isCommand()          {}
-func (*HeartbeatLocksCommand) isCommand()       {}
-func (*TimeoutLocksCommand) isCommand()         {}
 
 type StoreCompletion struct {
 	Valid   bool
@@ -413,23 +361,6 @@ func (r *AlterTasksResult) String() string {
 	return "AlterTasks"
 }
 
-type QueryLocksResult struct {
-	RowsReturned int64
-	Records      []*lock.LockRecord
-}
-
-func (r *QueryLocksResult) String() string {
-	return "QueryLocks"
-}
-
-type AlterLocksResult struct {
-	RowsAffected int64
-}
-
-func (r *AlterLocksResult) String() string {
-	return "AlterLocks"
-}
-
 func (r *QueryPromisesResult) isResult()  {}
 func (r *AlterPromisesResult) isResult()  {}
 func (r *AlterCallbacksResult) isResult() {}
@@ -437,9 +368,6 @@ func (r *QuerySchedulesResult) isResult() {}
 func (r *AlterSchedulesResult) isResult() {}
 func (r *QueryTasksResult) isResult()     {}
 func (r *AlterTasksResult) isResult()     {}
-
-func (r *QueryLocksResult) isResult() {}
-func (r *AlterLocksResult) isResult() {}
 
 func AsQueryPromises(r Result) *QueryPromisesResult {
 	return r.(*QueryPromisesResult)
@@ -461,11 +389,4 @@ func AsQueryTasks(r Result) *QueryTasksResult {
 }
 func AsAlterTasks(r Result) *AlterTasksResult {
 	return r.(*AlterTasksResult)
-}
-
-func AsQueryLocks(r Result) *QueryLocksResult {
-	return r.(*QueryLocksResult)
-}
-func AsAlterLocks(r Result) *AlterLocksResult {
-	return r.(*AlterLocksResult)
 }

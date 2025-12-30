@@ -116,11 +116,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
 	d.Add(t_api.DeleteSchedule, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
 
-	// locks
-	d.Add(t_api.AcquireLock, d.generator.GenerateAcquireLock, d.validator.ValidateAcquireLock)
-	d.Add(t_api.ReleaseLock, d.generator.GenerateReleaseLock, d.validator.ValidateReleaseLock)
-	d.Add(t_api.HeartbeatLocks, d.generator.GenerateHeartbeatLocks, d.validator.ValidateHeartbeatLocks)
-
 	// tasks
 	d.Add(t_api.ClaimTask, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
 	d.Add(t_api.CompleteTask, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
@@ -587,47 +582,7 @@ func (d *DST) Model() porcupine.Model {
 						</tbody>
 					</table>
 				`, schedules)
-			case len(*model.locks) > 0:
-				var locks string
-				for _, s := range *model.locks {
-					locks = locks + fmt.Sprintf(`
-					<tr>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
-						<td align="right">%d</td>
-					</tr>
-				`, s.value.ResourceId, s.value.ExecutionId, s.value.ProcessId, s.value.ExpiresAt)
-				}
 
-				return fmt.Sprintf(`
-					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<thead>
-							<tr>
-								<td><b>Locks</b></td>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>rid</b></td>
-												<td><b>eid</b></td>
-												<td><b>pid</b></td>
-												<td><b>timeout</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				`, locks)
 			default:
 				return ""
 			}

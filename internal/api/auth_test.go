@@ -293,19 +293,6 @@ func TestMatchPromisePrefix(t *testing.T) {
 			prefix:      "search",
 			shouldMatch: true,
 		},
-		// Lock requests
-		{
-			name:        "AcquireLockRequest - matching prefix",
-			payload:     &t_api.AcquireLockRequest{ResourceId: "resource.123"},
-			prefix:      "resource",
-			shouldMatch: true,
-		},
-		{
-			name:        "ReleaseLockRequest - matching prefix",
-			payload:     &t_api.ReleaseLockRequest{ResourceId: "resource.123"},
-			prefix:      "resource",
-			shouldMatch: true,
-		},
 		// Task requests with special ID formats
 		{
 			name:        "ClaimTaskRequest - resume format",
@@ -332,12 +319,6 @@ func TestMatchPromisePrefix(t *testing.T) {
 			shouldMatch: false,
 		},
 		// Special cases - no prefix check
-		{
-			name:        "HeartbeatLocksRequest - always authorized",
-			payload:     &t_api.HeartbeatLocksRequest{ProcessId: "any:id"},
-			prefix:      "test:",
-			shouldMatch: true,
-		},
 		{
 			name:        "HeartbeatTasksRequest - always authorized",
 			payload:     &t_api.HeartbeatTasksRequest{ProcessId: "any:id"},
@@ -526,16 +507,6 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		{
 			name:       "CreateCallbackRequest - authorized",
 			payload:    &t_api.CreateCallbackRequest{PromiseId: "test:promise"},
-			shouldPass: true,
-		},
-		{
-			name:       "AcquireLockRequest - authorized",
-			payload:    &t_api.AcquireLockRequest{ResourceId: "test:resource"},
-			shouldPass: true,
-		},
-		{
-			name:       "HeartbeatLocksRequest - always authorized",
-			payload:    &t_api.HeartbeatLocksRequest{ProcessId: "any"},
 			shouldPass: true,
 		},
 		{

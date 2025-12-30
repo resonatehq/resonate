@@ -25,7 +25,6 @@ import (
 
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -161,40 +160,6 @@ const (
 
 	SCHEDULE_DELETE_STATEMENT = `
 	DELETE FROM schedules WHERE id = $1`
-
-	LOCK_READ_STATEMENT = `
-	SELECT
-		resource_id, process_id, execution_id, ttl, expires_at
-	FROM
-		locks
-	WHERE
-		resource_id = $1`
-
-	LOCK_ACQUIRE_STATEMENT = `
-	INSERT INTO locks
-		(resource_id, execution_id, process_id, ttl, expires_at)
-	VALUES
-		($1, $2, $3, $4, $5)
-	ON CONFLICT(resource_id)
-	DO UPDATE SET
-		process_id = EXCLUDED.process_id,
-		ttl = EXCLUDED.ttl,
-		expires_at = EXCLUDED.expires_at
-	WHERE locks.execution_id = EXCLUDED.execution_id`
-
-	LOCK_RELEASE_STATEMENT = `
-	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
-
-	LOCK_HEARTBEAT_STATEMENT = `
-	UPDATE
-		locks
-	SET
-		expires_at = $1 + ttl
-	WHERE
-		process_id = $2`
-
-	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks WHERE expires_at <= $1`
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
@@ -614,10 +579,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var scheduleInsertStmt *sql.Stmt
 	var scheduleUpdateStmt *sql.Stmt
 	var scheduleDeleteStmt *sql.Stmt
-	var lockAcquireStmt *sql.Stmt
-	var lockReleaseStmt *sql.Stmt
-	var lockHeartbeatStmt *sql.Stmt
-	var lockTimeoutStmt *sql.Stmt
 	var tasksInsertStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
@@ -725,42 +686,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					}
 				}
 				results[j], err = w.deleteSchedule(tx, scheduleDeleteStmt, v)
-
-			// Locks
-			case *t_aio.ReadLockCommand:
-				results[j], err = w.readLock(tx, v)
-			case *t_aio.AcquireLockCommand:
-				if lockAcquireStmt == nil {
-					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.acquireLock(tx, lockAcquireStmt, v)
-			case *t_aio.ReleaseLockCommand:
-				if lockReleaseStmt == nil {
-					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.releaseLock(tx, lockReleaseStmt, v)
-			case *t_aio.HeartbeatLocksCommand:
-				if lockHeartbeatStmt == nil {
-					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, v)
-			case *t_aio.TimeoutLocksCommand:
-				if lockTimeoutStmt == nil {
-					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.timeoutLocks(tx, lockTimeoutStmt, v)
 
 			// Tasks
 			case *t_aio.ReadTaskCommand:
@@ -1314,107 +1239,6 @@ func (w *PostgresStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 	}
 
 	return &t_aio.AlterSchedulesResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-// Locks
-
-func (w *PostgresStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t_aio.QueryLocksResult, error) {
-	// select
-	row := tx.QueryRow(LOCK_READ_STATEMENT, cmd.ResourceId)
-	record := &lock.LockRecord{}
-	rowsReturned := int64(1)
-
-	if err := row.Scan(
-		&record.ResourceId,
-		&record.ProcessId,
-		&record.ExecutionId,
-		&record.Ttl,
-		&record.ExpiresAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			rowsReturned = 0
-		} else {
-			return nil, err
-		}
-	}
-
-	var records []*lock.LockRecord
-	if rowsReturned == 1 {
-		records = append(records, record)
-	}
-
-	return &t_aio.QueryLocksResult{
-		RowsReturned: rowsReturned,
-		Records:      records,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.AlterLocksResult, error) {
-	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.Ttl, cmd.ExpiresAt)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.ReleaseLockCommand) (*t_aio.AlterLocksResult, error) {
-	// delete
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.AlterLocksResult, error) {
-	// update
-	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutLocksCommand) (*t_aio.AlterLocksResult, error) {
-	// delete
-	res, err := stmt.Exec(cmd.Timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
 		RowsAffected: rowsAffected,
 	}, nil
 }

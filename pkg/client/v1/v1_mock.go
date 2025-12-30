@@ -81,46 +81,6 @@ func (m *MockClientInterface) EXPECT() *MockClientInterfaceMockRecorder {
 	return m.recorder
 }
 
-// AcquireLock mocks base method.
-func (m *MockClientInterface) AcquireLock(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "AcquireLock", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AcquireLock indicates an expected call of AcquireLock.
-func (mr *MockClientInterfaceMockRecorder) AcquireLock(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquireLock", reflect.TypeOf((*MockClientInterface)(nil).AcquireLock), varargs...)
-}
-
-// AcquireLockWithBody mocks base method.
-func (m *MockClientInterface) AcquireLockWithBody(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "AcquireLockWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AcquireLockWithBody indicates an expected call of AcquireLockWithBody.
-func (mr *MockClientInterfaceMockRecorder) AcquireLockWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquireLockWithBody", reflect.TypeOf((*MockClientInterface)(nil).AcquireLockWithBody), varargs...)
-}
-
 // ClaimTask mocks base method.
 func (m *MockClientInterface) ClaimTask(ctx context.Context, params *ClaimTaskParams, body ClaimTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -561,46 +521,6 @@ func (mr *MockClientInterfaceMockRecorder) DropTaskWithBody(ctx, contentType, bo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskWithBody", reflect.TypeOf((*MockClientInterface)(nil).DropTaskWithBody), varargs...)
 }
 
-// HeartbeatLocks mocks base method.
-func (m *MockClientInterface) HeartbeatLocks(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "HeartbeatLocks", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HeartbeatLocks indicates an expected call of HeartbeatLocks.
-func (mr *MockClientInterfaceMockRecorder) HeartbeatLocks(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeartbeatLocks", reflect.TypeOf((*MockClientInterface)(nil).HeartbeatLocks), varargs...)
-}
-
-// HeartbeatLocksWithBody mocks base method.
-func (m *MockClientInterface) HeartbeatLocksWithBody(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "HeartbeatLocksWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HeartbeatLocksWithBody indicates an expected call of HeartbeatLocksWithBody.
-func (mr *MockClientInterfaceMockRecorder) HeartbeatLocksWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeartbeatLocksWithBody", reflect.TypeOf((*MockClientInterface)(nil).HeartbeatLocksWithBody), varargs...)
-}
-
 // HeartbeatTaskGet mocks base method.
 func (m *MockClientInterface) HeartbeatTaskGet(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -701,46 +621,6 @@ func (mr *MockClientInterfaceMockRecorder) ReadSchedule(ctx, id, params any, req
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadSchedule", reflect.TypeOf((*MockClientInterface)(nil).ReadSchedule), varargs...)
 }
 
-// ReleaseLock mocks base method.
-func (m *MockClientInterface) ReleaseLock(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "ReleaseLock", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ReleaseLock indicates an expected call of ReleaseLock.
-func (mr *MockClientInterfaceMockRecorder) ReleaseLock(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseLock", reflect.TypeOf((*MockClientInterface)(nil).ReleaseLock), varargs...)
-}
-
-// ReleaseLockWithBody mocks base method.
-func (m *MockClientInterface) ReleaseLockWithBody(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "ReleaseLockWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ReleaseLockWithBody indicates an expected call of ReleaseLockWithBody.
-func (mr *MockClientInterfaceMockRecorder) ReleaseLockWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseLockWithBody", reflect.TypeOf((*MockClientInterface)(nil).ReleaseLockWithBody), varargs...)
-}
-
 // SearchPromises mocks base method.
 func (m *MockClientInterface) SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -803,46 +683,6 @@ func NewMockClientWithResponsesInterface(ctrl *gomock.Controller) *MockClientWit
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockClientWithResponsesInterface) EXPECT() *MockClientWithResponsesInterfaceMockRecorder {
 	return m.recorder
-}
-
-// AcquireLockWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) AcquireLockWithBodyWithResponse(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "AcquireLockWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*AcquireLockResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AcquireLockWithBodyWithResponse indicates an expected call of AcquireLockWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) AcquireLockWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquireLockWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).AcquireLockWithBodyWithResponse), varargs...)
-}
-
-// AcquireLockWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) AcquireLockWithResponse(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "AcquireLockWithResponse", varargs...)
-	ret0, _ := ret[0].(*AcquireLockResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AcquireLockWithResponse indicates an expected call of AcquireLockWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) AcquireLockWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AcquireLockWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).AcquireLockWithResponse), varargs...)
 }
 
 // ClaimTaskGetWithResponse mocks base method.
@@ -1285,46 +1125,6 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) DropTaskWithResponse(ctx
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).DropTaskWithResponse), varargs...)
 }
 
-// HeartbeatLocksWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) HeartbeatLocksWithBodyWithResponse(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "HeartbeatLocksWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*HeartbeatLocksResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HeartbeatLocksWithBodyWithResponse indicates an expected call of HeartbeatLocksWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) HeartbeatLocksWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeartbeatLocksWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).HeartbeatLocksWithBodyWithResponse), varargs...)
-}
-
-// HeartbeatLocksWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) HeartbeatLocksWithResponse(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "HeartbeatLocksWithResponse", varargs...)
-	ret0, _ := ret[0].(*HeartbeatLocksResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HeartbeatLocksWithResponse indicates an expected call of HeartbeatLocksWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) HeartbeatLocksWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeartbeatLocksWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).HeartbeatLocksWithResponse), varargs...)
-}
-
 // HeartbeatTaskGetWithResponse mocks base method.
 func (m *MockClientWithResponsesInterface) HeartbeatTaskGetWithResponse(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*HeartbeatTaskGetResponse, error) {
 	m.ctrl.T.Helper()
@@ -1423,46 +1223,6 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) ReadScheduleWithResponse
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, id, params}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadScheduleWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).ReadScheduleWithResponse), varargs...)
-}
-
-// ReleaseLockWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) ReleaseLockWithBodyWithResponse(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "ReleaseLockWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*ReleaseLockResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ReleaseLockWithBodyWithResponse indicates an expected call of ReleaseLockWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) ReleaseLockWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseLockWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).ReleaseLockWithBodyWithResponse), varargs...)
-}
-
-// ReleaseLockWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) ReleaseLockWithResponse(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "ReleaseLockWithResponse", varargs...)
-	ret0, _ := ret[0].(*ReleaseLockResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ReleaseLockWithResponse indicates an expected call of ReleaseLockWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) ReleaseLockWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseLockWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).ReleaseLockWithResponse), varargs...)
 }
 
 // SearchPromisesWithResponse mocks base method.

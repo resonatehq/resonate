@@ -175,12 +175,6 @@ The Kafka API subsystem can be configured with the following flags:
 - `schedules.create` - Create a new schedule
 - `schedules.delete` - Delete a schedule
 
-### Locks
-
-- `locks.acquire` - Acquire a distributed lock
-- `locks.release` - Release a distributed lock
-- `locks.heartbeat` - Send heartbeat for locks
-
 ### Tasks
 
 - `tasks.claim` - Claim a task
@@ -370,26 +364,6 @@ echo '{
 }' | rpk topic produce resonate.requests
 ```
 
-#### Example 6: Acquire a Lock
-
-```bash
-echo '{
-  "target": "resonate.server",
-  "replyTo": {
-    "topic": "resonate.replies",
-    "target": "my-client"
-  },
-  "correlationId": "req-006",
-  "operation": "locks.acquire",
-  "payload": {
-    "resourceId": "my-resource",
-    "processId": "process-1",
-    "executionId": "exec-1",
-    "expiryInMilliseconds": 60000
-  }
-}' | rpk topic produce resonate.requests
-```
-
 #### Example 7: Create Promise and Task
 
 ```bash
@@ -566,18 +540,6 @@ echo '{
   "promiseParam": {"headers": {}, "data": null},
   "promiseTags": {"key": "value"},
   "idempotencyKey": "string (optional)"
-}
-```
-
-### Lock Operations
-
-#### locks.acquire
-```json
-{
-  "resourceId": "string",
-  "processId": "string",
-  "executionId": "string",
-  "expiryInMilliseconds": 60000
 }
 ```
 

@@ -5,7 +5,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/callback"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -131,37 +130,6 @@ func (r *DeleteScheduleResponse) String() string {
 
 func (r *DeleteScheduleResponse) Kind() Kind { return DeleteSchedule }
 
-// Locks
-
-type AcquireLockResponse struct {
-	Lock *lock.Lock `json:"lock,omitempty"`
-}
-
-func (r *AcquireLockResponse) String() string {
-	return fmt.Sprintf("AcquireLock(lock=%v)", r.Lock)
-}
-
-func (r *AcquireLockResponse) Kind() Kind { return AcquireLock }
-
-type ReleaseLockResponse struct {
-}
-
-func (r *ReleaseLockResponse) String() string {
-	return "ReleaseLock()"
-}
-
-func (r *ReleaseLockResponse) Kind() Kind { return ReleaseLock }
-
-type HeartbeatLocksResponse struct {
-	LocksAffected int64 `json:"locksAffected"`
-}
-
-func (r *HeartbeatLocksResponse) String() string {
-	return fmt.Sprintf("HeartbeatLocks(locksAffected=%d)", r.LocksAffected)
-}
-
-func (r *HeartbeatLocksResponse) Kind() Kind { return HeartbeatLocks }
-
 // Tasks
 
 type ClaimTaskResponse struct {
@@ -242,9 +210,6 @@ func (r *ReadScheduleResponse) isResponsePayload()         {}
 func (r *SearchSchedulesResponse) isResponsePayload()      {}
 func (r *CreateScheduleResponse) isResponsePayload()       {}
 func (r *DeleteScheduleResponse) isResponsePayload()       {}
-func (r *AcquireLockResponse) isResponsePayload()          {}
-func (r *ReleaseLockResponse) isResponsePayload()          {}
-func (r *HeartbeatLocksResponse) isResponsePayload()       {}
 func (r *ClaimTaskResponse) isResponsePayload()            {}
 func (r *CompleteTaskResponse) isResponsePayload()         {}
 func (r *DropTaskResponse) isResponsePayload()             {}
@@ -301,18 +266,6 @@ func (r *Response) AsCreateScheduleResponse() *CreateScheduleResponse {
 
 func (r *Response) AsDeleteScheduleResponse() *DeleteScheduleResponse {
 	return r.Payload.(*DeleteScheduleResponse)
-}
-
-func (r *Response) AsAcquireLockResponse() *AcquireLockResponse {
-	return r.Payload.(*AcquireLockResponse)
-}
-
-func (r *Response) AsReleaseLockResponse() *ReleaseLockResponse {
-	return r.Payload.(*ReleaseLockResponse)
-}
-
-func (r *Response) AsHeartbeatLocksResponse() *HeartbeatLocksResponse {
-	return r.Payload.(*HeartbeatLocksResponse)
 }
 
 func (r *Response) AsClaimTaskResponse() *ClaimTaskResponse {

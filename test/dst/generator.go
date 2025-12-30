@@ -335,49 +335,6 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
-// LOCKS
-
-func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
-	resourceId := g.idSet[r.Intn(len(g.idSet))]
-	executionId := g.idSet[r.Intn(len(g.idSet))]
-	processId := g.idSet[r.Intn(len(g.idSet))]
-	ttl := cmdUtil.RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
-
-	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": resourceId},
-		Payload: &t_api.AcquireLockRequest{
-			ResourceId:  resourceId,
-			ExecutionId: executionId,
-			ProcessId:   processId,
-			Ttl:         ttl,
-		},
-	}
-}
-
-func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
-	resourceId := g.idSet[r.Intn(len(g.idSet))]
-	executionId := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": resourceId},
-		Payload: &t_api.ReleaseLockRequest{
-			ResourceId:  resourceId,
-			ExecutionId: executionId,
-		},
-	}
-}
-
-func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request {
-	processId := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": processId},
-		Payload: &t_api.HeartbeatLocksRequest{
-			ProcessId: processId,
-		},
-	}
-}
-
 // TASKS
 
 func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {

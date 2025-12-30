@@ -172,11 +172,6 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 	authorized.GET("/schedules/*id", server.readSchedule)
 	authorized.DELETE("/schedules/*id", server.deleteSchedule)
 
-	// Locks API
-	authorized.POST("/locks/acquire", server.acquireLock)
-	authorized.POST("/locks/release", server.releaseLock)
-	authorized.POST("/locks/heartbeat", server.heartbeatLocks)
-
 	// Tasks API
 	authorized.POST("/tasks/claim", server.claimTask)
 	authorized.GET("/tasks/claim/:id/:counter", server.claimTask)
