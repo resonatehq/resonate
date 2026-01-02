@@ -21,7 +21,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -38,7 +37,6 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Add Subsystems
 	cfg.API.Subsystems.Add("http", true, &http.Config{})
-	cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 	cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
 	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{}) // do not change order
