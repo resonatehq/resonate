@@ -9,11 +9,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/protobuf/reflect/protoreflect"
-
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
-	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type testCase struct {
@@ -21,7 +16,6 @@ type testCase struct {
 	Req    *t_api.Request
 	Res    *t_api.Response
 	Http   *httpTestCase
-	Grpc   *grpcTestCase
 	NoAuth bool
 }
 
@@ -42,12 +36,6 @@ type httpTestCaseResponse struct {
 	Body []byte
 }
 
-type grpcTestCase struct {
-	Req  protoreflect.ProtoMessage
-	Res  protoreflect.ProtoMessage
-	Code codes.Code
-}
-
 var TestCases = []*testCase{
 	// Ping
 	{
@@ -63,12 +51,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 200,
 				Body: []byte(`{"status":"ok"}`),
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &grpc_health_v1.HealthCheckRequest{},
-			Res: &grpc_health_v1.HealthCheckResponse{
-				Status: grpc_health_v1.HealthCheckResponse_SERVING,
 			},
 		},
 	},
@@ -100,12 +82,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "foo",
-				RequestId: "ReadPromise",
-			},
-		},
 	},
 	{
 		Name: "ReadPromiseWithSlash",
@@ -134,12 +110,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "foo/bar",
-				RequestId: "ReadPromiseWithSlash",
-			},
-		},
 	},
 	{
 		Name: "ReadPromiseNotFound",
@@ -164,13 +134,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 404,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "bar",
-				RequestId: "ReadPromiseNotFound",
-			},
-			Code: codes.NotFound,
 		},
 	},
 	{
@@ -207,13 +170,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				Limit:     10,
-				RequestId: "SearchPromises",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesCursor",
@@ -244,13 +200,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				Cursor:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.XKusWO-Jl4v7QVIwh5Pn3oIElBvtpf0VPOLJkXPvQLk",
-				RequestId: "SearchPromisesCursor",
 			},
 		},
 	},
@@ -284,14 +233,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_PENDING,
-				Limit:     10,
-				RequestId: "SearchPromisesPending",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesResolved",
@@ -321,14 +262,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_RESOLVED,
-				Limit:     10,
-				RequestId: "SearchPromisesResolved",
 			},
 		},
 	},
@@ -362,14 +295,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_REJECTED,
-				Limit:     10,
-				RequestId: "SearchPromisesRejected",
 			},
 		},
 	},
@@ -409,16 +334,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id: "*",
-				Tags: map[string]string{
-					"foo": "bar",
-				},
-				Limit:     10,
-				RequestId: "SearchPromisesTags",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidQuery",
@@ -433,12 +348,6 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id: "",
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidState",
@@ -452,14 +361,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: 10,
-				State: -1,
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 	{
@@ -496,12 +397,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				RequestId: "SearchPromisesDefaultLimit",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidLimitLower",
@@ -516,13 +411,6 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: -1,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidLimitUpper",
@@ -536,13 +424,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: 101,
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 	{
@@ -597,33 +478,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Param: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("pending"),
-				},
-				Timeout:   1,
-				RequestId: "CreatePromise",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "bar",
-					Param: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("pending"),
-					},
-					Value:   &pb.Value{},
-					Timeout: 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseMinimal",
@@ -663,24 +517,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:        "foo",
-				Timeout:   1,
-				RequestId: "CreatePromiseMinimal",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
 			},
 		},
 	},
@@ -724,26 +560,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:          "foo",
-				Timeout:     1,
-				RequestId:   "CreatePromiseWithTraceContext",
-				Traceparent: "foo",
-				Tracestate:  "bar",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
 			},
 		},
 	},
@@ -793,31 +609,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       2,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTaskWithTraceContext",
@@ -865,33 +656,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:          "foo",
-					Timeout:     1,
-					Tags:        map[string]string{"resonate:invoke": "baz"},
-					RequestId:   "CreatePromiseAndTaskWithTraceContext",
-					Traceparent: "baz",
-					Tracestate:  "qux",
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       2,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
 			},
 		},
 	},
@@ -964,31 +728,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				RequestId:      "ResolvePromise",
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("resolve"),
-				},
-			},
-			Res: &pb.ResolvePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_RESOLVED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("resolve"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "ResolvePromiseMinimal",
@@ -1028,22 +767,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				Id:        "foo",
-				RequestId: "ResolvePromiseMinimal",
-			},
-			Res: &pb.ResolvePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_RESOLVED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
 	},
 	{
 		Name: "ResolvePromiseAlreadyCompleted",
@@ -1080,13 +803,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 403,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				Id:        "foo",
-				RequestId: "ResolvePromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
 		},
 	},
 	{
@@ -1139,31 +855,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				RequestId:      "RejectPromise",
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("reject"),
-				},
-			},
-			Res: &pb.RejectPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("reject"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "RejectPromiseMinimal",
@@ -1203,22 +894,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				Id:        "foo",
-				RequestId: "RejectPromiseMinimal",
-			},
-			Res: &pb.RejectPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
 	},
 	{
 		Name: "RejectPromiseAlreadyCompleted",
@@ -1255,13 +930,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 403,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				Id:        "foo",
-				RequestId: "RejectPromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
 		},
 	},
 	{
@@ -1314,31 +982,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("cancel"),
-				},
-				RequestId: "CancelPromise",
-			},
-			Res: &pb.CancelPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED_CANCELED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("cancel"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "CancelPromiseMinimal",
@@ -1378,22 +1021,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				RequestId: "CancelPromiseMinimal",
-				Id:        "foo",
-			},
-			Res: &pb.CancelPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED_CANCELED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
 	},
 	{
 		Name: "CancelPromiseAlreadyCompleted",
@@ -1431,13 +1058,6 @@ var TestCases = []*testCase{
 				Code: 403,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				Id:        "foo",
-				RequestId: "CancelPromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
-		},
 	},
 
 	// Callbacks
@@ -1472,15 +1092,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallback",
 			},
 		},
 	},
@@ -1518,15 +1129,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallback",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackPhysicalReceiver",
@@ -1559,15 +1161,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackPhysicalReceiver",
 			},
 		},
 	},
@@ -1603,15 +1196,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackPhysicalReceiver",
 			},
 		},
 	},
@@ -1650,17 +1234,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackWithTraceContext",
-				Traceparent:   "foo",
-				Tracestate:    "bar",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackNotFound",
@@ -1694,16 +1267,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 404,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallbackNotFound",
-			},
-			Code: codes.NotFound,
 		},
 	},
 	{
@@ -1739,16 +1302,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 404,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallbackNotFound",
-			},
-			Code: codes.NotFound,
 		},
 	},
 
@@ -1786,15 +1339,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscription",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionLogicalReceiverDeprecated",
@@ -1828,15 +1372,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscription",
 			},
 		},
 	},
@@ -1874,15 +1409,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId: "CreateSubscriptionPhysicalRecv",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
@@ -1915,15 +1441,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId: "CreateSubscriptionPhysicalRecv",
 			},
 		},
 	},
@@ -1963,17 +1480,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:          "foo.1",
-				PromiseId:   "foo",
-				Timeout:     1,
-				Recv:        &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:   "CreateSubscriptionWithTraceContext",
-				Traceparent: "baz",
-				Tracestate:  "qux",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionNotFound",
@@ -2007,16 +1513,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 404,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscriptionNotFound",
-			},
-			Code: codes.NotFound,
 		},
 	},
 	{
@@ -2053,16 +1549,6 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscriptionNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 	// Schedules
 	{
@@ -2097,12 +1583,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadScheduleRequest{
-				Id:        "foo",
-				RequestId: "ReadSchedule",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedules",
@@ -2133,13 +1613,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				RequestId: "SearchSchedules",
-				Id:        "*",
-				Limit:     10,
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesCursor",
@@ -2167,13 +1640,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:        "*",
-				Cursor:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.w5_elkl3n5yUHKIbxBzdA1sWRxvKLGVqsnz-H69p_JI",
-				RequestId: "SearchSchedulesCursor",
 			},
 		},
 	},
@@ -2208,16 +1674,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id: "*",
-				Tags: map[string]string{
-					"foo": "bar",
-				},
-				Limit:     10,
-				RequestId: "SearchSchedulesTags",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesInvalidQuery",
@@ -2231,12 +1687,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id: "",
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 	{
@@ -2268,12 +1718,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:        "*",
-				RequestId: "SearchSchedulesDefaultLimit",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesInvalidLimitLower",
@@ -2288,13 +1732,6 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:    "*",
-				Limit: -1,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchSchedulesInvalidLimitUpper",
@@ -2308,13 +1745,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:    "*",
-				Limit: 101,
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 	{
@@ -2362,29 +1792,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateScheduleRequest{
-				Id:             "foo",
-				Description:    "",
-				Cron:           "* * * * *",
-				PromiseId:      "foo.{{.timestamp}}",
-				PromiseTimeout: 1,
-				IdempotencyKey: "bar",
-				RequestId:      "CreateSchedule",
-			},
-			Res: &pb.CreatedScheduleResponse{
-				Noop: false,
-				Schedule: &pb.Schedule{
-					Id:             "foo",
-					Description:    "",
-					Cron:           "* * * * *",
-					PromiseId:      "foo.{{.timestamp}}",
-					PromiseTimeout: 1,
-					PromiseParam:   &pb.Value{},
-					IdempotencyKey: "bar",
-				},
-			},
-		},
 	},
 	{
 		Name: "DeleteSchedule",
@@ -2408,12 +1815,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 204,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DeleteScheduleRequest{
-				Id:        "foo",
-				RequestId: "DeleteSchedule",
 			},
 		},
 	},
@@ -2459,15 +1860,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.AcquireLockRequest{
-				RequestId:   "AcquireLock",
-				ResourceId:  "foo",
-				ProcessId:   "bar",
-				ExecutionId: "baz",
-				Ttl:         1,
-			},
-		},
 	},
 	{
 		Name: "ReleaseLock",
@@ -2498,13 +1890,6 @@ var TestCases = []*testCase{
 				Code: 204,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReleaseLockRequest{
-				RequestId:   "ReleaseLock",
-				ResourceId:  "foo",
-				ExecutionId: "bar",
-			},
-		},
 	},
 	{
 		Name: "HeartbeatLocks",
@@ -2533,12 +1918,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatLocksRequest{
-				RequestId: "HeartbeatLocks",
-				ProcessId: "foo",
 			},
 		},
 	},
@@ -2579,15 +1958,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTask",
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskGet",
@@ -2616,15 +1986,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "foo/1",
-				Ttl:       60000,
-				RequestId: "ClaimTaskGet",
 			},
 		},
 	},
@@ -2669,28 +2030,6 @@ var TestCases = []*testCase{
 					},
 					"type":"invoke"
 				}`)),
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTaskInvoke",
-			},
-			Res: &pb.ClaimTaskResponse{
-				Claimed: true,
-				Mesg: &pb.Mesg{
-					Type: "invoke",
-					Promises: map[string]*pb.MesgPromise{
-						"root": {
-							Id:   "foo",
-							Href: "http://localhost:8001/promises/foo",
-							Data: &pb.Promise{Id: "foo", State: pb.State_PENDING, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-					},
-				},
 			},
 		},
 	},
@@ -2744,33 +2083,6 @@ var TestCases = []*testCase{
 				}`)),
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   2,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTaskResume",
-			},
-			Res: &pb.ClaimTaskResponse{
-				Claimed: true,
-				Mesg: &pb.Mesg{
-					Type: "resume",
-					Promises: map[string]*pb.MesgPromise{
-						"root": {
-							Id:   "foo",
-							Href: "http://localhost:8001/promises/foo",
-							Data: &pb.Promise{Id: "foo", State: pb.State_PENDING, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-						"leaf": {
-							Id:   "bar",
-							Href: "http://localhost:8001/promises/bar",
-							Data: &pb.Promise{Id: "bar", State: pb.State_RESOLVED, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskTtlTooLarge",
@@ -2822,13 +2134,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CompleteTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "CompleteTask",
-			},
-		},
 	},
 	{
 		Name: "CompleteTaskGet",
@@ -2853,13 +2158,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CompleteTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "CompleteTaskGet",
 			},
 		},
 	},
@@ -2892,13 +2190,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DropTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "DropTask",
-			},
-		},
 	},
 	{
 		Name: "DropTaskGet",
@@ -2923,13 +2214,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DropTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "DropTaskGet",
 			},
 		},
 	},
@@ -2962,12 +2246,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatTasksRequest{
-				ProcessId: "foo",
-				RequestId: "HeartbeatTasks",
-			},
-		},
 	},
 	{
 		Name: "HeartbeatTasksGet",
@@ -2993,12 +2271,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatTasksRequest{
-				ProcessId: "foo/1",
-				RequestId: "HeartbeatTasksGet",
 			},
 		},
 	},
@@ -3048,31 +2320,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       0,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTaskWithNegativeTtl",
@@ -3119,21 +2366,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       -1,
-				},
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 }
