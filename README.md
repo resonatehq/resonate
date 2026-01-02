@@ -64,11 +64,10 @@ You will see log output like the following:
 ```shell
 time=2025-09-09T20:54:31.349-06:00 level=INFO msg="starting http server" addr=:8001
 time=2025-09-09T20:54:31.349-06:00 level=INFO msg="starting poll server" addr=:8002
-time=2025-09-09T20:54:31.349-06:00 level=INFO msg="starting grpc server" addr=:50051
 time=2025-09-09T20:54:31.351-06:00 level=INFO msg="starting metrics server" addr=:9090
 ```
 
-The output indicates that the server has HTTP endpoints available at port 8001, a polling endpoint at port 8002, a gRPC endpoint at port 50051, and a metrics endpoint at port 9090.
+The output indicates that the server has HTTP endpoints available at port 8001, a polling endpoint at port 8002, and a metrics endpoint at port 9090.
 
 These are the default ports and can be changed via configuration.
 The SDKs are all configured to use these defaults unless otherwise specified.

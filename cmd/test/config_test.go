@@ -20,7 +20,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/spf13/cobra"
@@ -247,7 +246,6 @@ logLevel: "warn"`,
 			cmds: []cmd{serveCmd},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 				cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
@@ -285,13 +283,6 @@ logLevel: "warn"`,
 								Cors:          http.Cors{AllowOrigins: []string{}},
 								Timeout:       10 * time.Second,
 								TaskFrequency: 1 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: true,
-							config: &grpc.Config{
-								Addr: ":50051",
 							},
 						},
 					},
@@ -383,7 +374,6 @@ logLevel: "warn"`,
 			cmds: []cmd{devCmd},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 				cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
@@ -421,13 +411,6 @@ logLevel: "warn"`,
 								Cors:          http.Cors{AllowOrigins: []string{}},
 								Timeout:       10 * time.Second,
 								TaskFrequency: 1 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: true,
-							config: &grpc.Config{
-								Addr: ":50051",
 							},
 						},
 					},
@@ -561,7 +544,6 @@ logLevel: "warn"`,
 			cmds: []cmd{serveCmd},
 			args: []string{
 				"--api-http-enable=false",
-				"--api-grpc-enable=true",
 				"--aio-store-sqlite-enable=false",
 				"--aio-store-postgres-enable=true",
 				"--aio-http-enable=false",
@@ -569,7 +551,6 @@ logLevel: "warn"`,
 			},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", false, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
@@ -605,13 +586,6 @@ logLevel: "warn"`,
 								Cors:          http.Cors{AllowOrigins: []string{}},
 								Timeout:       10 * time.Second,
 								TaskFrequency: 1 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: true,
-							config: &grpc.Config{
-								Addr: ":50051",
 							},
 						},
 					},
@@ -688,7 +662,6 @@ logLevel: "warn"`,
 			cmds: []cmd{devCmd},
 			args: []string{
 				"--api-http-enable=false",
-				"--api-grpc-enable=true",
 				"--aio-store-sqlite-enable=false",
 				"--aio-store-postgres-enable=true",
 				"--aio-http-enable=false",
@@ -696,7 +669,6 @@ logLevel: "warn"`,
 			},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", false, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
@@ -732,13 +704,6 @@ logLevel: "warn"`,
 								Cors:          http.Cors{AllowOrigins: []string{}},
 								Timeout:       10 * time.Second,
 								TaskFrequency: 1 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: true,
-							config: &grpc.Config{
-								Addr: ":50051",
 							},
 						},
 					},
@@ -890,10 +855,6 @@ api:
           - "https://example2.com"
         timeout: 15s
         taskFrequency: 2m
-    grpc:
-      enabled: false
-      config:
-        addr: ":9999"
 aio:
   size: 2
   subsystems:
@@ -947,7 +908,6 @@ metricsAddr: "localhost:8080"
 logLevel: "warn"`,
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
@@ -991,13 +951,6 @@ logLevel: "warn"`,
 								},
 								Timeout:       15 * time.Second,
 								TaskFrequency: 2 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: false,
-							config: &grpc.Config{
-								Addr: ":9999",
 							},
 						},
 					},
@@ -1103,10 +1056,6 @@ api:
           - "https://example2.com"
         timeout: 15s
         taskFrequency: 2m
-    grpc:
-      enabled: false
-      config:
-        addr: ":9999"
 aio:
   size: 2
   subsystems:
@@ -1162,7 +1111,6 @@ logLevel: "warn"`,
 				"--api-http-enable=false",
 				"--api-http-auth", "x=y",
 				"--api-http-timeout", "1h",
-				"--api-grpc-enable=true",
 				"--aio-store-sqlite-enable=false",
 				"--aio-store-sqlite-batch-size", "10",
 				"--aio-store-sqlite-tx-timeout", "20s",
@@ -1182,7 +1130,6 @@ logLevel: "warn"`,
 			},
 			plugins: func(cfg *config.Config) {
 				cfg.API.Subsystems.Add("http", true, &http.Config{})
-				cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 				cfg.AIO.Subsystems.Add("store-sqlite", true, &sqlite.Config{})
 				cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{})
 				cfg.AIO.Plugins.Add("http", true, &httpPlugin.Config{})
@@ -1225,13 +1172,6 @@ logLevel: "warn"`,
 								},
 								Timeout:       1 * time.Hour,
 								TaskFrequency: 2 * time.Minute,
-							},
-						},
-						{
-							name:    "grpc",
-							enabled: true,
-							config: &grpc.Config{
-								Addr: ":9999",
 							},
 						},
 					},
