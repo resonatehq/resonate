@@ -474,7 +474,7 @@ The target filtering enables multi-tenancy on a single topic. Start multiple Res
 ./resonate dev --api-kafka-enable --api-kafka-target server1
 
 # Server 2 (in another terminal)
-./resonate dev --api-kafka-enable --api-kafka-target server2 --api-http-addr :9001 --api-grpc-addr :50052
+./resonate dev --api-kafka-enable --api-kafka-target server2 --api-http-addr :9001
 ```
 
 Send requests to different servers:
@@ -593,5 +593,5 @@ echo '{
 - The Kafka API uses the IBM Sarama library (github.com/IBM/sarama)
 - Consumer group rebalancing is handled automatically
 - Message offsets are committed after processing
-- All 21 operations from HTTP/gRPC APIs are supported
+- All 21 operations from HTTP API are supported
 - Target filtering happens at application level (after Kafka delivery)
