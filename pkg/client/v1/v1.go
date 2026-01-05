@@ -53,15 +53,6 @@ type Callback struct {
 	Timeout   int64  `json:"timeout"`
 }
 
-// Lock defines model for Lock.
-type Lock struct {
-	ExecutionId string `json:"executionId"`
-	ExpiresAt   *int64 `json:"expiresAt,omitempty"`
-	ProcessId   string `json:"processId"`
-	ResourceId  string `json:"resourceId"`
-	Ttl         int    `json:"ttl"`
-}
-
 // Mesg defines model for Mesg.
 type Mesg struct {
 	Promises struct {
@@ -143,43 +134,6 @@ type Task struct {
 type Value struct {
 	Data    *string            `json:"data,omitempty"`
 	Headers *map[string]string `json:"headers,omitempty"`
-}
-
-// AcquireLockJSONBody defines parameters for AcquireLock.
-type AcquireLockJSONBody struct {
-	ExecutionId string `json:"executionId"`
-	ProcessId   string `json:"processId"`
-	ResourceId  string `json:"resourceId"`
-	Ttl         int    `json:"ttl"`
-}
-
-// AcquireLockParams defines parameters for AcquireLock.
-type AcquireLockParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
-}
-
-// HeartbeatLocksJSONBody defines parameters for HeartbeatLocks.
-type HeartbeatLocksJSONBody struct {
-	ProcessId string `json:"processId"`
-}
-
-// HeartbeatLocksParams defines parameters for HeartbeatLocks.
-type HeartbeatLocksParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
-}
-
-// ReleaseLockJSONBody defines parameters for ReleaseLock.
-type ReleaseLockJSONBody struct {
-	ExecutionId string `json:"executionId"`
-	ResourceId  string `json:"resourceId"`
-}
-
-// ReleaseLockParams defines parameters for ReleaseLock.
-type ReleaseLockParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
 }
 
 // SearchPromisesParams defines parameters for SearchPromises.
@@ -437,15 +391,6 @@ type HeartbeatTaskGetParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
-// AcquireLockJSONRequestBody defines body for AcquireLock for application/json ContentType.
-type AcquireLockJSONRequestBody AcquireLockJSONBody
-
-// HeartbeatLocksJSONRequestBody defines body for HeartbeatLocks for application/json ContentType.
-type HeartbeatLocksJSONRequestBody HeartbeatLocksJSONBody
-
-// ReleaseLockJSONRequestBody defines body for ReleaseLock for application/json ContentType.
-type ReleaseLockJSONRequestBody ReleaseLockJSONBody
-
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
 type CreatePromiseJSONRequestBody CreatePromiseJSONBody
 
@@ -611,21 +556,6 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// AcquireLockWithBody request with any body
-	AcquireLockWithBody(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	AcquireLock(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// HeartbeatLocksWithBody request with any body
-	HeartbeatLocksWithBody(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	HeartbeatLocks(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// ReleaseLockWithBody request with any body
-	ReleaseLockWithBody(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	ReleaseLock(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// SearchPromises request
 	SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -702,78 +632,6 @@ type ClientInterface interface {
 
 	// HeartbeatTaskGet request
 	HeartbeatTaskGet(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-}
-
-func (c *Client) AcquireLockWithBody(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewAcquireLockRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) AcquireLock(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewAcquireLockRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) HeartbeatLocksWithBody(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewHeartbeatLocksRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) HeartbeatLocks(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewHeartbeatLocksRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) ReleaseLockWithBody(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewReleaseLockRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) ReleaseLock(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewReleaseLockRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
 }
 
 func (c *Client) SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -1122,171 +980,6 @@ func (c *Client) HeartbeatTaskGet(ctx context.Context, id string, counter int, p
 		return nil, err
 	}
 	return c.Client.Do(req)
-}
-
-// NewAcquireLockRequest calls the generic AcquireLock builder with application/json body
-func NewAcquireLockRequest(server string, params *AcquireLockParams, body AcquireLockJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewAcquireLockRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewAcquireLockRequestWithBody generates requests for AcquireLock with any type of body
-func NewAcquireLockRequestWithBody(server string, params *AcquireLockParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/locks/acquire")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
-// NewHeartbeatLocksRequest calls the generic HeartbeatLocks builder with application/json body
-func NewHeartbeatLocksRequest(server string, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewHeartbeatLocksRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewHeartbeatLocksRequestWithBody generates requests for HeartbeatLocks with any type of body
-func NewHeartbeatLocksRequestWithBody(server string, params *HeartbeatLocksParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/locks/heartbeat")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
-// NewReleaseLockRequest calls the generic ReleaseLock builder with application/json body
-func NewReleaseLockRequest(server string, params *ReleaseLockParams, body ReleaseLockJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewReleaseLockRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewReleaseLockRequestWithBody generates requests for ReleaseLock with any type of body
-func NewReleaseLockRequestWithBody(server string, params *ReleaseLockParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/locks/release")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
 }
 
 // NewSearchPromisesRequest generates requests for SearchPromises
@@ -2561,21 +2254,6 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// AcquireLockWithBodyWithResponse request with any body
-	AcquireLockWithBodyWithResponse(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error)
-
-	AcquireLockWithResponse(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error)
-
-	// HeartbeatLocksWithBodyWithResponse request with any body
-	HeartbeatLocksWithBodyWithResponse(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error)
-
-	HeartbeatLocksWithResponse(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error)
-
-	// ReleaseLockWithBodyWithResponse request with any body
-	ReleaseLockWithBodyWithResponse(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error)
-
-	ReleaseLockWithResponse(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error)
-
 	// SearchPromisesWithResponse request
 	SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error)
 
@@ -2652,73 +2330,6 @@ type ClientWithResponsesInterface interface {
 
 	// HeartbeatTaskGetWithResponse request
 	HeartbeatTaskGetWithResponse(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*HeartbeatTaskGetResponse, error)
-}
-
-type AcquireLockResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON201      *Lock
-}
-
-// Status returns HTTPResponse.Status
-func (r AcquireLockResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r AcquireLockResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type HeartbeatLocksResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		LocksAffected *int64 `json:"locksAffected,omitempty"`
-	}
-}
-
-// Status returns HTTPResponse.Status
-func (r HeartbeatLocksResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r HeartbeatLocksResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type ReleaseLockResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-}
-
-// Status returns HTTPResponse.Status
-func (r ReleaseLockResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r ReleaseLockResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
 }
 
 type SearchPromisesResponse struct {
@@ -3176,57 +2787,6 @@ func (r HeartbeatTaskGetResponse) StatusCode() int {
 	return 0
 }
 
-// AcquireLockWithBodyWithResponse request with arbitrary body returning *AcquireLockResponse
-func (c *ClientWithResponses) AcquireLockWithBodyWithResponse(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error) {
-	rsp, err := c.AcquireLockWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseAcquireLockResponse(rsp)
-}
-
-func (c *ClientWithResponses) AcquireLockWithResponse(ctx context.Context, params *AcquireLockParams, body AcquireLockJSONRequestBody, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error) {
-	rsp, err := c.AcquireLock(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseAcquireLockResponse(rsp)
-}
-
-// HeartbeatLocksWithBodyWithResponse request with arbitrary body returning *HeartbeatLocksResponse
-func (c *ClientWithResponses) HeartbeatLocksWithBodyWithResponse(ctx context.Context, params *HeartbeatLocksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error) {
-	rsp, err := c.HeartbeatLocksWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseHeartbeatLocksResponse(rsp)
-}
-
-func (c *ClientWithResponses) HeartbeatLocksWithResponse(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*HeartbeatLocksResponse, error) {
-	rsp, err := c.HeartbeatLocks(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseHeartbeatLocksResponse(rsp)
-}
-
-// ReleaseLockWithBodyWithResponse request with arbitrary body returning *ReleaseLockResponse
-func (c *ClientWithResponses) ReleaseLockWithBodyWithResponse(ctx context.Context, params *ReleaseLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error) {
-	rsp, err := c.ReleaseLockWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseReleaseLockResponse(rsp)
-}
-
-func (c *ClientWithResponses) ReleaseLockWithResponse(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error) {
-	rsp, err := c.ReleaseLock(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseReleaseLockResponse(rsp)
-}
-
 // SearchPromisesWithResponse request returning *SearchPromisesResponse
 func (c *ClientWithResponses) SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error) {
 	rsp, err := c.SearchPromises(ctx, params, reqEditors...)
@@ -3476,76 +3036,6 @@ func (c *ClientWithResponses) HeartbeatTaskGetWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseHeartbeatTaskGetResponse(rsp)
-}
-
-// ParseAcquireLockResponse parses an HTTP response from a AcquireLockWithResponse call
-func ParseAcquireLockResponse(rsp *http.Response) (*AcquireLockResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &AcquireLockResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest Lock
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseHeartbeatLocksResponse parses an HTTP response from a HeartbeatLocksWithResponse call
-func ParseHeartbeatLocksResponse(rsp *http.Response) (*HeartbeatLocksResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &HeartbeatLocksResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			LocksAffected *int64 `json:"locksAffected,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseReleaseLockResponse parses an HTTP response from a ReleaseLockWithResponse call
-func ParseReleaseLockResponse(rsp *http.Response) (*ReleaseLockResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &ReleaseLockResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	return response, nil
 }
 
 // ParseSearchPromisesResponse parses an HTTP response from a SearchPromisesWithResponse call

@@ -19,11 +19,6 @@ const (
 	CreateSchedule
 	DeleteSchedule
 
-	// LOCKS
-	AcquireLock
-	ReleaseLock
-	HeartbeatLocks
-
 	// TASKS
 	ClaimTask
 	CompleteTask
@@ -62,13 +57,6 @@ func (k Kind) String() string {
 		return "CreateSchedule"
 	case DeleteSchedule:
 		return "DeleteSchedule"
-	// LOCKS
-	case AcquireLock:
-		return "AcquireLock"
-	case ReleaseLock:
-		return "ReleaseLock"
-	case HeartbeatLocks:
-		return "HeartbeatLocks"
 	// TASKS
 	case ClaimTask:
 		return "ClaimTask"

@@ -4,7 +4,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -2414,131 +2413,6 @@ var TestCases = []*testCase{
 			Req: &pb.DeleteScheduleRequest{
 				Id:        "foo",
 				RequestId: "DeleteSchedule",
-			},
-		},
-	},
-
-	// Locks
-	{
-		Name: "AcquireLock",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "AcquireLock", "name": "AcquireLock"},
-			Payload: &t_api.AcquireLockRequest{
-				ResourceId:  "foo",
-				ProcessId:   "bar",
-				ExecutionId: "baz",
-				Ttl:         1,
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusCreated,
-			Payload: &t_api.AcquireLockResponse{
-				Lock: &lock.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Ttl:         1,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/acquire",
-				Headers: map[string]string{
-					"Request-Id": "AcquireLock",
-				},
-				Body: []byte(`{
-					"resourceId": "foo",
-					"processId": "bar",
-					"executionId": "baz",
-					"ttl": 1
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.AcquireLockRequest{
-				RequestId:   "AcquireLock",
-				ResourceId:  "foo",
-				ProcessId:   "bar",
-				ExecutionId: "baz",
-				Ttl:         1,
-			},
-		},
-	},
-	{
-		Name: "ReleaseLock",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReleaseLock", "name": "ReleaseLock"},
-			Payload: &t_api.ReleaseLockRequest{
-				ResourceId:  "foo",
-				ExecutionId: "bar",
-			},
-		},
-		Res: &t_api.Response{
-			Status:  t_api.StatusNoContent,
-			Payload: &t_api.ReleaseLockResponse{},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/release",
-				Headers: map[string]string{
-					"Request-Id": "ReleaseLock",
-				},
-				Body: []byte(`{
-					"resourceId": "foo",
-					"executionId": "bar"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 204,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReleaseLockRequest{
-				RequestId:   "ReleaseLock",
-				ResourceId:  "foo",
-				ExecutionId: "bar",
-			},
-		},
-	},
-	{
-		Name: "HeartbeatLocks",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatLocks", "name": "HeartbeatLocks"},
-			Payload: &t_api.HeartbeatLocksRequest{
-				ProcessId: "foo",
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatLocksResponse{
-				LocksAffected: 1,
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/heartbeat",
-				Headers: map[string]string{
-					"Request-Id": "HeartbeatLocks",
-				},
-				Body: []byte(`{
-					"processId": "foo"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatLocksRequest{
-				RequestId: "HeartbeatLocks",
-				ProcessId: "foo",
 			},
 		},
 	},

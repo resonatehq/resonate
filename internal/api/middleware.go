@@ -140,15 +140,11 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 		id = r.PromiseId
 	case *t_api.DeleteScheduleRequest:
 		id = r.Id
-	case *t_api.AcquireLockRequest:
-		id = r.ResourceId
-	case *t_api.ReleaseLockRequest:
-		id = r.ResourceId
 	case *t_api.SearchPromisesRequest:
 		id = r.Id
 	case *t_api.SearchSchedulesRequest:
 		id = r.Id
-	case *t_api.HeartbeatLocksRequest, *t_api.HeartbeatTasksRequest, *t_api.EchoRequest, *t_api.NoopRequest:
+	case *t_api.HeartbeatTasksRequest, *t_api.EchoRequest, *t_api.NoopRequest:
 		return nil
 	default:
 		panic("unreachable: unexpected request type")

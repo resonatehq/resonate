@@ -234,66 +234,6 @@ func (r *DeleteScheduleRequest) Kind() Kind {
 	return DeleteSchedule
 }
 
-// Locks
-
-type AcquireLockRequest struct {
-	ResourceId  string `json:"resourceId"`
-	ExecutionId string `json:"executionId"`
-	ProcessId   string `json:"processId"`
-	Ttl         int64  `json:"ttl" binding:"min=0"`
-}
-
-func (r *AcquireLockRequest) String() string {
-	return fmt.Sprintf(
-		"AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d)",
-		r.ResourceId,
-		r.ExecutionId,
-		r.ProcessId,
-		r.Ttl,
-	)
-}
-
-func (r *AcquireLockRequest) Validate() error {
-	return nil
-}
-
-func (r *AcquireLockRequest) Kind() Kind {
-	return AcquireLock
-}
-
-type ReleaseLockRequest struct {
-	ResourceId  string `json:"resourceId"`
-	ExecutionId string `json:"executionId"`
-}
-
-func (r *ReleaseLockRequest) String() string {
-	return fmt.Sprintf("ReleaseLock(resourceId=%s, executionId=%s)", r.ResourceId, r.ExecutionId)
-}
-
-func (r *ReleaseLockRequest) Validate() error {
-	return nil
-}
-
-func (r *ReleaseLockRequest) Kind() Kind {
-	return ReleaseLock
-}
-
-type HeartbeatLocksRequest struct {
-	ProcessId string `json:"processId"`
-}
-
-func (r *HeartbeatLocksRequest) String() string {
-	return fmt.Sprintf("HeartbeatLocks(processId=%s)", r.ProcessId)
-}
-
-func (r *HeartbeatLocksRequest) Validate() error {
-	return nil
-}
-
-func (r *HeartbeatLocksRequest) Kind() Kind {
-	return HeartbeatLocks
-}
-
 // Tasks
 
 // CreateTaskRequest is not a Request on its own it needs to be part of a CreatePromiseAndTask Request
@@ -430,9 +370,6 @@ func (r *ReadScheduleRequest) isRequestPayload()         {}
 func (r *SearchSchedulesRequest) isRequestPayload()      {}
 func (r *CreateScheduleRequest) isRequestPayload()       {}
 func (r *DeleteScheduleRequest) isRequestPayload()       {}
-func (r *AcquireLockRequest) isRequestPayload()          {}
-func (r *ReleaseLockRequest) isRequestPayload()          {}
-func (r *HeartbeatLocksRequest) isRequestPayload()       {}
 func (r *ClaimTaskRequest) isRequestPayload()            {}
 func (r *CompleteTaskRequest) isRequestPayload()         {}
 func (r *DropTaskRequest) isRequestPayload()             {}

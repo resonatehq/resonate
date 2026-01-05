@@ -380,14 +380,6 @@ func (s *server) handleRequest(msg *kafka.Message) {
 	case "schedules.delete":
 		s.handleDeleteSchedule(&kafkaReq)
 
-	// Locks
-	case "locks.acquire":
-		s.handleAcquireLock(&kafkaReq)
-	case "locks.release":
-		s.handleReleaseLock(&kafkaReq)
-	case "locks.heartbeat":
-		s.handleHeartbeatLocks(&kafkaReq)
-
 	// Tasks
 	case "tasks.claim":
 		s.handleClaimTask(&kafkaReq)

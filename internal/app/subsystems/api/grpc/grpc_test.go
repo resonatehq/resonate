@@ -26,7 +26,6 @@ type grpcTest struct {
 	conn      *grpc.ClientConn
 	promises  pb.PromisesClient
 	schedules pb.SchedulesClient
-	locks     pb.LocksClient
 	tasks     pb.TasksClient
 	health    grpc_health_v1.HealthClient
 }
@@ -55,7 +54,6 @@ func setup() (*grpcTest, error) {
 		conn:      conn,
 		promises:  pb.NewPromisesClient(conn),
 		schedules: pb.NewSchedulesClient(conn),
-		locks:     pb.NewLocksClient(conn),
 		tasks:     pb.NewTasksClient(conn),
 		health:    grpc_health_v1.NewHealthClient(conn),
 	}, nil
@@ -124,12 +122,6 @@ func TestGrpc(t *testing.T) {
 				res, err = grpcTest.schedules.CreateSchedule(ctx, req)
 			case *pb.DeleteScheduleRequest:
 				_, err = grpcTest.schedules.DeleteSchedule(ctx, req)
-			case *pb.AcquireLockRequest:
-				_, err = grpcTest.locks.AcquireLock(ctx, req)
-			case *pb.ReleaseLockRequest:
-				_, err = grpcTest.locks.ReleaseLock(ctx, req)
-			case *pb.HeartbeatLocksRequest:
-				_, err = grpcTest.locks.HeartbeatLocks(ctx, req)
 			case *pb.ClaimTaskRequest:
 				res, err = grpcTest.tasks.ClaimTask(ctx, req)
 			case *pb.CompleteTaskRequest:

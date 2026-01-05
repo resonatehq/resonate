@@ -195,9 +195,6 @@ func Serve(cfg *config.Config) error {
 	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
 	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
-	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
@@ -207,7 +204,6 @@ func Serve(cfg *config.Config) error {
 	// background coroutines
 	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 	system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
-	system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
 	system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 	system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
