@@ -188,7 +188,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
 			}
 		}
-		return model, nil
+		return model.Copy(), nil
 	default:
 		return model, fmt.Errorf("unexpected resonse status '%d'", status)
 	}
@@ -501,7 +501,8 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		// - the task has not timedout
 		// - the root promise is still pending
 		p := model.promises.get(t.RootPromiseId)
-		if !t.State.In(task.Completed|task.Timedout) && t.Timeout > resTime && p != nil && p.State == promise.Pending {
+
+		if !t.State.In(task.Completed|task.Timedout) && t.Timeout > resTime && p != nil && p.State == promise.Pending && p.Timeout > resTime {
 			return model, fmt.Errorf("task '%s' should have been completed", completeTaskReq.Id)
 		}
 
@@ -565,12 +566,12 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 			return model, fmt.Errorf("task '%s' does not exist", dropTaskReq.Id)
 		}
 
-		// the response should have been created if:
+		// the response should have been StatusCreated if:
 		// - the task was claimed
 		// - the task has not expired or timedout
 		// - the root promise is still pending
 		p := model.promises.get(t.RootPromiseId)
-		if t.State == task.Claimed && t.ExpiresAt >= resTime && t.Timeout >= resTime && p != nil && p.State == promise.Pending {
+		if t.State == task.Claimed && t.ExpiresAt >= resTime && t.Timeout >= resTime && p != nil && p.State == promise.Pending && p.Timeout > resTime {
 			return model, fmt.Errorf("task '%s' not init", dropTaskReq.Id)
 		}
 
