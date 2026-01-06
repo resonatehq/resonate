@@ -2,7 +2,6 @@ package coroutines
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -195,22 +194,5 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 		metrics.TasksTotal.WithLabelValues("completed").Add(float64(completeTasksResult.RowsAffected))
 
 		return updatePromiseResult.RowsAffected == 1, nil
-	}
-}
-
-// Helper functions
-
-func alreadyCompletedStatus(state promise.State) t_api.StatusCode {
-	switch state {
-	case promise.Resolved:
-		return t_api.StatusPromiseAlreadyResolved
-	case promise.Rejected:
-		return t_api.StatusPromiseAlreadyRejected
-	case promise.Canceled:
-		return t_api.StatusPromiseAlreadyCanceled
-	case promise.Timedout:
-		return t_api.StatusPromiseAlreadyTimedout
-	default:
-		panic(fmt.Sprintf("invalid promise state: %s", state))
 	}
 }

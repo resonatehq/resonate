@@ -239,38 +239,6 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 			}
 		}
 		return model, nil
-	case t_api.StatusPromiseAlreadyResolved:
-		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
-		}
-		if p.State != promise.Resolved && (p.State != promise.Pending || p.Tags["resonate:timeout"] != "true" || resTime < p.Timeout) {
-			return model, fmt.Errorf("promise '%s' not resolved", completePromiseReq.Id)
-		}
-		return model, nil
-	case t_api.StatusPromiseAlreadyRejected:
-		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
-		}
-		if p.State != promise.Rejected {
-			return model, fmt.Errorf("promise '%s' not rejected", completePromiseReq.Id)
-		}
-		return model, nil
-	case t_api.StatusPromiseAlreadyCanceled:
-		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
-		}
-		if p.State != promise.Canceled {
-			return model, fmt.Errorf("promise '%s' not canceled", completePromiseReq.Id)
-		}
-		return model, nil
-	case t_api.StatusPromiseAlreadyTimedout:
-		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
-		}
-		if p.State != promise.Timedout && (p.State != promise.Pending || p.Tags["resonate:timeout"] == "true" || resTime < p.Timeout) {
-			return model, fmt.Errorf("promise '%s' not timedout", completePromiseReq.Id)
-		}
-		return model, nil
 	case t_api.StatusPromiseNotFound:
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", completePromiseReq.Id)

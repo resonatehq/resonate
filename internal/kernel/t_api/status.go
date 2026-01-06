@@ -16,10 +16,6 @@ const (
 	StatusFieldValidationError   StatusCode = 40000
 	StatusUnauthorized           StatusCode = 40100
 	StatusForbidden              StatusCode = 40300
-	StatusPromiseAlreadyResolved StatusCode = 40301
-	StatusPromiseAlreadyRejected StatusCode = 40302
-	StatusPromiseAlreadyCanceled StatusCode = 40303
-	StatusPromiseAlreadyTimedout StatusCode = 40304
 	StatusTaskAlreadyClaimed     StatusCode = 40306
 	StatusTaskAlreadyCompleted   StatusCode = 40307
 	StatusTaskInvalidCounter     StatusCode = 40308
@@ -53,14 +49,6 @@ func (s StatusCode) String() string {
 		return "The request is unauthorized"
 	case StatusForbidden:
 		return "The request is forbidden"
-	case StatusPromiseAlreadyResolved:
-		return "The promise has already been resolved"
-	case StatusPromiseAlreadyRejected:
-		return "The promise has already been rejected"
-	case StatusPromiseAlreadyCanceled:
-		return "The promise has already been canceled"
-	case StatusPromiseAlreadyTimedout:
-		return "The promise has already timedout"
 	case StatusTaskAlreadyClaimed:
 		return "The task is already claimed"
 	case StatusTaskAlreadyCompleted:

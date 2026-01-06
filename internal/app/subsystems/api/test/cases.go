@@ -748,41 +748,6 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		Name: "ResolvePromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:    "foo",
-				State: promise.Resolved,
-				Value: promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyResolved,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Resolved,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "ResolvePromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "RESOLVED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
-			},
-		},
-	},
-	{
 		Name: "RejectPromise",
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
@@ -865,41 +830,6 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		Name: "RejectPromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:    "foo",
-				State: promise.Rejected,
-				Value: promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyRejected,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Rejected,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "RejectPromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "REJECTED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
-			},
-		},
-	},
-	{
 		Name: "CancelPromise",
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
@@ -978,41 +908,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-	},
-	{
-		Name: "CancelPromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:    "foo",
-				State: promise.Canceled,
-				Value: promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyRejected,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Canceled,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "CancelPromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "REJECTED_CANCELED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
 			},
 		},
 	},
