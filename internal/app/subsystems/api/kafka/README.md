@@ -507,8 +507,6 @@ echo '{
 ```json
 {
   "id": "string",
-  "idempotencyKey": "string (optional)",
-  "strict": false,
   "param": {"headers": {}, "data": null},
   "timeout": 3600000,
   "tags": {"key": "value"}
@@ -519,8 +517,6 @@ echo '{
 ```json
 {
   "id": "string",
-  "idempotencyKey": "string (optional)",
-  "strict": false,
   "state": "RESOLVED|REJECTED|REJECTED_CANCELED|REJECTED_TIMEDOUT",
   "value": {"headers": {}, "data": null}
 }
@@ -539,7 +535,6 @@ echo '{
   "promiseTimeout": 3600000,
   "promiseParam": {"headers": {}, "data": null},
   "promiseTags": {"key": "value"},
-  "idempotencyKey": "string (optional)"
 }
 ```
 

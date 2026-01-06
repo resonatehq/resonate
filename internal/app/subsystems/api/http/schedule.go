@@ -5,7 +5,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -107,8 +106,7 @@ func (s *server) searchSchedules(c *gin.Context) {
 // Create
 
 type createScheduleHeader struct {
-	RequestId      string           `header:"request-id"`
-	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
+	RequestId string `header:"request-id"`
 }
 
 type createScheduleBody struct {
@@ -157,7 +155,6 @@ func (s *server) createSchedule(c *gin.Context) {
 			PromiseTimeout: body.PromiseTimeout,
 			PromiseParam:   body.PromiseParam,
 			PromiseTags:    body.PromiseTags,
-			IdempotencyKey: header.IdempotencyKey,
 		},
 	})
 	if err != nil {

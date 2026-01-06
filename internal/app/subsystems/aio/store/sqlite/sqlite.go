@@ -41,7 +41,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on
 	FROM
 		promises
 	WHERE
@@ -49,7 +49,7 @@ const (
 
 	PROMISE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -59,7 +59,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -77,7 +77,7 @@ const (
 		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
 		(?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(id) DO NOTHING`
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this insert`
 
 	PROMISE_UPDATE_STATEMENT = `
 	UPDATE
@@ -85,7 +85,7 @@ const (
 	SET
 		state = ?, value_headers = ?, value_data = ?, idempotency_key_for_complete = ?, completed_on = ?
 	WHERE
-		id = ? AND state = 1`
+		id = ? AND state = 1 -- idempotency_key must be equal to id for this insert`
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
@@ -102,7 +102,7 @@ const (
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
-		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, idempotency_key, created_on
+		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, created_on
 	FROM
 		schedules
 	WHERE
@@ -122,7 +122,7 @@ const (
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
-		id, cron, tags, last_run_time, next_run_time, idempotency_key, created_on, sort_id
+		id, cron, tags, last_run_time, next_run_time, created_on, sort_id
 	FROM
 		schedules
 	WHERE
@@ -139,7 +139,7 @@ const (
 		(id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, next_run_time, idempotency_key, created_on)
 	VALUES
 		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(id) DO NOTHING`
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
@@ -709,8 +709,6 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComman
 		&record.ValueHeaders,
 		&record.ValueData,
 		&record.Timeout,
-		&record.IdempotencyKeyForCreate,
-		&record.IdempotencyKeyForComplete,
 		&record.Tags,
 		&record.CreatedOn,
 		&record.CompletedOn,
@@ -755,8 +753,6 @@ func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesComm
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -837,8 +833,6 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -874,7 +868,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -915,7 +909,7 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.IdempotencyKey, cmd.CompletedOn, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.Id, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -1002,7 +996,6 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 		&record.PromiseTags,
 		&record.LastRunTime,
 		&record.NextRunTime,
-		&record.IdempotencyKey,
 		&record.CreatedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -1108,7 +1101,6 @@ func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedul
 			&record.Tags,
 			&record.LastRunTime,
 			&record.NextRunTime,
-			&record.IdempotencyKey,
 			&record.CreatedOn,
 			&record.SortId,
 		); err != nil {
@@ -1154,7 +1146,7 @@ func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		cmd.PromiseParam.Data,
 		promiseTags,
 		cmd.NextRunTime,
-		cmd.IdempotencyKey,
+		cmd.Id,
 		cmd.CreatedOn,
 	)
 	if err != nil {

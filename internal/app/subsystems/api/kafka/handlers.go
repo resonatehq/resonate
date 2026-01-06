@@ -100,12 +100,10 @@ func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
 	}
 
 	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseRequest{
-		Id:             payload.ID,
-		IdempotencyKey: payload.IKey,
-		Strict:         payload.Strict,
-		Param:          payload.Param,
-		Timeout:        payload.Timeout,
-		Tags:           payload.Tags,
+		Id:      payload.ID,
+		Param:   payload.Param,
+		Timeout: payload.Timeout,
+		Tags:    payload.Tags,
 	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
@@ -138,12 +136,10 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 
 	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseAndTaskRequest{
 		Promise: &t_api.CreatePromiseRequest{
-			Id:             payload.Promise.ID,
-			IdempotencyKey: payload.IKey,
-			Strict:         payload.Strict,
-			Param:          payload.Promise.Param,
-			Timeout:        payload.Promise.Timeout,
-			Tags:           payload.Promise.Tags,
+			Id:      payload.Promise.ID,
+			Param:   payload.Promise.Param,
+			Timeout: payload.Promise.Timeout,
+			Tags:    payload.Promise.Tags,
 		},
 		Task: &t_api.CreateTaskRequest{
 			PromiseId: payload.Promise.ID,
@@ -185,11 +181,9 @@ func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
 	}
 
 	res, error := s.processRequest(kafkaReq, &t_api.CompletePromiseRequest{
-		Id:             payload.ID,
-		IdempotencyKey: payload.IKey,
-		Strict:         payload.Strict,
-		State:          payload.State,
-		Value:          payload.Value,
+		Id:    payload.ID,
+		State: payload.State,
+		Value: payload.Value,
 	})
 	if error != nil {
 		s.respondError(kafkaReq, error)
@@ -382,7 +376,6 @@ func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
 		PromiseTimeout: payload.PromiseTimeout,
 		PromiseParam:   payload.PromiseParam,
 		PromiseTags:    payload.PromiseTags,
-		IdempotencyKey: payload.IKey,
 	})
 	if error != nil {
 		s.respondError(kafkaReq, error)

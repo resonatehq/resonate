@@ -19,12 +19,11 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	req := r.Payload.(*t_api.CreatePromiseRequest)
 
 	cmd := &t_aio.CreatePromiseCommand{
-		Id:             req.Id,
-		Param:          req.Param,
-		Timeout:        req.Timeout,
-		IdempotencyKey: req.IdempotencyKey,
-		Tags:           req.Tags,
-		CreatedOn:      c.Time(),
+		Id:        req.Id,
+		Param:     req.Param,
+		Timeout:   req.Timeout,
+		Tags:      req.Tags,
+		CreatedOn: c.Time(),
 	}
 
 	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, r.Fence, cmd, nil))
@@ -37,10 +36,8 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 
 	if completion.created {
 		status = t_api.StatusCreated
-	} else if (!req.Strict || completion.promise.State == promise.Pending) && completion.promise.IdempotencyKeyForCreate.Match(req.IdempotencyKey) {
-		status = t_api.StatusOK
 	} else {
-		status = t_api.StatusPromiseAlreadyExists
+		status = t_api.StatusOK
 	}
 
 	return &t_api.Response{
@@ -54,12 +51,11 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	req := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
 
 	cmd := &t_aio.CreatePromiseCommand{
-		Id:             req.Promise.Id,
-		Param:          req.Promise.Param,
-		Timeout:        req.Promise.Timeout,
-		IdempotencyKey: req.Promise.IdempotencyKey,
-		Tags:           req.Promise.Tags,
-		CreatedOn:      c.Time(),
+		Id:        req.Promise.Id,
+		Param:     req.Promise.Param,
+		Timeout:   req.Promise.Timeout,
+		Tags:      req.Promise.Tags,
+		CreatedOn: c.Time(),
 	}
 
 	head := map[string]string{}
@@ -90,12 +86,9 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 
 	if completion.created {
 		status = t_api.StatusCreated
-	} else if (!req.Promise.Strict || completion.promise.State == promise.Pending) && completion.promise.IdempotencyKeyForCreate.Match(req.Promise.IdempotencyKey) {
-		status = t_api.StatusOK
 	} else {
-		status = t_api.StatusPromiseAlreadyExists
+		status = t_api.StatusOK
 	}
-
 	return &t_api.Response{
 		Status:   status,
 		Metadata: r.Metadata,
@@ -161,13 +154,12 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			commands := []t_aio.Command{}
 
 			p = &promise.Promise{
-				Id:                      promiseCmd.Id,
-				State:                   promise.Pending,
-				Param:                   promiseCmd.Param,
-				Timeout:                 promiseCmd.Timeout,
-				IdempotencyKeyForCreate: promiseCmd.IdempotencyKey,
-				Tags:                    promiseCmd.Tags,
-				CreatedOn:               &promiseCmd.CreatedOn,
+				Id:        promiseCmd.Id,
+				State:     promise.Pending,
+				Param:     promiseCmd.Param,
+				Timeout:   promiseCmd.Timeout,
+				Tags:      promiseCmd.Tags,
+				CreatedOn: &promiseCmd.CreatedOn,
 			}
 
 			// first, check the router to see if a task needs to be created
@@ -292,11 +284,10 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, fence, &t_aio.UpdatePromiseCommand{
-				Id:             promiseCmd.Id,
-				State:          promise.GetTimedoutState(p),
-				Value:          promise.Value{},
-				IdempotencyKey: nil,
-				CompletedOn:    p.Timeout,
+				Id:          promiseCmd.Id,
+				State:       promise.GetTimedoutState(p),
+				Value:       promise.Value{},
+				CompletedOn: p.Timeout,
 			}))
 			if err != nil {
 				return nil, err
@@ -311,7 +302,6 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			// update promise
 			p.State = promise.GetTimedoutState(p)
 			p.Value = promise.Value{}
-			p.IdempotencyKeyForComplete = nil
 			p.CompletedOn = &p.Timeout
 		}
 

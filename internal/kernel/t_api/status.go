@@ -28,8 +28,6 @@ const (
 	StatusScheduleNotFound       StatusCode = 40401
 	StatusTaskNotFound           StatusCode = 40403
 	StatusPromiseRecvNotFound    StatusCode = 40404
-	StatusPromiseAlreadyExists   StatusCode = 40900
-	StatusScheduleAlreadyExists  StatusCode = 40901
 	StatusTaskPreconditionFailed StatusCode = 41200
 
 	// Platform level status (50000-59909)
@@ -81,10 +79,6 @@ func (s StatusCode) String() string {
 		return "The specified task was not found"
 	case StatusPromiseRecvNotFound:
 		return "The specified recv couldn't be found"
-	case StatusPromiseAlreadyExists:
-		return "The specified promise already exists"
-	case StatusScheduleAlreadyExists:
-		return "The specified schedule already exists"
 	case StatusInternalServerError:
 		return "There was an internal server error"
 	case StatusAIOEchoError:

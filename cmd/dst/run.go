@@ -38,7 +38,6 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 
 		reqsPerTick     = util.NewRangeIntFlag(1, 25)
 		ids             = util.NewRangeIntFlag(1, 25)
-		idempotencyKeys = util.NewRangeIntFlag(1, 25)
 		headers         = util.NewRangeIntFlag(1, 25)
 		data            = util.NewRangeIntFlag(1, 25)
 		tags            = util.NewRangeIntFlag(1, 25)
@@ -210,7 +209,6 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 				ReqsPerTick:        func() int { return reqsPerTick.Resolve(r) },
 				MaxReqsPerTick:     int64(reqsPerTick.Max()),
 				Ids:                ids.Resolve(r),
-				IdempotencyKeys:    idempotencyKeys.Resolve(r),
 				Headers:            headers.Resolve(r),
 				Data:               data.Resolve(r),
 				Tags:               tags.Resolve(r),
@@ -251,7 +249,6 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 	cmd.Flags().BoolVar(&printOps, "print-ops", true, "log the request/response pairs of a run.")
 	cmd.Flags().Var(reqsPerTick, "reqs-per-tick", "number of requests per tick")
 	cmd.Flags().Var(ids, "ids", "promise id set size")
-	cmd.Flags().Var(idempotencyKeys, "idempotency-keys", "idempotency key set size")
 	cmd.Flags().Var(headers, "headers", "promise header set size")
 	cmd.Flags().Var(data, "data", "promise data set size")
 	cmd.Flags().Var(tags, "tags", "promise tags set size")

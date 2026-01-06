@@ -50,7 +50,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on
 	FROM
 		promises
 	WHERE
@@ -58,7 +58,7 @@ const (
 
 	PROMISE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -68,7 +68,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -86,7 +86,7 @@ const (
 		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
 		($1, $2, $3, $4, $5, $6, $7)
-	ON CONFLICT(id) DO NOTHING`
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	PROMISE_UPDATE_STATEMENT = `
 	UPDATE
@@ -94,7 +94,7 @@ const (
 	SET
 		state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $4, completed_on = $5
 	WHERE
-		id = $6 AND state = 1`
+		id = $6 AND state = 1 -- idempotency_key must be equal to id for this stmt`
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
@@ -111,7 +111,7 @@ const (
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
-		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, idempotency_key, created_on
+		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, created_on
 	FROM
 		schedules
 	WHERE
@@ -131,7 +131,7 @@ const (
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
-		id, cron, tags, last_run_time, next_run_time, idempotency_key, created_on, sort_id
+		id, cron, tags, last_run_time, next_run_time, created_on, sort_id
 	FROM
 		schedules
 	WHERE
@@ -148,7 +148,7 @@ const (
 		(id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, next_run_time, idempotency_key, created_on)
 	VALUES
 		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	ON CONFLICT(id) DO NOTHING`
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
@@ -780,8 +780,6 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 		&record.ValueHeaders,
 		&record.ValueData,
 		&record.Timeout,
-		&record.IdempotencyKeyForCreate,
-		&record.IdempotencyKeyForComplete,
 		&record.Tags,
 		&record.CreatedOn,
 		&record.CompletedOn,
@@ -825,8 +823,6 @@ func (w *PostgresStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCo
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -901,8 +897,6 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -939,7 +933,7 @@ func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -980,7 +974,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.IdempotencyKey, cmd.CompletedOn, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.Id, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -1056,7 +1050,6 @@ func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCo
 		&record.PromiseTags,
 		&record.LastRunTime,
 		&record.NextRunTime,
-		&record.IdempotencyKey,
 		&record.CreatedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -1148,7 +1141,6 @@ func (w *PostgresStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSched
 			&record.Tags,
 			&record.LastRunTime,
 			&record.NextRunTime,
-			&record.IdempotencyKey,
 			&record.CreatedOn,
 			&record.SortId,
 		); err != nil {
@@ -1194,7 +1186,7 @@ func (w *PostgresStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 		cmd.PromiseParam.Data,
 		promiseTags,
 		cmd.NextRunTime,
-		cmd.IdempotencyKey,
+		cmd.Id,
 		cmd.CreatedOn,
 	)
 	if err != nil {

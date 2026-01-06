@@ -20,12 +20,10 @@ resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=
 
 func CreatePromiseCmd(c client.Client) *cobra.Command {
 	var (
-		data           string
-		timeout        time.Duration
-		headers        map[string]string
-		tags           map[string]string
-		idempotencyKey string
-		strict         bool
+		data    string
+		timeout time.Duration
+		headers map[string]string
+		tags    map[string]string
 	)
 
 	cmd := &cobra.Command{
@@ -39,13 +37,7 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			params := &v1.CreatePromiseParams{
-				Strict: &strict,
-			}
-
-			if cmd.Flag("idempotency-key").Changed {
-				params.IdempotencyKey = &idempotencyKey
-			}
+			params := &v1.CreatePromiseParams{}
 
 			body := v1.CreatePromiseJSONRequestBody{
 				Id:      id,
@@ -87,8 +79,6 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 	cmd.Flags().StringToStringVar(&headers, "header", map[string]string{}, "promise param header")
 	cmd.Flags().StringVar(&data, "data", "", "promise param data")
 	cmd.Flags().StringToStringVar(&tags, "tag", map[string]string{}, "promise tags")
-	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "idempotency key")
-	cmd.Flags().BoolVar(&strict, "strict", true, "strict mode")
 
 	_ = cmd.MarkFlagRequired("timeout")
 

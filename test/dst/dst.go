@@ -42,7 +42,6 @@ type Config struct {
 	ReqsPerTick        func() int
 	MaxReqsPerTick     int64
 	Ids                int
-	IdempotencyKeys    int
 	Headers            int
 	Data               int
 	Tags               int
@@ -449,12 +448,10 @@ func (d *DST) Model() porcupine.Model {
 					<tr>
 						<td align="right">%s</td>
 						<td>%s</td>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
 						<td align="right">%d</td>
 						<td align="right">%s</td>
 					</tr>
-				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout, completedOn)
+				`, p.value.Id, p.value.State, p.value.Timeout, completedOn)
 				}
 
 				var callbacks string
@@ -497,8 +494,6 @@ func (d *DST) Model() porcupine.Model {
 									<tr>
 										<td><b>id</b></td>
 										<td><b>state</b></td>
-										<td><b>ikeyCreate</b></td>
-										<td><b>ikeyComplete</b></td>
 										<td><b>timeout</b></td>
 										<td><b>completedOn</b></td>
 									</tr>
@@ -551,9 +546,8 @@ func (d *DST) Model() porcupine.Model {
 					schedules = schedules + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
-						<td align="right">%s</td>
 					</tr>
-				`, s.value.Id, s.value.IdempotencyKey)
+				`, s.value.Id)
 				}
 
 				return fmt.Sprintf(`
@@ -570,7 +564,6 @@ func (d *DST) Model() porcupine.Model {
 										<thead>
 											<tr>
 												<td><b>id</b></td>
-												<td><b>ikey</b></td>
 											</tr>
 										</thead>
 										<tbody>
@@ -641,9 +634,8 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
+		"DST(ids=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
 		d.config.Ids,
-		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,

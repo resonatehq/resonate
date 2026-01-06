@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -64,16 +63,14 @@ func (r *SearchPromisesRequest) Kind() Kind {
 }
 
 type CreatePromiseRequest struct {
-	Id             string            `json:"id"`
-	IdempotencyKey *idempotency.Key  `json:"idempotencyKey,omitempty"`
-	Strict         bool              `json:"strict"`
-	Param          promise.Value     `json:"param,omitempty"`
-	Timeout        int64             `json:"timeout"`
-	Tags           map[string]string `json:"tags,omitempty"`
+	Id      string            `json:"id"`
+	Param   promise.Value     `json:"param,omitempty"`
+	Timeout int64             `json:"timeout"`
+	Tags    map[string]string `json:"tags,omitempty"`
 }
 
 func (r *CreatePromiseRequest) String() string {
-	return fmt.Sprintf("CreatePromise(id=%s, idempotencyKey=%v, strict=%v, param=%v, timeout=%d, tags=%v)", r.Id, r.IdempotencyKey, r.Strict, r.Param, r.Timeout, r.Tags)
+	return fmt.Sprintf("CreatePromise(id=%s, param=%v, timeout=%d, tags=%v)", r.Id, r.Param, r.Timeout, r.Tags)
 }
 
 func (r *CreatePromiseRequest) Validate() error {
@@ -102,15 +99,13 @@ func (r *CreatePromiseAndTaskRequest) Kind() Kind {
 }
 
 type CompletePromiseRequest struct {
-	Id             string           `json:"id"`
-	IdempotencyKey *idempotency.Key `json:"idempotencyKey,omitempty"`
-	Strict         bool             `json:"strict"`
-	State          promise.State    `json:"state"`
-	Value          promise.Value    `json:"value,omitempty"`
+	Id    string        `json:"id"`
+	State promise.State `json:"state"`
+	Value promise.Value `json:"value,omitempty"`
 }
 
 func (r *CompletePromiseRequest) String() string {
-	return fmt.Sprintf("CompletePromise(id=%s, idempotencyKey=%v, strict=%v, state=%v, value=%v)", r.Id, r.IdempotencyKey, r.Strict, r.State, r.Value)
+	return fmt.Sprintf("CompletePromise(id=%s, state=%v, value=%v)", r.Id, r.State, r.Value)
 }
 
 func (r *CompletePromiseRequest) Validate() error {
@@ -192,12 +187,11 @@ type CreateScheduleRequest struct {
 	PromiseTimeout int64             `json:"promiseTimeout"`
 	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
-	IdempotencyKey *idempotency.Key  `json:"idempotencyKey,omitempty"`
 }
 
 func (r *CreateScheduleRequest) String() string {
 	return fmt.Sprintf(
-		"CreateSchedule(id=%s, desc=%s, cron=%s, tags=%v, promiseId=%s, promiseTimeout=%d, promiseParam=%v, promiseTags=%v, idempotencyKey=%v)",
+		"CreateSchedule(id=%s, desc=%s, cron=%s, tags=%v, promiseId=%s, promiseTimeout=%d, promiseParam=%v, promiseTags=%v)",
 		r.Id,
 		r.Description,
 		r.Cron,
@@ -206,7 +200,6 @@ func (r *CreateScheduleRequest) String() string {
 		r.PromiseTimeout,
 		r.PromiseParam,
 		r.PromiseTags,
-		r.IdempotencyKey,
 	)
 }
 

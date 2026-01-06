@@ -179,7 +179,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 			return model, fmt.Errorf("promise '%s' does not exist", req.Id)
 		}
 		if p.State != res.Promise.State {
-			// the only way this can happen is if the promise timedout
+			// the only way this can happen with this test setup is if the promise timedout
 			if res.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(req.Id, res.Promise)
@@ -187,16 +187,6 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 			} else {
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
 			}
-		}
-		if !p.IdempotencyKeyForCreate.Match(res.Promise.IdempotencyKeyForCreate) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, res.Promise.IdempotencyKeyForCreate, req.Id)
-		} else if req.Strict && p.State != promise.Pending {
-			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, req.Id)
-		}
-		return model, nil
-	case t_api.StatusPromiseAlreadyExists:
-		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", req.Id)
 		}
 		return model, nil
 	default:
@@ -247,11 +237,6 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 			} else {
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, completePromiseRes.Promise.State, completePromiseReq.Id)
 			}
-		}
-		if !p.IdempotencyKeyForComplete.Match(completePromiseRes.Promise.IdempotencyKeyForComplete) && (completePromiseReq.Strict || completePromiseRes.Promise.State != promise.Timedout) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, completePromiseRes.Promise.IdempotencyKeyForCreate, completePromiseReq.Id)
-		} else if completePromiseReq.Strict && p.State != completePromiseReq.State {
-			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, completePromiseReq.Id)
 		}
 		return model, nil
 	case t_api.StatusPromiseAlreadyResolved:
@@ -424,14 +409,6 @@ func (v *Validator) ValidateCreateSchedule(model *Model, reqTime int64, resTime 
 		if s == nil {
 			return model, fmt.Errorf("schedule '%s' does not exist", createScheduleReq.Id)
 		}
-		if !s.IdempotencyKey.Match(createScheduleRes.Schedule.IdempotencyKey) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for schedule '%s'", s.IdempotencyKey, createScheduleRes.Schedule.IdempotencyKey, createScheduleReq.IdempotencyKey)
-		}
-		return model, nil
-	case t_api.StatusScheduleAlreadyExists:
-		if s == nil {
-			return model, fmt.Errorf("schedule '%s' does not exist", createScheduleReq.Id)
-		}
 		return model, nil
 	default:
 		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
@@ -551,7 +528,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 			return model, fmt.Errorf("task '%s' not completed", completeTaskReq.Id)
 		}
 
-		// the response should have been created if:
+		// the response should have been status created if:
 		// - the task was not already completed or timedout
 		// - the task has not timedout
 		// - the root promise is still pending

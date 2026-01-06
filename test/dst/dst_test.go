@@ -121,7 +121,6 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		ReqsPerTick:        func() int { return util.RangeIntn(r, 0, 15) },
 		MaxReqsPerTick:     25,
 		Ids:                10,
-		IdempotencyKeys:    10,
 		Headers:            10,
 		Data:               10,
 		Tags:               10,

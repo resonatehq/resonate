@@ -3,7 +3,6 @@ package test
 import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -430,9 +429,7 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CreatePromise", "name": "CreatePromise"},
 			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
+				Id: "foo",
 				Param: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("pending"),
@@ -444,9 +441,8 @@ var TestCases = []*testCase{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CreatePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("pending"),
@@ -460,9 +456,7 @@ var TestCases = []*testCase{
 				Method: "POST",
 				Path:   "promises",
 				Headers: map[string]string{
-					"Request-Id":      "CreatePromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "CreatePromise",
 				},
 				Body: []byte(`{
 					"id": "foo",
@@ -483,22 +477,19 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CreatePromiseMinimal", "name": "CreatePromise"},
 			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				Param:          promise.Value{},
-				Timeout:        1,
+				Id:      "foo",
+				Param:   promise.Value{},
+				Timeout: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CreatePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: nil,
-					Param:                   promise.Value{},
-					Timeout:                 1,
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
 				},
 			},
 		},
@@ -524,22 +515,19 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "CreatePromise", "traceparent": "foo", "tracestate": "bar"},
 			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				Param:          promise.Value{},
-				Timeout:        1,
+				Id:      "foo",
+				Param:   promise.Value{},
+				Timeout: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CreatePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: nil,
-					Param:                   promise.Value{},
-					Timeout:                 1,
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
 				},
 			},
 		},
@@ -682,10 +670,8 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Resolved,
+				Id:    "foo",
+				State: promise.Resolved,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("resolve"),
@@ -696,9 +682,8 @@ var TestCases = []*testCase{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Resolved,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Resolved,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("resolve"),
@@ -711,9 +696,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "ResolvePromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "ResolvePromise",
 				},
 				Body: []byte(`{
 					"state": "RESOLVED",
@@ -733,21 +716,18 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "ResolvePromiseMinimal", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Resolved,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Resolved,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Resolved,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Resolved,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -772,11 +752,9 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "ResolvePromiseAlreadyCompleted", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Resolved,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Resolved,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
@@ -809,10 +787,8 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Rejected,
+				Id:    "foo",
+				State: promise.Rejected,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("reject"),
@@ -823,9 +799,8 @@ var TestCases = []*testCase{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Rejected,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Rejected,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("reject"),
@@ -838,9 +813,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "RejectPromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "RejectPromise",
 				},
 				Body: []byte(`{
 					"state": "REJECTED",
@@ -860,21 +833,18 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "RejectPromiseMinimal", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Rejected,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Rejected,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Rejected,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Rejected,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -899,11 +869,9 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "RejectPromiseAlreadyCompleted", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Rejected,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Rejected,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
@@ -936,10 +904,8 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Canceled,
+				Id:    "foo",
+				State: promise.Canceled,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
@@ -950,9 +916,8 @@ var TestCases = []*testCase{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Canceled,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Canceled,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("cancel"),
@@ -965,9 +930,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "CancelPromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "CancelPromise",
 				},
 				Body: []byte(`{
 					"state": "REJECTED_CANCELED",
@@ -987,21 +950,18 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CancelPromiseMinimal", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Canceled,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Canceled,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
 			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Canceled,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Canceled,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -1026,11 +986,9 @@ var TestCases = []*testCase{
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CancelPromiseAlreadyCompleted", "name": "CompletePromise"},
 			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Canceled,
-				Value:          promise.Value{},
+				Id:    "foo",
+				State: promise.Canceled,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
@@ -1752,7 +1710,6 @@ var TestCases = []*testCase{
 			Metadata: map[string]string{"id": "CreateSchedule", "name": "CreateSchedule"},
 			Payload: &t_api.CreateScheduleRequest{
 				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Cron:           "* * * * *",
 				PromiseId:      "foo.{{.timestamp}}",
 				PromiseTimeout: 1,
@@ -1767,7 +1724,6 @@ var TestCases = []*testCase{
 					Cron:           "* * * * *",
 					PromiseId:      "foo.{{.timestamp}}",
 					PromiseTimeout: 1,
-					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				},
 			},
 		},
@@ -1776,8 +1732,7 @@ var TestCases = []*testCase{
 				Method: "POST",
 				Path:   "schedules",
 				Headers: map[string]string{
-					"Request-Id":      "CreateSchedule",
-					"Idempotency-Key": "bar",
+					"Request-Id": "CreateSchedule",
 				},
 				Body: []byte(`{
 					"id": "foo",
