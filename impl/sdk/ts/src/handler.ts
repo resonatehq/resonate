@@ -14,7 +14,7 @@ import type {
   ReadPromiseReq,
   TaskRecord,
 } from "./network/network";
-import type { Value } from "./types";
+import type { Result, Value } from "./types";
 import * as util from "./util";
 
 export class Cache {
@@ -67,39 +67,38 @@ export class Handler {
     this.encryptor = encryptor;
   }
 
-  public readPromise(req: ReadPromiseReq, done: (err?: ResonateError, res?: DurablePromiseRecord<any>) => void): void {
+  public readPromise(req: ReadPromiseReq, done: (res: Result<DurablePromiseRecord<any>, ResonateError>) => void): void {
     const promise = this.cache.getPromise(req.id);
     if (promise) {
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
       return;
     }
 
-    this.network.send(req, (err, res) => {
-      if (err) return done(err);
-      util.assertDefined(res);
+    this.network.send(req, (res) => {
+      if (res.kind === "error") return done(res);
 
       let promise: DurablePromiseRecord<any>;
       try {
-        promise = this.decode(res.promise);
+        promise = this.decode(res.value.promise);
       } catch (e) {
-        return done(e as ResonateError);
+        return done({ kind: "error", error: e as ResonateError });
       }
 
       this.cache.setPromise(promise);
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
     });
   }
 
   public createPromise(
     req: CreatePromiseReq<any>,
-    done: (err?: ResonateError, res?: DurablePromiseRecord<any>) => void,
+    done: (res: Result<DurablePromiseRecord<any>, ResonateError>) => void,
     func = "unknown",
     headers: Record<string, string> = {},
     retryForever = false,
   ): void {
     const promise = this.cache.getPromise(req.id);
     if (promise) {
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
       return;
     }
 
@@ -107,25 +106,24 @@ export class Handler {
     try {
       param = this.encryptor.encrypt(this.encoder.encode(req.param?.data));
     } catch (e) {
-      done(exceptions.ENCODING_ARGS_UNENCODEABLE(req.param?.data?.func ?? func, e));
+      done({ kind: "error", error: exceptions.ENCODING_ARGS_UNENCODEABLE(req.param?.data?.func ?? func, e) });
       return;
     }
 
     this.network.send(
       { ...req, param },
-      (err, res) => {
-        if (err) return done(err);
-        util.assertDefined(res);
+      (res) => {
+        if (res.kind === "error") return done(res);
 
         let promise: DurablePromiseRecord<any>;
         try {
-          promise = this.decode(res.promise, req.param?.data?.func ?? func);
+          promise = this.decode(res.value.promise, req.param?.data?.func ?? func);
         } catch (e) {
-          return done(e as ResonateError);
+          return done({ kind: "error", error: e as ResonateError });
         }
 
         this.cache.setPromise(promise);
-        done(undefined, promise);
+        done({ kind: "value", value: promise });
       },
       headers,
       retryForever,
@@ -134,14 +132,14 @@ export class Handler {
 
   public createPromiseAndTask(
     req: CreatePromiseAndTaskReq<any>,
-    done: (err?: ResonateError, res?: { promise: DurablePromiseRecord<any>; task?: TaskRecord }) => void,
+    done: (res: Result<{ promise: DurablePromiseRecord<any>; task?: TaskRecord }, ResonateError>) => void,
     func = "unknown",
     headers: Record<string, string> = {},
     retryForever = false,
   ) {
     const promise = this.cache.getPromise(req.promise.id);
     if (promise) {
-      done(undefined, { promise });
+      done({ kind: "value", value: { promise } });
       return;
     }
 
@@ -149,30 +147,29 @@ export class Handler {
     try {
       param = this.encryptor.encrypt(this.encoder.encode(req.promise.param?.data));
     } catch (e) {
-      done(exceptions.ENCODING_ARGS_UNENCODEABLE(req.promise.param?.data?.func ?? func, e));
+      done({ kind: "error", error: exceptions.ENCODING_ARGS_UNENCODEABLE(req.promise.param?.data?.func ?? func, e) });
       return;
     }
 
     this.network.send(
       { ...req, promise: { ...req.promise, param } },
-      (err, res) => {
-        if (err) return done(err);
-        util.assertDefined(res);
+      (res) => {
+        if (res.kind === "error") return done(res);
 
         let promise: DurablePromiseRecord<any>;
         try {
-          promise = this.decode(res.promise, req.promise.param?.data?.func ?? func);
+          promise = this.decode(res.value.promise, req.promise.param?.data?.func ?? func);
         } catch (e) {
-          return done(e as ResonateError);
+          return done({ kind: "error", error: e as ResonateError });
         }
 
         this.cache.setPromise(promise);
 
-        if (res.task) {
-          this.cache.setTask(res.task);
+        if (res.value.task) {
+          this.cache.setTask(res.value.task);
         }
 
-        done(undefined, { promise, task: res.task });
+        done({ kind: "value", value: { promise, task: res.value.task } });
       },
       headers,
       retryForever,
@@ -181,14 +178,14 @@ export class Handler {
 
   public completePromise(
     req: CompletePromiseReq<any>,
-    done: (err?: ResonateError, res?: DurablePromiseRecord<any>) => void,
+    done: (res: Result<DurablePromiseRecord<any>, ResonateError>) => void,
     func = "unknown",
   ): void {
     const promise = this.cache.getPromise(req.id);
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
       return;
     }
 
@@ -196,56 +193,56 @@ export class Handler {
     try {
       value = this.encryptor.encrypt(this.encoder.encode(req.value?.data));
     } catch (e) {
-      done(exceptions.ENCODING_RETV_UNENCODEABLE(func, e));
+      done({ kind: "error", error: exceptions.ENCODING_RETV_UNENCODEABLE(func, e) });
       return;
     }
 
-    this.network.send({ ...req, value }, (err, res) => {
-      if (err) return done(err);
-      util.assertDefined(res);
+    this.network.send({ ...req, value }, (res) => {
+      if (res.kind === "error") return done(res);
 
       let promise: DurablePromiseRecord<any>;
       try {
-        promise = this.decode(res.promise, func);
+        promise = this.decode(res.value.promise, func);
       } catch (e) {
-        return done(e as ResonateError);
+        return done({ kind: "error", error: e as ResonateError });
       }
 
       this.cache.setPromise(promise);
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
     });
   }
 
   public claimTask(
     req: ClaimTaskReq,
-    done: (err?: ResonateError, res?: { root: DurablePromiseRecord<any>; leaf?: DurablePromiseRecord<any> }) => void,
+    done: (res: Result<{ root: DurablePromiseRecord<any>; leaf?: DurablePromiseRecord<any> }, ResonateError>) => void,
   ): void {
     const task = this.cache.getTask(req.id);
     if (task && task.counter >= req.counter) {
-      done(
-        exceptions.ENCODING_RETV_UNDECODEABLE("The task counter is invalid", {
+      done({
+        kind: "error",
+        error: exceptions.ENCODING_RETV_UNDECODEABLE("The task counter is invalid", {
           code: 40307,
           message: "The task counter is invalid",
         }),
-      );
+      });
       return;
     }
 
-    this.network.send(req, (err, res) => {
-      if (err) return done(err);
+    this.network.send(req, (res) => {
+      if (res.kind === "error") return done(res);
       util.assertDefined(res);
-      util.assertDefined(res.message.promises.root);
+      util.assertDefined(res.value.message.promises.root);
 
       let rootPromise: DurablePromiseRecord<any>;
       let leafPromise: DurablePromiseRecord<any> | undefined;
 
       try {
-        rootPromise = this.decode(res.message.promises.root.data);
-        if (res.message.promises.leaf) {
-          leafPromise = this.decode(res.message.promises.leaf.data);
+        rootPromise = this.decode(res.value.message.promises.root.data);
+        if (res.value.message.promises.leaf) {
+          leafPromise = this.decode(res.value.message.promises.leaf.data);
         }
       } catch (e) {
-        return done(e as ResonateError);
+        return done({ kind: "error", error: e as ResonateError });
       }
 
       this.cache.setPromise(rootPromise);
@@ -255,15 +252,17 @@ export class Handler {
 
       this.cache.setTask({ id: req.id, counter: req.counter });
 
-      done(undefined, { root: rootPromise, leaf: leafPromise });
+      done({ kind: "value", value: { root: rootPromise, leaf: leafPromise } });
     });
   }
 
   public createCallback(
     req: CreateCallbackReq,
     done: (
-      err?: ResonateError,
-      res?: { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord<any> },
+      res: Result<
+        { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord<any> },
+        ResonateError
+      >,
     ) => void,
     headers: Record<string, string> = {},
   ): void {
@@ -272,41 +271,42 @@ export class Handler {
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {
-      done(undefined, { kind: "promise", promise });
+      done({ kind: "value", value: { kind: "promise", promise } });
       return;
     }
 
     const callback = this.cache.getCallback(id);
     if (callback) {
-      done(undefined, { kind: "callback", callback });
+      done({ kind: "value", value: { kind: "callback", callback } });
       return;
     }
 
     this.network.send(
       req,
-      (err, res) => {
-        if (err) return done(err);
-        util.assertDefined(res);
+      (res) => {
+        if (res.kind === "error") return done(res);
 
-        if (res.promise) {
+        if (res.value.promise) {
           let promise: DurablePromiseRecord<any>;
           try {
-            promise = this.decode(res.promise);
+            promise = this.decode(res.value.promise);
           } catch (e) {
-            return done(e as ResonateError);
+            return done({ kind: "error", error: e as ResonateError });
           }
 
           this.cache.setPromise(promise);
         }
 
-        if (res.callback) {
-          this.cache.setCallback(id, res.callback);
+        if (res.value.callback) {
+          this.cache.setCallback(id, res.value.callback);
         }
 
-        done(
-          undefined,
-          res.callback ? { kind: "callback", callback: res.callback } : { kind: "promise", promise: res.promise },
-        );
+        done({
+          kind: "value",
+          value: res.value.callback
+            ? { kind: "callback", callback: res.value.callback }
+            : { kind: "promise", promise: res.value.promise },
+        });
       },
       headers,
     );
@@ -314,7 +314,7 @@ export class Handler {
 
   public createSubscription(
     req: CreateSubscriptionReq,
-    done: (err?: ResonateError, res?: DurablePromiseRecord<any>) => void,
+    done: (res: Result<DurablePromiseRecord<any>, ResonateError>) => void,
     retryForever = false,
   ) {
     const id = `__notify:${req.promiseId}:${req.id}`;
@@ -322,36 +322,35 @@ export class Handler {
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
       return;
     }
 
     const callback = this.cache.getCallback(id);
     if (callback) {
-      done(undefined, promise);
+      done({ kind: "value", value: promise });
       return;
     }
 
     this.network.send(
       req,
-      (err, res) => {
-        if (err) return done(err);
-        util.assertDefined(res);
+      (res) => {
+        if (res.kind === "error") return done(res);
 
         let promise: DurablePromiseRecord<any>;
         try {
-          promise = this.decode(res.promise);
+          promise = this.decode(res.value.promise);
         } catch (e) {
-          return done(e as ResonateError);
+          return done({ kind: "error", error: e as ResonateError });
         }
 
         this.cache.setPromise(promise);
 
-        if (res.callback) {
-          this.cache.setCallback(id, res.callback);
+        if (res.value.callback) {
+          this.cache.setCallback(id, res.value.callback);
         }
 
-        done(undefined, promise);
+        done({ kind: "value", value: promise });
       },
       {},
       retryForever,

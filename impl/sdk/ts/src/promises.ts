@@ -9,13 +9,13 @@ export class Promises {
 
   get(id: string): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "readPromise", id }, (err, res) => {
-        if (err) {
-          reject(err);
+      this.network.send({ kind: "readPromise", id }, (res) => {
+        if (res.kind === "error") {
+          reject(res.error);
           return;
         }
 
-        resolve(res!.promise);
+        resolve(res.value.promise);
       });
     });
   }
@@ -48,13 +48,13 @@ export class Promises {
           iKey: ikey,
           strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -96,13 +96,13 @@ export class Promises {
           iKey: ikey,
           strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve({ promise: res!.promise, task: res!.task });
+          resolve({ promise: res.value.promise, task: res.value.task });
         },
       );
     });
@@ -132,13 +132,13 @@ export class Promises {
           iKey: ikey,
           strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -167,13 +167,13 @@ export class Promises {
           iKey: ikey,
           strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -202,13 +202,13 @@ export class Promises {
           iKey: ikey,
           strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -229,9 +229,9 @@ export class Promises {
             limit,
             cursor,
           },
-          (err, res) => {
-            if (err) return reject(err);
-            resolve(res!);
+          (res) => {
+            if (res.kind === "error") return reject(res.error);
+            resolve(res.value);
           },
         );
       });
@@ -258,13 +258,13 @@ export class Promises {
           timeout: timeout,
           recv: recv,
         },
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve({ promise: res!.promise, callback: res!.callback });
+          resolve({ promise: res.value.promise, callback: res.value.callback });
         },
       );
     });
@@ -280,13 +280,13 @@ export class Promises {
     callback: CallbackRecord | undefined;
   }> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (err, res) => {
-        if (err) {
-          reject(err);
+      this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (res) => {
+        if (res.kind === "error") {
+          reject(res.error);
           return;
         }
 
-        resolve({ promise: res!.promise, callback: res!.callback });
+        resolve({ promise: res.value.promise, callback: res.value.callback });
       });
     });
   }

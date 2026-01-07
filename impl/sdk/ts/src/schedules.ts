@@ -15,14 +15,14 @@ export class Schedules {
           kind: "readSchedule",
           id: id,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.schedule);
+          resolve(res.value.schedule);
         },
       );
     });
@@ -63,15 +63,15 @@ export class Schedules {
           promiseTags: promiseTags,
           iKey: ikey,
         },
-        (err, res) => {
-          if (err) {
-            console.log(err);
+        (res) => {
+          if (res.kind === "error") {
+            console.log(res.error);
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.schedule);
+          resolve(res.value.schedule);
         },
       );
     });
@@ -84,8 +84,8 @@ export class Schedules {
           kind: "deleteSchedule",
           id: id,
         },
-        (err) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
@@ -109,9 +109,9 @@ export class Schedules {
             limit,
             cursor,
           },
-          (err, res) => {
-            if (err) return reject(err);
-            resolve(res!);
+          (res) => {
+            if (res.kind === "error") return reject(res.error);
+            resolve(res.value);
           },
         );
       });

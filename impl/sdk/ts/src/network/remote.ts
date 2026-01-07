@@ -1,6 +1,6 @@
 import { EventSource } from "eventsource";
 import exceptions, { ResonateError, type ResonateServerError } from "../exceptions";
-import type { Value } from "../types";
+import type { Result, Value } from "../types";
 import * as util from "../util";
 import type {
   CallbackRecord,
@@ -180,7 +180,7 @@ export class HttpNetwork implements Network {
 
   send<T extends Request>(
     req: T,
-    callback: (err?: ResonateError, res?: ResponseFor<T>) => void,
+    callback: (res: Result<ResponseFor<T>, ResonateError>) => void,
     headers: Record<string, string> = {},
     retryForever = false,
   ): void {
@@ -189,10 +189,10 @@ export class HttpNetwork implements Network {
     this.handleRequest(req, headers, retryPolicy).then(
       (res) => {
         util.assert(res.kind === req.kind, "res kind must match req kind");
-        callback(undefined, res as ResponseFor<T>);
+        callback({ kind: "value", value: res as ResponseFor<T> });
       },
       (err) => {
-        callback(err as ResonateError);
+        callback({ kind: "error", error: err as ResonateError });
       },
     );
   }

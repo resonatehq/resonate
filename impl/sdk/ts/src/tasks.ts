@@ -18,14 +18,14 @@ export class Tasks {
           processId: pid,
           ttl: ttl,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.message);
+          resolve(res.value.message);
         },
       );
     });
@@ -39,14 +39,14 @@ export class Tasks {
           id: id,
           counter: counter,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.task);
+          resolve(res.value.task);
         },
       );
     });
@@ -59,14 +59,14 @@ export class Tasks {
           kind: "heartbeatTasks",
           processId: pid,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.tasksAffected);
+          resolve(res.value.tasksAffected);
         },
       );
     });

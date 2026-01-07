@@ -1,5 +1,6 @@
 import type { ResonateError } from "../src/exceptions";
 import type { Message, MessageSource, Network, Request, ResponseFor } from "../src/network/network";
+import type { Result } from "../src/types";
 import * as util from "../src/util";
 import { Server } from "./server";
 
@@ -23,16 +24,16 @@ export class LocalNetwork implements Network {
   start() {}
   stop() {}
 
-  send<T extends Request>(req: Request, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
+  send<T extends Request>(req: Request, callback: (res: Result<ResponseFor<T>, ResonateError>) => void): void {
     setTimeout(() => {
       try {
         const res = this.server.process(req, Date.now());
         util.assert(res.kind === req.kind, "res kind must match req kind");
 
-        callback(undefined, res as ResponseFor<T>);
+        callback({ kind: "value", value: res as ResponseFor<T> });
         this.messageSource.enqueueNext();
       } catch (err) {
-        callback(err as ResonateError);
+        callback({ kind: "error", error: err as ResonateError });
       }
     });
   }

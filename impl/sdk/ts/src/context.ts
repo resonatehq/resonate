@@ -135,14 +135,14 @@ export class DIE implements Iterable<DIE> {
 }
 
 export class Future<T> implements Iterable<Future<T>> {
-  private readonly value?: Result<T>;
+  private readonly value?: Result<T, any>;
   public readonly state: "pending" | "completed";
   private mode: "attached" | "detached";
 
   constructor(
     public id: string,
     state: "pending" | "completed",
-    value?: Result<T>,
+    value?: Result<T, any>,
     mode: "attached" | "detached" = "attached",
   ) {
     this.value = value;
@@ -155,7 +155,7 @@ export class Future<T> implements Iterable<Future<T>> {
       throw new Error("Future is not ready");
     }
 
-    if (this.value.success) {
+    if (this.value.kind === "value") {
       return this.value.value;
     }
     throw this.value.error; // Should be unreachble
@@ -164,7 +164,7 @@ export class Future<T> implements Iterable<Future<T>> {
   *[Symbol.iterator](): Generator<Future<T>, T, undefined> {
     yield this;
     util.assertDefined(this.value);
-    util.assert(this.value.success, "The value must be and ok result at this point.");
+    util.assert(this.value.kind === "value", "The value must be and ok result at this point.");
     return this.getValue();
   }
 }

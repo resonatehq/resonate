@@ -7,7 +7,7 @@ import type { OptionsBuilder } from "./options";
 import type { Registry } from "./registry";
 import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries";
 import type { Span, Tracer } from "./tracer";
-import type { Callback } from "./types";
+import type { Result } from "./types";
 import * as util from "./util";
 
 export type PromiseHandler = {
@@ -104,7 +104,7 @@ export class ResonateInner {
     messageSource?.subscribe("resume", this.onMessage.bind(this));
   }
 
-  public process(span: Span, task: Task, done: Callback<Status>) {
+  public process(span: Span, task: Task, done: (res: Result<Status, undefined>) => void) {
     let computation = this.computations.get(task.task.rootPromiseId);
     if (!computation) {
       computation = new Computation(

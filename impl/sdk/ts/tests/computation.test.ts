@@ -44,9 +44,9 @@ async function createPromiseAndTask(
         iKey: id,
         strict: false,
       },
-      (_, res) => {
-        util.assertDefined(res);
-        resolve({ promise: res!.promise, task: res!.task! });
+      (res) => {
+        util.assert(res.kind === "value");
+        resolve({ promise: res.value.promise, task: res.value.task! });
       },
     );
   });
@@ -56,7 +56,7 @@ async function createPromiseAndTask(
 interface PendingTodo {
   id: string;
   func: () => Promise<any>;
-  callback: (result: Result<any>) => void;
+  callback: (res: Result<any, any>) => void;
 }
 
 // This mock allows us to control when "async" tasks complete.
@@ -64,7 +64,7 @@ class MockProcessor implements Processor {
   public pendingTodos: Map<string, PendingTodo> = new Map();
   private todoNotifier?: { expectedCount: number; resolve: () => void };
 
-  process(id: string, ctx: InnerContext, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
+  process(id: string, ctx: InnerContext, func: () => Promise<any>, callback: (res: Result<any, any>) => void): void {
     // Instead of running the work, we just store it.
     this.pendingTodos.set(id, { id, func, callback });
 
@@ -93,7 +93,7 @@ class MockProcessor implements Processor {
     // Fire all callbacks in the same event loop tick to simulate concurrency
     for (const todo of todosToComplete) {
       // We resolve with a simple value for the test
-      todo.callback({ success: true, value: `completed-${todo.id}` });
+      todo.callback({ kind: "value", value: `completed-${todo.id}` });
     }
   }
 }
@@ -159,12 +159,12 @@ describe("Computation Event Queue Concurrency", () => {
     };
 
     const computationPromise: Promise<Status> = new Promise((resolve) => {
-      computation.process(testTask, (err, res) => {
-        if (err || !res) {
+      computation.process(testTask, (res) => {
+        if (res.kind === "error") {
           throw new Error("Computation processing failed");
         }
 
-        resolve(res);
+        resolve(res.value);
       });
     });
 

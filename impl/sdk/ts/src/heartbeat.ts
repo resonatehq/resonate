@@ -1,5 +1,4 @@
 import type { Network } from "./network/network";
-import * as util from "./util";
 
 export interface Heartbeat {
   start(): void;
@@ -35,11 +34,10 @@ export class AsyncHeartbeat implements Heartbeat {
           kind: "heartbeatTasks",
           processId: this.pid,
         },
-        (err, res) => {
-          if (err) return;
-          util.assertDefined(res);
+        (res) => {
+          if (res.kind === "error") return;
 
-          if (res.tasksAffected === 0) {
+          if (res.value.tasksAffected === 0) {
             this.clearIntervalIfMatch(counter);
           }
         },

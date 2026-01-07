@@ -1,6 +1,6 @@
 import { WallClock } from "../src/clock";
 import { type Context, InnerContext } from "../src/context";
-import { Coroutine, type Suspended } from "../src/coroutine";
+import { type Completed, Coroutine, type Suspended } from "../src/coroutine";
 import { JsonEncoder } from "../src/encoder";
 import { NoopEncryptor } from "../src/encryptor";
 import type { ResonateError } from "../src/exceptions";
@@ -11,13 +11,14 @@ import { OptionsBuilder } from "../src/options";
 import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
 import { NoopSpan } from "../src/tracer";
-import { ok, type Result } from "../src/types";
+import type { Result } from "../src/types";
+import { assert } from "../src/util";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
 
   start(): void {}
-  send<T extends Request>(request: T, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
+  send<T extends Request>(request: T, callback: (res: Result<ResponseFor<T>, ResonateError>) => void): void {
     switch (request.kind) {
       case "createPromise": {
         const p: DurablePromiseRecord = {
@@ -30,10 +31,13 @@ class DummyNetwork implements Network {
           iKeyForCreate: request.iKey,
         };
         this.promises.set(p.id, p);
-        callback(undefined, {
-          kind: "createPromise",
-          promise: p,
-        } as ResponseFor<T>);
+        callback({
+          kind: "value",
+          value: {
+            kind: "createPromise",
+            promise: p,
+          } as ResponseFor<T>,
+        });
         return;
       }
 
@@ -42,10 +46,13 @@ class DummyNetwork implements Network {
         p.state = "resolved";
         p.value = request.value!;
         this.promises.set(p.id, p);
-        callback(undefined, {
-          kind: "completePromise",
-          promise: p,
-        } as ResponseFor<T>);
+        callback({
+          kind: "value",
+          value: {
+            kind: "completePromise",
+            promise: p,
+          } as ResponseFor<T>,
+        });
         break;
       }
       default:
@@ -87,30 +94,32 @@ describe("Coroutine", () => {
         { id: `__invoke:${uuid}`, counter: 1, timeout: 0, rootPromiseId: uuid },
         handler,
         new Map(),
-        (err, res) => {
-          expect(err).toBe(false);
-          resolve(res);
+        (res) => {
+          expect(res.kind).toBe("value");
+          assert(res.kind === "value");
+          resolve(res.value);
         },
       );
     });
   };
 
-  const completePromise = (handler: Handler, id: string, result: Result<any>) => {
+  const completePromise = (handler: Handler, id: string, result: Result<any, any>) => {
     return new Promise<any>((resolve) => {
       handler.completePromise(
         {
           kind: "completePromise",
           id: id,
-          state: result.success ? "resolved" : "rejected",
+          state: result.kind === "value" ? "resolved" : "rejected",
           value: {
-            data: result.success ? result.value : result.error,
+            data: result.kind === "value" ? result.value : result.error,
           },
           iKey: id,
           strict: false,
         },
-        (err, res) => {
-          expect(err).toBeUndefined();
-          resolve(res);
+        (res) => {
+          expect(res.kind).toBe("value");
+          assert(res.kind === "value");
+          resolve(res.value);
         },
       );
     });
@@ -155,8 +164,8 @@ describe("Coroutine", () => {
     const suspended = r as Suspended;
     expect(suspended.todo.local).toHaveLength(2);
 
-    await completePromise(h, "foo.1.0", ok(42));
-    await completePromise(h, "foo.1.1", ok(31416));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
+    await completePromise(h, "foo.1.1", { kind: "value", value: 31416 });
 
     // Second execution - should complete
     r = await exec("foo.1", foo, [], h);
@@ -184,7 +193,7 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
@@ -207,14 +216,14 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 99 } } });
@@ -238,7 +247,7 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 99 } } });
@@ -263,14 +272,14 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
@@ -294,7 +303,7 @@ describe("Coroutine", () => {
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
 
     r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 84 } } });
@@ -310,7 +319,7 @@ describe("Coroutine", () => {
 
     const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
     // DIE with condition=true causes callback to be called with err=true
-    const result = await new Promise<any>((resolve) => {
+    const result = await new Promise<Result<Suspended | Completed, any>>((resolve) => {
       Coroutine.exec(
         "foo.1",
         false,
@@ -331,14 +340,13 @@ describe("Coroutine", () => {
         { id: "__invoke:foo.1", counter: 1, timeout: 0, rootPromiseId: "foo" },
         h,
         new Map(),
-        (err, res) => {
-          resolve({ err, res });
+        (res) => {
+          resolve(res);
         },
       );
     });
 
-    expect(result.err).toBe(true);
-    expect(result.res).toBeUndefined();
+    expect(result.kind).toBe("error");
   });
 
   test("DIE with condition false continues execution", async () => {

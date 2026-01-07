@@ -12,7 +12,7 @@ import type { Registry } from "./registry";
 import type { ClaimedTask, Task } from "./resonate-inner";
 import { Exponential, Never, type RetryPolicyConstructor } from "./retries";
 import type { Span, Tracer } from "./tracer";
-import type { Callback, Func } from "./types";
+import type { Func, Result } from "./types";
 import * as util from "./util";
 
 export type Status = Completed | Suspended;
@@ -94,15 +94,15 @@ export class Computation {
     this.spans = new Map();
   }
 
-  public process(task: Task, done: Callback<Status>) {
+  public process(task: Task, done: (res: Result<Status, undefined>) => void) {
     // If we are already processing there is nothing to do, the
     // caller will be notified via the promise handler
-    if (this.processing) return done(true);
+    if (this.processing) return done({ kind: "error", error: undefined });
     this.processing = true;
 
-    const doneProcessing = (err: boolean, res?: Status) => {
+    const doneProcessing = (res: Result<Status, undefined>) => {
       this.processing = false;
-      err ? done(err) : done(err, res!);
+      done(res);
     };
 
     switch (task.kind) {
@@ -119,14 +119,13 @@ export class Computation {
             processId: this.pid,
             ttl: this.ttl,
           },
-          (err, promise) => {
-            if (err) {
-              err.log(this.verbose);
-              return doneProcessing(true);
+          (res) => {
+            if (res.kind === "error") {
+              res.error.log(this.verbose);
+              return doneProcessing({ kind: "error", error: undefined });
             }
-            util.assertDefined(promise);
             this.processClaimed(
-              { kind: "claimed", task: task.task, rootPromise: promise.root, leafPromise: promise.leaf },
+              { kind: "claimed", task: task.task, rootPromise: res.value.root, leafPromise: res.value.leaf },
               doneProcessing,
             );
           },
@@ -135,23 +134,23 @@ export class Computation {
     }
   }
 
-  private processClaimed({ task, rootPromise }: ClaimedTask, done: Callback<Status>) {
+  private processClaimed({ task, rootPromise }: ClaimedTask, done: (res: Result<Status, undefined>) => void) {
     util.assert(task.rootPromiseId === this.id, "task root promise id must match computation id");
 
-    const doneAndDropTaskIfErr = (err?: boolean, res?: Status) => {
-      if (err) {
+    const doneAndDropTaskIfErr = (res: Result<Status, undefined>) => {
+      if (res.kind === "error") {
         return this.network.send({ kind: "dropTask", id: task.id, counter: task.counter }, () => {
           // ignore the drop task response, if the request failed the
           // task will eventually expire anyways
-          done(true);
+          done(res);
         });
       }
 
-      done(false, res!);
+      done(res);
     };
 
     if (!isValidData(rootPromise.param?.data)) {
-      return doneAndDropTaskIfErr(true);
+      return doneAndDropTaskIfErr({ kind: "error", error: undefined });
     }
 
     const { func, args, retry, version = 1 } = rootPromise.param.data;
@@ -160,7 +159,7 @@ export class Computation {
     // function must be registered
     if (!registered) {
       exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(func, version).log(this.verbose);
-      return doneAndDropTaskIfErr(true);
+      return doneAndDropTaskIfErr({ kind: "error", error: undefined });
     }
 
     if (version !== 0) util.assert(version === registered.version, "versions must match");
@@ -169,14 +168,18 @@ export class Computation {
     // start heartbeat
     this.heartbeat.start();
 
-    return new Nursery<boolean, Status>((nursery) => {
-      const done = (err: boolean, res?: Status) => {
-        if (err) {
-          return nursery.done(err);
+    return new Nursery<Status>((nursery) => {
+      const done = (res: Result<Status, undefined>) => {
+        if (res.kind === "error") {
+          return nursery.done(res);
         }
 
-        this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) => {
-          nursery.done(!!err, res);
+        this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (r) => {
+          if (r.kind === "error") {
+            nursery.done(r);
+          } else {
+            nursery.done(res);
+          }
         });
       };
 
@@ -207,33 +210,32 @@ export class Computation {
       if (util.isGeneratorFunction(registered.func)) {
         this.processGenerator(nursery, ctx, registered.func, args, task, done);
       } else {
-        this.processFunction(this.id, ctx, registered.func, args, (err, promise) => {
-          if (err) return done(true);
-          util.assertDefined(promise);
+        this.processFunction(this.id, ctx, registered.func, args, (res) => {
+          if (res.kind === "error") return done({ kind: "error", error: undefined });
 
-          done(false, { kind: "completed", promise });
+          done({ kind: "value", value: { kind: "completed", promise: res.value } });
         });
       }
     }, doneAndDropTaskIfErr);
   }
 
   private processGenerator(
-    nursery: Nursery<boolean, Status>,
+    nursery: Nursery<Status>,
     ctx: InnerContext,
     func: Func,
     args: any[],
     task: TaskRecord,
-    done: Callback<Status>,
+    done: (res: Result<Status, undefined>) => void,
   ) {
-    Coroutine.exec(this.id, this.verbose, ctx, func, args, task, this.handler, this.spans, (err, status) => {
-      if (err) {
-        return done(err);
+    Coroutine.exec(this.id, this.verbose, ctx, func, args, task, this.handler, this.spans, (res) => {
+      if (res.kind === "error") {
+        return done(res);
       }
-      util.assertDefined(status);
+      const status = res.value;
 
       switch (status.type) {
         case "completed":
-          done(false, { kind: "completed", promise: status.promise });
+          done({ kind: "value", value: { kind: "completed", promise: status.promise } });
           break;
 
         case "suspended":
@@ -255,7 +257,7 @@ export class Computation {
     ctx: InnerContext,
     func: Func,
     args: any[],
-    done: Callback<DurablePromiseRecord>,
+    done: (res: Result<DurablePromiseRecord, undefined>) => void,
   ) {
     this.processor.process(
       id,
@@ -266,20 +268,19 @@ export class Computation {
           {
             kind: "completePromise",
             id: id,
-            state: res.success ? "resolved" : "rejected",
+            state: res.kind === "value" ? "resolved" : "rejected",
             value: {
-              data: res.success ? res.value : res.error,
+              data: res.kind === "value" ? res.value : res.error,
             },
             iKey: id,
             strict: false,
           },
-          (err, res) => {
-            if (err) {
-              err.log(this.verbose);
-              return done(true);
+          (res) => {
+            if (res.kind === "error") {
+              res.error.log(this.verbose);
+              return done({ kind: "error", error: undefined });
             }
-            util.assertDefined(res);
-            done(false, res);
+            done(res);
           },
           func.name,
         ),
@@ -288,7 +289,11 @@ export class Computation {
     );
   }
 
-  private processLocalTodo(nursery: Nursery<boolean, Status>, todo: LocalTodo[], done: Callback<Status>) {
+  private processLocalTodo(
+    nursery: Nursery<Status>,
+    todo: LocalTodo[],
+    done: (res: Result<Status, undefined>) => void,
+  ) {
     for (const { id, ctx, span, func, args } of todo) {
       if (this.seen.has(id)) {
         continue;
@@ -297,13 +302,13 @@ export class Computation {
       this.seen.add(id);
 
       nursery.hold((next) => {
-        this.processFunction(id, ctx, func, args, (err) => {
+        this.processFunction(id, ctx, func, args, (res) => {
           span.end(this.clock.now());
           next();
 
-          if (err) {
+          if (res.kind === "error") {
             this.seen.delete(id);
-            done(err);
+            done(res);
           }
         });
       });
@@ -314,16 +319,15 @@ export class Computation {
   }
 
   private processRemoteTodo(
-    nursery: Nursery<boolean, Status>,
+    nursery: Nursery<Status>,
     todo: RemoteTodo[],
     spans: Span[],
     timeout: number,
-    done: Callback<Status>,
+    done: (res: Result<Status, undefined>) => void,
   ) {
     nursery.all<
       RemoteTodo,
-      { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord },
-      boolean
+      { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
     >(
       todo,
       ({ id }, done) =>
@@ -335,35 +339,33 @@ export class Computation {
             timeout: timeout,
             recv: this.anycast,
           },
-          (err, res) => {
-            if (err) {
-              err.log(this.verbose);
-              return done(true);
+          (res) => {
+            if (res.kind === "error") {
+              res.error.log(this.verbose);
+              return done({ kind: "error", error: undefined });
             }
-            util.assertDefined(res);
-            done(false, res);
+            done(res);
           },
           this.span.encode(),
         ),
-      (err, results) => {
-        if (err) {
+      (res) => {
+        if (res.kind === "error") {
           for (const span of spans) {
             span.end(this.clock.now());
           }
-          return done(err);
+          return done(res);
         }
-        util.assertDefined(results);
 
         const callbacks: CallbackRecord[] = [];
 
-        for (const res of results) {
-          switch (res.kind) {
+        for (const r of res.value) {
+          switch (r.kind) {
             case "promise":
               nursery.hold((next) => next());
               return nursery.cont();
 
             case "callback":
-              callbacks.push(res.callback);
+              callbacks.push(r.callback);
               break;
           }
         }
@@ -373,7 +375,7 @@ export class Computation {
         }
 
         // once all callbacks are created we can call done
-        return done(false, { kind: "suspended", callbacks });
+        return done({ kind: "value", value: { kind: "suspended", callbacks } });
       },
     );
   }

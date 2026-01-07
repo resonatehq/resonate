@@ -798,11 +798,11 @@ export class Resonate {
     return new Promise((resolve, reject) =>
       this.handler.createPromiseAndTask(
         req,
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
           } else {
-            resolve({ promise: res!.promise, task: res!.task });
+            resolve({ promise: res.value.promise, task: res.value.task });
           }
         },
         undefined,
@@ -819,11 +819,11 @@ export class Resonate {
     return new Promise((resolve, reject) =>
       this.handler.createPromise(
         req,
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
           } else {
-            resolve(res!);
+            resolve(res.value);
           }
         },
         undefined,
@@ -837,11 +837,11 @@ export class Resonate {
     return new Promise((resolve, reject) =>
       this.handler.createSubscription(
         req,
-        (err, res) => {
-          if (err) {
-            reject(err);
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
           } else {
-            resolve(res!);
+            resolve(res.value);
           }
         },
         true,
@@ -851,11 +851,11 @@ export class Resonate {
 
   private readPromise(req: ReadPromiseReq): Promise<DurablePromiseRecord<any>> {
     return new Promise((resolve, reject) =>
-      this.handler.readPromise(req, (err, res) => {
-        if (err) {
-          reject(err);
+      this.handler.readPromise(req, (res) => {
+        if (res.kind === "error") {
+          reject(res.error);
         } else {
-          resolve(res!);
+          resolve(res.value);
         }
       }),
     );

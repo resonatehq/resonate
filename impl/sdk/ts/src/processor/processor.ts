@@ -9,7 +9,7 @@ export interface Processor {
     id: string,
     ctx: InnerContext,
     func: F,
-    done: (result: Result<unknown>) => void,
+    done: (result: Result<unknown, any>) => void,
     verbose: boolean,
     span: Span,
   ): void;
@@ -20,7 +20,7 @@ export class AsyncProcessor implements Processor {
     id: string,
     ctx: InnerContext,
     func: () => Promise<T>,
-    done: (result: Result<T>) => void,
+    done: (res: Result<T, any>) => void,
     verbose: boolean,
     span: Span,
   ) {
@@ -32,20 +32,20 @@ export class AsyncProcessor implements Processor {
       try {
         const data = await func();
         childSpan.setStatus(true);
-        done({ success: true, value: data });
+        done({ kind: "value", value: data });
         return;
       } catch (error) {
         childSpan.setStatus(false, String(error));
 
         retryIn = ctx.retryPolicy.next(ctx.info.attempt);
         if (retryIn === null) {
-          done({ success: false, error });
+          done({ kind: "error", error: error });
           return;
         }
 
         // Use the same clock sourced from ctx for consistency
         if (ctx.clock.now() + retryIn >= ctx.info.timeout) {
-          done({ success: false, error });
+          done({ kind: "error", error: error });
           return;
         }
 

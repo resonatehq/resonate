@@ -10,7 +10,7 @@ export const HOUR = 60 * MIN;
 
 // assert
 
-export function assert(cond: boolean, msg?: string): void {
+export function assert(cond: boolean, msg?: string): asserts cond {
   if (cond) return; // Early return if assertion passes
 
   console.assert(cond, "Assertion Failed: %s", msg);

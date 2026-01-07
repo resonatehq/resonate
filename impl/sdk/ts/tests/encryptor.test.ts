@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
-
-import type { Value } from "types";
 import { type Encryptor, NoopEncryptor } from "../src/encryptor";
+import type { Value } from "../src/types";
 
 export class DummyEncryptor {
   private key: Buffer;
