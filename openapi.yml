@@ -90,16 +90,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -153,16 +143,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -275,16 +255,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -506,11 +476,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -538,8 +503,6 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
-                idempotencyKey:
-                  type: string
         required: true
       responses:
         200:
@@ -575,8 +538,6 @@ paths:
                     type: object
                     additionalProperties:
                       type: string
-                  idempotencyKey:
-                    type: string
         201:
           description: Created
           content:
@@ -967,12 +928,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        idempotencyKeyForCreate:
-          type: string
-          readOnly: true
-        idempotencyKeyForComplete:
-          type: string
-          readOnly: true
         createdOn:
           type: integer
           format: int64
@@ -1043,8 +998,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        idempotencyKey:
-          type: string
         lastRunTime:
           type: integer
           format: int64
