@@ -39,7 +39,7 @@ func TestGetTimedoutState(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := GetTimedoutState(&tc.promise)
+			result := GetTimedoutState(tc.promise.Tags)
 			if result != tc.expected {
 				t.Errorf("Expected %v, got %v", tc.expected, result)
 			}

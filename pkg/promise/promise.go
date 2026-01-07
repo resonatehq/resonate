@@ -34,13 +34,13 @@ func (p *Promise) String() string {
 	)
 }
 
-func GetTimedoutState(p *Promise) State {
-	completedState := Timedout
-	if p.Tags["resonate:timeout"] == "true" {
-		completedState = Resolved
+func GetTimedoutState(tags map[string]string) State {
+	state := Timedout
+	if tags["resonate:timeout"] == "true" {
+		state = Resolved
 	}
 
-	return completedState
+	return state
 }
 
 func (p1 *Promise) Equals(p2 *Promise) bool {

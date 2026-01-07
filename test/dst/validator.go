@@ -63,7 +63,7 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 		}
 		if p.State != readPromiseRes.Promise.State {
 			// the only way this can happen is if the promise timedout
-			if readPromiseRes.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if readPromiseRes.Promise.State == promise.GetTimedoutState(p.Tags) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(readPromiseReq.Id, readPromiseRes.Promise)
 				return model, nil
@@ -180,7 +180,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 		}
 		if p.State != res.Promise.State {
 			// the only way this can happen with this test setup is if the promise timedout
-			if res.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if res.Promise.State == promise.GetTimedoutState(p.Tags) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(req.Id, res.Promise)
 				return model, nil
@@ -230,7 +230,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 		}
 		if p.State != completePromiseRes.Promise.State {
 			// the only way this can happen is if the promise timedout
-			if completePromiseRes.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if completePromiseRes.Promise.State == promise.GetTimedoutState(p.Tags) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(completePromiseReq.Id, completePromiseRes.Promise)
 				return model, nil

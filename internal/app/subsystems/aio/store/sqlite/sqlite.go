@@ -74,9 +74,9 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this insert`
 
 	PROMISE_UPDATE_STATEMENT = `
@@ -868,7 +868,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

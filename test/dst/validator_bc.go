@@ -43,7 +43,7 @@ func ValidateNotify(model *Model, reqTime int64, resTime int64, req *Req) (*Mode
 		p := req.bc.Promise
 		if storedP.State == promise.Pending {
 			// the only way this can happen is if the promise timedout
-			if p.State == promise.GetTimedoutState(storedP) && resTime >= storedP.Timeout {
+			if p.State == promise.GetTimedoutState(storedP.Tags) && resTime >= storedP.Timeout {
 				model = model.Copy()
 				model.promises.set(p.Id, p)
 				return model, nil

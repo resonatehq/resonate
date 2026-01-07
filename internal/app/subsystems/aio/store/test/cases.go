@@ -75,6 +75,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -118,7 +119,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "bar",
+						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -162,7 +164,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte("baz"),
@@ -206,7 +209,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{
 								"a": "a",
@@ -254,7 +258,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{
 								"a": "a",
@@ -306,7 +311,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -315,7 +321,8 @@ var TestCases = []*testCase{
 						CreatedOn: 1,
 					},
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -347,6 +354,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -369,6 +377,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -449,6 +458,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -471,6 +481,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -551,6 +562,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -573,6 +585,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -653,6 +666,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -679,6 +693,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -762,7 +777,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -789,7 +805,8 @@ var TestCases = []*testCase{
 						CompletedOn: 2,
 					},
 					&t_aio.CreatePromiseCommand{
-						Id: "bar",
+						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -913,6 +930,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -923,6 +941,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -933,6 +952,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1000,6 +1020,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo.a",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1010,6 +1031,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo.b",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1020,6 +1042,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "a.bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1030,6 +1053,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "b.bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1205,6 +1229,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1215,6 +1240,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1234,6 +1260,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1253,6 +1280,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "qux",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1272,6 +1300,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "quy",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1539,6 +1568,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1552,6 +1582,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1564,6 +1595,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1698,6 +1730,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1740,6 +1773,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1782,6 +1816,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1840,6 +1875,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1856,6 +1892,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1872,6 +1909,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1888,6 +1926,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "qux",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1956,11 +1995,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2323,6 +2364,7 @@ var TestCases = []*testCase{
 					&t_aio.CreatePromiseAndTaskCommand{
 						PromiseCommand: &t_aio.CreatePromiseCommand{
 							Id:      "foo",
+							State:   promise.Pending,
 							Timeout: 1,
 							Param: promise.Value{
 								Headers: map[string]string{},
@@ -2401,6 +2443,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:        "foo",
+						State:     promise.Pending,
 						Timeout:   1,
 						Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:      map[string]string{},
@@ -2409,6 +2452,7 @@ var TestCases = []*testCase{
 					&t_aio.CreatePromiseAndTaskCommand{
 						PromiseCommand: &t_aio.CreatePromiseCommand{
 							Id:        "foo",
+							State:     promise.Pending,
 							Timeout:   1,
 							Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
 							Tags:      map[string]string{},
@@ -2543,6 +2587,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2636,11 +2681,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "pbar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2813,6 +2860,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2949,6 +2997,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3023,16 +3072,19 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3108,21 +3160,25 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root1",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "root2",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3234,11 +3290,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3315,11 +3373,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3405,11 +3465,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3494,6 +3556,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3593,6 +3656,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3873,7 +3937,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: nil,
 							Data:    []byte{},
@@ -3891,7 +3956,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    nil,
@@ -3909,7 +3975,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
