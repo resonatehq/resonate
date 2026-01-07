@@ -74,7 +74,7 @@ class SimulatedNetwork implements Network {
   private prng: Random;
   private deliveryOptions: Required<DeliveryOptions>;
   private buffer: Message<Request>[] = [];
-  private callbacks: Record<number, { callback: (err: any, res?: Response) => void; timeout: number }> = {};
+  private callbacks: Record<number, { callback: (res: Result<Response, any>) => void; timeout: number }> = {};
   private messageSource: SimulatedMessageSource;
 
   constructor(
@@ -124,7 +124,7 @@ class SimulatedNetwork implements Network {
       const cb = this.callbacks[key];
       const hasTimedOut = cb.timeout < this.currentTime;
       if (hasTimedOut) {
-        cb.callback(exceptions.SERVER_ERROR("Request timed out", true));
+        cb.callback({ kind: "error", error: exceptions.SERVER_ERROR("Request timed out", true) });
         delete this.callbacks[key];
       }
     }
@@ -135,15 +135,16 @@ class SimulatedNetwork implements Network {
       util.assert(message.source === this.target);
       util.assert(message.target === this.source);
       const correlationId = message.head?.correlationId;
-      const entry = correlationId && this.callbacks[correlationId];
+      const entry: { callback: (res: Result<Response, any>) => void; timeout: number } =
+        correlationId && this.callbacks[correlationId];
       if (entry) {
         const msg = message as Message<{ err?: any; res?: Response }>;
         if (msg.data.err) {
           util.assert(msg.data.res === undefined);
-          entry.callback(msg.data.err);
+          entry.callback({ kind: "error", error: msg.data.err });
         } else {
           util.assertDefined(msg.data.res);
-          entry.callback(undefined, this.maybeCorruptData(msg.data.res));
+          entry.callback({ kind: "value", value: this.maybeCorruptData(msg.data.res) });
         }
         delete this.callbacks[correlationId];
       }
