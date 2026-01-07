@@ -7,7 +7,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -115,13 +114,11 @@ func (s *server) searchPromises(c *gin.Context) {
 // Create
 
 type createPromiseHeader struct {
-	RequestId      string           `header:"request-id"`
-	Traceparent    string           `header:"traceparent"`
-	Tracestate     string           `header:"tracestate"`
-	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
-	Strict         bool             `header:"strict"`
-	TaskId         string           `header:"task-id"`
-	TaskCounter    int64            `header:"task-counter"`
+	RequestId   string `header:"request-id"`
+	Traceparent string `header:"traceparent"`
+	Tracestate  string `header:"tracestate"`
+	TaskId      string `header:"task-id"`
+	TaskCounter int64  `header:"task-counter"`
 }
 
 type createPromiseBody struct {
@@ -172,12 +169,10 @@ func (s *server) createPromise(c *gin.Context) {
 		Metadata: metadata,
 		Fence:    fence,
 		Payload: &t_api.CreatePromiseRequest{
-			Id:             body.Id,
-			IdempotencyKey: header.IdempotencyKey,
-			Strict:         header.Strict,
-			Param:          body.Param,
-			Timeout:        body.Timeout,
-			Tags:           body.Tags,
+			Id:      body.Id,
+			Param:   body.Param,
+			Timeout: body.Timeout,
+			Tags:    body.Tags,
 		},
 	})
 	if err != nil {
@@ -231,12 +226,10 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 		Metadata: metadata,
 		Payload: &t_api.CreatePromiseAndTaskRequest{
 			Promise: &t_api.CreatePromiseRequest{
-				Id:             body.Promise.Id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Param:          body.Promise.Param,
-				Timeout:        body.Promise.Timeout,
-				Tags:           body.Promise.Tags,
+				Id:      body.Promise.Id,
+				Param:   body.Promise.Param,
+				Timeout: body.Promise.Timeout,
+				Tags:    body.Promise.Tags,
 			},
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: body.Promise.Id,
@@ -261,11 +254,9 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 // Complete
 
 type completePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
-	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
-	Strict         bool             `header:"strict"`
-	TaskId         string           `header:"task-id"`
-	TaskCounter    int64            `header:"task-counter"`
+	RequestId   string `header:"request-id"`
+	TaskId      string `header:"task-id"`
+	TaskCounter int64  `header:"task-counter"`
 }
 
 type completePromiseBody struct {
@@ -311,11 +302,9 @@ func (s *server) completePromise(c *gin.Context) {
 		Metadata: metadata,
 		Fence:    fence,
 		Payload: &t_api.CompletePromiseRequest{
-			Id:             extractId(c.Param("id")),
-			IdempotencyKey: header.IdempotencyKey,
-			Strict:         header.Strict,
-			State:          body.State,
-			Value:          body.Value,
+			Id:    extractId(c.Param("id")),
+			State: body.State,
+			Value: body.Value,
 		},
 	})
 	if err != nil {

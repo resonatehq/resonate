@@ -48,11 +48,10 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			cmd := &t_aio.UpdatePromiseCommand{
-				Id:             req.Id,
-				State:          promise.GetTimedoutState(p),
-				Value:          promise.Value{},
-				IdempotencyKey: nil,
-				CompletedOn:    p.Timeout,
+				Id:          req.Id,
+				State:       promise.GetTimedoutState(p),
+				Value:       promise.Value{},
+				CompletedOn: p.Timeout,
 			}
 
 			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, nil, cmd))
@@ -71,16 +70,14 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 				Metadata: r.Metadata,
 				Payload: &t_api.ReadPromiseResponse{
 					Promise: &promise.Promise{
-						Id:                        p.Id,
-						State:                     cmd.State,
-						Param:                     p.Param,
-						Value:                     cmd.Value,
-						Timeout:                   p.Timeout,
-						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: cmd.IdempotencyKey,
-						Tags:                      p.Tags,
-						CreatedOn:                 p.CreatedOn,
-						CompletedOn:               &cmd.CompletedOn,
+						Id:          p.Id,
+						State:       cmd.State,
+						Param:       p.Param,
+						Value:       cmd.Value,
+						Timeout:     p.Timeout,
+						Tags:        p.Tags,
+						CreatedOn:   p.CreatedOn,
+						CompletedOn: &cmd.CompletedOn,
 					},
 				},
 			}

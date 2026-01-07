@@ -2,24 +2,20 @@ package promise
 
 import (
 	"encoding/json"
-
-	"github.com/resonatehq/resonate/pkg/idempotency"
 )
 
 type PromiseRecord struct {
-	Id                        string
-	State                     State
-	ParamHeaders              []byte
-	ParamData                 []byte
-	ValueHeaders              []byte
-	ValueData                 []byte
-	Timeout                   int64
-	IdempotencyKeyForCreate   *idempotency.Key
-	IdempotencyKeyForComplete *idempotency.Key
-	CreatedOn                 *int64
-	CompletedOn               *int64
-	Tags                      []byte
-	SortId                    int64
+	Id           string
+	State        State
+	ParamHeaders []byte
+	ParamData    []byte
+	ValueHeaders []byte
+	ValueData    []byte
+	Timeout      int64
+	CreatedOn    *int64
+	CompletedOn  *int64
+	Tags         []byte
+	SortId       int64
 }
 
 func (r *PromiseRecord) Promise() (*Promise, error) {
@@ -39,17 +35,15 @@ func (r *PromiseRecord) Promise() (*Promise, error) {
 	}
 
 	return &Promise{
-		Id:                        r.Id,
-		State:                     r.State,
-		Param:                     Value{Headers: paramHeaders, Data: r.ParamData},
-		Value:                     Value{Headers: valueHeaders, Data: r.ValueData},
-		Timeout:                   r.Timeout,
-		IdempotencyKeyForCreate:   r.IdempotencyKeyForCreate,
-		IdempotencyKeyForComplete: r.IdempotencyKeyForComplete,
-		CreatedOn:                 r.CreatedOn,
-		CompletedOn:               r.CompletedOn,
-		Tags:                      tags,
-		SortId:                    r.SortId,
+		Id:          r.Id,
+		State:       r.State,
+		Param:       Value{Headers: paramHeaders, Data: r.ParamData},
+		Value:       Value{Headers: valueHeaders, Data: r.ValueData},
+		Timeout:     r.Timeout,
+		CreatedOn:   r.CreatedOn,
+		CompletedOn: r.CompletedOn,
+		Tags:        tags,
+		SortId:      r.SortId,
 	}, nil
 }
 

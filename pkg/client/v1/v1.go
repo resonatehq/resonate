@@ -75,16 +75,14 @@ type MesgType string
 
 // Promise defines model for Promise.
 type Promise struct {
-	CompletedOn               *int64            `json:"completedOn,omitempty"`
-	CreatedOn                 *int64            `json:"createdOn,omitempty"`
-	Id                        string            `json:"id"`
-	IdempotencyKeyForComplete *string           `json:"idempotencyKeyForComplete,omitempty"`
-	IdempotencyKeyForCreate   *string           `json:"idempotencyKeyForCreate,omitempty"`
-	Param                     Value             `json:"param"`
-	State                     PromiseState      `json:"state"`
-	Tags                      map[string]string `json:"tags"`
-	Timeout                   int64             `json:"timeout"`
-	Value                     Value             `json:"value"`
+	CompletedOn *int64            `json:"completedOn,omitempty"`
+	CreatedOn   *int64            `json:"createdOn,omitempty"`
+	Id          string            `json:"id"`
+	Param       Value             `json:"param"`
+	State       PromiseState      `json:"state"`
+	Tags        map[string]string `json:"tags"`
+	Timeout     int64             `json:"timeout"`
+	Value       Value             `json:"value"`
 }
 
 // PromiseState defines model for Promise.State.
@@ -110,7 +108,6 @@ type Schedule struct {
 	Cron           string            `json:"cron"`
 	Description    string            `json:"description"`
 	Id             string            `json:"id"`
-	IdempotencyKey *string           `json:"idempotencyKey,omitempty"`
 	LastRunTime    *int64            `json:"lastRunTime,omitempty"`
 	NextRunTime    *int64            `json:"nextRunTime,omitempty"`
 	PromiseId      string            `json:"promiseId"`
@@ -175,12 +172,6 @@ type CreatePromiseJSONBody struct {
 type CreatePromiseParams struct {
 	// RequestId Unique tracking id
 	RequestId *string `json:"request-id,omitempty"`
-
-	// IdempotencyKey Deduplicates requests
-	IdempotencyKey *string `json:"idempotency-key,omitempty"`
-
-	// Strict If true, deduplicates only when promise state matches the request
-	Strict *bool `json:"strict,omitempty"`
 }
 
 // CreatePromiseCallbackJSONBody defines parameters for CreatePromiseCallback.
@@ -227,12 +218,6 @@ type CreatePromiseAndTaskJSONBody struct {
 type CreatePromiseAndTaskParams struct {
 	// RequestId Unique tracking id
 	RequestId *string `json:"request-id,omitempty"`
-
-	// IdempotencyKey Deduplicates requests
-	IdempotencyKey *string `json:"idempotency-key,omitempty"`
-
-	// Strict If true, deduplicates only when promise state matches the request
-	Strict *bool `json:"strict,omitempty"`
 }
 
 // ReadPromiseParams defines parameters for ReadPromise.
@@ -251,12 +236,6 @@ type CompletePromiseJSONBody struct {
 type CompletePromiseParams struct {
 	// RequestId Unique tracking id
 	RequestId *string `json:"request-id,omitempty"`
-
-	// IdempotencyKey Deduplicates requests
-	IdempotencyKey *string `json:"idempotency-key,omitempty"`
-
-	// Strict If true, deduplicates only when promise state matches the request
-	Strict *bool `json:"strict,omitempty"`
 }
 
 // CompletePromiseJSONBodyState defines parameters for CompletePromise.
@@ -288,7 +267,6 @@ type CreateScheduleJSONBody struct {
 	Cron           *string            `json:"cron,omitempty"`
 	Description    *string            `json:"description,omitempty"`
 	Id             *string            `json:"id,omitempty"`
-	IdempotencyKey *string            `json:"idempotencyKey,omitempty"`
 	PromiseId      *string            `json:"promiseId,omitempty"`
 	PromiseParam   *Value             `json:"promiseParam,omitempty"`
 	PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
@@ -300,9 +278,6 @@ type CreateScheduleJSONBody struct {
 type CreateScheduleParams struct {
 	// RequestId Unique tracking id
 	RequestId *string `json:"request-id,omitempty"`
-
-	// IdempotencyKey Deduplicates requests
-	IdempotencyKey *string `json:"idempotency-key,omitempty"`
 }
 
 // DeleteScheduleParams defines parameters for DeleteSchedule.
@@ -1160,28 +1135,6 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 			req.Header.Set("request-id", headerParam0)
 		}
 
-		if params.IdempotencyKey != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("idempotency-key", headerParam1)
-		}
-
-		if params.Strict != nil {
-			var headerParam2 string
-
-			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("strict", headerParam2)
-		}
-
 	}
 
 	return req, nil
@@ -1361,28 +1314,6 @@ func NewCreatePromiseAndTaskRequestWithBody(server string, params *CreatePromise
 			req.Header.Set("request-id", headerParam0)
 		}
 
-		if params.IdempotencyKey != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("idempotency-key", headerParam1)
-		}
-
-		if params.Strict != nil {
-			var headerParam2 string
-
-			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("strict", headerParam2)
-		}
-
 	}
 
 	return req, nil
@@ -1492,28 +1423,6 @@ func NewCompletePromiseRequestWithBody(server string, id string, params *Complet
 			}
 
 			req.Header.Set("request-id", headerParam0)
-		}
-
-		if params.IdempotencyKey != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("idempotency-key", headerParam1)
-		}
-
-		if params.Strict != nil {
-			var headerParam2 string
-
-			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("strict", headerParam2)
 		}
 
 	}
@@ -1681,17 +1590,6 @@ func NewCreateScheduleRequestWithBody(server string, params *CreateScheduleParam
 			}
 
 			req.Header.Set("request-id", headerParam0)
-		}
-
-		if params.IdempotencyKey != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("idempotency-key", headerParam1)
 		}
 
 	}
@@ -2540,7 +2438,6 @@ type CreateScheduleResponse struct {
 		Cron           string             `json:"cron"`
 		Description    *string            `json:"description,omitempty"`
 		Id             string             `json:"id"`
-		IdempotencyKey *string            `json:"idempotencyKey,omitempty"`
 		PromiseId      string             `json:"promiseId"`
 		PromiseParam   *Value             `json:"promiseParam,omitempty"`
 		PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
@@ -3314,7 +3211,6 @@ func ParseCreateScheduleResponse(rsp *http.Response) (*CreateScheduleResponse, e
 			Cron           string             `json:"cron"`
 			Description    *string            `json:"description,omitempty"`
 			Id             string             `json:"id"`
-			IdempotencyKey *string            `json:"idempotencyKey,omitempty"`
 			PromiseId      string             `json:"promiseId"`
 			PromiseParam   *Value             `json:"promiseParam,omitempty"`
 			PromiseTags    *map[string]string `json:"promiseTags,omitempty"`

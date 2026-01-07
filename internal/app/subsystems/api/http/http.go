@@ -114,7 +114,7 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 		handler.Use(cors.New(cors.Config{
 			AllowOrigins:  config.Cors.AllowOrigins,
 			AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 			ExposeHeaders: []string{"Resonate-Version"},
 		}))
 	}

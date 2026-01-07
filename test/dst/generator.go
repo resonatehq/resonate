@@ -10,7 +10,6 @@ import (
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -20,7 +19,6 @@ type Generator struct {
 	timeElapsedPerTick int64
 	timeoutTicks       int64 // max ticks in the future to set promise timeout
 	idSet              []string
-	idemotencyKeySet   []*idempotency.Key
 	headersSet         []map[string]string
 	dataSet            [][]byte
 	tagsSet            []map[string]string
@@ -38,13 +36,6 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		// pad ids with leading zeros to ensure ids are the same length
 		// this helps with lexigraphical sorting across different databases
 		idSet[i] = fmt.Sprintf(fmt.Sprintf("%%0%dd", width), i)
-	}
-
-	idempotencyKeySet := []*idempotency.Key{}
-	for i := 0; i < config.IdempotencyKeys; i++ {
-		s := strconv.Itoa(i)
-		idempotencyKey := idempotency.Key(s)
-		idempotencyKeySet = append(idempotencyKeySet, &idempotencyKey, nil) // half of all idempotencyKeys are nil
 	}
 
 	headersSet := []map[string]string{}
@@ -85,7 +76,6 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		timeElapsedPerTick: config.TimeElapsedPerTick,
 		timeoutTicks:       config.TimeoutTicks,
 		idSet:              idSet,
-		idemotencyKeySet:   idempotencyKeySet,
 		headersSet:         headersSet,
 		dataSet:            dataSet,
 		tagsSet:            tagsSet,
@@ -169,8 +159,6 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
-	idempotencyKey := g.idempotencyKey(r)
-	strict := r.Intn(2) == 0
 	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	timeout := cmdUtil.RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
@@ -179,12 +167,10 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	return &t_api.Request{
 		Metadata: map[string]string{"partitionId": id},
 		Payload: &t_api.CreatePromiseRequest{
-			Id:             id,
-			IdempotencyKey: idempotencyKey,
-			Strict:         strict,
-			Param:          promise.Value{Headers: headers, Data: data},
-			Timeout:        timeout,
-			Tags:           tags,
+			Id:      id,
+			Param:   promise.Value{Headers: headers, Data: data},
+			Timeout: timeout,
+			Tags:    tags,
 		},
 	}
 }
@@ -214,8 +200,6 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 
 func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
-	idempotencyKey := g.idempotencyKey(r)
-	strict := r.Intn(2) == 0
 	state := promise.State(math.Exp2(float64(r.Intn(3) + 1)))
 	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
@@ -223,11 +207,9 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	return &t_api.Request{
 		Metadata: map[string]string{"partitionId": id},
 		Payload: &t_api.CompletePromiseRequest{
-			Id:             id,
-			IdempotencyKey: idempotencyKey,
-			Strict:         strict,
-			State:          state,
-			Value:          promise.Value{Headers: headers, Data: data},
+			Id:    id,
+			State: state,
+			Value: promise.Value{Headers: headers, Data: data},
 		},
 	}
 }
@@ -301,7 +283,6 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	id := g.scheduleId(r)
 	cron := fmt.Sprintf("%d * * * *", r.Intn(60))
 	tags := g.tags(r)
-	idempotencyKey := g.idempotencyKey(r)
 
 	promiseTimeout := cmdUtil.RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	promiseHeaders := g.headers(r)
@@ -319,7 +300,6 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 			PromiseTimeout: promiseTimeout,
 			PromiseParam:   promise.Value{Headers: promiseHeaders, Data: promiseData},
 			PromiseTags:    promiseTags,
-			IdempotencyKey: idempotencyKey,
 		},
 	}
 }
@@ -464,9 +444,4 @@ func (g *Generator) tags(r *rand.Rand) map[string]string {
 func (g *Generator) headers(r *rand.Rand) map[string]string {
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	return maps.Clone(headers)
-}
-
-func (g *Generator) idempotencyKey(r *rand.Rand) *idempotency.Key {
-	iKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	return iKey.Clone()
 }

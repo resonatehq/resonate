@@ -3,7 +3,6 @@ package t_aio
 import (
 	"fmt"
 
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -58,12 +57,11 @@ func (c *SearchPromisesCommand) String() string {
 }
 
 type CreatePromiseCommand struct {
-	Id             string
-	Param          promise.Value
-	Timeout        int64
-	IdempotencyKey *idempotency.Key
-	Tags           map[string]string
-	CreatedOn      int64
+	Id        string
+	Param     promise.Value
+	Timeout   int64
+	Tags      map[string]string
+	CreatedOn int64
 }
 
 func (c *CreatePromiseCommand) String() string {
@@ -71,11 +69,10 @@ func (c *CreatePromiseCommand) String() string {
 }
 
 type UpdatePromiseCommand struct {
-	Id             string
-	State          promise.State
-	Value          promise.Value
-	IdempotencyKey *idempotency.Key
-	CompletedOn    int64
+	Id          string
+	State       promise.State
+	Value       promise.Value
+	CompletedOn int64
 }
 
 func (c *UpdatePromiseCommand) String() string {
@@ -141,7 +138,6 @@ type CreateScheduleCommand struct {
 	PromiseParam   promise.Value
 	PromiseTags    map[string]string
 	NextRunTime    int64
-	IdempotencyKey *idempotency.Key
 	CreatedOn      int64
 }
 

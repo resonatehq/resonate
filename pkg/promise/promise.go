@@ -6,33 +6,28 @@ import (
 	"strings"
 
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 )
 
 type Promise struct {
-	Id                        string            `json:"id"`
-	State                     State             `json:"state"`
-	Param                     Value             `json:"param,omitempty"`
-	Value                     Value             `json:"value,omitempty"`
-	Timeout                   int64             `json:"timeout"`
-	IdempotencyKeyForCreate   *idempotency.Key  `json:"idempotencyKeyForCreate,omitempty"`
-	IdempotencyKeyForComplete *idempotency.Key  `json:"idempotencyKeyForComplete,omitempty"`
-	Tags                      map[string]string `json:"tags,omitempty"`
-	CreatedOn                 *int64            `json:"createdOn,omitempty"`
-	CompletedOn               *int64            `json:"completedOn,omitempty"`
-	SortId                    int64             `json:"-"` // unexported
+	Id          string            `json:"id"`
+	State       State             `json:"state"`
+	Param       Value             `json:"param,omitempty"`
+	Value       Value             `json:"value,omitempty"`
+	Timeout     int64             `json:"timeout"`
+	Tags        map[string]string `json:"tags,omitempty"`
+	CreatedOn   *int64            `json:"createdOn,omitempty"`
+	CompletedOn *int64            `json:"completedOn,omitempty"`
+	SortId      int64             `json:"-"` // unexported
 }
 
 func (p *Promise) String() string {
 	return fmt.Sprintf(
-		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s, tags=%s, createdOn=%d, completedOn=%d)",
+		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, tags=%s, createdOn=%d, completedOn=%d)",
 		p.Id,
 		p.State,
 		p.Param,
 		p.Value,
 		p.Timeout,
-		p.IdempotencyKeyForCreate,
-		p.IdempotencyKeyForComplete,
 		p.Tags,
 		util.SafeDeref(p.CreatedOn),
 		util.SafeDeref(p.CompletedOn),
@@ -52,9 +47,7 @@ func (p1 *Promise) Equals(p2 *Promise) bool {
 	// for dst only
 	return p1.Id == p2.Id &&
 		p1.State == p2.State &&
-		p1.Timeout == p2.Timeout &&
-		p1.IdempotencyKeyForCreate.Equals(p2.IdempotencyKeyForCreate) &&
-		p1.IdempotencyKeyForComplete.Equals(p2.IdempotencyKeyForComplete)
+		p1.Timeout == p2.Timeout
 }
 
 type State int
