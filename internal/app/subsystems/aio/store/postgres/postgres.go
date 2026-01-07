@@ -82,19 +82,19 @@ const (
 		$5`
 
 	PROMISE_INSERT_STATEMENT = `
-	INSERT INTO promises
-		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
-	VALUES
-		($1, $2, $3, $4, $5, $1, $6, $7)
-	ON CONFLICT(id) DO NOTHING`
+		INSERT INTO promises
+			(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		VALUES
+			($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	PROMISE_UPDATE_STATEMENT = `
-	UPDATE
-		promises
-	SET
-		state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $1, completed_on = $4
-	WHERE
-		id = $5 AND state = 1`
+		UPDATE
+			promises
+		SET
+			state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $4, completed_on = $5
+		WHERE
+			id = $6 AND state = 1 -- idempotency_key must be equal to id for this stmt`
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
@@ -933,7 +933,7 @@ func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -974,7 +974,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.Id, cmd.CompletedOn)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.Id, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}
