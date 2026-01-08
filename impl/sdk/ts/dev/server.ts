@@ -20,8 +20,6 @@ interface DurablePromise {
   param: any;
   value: any;
   tags: Record<string, string>;
-  iKeyForCreate?: string;
-  iKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
   callbacks?: Map<string, Callback>;
@@ -64,7 +62,6 @@ interface Schedule {
   promiseTags: Record<string, string>;
   lastRunTime?: number;
   nextRunTime?: number;
-  iKey?: string;
   createdOn?: number;
 }
 
@@ -139,7 +136,6 @@ export class Server {
           timeout: time + schedule.promiseTimeout,
           param: schedule.promiseParam,
           tags: schedule.promiseTags,
-          strict: false,
           time,
         });
       } catch {}
@@ -254,8 +250,6 @@ export class Server {
           ttl: requ.task.ttl,
           param: requ.promise.param,
           tags: requ.promise.tags,
-          iKey: requ.iKey,
-          strict: requ.strict,
           time,
         });
         return {
@@ -306,7 +300,6 @@ export class Server {
             cron: requ.cron!,
             promiseId: requ.promiseId!,
             promiseTimeout: requ.promiseTimeout!,
-            iKey: requ.iKey,
             description: requ.description,
             tags: requ.tags,
             promiseParam: requ.promiseParam,
@@ -369,16 +362,12 @@ export class Server {
     timeout,
     param,
     tags,
-    iKey,
-    strict,
     time,
   }: {
     id: string;
     timeout: number;
     param?: any;
     tags?: Record<string, string>;
-    iKey?: string;
-    strict?: boolean;
     time: number;
   }): DurablePromiseRecord {
     return this._createPromise({
@@ -386,8 +375,6 @@ export class Server {
       timeout,
       param,
       tags,
-      iKey,
-      strict,
       time,
     }).promise;
   }
@@ -399,8 +386,6 @@ export class Server {
     ttl,
     param,
     tags,
-    iKey,
-    strict,
     time,
   }: {
     id: string;
@@ -409,8 +394,6 @@ export class Server {
     ttl: number;
     param?: any;
     tags?: Record<string, string>;
-    iKey?: string;
-    strict?: boolean;
     time: number;
   }): { promise: DurablePromiseRecord; task?: TaskRecord } {
     const { promise, task } = this._createPromise({
@@ -420,8 +403,6 @@ export class Server {
       ttl,
       param,
       tags,
-      iKey,
-      strict,
       time,
     });
     if (task === undefined) {
@@ -435,8 +416,6 @@ export class Server {
     timeout,
     param,
     tags,
-    iKey,
-    strict,
     processId,
     ttl,
     time,
@@ -445,8 +424,6 @@ export class Server {
     timeout: number;
     param?: any;
     tags?: Record<string, string>;
-    iKey?: string;
-    strict?: boolean;
     processId?: string;
     ttl?: number;
     time: number;
@@ -454,9 +431,7 @@ export class Server {
     const { promise, task, applied } = this.transitionPromise({
       id,
       to: "pending",
-      strict,
       timeout,
-      iKey,
       value: param,
       tags,
       time,
@@ -491,22 +466,16 @@ export class Server {
     id,
     state,
     value,
-    iKey,
-    strict,
     time,
   }: {
     id: string;
     state: "resolved" | "rejected" | "rejected_canceled";
     value?: any;
-    iKey?: string;
-    strict?: boolean;
     time: number;
   }): DurablePromiseRecord {
     const { promise, applied } = this.transitionPromise({
       id,
       to: state,
-      strict,
-      iKey,
       value,
       time,
     });
@@ -714,7 +683,6 @@ export class Server {
     cron,
     promiseId,
     promiseTimeout,
-    iKey,
     description,
     tags,
     promiseParam,
@@ -725,7 +693,6 @@ export class Server {
     cron: string;
     promiseId: string;
     promiseTimeout: number;
-    iKey?: string;
     description?: string;
     tags?: Record<string, string>;
     promiseParam?: any;
@@ -738,7 +705,6 @@ export class Server {
       cron,
       promiseId,
       promiseTimeout,
-      iKey,
       description,
       tags,
       promiseParam,
@@ -774,9 +740,7 @@ export class Server {
   private transitionPromise({
     id,
     to,
-    strict,
     timeout,
-    iKey,
     value,
     tags,
     time,
@@ -793,9 +757,7 @@ export class Server {
     const { promise, applied } = this._transitionPromise({
       id,
       to,
-      strict,
       timeout,
-      iKey,
       value,
       tags,
       time,
@@ -858,18 +820,14 @@ export class Server {
   private _transitionPromise({
     id,
     to,
-    strict,
     timeout,
-    iKey,
     value,
     tags,
     time,
   }: {
     id: string;
     to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
-    strict?: boolean;
     timeout?: number;
-    iKey?: string;
     value?: any;
     tags?: Record<string, string>;
     time: number;
@@ -883,7 +841,6 @@ export class Server {
         id,
         state: to,
         timeout,
-        iKeyForCreate: iKey,
         param: value,
         value: undefined,
         tags: tags ?? {},
@@ -900,23 +857,12 @@ export class Server {
     }
 
     // No-op re-create pending if before timeout and same iKey
-    if (
-      record?.state === "pending" &&
-      to === "pending" &&
-      time < record.timeout &&
-      ikeyMatch(record.iKeyForCreate, iKey)
-    ) {
+    if (record?.state === "pending" && to === "pending" && time < record.timeout) {
       return { promise: record, applied: false };
     }
 
     // Auto-timeout transition
-    if (
-      record?.state === "pending" &&
-      to === "pending" &&
-      !strict &&
-      time >= record.timeout &&
-      ikeyMatch(record.iKeyForCreate, iKey)
-    ) {
+    if (record?.state === "pending" && to === "pending" && time >= record.timeout) {
       return this._transitionPromise({ id, to: "rejected_timedout", time });
     }
 
@@ -929,7 +875,6 @@ export class Server {
       record = {
         ...record,
         state: to,
-        iKeyForComplete: iKey,
         value: value,
         completedOn: time,
       };
@@ -942,20 +887,9 @@ export class Server {
     if (
       record?.state === "pending" &&
       ["resolved", "rejected", "rejected_canceled"].includes(to) &&
-      !strict &&
       time >= record.timeout
     ) {
       return this._transitionPromise({ id, to: "rejected_timedout", time });
-    }
-
-    // Strict completion after timeout -> error
-    if (
-      record?.state === "pending" &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to) &&
-      strict &&
-      time >= record.timeout
-    ) {
-      throw exceptions.SERVER_ERROR("Promise already timedout");
     }
 
     // Transition to timed-out
@@ -978,9 +912,7 @@ export class Server {
     if (
       record?.state !== undefined &&
       ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(record.state) &&
-      to === "pending" &&
-      !strict &&
-      ikeyMatch(record.iKeyForCreate, iKey)
+      to === "pending"
     ) {
       return { promise: record, applied: false };
     }
@@ -988,29 +920,12 @@ export class Server {
     if (
       record !== undefined &&
       ["resolved", "rejected", "rejected_canceled"].includes(record.state) &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to) &&
-      !strict &&
-      ikeyMatch(record.iKeyForComplete, iKey)
+      ["resolved", "rejected", "rejected_canceled"].includes(to)
     ) {
       return { promise: record, applied: false };
     }
 
-    if (
-      record?.state === "rejected_timedout" &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to) &&
-      !strict
-    ) {
-      return { promise: record, applied: false };
-    }
-
-    if (
-      record !== undefined &&
-      ["resolved", "rejected", "rejected_canceled"].includes(record.state) &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to) &&
-      strict &&
-      ikeyMatch(record.iKeyForComplete, iKey) &&
-      record.state === to
-    ) {
+    if (record?.state === "rejected_timedout" && ["resolved", "rejected", "rejected_canceled"].includes(to)) {
       return { promise: record, applied: false };
     }
 
@@ -1222,7 +1137,6 @@ export class Server {
     cron,
     promiseId,
     promiseTimeout,
-    iKey,
     description,
     tags,
     promiseParam,
@@ -1235,7 +1149,6 @@ export class Server {
     cron?: string;
     promiseId?: string;
     promiseTimeout?: number;
-    iKey?: string;
     description?: string;
     tags?: Record<string, string>;
     promiseParam?: any;
@@ -1262,18 +1175,12 @@ export class Server {
         promiseParam,
         promiseTags: promiseTags ?? {},
         nextRunTime: CronExpressionParser.parse(cron, { currentDate: time }).next().getTime(),
-        iKey,
         createdOn: time,
         lastRunTime: 0,
       };
       this.schedules.set(id, record);
 
       return { schedule: record, applied: true };
-    }
-
-    // No-op if same iKey
-    if (record !== undefined && to === "created" && ikeyMatch(iKey, record.iKey)) {
-      return { schedule: record, applied: false };
     }
 
     // Update existing schedule
@@ -1290,7 +1197,7 @@ export class Server {
 
     // Schedule exists and not updating
     if (record !== undefined && to === "created") {
-      throw exceptions.SERVER_ERROR("Schedule already exists");
+      return { schedule: record, applied: false };
     }
 
     // Delete non-existent
@@ -1307,8 +1214,4 @@ export class Server {
     // Fallback error
     throw exceptions.SERVER_ERROR("Unexpected schedule transition");
   }
-}
-
-function ikeyMatch(left: string | undefined, right: string | undefined): boolean {
-  return left !== undefined && right !== undefined && left === right;
 }

@@ -89,7 +89,6 @@ sim.delay(0, () => {
       kind: "createPromise",
       id,
       timeout: 10000000000,
-      iKey: id,
       tags: { "resonate:invoke": "local://any@default" },
       param: encoder.encode({ func: "fibonacci", args: [n], version: 1 }),
     },

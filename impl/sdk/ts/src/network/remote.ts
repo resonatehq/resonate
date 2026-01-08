@@ -53,8 +53,6 @@ interface PromiseDto {
   param?: Value<string>;
   value?: Value<string>;
   tags?: Record<string, string>;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
 }
@@ -244,9 +242,6 @@ export class HttpNetwork implements Network {
     headers: Record<string, string>,
     retryPolicy: RetryPolicy = {},
   ): Promise<CreatePromiseRes> {
-    if (req.iKey) headers["idempotency-key"] = req.iKey;
-    if (req.strict !== undefined) headers.strict = req.strict.toString();
-
     const res = await this.fetch(
       "/promises",
       {
@@ -271,9 +266,6 @@ export class HttpNetwork implements Network {
     headers: Record<string, string>,
     retryPolicy: RetryPolicy = {},
   ): Promise<CreatePromiseAndTaskRes> {
-    if (req.iKey) headers["idempotency-key"] = req.iKey;
-    if (req.strict !== undefined) headers.strict = req.strict.toString();
-
     const res = await this.fetch(
       "/promises/task",
       {
@@ -312,9 +304,6 @@ export class HttpNetwork implements Network {
 
   private async completePromise(req: CompletePromiseReq, retryPolicy: RetryPolicy = {}): Promise<CompletePromiseRes> {
     const headers: Record<string, string> = {};
-    if (req.iKey) headers["idempotency-key"] = req.iKey;
-    if (req.strict !== undefined) headers.strict = req.strict.toString();
-
     const res = await this.fetch(
       `/promises/${encodeURIComponent(req.id)}`,
       {
@@ -388,7 +377,6 @@ export class HttpNetwork implements Network {
 
   private async createSchedule(req: CreateScheduleReq, retryPolicy: RetryPolicy = {}): Promise<CreateScheduleRes> {
     const headers: Record<string, string> = {};
-    if (req.iKey) headers["idempotency-key"] = req.iKey;
 
     const res = await this.fetch(
       "/schedules",
@@ -615,7 +603,6 @@ export class HttpNetwork implements Network {
       promiseTimeout: schedule.promiseTimeout,
       promiseParam: schedule.promiseParam,
       promiseTags: schedule.promiseTags || {},
-      iKey: schedule.idempotencyKey,
       lastRunTime: schedule.lastRunTime,
       nextRunTime: schedule.nextRunTime,
       createdOn: schedule.createdOn,
@@ -782,8 +769,6 @@ function mapPromiseDtoToRecord(promise: PromiseDto): DurablePromiseRecord {
     param: promise.param,
     value: promise.value,
     tags: promise.tags || {},
-    iKeyForCreate: promise.idempotencyKeyForCreate,
-    iKeyForComplete: promise.idempotencyKeyForComplete,
     createdOn: promise.createdOn,
     completedOn: promise.completedOn,
   };

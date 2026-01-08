@@ -27,16 +27,9 @@ describe("schedule transitions", () => {
     expect(await schedules.get(schedule.id)).toEqual(schedule);
   });
 
-  test("test case 2: create twice without ikey", async () => {
-    await schedules.create(id, "* * * * *", "foo", 10);
-    await expect(schedules.create(id, "* * * * *", "foo", 10)).rejects.toThrow();
-  });
-
-  test("test case 3: create twich with ikey", async () => {
-    const schedule = await schedules.create(id, "* * * * *", "foo", 10, {
-      ikey: "foo",
-    });
-    await schedules.create(id, "* 2 * * *", "bar", 10, { ikey: "foo" });
+  test("test case 3: create twice", async () => {
+    const schedule = await schedules.create(id, "* * * * *", "foo", 10);
+    await schedules.create(id, "* 2 * * *", "bar", 10);
     expect(await schedules.get(schedule.id)).toEqual(schedule);
   });
 });

@@ -28,7 +28,6 @@ class DummyNetwork implements Network {
           param: request.param,
           value: undefined,
           tags: request.tags || {},
-          iKeyForCreate: request.iKey,
         };
         this.promises.set(p.id, p);
         callback({
@@ -113,8 +112,6 @@ describe("Coroutine", () => {
           value: {
             data: result.kind === "value" ? result.value : result.error,
           },
-          iKey: id,
-          strict: false,
         },
         (res) => {
           expect(res.kind).toBe("value");

@@ -594,8 +594,6 @@ export class InnerContext implements Context {
       timeout: timeout,
       param: { data },
       tags,
-      iKey: id,
-      strict: false,
     };
   }
 
@@ -617,8 +615,6 @@ export class InnerContext implements Context {
       timeout,
       tags,
       param: { data },
-      iKey: id,
-      strict: false,
     };
   }
 
@@ -639,8 +635,6 @@ export class InnerContext implements Context {
       timeout: cTimeout,
       param: { data },
       tags: cTags,
-      iKey: id,
-      strict: false,
     };
   }
 
@@ -661,8 +655,6 @@ export class InnerContext implements Context {
       timeout: timeout,
       param: {},
       tags,
-      iKey: id,
-      strict: false,
     };
   }
 

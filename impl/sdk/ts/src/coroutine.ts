@@ -100,8 +100,6 @@ export class Coroutine<T> {
         kind: "createPromise",
         id,
         timeout: 0,
-        iKey: id,
-        strict: false,
       },
       (res) => {
         if (res.kind === "error") return callback({ kind: "error", error: undefined });
@@ -128,8 +126,6 @@ export class Coroutine<T> {
                   value: {
                     data: status.result.kind === "value" ? status.result.value : status.result.error,
                   },
-                  iKey: id,
-                  strict: false,
                 },
                 (res) => {
                   if (res.kind === "error") {
@@ -257,8 +253,6 @@ export class Coroutine<T> {
                         value: {
                           data: status.result.kind === "value" ? status.result.value : status.result.error,
                         },
-                        iKey: action.id,
-                        strict: false,
                       },
                       (res) => {
                         span.end(this.ctx.clock.now());

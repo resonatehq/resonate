@@ -9,8 +9,6 @@ export interface DurablePromiseRecord<T = string> {
   param?: Value<T>;
   value?: Value<T>;
   tags: Record<string, string>;
-  iKeyForCreate?: string;
-  iKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
 }
@@ -24,7 +22,6 @@ export interface ScheduleRecord {
   promiseTimeout: number;
   promiseParam?: Value<string>;
   promiseTags: Record<string, string>;
-  iKey?: string;
   lastRunTime?: number;
   nextRunTime?: number;
   createdOn?: number;
@@ -72,8 +69,6 @@ export type CreatePromiseReq<T = string> = {
   timeout: number;
   param?: Value<T>;
   tags?: Record<string, string>;
-  iKey?: string;
-  strict?: boolean;
 };
 
 export type CreatePromiseAndTaskReq<T = string> = {
@@ -88,8 +83,6 @@ export type CreatePromiseAndTaskReq<T = string> = {
     processId: string;
     ttl: number;
   };
-  iKey?: string;
-  strict?: boolean;
 };
 
 export type ReadPromiseReq = {
@@ -102,8 +95,6 @@ export type CompletePromiseReq<T = string> = {
   id: string;
   state: "resolved" | "rejected" | "rejected_canceled";
   value?: Value<T>;
-  iKey?: string;
-  strict?: boolean;
 };
 
 export type CreateCallbackReq = {
@@ -132,7 +123,6 @@ export type CreateScheduleReq = {
   promiseTimeout?: number;
   promiseParam?: Value<string>;
   promiseTags?: Record<string, string>;
-  iKey?: string;
 };
 
 export type ReadScheduleReq = {

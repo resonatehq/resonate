@@ -24,14 +24,10 @@ export class Promises {
     id: string,
     timeout: number,
     {
-      ikey = undefined,
-      strict = false,
       headers = undefined,
       data = undefined,
       tags = undefined,
     }: {
-      ikey?: string;
-      strict?: boolean;
       headers?: Record<string, string>;
       data?: string;
       tags?: Record<string, string>;
@@ -45,8 +41,6 @@ export class Promises {
           timeout: timeout,
           param: { headers, data },
           tags: tags,
-          iKey: ikey,
-          strict: strict,
         },
         (res) => {
           if (res.kind === "error") {
@@ -66,14 +60,10 @@ export class Promises {
     pid: string,
     ttl: number,
     {
-      ikey = undefined,
-      strict = false,
       headers = undefined,
       data = undefined,
       tags = undefined,
     }: {
-      ikey?: string;
-      strict?: boolean;
       headers?: Record<string, string>;
       data?: string;
       tags?: Record<string, string>;
@@ -93,8 +83,6 @@ export class Promises {
             processId: pid,
             ttl: ttl,
           },
-          iKey: ikey,
-          strict: strict,
         },
         (res) => {
           if (res.kind === "error") {
@@ -111,13 +99,9 @@ export class Promises {
   resolve(
     id: string,
     {
-      ikey = undefined,
-      strict = false,
       headers = undefined,
       data = undefined,
     }: {
-      ikey?: string;
-      strict?: boolean;
       headers?: Record<string, string>;
       data?: string;
     } = {},
@@ -129,8 +113,6 @@ export class Promises {
           id: id,
           state: "resolved",
           value: { headers, data },
-          iKey: ikey,
-          strict: strict,
         },
         (res) => {
           if (res.kind === "error") {
@@ -146,13 +128,9 @@ export class Promises {
   reject(
     id: string,
     {
-      ikey = undefined,
-      strict = false,
       headers = undefined,
       data = undefined,
     }: {
-      ikey?: string;
-      strict?: boolean;
       headers?: Record<string, string>;
       data?: string;
     } = {},
@@ -164,8 +142,6 @@ export class Promises {
           id: id,
           state: "rejected",
           value: { headers, data },
-          iKey: ikey,
-          strict: strict,
         },
         (res) => {
           if (res.kind === "error") {
@@ -181,13 +157,9 @@ export class Promises {
   cancel(
     id: string,
     {
-      ikey = undefined,
-      strict = false,
       headers = undefined,
       data = undefined,
     }: {
-      ikey?: string;
-      strict?: boolean;
       headers?: Record<string, string>;
       data?: string;
     } = {},
@@ -199,8 +171,6 @@ export class Promises {
           id: id,
           state: "rejected_canceled",
           value: { headers, data },
-          iKey: ikey,
-          strict: strict,
         },
         (res) => {
           if (res.kind === "error") {

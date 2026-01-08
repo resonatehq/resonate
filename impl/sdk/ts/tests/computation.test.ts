@@ -41,8 +41,6 @@ async function createPromiseAndTask(
           processId: "default",
           ttl: 5 * util.MIN,
         },
-        iKey: id,
-        strict: false,
       },
       (res) => {
         util.assert(res.kind === "value");

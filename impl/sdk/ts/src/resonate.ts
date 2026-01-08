@@ -543,8 +543,6 @@ export class Resonate {
             processId: this.pid,
             ttl: this.ttl,
           },
-          iKey: id,
-          strict: false,
         },
         span.encode(),
       );
@@ -682,8 +680,6 @@ export class Resonate {
             "resonate:scope": "global",
             "resonate:invoke": opts.target,
           },
-          iKey: id,
-          strict: false,
         },
         span.encode(),
       );
@@ -731,7 +727,6 @@ export class Resonate {
     );
 
     await this.schedules.create(name, cron, `${this.idPrefix}{{.id}}.{{.timestamp}}`, opts.timeout, {
-      ikey: name,
       promiseHeaders: headers,
       promiseData: data,
       promiseTags: { ...opts.tags, "resonate:invoke": opts.target },

@@ -272,8 +272,6 @@ export class Computation {
             value: {
               data: res.kind === "value" ? res.value : res.error,
             },
-            iKey: id,
-            strict: false,
           },
           (res) => {
             if (res.kind === "error") {
