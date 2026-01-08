@@ -82,6 +82,28 @@ export class Resonate {
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
+  /**
+   * Creates a new Resonate client instance.
+   *
+   * @param options - Configuration options for the client.
+   * @param options.url - Resonate server URL. Defaults to `process.env.RESONATE_URL`,
+   *   otherwise builds from `process.env.RESONATE_SCHEME` (defaults to `"http"`),
+   *   `process.env.RESONATE_HOST`, and `process.env.RESONATE_PORT` (defaults to `"8001"`).
+   *   If no URL is resolved, a local in-memory network is used.
+   * @param options.group - Worker group name. Defaults to `"default"`.
+   * @param options.pid - Process identifier for the client. Defaults to the
+   *   message source's generated PID.
+   * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
+   * @param options.auth - Basic authentication credentials. Defaults to
+   *   `process.env.RESONATE_USERNAME` and `process.env.RESONATE_PASSWORD` when set.
+   * @param options.token - Bearer token for authentication. Defaults to `process.env.RESONATE_TOKEN`.
+   * @param options.verbose - Enables verbose logging. Defaults to `false`.
+   * @param options.encryptor - Payload encryptor. Defaults to {@link NoopEncryptor}.
+   * @param options.tracer - Tracing implementation. Defaults to {@link NoopTracer}.
+   * @param options.transport - Custom network transport implementation. Defaults to `undefined`.
+   * @param options.prefix - ID prefix applied to generated IDs. Defaults to
+   *   `process.env.RESONATE_PREFIX` when set.
+   */
   constructor({
     url = undefined,
     group = "default",
