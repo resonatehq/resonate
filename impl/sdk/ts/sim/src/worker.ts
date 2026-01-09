@@ -1,4 +1,5 @@
 import type { StepClock } from "../../src/clock";
+import { Core } from "../../src/core";
 import type { Encoder } from "../../src/encoder";
 import { NoopEncryptor } from "../../src/encryptor";
 import type { ResonateError } from "../../src/exceptions";
@@ -15,7 +16,6 @@ import type {
 } from "../../src/network/network";
 import { OptionsBuilder } from "../../src/options";
 import type { Registry } from "../../src/registry";
-import { ResonateInner } from "../../src/resonate-inner";
 import { NoopTracer } from "../../src/tracer";
 import type { Result } from "../../src/types";
 import * as util from "../../src/util";
@@ -184,7 +184,7 @@ export class WorkerProcess extends Process {
   private clock: StepClock;
   private network: SimulatedNetwork;
   private registry: Registry;
-  private resonate: ResonateInner;
+  private core: Core;
 
   constructor(
     prng: Random,
@@ -200,7 +200,7 @@ export class WorkerProcess extends Process {
     this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
     this.registry = registry;
     const messageSource = this.network.getMessageSource();
-    this.resonate = new ResonateInner({
+    this.core = new Core({
       unicast: messageSource.unicast,
       anycast: messageSource.anycast,
       pid: iaddr,

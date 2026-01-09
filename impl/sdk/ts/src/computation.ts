@@ -1,5 +1,6 @@
 import type { Clock } from "./clock";
 import { InnerContext } from "./context";
+import type { ClaimedTask, Task } from "./core";
 import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import exceptions from "./exceptions";
 import type { Handler } from "./handler";
@@ -9,7 +10,6 @@ import { Nursery } from "./nursery";
 import type { OptionsBuilder } from "./options";
 import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
-import type { ClaimedTask, Task } from "./resonate-inner";
 import { Exponential, Never, type RetryPolicyConstructor } from "./retries";
 import type { Span, Tracer } from "./tracer";
 import type { Func, Result } from "./types";
