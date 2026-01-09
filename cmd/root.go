@@ -8,7 +8,6 @@ import (
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/invoke"
 	"github.com/resonatehq/resonate/cmd/migrate"
-	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
@@ -51,7 +50,6 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
 	rootCmd.AddCommand(migrate.NewCmd(cfg, viper.New()))
-	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(serve.NewCmd(cfg, viper.New()))
