@@ -163,10 +163,15 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 
 	switch status {
 	case t_api.StatusCreated:
+		fmt.Printf("promise=%s timeout=%d state=%s t=%d\n", res.Promise.Id, res.Promise.Timeout, res.Promise.State, resTime)
+
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.Id)
 		}
-		if res.Promise.State != promise.Pending {
+		if req.Timeout > resTime && res.Promise.State != promise.Pending {
+			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.Promise.State, req.Id)
+		}
+		if req.Timeout <= resTime && !res.Promise.State.In(promise.Pending|promise.Resolved|promise.Timedout) {
 			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.Promise.State, req.Id)
 		}
 
