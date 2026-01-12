@@ -555,7 +555,8 @@ export class Resonate {
             },
             tags: {
               ...opts.tags,
-              "resonate:root": id,
+              "resonate:origin": id,
+              "resonate:branch": id,
               "resonate:parent": id,
               "resonate:scope": "global",
               "resonate:invoke": this.anycast,
@@ -573,7 +574,7 @@ export class Resonate {
       span.setStatus(true);
 
       if (task) {
-        this.core.process(span, { kind: "claimed", task: task, rootPromise: promise }, () => {
+        this.core.executeUntilBlocked(span, { kind: "claimed", task: task, rootPromise: promise }, () => {
           span.end(this.clock.now());
         });
       } else {
@@ -697,7 +698,8 @@ export class Resonate {
           },
           tags: {
             ...opts.tags,
-            "resonate:root": id,
+            "resonate:origin": id,
+            "resonate:branch": id,
             "resonate:parent": id,
             "resonate:scope": "global",
             "resonate:invoke": opts.target,

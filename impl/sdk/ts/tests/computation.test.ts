@@ -157,7 +157,7 @@ describe("Computation Event Queue Concurrency", () => {
     };
 
     const computationPromise: Promise<Status> = new Promise((resolve) => {
-      computation.process(testTask, (res) => {
+      computation.executeUntilBlocked(testTask, (res) => {
         if (res.kind === "error") {
           throw new Error("Computation processing failed");
         }

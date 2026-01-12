@@ -94,7 +94,7 @@ export class Computation {
     this.spans = new Map();
   }
 
-  public process(task: Task, done: (res: Result<Status, undefined>) => void) {
+  public executeUntilBlocked(task: Task, done: (res: Result<Status, undefined>) => void) {
     // If we are already processing there is nothing to do, the
     // caller will be notified via the promise handler
     if (this.processing) return done({ kind: "error", error: undefined });
@@ -196,6 +196,7 @@ export class Computation {
 
       const ctx = new InnerContext({
         id: this.id,
+        oId: rootPromise.tags["resonate:origin"] ?? this.id,
         func: registered.func.name,
         clock: this.clock,
         registry: this.registry,

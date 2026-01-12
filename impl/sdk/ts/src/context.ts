@@ -171,8 +171,9 @@ export class Future<T> implements Iterable<Future<T>> {
 
 export interface Context {
   readonly id: string;
+  readonly originId: string;
   readonly parentId: string;
-  readonly rootId: string;
+  readonly branchId: string;
   readonly info: { readonly attempt: number; readonly timeout: number; readonly version: number };
 
   // core four
@@ -259,7 +260,8 @@ export class InnerContext implements Context {
   readonly func: string;
   readonly retryPolicy: RetryPolicy;
 
-  readonly rootId: string;
+  readonly originId: string;
+  readonly branchId: string;
   readonly parentId: string;
   readonly clock: Clock;
   readonly span: Span;
@@ -275,7 +277,8 @@ export class InnerContext implements Context {
 
   constructor({
     id,
-    rId = id,
+    oId = id,
+    bId = id,
     pId = id,
     func,
     clock,
@@ -288,7 +291,8 @@ export class InnerContext implements Context {
     span,
   }: {
     id: string;
-    rId?: string;
+    oId?: string;
+    bId?: string;
     pId?: string;
     func: string;
     clock: Clock;
@@ -301,7 +305,8 @@ export class InnerContext implements Context {
     span: Span;
   }) {
     this.id = id;
-    this.rootId = rId;
+    this.originId = oId;
+    this.branchId = bId;
     this.parentId = pId;
     this.func = func;
     this.clock = clock;
@@ -335,7 +340,8 @@ export class InnerContext implements Context {
   }) {
     return new InnerContext({
       id,
-      rId: this.rootId,
+      oId: this.originId,
+      bId: this.branchId,
       pId: this.id,
       func,
       clock: this.clock,
@@ -366,7 +372,8 @@ export class InnerContext implements Context {
       ) as unknown as LFI<any>;
     }
 
-    const id = opts.id ?? this.seqid();
+    const idChanged = opts.id !== undefined;
+    const id = idChanged ? opts.id : this.seqid();
     this.seq++;
 
     const func = registered ? registered.func : (funcOrName as Func);
@@ -378,7 +385,7 @@ export class InnerContext implements Context {
       argu,
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq(id, { func: func.name, version }, opts),
+      this.localCreateReq({ id, data: { func: func.name, version }, opts, idChanged }),
     );
   }
 
@@ -399,7 +406,8 @@ export class InnerContext implements Context {
       ) as unknown as LFC<any>;
     }
 
-    const id = opts.id ?? this.seqid();
+    const idChanged = opts.id !== undefined;
+    const id = idChanged ? opts.id : this.seqid();
     this.seq++;
 
     const func = registered ? registered.func : (funcOrName as Func);
@@ -411,7 +419,7 @@ export class InnerContext implements Context {
       argu,
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq(id, { func: func.name, version }, opts),
+      this.localCreateReq({ id, data: { func: func.name, version }, opts, idChanged }),
     );
   }
 
@@ -432,7 +440,8 @@ export class InnerContext implements Context {
       ) as unknown as RFI<any>;
     }
 
-    const id = opts.id ?? this.seqid();
+    const idChanged = opts.id !== undefined;
+    const id = idChanged ? opts.id : this.seqid();
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
@@ -445,7 +454,7 @@ export class InnerContext implements Context {
       version: registered ? registered.version : opts.version || 1,
     };
 
-    return new RFI(id, func, version, this.remoteCreateReq(id, data, opts));
+    return new RFI(id, func, version, this.remoteCreateReq({ id, data, opts, idChanged }));
   }
 
   rfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
@@ -465,7 +474,8 @@ export class InnerContext implements Context {
       ) as unknown as RFC<any>;
     }
 
-    const id = opts.id ?? this.seqid();
+    const idChanged = opts.id !== undefined;
+    const id = idChanged ? opts.id : this.seqid();
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
@@ -478,7 +488,7 @@ export class InnerContext implements Context {
       version: registered ? registered.version : opts.version || 1,
     };
 
-    return new RFC(id, func, version, this.remoteCreateReq(id, data, opts));
+    return new RFC(id, func, version, this.remoteCreateReq({ id, data, opts, idChanged }));
   }
 
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
@@ -498,7 +508,8 @@ export class InnerContext implements Context {
       ) as unknown as RFI<any>;
     }
 
-    const id = opts.id ?? this.seqid();
+    const idChanged = opts.id !== undefined;
+    const id = idChanged ? opts.id : this.seqid();
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
@@ -511,7 +522,13 @@ export class InnerContext implements Context {
       version: registered ? registered.version : opts.version || 1,
     };
 
-    return new RFI(id, func, version, this.remoteCreateReq(id, data, opts, Number.MAX_SAFE_INTEGER), "detached");
+    return new RFI(
+      id,
+      func,
+      version,
+      this.remoteCreateReq({ id, data, opts, maxTimeout: Number.MAX_SAFE_INTEGER, idChanged }),
+      "detached",
+    );
   }
 
   promise<T>({
@@ -525,10 +542,11 @@ export class InnerContext implements Context {
     data?: any;
     tags?: Record<string, string>;
   } = {}): RFI<T> {
+    const idChanged = id !== undefined;
     id = id ?? this.seqid();
     this.seq++;
 
-    return new RFI(id, "unknown", 1, this.latentCreateOpts(id, timeout, data, tags));
+    return new RFI(id, "unknown", 1, this.latentCreateOpts({ id, timeout, data, tags, idChanged }));
   }
 
   sleep(msOrOpts: number | { for?: number; until?: Date }): RFC<void> {
@@ -547,7 +565,7 @@ export class InnerContext implements Context {
     const id = this.seqid();
     this.seq++;
 
-    return new RFC(id, "sleep", 1, this.sleepCreateOpts(id, until));
+    return new RFC(id, "sleep", 1, this.sleepCreateOpts({ id, time: until }));
   }
 
   panic(condition: boolean, msg?: string): DIE {
@@ -577,11 +595,22 @@ export class InnerContext implements Context {
     random: () => this.lfc((this.getDependency<Math>("resonate:math") ?? Math).random),
   };
 
-  localCreateReq(id: string, data: any, opts: Options): CreatePromiseReq {
+  localCreateReq({
+    id,
+    data,
+    opts,
+    idChanged,
+  }: {
+    id: string;
+    data: any;
+    opts: Options;
+    idChanged: boolean;
+  }): CreatePromiseReq {
     const tags = {
       "resonate:scope": "local",
-      "resonate:root": this.rootId,
+      "resonate:branch": idChanged ? this.id : this.branchId,
       "resonate:parent": this.id,
+      "resonate:origin": idChanged ? this.id : this.originId,
       ...opts.tags,
     };
 
@@ -597,12 +626,25 @@ export class InnerContext implements Context {
     };
   }
 
-  remoteCreateReq(id: string, data: any, opts: Options, maxTimeout = this.info.timeout): CreatePromiseReq {
+  remoteCreateReq({
+    id,
+    data,
+    opts,
+    idChanged,
+    maxTimeout = this.info.timeout,
+  }: {
+    id: string;
+    data: any;
+    opts: Options;
+    idChanged: boolean;
+    maxTimeout?: number;
+  }): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
-      "resonate:root": this.rootId,
+      "resonate:branch": idChanged ? this.id : this.branchId,
       "resonate:parent": this.id,
+      "resonate:origin": idChanged ? this.id : this.originId,
       ...opts.tags,
     };
 
@@ -618,11 +660,24 @@ export class InnerContext implements Context {
     };
   }
 
-  latentCreateOpts(id: string, timeout?: number, data?: any, tags?: Record<string, string>): CreatePromiseReq {
-    const cTags = {
+  latentCreateOpts({
+    id,
+    timeout,
+    data,
+    tags,
+    idChanged,
+  }: {
+    id: string;
+    timeout?: number;
+    data: any;
+    tags?: Record<string, string>;
+    idChanged: boolean;
+  }): CreatePromiseReq {
+    const cTags: Record<string, string> = {
       "resonate:scope": "global",
-      "resonate:root": this.rootId,
+      "resonate:branch": idChanged ? this.id : this.branchId,
       "resonate:parent": this.id,
+      "resonate:origin": idChanged ? this.id : this.originId,
       ...tags,
     };
 
@@ -638,11 +693,12 @@ export class InnerContext implements Context {
     };
   }
 
-  sleepCreateOpts(id: string, time: number): CreatePromiseReq {
+  sleepCreateOpts({ id, time }: { id: string; time: number }): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
-      "resonate:root": this.rootId,
+      "resonate:branch": this.branchId,
       "resonate:parent": this.id,
+      "resonate:origin": this.originId,
       "resonate:timeout": "true",
     };
 

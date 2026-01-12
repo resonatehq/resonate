@@ -104,7 +104,7 @@ export class Core {
     messageSource?.subscribe("resume", this.onMessage.bind(this));
   }
 
-  public process(span: Span, task: Task, done: (res: Result<Status, undefined>) => void) {
+  public executeUntilBlocked(span: Span, task: Task, done: (res: Result<Status, undefined>) => void) {
     let computation = this.computations.get(task.task.rootPromiseId);
     if (!computation) {
       computation = new Computation(
@@ -128,14 +128,14 @@ export class Core {
       this.computations.set(task.task.rootPromiseId, computation);
     }
 
-    computation.process(task, done);
+    computation.executeUntilBlocked(task, done);
   }
 
   private onMessage(msg: Message): void {
     util.assert(msg.type === "invoke" || msg.type === "resume");
 
     if (msg.type === "invoke" || msg.type === "resume") {
-      this.process(this.tracer.decode(msg.headers), { kind: "unclaimed", task: msg.task }, () => {});
+      this.executeUntilBlocked(this.tracer.decode(msg.headers), { kind: "unclaimed", task: msg.task }, () => {});
     }
   }
 }
