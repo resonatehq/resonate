@@ -1,32 +1,39 @@
-import type { ClaimedTask } from "resonate-inner";
 import { LocalNetwork } from "../dev/network";
 import { WallClock } from "../src/clock";
 import { Computation, type Status } from "../src/computation";
-import type { Context } from "../src/context";
+import type { Context, InnerContext } from "../src/context";
+import type { ClaimedTask } from "../src/core";
+import { JsonEncoder } from "../src/encoder";
+import { NoopEncryptor } from "../src/encryptor";
 import { Handler } from "../src/handler";
 import { NoopHeartbeat } from "../src/heartbeat";
-import type { DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
+import type { DurablePromiseRecord, TaskRecord } from "../src/network/network";
+import { OptionsBuilder } from "../src/options";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
+import { NoopSpan, NoopTracer } from "../src/tracer";
 import type { Result } from "../src/types";
 import * as util from "../src/util";
 
 async function createPromiseAndTask(
-  network: Network,
+  handler: Handler,
   id: string,
   funcName: string,
   args: any[],
 ): Promise<{ promise: DurablePromiseRecord; task: TaskRecord }> {
-  return new Promise((resolve, _reject) => {
-    network.send(
+  return new Promise((resolve) => {
+    handler.createPromiseAndTask(
       {
         kind: "createPromiseAndTask",
         promise: {
           id: id,
           timeout: 24 * util.HOUR + Date.now(),
           param: {
-            func: funcName,
-            args,
+            data: {
+              func: funcName,
+              args: args,
+              version: 1,
+            },
           },
           tags: { "resonate:invoke": "poll://any@default/default" },
         },
@@ -34,11 +41,10 @@ async function createPromiseAndTask(
           processId: "default",
           ttl: 5 * util.MIN,
         },
-        iKey: id,
-        strict: false,
       },
-      (_err, res) => {
-        resolve({ promise: res!.promise, task: res!.task! });
+      (res) => {
+        util.assert(res.kind === "value");
+        resolve({ promise: res.value.promise, task: res.value.task! });
       },
     );
   });
@@ -48,7 +54,7 @@ async function createPromiseAndTask(
 interface PendingTodo {
   id: string;
   func: () => Promise<any>;
-  callback: (result: Result<any>) => void;
+  callback: (res: Result<any, any>) => void;
 }
 
 // This mock allows us to control when "async" tasks complete.
@@ -56,7 +62,7 @@ class MockProcessor implements Processor {
   public pendingTodos: Map<string, PendingTodo> = new Map();
   private todoNotifier?: { expectedCount: number; resolve: () => void };
 
-  process(id: string, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
+  process(id: string, ctx: InnerContext, func: () => Promise<any>, callback: (res: Result<any, any>) => void): void {
     // Instead of running the work, we just store it.
     this.pendingTodos.set(id, { id, func, callback });
 
@@ -85,7 +91,7 @@ class MockProcessor implements Processor {
     // Fire all callbacks in the same event loop tick to simulate concurrency
     for (const todo of todosToComplete) {
       // We resolve with a simple value for the test
-      todo.callback({ success: true, value: `completed-${todo.id}` });
+      todo.callback({ kind: "value", value: `completed-${todo.id}` });
     }
   }
 }
@@ -93,6 +99,7 @@ class MockProcessor implements Processor {
 describe("Computation Event Queue Concurrency", () => {
   let mockProcessor: MockProcessor;
   let network: LocalNetwork;
+  let handler: Handler;
   let registry: Registry;
   let computation: Computation;
 
@@ -101,21 +108,28 @@ describe("Computation Event Queue Concurrency", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockProcessor = new MockProcessor();
-    network = new LocalNetwork();
+    network = new LocalNetwork({ pid: "test-pid", group: "test-group" });
+    handler = new Handler(network, new JsonEncoder(), new NoopEncryptor());
     registry = new Registry();
+    const messsageSource = network.getMessageSource();
 
     computation = new Computation(
       "root-promise-1",
-      "poll://any@test-group/test-pid",
-      "poll://uni@test-group/test-pid",
-      "test-pid",
+      messsageSource.unicast,
+      messsageSource.anycast,
+      messsageSource.match("default"),
       3600,
       new WallClock(),
       network,
-      new Handler(network),
+      handler,
+      new Map(),
       registry,
       new NoopHeartbeat(),
       new Map(),
+      new OptionsBuilder({ match: messsageSource.match, idPrefix: "" }),
+      false,
+      new NoopTracer(),
+      new NoopSpan(),
       mockProcessor,
     );
   });
@@ -133,8 +147,8 @@ describe("Computation Event Queue Concurrency", () => {
       return { a: va, b: vb, c: vc, d: vd };
     }
 
-    registry.set("testCoro", testCoroutine);
-    const { promise, task } = await createPromiseAndTask(network, "root-promise-1", "testCoro", []);
+    registry.add(testCoroutine, "testCoro");
+    const { promise, task } = await createPromiseAndTask(handler, "root-promise-1", "testCoro", []);
 
     const testTask: ClaimedTask = {
       kind: "claimed",
@@ -143,12 +157,12 @@ describe("Computation Event Queue Concurrency", () => {
     };
 
     const computationPromise: Promise<Status> = new Promise((resolve) => {
-      computation.process(testTask, (err, res) => {
-        if (err || !res) {
+      computation.process(testTask, (res) => {
+        if (res.kind === "error") {
           throw new Error("Computation processing failed");
         }
 
-        resolve(res);
+        resolve(res.value);
       });
     });
 
@@ -173,10 +187,12 @@ describe("Computation Event Queue Concurrency", () => {
       kind: "completed",
       promise: {
         value: {
-          a: "completed-root-promise-1.0",
-          b: "completed-root-promise-1.1",
-          c: "completed-root-promise-1.2",
-          d: "completed-root-promise-1.3",
+          data: {
+            a: "completed-root-promise-1.0",
+            b: "completed-root-promise-1.1",
+            c: "completed-root-promise-1.2",
+            d: "completed-root-promise-1.3",
+          },
         },
       },
     });

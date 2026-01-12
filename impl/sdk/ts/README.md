@@ -19,7 +19,11 @@ The Resonate TypeScript SDK enables developers to build reliable and scalable cl
 - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
 - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
+<<<<<<< HEAD
 ## Quickstart
+=======
+### [How to use this SDK](https://docs.resonatehq.io/develop/typescript)
+>>>>>>> main
 
 1. Install the Resonate Server & CLI
 

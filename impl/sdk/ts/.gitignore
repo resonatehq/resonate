@@ -8,3 +8,5 @@ coverage/
 bun.lock
 public/
 *.log
+*.lock
+package-lock.json

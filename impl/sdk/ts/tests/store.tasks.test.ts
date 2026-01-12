@@ -26,7 +26,7 @@ describe("tasks transitions", () => {
 
   beforeAll(() => {
     server = new Server();
-    network = new LocalNetwork(server);
+    network = new LocalNetwork({ server });
     promises = new Promises(network);
     tasks = new Tasks(network);
   });

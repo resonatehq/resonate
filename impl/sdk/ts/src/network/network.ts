@@ -1,16 +1,14 @@
 // Records
+import type { ResonateError } from "exceptions";
+import type { Result, Value } from "../types";
 
-import type { Callback } from "../types";
-
-export interface DurablePromiseRecord {
+export interface DurablePromiseRecord<T = string> {
   id: string;
   state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   timeout: number;
-  param: any;
-  value: any;
+  param?: Value<T>;
+  value?: Value<T>;
   tags: Record<string, string>;
-  iKeyForCreate?: string;
-  iKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
 }
@@ -22,9 +20,8 @@ export interface ScheduleRecord {
   tags: Record<string, string>;
   promiseId: string;
   promiseTimeout: number;
-  promiseParam: any;
+  promiseParam?: Value<string>;
   promiseTags: Record<string, string>;
-  iKey?: string;
   lastRunTime?: number;
   nextRunTime?: number;
   createdOn?: number;
@@ -62,32 +59,30 @@ export type Request =
   | ClaimTaskReq
   | CompleteTaskReq
   | DropTaskReq
-  | HeartbeatTasksReq;
+  | HeartbeatTasksReq
+  | SearchPromisesReq
+  | SearchSchedulesReq;
 
-export type CreatePromiseReq = {
+export type CreatePromiseReq<T = string> = {
   kind: "createPromise";
   id: string;
   timeout: number;
-  param?: any;
+  param?: Value<T>;
   tags?: Record<string, string>;
-  iKey?: string;
-  strict?: boolean;
 };
 
-export type CreatePromiseAndTaskReq = {
+export type CreatePromiseAndTaskReq<T = string> = {
   kind: "createPromiseAndTask";
   promise: {
     id: string;
     timeout: number;
-    param?: any;
+    param?: Value<T>;
     tags?: Record<string, string>;
   };
   task: {
     processId: string;
     ttl: number;
   };
-  iKey?: string;
-  strict?: boolean;
 };
 
 export type ReadPromiseReq = {
@@ -95,18 +90,16 @@ export type ReadPromiseReq = {
   id: string;
 };
 
-export type CompletePromiseReq = {
+export type CompletePromiseReq<T = string> = {
   kind: "completePromise";
   id: string;
   state: "resolved" | "rejected" | "rejected_canceled";
-  value?: any;
-  iKey?: string;
-  strict?: boolean;
+  value?: Value<T>;
 };
 
 export type CreateCallbackReq = {
   kind: "createCallback";
-  id: string;
+  promiseId: string;
   rootPromiseId: string;
   timeout: number;
   recv: string;
@@ -115,6 +108,7 @@ export type CreateCallbackReq = {
 export type CreateSubscriptionReq = {
   kind: "createSubscription";
   id: string;
+  promiseId: string;
   timeout: number;
   recv: string;
 };
@@ -127,9 +121,8 @@ export type CreateScheduleReq = {
   tags?: Record<string, string>;
   promiseId?: string;
   promiseTimeout?: number;
-  promiseParam?: any;
+  promiseParam?: Value<string>;
   promiseTags?: Record<string, string>;
-  iKey?: string;
 };
 
 export type ReadScheduleReq = {
@@ -167,6 +160,21 @@ export type HeartbeatTasksReq = {
   processId: string;
 };
 
+export type SearchPromisesReq = {
+  kind: "searchPromises";
+  id: string;
+  state?: "pending" | "resolved" | "rejected";
+  limit?: number;
+  cursor?: string;
+};
+
+export type SearchSchedulesReq = {
+  kind: "searchSchedules";
+  id: string;
+  limit?: number;
+  cursor?: string;
+};
+
 // Response
 
 export type Response =
@@ -182,7 +190,9 @@ export type Response =
   | ClaimTaskRes
   | CompleteTaskRes
   | DropTaskRes
-  | HeartbeatTasksRes;
+  | HeartbeatTasksRes
+  | SearchPromisesRes
+  | SearchSchedulesRes;
 
 export type CreatePromiseRes = {
   kind: "createPromise";
@@ -262,19 +272,51 @@ export type HeartbeatTasksRes = {
   tasksAffected: number;
 };
 
+export type SearchPromisesRes = {
+  kind: "searchPromises";
+  promises: DurablePromiseRecord[];
+  cursor?: string;
+};
+
+export type SearchSchedulesRes = {
+  kind: "searchSchedules";
+  schedules: ScheduleRecord[];
+  cursor?: string;
+};
+
 // Message
 
 export type Message =
-  | { type: "invoke" | "resume"; task: TaskRecord }
-  | { type: "notify"; promise: DurablePromiseRecord };
+  | { type: "invoke" | "resume"; task: TaskRecord; headers: Record<string, string> }
+  | { type: "notify"; promise: DurablePromiseRecord; headers: Record<string, string> };
 
 // Network
 
 export type ResponseFor<T extends Request> = Extract<Response, { kind: T["kind"] }>;
 
 export interface Network {
-  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever?: boolean): void;
-  recv(msg: Message): void;
+  start(): void;
   stop(): void;
+
+  send<T extends Request>(
+    req: T,
+    callback: (res: Result<ResponseFor<T>, ResonateError>) => void,
+    headers?: Record<string, string>,
+    retryForever?: boolean,
+  ): void;
+  getMessageSource?: () => MessageSource;
+}
+
+export interface MessageSource {
+  readonly pid: string;
+  readonly group: string;
+  readonly unicast: string;
+  readonly anycast: string;
+
+  start(): void;
+  stop(): void;
+
+  recv(msg: Message): void;
   subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void;
+  match(target: string): string;
 }

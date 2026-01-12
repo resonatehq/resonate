@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "esnext",
-    "module": "commonjs",
-    "lib": ["esnext"],
+    "target": "ESNext",
+    "module": "CommonJS",
+    "lib": ["ESNext"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

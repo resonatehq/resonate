@@ -110,6 +110,7 @@ export class Simulator {
     prng: Random,
     { dropProb = 0, randomDelay = 0, duplProb = 0, deactivateProb = 0, activateProb = 0 }: DeliveryOptions = {},
   ) {
+    process.env.QUEUE_MICROTASK_EVERY_N = Number.MAX_SAFE_INTEGER.toString();
     this.prng = prng;
     this.deliveryOptions = { dropProb, randomDelay, duplProb, deactivateProb, activateProb };
   }

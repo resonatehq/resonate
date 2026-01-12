@@ -9,14 +9,13 @@ export class Promises {
 
   get(id: string): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "readPromise", id }, (err, res) => {
-        if (err) {
-          // TODO: reject with more information
-          reject(Error("not implemented"));
+      this.network.send({ kind: "readPromise", id }, (res) => {
+        if (res.kind === "error") {
+          reject(res.error);
           return;
         }
 
-        resolve(res!.promise);
+        resolve(res.value.promise);
       });
     });
   }
@@ -25,14 +24,12 @@ export class Promises {
     id: string,
     timeout: number,
     {
-      iKey = undefined,
-      strict = false,
-      param = undefined,
+      headers = undefined,
+      data = undefined,
       tags = undefined,
     }: {
-      iKey?: string;
-      strict?: boolean;
-      param?: any;
+      headers?: Record<string, string>;
+      data?: string;
       tags?: Record<string, string>;
     } = {},
   ): Promise<DurablePromiseRecord> {
@@ -42,19 +39,16 @@ export class Promises {
           kind: "createPromise",
           id: id,
           timeout: timeout,
-          param: param,
+          param: { headers, data },
           tags: tags,
-          iKey: iKey,
-          strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -63,17 +57,15 @@ export class Promises {
   createWithTask(
     id: string,
     timeout: number,
-    processId: string,
+    pid: string,
     ttl: number,
     {
-      iKey = undefined,
-      strict = false,
-      param = undefined,
+      headers = undefined,
+      data = undefined,
       tags = undefined,
     }: {
-      iKey?: string;
-      strict?: boolean;
-      param?: any;
+      headers?: Record<string, string>;
+      data?: string;
       tags?: Record<string, string>;
     } = {},
   ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
@@ -84,24 +76,21 @@ export class Promises {
           promise: {
             id: id,
             timeout: timeout,
-            param: param,
+            param: { headers, data },
             tags: tags,
           },
           task: {
-            processId: processId,
+            processId: pid,
             ttl: ttl,
           },
-          iKey: iKey,
-          strict: strict,
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve({ promise: res!.promise, task: res!.task });
+          resolve({ promise: res.value.promise, task: res.value.task });
         },
       );
     });
@@ -110,13 +99,11 @@ export class Promises {
   resolve(
     id: string,
     {
-      iKey = undefined,
-      strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
-      iKey?: string;
-      strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -125,18 +112,15 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "resolved",
-          value: value,
-          iKey: iKey,
-          strict: strict,
+          value: { headers, data },
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
@@ -144,13 +128,11 @@ export class Promises {
   reject(
     id: string,
     {
-      iKey = undefined,
-      strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
-      iKey?: string;
-      strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -159,33 +141,27 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "rejected",
-          value: value,
-          iKey: iKey,
-          strict: strict,
+          value: { headers, data },
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
   }
-
   cancel(
     id: string,
     {
-      iKey = undefined,
-      strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
-      iKey?: string;
-      strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -194,23 +170,46 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "rejected_canceled",
-          value: value,
-          iKey: iKey,
-          strict: strict,
+          value: { headers, data },
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve(res!.promise);
+          resolve(res.value.promise);
         },
       );
     });
   }
+  async *search(
+    id: string,
+    { state = undefined, limit = undefined }: { state?: "pending" | "resolved" | "rejected"; limit?: number } = {},
+  ): AsyncGenerator<DurablePromiseRecord[], void> {
+    let cursor: string | undefined;
 
+    do {
+      const res = await new Promise<{ promises: DurablePromiseRecord[]; cursor?: string }>((resolve, reject) => {
+        this.network.send(
+          {
+            kind: "searchPromises",
+            id,
+            state,
+            limit,
+            cursor,
+          },
+          (res) => {
+            if (res.kind === "error") return reject(res.error);
+            resolve(res.value);
+          },
+        );
+      });
+
+      cursor = res.cursor;
+      yield res.promises;
+    } while (cursor !== null && cursor !== undefined);
+  }
   callback(
     promiseId: string,
     rootPromiseId: string,
@@ -224,19 +223,18 @@ export class Promises {
       this.network.send(
         {
           kind: "createCallback",
-          id: promiseId,
+          promiseId: promiseId,
           rootPromiseId: rootPromiseId,
           timeout: timeout,
           recv: recv,
         },
-        (err, res) => {
-          if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+        (res) => {
+          if (res.kind === "error") {
+            reject(res.error);
             return;
           }
 
-          resolve({ promise: res!.promise, callback: res!.callback });
+          resolve({ promise: res.value.promise, callback: res.value.callback });
         },
       );
     });
@@ -244,6 +242,7 @@ export class Promises {
 
   subscribe(
     id: string,
+    promiseId: string,
     timeout: number,
     recv: string,
   ): Promise<{
@@ -251,14 +250,13 @@ export class Promises {
     callback: CallbackRecord | undefined;
   }> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "createSubscription", id: id, timeout: timeout, recv: recv }, (err, res) => {
-        if (err) {
-          // TODO: reject with more information
-          reject(Error("not implemented"));
+      this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (res) => {
+        if (res.kind === "error") {
+          reject(res.error);
           return;
         }
 
-        resolve({ promise: res!.promise, callback: res!.callback });
+        resolve({ promise: res.value.promise, callback: res.value.callback });
       });
     });
   }

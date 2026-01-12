@@ -1,14 +1,24 @@
 import { WallClock } from "../src/clock";
 import { type Context, InnerContext } from "../src/context";
-import { Coroutine, type Suspended } from "../src/coroutine";
+import { type Completed, Coroutine, type Suspended } from "../src/coroutine";
+import { JsonEncoder } from "../src/encoder";
+import { NoopEncryptor } from "../src/encryptor";
+import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
-import { type Callback, type Result, ok } from "../src/types";
+import { PollMessageSource } from "../src/network/remote";
+import { OptionsBuilder } from "../src/options";
+import { Registry } from "../src/registry";
+import { Never } from "../src/retries";
+import { NoopSpan } from "../src/tracer";
+import type { Result } from "../src/types";
+import { assert } from "../src/util";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
 
-  send<T extends Request>(request: T, callback: Callback<ResponseFor<T>>): void {
+  start(): void {}
+  send<T extends Request>(request: T, callback: (res: Result<ResponseFor<T>, ResonateError>) => void): void {
     switch (request.kind) {
       case "createPromise": {
         const p: DurablePromiseRecord = {
@@ -18,13 +28,15 @@ class DummyNetwork implements Network {
           param: request.param,
           value: undefined,
           tags: request.tags || {},
-          iKeyForCreate: request.iKey,
         };
         this.promises.set(p.id, p);
-        callback(false, {
-          kind: "createPromise",
-          promise: p,
-        } as ResponseFor<T>);
+        callback({
+          kind: "value",
+          value: {
+            kind: "createPromise",
+            promise: p,
+          } as ResponseFor<T>,
+        });
         return;
       }
 
@@ -33,10 +45,13 @@ class DummyNetwork implements Network {
         p.state = "resolved";
         p.value = request.value!;
         this.promises.set(p.id, p);
-        callback(false, {
-          kind: "completePromise",
-          promise: p,
-        } as ResponseFor<T>);
+        callback({
+          kind: "value",
+          value: {
+            kind: "completePromise",
+            promise: p,
+          } as ResponseFor<T>,
+        });
         break;
       }
       default:
@@ -55,34 +70,59 @@ class DummyNetwork implements Network {
 describe("Coroutine", () => {
   // Helper functions to write test easily
   const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
-    return new Promise<any>((resolve) => {
-      Coroutine.exec(uuid, InnerContext.root(uuid, 0, new WallClock(), new Map()), func, args, handler, (err, res) => {
-        expect(err).toBe(false);
-        resolve(res);
-      });
-    });
-  };
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
 
-  const completePromise = (handler: Handler, id: string, result: Result<any>) => {
     return new Promise<any>((resolve) => {
-      handler.completePromise(
-        {
-          kind: "completePromise",
-          id: id,
-          state: result.success ? "resolved" : "rejected",
-          value: result.success ? result.value : result.error,
-          iKey: id,
-          strict: false,
-        },
-        (err, res) => {
-          expect(err).toBe(false);
-          resolve(res);
+      Coroutine.exec(
+        uuid,
+        false,
+        new InnerContext({
+          id: uuid,
+          func: func.name,
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+          optsBuilder: new OptionsBuilder({ match: m.match, idPrefix: "" }),
+          span: new NoopSpan(),
+        }),
+        func,
+        args,
+        { id: `__invoke:${uuid}`, counter: 1, timeout: 0, rootPromiseId: uuid },
+        handler,
+        new Map(),
+        (res) => {
+          expect(res.kind).toBe("value");
+          assert(res.kind === "value");
+          resolve(res.value);
         },
       );
     });
   };
 
-  test('basic coroutine completes with { type: "completed", value: 42 }', async () => {
+  const completePromise = (handler: Handler, id: string, result: Result<any, any>) => {
+    return new Promise<any>((resolve) => {
+      handler.completePromise(
+        {
+          kind: "completePromise",
+          id: id,
+          state: result.kind === "value" ? "resolved" : "rejected",
+          value: {
+            data: result.kind === "value" ? result.value : result.error,
+          },
+        },
+        (res) => {
+          expect(res.kind).toBe("value");
+          assert(res.kind === "value");
+          resolve(res.value);
+        },
+      );
+    });
+  };
+
+  test("basic coroutine completes with completed", async () => {
     function* bar() {
       return 42;
     }
@@ -93,9 +133,9 @@ describe("Coroutine", () => {
       return v;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
     const r = await exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 42 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
 
   test("basic coroutine with function suspends after first await", async () => {
@@ -113,7 +153,7 @@ describe("Coroutine", () => {
       const v2 = yield* p2;
       return v + v2;
     }
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
 
     // First execution - should suspend
     let r = await exec("foo.1", foo, [], h);
@@ -121,12 +161,12 @@ describe("Coroutine", () => {
     const suspended = r as Suspended;
     expect(suspended.todo.local).toHaveLength(2);
 
-    await completePromise(h, "foo.1.0", ok(42));
-    await completePromise(h, "foo.1.1", ok(31416));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
+    await completePromise(h, "foo.1.1", { kind: "value", value: 31416 });
 
     // Second execution - should complete
     r = await exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 31458 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 31458 } } });
   });
 
   test("coroutine with a suspension point suspends if can not make more progress", async () => {
@@ -138,21 +178,21 @@ describe("Coroutine", () => {
       const p1 = yield* ctx.beginRun(bar);
       const p2 = yield* ctx.beginRpc("bar");
       const v1 = yield* p1;
-      const vx = yield* p1;
-      const v2 = yield* p2;
+      yield* p1;
+      yield* p2;
       return v1;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
 
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 42 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
 
   test("Structured concurrency", async () => {
@@ -166,24 +206,24 @@ describe("Coroutine", () => {
       return 99;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 99 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 99 } } });
   });
 
   test("Detached concurrency", async () => {
@@ -197,17 +237,17 @@ describe("Coroutine", () => {
       return 99;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 99 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 99 } } });
   });
 
   test("Return the detached todo if explicitly awaited", async () => {
@@ -222,24 +262,24 @@ describe("Coroutine", () => {
       return v;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.0", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
     r = await exec("foo.1", foo, [], h);
 
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 42 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
 
   test("lfc/rfc", async () => {
@@ -253,16 +293,67 @@ describe("Coroutine", () => {
       return v1 + v2;
     }
 
-    const h = new Handler(new DummyNetwork());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
 
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1);
 
-    await completePromise(h, "foo.1.1", ok(42));
+    await completePromise(h, "foo.1.1", { kind: "value", value: 42 });
 
     r = await exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 84 } });
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 84 } } });
+  });
+
+  test("DIE with condition true aborts execution", async () => {
+    function* foo(ctx: Context) {
+      yield* ctx.panic(true, "Abort execution");
+      return 42;
+    }
+
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
+
+    const m = new PollMessageSource({ url: "http://localhost:9999", pid: "0", group: "default" });
+    // DIE with condition=true causes callback to be called with err=true
+    const result = await new Promise<Result<Suspended | Completed, any>>((resolve) => {
+      Coroutine.exec(
+        "foo.1",
+        false,
+        new InnerContext({
+          id: "foo.1",
+          func: foo.name,
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+          optsBuilder: new OptionsBuilder({ match: m.match, idPrefix: "" }),
+          span: new NoopSpan(),
+        }),
+        foo,
+        [],
+        { id: "__invoke:foo.1", counter: 1, timeout: 0, rootPromiseId: "foo" },
+        h,
+        new Map(),
+        (res) => {
+          resolve(res);
+        },
+      );
+    });
+
+    expect(result.kind).toBe("error");
+  });
+
+  test("DIE with condition false continues execution", async () => {
+    function* foo(ctx: Context) {
+      yield* ctx.panic(false, "Should not abort");
+      return 42;
+    }
+
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
+    const r = await exec("foo.1", foo, [], h);
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
 });

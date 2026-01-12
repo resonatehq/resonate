@@ -1,12 +1,12 @@
+import { StepClock } from "../src/clock";
 import type * as context from "../src/context";
+import { JsonEncoder } from "../src/encoder";
 import type { Request } from "../src/network/network";
+import { Registry } from "../src/registry";
+import * as util from "../src/util";
 import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
-
-import { StepClock } from "../src/clock";
-import { Registry } from "../src/registry";
-import * as util from "../src/util";
 
 // Function definition
 function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any> {
@@ -32,8 +32,9 @@ const options: {
 
 const rnd = new Random(options.seed);
 const clock = new StepClock();
+const encoder = new JsonEncoder();
 const registry = new Registry();
-registry.set("fibonacci", fibonacci);
+registry.add(fibonacci);
 
 const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
@@ -45,6 +46,7 @@ const server = new ServerProcess(clock, "server");
 const worker1 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-1",
@@ -53,6 +55,7 @@ const worker1 = new WorkerProcess(
 const worker2 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-2",
@@ -61,6 +64,7 @@ const worker2 = new WorkerProcess(
 const worker3 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-3",
@@ -85,9 +89,8 @@ sim.delay(0, () => {
       kind: "createPromise",
       id,
       timeout: 10000000000,
-      iKey: id,
       tags: { "resonate:invoke": "local://any@default" },
-      param: { func: "fibonacci", args: [n] },
+      param: encoder.encode({ func: "fibonacci", args: [n], version: 1 }),
     },
     { requ: true, correlationId: 1 },
   );
@@ -107,4 +110,4 @@ function f(n: number, memo: Record<number, number> = {}): number {
   return memo[n];
 }
 
-util.assert(server.server.promises.get(id)?.value === f(n));
+util.assert(encoder.decode(server.server.promises.get(id)?.value) === f(n));

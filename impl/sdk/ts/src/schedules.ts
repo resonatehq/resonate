@@ -15,14 +15,14 @@ export class Schedules {
           kind: "readSchedule",
           id: id,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.schedule);
+          resolve(res.value.schedule);
         },
       );
     });
@@ -34,16 +34,16 @@ export class Schedules {
     promiseId: string,
     promiseTimeout: number,
     {
-      iKey = undefined,
       description = undefined,
       tags = undefined,
-      promiseParam = undefined,
+      promiseHeaders = undefined,
+      promiseData = undefined,
       promiseTags = undefined,
     }: {
-      iKey?: string;
       description?: string;
       tags?: Record<string, string>;
-      promiseParam?: any;
+      promiseHeaders?: Record<string, string>;
+      promiseData?: string;
       promiseTags?: Record<string, string>;
     } = {},
   ): Promise<ScheduleRecord> {
@@ -57,18 +57,18 @@ export class Schedules {
           tags: tags,
           promiseId: promiseId,
           promiseTimeout: promiseTimeout,
-          promiseParam: promiseParam,
+          promiseParam: { headers: promiseHeaders, data: promiseData },
           promiseTags: promiseTags,
-          iKey: iKey,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
+            console.log(res.error);
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.schedule);
+          resolve(res.value.schedule);
         },
       );
     });
@@ -81,8 +81,8 @@ export class Schedules {
           kind: "deleteSchedule",
           id: id,
         },
-        (err) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
@@ -92,5 +92,29 @@ export class Schedules {
         },
       );
     });
+  }
+
+  async *search(id: string, { limit = undefined }: { limit?: number } = {}): AsyncGenerator<ScheduleRecord[], void> {
+    let cursor: string | undefined;
+
+    do {
+      const res = await new Promise<{ schedules: ScheduleRecord[]; cursor?: string }>((resolve, reject) => {
+        this.network.send(
+          {
+            kind: "searchSchedules",
+            id,
+            limit,
+            cursor,
+          },
+          (res) => {
+            if (res.kind === "error") return reject(res.error);
+            resolve(res.value);
+          },
+        );
+      });
+
+      cursor = res.cursor;
+      yield res.schedules;
+    } while (cursor !== null && cursor !== undefined);
   }
 }

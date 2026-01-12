@@ -1,10 +1,49 @@
+import type { ResonateError } from "../src/exceptions";
+import type { Message, MessageSource, Network, Request, ResponseFor } from "../src/network/network";
+import type { Result } from "../src/types";
+import * as util from "../src/util";
 import { Server } from "./server";
 
-import type { Callback } from "types";
-import type { Message, Network, Request, ResponseFor } from "../src/network/network";
-import * as util from "../src/util";
-
 export class LocalNetwork implements Network {
+  private server: Server;
+  private messageSource: LocalMessageSource;
+
+  constructor({
+    pid = "pid",
+    group = "default",
+    server = new Server(),
+  }: { pid?: string; group?: string; server?: Server } = {}) {
+    this.server = server;
+    this.messageSource = new LocalMessageSource(pid, group, server);
+  }
+
+  getMessageSource(): MessageSource {
+    return this.messageSource;
+  }
+
+  start() {}
+  stop() {}
+
+  send<T extends Request>(req: Request, callback: (res: Result<ResponseFor<T>, ResonateError>) => void): void {
+    setTimeout(() => {
+      try {
+        const res = this.server.process(req, Date.now());
+        util.assert(res.kind === req.kind, "res kind must match req kind");
+
+        callback({ kind: "value", value: res as ResponseFor<T> });
+        this.messageSource.enqueueNext();
+      } catch (err) {
+        callback({ kind: "error", error: err as ResonateError });
+      }
+    });
+  }
+}
+
+export class LocalMessageSource implements MessageSource {
+  readonly pid: string;
+  readonly group: string;
+  readonly unicast: string;
+  readonly anycast: string;
   private server: Server;
   private timeoutId: ReturnType<typeof setTimeout> | undefined;
   private shouldStop = false;
@@ -14,29 +53,21 @@ export class LocalNetwork implements Network {
     notify: Array<(msg: Message) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor(server: Server = new Server()) {
+  constructor(pid: string, group: string, server: Server) {
+    this.pid = pid;
+    this.group = group;
+    this.unicast = `poll://uni@${group}/${pid}`;
+    this.anycast = `poll://any@${group}/${pid}`;
     this.server = server;
     this.timeoutId = undefined;
   }
+
+  start() {}
 
   stop() {
     clearTimeout(this.timeoutId);
     this.shouldStop = true;
     this.timeoutId = undefined;
-  }
-
-  send<T extends Request>(req: Request, callback: Callback<ResponseFor<T>>): void {
-    setTimeout(() => {
-      try {
-        const res = this.server.process(req, Date.now());
-        util.assert(res.kind === req.kind, "res kind must match req kind");
-
-        callback(false, res as ResponseFor<T>);
-        this.enqueueNext();
-      } catch (err) {
-        callback(true);
-      }
-    });
   }
 
   recv(msg: Message): void {
@@ -49,7 +80,7 @@ export class LocalNetwork implements Network {
     this.subscriptions[type].push(callback);
   }
 
-  private enqueueNext(): void {
+  enqueueNext(): void {
     clearTimeout(this.timeoutId);
 
     const time = Date.now();
@@ -63,5 +94,9 @@ export class LocalNetwork implements Network {
         this.enqueueNext();
       }, next);
     }
+  }
+
+  match(target: string): string {
+    return `poll://any@${target}`;
   }
 }

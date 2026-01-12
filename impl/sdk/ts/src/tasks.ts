@@ -8,24 +8,24 @@ export class Tasks {
     this.network = network;
   }
 
-  claim(id: string, counter: number, processId: string, ttl: number): Promise<ClaimTaskRes["message"]> {
+  claim(id: string, counter: number, pid: string, ttl: number): Promise<ClaimTaskRes["message"]> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
           kind: "claimTask",
           id: id,
           counter: counter,
-          processId: processId,
+          processId: pid,
           ttl: ttl,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.message);
+          resolve(res.value.message);
         },
       );
     });
@@ -39,34 +39,34 @@ export class Tasks {
           id: id,
           counter: counter,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.task);
+          resolve(res.value.task);
         },
       );
     });
   }
 
-  heartbeat(processId: string): Promise<number> {
+  heartbeat(pid: string): Promise<number> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
           kind: "heartbeatTasks",
-          processId: processId,
+          processId: pid,
         },
-        (err, res) => {
-          if (err) {
+        (res) => {
+          if (res.kind === "error") {
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
           }
 
-          resolve(res!.tasksAffected);
+          resolve(res.value.tasksAffected);
         },
       );
     });

@@ -1,30 +1,67 @@
+import type { InnerContext } from "../context";
+import type { Span } from "../tracer";
 import type { Result } from "../types";
 
 type F = () => Promise<unknown>;
 
 export interface Processor {
-  process(id: string, func: F, cb: (result: Result<unknown>) => void): void;
+  process(
+    id: string,
+    ctx: InnerContext,
+    func: F,
+    done: (result: Result<unknown, any>) => void,
+    verbose: boolean,
+    span: Span,
+  ): void;
 }
 
 export class AsyncProcessor implements Processor {
-  private seen = new Set<string>();
+  async process<T>(
+    id: string,
+    ctx: InnerContext,
+    func: () => Promise<T>,
+    done: (res: Result<T, any>) => void,
+    verbose: boolean,
+    span: Span,
+  ) {
+    while (true) {
+      let retryIn: number | null = null;
+      const childSpan = span.startSpan(`${id}::${ctx.info.attempt}`, ctx.clock.now());
+      childSpan.setAttribute("attempt", ctx.info.attempt);
 
-  process(id: string, func: F, cb: (result: Result<unknown>) => void): void {
-    // If already seen, ignore, either we are already working on it, or it was already completed
-    if (this.seen.has(id)) {
-      return;
+      try {
+        const data = await func();
+        childSpan.setStatus(true);
+        done({ kind: "value", value: data });
+        return;
+      } catch (error) {
+        childSpan.setStatus(false, String(error));
+
+        retryIn = ctx.retryPolicy.next(ctx.info.attempt);
+        if (retryIn === null) {
+          done({ kind: "error", error: error });
+          return;
+        }
+
+        // Use the same clock sourced from ctx for consistency
+        if (ctx.clock.now() + retryIn >= ctx.info.timeout) {
+          done({ kind: "error", error: error });
+          return;
+        }
+
+        console.warn(
+          `Runtime. Function '${ctx.func}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`,
+        );
+        if (verbose) {
+          console.warn(error);
+        }
+      } finally {
+        childSpan.end(ctx.clock.now());
+      }
+
+      // Ensure a numeric delay for setTimeout; guard against null just in case
+      await new Promise((resolve) => setTimeout(resolve, retryIn ?? 0));
+      ctx.info.attempt++;
     }
-
-    this.seen.add(id);
-
-    func()
-      .then((data) => {
-        const result: Result<unknown> = { success: true, value: data };
-        cb(result);
-      })
-      .catch((error) => {
-        const result: Result<unknown> = { success: false, error };
-        cb(result);
-      });
   }
 }
