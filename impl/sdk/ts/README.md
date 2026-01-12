@@ -21,6 +21,8 @@ The Resonate TypeScript SDK enables developers to build reliable and scalable cl
 
 ## Quickstart
 
+![quickstart banner](./assets/quickstart-banner.png)
+
 1. Install the Resonate Server & CLI
 
 ```shell
