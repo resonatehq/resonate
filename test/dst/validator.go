@@ -163,8 +163,6 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 
 	switch status {
 	case t_api.StatusCreated:
-		fmt.Printf("promise=%s timeout=%d state=%s t=%d\n", res.Promise.Id, res.Promise.Timeout, res.Promise.State, resTime)
-
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.Id)
 		}
