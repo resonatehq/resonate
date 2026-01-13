@@ -161,7 +161,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	id := g.promiseId(r)
 	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
-	timeout := cmdUtil.RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
+	timeout := cmdUtil.RangeInt63n(r, 0, g.timeoutTicks*g.timeElapsedPerTick)
 	tags := g.tags(r)
 
 	return &t_api.Request{

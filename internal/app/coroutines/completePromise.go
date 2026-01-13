@@ -69,7 +69,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			} else {
 				cmd = &t_aio.UpdatePromiseCommand{
 					Id:          req.Id,
-					State:       promise.GetTimedoutState(p),
+					State:       promise.GetTimedoutState(p.Tags),
 					Value:       promise.Value{},
 					CompletedOn: p.Timeout,
 				}

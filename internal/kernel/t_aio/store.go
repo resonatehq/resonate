@@ -58,6 +58,7 @@ func (c *SearchPromisesCommand) String() string {
 
 type CreatePromiseCommand struct {
 	Id        string
+	State     promise.State // used to create timedout promise in non-pending state
 	Param     promise.Value
 	Timeout   int64
 	Tags      map[string]string

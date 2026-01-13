@@ -18,8 +18,17 @@ import (
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.CreatePromiseRequest)
 
+	// determine initial state
+	state := promise.Pending
+	if c.Time() >= req.Timeout {
+		state = promise.GetTimedoutState(req.Tags)
+	}
+
+	util.Assert(state.In(promise.Pending|promise.Resolved|promise.Timedout), "state must be pending, resolved, or timedout")
+
 	cmd := &t_aio.CreatePromiseCommand{
 		Id:        req.Id,
+		State:     state,
 		Param:     req.Param,
 		Timeout:   req.Timeout,
 		Tags:      req.Tags,
@@ -50,8 +59,17 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
 
+	// determine initial state
+	state := promise.Pending
+	if c.Time() >= req.Promise.Timeout {
+		state = promise.GetTimedoutState(req.Promise.Tags)
+	}
+
+	util.Assert(state.In(promise.Pending|promise.Resolved|promise.Timedout), "state must be pending, resolved, or timedout")
+
 	cmd := &t_aio.CreatePromiseCommand{
 		Id:        req.Promise.Id,
+		State:     state,
 		Param:     req.Promise.Param,
 		Timeout:   req.Promise.Timeout,
 		Tags:      req.Promise.Tags,
@@ -155,7 +173,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 
 			p = &promise.Promise{
 				Id:        promiseCmd.Id,
-				State:     promise.Pending,
+				State:     promiseCmd.State,
 				Param:     promiseCmd.Param,
 				Timeout:   promiseCmd.Timeout,
 				Tags:      promiseCmd.Tags,
@@ -285,7 +303,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, fence, &t_aio.UpdatePromiseCommand{
 				Id:          promiseCmd.Id,
-				State:       promise.GetTimedoutState(p),
+				State:       promise.GetTimedoutState(p.Tags),
 				Value:       promise.Value{},
 				CompletedOn: p.Timeout,
 			}))
@@ -300,7 +318,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			}
 
 			// update promise
-			p.State = promise.GetTimedoutState(p)
+			p.State = promise.GetTimedoutState(p.Tags)
 			p.Value = promise.Value{}
 			p.CompletedOn = &p.Timeout
 		}
