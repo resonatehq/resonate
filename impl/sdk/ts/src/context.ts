@@ -385,7 +385,7 @@ export class InnerContext implements Context {
       argu,
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq({ id, data: { func: func.name, version }, opts, idChanged }),
+      this.localCreateReq({ id, data: { func: func.name, version }, opts, breaksLineage: idChanged }),
     );
   }
 
@@ -419,7 +419,7 @@ export class InnerContext implements Context {
       argu,
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq({ id, data: { func: func.name, version }, opts, idChanged }),
+      this.localCreateReq({ id, data: { func: func.name, version }, opts, breaksLineage: idChanged }),
     );
   }
 
@@ -546,7 +546,7 @@ export class InnerContext implements Context {
     id = id ?? this.seqid();
     this.seq++;
 
-    return new RFI(id, "unknown", 1, this.latentCreateOpts({ id, timeout, data, tags, idChanged }));
+    return new RFI(id, "unknown", 1, this.latentCreateOpts({ id, timeout, data, tags, breaksLineage: idChanged }));
   }
 
   sleep(msOrOpts: number | { for?: number; until?: Date }): RFC<void> {
@@ -599,18 +599,18 @@ export class InnerContext implements Context {
     id,
     data,
     opts,
-    idChanged,
+    breaksLineage,
   }: {
     id: string;
     data: any;
     opts: Options;
-    idChanged: boolean;
+    breaksLineage: boolean;
   }): CreatePromiseReq {
     const tags = {
       "resonate:scope": "local",
-      "resonate:branch": idChanged ? this.id : this.branchId,
+      "resonate:branch": this.branchId,
       "resonate:parent": this.id,
-      "resonate:origin": idChanged ? this.id : this.originId,
+      "resonate:origin": breaksLineage ? id : this.originId,
       ...opts.tags,
     };
 
@@ -642,9 +642,9 @@ export class InnerContext implements Context {
     const tags = {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
-      "resonate:branch": breaksLineage ? this.id : this.branchId,
+      "resonate:branch": id,
       "resonate:parent": this.id,
-      "resonate:origin": breaksLineage ? this.id : this.originId,
+      "resonate:origin": breaksLineage ? id : this.originId,
       ...opts.tags,
     };
 
@@ -665,19 +665,19 @@ export class InnerContext implements Context {
     timeout,
     data,
     tags,
-    idChanged,
+    breaksLineage,
   }: {
     id: string;
     timeout?: number;
     data: any;
     tags?: Record<string, string>;
-    idChanged: boolean;
+    breaksLineage: boolean;
   }): CreatePromiseReq {
     const cTags: Record<string, string> = {
       "resonate:scope": "global",
-      "resonate:branch": idChanged ? this.id : this.branchId,
+      "resonate:branch": id,
       "resonate:parent": this.id,
-      "resonate:origin": idChanged ? this.id : this.originId,
+      "resonate:origin": breaksLineage ? id : this.originId,
       ...tags,
     };
 
@@ -696,7 +696,7 @@ export class InnerContext implements Context {
   sleepCreateOpts({ id, time }: { id: string; time: number }): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
-      "resonate:branch": this.branchId,
+      "resonate:branch": id,
       "resonate:parent": this.id,
       "resonate:origin": this.originId,
       "resonate:timeout": "true",
