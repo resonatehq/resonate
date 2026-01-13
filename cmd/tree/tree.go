@@ -49,11 +49,11 @@ func NewCmd() *cobra.Command {
 
 			var rootPromise *v1.Promise
 			promises := map[string][]*v1.Promise{}
-			usingNewFormat := false
 
 			// Try new tag format first (resonate:origin)
+			id := "*"
 			res, err := c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
-				Id:   &[]string{"*"}[0],
+				Id:   &id,
 				Tags: &map[string]string{"resonate:origin": args[0]},
 			})
 			if err != nil {
@@ -66,8 +66,6 @@ func NewCmd() *cobra.Command {
 
 			// If we got results with resonate:origin, we have the entire call graph
 			if len(*res.JSON200.Promises) > 0 {
-				usingNewFormat = true
-
 				// Collect all promises with pagination
 				for {
 					for _, p := range *res.JSON200.Promises {
@@ -85,7 +83,7 @@ func NewCmd() *cobra.Command {
 					}
 
 					res, err = c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
-						Id:     &[]string{"*"}[0],
+						Id:     &id,
 						Tags:   &map[string]string{"resonate:origin": args[0]},
 						Cursor: res.JSON200.Cursor,
 					})
@@ -97,10 +95,7 @@ func NewCmd() *cobra.Command {
 						return nil
 					}
 				}
-			}
-
-			// Fallback to old format if new format returned no results
-			if !usingNewFormat {
+			} else {
 				searches := []*searchParams{{id: "*", origin: args[0]}}
 
 				for len(searches) > 0 {
