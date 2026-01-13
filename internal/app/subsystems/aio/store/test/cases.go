@@ -114,6 +114,96 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "CreatePromiseResolved",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreatePromiseCommand{
+						Id:    "foo",
+						State: promise.Resolved,
+						Param: promise.Value{
+							Headers: map[string]string{},
+							Data:    []byte{},
+						},
+						Tags:      map[string]string{},
+						Timeout:   1,
+						CreatedOn: 1,
+					},
+					&t_aio.ReadPromiseCommand{
+						Id: "foo",
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterPromisesResult{
+						RowsAffected: 1,
+					},
+					&t_aio.QueryPromisesResult{
+						RowsReturned: 1,
+						Records: []*promise.PromiseRecord{{
+							Id:           "foo",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+						}},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "CreatePromiseTimedout",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreatePromiseCommand{
+						Id:    "foo",
+						State: promise.Timedout,
+						Param: promise.Value{
+							Headers: map[string]string{},
+							Data:    []byte{},
+						},
+						Tags:      map[string]string{},
+						Timeout:   1,
+						CreatedOn: 1,
+					},
+					&t_aio.ReadPromiseCommand{
+						Id: "foo",
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterPromisesResult{
+						RowsAffected: 1,
+					},
+					&t_aio.QueryPromisesResult{
+						RowsReturned: 1,
+						Records: []*promise.PromiseRecord{{
+							Id:           "foo",
+							State:        16,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+						}},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "CreatePromiseWithIdKey",
 		transactions: []*t_aio.Transaction{
 			{

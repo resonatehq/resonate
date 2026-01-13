@@ -166,10 +166,15 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.Id)
 		}
-		if req.Timeout > resTime && res.Promise.State != promise.Pending {
+		if res.Promise.Timeout > resTime && res.Promise.State != promise.Pending {
 			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.Promise.State, req.Id)
 		}
-		if req.Timeout <= resTime && !res.Promise.State.In(promise.Pending|promise.Resolved|promise.Timedout) {
+
+		timedoutState := promise.Timedout
+		if res.Promise.Tags["resonate:timeout"] == "true" {
+			timedoutState = promise.Resolved
+		}
+		if res.Promise.Timeout <= resTime && !res.Promise.State.In(promise.Pending|timedoutState) {
 			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.Promise.State, req.Id)
 		}
 
