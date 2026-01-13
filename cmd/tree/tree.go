@@ -15,7 +15,7 @@ import (
 
 type searchParams struct {
 	id     string
-	root   string
+	origin string
 	cursor *string
 }
 
@@ -48,45 +48,99 @@ func NewCmd() *cobra.Command {
 			}
 
 			var rootPromise *v1.Promise
-			searches := []*searchParams{{id: "*", root: args[0]}}
 			promises := map[string][]*v1.Promise{}
+			usingNewFormat := false
 
-			for len(searches) > 0 {
-				params := searches[0]
-				searches = searches[1:]
+			// Try new tag format first (resonate:origin)
+			res, err := c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
+				Id:   &[]string{"*"}[0],
+				Tags: &map[string]string{"resonate:origin": args[0]},
+			})
+			if err != nil {
+				return err
+			}
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
+				return nil
+			}
 
-				res, err := c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
-					Id:     &params.id,
-					Tags:   &map[string]string{"resonate:root": params.root},
-					Cursor: params.cursor,
-				})
-				if err != nil {
-					return err
-				}
-				if res.StatusCode() != 200 {
-					cmd.PrintErrln(res.Status(), string(res.Body))
-					return nil
-				}
+			// If we got results with resonate:origin, we have the entire call graph
+			if len(*res.JSON200.Promises) > 0 {
+				usingNewFormat = true
 
-				for _, p := range *res.JSON200.Promises {
-					if p.Id == args[0] {
-						rootPromise = &p
+				// Collect all promises with pagination
+				for {
+					for _, p := range *res.JSON200.Promises {
+						if p.Id == args[0] {
+							rootPromise = &p
+						}
+						if parent, ok := p.Tags["resonate:parent"]; ok && parent != p.Id {
+							promises[parent] = append(promises[parent], &p)
+						}
 					}
-					if parent, ok := p.Tags["resonate:parent"]; ok && parent != p.Id {
-						promises[parent] = append(promises[parent], &p)
+
+					// Handle pagination
+					if res.JSON200.Cursor == nil {
+						break
 					}
 
-					if p.Tags["resonate:scope"] == "global" && p.Id != params.root {
-						searches = append(searches, &searchParams{id: "*", root: p.Id})
-					}
-				}
-
-				if res.JSON200.Cursor != nil {
-					searches = append(searches, &searchParams{
-						id:     params.id,
-						root:   params.root,
-						cursor: res.JSON200.Cursor,
+					res, err = c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
+						Id:     &[]string{"*"}[0],
+						Tags:   &map[string]string{"resonate:origin": args[0]},
+						Cursor: res.JSON200.Cursor,
 					})
+					if err != nil {
+						return err
+					}
+					if res.StatusCode() != 200 {
+						cmd.PrintErrln(res.Status(), string(res.Body))
+						return nil
+					}
+				}
+			}
+
+			// Fallback to old format if new format returned no results
+			if !usingNewFormat {
+				searches := []*searchParams{{id: "*", origin: args[0]}}
+
+				for len(searches) > 0 {
+					params := searches[0]
+					searches = searches[1:]
+
+					res, err := c.V1().SearchPromisesWithResponse(context.TODO(), &v1.SearchPromisesParams{
+						Id:     &params.id,
+						Tags:   &map[string]string{"resonate:root": params.origin},
+						Cursor: params.cursor,
+					})
+					if err != nil {
+						return err
+					}
+					if res.StatusCode() != 200 {
+						cmd.PrintErrln(res.Status(), string(res.Body))
+						return nil
+					}
+
+					for _, p := range *res.JSON200.Promises {
+						if p.Id == args[0] {
+							rootPromise = &p
+						}
+						if parent, ok := p.Tags["resonate:parent"]; ok && parent != p.Id {
+							promises[parent] = append(promises[parent], &p)
+						}
+
+						// Old format: global scope indicates a new branch
+						if p.Tags["resonate:scope"] == "global" && p.Id != params.origin {
+							searches = append(searches, &searchParams{id: "*", origin: p.Id})
+						}
+					}
+
+					if res.JSON200.Cursor != nil {
+						searches = append(searches, &searchParams{
+							id:     params.id,
+							origin: params.origin,
+							cursor: res.JSON200.Cursor,
+						})
+					}
 				}
 			}
 
