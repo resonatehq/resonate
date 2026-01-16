@@ -94,7 +94,7 @@ func TestHttp(t *testing.T) {
 				t.Run(tc.Name, func(t *testing.T) {
 					if tc.Req != nil {
 						// set protocol specific header
-						tc.Req.Metadata["protocol"] = "http"
+						tc.Req.Head["protocol"] = "http"
 					}
 
 					httpTest.Load(t, tc.Req, tc.Res)
@@ -116,7 +116,7 @@ func TestHttp(t *testing.T) {
 
 						// Workaround to make the test Request have the same Authorization header than the test setup
 						if tc.Req != nil {
-							tc.Req.Metadata["authorization"] = req.Header.Get("Authorization")
+							tc.Req.Head["authorization"] = req.Header.Get("Authorization")
 						}
 					} else if ts.bearer != nil {
 						req.Header.Add("Authorization", "Bearer "+*ts.bearer)
@@ -124,7 +124,7 @@ func TestHttp(t *testing.T) {
 						// This tests that the http api subsytem correctly removes "Bearer" before handling the
 						// token to the api
 						if tc.Req != nil {
-							tc.Req.Metadata["authorization"] = *ts.bearer
+							tc.Req.Head["authorization"] = *ts.bearer
 						}
 					}
 
@@ -153,7 +153,7 @@ func TestHttp(t *testing.T) {
 
 					// Reset changes to tc.Req.Metadata["authorization"] for other tests to work
 					if tc.Req != nil {
-						delete(tc.Req.Metadata, "authorization")
+						delete(tc.Req.Head, "authorization")
 					}
 
 					select {

@@ -22,7 +22,7 @@ func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.ReadPromiseRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.PromiseGetRequest{
 		Id: payload.ID,
 	})
 
@@ -31,7 +31,7 @@ func (s *server) handleReadPromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.ReadPromiseResponse)
+	responseData := res.(*t_api.PromiseGetResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -72,7 +72,7 @@ func (s *server) handleSearchPromises(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.SearchPromisesResponse)
+	responseData := res.(*t_api.PromiseSearchResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"promises": responseData.Promises,
 		"cursor":   responseData.Cursor,
@@ -99,7 +99,7 @@ func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.PromiseCreateRequest{
 		Id:      payload.ID,
 		Param:   payload.Param,
 		Timeout: payload.Timeout,
@@ -110,7 +110,7 @@ func (s *server) handleCreatePromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CreatePromiseResponse)
+	responseData := res.(*t_api.PromiseCreateResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -134,8 +134,8 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CreatePromiseAndTaskRequest{
-		Promise: &t_api.CreatePromiseRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.TaskCreateRequest{
+		Promise: &t_api.PromiseCreateRequest{
 			Id:      payload.Promise.ID,
 			Param:   payload.Promise.Param,
 			Timeout: payload.Promise.Timeout,
@@ -153,7 +153,7 @@ func (s *server) handleCreatePromiseAndTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CreatePromiseAndTaskResponse)
+	responseData := res.(*t_api.TaskCreateResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"promise": responseData.Promise,
 		"task":    responseData.Task,
@@ -180,7 +180,7 @@ func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CompletePromiseRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.PromiseCompleteRequest{
 		Id:    payload.ID,
 		State: payload.State,
 		Value: payload.Value,
@@ -190,7 +190,7 @@ func (s *server) handleCompletePromise(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CompletePromiseResponse)
+	responseData := res.(*t_api.PromiseCompleteResponse)
 	responseBytes, err := json.Marshal(responseData.Promise)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -213,7 +213,7 @@ func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CreateCallbackRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.PromiseRegisterRequest{
 		Id:        util.ResumeId(payload.RootPromiseID, payload.PromiseID),
 		PromiseId: payload.PromiseID,
 		Recv:      payload.Recv,
@@ -225,7 +225,7 @@ func (s *server) handleCreateCallback(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CreateCallbackResponse)
+	responseData := res.(*t_api.PromiseRegisterResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"callback": responseData.Callback,
 		"promise":  responseData.Promise,
@@ -252,7 +252,7 @@ func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CreateCallbackRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.PromiseRegisterRequest{
 		Id:        util.NotifyId(payload.PromiseID, payload.ID),
 		PromiseId: payload.PromiseID,
 		Recv:      payload.Recv,
@@ -264,7 +264,7 @@ func (s *server) handleCreateSubscription(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CreateCallbackResponse)
+	responseData := res.(*t_api.PromiseRegisterResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"callback": responseData.Callback,
 		"promise":  responseData.Promise,
@@ -292,7 +292,7 @@ func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.ReadScheduleRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.ScheduleGetRequest{
 		Id: payload.ID,
 	})
 	if error != nil {
@@ -300,7 +300,7 @@ func (s *server) handleReadSchedule(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.ReadScheduleResponse)
+	responseData := res.(*t_api.ScheduleGetResponse)
 	responseBytes, err := json.Marshal(responseData.Schedule)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -340,7 +340,7 @@ func (s *server) handleSearchSchedules(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.SearchSchedulesResponse)
+	responseData := res.(*t_api.ScheduleSearchResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"schedules": responseData.Schedules,
 		"cursor":    responseData.Cursor,
@@ -367,7 +367,7 @@ func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CreateScheduleRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.ScheduleCreateRequest{
 		Id:             payload.ID,
 		Description:    payload.Description,
 		Cron:           payload.Cron,
@@ -382,7 +382,7 @@ func (s *server) handleCreateSchedule(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CreateScheduleResponse)
+	responseData := res.(*t_api.ScheduleCreateResponse)
 	responseBytes, err := json.Marshal(responseData.Schedule)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -405,7 +405,7 @@ func (s *server) handleDeleteSchedule(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	_, error := s.processRequest(kafkaReq, &t_api.DeleteScheduleRequest{
+	_, error := s.processRequest(kafkaReq, &t_api.ScheduleDeleteRequest{
 		Id: payload.ID,
 	})
 	if error != nil {
@@ -429,7 +429,7 @@ func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.ClaimTaskRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.TaskAcquireRequest{
 		Id:        payload.ID,
 		Counter:   payload.Counter,
 		ProcessId: payload.ProcessID,
@@ -440,7 +440,7 @@ func (s *server) handleClaimTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.ClaimTaskResponse)
+	responseData := res.(*t_api.TaskAcquireResponse)
 
 	promises := map[string]any{
 		"root": map[string]any{
@@ -482,7 +482,7 @@ func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.CompleteTaskRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.TaskCompleteRequest{
 		Id:      payload.ID,
 		Counter: payload.Counter,
 	})
@@ -491,7 +491,7 @@ func (s *server) handleCompleteTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.CompleteTaskResponse)
+	responseData := res.(*t_api.TaskCompleteResponse)
 	responseBytes, err := json.Marshal(responseData.Task)
 	if err != nil {
 		s.respondError(kafkaReq, &api.Error{
@@ -514,7 +514,7 @@ func (s *server) handleDropTask(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	_, error := s.processRequest(kafkaReq, &t_api.DropTaskRequest{
+	_, error := s.processRequest(kafkaReq, &t_api.TaskReleaseRequest{
 		Id:      payload.ID,
 		Counter: payload.Counter,
 	})
@@ -537,7 +537,7 @@ func (s *server) handleHeartbeatTasks(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	res, error := s.processRequest(kafkaReq, &t_api.HeartbeatTasksRequest{
+	res, error := s.processRequest(kafkaReq, &t_api.TaskHeartbeatRequest{
 		ProcessId: payload.ProcessID,
 	})
 	if error != nil {
@@ -545,7 +545,7 @@ func (s *server) handleHeartbeatTasks(kafkaReq *KafkaRequest) {
 		return
 	}
 
-	responseData := res.(*t_api.HeartbeatTasksResponse)
+	responseData := res.(*t_api.TaskHeartbeatResponse)
 	responseBytes, err := json.Marshal(map[string]any{
 		"tasksAffected": responseData.TasksAffected,
 	})

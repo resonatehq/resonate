@@ -12,7 +12,7 @@ import (
 )
 
 func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.DropTaskRequest)
+	req := r.Data.(*t_api.TaskReleaseRequest)
 	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	var status t_api.StatusCode
@@ -20,7 +20,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -58,7 +58,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 			// to 1 would mean that nodes with stale tasks could claim them.
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Metadata,
+				Tags: r.Head,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: []t_aio.Command{
@@ -115,8 +115,8 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Metadata,
-		Payload: &t_api.DropTaskResponse{
+		Metadata: r.Head,
+		Payload: &t_api.TaskReleaseResponse{
 			Task: t,
 		},
 	}, nil

@@ -11,7 +11,7 @@ import (
 func Noop(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Metadata,
+		Metadata: r.Head,
 		Payload:  &t_api.NoopResponse{},
 	}, nil
 }

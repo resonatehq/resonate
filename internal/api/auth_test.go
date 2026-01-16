@@ -103,8 +103,8 @@ func TestAuthenticate(t *testing.T) {
 
 	t.Run("missing authorization header", func(t *testing.T) {
 		req := &t_api.Request{
-			Metadata: map[string]string{},
-			Payload:  &t_api.EchoRequest{Data: "test"},
+			Head: map[string]string{},
+			Data:  &t_api.EchoRequest{Data: "test"},
 		}
 		_, err := auth.authenticate(req)
 		if err == nil {
@@ -126,8 +126,8 @@ func TestAuthenticate(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"authorization": token},
-			Payload:  &t_api.EchoRequest{Data: "test"},
+			Head: map[string]string{"authorization": token},
+			Data:  &t_api.EchoRequest{Data: "test"},
 		}
 		returnedClaims, err := auth.authenticate(req)
 		if err != nil {
@@ -156,8 +156,8 @@ func TestAuthenticate(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"authorization": token},
-			Payload:  &t_api.EchoRequest{Data: "test"},
+			Head: map[string]string{"authorization": token},
+			Data:  &t_api.EchoRequest{Data: "test"},
 		}
 		_, err = auth.authenticate(req)
 		if err == nil {
@@ -232,96 +232,96 @@ func TestMatchPromisePrefix(t *testing.T) {
 	}{
 		// Promise requests
 		{
-			name:        "ReadPromiseRequest - matching prefix",
-			payload:     &t_api.ReadPromiseRequest{Id: "test.123"},
+			name:        "PromiseGetRequest - matching prefix",
+			payload:     &t_api.PromiseGetRequest{Id: "test.123"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
 		{
-			name:        "ReadPromiseRequest - non-matching prefix",
-			payload:     &t_api.ReadPromiseRequest{Id: "other.123"},
+			name:        "PromiseGetRequest - non-matching prefix",
+			payload:     &t_api.PromiseGetRequest{Id: "other.123"},
 			prefix:      "test",
 			shouldMatch: false,
 		},
 		{
-			name:        "CreatePromiseRequest - matching prefix",
-			payload:     &t_api.CreatePromiseRequest{Id: "app.promise.1"},
+			name:        "PromiseCreateRequest - matching prefix",
+			payload:     &t_api.PromiseCreateRequest{Id: "app.promise.1"},
 			prefix:      "app",
 			shouldMatch: true,
 		},
 		{
-			name:        "CompletePromiseRequest - matching prefix",
-			payload:     &t_api.CompletePromiseRequest{Id: "my-app.promise.1"},
+			name:        "PromiseCompleteRequest - matching prefix",
+			payload:     &t_api.PromiseCompleteRequest{Id: "my-app.promise.1"},
 			prefix:      "my-app",
 			shouldMatch: true,
 		},
 		{
-			name:        "CreatePromiseAndTaskRequest - matching prefix",
-			payload:     &t_api.CreatePromiseAndTaskRequest{Promise: &t_api.CreatePromiseRequest{Id: "prefix.id"}},
+			name:        "TaskCreateRequest - matching prefix",
+			payload:     &t_api.TaskCreateRequest{Promise: &t_api.PromiseCreateRequest{Id: "prefix.id"}},
 			prefix:      "prefix",
 			shouldMatch: true,
 		},
 		// Callback requests
 		{
-			name:        "CreateCallbackRequest - matching prefix",
-			payload:     &t_api.CreateCallbackRequest{PromiseId: "test.123"},
+			name:        "PromiseRegisterRequest - matching prefix",
+			payload:     &t_api.PromiseRegisterRequest{PromiseId: "test.123"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
 		// Schedule requests
 		{
-			name:        "ReadScheduleRequest - matching prefix",
-			payload:     &t_api.ReadScheduleRequest{Id: "schedule.1"},
+			name:        "ScheduleGetRequest - matching prefix",
+			payload:     &t_api.ScheduleGetRequest{Id: "schedule.1"},
 			prefix:      "schedule",
 			shouldMatch: true,
 		},
 		{
-			name:        "CreateScheduleRequest - matching prefix",
-			payload:     &t_api.CreateScheduleRequest{PromiseId: "sched.promise.1"},
+			name:        "ScheduleCreateRequest - matching prefix",
+			payload:     &t_api.ScheduleCreateRequest{PromiseId: "sched.promise.1"},
 			prefix:      "sched",
 			shouldMatch: true,
 		},
 		{
-			name:        "DeleteScheduleRequest - matching prefix",
-			payload:     &t_api.DeleteScheduleRequest{Id: "del.sched.1"},
+			name:        "ScheduleDeleteRequest - matching prefix",
+			payload:     &t_api.ScheduleDeleteRequest{Id: "del.sched.1"},
 			prefix:      "del",
 			shouldMatch: true,
 		},
 		{
-			name:        "SearchSchedulesRequest - matching prefix",
-			payload:     &t_api.SearchSchedulesRequest{Id: "search.1"},
+			name:        "ScheduleSearchRequest - matching prefix",
+			payload:     &t_api.ScheduleSearchRequest{Id: "search.1"},
 			prefix:      "search",
 			shouldMatch: true,
 		},
 		// Task requests with special ID formats
 		{
-			name:        "ClaimTaskRequest - resume format",
-			payload:     &t_api.ClaimTaskRequest{Id: "__resume:test.promise:another"},
+			name:        "TaskAcquireRequest - resume format",
+			payload:     &t_api.TaskAcquireRequest{Id: "__resume:test.promise:another"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
 		{
-			name:        "ClaimTaskRequest - invoke format",
-			payload:     &t_api.ClaimTaskRequest{Id: "__invoke:test.root:test.promise"},
+			name:        "TaskAcquireRequest - invoke format",
+			payload:     &t_api.TaskAcquireRequest{Id: "__invoke:test.root:test.promise"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
 		{
-			name:        "ClaimTaskRequest - notify format",
-			payload:     &t_api.ClaimTaskRequest{Id: "__notify:test.promise:id.extra"},
+			name:        "TaskAcquireRequest - notify format",
+			payload:     &t_api.TaskAcquireRequest{Id: "__notify:test.promise:id.extra"},
 			prefix:      "test.",
 			shouldMatch: true,
 		},
 		{
-			name:        "CompleteTaskRequest - non-matching prefix",
-			payload:     &t_api.CompleteTaskRequest{Id: "__resume:other.promise:child.promise"},
+			name:        "TaskCompleteRequest - non-matching prefix",
+			payload:     &t_api.TaskCompleteRequest{Id: "__resume:other.promise:child.promise"},
 			prefix:      "test",
 			shouldMatch: false,
 		},
 		// Special cases - no prefix check
 		{
-			name:        "HeartbeatTasksRequest - always authorized",
-			payload:     &t_api.HeartbeatTasksRequest{ProcessId: "any:id"},
+			name:        "TaskHeartbeatRequest - always authorized",
+			payload:     &t_api.TaskHeartbeatRequest{ProcessId: "any:id"},
 			prefix:      "test:",
 			shouldMatch: true,
 		},
@@ -332,8 +332,8 @@ func TestMatchPromisePrefix(t *testing.T) {
 			shouldMatch: true,
 		},
 		{
-			name:        "SearchPromisesRequest - matching prefix",
-			payload:     &t_api.SearchPromisesRequest{Id: "search:promise"},
+			name:        "PromiseSearchRequest - matching prefix",
+			payload:     &t_api.PromiseSearchRequest{Id: "search:promise"},
 			prefix:      "search:",
 			shouldMatch: true,
 		},
@@ -341,7 +341,7 @@ func TestMatchPromisePrefix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &t_api.Request{Payload: tt.payload}
+			req := &t_api.Request{Data: tt.payload}
 			err := matchPromisePrefix(req, tt.prefix)
 			if tt.shouldMatch && err != nil {
 				t.Errorf("Expected match, got error: %v", err)
@@ -386,8 +386,8 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"authorization": token},
-			Payload:  &t_api.ReadPromiseRequest{Id: "app.promise.1"},
+			Head: map[string]string{"authorization": token},
+			Data:  &t_api.PromiseGetRequest{Id: "app.promise.1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr != nil {
@@ -408,8 +408,8 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"authorization": token},
-			Payload:  &t_api.ReadPromiseRequest{Id: "any.prefix.promise"},
+			Head: map[string]string{"authorization": token},
+			Data:  &t_api.PromiseGetRequest{Id: "any.prefix.promise"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr != nil {
@@ -431,8 +431,8 @@ func TestProcess(t *testing.T) {
 		}
 
 		req := &t_api.Request{
-			Metadata: map[string]string{"authorization": token},
-			Payload:  &t_api.ReadPromiseRequest{Id: "other.promise.1"},
+			Head: map[string]string{"authorization": token},
+			Data:  &t_api.PromiseGetRequest{Id: "other.promise.1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr == nil {
@@ -442,8 +442,8 @@ func TestProcess(t *testing.T) {
 
 	t.Run("full flow - missing token", func(t *testing.T) {
 		req := &t_api.Request{
-			Metadata: map[string]string{},
-			Payload:  &t_api.ReadPromiseRequest{Id: "app:promise:1"},
+			Head: map[string]string{},
+			Data:  &t_api.PromiseGetRequest{Id: "app:promise:1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr == nil {
@@ -490,23 +490,23 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		shouldPass bool
 	}{
 		{
-			name:       "ReadPromiseRequest - authorized",
-			payload:    &t_api.ReadPromiseRequest{Id: "test:promise"},
+			name:       "PromiseGetRequest - authorized",
+			payload:    &t_api.PromiseGetRequest{Id: "test:promise"},
 			shouldPass: true,
 		},
 		{
-			name:       "CreatePromiseRequest - authorized",
-			payload:    &t_api.CreatePromiseRequest{Id: "test:promise"},
+			name:       "PromiseCreateRequest - authorized",
+			payload:    &t_api.PromiseCreateRequest{Id: "test:promise"},
 			shouldPass: true,
 		},
 		{
-			name:       "CompletePromiseRequest - authorized",
-			payload:    &t_api.CompletePromiseRequest{Id: "test:promise"},
+			name:       "PromiseCompleteRequest - authorized",
+			payload:    &t_api.PromiseCompleteRequest{Id: "test:promise"},
 			shouldPass: true,
 		},
 		{
-			name:       "CreateCallbackRequest - authorized",
-			payload:    &t_api.CreateCallbackRequest{PromiseId: "test:promise"},
+			name:       "PromiseRegisterRequest - authorized",
+			payload:    &t_api.PromiseRegisterRequest{PromiseId: "test:promise"},
 			shouldPass: true,
 		},
 		{
@@ -515,8 +515,8 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 			shouldPass: true,
 		},
 		{
-			name:       "ReadPromiseRequest - unauthorized",
-			payload:    &t_api.ReadPromiseRequest{Id: "other:promise"},
+			name:       "PromiseGetRequest - unauthorized",
+			payload:    &t_api.PromiseGetRequest{Id: "other:promise"},
 			shouldPass: false,
 		},
 	}
@@ -524,8 +524,8 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &t_api.Request{
-				Metadata: metadata,
-				Payload:  tt.payload,
+				Head: metadata,
+				Data:  tt.payload,
 			}
 			apiErr := auth.Process(req)
 			if tt.shouldPass && apiErr != nil {

@@ -10,10 +10,10 @@ import (
 )
 
 func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.HeartbeatTasksRequest)
+	req := r.Data.(*t_api.TaskHeartbeatRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -36,8 +36,8 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Metadata,
-		Payload: &t_api.HeartbeatTasksResponse{
+		Metadata: r.Head,
+		Payload: &t_api.TaskHeartbeatResponse{
 			TasksAffected: result.RowsAffected,
 		},
 	}, nil

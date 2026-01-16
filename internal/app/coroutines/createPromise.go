@@ -16,7 +16,7 @@ import (
 )
 
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.CreatePromiseRequest)
+	req := r.Data.(*t_api.PromiseCreateRequest)
 
 	// determine initial state
 	state := promise.Pending
@@ -35,7 +35,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		CreatedOn: c.Time(),
 	}
 
-	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, r.Fence, cmd, nil))
+	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Head, cmd, nil))
 
 	if err != nil {
 		return nil, err
@@ -51,13 +51,13 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Metadata,
-		Payload:  &t_api.CreatePromiseResponse{Promise: completion.promise},
+		Metadata: r.Head,
+		Payload:  &t_api.PromiseCreateResponse{Promise: completion.promise},
 	}, nil
 }
 
 func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
+	req := r.Data.(*t_api.TaskCreateRequest)
 
 	// determine initial state
 	state := promise.Pending
@@ -77,14 +77,14 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	}
 
 	head := map[string]string{}
-	if traceparent, ok := r.Metadata["traceparent"]; ok {
+	if traceparent, ok := r.Head["traceparent"]; ok {
 		head["traceparent"] = traceparent
 	}
-	if tracestate, ok := r.Metadata["tracestate"]; ok {
+	if tracestate, ok := r.Head["tracestate"]; ok {
 		head["tracestate"] = tracestate
 	}
 
-	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, nil, cmd, &t_aio.CreateTaskCommand{
+	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Head, cmd, &t_aio.CreateTaskCommand{
 		Id:        util.InvokeId(req.Task.PromiseId),
 		Recv:      nil,
 		Mesg:      &message.Mesg{Type: message.Invoke, Head: head, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
@@ -109,8 +109,8 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	}
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Metadata,
-		Payload:  &t_api.CreatePromiseAndTaskResponse{Promise: completion.promise, Task: completion.task},
+		Metadata: r.Head,
+		Payload:  &t_api.TaskCreateResponse{Promise: completion.promise, Task: completion.task},
 	}, nil
 }
 
@@ -120,7 +120,7 @@ type promiseAndTask struct {
 	task    *task.Task
 }
 
-func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *promiseAndTask] {
+func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *promiseAndTask] {
 	if promiseCmd.Param.Headers == nil {
 		promiseCmd.Param.Headers = map[string]string{}
 	}
@@ -140,7 +140,6 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Fence: fence,
 					Commands: []t_aio.Command{
 						&t_aio.ReadPromiseCommand{
 							Id: promiseCmd.Id,
@@ -258,7 +257,6 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 				Tags: tags,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Fence:    fence,
 						Commands: append(commands, additionalCmds...),
 					},
 				},
@@ -280,7 +278,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			if result.RowsAffected == 0 {
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
-				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
+				return gocoro.SpawnAndAwait(c, createPromise(tags, promiseCmd, taskCmd, additionalCmds...))
 			}
 
 			// count promise
@@ -301,7 +299,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 		}
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, fence, &t_aio.UpdatePromiseCommand{
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, &t_aio.UpdatePromiseCommand{
 				Id:          promiseCmd.Id,
 				State:       promise.GetTimedoutState(p.Tags),
 				Value:       promise.Value{},
@@ -314,7 +312,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			if !ok {
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
-				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
+				return gocoro.SpawnAndAwait(c, createPromise(tags, promiseCmd, taskCmd, additionalCmds...))
 			}
 
 			// update promise

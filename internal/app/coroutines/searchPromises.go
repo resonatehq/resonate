@@ -12,7 +12,7 @@ import (
 )
 
 func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.SearchPromisesRequest)
+	req := r.Data.(*t_api.PromiseSearchRequest)
 
 	util.Assert(req.Id != "", "id must not be empty")
 	util.Assert(req.Limit > 0, "limit must be greater than zero")
@@ -23,7 +23,7 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -61,7 +61,7 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		promises = append(promises, p)
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
-			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Metadata, nil, &t_aio.UpdatePromiseCommand{
+			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Head, nil, &t_aio.UpdatePromiseCommand{
 				Id:          p.Id,
 				State:       promise.GetTimedoutState(p.Tags),
 				Value:       promise.Value{},
@@ -82,10 +82,10 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	// set cursor only if there are more results
-	var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
+	var cursor *t_api.Cursor[t_api.PromiseSearchRequest]
 	if result.RowsReturned == int64(req.Limit) {
-		cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
-			Next: &t_api.SearchPromisesRequest{
+		cursor = &t_api.Cursor[t_api.PromiseSearchRequest]{
+			Next: &t_api.PromiseSearchRequest{
 				Id:     req.Id,
 				States: req.States,
 				Tags:   req.Tags,
@@ -97,8 +97,8 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Metadata,
-		Payload: &t_api.SearchPromisesResponse{
+		Metadata: r.Head,
+		Payload: &t_api.PromiseSearchResponse{
 			Cursor:   cursor,
 			Promises: promises,
 		},

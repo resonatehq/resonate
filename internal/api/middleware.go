@@ -65,7 +65,7 @@ func (a *JwtAuthenticator) Process(req *t_api.Request) *t_api.Error {
 func (a *JwtAuthenticator) authenticate(req *t_api.Request) (*Claims, error) {
 	// Assume what ever is in the metadata["authorization"] is just the token without
 	// 'Bearer' or other prefixes
-	tokenString, ok := req.Metadata["authorization"]
+	tokenString, ok := req.Head["authorization"]
 	if !ok {
 		return nil, fmt.Errorf("missing authorization header")
 	}
@@ -116,35 +116,35 @@ func (a *JwtAuthenticator) authorize(claims *Claims, req *t_api.Request) error {
 
 func matchPromisePrefix(req *t_api.Request, prefix string) error {
 	var id string
-	switch r := req.Payload.(type) {
+	switch r := req.Data.(type) {
 	// Tasks have their own way of matching prefix to their ids
-	case *t_api.ClaimTaskRequest:
+	case *t_api.TaskAcquireRequest:
 		return matchTaskId(r.Id, prefix)
-	case *t_api.CompleteTaskRequest:
+	case *t_api.TaskCompleteRequest:
 		return matchTaskId(r.Id, prefix)
-	case *t_api.DropTaskRequest:
+	case *t_api.TaskReleaseRequest:
 		return matchTaskId(r.Id, prefix)
-	case *t_api.ReadPromiseRequest:
+	case *t_api.PromiseGetRequest:
 		id = r.Id
-	case *t_api.CreatePromiseRequest:
+	case *t_api.PromiseCreateRequest:
 		id = r.Id
-	case *t_api.CreatePromiseAndTaskRequest:
+	case *t_api.TaskCreateRequest:
 		id = r.Promise.Id
-	case *t_api.CompletePromiseRequest:
+	case *t_api.PromiseCompleteRequest:
 		id = r.Id
-	case *t_api.CreateCallbackRequest:
+	case *t_api.PromiseRegisterRequest:
 		id = r.PromiseId
-	case *t_api.ReadScheduleRequest:
+	case *t_api.ScheduleGetRequest:
 		id = r.Id
-	case *t_api.CreateScheduleRequest:
+	case *t_api.ScheduleCreateRequest:
 		id = r.PromiseId
-	case *t_api.DeleteScheduleRequest:
+	case *t_api.ScheduleDeleteRequest:
 		id = r.Id
-	case *t_api.SearchPromisesRequest:
+	case *t_api.PromiseSearchRequest:
 		id = r.Id
-	case *t_api.SearchSchedulesRequest:
+	case *t_api.ScheduleSearchRequest:
 		id = r.Id
-	case *t_api.HeartbeatTasksRequest, *t_api.EchoRequest, *t_api.NoopRequest:
+	case *t_api.TaskHeartbeatRequest, *t_api.EchoRequest, *t_api.NoopRequest:
 		return nil
 	default:
 		panic("unreachable: unexpected request type")

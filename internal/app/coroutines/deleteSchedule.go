@@ -11,12 +11,12 @@ import (
 )
 
 func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.DeleteScheduleRequest)
+	req := r.Data.(*t_api.ScheduleDeleteRequest)
 	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -48,7 +48,7 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Metadata,
-		Payload:  &t_api.DeleteScheduleResponse{},
+		Metadata: r.Head,
+		Payload:  &t_api.ScheduleDeleteResponse{},
 	}, nil
 }

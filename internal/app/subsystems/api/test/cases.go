@@ -56,14 +56,14 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromise", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromise", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadPromiseResponse{
+			Payload: &t_api.PromiseGetResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Pending,
@@ -84,14 +84,14 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromiseWithSlash",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromiseWithSlash", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromiseWithSlash", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "foo/bar",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadPromiseResponse{
+			Payload: &t_api.PromiseGetResponse{
 				Promise: &promise.Promise{
 					Id:    "foo/bar",
 					State: promise.Pending,
@@ -112,14 +112,14 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromiseNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromiseNotFound", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromiseNotFound", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "bar",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusPromiseNotFound,
-			Payload: &t_api.ReadPromiseResponse{
+			Payload: &t_api.PromiseGetResponse{
 				Promise: nil,
 			},
 		},
@@ -137,8 +137,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromises",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromises", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromises", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -153,7 +153,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -172,8 +172,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesCursor",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesCursor", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesCursor", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -185,7 +185,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -204,8 +204,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesPending",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesPending", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesPending", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -216,7 +216,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -235,8 +235,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesResolved",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesResolved", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesResolved", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Resolved,
@@ -247,7 +247,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -266,8 +266,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesRejected",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesRejected", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesRejected", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Rejected,
@@ -280,7 +280,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -299,8 +299,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesTags",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesTags", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesTags", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -317,7 +317,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -364,8 +364,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesDefaultLimit",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -380,7 +380,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Payload: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -427,8 +427,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromise", "name": "CreatePromise"},
-			Payload: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromise", "name": "promise.create"},
+			Data: &t_api.PromiseCreateRequest{
 				Id: "foo",
 				Param: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -439,7 +439,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Payload: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Pending,
@@ -475,8 +475,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseMinimal", "name": "CreatePromise"},
-			Payload: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseMinimal", "name": "promise.create"},
+			Data: &t_api.PromiseCreateRequest{
 				Id:      "foo",
 				Param:   promise.Value{},
 				Timeout: 1,
@@ -484,7 +484,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Payload: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -513,8 +513,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "CreatePromise", "traceparent": "foo", "tracestate": "bar"},
-			Payload: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "promise.create", "traceparent": "foo", "tracestate": "bar"},
+			Data: &t_api.PromiseCreateRequest{
 				Id:      "foo",
 				Param:   promise.Value{},
 				Timeout: 1,
@@ -522,7 +522,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Payload: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -553,9 +553,9 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -570,7 +570,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Payload: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -600,9 +600,9 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTaskWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTaskWithTraceContext", "name": "CreatePromiseAndTask", "traceparent": "baz", "tracestate": "qux"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTaskWithTraceContext", "name": "task.create", "traceparent": "baz", "tracestate": "qux"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -617,7 +617,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Payload: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -668,8 +668,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "ResolvePromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Resolved,
 				Value: promise.Value{
@@ -680,7 +680,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Resolved,
@@ -714,8 +714,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "ResolvePromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Resolved,
 				Value: promise.Value{},
@@ -723,7 +723,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Resolved,
@@ -750,8 +750,8 @@ var TestCases = []*testCase{
 	{
 		Name: "RejectPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "RejectPromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Rejected,
 				Value: promise.Value{
@@ -762,7 +762,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Rejected,
@@ -796,8 +796,8 @@ var TestCases = []*testCase{
 	{
 		Name: "RejectPromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "RejectPromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Rejected,
 				Value: promise.Value{},
@@ -805,7 +805,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Rejected,
@@ -832,8 +832,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CancelPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "CancelPromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Canceled,
 				Value: promise.Value{
@@ -844,7 +844,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Canceled,
@@ -878,8 +878,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CancelPromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
+			Head: map[string]string{"id": "CancelPromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
 				Id:    "foo",
 				State: promise.Canceled,
 				Value: promise.Value{},
@@ -887,7 +887,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Payload: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Canceled,
@@ -916,8 +916,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -927,7 +927,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -950,8 +950,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -961,7 +961,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -985,8 +985,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -996,7 +996,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1019,8 +1019,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1030,7 +1030,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1054,8 +1054,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1065,7 +1065,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1090,8 +1090,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1101,7 +1101,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1124,8 +1124,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFoundDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1135,7 +1135,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1161,8 +1161,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1172,7 +1172,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1195,8 +1195,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1206,7 +1206,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1230,8 +1230,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1241,7 +1241,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1265,8 +1265,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1276,7 +1276,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1299,8 +1299,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1310,7 +1310,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1336,8 +1336,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1347,7 +1347,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1370,8 +1370,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFoundDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1381,7 +1381,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Payload: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1406,14 +1406,14 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadSchedule", "name": "ReadSchedule"},
-			Payload: &t_api.ReadScheduleRequest{
+			Head: map[string]string{"id": "ReadSchedule", "name": "schedule.get"},
+			Data: &t_api.ScheduleGetRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadScheduleResponse{
+			Payload: &t_api.ScheduleGetResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
@@ -1439,8 +1439,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedules",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedules", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedules", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 10,
@@ -1448,7 +1448,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Payload: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1469,8 +1469,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesCursor",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesCursor", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesCursor", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:     "*",
 				Tags:   map[string]string{},
 				Limit:  10,
@@ -1479,7 +1479,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Payload: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1498,8 +1498,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesTags",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesTags", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesTags", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id: "*",
 				Tags: map[string]string{
 					"foo": "bar",
@@ -1509,7 +1509,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Payload: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1544,8 +1544,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesDefaultLimit",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 100,
@@ -1553,7 +1553,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Payload: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1602,8 +1602,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSchedule", "name": "CreateSchedule"},
-			Payload: &t_api.CreateScheduleRequest{
+			Head: map[string]string{"id": "CreateSchedule", "name": "schedule.create"},
+			Data: &t_api.ScheduleCreateRequest{
 				Id:             "foo",
 				Cron:           "* * * * *",
 				PromiseId:      "foo.{{.timestamp}}",
@@ -1612,7 +1612,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreateScheduleResponse{
+			Payload: &t_api.ScheduleCreateResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
@@ -1645,14 +1645,14 @@ var TestCases = []*testCase{
 	{
 		Name: "DeleteSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DeleteSchedule", "name": "DeleteSchedule"},
-			Payload: &t_api.DeleteScheduleRequest{
+			Head: map[string]string{"id": "DeleteSchedule", "name": "schedule.delete"},
+			Data: &t_api.ScheduleDeleteRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusNoContent,
-			Payload: &t_api.DeleteScheduleResponse{},
+			Payload: &t_api.ScheduleDeleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1672,8 +1672,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTask", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTask", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -1682,7 +1682,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Payload: &t_api.TaskAcquireResponse{
 				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
@@ -1708,8 +1708,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTaskGet", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTaskGet", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "foo/1", // default process id for get endpoint
@@ -1718,7 +1718,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Payload: &t_api.TaskAcquireResponse{
 				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
@@ -1738,8 +1738,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskInvoke",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTaskInvoke", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTaskInvoke", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -1748,7 +1748,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Payload: &t_api.TaskAcquireResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Invoke, Root: "foo"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				RootPromiseHref: "http://localhost:8001/promises/foo",
@@ -1782,12 +1782,12 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskResume",
 		Req: &t_api.Request{
-			Metadata: map[string]string{
+			Head: map[string]string{
 				"id":       "ClaimTaskResume",
-				"name":     "ClaimTask",
+				"name":     "task.acquire",
 				"protocol": "http",
 			},
-			Payload: &t_api.ClaimTaskRequest{
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   2,
 				ProcessId: "bar",
@@ -1796,7 +1796,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Payload: &t_api.TaskAcquireResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				LeafPromise:     &promise.Promise{Id: "bar", State: promise.Resolved},
@@ -1854,15 +1854,15 @@ var TestCases = []*testCase{
 	{
 		Name: "CompleteTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CompleteTask", "name": "CompleteTask"},
-			Payload: &t_api.CompleteTaskRequest{
+			Head: map[string]string{"id": "CompleteTask", "name": "task.complete"},
+			Data: &t_api.TaskCompleteRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CompleteTaskResponse{},
+			Payload: &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1884,15 +1884,15 @@ var TestCases = []*testCase{
 	{
 		Name: "CompleteTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CompleteTaskGet", "name": "CompleteTask"},
-			Payload: &t_api.CompleteTaskRequest{
+			Head: map[string]string{"id": "CompleteTaskGet", "name": "task.complete"},
+			Data: &t_api.TaskCompleteRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CompleteTaskResponse{},
+			Payload: &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1910,15 +1910,15 @@ var TestCases = []*testCase{
 	{
 		Name: "DropTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DropTask", "name": "DropTask"},
-			Payload: &t_api.DropTaskRequest{
+			Head: map[string]string{"id": "DropTask", "name": "task.release"},
+			Data: &t_api.TaskReleaseRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.DropTaskResponse{},
+			Payload: &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1940,15 +1940,15 @@ var TestCases = []*testCase{
 	{
 		Name: "DropTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DropTaskGet", "name": "DropTask"},
-			Payload: &t_api.DropTaskRequest{
+			Head: map[string]string{"id": "DropTaskGet", "name": "task.release"},
+			Data: &t_api.TaskReleaseRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.DropTaskResponse{},
+			Payload: &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1966,14 +1966,14 @@ var TestCases = []*testCase{
 	{
 		Name: "HeartbeatTasks",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatTasks", "name": "HeartbeatTasks"},
-			Payload: &t_api.HeartbeatTasksRequest{
+			Head: map[string]string{"id": "HeartbeatTasks", "name": "task.hearbeat"},
+			Data: &t_api.TaskHeartbeatRequest{
 				ProcessId: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatTasksResponse{
+			Payload: &t_api.TaskHeartbeatResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -1996,14 +1996,14 @@ var TestCases = []*testCase{
 	{
 		Name: "HeartbeatTasksGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatTasksGet", "name": "HeartbeatTasks"},
-			Payload: &t_api.HeartbeatTasksRequest{
+			Head: map[string]string{"id": "HeartbeatTasksGet", "name": "task.hearbeat"},
+			Data: &t_api.TaskHeartbeatRequest{
 				ProcessId: "foo/1",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatTasksResponse{
+			Payload: &t_api.TaskHeartbeatResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -2023,9 +2023,9 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTaskWithTtlZero",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -2040,7 +2040,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Payload: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -2070,9 +2070,9 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTaskWithNegativeTtl",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -2087,7 +2087,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Payload: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,

@@ -8,13 +8,11 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Request struct {
-	Metadata map[string]string
-	Fence    *task.FencingToken
-	Payload  RequestPayload
+	Head map[string]string
+	Data RequestPayload
 }
 
 type RequestPayload interface {
@@ -26,23 +24,23 @@ type RequestPayload interface {
 
 // Promises
 
-type ReadPromiseRequest struct {
+type PromiseGetRequest struct {
 	Id string `json:"id"`
 }
 
-func (r *ReadPromiseRequest) String() string {
-	return fmt.Sprintf("ReadPromise(id=%s)", r.Id)
+func (r *PromiseGetRequest) String() string {
+	return fmt.Sprintf("PromiseGet(id=%s)", r.Id)
 }
 
-func (r *ReadPromiseRequest) Validate() error {
+func (r *PromiseGetRequest) Validate() error {
 	return nil
 }
 
-func (r *ReadPromiseRequest) Kind() Kind {
-	return ReadPromise
+func (r *PromiseGetRequest) Kind() Kind {
+	return PromiseGet
 }
 
-type SearchPromisesRequest struct {
+type PromiseSearchRequest struct {
 	Id     string            `json:"id"`
 	States []promise.State   `json:"states"`
 	Tags   map[string]string `json:"tags"`
@@ -50,75 +48,75 @@ type SearchPromisesRequest struct {
 	SortId *int64            `json:"sortId"`
 }
 
-func (r *SearchPromisesRequest) String() string {
-	return fmt.Sprintf("SearchPromises(id=%s, states=%v, tags=%v, limit=%d, sortId=%d)", r.Id, r.States, r.Tags, r.Limit, util.SafeDeref(r.SortId))
+func (r *PromiseSearchRequest) String() string {
+	return fmt.Sprintf("PromiseSearch(id=%s, states=%v, tags=%v, limit=%d, sortId=%d)", r.Id, r.States, r.Tags, r.Limit, util.SafeDeref(r.SortId))
 }
 
-func (r *SearchPromisesRequest) Validate() error {
+func (r *PromiseSearchRequest) Validate() error {
 	return nil
 }
 
-func (r *SearchPromisesRequest) Kind() Kind {
-	return SearchPromises
+func (r *PromiseSearchRequest) Kind() Kind {
+	return PromiseSearch
 }
 
-type CreatePromiseRequest struct {
+type PromiseCreateRequest struct {
 	Id      string            `json:"id"`
 	Param   promise.Value     `json:"param,omitempty"`
 	Timeout int64             `json:"timeout"`
 	Tags    map[string]string `json:"tags,omitempty"`
 }
 
-func (r *CreatePromiseRequest) String() string {
-	return fmt.Sprintf("CreatePromise(id=%s, param=%v, timeout=%d, tags=%v)", r.Id, r.Param, r.Timeout, r.Tags)
+func (r *PromiseCreateRequest) String() string {
+	return fmt.Sprintf("PromiseCreate(id=%s, param=%v, timeout=%d, tags=%v)", r.Id, r.Param, r.Timeout, r.Tags)
 }
 
-func (r *CreatePromiseRequest) Validate() error {
+func (r *PromiseCreateRequest) Validate() error {
 	return nil
 }
 
-func (r *CreatePromiseRequest) Kind() Kind {
-	return CreatePromise
+func (r *PromiseCreateRequest) Kind() Kind {
+	return PromiseCreate
 }
 
-type CreatePromiseAndTaskRequest struct {
-	Promise *CreatePromiseRequest
+type TaskCreateRequest struct {
+	Promise *PromiseCreateRequest
 	Task    *CreateTaskRequest
 }
 
-func (r *CreatePromiseAndTaskRequest) String() string {
-	return fmt.Sprintf("CreatePromiseAndTask(promise=%v, task=%v)", r.Promise, r.Task)
+func (r *TaskCreateRequest) String() string {
+	return fmt.Sprintf("TaskCreate(promise=%v, task=%v)", r.Promise, r.Task)
 }
 
-func (r *CreatePromiseAndTaskRequest) Validate() error {
+func (r *TaskCreateRequest) Validate() error {
 	return nil
 }
 
-func (r *CreatePromiseAndTaskRequest) Kind() Kind {
-	return CreatePromiseAndTask
+func (r *TaskCreateRequest) Kind() Kind {
+	return TaskCreate
 }
 
-type CompletePromiseRequest struct {
+type PromiseCompleteRequest struct {
 	Id    string        `json:"id"`
 	State promise.State `json:"state"`
 	Value promise.Value `json:"value,omitempty"`
 }
 
-func (r *CompletePromiseRequest) String() string {
-	return fmt.Sprintf("CompletePromise(id=%s, state=%v, value=%v)", r.Id, r.State, r.Value)
+func (r *PromiseCompleteRequest) String() string {
+	return fmt.Sprintf("PromiseComplete(id=%s, state=%v, value=%v)", r.Id, r.State, r.Value)
 }
 
-func (r *CompletePromiseRequest) Validate() error {
+func (r *PromiseCompleteRequest) Validate() error {
 	return nil
 }
 
-func (r *CompletePromiseRequest) Kind() Kind {
-	return CompletePromise
+func (r *PromiseCompleteRequest) Kind() Kind {
+	return PromiseComplete
 }
 
 // Callbacks
 
-type CreateCallbackRequest struct {
+type PromiseRegisterRequest struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`
 	Recv      json.RawMessage `json:"recv"`
@@ -126,59 +124,59 @@ type CreateCallbackRequest struct {
 	Timeout   int64           `json:"timeout"`
 }
 
-func (r *CreateCallbackRequest) String() string {
-	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
+func (r *PromiseRegisterRequest) String() string {
+	return fmt.Sprintf("PromiseRegister(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
 }
 
-func (r *CreateCallbackRequest) Validate() error {
+func (r *PromiseRegisterRequest) Validate() error {
 	if r.Mesg.Type == "resume" && r.PromiseId == r.Mesg.Root {
 		return errors.New("promise and root promise must be different")
 	}
 	return nil
 }
 
-func (r *CreateCallbackRequest) Kind() Kind {
-	return CreateCallback
+func (r *PromiseRegisterRequest) Kind() Kind {
+	return PromiseRegister
 }
 
 // Schedules
 
-type ReadScheduleRequest struct {
+type ScheduleGetRequest struct {
 	Id string `json:"id"`
 }
 
-func (r *ReadScheduleRequest) String() string {
-	return fmt.Sprintf("ReadSchedule(id=%s)", r.Id)
+func (r *ScheduleGetRequest) String() string {
+	return fmt.Sprintf("ScheduleGet(id=%s)", r.Id)
 }
 
-func (r *ReadScheduleRequest) Validate() error {
+func (r *ScheduleGetRequest) Validate() error {
 	return nil
 }
 
-func (r *ReadScheduleRequest) Kind() Kind {
-	return ReadSchedule
+func (r *ScheduleGetRequest) Kind() Kind {
+	return ScheduleRead
 }
 
-type SearchSchedulesRequest struct {
+type ScheduleSearchRequest struct {
 	Id     string            `json:"id"`
 	Tags   map[string]string `json:"tags"`
 	Limit  int               `json:"limit"`
 	SortId *int64            `json:"sortId"`
 }
 
-func (r *SearchSchedulesRequest) String() string {
-	return fmt.Sprintf("SearchSchedules(id=%s, tags=%v, limit=%d, sortId=%d)", r.Id, r.Tags, r.Limit, util.SafeDeref(r.SortId))
+func (r *ScheduleSearchRequest) String() string {
+	return fmt.Sprintf("ScheduleSearch(id=%s, tags=%v, limit=%d, sortId=%d)", r.Id, r.Tags, r.Limit, util.SafeDeref(r.SortId))
 }
 
-func (r *SearchSchedulesRequest) Validate() error {
+func (r *ScheduleSearchRequest) Validate() error {
 	return nil
 }
 
-func (r *SearchSchedulesRequest) Kind() Kind {
-	return SearchSchedules
+func (r *ScheduleSearchRequest) Kind() Kind {
+	return ScheduleSearch
 }
 
-type CreateScheduleRequest struct {
+type ScheduleCreateRequest struct {
 	Id             string            `json:"id"`
 	Description    string            `json:"desc,omitempty"`
 	Cron           string            `json:"cron"`
@@ -189,9 +187,9 @@ type CreateScheduleRequest struct {
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
 }
 
-func (r *CreateScheduleRequest) String() string {
+func (r *ScheduleCreateRequest) String() string {
 	return fmt.Sprintf(
-		"CreateSchedule(id=%s, desc=%s, cron=%s, tags=%v, promiseId=%s, promiseTimeout=%d, promiseParam=%v, promiseTags=%v)",
+		"ScheduleCreate(id=%s, desc=%s, cron=%s, tags=%v, promiseId=%s, promiseTimeout=%d, promiseParam=%v, promiseTags=%v)",
 		r.Id,
 		r.Description,
 		r.Cron,
@@ -203,28 +201,28 @@ func (r *CreateScheduleRequest) String() string {
 	)
 }
 
-func (r *CreateScheduleRequest) Validate() error {
+func (r *ScheduleCreateRequest) Validate() error {
 	return nil
 }
 
-func (r *CreateScheduleRequest) Kind() Kind {
-	return CreateSchedule
+func (r *ScheduleCreateRequest) Kind() Kind {
+	return ScheduleCreate
 }
 
-type DeleteScheduleRequest struct {
+type ScheduleDeleteRequest struct {
 	Id string `json:"id"`
 }
 
-func (r *DeleteScheduleRequest) String() string {
-	return fmt.Sprintf("DeleteSchedule(id=%s)", r.Id)
+func (r *ScheduleDeleteRequest) String() string {
+	return fmt.Sprintf("ScheduleDelete(id=%s)", r.Id)
 }
 
-func (r *DeleteScheduleRequest) Validate() error {
+func (r *ScheduleDeleteRequest) Validate() error {
 	return nil
 }
 
-func (r *DeleteScheduleRequest) Kind() Kind {
-	return DeleteSchedule
+func (r *ScheduleDeleteRequest) Kind() Kind {
+	return ScheduleDelete
 }
 
 // Tasks
@@ -248,73 +246,73 @@ func (r *CreateTaskRequest) String() string {
 	)
 }
 
-type ClaimTaskRequest struct {
+type TaskAcquireRequest struct {
 	Id        string `json:"id"`
 	Counter   int    `json:"counter"`
 	ProcessId string `json:"processId"`
 	Ttl       int64  `json:"ttl" binding:"min=0"`
 }
 
-func (r *ClaimTaskRequest) String() string {
-	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, ttl=%d)", r.Id, r.Counter, r.ProcessId, r.Ttl)
+func (r *TaskAcquireRequest) String() string {
+	return fmt.Sprintf("TaskAcquire(id=%s, counter=%d, processId=%s, ttl=%d)", r.Id, r.Counter, r.ProcessId, r.Ttl)
 }
 
-func (r *ClaimTaskRequest) Validate() error {
+func (r *TaskAcquireRequest) Validate() error {
 	return nil
 }
 
-func (r *ClaimTaskRequest) Kind() Kind {
-	return ClaimTask
+func (r *TaskAcquireRequest) Kind() Kind {
+	return TaskAcquire
 }
 
-type CompleteTaskRequest struct {
+type TaskCompleteRequest struct {
 	Id      string `json:"id"`
 	Counter int    `json:"counter"`
 }
 
-func (r *CompleteTaskRequest) String() string {
-	return fmt.Sprintf("CompleteTask(id=%s, counter=%d)", r.Id, r.Counter)
+func (r *TaskCompleteRequest) String() string {
+	return fmt.Sprintf("TaskComplete(id=%s, counter=%d)", r.Id, r.Counter)
 }
 
-func (r *CompleteTaskRequest) Validate() error {
+func (r *TaskCompleteRequest) Validate() error {
 	return nil
 }
 
-func (r *CompleteTaskRequest) Kind() Kind {
-	return CompleteTask
+func (r *TaskCompleteRequest) Kind() Kind {
+	return TaskComplete
 }
 
-type DropTaskRequest struct {
+type TaskReleaseRequest struct {
 	Id      string `json:"id"`
 	Counter int    `json:"counter"`
 }
 
-func (r *DropTaskRequest) String() string {
-	return fmt.Sprintf("DropTask(id=%s, counter=%d)", r.Id, r.Counter)
+func (r *TaskReleaseRequest) String() string {
+	return fmt.Sprintf("TaskRelease(id=%s, counter=%d)", r.Id, r.Counter)
 }
 
-func (r *DropTaskRequest) Validate() error {
+func (r *TaskReleaseRequest) Validate() error {
 	return nil
 }
 
-func (r *DropTaskRequest) Kind() Kind {
-	return DropTask
+func (r *TaskReleaseRequest) Kind() Kind {
+	return TaskRelease
 }
 
-type HeartbeatTasksRequest struct {
+type TaskHeartbeatRequest struct {
 	ProcessId string `json:"processId"`
 }
 
-func (r *HeartbeatTasksRequest) String() string {
-	return fmt.Sprintf("HeartbeatTasks(processId=%s)", r.ProcessId)
+func (r *TaskHeartbeatRequest) String() string {
+	return fmt.Sprintf("TaskHeartbeat(processId=%s)", r.ProcessId)
 }
 
-func (r *HeartbeatTasksRequest) Validate() error {
+func (r *TaskHeartbeatRequest) Validate() error {
 	return nil
 }
 
-func (r *HeartbeatTasksRequest) Kind() Kind {
-	return HeartbeatTasks
+func (r *TaskHeartbeatRequest) Kind() Kind {
+	return TaskHeartbeat
 }
 
 // Echo
@@ -353,36 +351,36 @@ func (r *NoopRequest) Kind() Kind {
 
 // Marker methods that make each of the request types be a
 // RequestPayload type.
-func (r *ReadPromiseRequest) isRequestPayload()          {}
-func (r *SearchPromisesRequest) isRequestPayload()       {}
-func (r *CreatePromiseRequest) isRequestPayload()        {}
-func (r *CreatePromiseAndTaskRequest) isRequestPayload() {}
-func (r *CompletePromiseRequest) isRequestPayload()      {}
-func (r *CreateCallbackRequest) isRequestPayload()       {}
-func (r *ReadScheduleRequest) isRequestPayload()         {}
-func (r *SearchSchedulesRequest) isRequestPayload()      {}
-func (r *CreateScheduleRequest) isRequestPayload()       {}
-func (r *DeleteScheduleRequest) isRequestPayload()       {}
-func (r *ClaimTaskRequest) isRequestPayload()            {}
-func (r *CompleteTaskRequest) isRequestPayload()         {}
-func (r *DropTaskRequest) isRequestPayload()             {}
-func (r *HeartbeatTasksRequest) isRequestPayload()       {}
-func (r *EchoRequest) isRequestPayload()                 {}
-func (r *NoopRequest) isRequestPayload()                 {}
+func (r *PromiseGetRequest) isRequestPayload()      {}
+func (r *PromiseSearchRequest) isRequestPayload()   {}
+func (r *PromiseCreateRequest) isRequestPayload()   {}
+func (r *TaskCreateRequest) isRequestPayload()      {}
+func (r *PromiseCompleteRequest) isRequestPayload() {}
+func (r *PromiseRegisterRequest) isRequestPayload() {}
+func (r *ScheduleGetRequest) isRequestPayload()     {}
+func (r *ScheduleSearchRequest) isRequestPayload()  {}
+func (r *ScheduleCreateRequest) isRequestPayload()  {}
+func (r *ScheduleDeleteRequest) isRequestPayload()  {}
+func (r *TaskAcquireRequest) isRequestPayload()     {}
+func (r *TaskCompleteRequest) isRequestPayload()    {}
+func (r *TaskReleaseRequest) isRequestPayload()     {}
+func (r *TaskHeartbeatRequest) isRequestPayload()   {}
+func (r *EchoRequest) isRequestPayload()            {}
+func (r *NoopRequest) isRequestPayload()            {}
 
 // Request Methods
 
 func (r *Request) String() string {
-	util.Assert(r.Payload != nil, "Payload cannot be nil")
-	return r.Payload.String()
+	util.Assert(r.Data != nil, "Payload cannot be nil")
+	return r.Data.String()
 }
 
 func (r *Request) Kind() Kind {
-	util.Assert(r.Payload != nil, "Payload cannot be nil")
-	return r.Payload.Kind()
+	util.Assert(r.Data != nil, "Payload cannot be nil")
+	return r.Data.Kind()
 }
 
 func (r *Request) Validate() error {
-	util.Assert(r.Payload != nil, "Payload cannot be nil")
-	return r.Payload.Validate()
+	util.Assert(r.Data != nil, "Payload cannot be nil")
+	return r.Data.Validate()
 }
