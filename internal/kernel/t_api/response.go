@@ -11,9 +11,9 @@ import (
 )
 
 type Response struct {
-	Status   StatusCode
-	Metadata map[string]string
-	Payload  ResponsePayload
+	Status StatusCode
+	Head   map[string]string
+	Data   ResponsePayload
 }
 
 type ResponsePayload interface {
@@ -102,7 +102,7 @@ func (r *ScheduleGetResponse) String() string {
 func (r *ScheduleGetResponse) Kind() Kind { return ScheduleRead }
 
 type ScheduleSearchResponse struct {
-	Schedules []*schedule.Schedule             `json:"schedules,omitempty"`
+	Schedules []*schedule.Schedule           `json:"schedules,omitempty"`
 	Cursor    *Cursor[ScheduleSearchRequest] `json:"cursor,omitempty"`
 }
 
@@ -218,72 +218,72 @@ func (r *EchoResponse) isResponsePayload()            {}
 func (r *NoopResponse) isResponsePayload()            {}
 
 func (r *Response) String() string {
-	util.Assert(r.Payload != nil, "Payload must not be nil")
-	return fmt.Sprintf("Response(status=%d, %s)", r.Status, r.Payload.String())
+	util.Assert(r.Data != nil, "Payload must not be nil")
+	return fmt.Sprintf("Response(status=%d, %s)", r.Status, r.Data.String())
 }
 
 func (r *Response) Kind() Kind {
-	util.Assert(r.Payload != nil, "Payload must not be nil")
-	return r.Payload.Kind()
+	util.Assert(r.Data != nil, "Payload must not be nil")
+	return r.Data.Kind()
 }
 
 // Methods to cast Response.Payload to specific response payload types (direct assertion)
 func (r *Response) AsPromiseGetResponse() *PromiseGetResponse {
-	return r.Payload.(*PromiseGetResponse)
+	return r.Data.(*PromiseGetResponse)
 }
 
 func (r *Response) AsPromiseSearchResponse() *PromiseSearchResponse {
-	return r.Payload.(*PromiseSearchResponse)
+	return r.Data.(*PromiseSearchResponse)
 }
 
 func (r *Response) AsPromiseCreateResponse() *PromiseCreateResponse {
-	return r.Payload.(*PromiseCreateResponse)
+	return r.Data.(*PromiseCreateResponse)
 }
 
 func (r *Response) AsTaskCreateResponse() *TaskCreateResponse {
-	return r.Payload.(*TaskCreateResponse)
+	return r.Data.(*TaskCreateResponse)
 }
 
 func (r *Response) AsPromiseCompleteResponse() *PromiseCompleteResponse {
-	return r.Payload.(*PromiseCompleteResponse)
+	return r.Data.(*PromiseCompleteResponse)
 }
 
 func (r *Response) AsPromiseRegisterResponse() *PromiseRegisterResponse {
-	return r.Payload.(*PromiseRegisterResponse)
+	return r.Data.(*PromiseRegisterResponse)
 }
 
 func (r *Response) AsScheduleGetResponse() *ScheduleGetResponse {
-	return r.Payload.(*ScheduleGetResponse)
+	return r.Data.(*ScheduleGetResponse)
 }
 
 func (r *Response) AsScheduleSearchResponse() *ScheduleSearchResponse {
-	return r.Payload.(*ScheduleSearchResponse)
+	return r.Data.(*ScheduleSearchResponse)
 }
 
 func (r *Response) AsScheduleCreateResponse() *ScheduleCreateResponse {
-	return r.Payload.(*ScheduleCreateResponse)
+	return r.Data.(*ScheduleCreateResponse)
 }
 
 func (r *Response) AsScheduleDeleteResponse() *ScheduleDeleteResponse {
-	return r.Payload.(*ScheduleDeleteResponse)
+	return r.Data.(*ScheduleDeleteResponse)
 }
 
 func (r *Response) AsTaskAcquireResponse() *TaskAcquireResponse {
-	return r.Payload.(*TaskAcquireResponse)
+	return r.Data.(*TaskAcquireResponse)
 }
 
 func (r *Response) AsTaskCompleteResponse() *TaskCompleteResponse {
-	return r.Payload.(*TaskCompleteResponse)
+	return r.Data.(*TaskCompleteResponse)
 }
 
 func (r *Response) AsTaskReleaseResponse() *TaskReleaseResponse {
-	return r.Payload.(*TaskReleaseResponse)
+	return r.Data.(*TaskReleaseResponse)
 }
 
 func (r *Response) AsTaskHeartbeatResponse() *TaskHeartbeatResponse {
-	return r.Payload.(*TaskHeartbeatResponse)
+	return r.Data.(*TaskHeartbeatResponse)
 }
 
 func (r *Response) AsEchoResponse() *EchoResponse {
-	return r.Payload.(*EchoResponse)
+	return r.Data.(*EchoResponse)
 }

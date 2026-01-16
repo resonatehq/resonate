@@ -97,8 +97,8 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Head,
-		Payload: &t_api.PromiseSearchResponse{
+		Head: r.Head,
+		Data: &t_api.PromiseSearchResponse{
 			Cursor:   cursor,
 			Promises: promises,
 		},

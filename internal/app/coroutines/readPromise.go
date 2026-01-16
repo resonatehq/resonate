@@ -67,8 +67,8 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 			res = &t_api.Response{
 				Status:   t_api.StatusOK,
-				Metadata: r.Head,
-				Payload: &t_api.PromiseGetResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseGetResponse{
 					Promise: &promise.Promise{
 						Id:          p.Id,
 						State:       cmd.State,
@@ -84,8 +84,8 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		} else {
 			res = &t_api.Response{
 				Status:   t_api.StatusOK,
-				Metadata: r.Head,
-				Payload: &t_api.PromiseGetResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseGetResponse{
 					Promise: p,
 				},
 			}
@@ -93,8 +93,8 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,
-			Metadata: r.Head,
-			Payload:  &t_api.PromiseGetResponse{},
+			Head: r.Head,
+			Data:  &t_api.PromiseGetResponse{},
 		}
 	}
 

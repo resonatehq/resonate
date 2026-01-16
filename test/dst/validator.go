@@ -50,7 +50,7 @@ func (v *Validator) Validate(model *Model, reqTime int64, resTime int64, req *t_
 
 func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	readPromiseReq := req.Data.(*t_api.PromiseGetRequest)
-	readPromiseRes := res.Payload.(*t_api.PromiseGetResponse)
+	readPromiseRes := res.Data.(*t_api.PromiseGetResponse)
 	p := model.promises.get(readPromiseReq.Id)
 
 	switch res.Status {
@@ -83,7 +83,7 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 }
 func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	searchPromisesReq := req.Data.(*t_api.PromiseSearchRequest)
-	searchPromisesRes := res.Payload.(*t_api.PromiseSearchResponse)
+	searchPromisesRes := res.Data.(*t_api.PromiseSearchResponse)
 
 	switch res.Status {
 	case t_api.StatusOK:
@@ -129,14 +129,14 @@ func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime 
 
 func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createPromiseReq := req.Data.(*t_api.PromiseCreateRequest)
-	createPromiseRes := res.Payload.(*t_api.PromiseCreateResponse)
+	createPromiseRes := res.Data.(*t_api.PromiseCreateResponse)
 
 	return v.validateCreatePromise(model, reqTime, resTime, createPromiseReq, res.Status, createPromiseRes)
 }
 
 func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createPromiseAndTaskReq := req.Data.(*t_api.TaskCreateRequest)
-	createPromiseAndTaskRes := res.Payload.(*t_api.TaskCreateResponse)
+	createPromiseAndTaskRes := res.Data.(*t_api.TaskCreateResponse)
 
 	switch res.Status {
 	case t_api.StatusCreated:
@@ -204,7 +204,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 
 func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	completePromiseReq := req.Data.(*t_api.PromiseCompleteRequest)
-	completePromiseRes := res.Payload.(*t_api.PromiseCompleteResponse)
+	completePromiseRes := res.Data.(*t_api.PromiseCompleteResponse)
 	p := model.promises.get(completePromiseReq.Id)
 
 	switch res.Status {
@@ -259,7 +259,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 
 func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createCallbackReq := req.Data.(*t_api.PromiseRegisterRequest)
-	createCallbackRes := res.Payload.(*t_api.PromiseRegisterResponse)
+	createCallbackRes := res.Data.(*t_api.PromiseRegisterResponse)
 	p := model.promises.get(createCallbackReq.PromiseId)
 
 	switch res.Status {
@@ -339,7 +339,7 @@ func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime in
 
 func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	searchSchedulesReq := req.Data.(*t_api.ScheduleSearchRequest)
-	schedules := res.Payload.(*t_api.ScheduleSearchResponse).Schedules
+	schedules := res.Data.(*t_api.ScheduleSearchResponse).Schedules
 
 	switch res.Status {
 	case t_api.StatusOK:
@@ -369,7 +369,7 @@ func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime
 
 func (v *Validator) ValidateCreateSchedule(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createScheduleReq := req.Data.(*t_api.ScheduleCreateRequest)
-	createScheduleRes := res.Payload.(*t_api.ScheduleCreateResponse)
+	createScheduleRes := res.Data.(*t_api.ScheduleCreateResponse)
 	s := model.schedules.get(createScheduleReq.Id)
 
 	switch res.Status {
@@ -418,7 +418,7 @@ func (v *Validator) ValidateDeleteSchedule(model *Model, reqTime int64, resTime 
 
 func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	claimTaskReq := req.Data.(*t_api.TaskAcquireRequest)
-	claimTaskRes := res.Payload.(*t_api.TaskAcquireResponse)
+	claimTaskRes := res.Data.(*t_api.TaskAcquireResponse)
 	t := model.tasks.get(claimTaskReq.Id)
 
 	switch res.Status {
@@ -478,7 +478,7 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 
 func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	completeTaskReq := req.Data.(*t_api.TaskCompleteRequest)
-	completeTaskRes := res.Payload.(*t_api.TaskCompleteResponse)
+	completeTaskRes := res.Data.(*t_api.TaskCompleteResponse)
 	t := model.tasks.get(completeTaskReq.Id)
 
 	switch res.Status {
@@ -548,7 +548,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 
 func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	dropTaskReq := req.Data.(*t_api.TaskReleaseRequest)
-	dropTaskRes := res.Payload.(*t_api.TaskReleaseResponse)
+	dropTaskRes := res.Data.(*t_api.TaskReleaseResponse)
 	t := model.tasks.get(dropTaskReq.Id)
 
 	switch res.Status {
@@ -609,7 +609,7 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 
 func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	heartbeatTasksReq := req.Data.(*t_api.TaskHeartbeatRequest)
-	heartbeatTasksRes := res.Payload.(*t_api.TaskHeartbeatResponse)
+	heartbeatTasksRes := res.Data.(*t_api.TaskHeartbeatResponse)
 
 	switch res.Status {
 	case t_api.StatusOK:

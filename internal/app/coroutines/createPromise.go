@@ -51,8 +51,8 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Head,
-		Payload:  &t_api.PromiseCreateResponse{Promise: completion.promise},
+		Head: r.Head,
+		Data:  &t_api.PromiseCreateResponse{Promise: completion.promise},
 	}, nil
 }
 
@@ -109,8 +109,8 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	}
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Head,
-		Payload:  &t_api.TaskCreateResponse{Promise: completion.promise, Task: completion.task},
+		Head: r.Head,
+		Data:  &t_api.TaskCreateResponse{Promise: completion.promise, Task: completion.task},
 	}, nil
 }
 

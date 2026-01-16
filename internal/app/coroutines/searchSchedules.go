@@ -71,8 +71,8 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Head,
-		Payload: &t_api.ScheduleSearchResponse{
+		Head: r.Head,
+		Data: &t_api.ScheduleSearchResponse{
 			Cursor:    cursor,
 			Schedules: schedules,
 		},

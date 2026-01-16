@@ -172,8 +172,8 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Head,
-		Payload: &t_api.TaskAcquireResponse{
+		Head: r.Head,
+		Data: &t_api.TaskAcquireResponse{
 			Task:            t,
 			RootPromise:     rp,
 			LeafPromise:     lp,

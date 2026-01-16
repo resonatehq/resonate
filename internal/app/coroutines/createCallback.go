@@ -115,8 +115,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		res = &t_api.Response{
 			// Status could be StatusOk or StatusCreated if the Callback Id was already present
 			Status:   status,
-			Metadata: r.Head,
-			Payload: &t_api.PromiseRegisterResponse{
+			Head: r.Head,
+			Data: &t_api.PromiseRegisterResponse{
 				Callback: cb,
 				Promise:  p,
 			},
@@ -124,8 +124,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,
-			Metadata: r.Head,
-			Payload:  &t_api.PromiseRegisterResponse{},
+			Head: r.Head,
+			Data:  &t_api.PromiseRegisterResponse{},
 		}
 	}
 

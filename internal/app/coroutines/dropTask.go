@@ -115,8 +115,8 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Head,
-		Payload: &t_api.TaskReleaseResponse{
+		Head: r.Head,
+		Data: &t_api.TaskReleaseResponse{
 			Task: t,
 		},
 	}, nil

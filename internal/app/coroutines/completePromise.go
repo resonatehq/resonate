@@ -88,8 +88,8 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 			res = &t_api.Response{
 				Status:   status,
-				Metadata: r.Head,
-				Payload: &t_api.PromiseCompleteResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseCompleteResponse{
 					Promise: &promise.Promise{
 						Id:          p.Id,
 						State:       cmd.State,
@@ -105,8 +105,8 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 		} else {
 			res = &t_api.Response{
 				Status:   t_api.StatusOK,
-				Metadata: r.Head,
-				Payload: &t_api.PromiseCompleteResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseCompleteResponse{
 					Promise: p,
 				},
 			}
@@ -114,8 +114,8 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,
-			Metadata: r.Head,
-			Payload:  &t_api.PromiseCompleteResponse{},
+			Head: r.Head,
+			Data:  &t_api.PromiseCompleteResponse{},
 		}
 	}
 

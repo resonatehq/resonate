@@ -115,8 +115,8 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Head,
-		Payload: &t_api.TaskCompleteResponse{
+		Head: r.Head,
+		Data: &t_api.TaskCompleteResponse{
 			Task: t,
 		},
 	}, nil

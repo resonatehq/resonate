@@ -36,8 +36,8 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Head,
-		Payload: &t_api.TaskHeartbeatResponse{
+		Head: r.Head,
+		Data: &t_api.TaskHeartbeatResponse{
 			TasksAffected: result.RowsAffected,
 		},
 	}, nil
