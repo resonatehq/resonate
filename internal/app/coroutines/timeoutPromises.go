@@ -56,7 +56,7 @@ func TimeoutPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				continue
 			}
 
-			awaiting[i] = gocoro.Spawn(c, completePromise(m, nil, &t_aio.UpdatePromiseCommand{
+			awaiting[i] = gocoro.Spawn(c, completePromise(m, &t_aio.UpdatePromiseCommand{
 				Id:          p.Id,
 				State:       promise.GetTimedoutState(p.Tags),
 				Value:       promise.Value{},
