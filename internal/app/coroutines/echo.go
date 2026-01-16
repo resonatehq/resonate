@@ -7,10 +7,10 @@ import (
 )
 
 func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.EchoRequest)
+	req := r.Data.(*t_api.EchoRequest)
 	submission := &t_aio.Submission{
 		Kind: t_aio.Echo,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Echo: &t_aio.EchoSubmission{
 			Data: req.Data,
 		},
@@ -23,8 +23,8 @@ func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_ap
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,
-		Metadata: r.Metadata,
-		Payload: &t_api.EchoResponse{
+		Head: r.Head,
+		Data: &t_api.EchoResponse{
 			Data: completion.Echo.Data,
 		},
 	}, nil

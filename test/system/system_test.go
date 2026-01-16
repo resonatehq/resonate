@@ -55,8 +55,8 @@ func TestSystemLoop(t *testing.T) {
 
 		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
-				Metadata: map[string]string{"id": "test"},
-				Payload: &t_api.EchoRequest{
+				Head: map[string]string{"id": "test"},
+				Data: &t_api.EchoRequest{
 					Data: data,
 				},
 			},
@@ -75,8 +75,8 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
-				Metadata: map[string]string{"id": "test"},
-				Payload: &t_api.EchoRequest{
+				Head: map[string]string{"id": "test"},
+				Data: &t_api.EchoRequest{
 					Data: "nope",
 				},
 			},

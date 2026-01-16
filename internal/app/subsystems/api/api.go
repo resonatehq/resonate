@@ -29,14 +29,14 @@ func (a *API) Process(id string, submission *t_api.Request) (*t_api.Response, *E
 	if id == "" {
 		id = uuid.New().String()
 	}
-	if submission.Metadata == nil {
-		submission.Metadata = map[string]string{}
+	if submission.Head == nil {
+		submission.Head = map[string]string{}
 	}
 
 	// inject tags
-	submission.Metadata["id"] = id
-	submission.Metadata["name"] = submission.Kind().String()
-	submission.Metadata["protocol"] = a.protocol
+	submission.Head["id"] = id
+	submission.Head["name"] = submission.Kind().String()
+	submission.Head["protocol"] = a.protocol
 
 	// completion queue
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
@@ -74,9 +74,9 @@ func (a *API) Process(id string, submission *t_api.Request) (*t_api.Response, *E
 
 // Helper functions
 
-func (a *API) SearchPromises(id string, state string, tags map[string]string, limit int, cursor string) (*t_api.SearchPromisesRequest, *Error) {
+func (a *API) SearchPromises(id string, state string, tags map[string]string, limit int, cursor string) (*t_api.PromiseSearchRequest, *Error) {
 	if cursor != "" {
-		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](cursor)
+		cursor, err := t_api.NewCursor[t_api.PromiseSearchRequest](cursor)
 		if err != nil {
 			return nil, RequestValidationError(err)
 		}
@@ -133,7 +133,7 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 		return nil, RequestValidationError(errors.New("the field limit must be between 1 and 100"))
 	}
 
-	return &t_api.SearchPromisesRequest{
+	return &t_api.PromiseSearchRequest{
 		Id:     id,
 		States: states,
 		Tags:   tags,
@@ -141,9 +141,9 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 	}, nil
 }
 
-func (a *API) SearchSchedules(id string, tags map[string]string, limit int, cursor string) (*t_api.SearchSchedulesRequest, *Error) {
+func (a *API) SearchSchedules(id string, tags map[string]string, limit int, cursor string) (*t_api.ScheduleSearchRequest, *Error) {
 	if cursor != "" {
-		cursor, err := t_api.NewCursor[t_api.SearchSchedulesRequest](cursor)
+		cursor, err := t_api.NewCursor[t_api.ScheduleSearchRequest](cursor)
 		if err != nil {
 			return nil, RequestValidationError(err)
 		}
@@ -171,7 +171,7 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 		return nil, RequestValidationError(errors.New("the field limit must be between 1 and 100"))
 	}
 
-	return &t_api.SearchSchedulesRequest{
+	return &t_api.ScheduleSearchRequest{
 		Id:    id,
 		Tags:  tags,
 		Limit: limit,

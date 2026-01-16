@@ -89,7 +89,7 @@ func SchedulePromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, a
 				CreatedOn: s.NextRunTime,
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(m, nil, commands[i], nil, &t_aio.UpdateScheduleCommand{
+			awaiting[i] = gocoro.Spawn(c, createPromise(m, commands[i], nil, &t_aio.UpdateScheduleCommand{
 				Id:          s.Id,
 				LastRunTime: &s.NextRunTime,
 				NextRunTime: next,

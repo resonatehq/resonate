@@ -27,8 +27,8 @@ func (s *server) readSchedule(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.ReadScheduleRequest{
+		Head: metadata,
+		Data: &t_api.ScheduleGetRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})
@@ -37,7 +37,7 @@ func (s *server) readSchedule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsReadScheduleResponse().Schedule)
+	c.JSON(s.code(res.Status), res.AsScheduleGetResponse().Schedule)
 }
 
 // Search
@@ -88,15 +88,15 @@ func (s *server) searchSchedules(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  req,
+		Head: metadata,
+		Data:  req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	searchSchedules := res.AsSearchSchedulesResponse()
+	searchSchedules := res.AsScheduleSearchResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"schedules": searchSchedules.Schedules,
 		"cursor":    searchSchedules.Cursor,
@@ -145,8 +145,8 @@ func (s *server) createSchedule(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.CreateScheduleRequest{
+		Head: metadata,
+		Data: &t_api.ScheduleCreateRequest{
 			Id:             body.Id,
 			Description:    body.Description,
 			Cron:           body.Cron,
@@ -162,7 +162,7 @@ func (s *server) createSchedule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsCreateScheduleResponse().Schedule)
+	c.JSON(s.code(res.Status), res.AsScheduleCreateResponse().Schedule)
 }
 
 // Delete
@@ -184,8 +184,8 @@ func (s *server) deleteSchedule(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.DeleteScheduleRequest{
+		Head: metadata,
+		Data: &t_api.ScheduleDeleteRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})
@@ -194,6 +194,6 @@ func (s *server) deleteSchedule(c *gin.Context) {
 		return
 	}
 
-	_ = res.AsDeleteScheduleResponse() // Serves as a type assertion
+	_ = res.AsScheduleDeleteResponse() // Serves as a type assertion
 	c.JSON(s.code(res.Status), nil)
 }

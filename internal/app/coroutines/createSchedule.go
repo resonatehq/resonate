@@ -12,7 +12,7 @@ import (
 )
 
 func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.CreateScheduleRequest)
+	req := r.Data.(*t_api.ScheduleCreateRequest)
 	if req.Tags == nil {
 		req.Tags = map[string]string{}
 	}
@@ -30,7 +30,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -62,7 +62,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: r.Metadata,
+			Tags: r.Head,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -94,8 +94,8 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		if result.RowsAffected == 1 {
 			res = &t_api.Response{
 				Status:   t_api.StatusCreated,
-				Metadata: r.Metadata,
-				Payload: &t_api.CreateScheduleResponse{
+				Head: r.Head,
+				Data: &t_api.ScheduleCreateResponse{
 					Schedule: &schedule.Schedule{
 						Id:             req.Id,
 						Description:    req.Description,
@@ -129,8 +129,8 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		res = &t_api.Response{
 			Status:   t_api.StatusOK,
-			Metadata: r.Metadata,
-			Payload: &t_api.CreateScheduleResponse{
+			Head: r.Head,
+			Data: &t_api.ScheduleCreateResponse{
 				Schedule: s,
 			},
 		}

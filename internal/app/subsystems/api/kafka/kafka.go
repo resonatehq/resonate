@@ -400,15 +400,15 @@ func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPay
 
 	// Process the request
 	res, apiErr := s.api.Process(kafkaReq.RequestId, &t_api.Request{
-		Metadata: kafkaReq.Metadata,
-		Payload:  payload,
+		Head: kafkaReq.Metadata,
+		Data: payload,
 	})
 
 	if apiErr != nil {
 		return nil, apiErr
 	}
 
-	return res.Payload, nil
+	return res.Data, nil
 }
 
 func (s *server) respondError(kafkaReq *KafkaRequest, error *api.Error) {

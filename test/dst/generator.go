@@ -113,8 +113,8 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.ReadPromiseRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.PromiseGetRequest{
 			Id: id,
 		},
 	}
@@ -122,7 +122,7 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request {
 	// grab a cursor if one is available
-	if req := g.pop(r, t_api.SearchPromises); req != nil {
+	if req := g.pop(r, t_api.PromiseSearch); req != nil {
 		return req
 	}
 
@@ -148,7 +148,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	}
 
 	return &t_api.Request{
-		Payload: &t_api.SearchPromisesRequest{
+		Data: &t_api.PromiseSearchRequest{
 			Id:     id,
 			States: states,
 			Tags:   tags,
@@ -165,8 +165,8 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	tags := g.tags(r)
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.CreatePromiseRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.PromiseCreateRequest{
 			Id:      id,
 			Param:   promise.Value{Headers: headers, Data: data},
 			Timeout: timeout,
@@ -177,7 +177,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 
 func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
-	createPromiseReq := req.Payload.(*t_api.CreatePromiseRequest)
+	createPromiseReq := req.Data.(*t_api.PromiseCreateRequest)
 	if createPromiseReq.Tags == nil {
 		createPromiseReq.Tags = map[string]string{"resonate:invoke": "dst"}
 	} else {
@@ -185,8 +185,8 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 	}
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": createPromiseReq.Id},
-		Payload: &t_api.CreatePromiseAndTaskRequest{
+		Head: map[string]string{"partitionId": createPromiseReq.Id},
+		Data: &t_api.TaskCreateRequest{
 			Promise: createPromiseReq,
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: createPromiseReq.Id,
@@ -205,8 +205,8 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.CompletePromiseRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.PromiseCompleteRequest{
 			Id:    id,
 			State: state,
 			Value: promise.Value{Headers: headers, Data: data},
@@ -224,8 +224,8 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	switch r.Intn(2) {
 	case 0:
 		return &t_api.Request{
-			Metadata: map[string]string{"partitionId": promiseId},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"partitionId": promiseId},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
@@ -235,8 +235,8 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 		}
 	default:
 		return &t_api.Request{
-			Metadata: map[string]string{"partitionId": promiseId},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"partitionId": promiseId},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        fmt.Sprintf("__notify:%s:%s", promiseId, g.callbackId(r)),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
@@ -253,8 +253,8 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.scheduleId(r)
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.ReadScheduleRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.ScheduleGetRequest{
 			Id: id,
 		},
 	}
@@ -262,7 +262,7 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 
 func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Request {
 	// grab a cursor if one is available
-	if req := g.pop(r, t_api.SearchSchedules); req != nil {
+	if req := g.pop(r, t_api.ScheduleSearch); req != nil {
 		return req
 	}
 
@@ -271,7 +271,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 	tags := g.tags(r)
 
 	return &t_api.Request{
-		Payload: &t_api.SearchSchedulesRequest{
+		Data: &t_api.ScheduleSearchRequest{
 			Id:    id,
 			Tags:  tags,
 			Limit: limit,
@@ -290,8 +290,8 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	promiseTags := g.tags(r)
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.CreateScheduleRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.ScheduleCreateRequest{
 			Id:             id,
 			Description:    "",
 			Cron:           cron,
@@ -308,8 +308,8 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 	id := g.scheduleId(r)
 
 	return &t_api.Request{
-		Metadata: map[string]string{"partitionId": id},
-		Payload: &t_api.DeleteScheduleRequest{
+		Head: map[string]string{"partitionId": id},
+		Data: &t_api.ScheduleDeleteRequest{
 			Id: id,
 		},
 	}
@@ -318,11 +318,11 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 // TASKS
 
 func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
-	req := g.pop(r, t_api.ClaimTask)
+	req := g.pop(r, t_api.TaskAcquire)
 
 	if req != nil {
-		claimTaskReq := req.Payload.(*t_api.ClaimTaskRequest)
-		partitionId, ok := req.Metadata["partitionId"]
+		claimTaskReq := req.Data.(*t_api.TaskAcquireRequest)
+		partitionId, ok := req.Head["partitionId"]
 		util.Assert(ok, "req metadata must contain partitionId")
 
 		g.nextTasks(r,
@@ -336,15 +336,15 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
-	return g.pop(r, t_api.CompleteTask)
+	return g.pop(r, t_api.TaskComplete)
 }
 
 func (g *Generator) GenerateDropTask(r *rand.Rand, t int64) *t_api.Request {
-	return g.pop(r, t_api.DropTask)
+	return g.pop(r, t_api.TaskRelease)
 }
 
 func (g *Generator) GenerateHeartbeatTasks(r *rand.Rand, t int64) *t_api.Request {
-	return g.pop(r, t_api.HeartbeatTasks)
+	return g.pop(r, t_api.TaskHeartbeat)
 }
 
 // Helpers
@@ -399,8 +399,8 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 		switch r.Intn(5) {
 		case 0:
 			g.AddRequest(&t_api.Request{
-				Metadata: map[string]string{"partitionId": partitionId},
-				Payload: &t_api.ClaimTaskRequest{
+				Head: map[string]string{"partitionId": partitionId},
+				Data: &t_api.TaskAcquireRequest{
 					Id:        id,
 					ProcessId: pid,
 					Counter:   counter,
@@ -409,24 +409,24 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 1:
 			g.AddRequest(&t_api.Request{
-				Metadata: map[string]string{"partitionId": partitionId},
-				Payload: &t_api.CompleteTaskRequest{
+				Head: map[string]string{"partitionId": partitionId},
+				Data: &t_api.TaskCompleteRequest{
 					Id:      id,
 					Counter: counter,
 				},
 			})
 		case 2:
 			g.AddRequest(&t_api.Request{
-				Metadata: map[string]string{"partitionId": partitionId},
-				Payload: &t_api.DropTaskRequest{
+				Head: map[string]string{"partitionId": partitionId},
+				Data: &t_api.TaskReleaseRequest{
 					Id:      id,
 					Counter: counter,
 				},
 			})
 		case 3:
 			g.AddRequest(&t_api.Request{
-				Metadata: map[string]string{"partitionId": partitionId},
-				Payload: &t_api.HeartbeatTasksRequest{
+				Head: map[string]string{"partitionId": partitionId},
+				Data: &t_api.TaskHeartbeatRequest{
 					ProcessId: pid,
 				},
 			})

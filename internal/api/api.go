@@ -153,10 +153,10 @@ func (a *api) Signal(cancel <-chan any) <-chan any {
 
 func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
-	util.Assert(sqe.Submission.Metadata != nil, "submission tags must not be nil")
+	util.Assert(sqe.Submission.Head != nil, "submission tags must not be nil")
 
 	kind := sqe.Submission.Kind().String()
-	protocol := sqe.Submission.Metadata["protocol"]
+	protocol := sqe.Submission.Head["protocol"]
 
 	slog.Debug("api:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
 	timer := prometheus.NewTimer(a.metrics.ApiDuration.WithLabelValues(kind, protocol))
