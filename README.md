@@ -84,6 +84,8 @@ resonate.register(countdown);
 from resonate import Resonate, Context
 from threading import Event
 
+# Register the function
+@resonate.register
 def countdown(ctx: Context, count: int, delay: int):
     for i in range(count, 0, -1):
         # Run a function, persist its result
@@ -99,11 +101,8 @@ def ntfy(_: Context, i: int):
 
 # Instantiate Resonate
 resonate = Resonate.remote()
-# Register the function
-resonate.register(countdown)
 resonate.start()  # Start Resonate threads
 Event().wait()  # Keep the main thread alive
-```
 
 [Working example](https://github.com/resonatehq-examples/example-quickstart-py)
 
