@@ -22,6 +22,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	var res *t_api.Response
 
 	// read the promise to see if it exists
+	// TODO(avillega): read the root promise of the Message, is the root promise always what we need instead of promiseId?
+	// Should I create a different  corutine and different request for subscribe and register?
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Head,
@@ -114,8 +116,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		res = &t_api.Response{
 			// Status could be StatusOk or StatusCreated if the Callback Id was already present
-			Status:   status,
-			Head: r.Head,
+			Status: status,
+			Head:   r.Head,
 			Data: &t_api.PromiseRegisterResponse{
 				Callback: cb,
 				Promise:  p,
@@ -123,9 +125,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 	} else {
 		res = &t_api.Response{
-			Status:   t_api.StatusPromiseNotFound,
-			Head: r.Head,
-			Data:  &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Head:   r.Head,
+			Data:   &t_api.PromiseRegisterResponse{},
 		}
 	}
 

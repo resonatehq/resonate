@@ -114,8 +114,10 @@ func (r *PromiseCompleteRequest) Kind() Kind {
 	return PromiseComplete
 }
 
-// Callbacks
-
+// TODO(avillega): Currently used for promise.subscribe and promise.register.
+// Once the old api is fully deleted and the task framework separates the
+// concept of Message and Task we can refactor this request to be closer
+// to the protocol and api.
 type PromiseRegisterRequest struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`

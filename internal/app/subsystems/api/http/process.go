@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
@@ -47,6 +49,16 @@ type promiseSettleData struct {
 	Id    string        `json:"id" binding:"required"`
 	State promise.State `json:"state" binding:"required"`
 	Value promise.Value `json:"value,omitempty"`
+}
+
+type promiseRegisterData struct {
+	Awaiter string `json:"awaiter" binding:"required"`
+	Awaited string `json:"awaited" binding:"required"`
+}
+
+type promiseSubscribeData struct {
+	Id      string `json:"id" binding:"required"`
+	Address string `json:"address" binding:"required"`
 }
 
 type taskCreateData struct {
@@ -162,6 +174,34 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			Id:    d.Id,
 			State: d.State,
 			Value: d.Value,
+		}, nil
+
+	case "promise.register":
+		d, err := bind[promiseRegisterData](data)
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO(avillega): What will be the Head in this context?
+		return &t_api.PromiseRegisterRequest{
+			Id:        util.ResumeId(d.Awaiter, d.Awaited),
+			PromiseId: d.Awaited,
+			Recv:      []byte{},
+			Mesg:      &message.Mesg{Type: "resume", Head: map[string]string{}, Root: d.Awaiter, Leaf: d.Awaited},
+		}, nil
+
+	case "promise.subscribe":
+		d, err := bind[promiseSubscribeData](data)
+		if err != nil {
+			return nil, err
+		}
+
+		// TODO(avillega): What will be the Head in this context?
+		return &t_api.PromiseRegisterRequest{
+			Id:        util.NotifyId(d.Id, d.Address),
+			PromiseId: d.Id,
+			Recv:      []byte(d.Address),
+			Mesg:      &message.Mesg{Type: "notify", Head: map[string]string{}, Root: d.Id},
 		}, nil
 
 	case "task.create":
