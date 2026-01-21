@@ -103,8 +103,12 @@ type scheduleDeleteData struct {
 func (s *server) process(c *gin.Context) {
 	var req Req
 	if err := c.ShouldBindJSON(&req); err != nil {
+		kind := "error"
+		if req.Kind != "" {
+			kind = req.Kind
+		}
 		c.JSON(http.StatusBadRequest, Res{
-			Kind: "error",
+			Kind: kind,
 			Head: map[string]any{"corrId": "", "status": 400},
 			Data: err.Error(),
 		})
