@@ -516,64 +516,76 @@ func TestProcessValidationErrors(t *testing.T) {
 	}()
 
 	testCases := []struct {
-		Name     string
-		ReqBody  string
-		HttpCode int
+		Name         string
+		ReqBody      string
+		ExpectedKind string
+		HttpCode     int
 	}{
 		{
-			Name:     "MissingKind",
-			ReqBody:  `{"head": {"corrId": "test"}, "data": {"id": "foo"}}`,
-			HttpCode: 400,
+			Name:         "MissingKind",
+			ReqBody:      `{"head": {"corrId": "test"}, "data": {"id": "foo"}}`,
+			ExpectedKind: "error",
+			HttpCode:     400,
 		},
 		{
-			Name:     "MissingData",
-			ReqBody:  `{"kind": "promise.get", "head": {"corrId": "test"}}`,
-			HttpCode: 400,
+			Name:         "MissingData",
+			ReqBody:      `{"kind": "promise.get", "head": {"corrId": "test"}}`,
+			ExpectedKind: "promise.get",
+			HttpCode:     400,
 		},
 		{
-			Name:     "UnknownKind",
-			ReqBody:  `{"kind": "unknown.kind", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
-			HttpCode: 400,
+			Name:         "UnknownKind",
+			ReqBody:      `{"kind": "unknown.kind", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
+			ExpectedKind: "unknown.kind",
+			HttpCode:     400,
 		},
 		{
-			Name:     "PromiseGetMissingId",
-			ReqBody:  `{"kind": "promise.get", "head": {"corrId": "test"}, "data": {}}`,
-			HttpCode: 400,
+			Name:         "PromiseGetMissingId",
+			ReqBody:      `{"kind": "promise.get", "head": {"corrId": "test"}, "data": {}}`,
+			ExpectedKind: "promise.get",
+			HttpCode:     400,
 		},
 		{
-			Name:     "PromiseCreateMissingId",
-			ReqBody:  `{"kind": "promise.create", "head": {"corrId": "test"}, "data": {"timeoutAt": 1000}}`,
-			HttpCode: 400,
+			Name:         "PromiseCreateMissingId",
+			ReqBody:      `{"kind": "promise.create", "head": {"corrId": "test"}, "data": {"timeoutAt": 1000}}`,
+			ExpectedKind: "promise.create",
+			HttpCode:     400,
 		},
 		{
-			Name:     "PromiseCreateMissingTimeout",
-			ReqBody:  `{"kind": "promise.create", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
-			HttpCode: 400,
+			Name:         "PromiseCreateMissingTimeout",
+			ReqBody:      `{"kind": "promise.create", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
+			ExpectedKind: "promise.create",
+			HttpCode:     400,
 		},
 		{
-			Name:     "PromiseSettleMissingState",
-			ReqBody:  `{"kind": "promise.settle", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
-			HttpCode: 400,
+			Name:         "PromiseSettleMissingState",
+			ReqBody:      `{"kind": "promise.settle", "head": {"corrId": "test"}, "data": {"id": "foo"}}`,
+			ExpectedKind: "promise.settle",
+			HttpCode:     400,
 		},
 		{
-			Name:     "TaskCreateMissingPid",
-			ReqBody:  `{"kind": "task.create", "head": {"corrId": "test"}, "data": {"ttl": 1000, "action": {"id": "foo", "timeoutAt": 2000}}}`,
-			HttpCode: 400,
+			Name:         "TaskCreateMissingPid",
+			ReqBody:      `{"kind": "task.create", "head": {"corrId": "test"}, "data": {"ttl": 1000, "action": {"id": "foo", "timeoutAt": 2000}}}`,
+			ExpectedKind: "task.create",
+			HttpCode:     400,
 		},
 		{
-			Name:     "TaskAcquireMissingVersion",
-			ReqBody:  `{"kind": "task.acquire", "head": {"corrId": "test"}, "data": {"id": "foo", "pid": "worker", "ttl": 1000}}`,
-			HttpCode: 400,
+			Name:         "TaskAcquireMissingVersion",
+			ReqBody:      `{"kind": "task.acquire", "head": {"corrId": "test"}, "data": {"id": "foo", "pid": "worker", "ttl": 1000}}`,
+			ExpectedKind: "task.acquire",
+			HttpCode:     400,
 		},
 		{
-			Name:     "ScheduleCreateMissingCron",
-			ReqBody:  `{"kind": "schedule.create", "head": {"corrId": "test"}, "data": {"id": "sched", "promiseId": "prom", "promiseTimeout": 1000}}`,
-			HttpCode: 400,
+			Name:         "ScheduleCreateMissingCron",
+			ReqBody:      `{"kind": "schedule.create", "head": {"corrId": "test"}, "data": {"id": "sched", "promiseId": "prom", "promiseTimeout": 1000}}`,
+			ExpectedKind: "schedule.create",
+			HttpCode:     400,
 		},
 		{
-			Name:     "InvalidJson",
-			ReqBody:  `{invalid json}`,
-			HttpCode: 400,
+			Name:         "InvalidJson",
+			ReqBody:      `{invalid json}`,
+			ExpectedKind: "error",
+			HttpCode:     400,
 		},
 	}
 
@@ -602,7 +614,7 @@ func TestProcessValidationErrors(t *testing.T) {
 			if err := json.Unmarshal(body, &actual); err != nil {
 				t.Fatalf("failed to unmarshal response: %v, body: %s", err, string(body))
 			}
-			assert.Equal(t, "error", actual.Kind)
+			assert.Equal(t, tc.ExpectedKind, actual.Kind)
 		})
 	}
 }
