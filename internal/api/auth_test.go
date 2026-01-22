@@ -264,7 +264,7 @@ func TestMatchPromisePrefix(t *testing.T) {
 		// Callback requests
 		{
 			name:        "PromiseRegisterRequest - matching prefix",
-			payload:     &t_api.PromiseRegisterRequest{PromiseId: "test.123"},
+			payload:     &t_api.CallbackCreateRequest{PromiseId: "test.123"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
@@ -506,7 +506,7 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		},
 		{
 			name:       "PromiseRegisterRequest - authorized",
-			payload:    &t_api.PromiseRegisterRequest{PromiseId: "test:promise"},
+			payload:    &t_api.CallbackCreateRequest{PromiseId: "test:promise"},
 			shouldPass: true,
 		},
 		{

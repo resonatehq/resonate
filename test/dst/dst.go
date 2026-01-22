@@ -108,7 +108,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.PromiseComplete, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
 	// callbacks
-	d.Add(t_api.PromiseRegister, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
+	d.Add(t_api.CallbackCreate, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
 	// schedules
 	d.Add(t_api.ScheduleRead, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
@@ -598,8 +598,8 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		case t_api.StatusFieldValidationError:
-			if req.Kind() == t_api.PromiseRegister {
-				callbackReq := req.Data.(*t_api.PromiseRegisterRequest)
+			if req.Kind() == t_api.CallbackCreate {
+				callbackReq := req.Data.(*t_api.CallbackCreateRequest)
 				if callbackReq.Mesg.Type == "resume" && callbackReq.PromiseId == callbackReq.Mesg.Root {
 					// sometimes we generate create callback requests with the same root and
 					// leaf promise ids by chance

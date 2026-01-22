@@ -916,8 +916,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiver",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -926,8 +926,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -950,8 +950,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -960,8 +960,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -985,8 +985,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiver",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -995,8 +995,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1019,8 +1019,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1029,8 +1029,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1054,8 +1054,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackWithTraceContext",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1064,8 +1064,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1090,8 +1090,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFound",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1100,8 +1100,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusPromiseNotFound,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1124,8 +1124,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFoundDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1134,8 +1134,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusPromiseNotFound,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1161,8 +1161,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1171,8 +1171,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1195,8 +1195,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1205,8 +1205,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1230,8 +1230,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1240,8 +1240,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1265,8 +1265,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1275,8 +1275,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1299,8 +1299,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionWithTraceContext",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1309,8 +1309,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1336,8 +1336,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFound",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1346,8 +1346,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusPromiseNotFound,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1370,8 +1370,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFoundDeprecated",
 		Req: &t_api.Request{
-			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
-			Data: &t_api.PromiseRegisterRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "callback.create"},
+			Data: &t_api.CallbackCreateRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1380,8 +1380,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusPromiseNotFound,
-			Data: &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Data:   &t_api.CallbackCreateResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1651,8 +1651,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusNoContent,
-			Data: &t_api.ScheduleDeleteResponse{},
+			Status: t_api.StatusNoContent,
+			Data:   &t_api.ScheduleDeleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1861,8 +1861,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.TaskCompleteResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1891,8 +1891,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.TaskCompleteResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1917,8 +1917,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.TaskReleaseResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1947,8 +1947,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Status:  t_api.StatusCreated,
-			Data: &t_api.TaskReleaseResponse{},
+			Status: t_api.StatusCreated,
+			Data:   &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{

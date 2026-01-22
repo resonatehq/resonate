@@ -132,7 +132,7 @@ func matchPromisePrefix(req *t_api.Request, prefix string) error {
 		id = r.Promise.Id
 	case *t_api.PromiseCompleteRequest:
 		id = r.Id
-	case *t_api.PromiseRegisterRequest:
+	case *t_api.CallbackCreateRequest:
 		id = r.PromiseId
 	case *t_api.ScheduleGetRequest:
 		id = r.Id

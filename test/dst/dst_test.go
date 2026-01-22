@@ -82,7 +82,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	system.AddOnRequest(t_api.TaskCreate, coroutines.CreatePromiseAndTask)
 	system.AddOnRequest(t_api.PromiseComplete, coroutines.CompletePromise)
 	system.AddOnRequest(t_api.PromiseComplete, coroutines.CompletePromise)
-	system.AddOnRequest(t_api.PromiseRegister, coroutines.CreateCallback)
+	system.AddOnRequest(t_api.CallbackCreate, coroutines.CreateCallback)
 	system.AddOnRequest(t_api.ScheduleRead, coroutines.ReadSchedule)
 	system.AddOnRequest(t_api.ScheduleSearch, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.ScheduleCreate, coroutines.CreateSchedule)

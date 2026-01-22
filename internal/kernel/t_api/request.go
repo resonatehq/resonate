@@ -114,11 +114,48 @@ func (r *PromiseCompleteRequest) Kind() Kind {
 	return PromiseComplete
 }
 
-// TODO(avillega): Currently used for promise.subscribe and promise.register.
+type PromiseRegisterRequest struct {
+	Awaiter string `json:"awaiter"`
+	Awaited string `json:"awaited"`
+}
+
+func (r *PromiseRegisterRequest) String() string {
+	return fmt.Sprintf("PromiseRegister(awaiter=%s, awaited=%s)", r.Awaiter, r.Awaited)
+}
+
+func (r *PromiseRegisterRequest) Validate() error {
+	if r.Awaiter == r.Awaited {
+		return errors.New("awaiter and awaited promises must be different")
+	}
+	return nil
+}
+
+func (r *PromiseRegisterRequest) Kind() Kind {
+	return PromiseRegister
+}
+
+type PromiseSubscribeRequest struct {
+	Awaited string `json:"id"`
+	Address string `json:"address"`
+}
+
+func (r *PromiseSubscribeRequest) String() string {
+	return fmt.Sprintf("PromiseSubscribe(awaited=%s, address=%s)", r.Awaited, r.Address)
+}
+
+func (r *PromiseSubscribeRequest) Validate() error {
+	return nil
+}
+
+func (r *PromiseSubscribeRequest) Kind() Kind {
+	return PromiseSubscribe
+}
+
+// TODO(avillega): Currently used on the old api.
 // Once the old api is fully deleted and the task framework separates the
 // concept of Message and Task we can refactor this request to be closer
 // to the protocol and api.
-type PromiseRegisterRequest struct {
+type CallbackCreateRequest struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`
 	Recv      json.RawMessage `json:"recv"`
@@ -126,19 +163,19 @@ type PromiseRegisterRequest struct {
 	Timeout   int64           `json:"timeout"`
 }
 
-func (r *PromiseRegisterRequest) String() string {
-	return fmt.Sprintf("PromiseRegister(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
+func (r *CallbackCreateRequest) String() string {
+	return fmt.Sprintf("CallbackCreate(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
 }
 
-func (r *PromiseRegisterRequest) Validate() error {
+func (r *CallbackCreateRequest) Validate() error {
 	if r.Mesg.Type == "resume" && r.PromiseId == r.Mesg.Root {
 		return errors.New("promise and root promise must be different")
 	}
 	return nil
 }
 
-func (r *PromiseRegisterRequest) Kind() Kind {
-	return PromiseRegister
+func (r *CallbackCreateRequest) Kind() Kind {
+	return CallbackCreate
 }
 
 // Schedules
@@ -353,22 +390,24 @@ func (r *NoopRequest) Kind() Kind {
 
 // Marker methods that make each of the request types be a
 // RequestPayload type.
-func (r *PromiseGetRequest) isRequestPayload()      {}
-func (r *PromiseSearchRequest) isRequestPayload()   {}
-func (r *PromiseCreateRequest) isRequestPayload()   {}
-func (r *TaskCreateRequest) isRequestPayload()      {}
-func (r *PromiseCompleteRequest) isRequestPayload() {}
-func (r *PromiseRegisterRequest) isRequestPayload() {}
-func (r *ScheduleGetRequest) isRequestPayload()     {}
-func (r *ScheduleSearchRequest) isRequestPayload()  {}
-func (r *ScheduleCreateRequest) isRequestPayload()  {}
-func (r *ScheduleDeleteRequest) isRequestPayload()  {}
-func (r *TaskAcquireRequest) isRequestPayload()     {}
-func (r *TaskCompleteRequest) isRequestPayload()    {}
-func (r *TaskReleaseRequest) isRequestPayload()     {}
-func (r *TaskHeartbeatRequest) isRequestPayload()   {}
-func (r *EchoRequest) isRequestPayload()            {}
-func (r *NoopRequest) isRequestPayload()            {}
+func (r *PromiseGetRequest) isRequestPayload()       {}
+func (r *PromiseSearchRequest) isRequestPayload()    {}
+func (r *PromiseCreateRequest) isRequestPayload()    {}
+func (r *TaskCreateRequest) isRequestPayload()       {}
+func (r *PromiseCompleteRequest) isRequestPayload()  {}
+func (r *PromiseRegisterRequest) isRequestPayload()  {}
+func (r *PromiseSubscribeRequest) isRequestPayload() {}
+func (r *CallbackCreateRequest) isRequestPayload()   {}
+func (r *ScheduleGetRequest) isRequestPayload()      {}
+func (r *ScheduleSearchRequest) isRequestPayload()   {}
+func (r *ScheduleCreateRequest) isRequestPayload()   {}
+func (r *ScheduleDeleteRequest) isRequestPayload()   {}
+func (r *TaskAcquireRequest) isRequestPayload()      {}
+func (r *TaskCompleteRequest) isRequestPayload()     {}
+func (r *TaskReleaseRequest) isRequestPayload()      {}
+func (r *TaskHeartbeatRequest) isRequestPayload()    {}
+func (r *EchoRequest) isRequestPayload()             {}
+func (r *NoopRequest) isRequestPayload()             {}
 
 // Request Methods
 

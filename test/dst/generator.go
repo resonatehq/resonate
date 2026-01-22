@@ -225,7 +225,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	case 0:
 		return &t_api.Request{
 			Head: map[string]string{"partitionId": promiseId},
-			Data: &t_api.PromiseRegisterRequest{
+			Data: &t_api.CallbackCreateRequest{
 				Id:        fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
@@ -236,7 +236,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	default:
 		return &t_api.Request{
 			Head: map[string]string{"partitionId": promiseId},
-			Data: &t_api.PromiseRegisterRequest{
+			Data: &t_api.CallbackCreateRequest{
 				Id:        fmt.Sprintf("__notify:%s:%s", promiseId, g.callbackId(r)),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value

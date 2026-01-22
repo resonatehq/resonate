@@ -32,8 +32,6 @@ type Res struct {
 	Data any            `json:"data,omitempty"`
 }
 
-// Request data types per spec.md
-
 type promiseGetData struct {
 	Id string `json:"id" binding:"required"`
 }
@@ -187,7 +185,7 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 		}
 
 		// TODO(avillega): What will be the Head in this context?
-		return &t_api.PromiseRegisterRequest{
+		return &t_api.CallbackCreateRequest{
 			Id:        util.ResumeId(d.Awaiter, d.Awaited),
 			PromiseId: d.Awaited,
 			Recv:      []byte{},
@@ -201,7 +199,7 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 		}
 
 		// TODO(avillega): What will be the Head in this context?
-		return &t_api.PromiseRegisterRequest{
+		return &t_api.CallbackCreateRequest{
 			Id:        util.NotifyId(d.Id, d.Address),
 			PromiseId: d.Id,
 			Recv:      []byte(d.Address),

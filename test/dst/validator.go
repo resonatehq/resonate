@@ -258,8 +258,8 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 }
 
 func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	createCallbackReq := req.Data.(*t_api.PromiseRegisterRequest)
-	createCallbackRes := res.Data.(*t_api.PromiseRegisterResponse)
+	createCallbackReq := req.Data.(*t_api.CallbackCreateRequest)
+	createCallbackRes := res.Data.(*t_api.CallbackCreateResponse)
 	p := model.promises.get(createCallbackReq.PromiseId)
 
 	switch res.Status {
