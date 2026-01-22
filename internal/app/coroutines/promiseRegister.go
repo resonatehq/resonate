@@ -38,8 +38,12 @@ func PromiseRegister(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	recv, exists := awaiter.Tags["resonate:invoke"]
 	if !exists {
-		slog.Error("Awaiter promise missing recv tag", "tags", awaiter.Tags)
-		return nil, t_api.NewError(t_api.StatusPromiseRecvNotFound, err)
+		slog.Debug("Awaiter promise missing recv tag", "tags", awaiter.Tags)
+		return &t_api.Response{
+			Status: t_api.StatusPromiseRecvNotFound,
+			Head:   r.Head,
+			Data:   &t_api.PromiseRegisterResponse{},
+		}, nil
 	}
 
 	if awaited.State == promise.Pending && awaiter.State == promise.Pending {

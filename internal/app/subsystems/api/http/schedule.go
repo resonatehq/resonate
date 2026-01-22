@@ -89,7 +89,7 @@ func (s *server) searchSchedules(c *gin.Context) {
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Head: metadata,
-		Data:  req,
+		Data: req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})

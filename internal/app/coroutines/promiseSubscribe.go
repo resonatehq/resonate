@@ -80,7 +80,7 @@ func PromiseSubscribe(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, a
 	return &t_api.Response{
 		Status: t_api.StatusOK,
 		Head:   r.Head,
-		Data: &t_api.PromiseRegisterResponse{
+		Data: &t_api.PromiseSubscribeResponse{
 			Promise: awaited,
 		},
 	}, nil

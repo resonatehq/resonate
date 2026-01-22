@@ -35,9 +35,9 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 	if result.RowsReturned == 0 {
 		return &t_api.Response{
-			Status:   t_api.StatusScheduleNotFound,
-			Head: r.Head,
-			Data:  &t_api.ScheduleGetResponse{},
+			Status: t_api.StatusScheduleNotFound,
+			Head:   r.Head,
+			Data:   &t_api.ScheduleGetResponse{},
 		}, nil
 	}
 
@@ -48,8 +48,8 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	}
 
 	return &t_api.Response{
-		Status:   t_api.StatusOK,
-		Head: r.Head,
+		Status: t_api.StatusOK,
+		Head:   r.Head,
 		Data: &t_api.ScheduleGetResponse{
 			Schedule: s,
 		},

@@ -214,6 +214,32 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	}
 }
 
+func (g *Generator) GenerateRegisterPromise(r *rand.Rand, t int64) *t_api.Request {
+	awaiter := g.promiseId(r)
+	awaited := g.promiseId(r)
+
+	return &t_api.Request{
+		Head: map[string]string{"partitionId": awaited},
+		Data: &t_api.PromiseRegisterRequest{
+			Awaiter: awaiter,
+			Awaited: awaited,
+		},
+	}
+}
+
+func (g *Generator) GenerateSubscribePromise(r *rand.Rand, t int64) *t_api.Request {
+	awaited := g.promiseId(r)
+	address := g.subscriptionAddress(r)
+
+	return &t_api.Request{
+		Head: map[string]string{"partitionId": awaited},
+		Data: &t_api.PromiseSubscribeRequest{
+			Awaited: awaited,
+			Address: address,
+		},
+	}
+}
+
 // CALLBACKS
 
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
@@ -359,6 +385,10 @@ func (g *Generator) scheduleId(r *rand.Rand) string {
 
 func (g *Generator) callbackId(r *rand.Rand) string {
 	return "cb" + g.idSet[r.Intn(len(g.idSet))]
+}
+
+func (g *Generator) subscriptionAddress(r *rand.Rand) string {
+	return "addr" + g.idSet[r.Intn(len(g.idSet))]
 }
 
 func (g *Generator) promiseSearch(r *rand.Rand) string {

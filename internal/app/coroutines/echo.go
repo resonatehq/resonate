@@ -22,8 +22,8 @@ func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_ap
 	}
 
 	return &t_api.Response{
-		Status:   t_api.StatusOK,
-		Head: r.Head,
+		Status: t_api.StatusOK,
+		Head:   r.Head,
 		Data: &t_api.EchoResponse{
 			Data: completion.Echo.Data,
 		},

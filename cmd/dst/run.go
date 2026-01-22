@@ -180,6 +180,8 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 			system.AddOnRequest(t_api.PromiseCreate, coroutines.CreatePromise)
 			system.AddOnRequest(t_api.TaskCreate, coroutines.CreatePromiseAndTask)
 			system.AddOnRequest(t_api.PromiseComplete, coroutines.CompletePromise)
+			system.AddOnRequest(t_api.PromiseRegister, coroutines.PromiseRegister)
+			system.AddOnRequest(t_api.PromiseSubscribe, coroutines.PromiseSubscribe)
 			system.AddOnRequest(t_api.CallbackCreate, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.ScheduleRead, coroutines.ReadSchedule)
 			system.AddOnRequest(t_api.ScheduleSearch, coroutines.SearchSchedules)
