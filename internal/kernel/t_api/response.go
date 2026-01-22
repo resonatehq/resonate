@@ -290,6 +290,14 @@ func (r *Response) AsScheduleDeleteResponse() *ScheduleDeleteResponse {
 	return r.Data.(*ScheduleDeleteResponse)
 }
 
+func (r *Response) AsPromiseRegisterResponse() *PromiseRegisterResponse {
+	return r.Data.(*PromiseRegisterResponse)
+}
+
+func (r *Response) AsPromiseSubscribeResponse() *PromiseSubscribeResponse {
+	return r.Data.(*PromiseSubscribeResponse)
+}
+
 func (r *Response) AsTaskAcquireResponse() *TaskAcquireResponse {
 	return r.Data.(*TaskAcquireResponse)
 }

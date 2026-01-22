@@ -9,8 +9,6 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
@@ -55,7 +53,7 @@ type promiseRegisterData struct {
 }
 
 type promiseSubscribeData struct {
-	Id      string `json:"id" binding:"required"`
+	Awaited string `json:"awaited" binding:"required"`
 	Address string `json:"address" binding:"required"`
 }
 
@@ -184,12 +182,9 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			return nil, err
 		}
 
-		// TODO(avillega): What will be the Head in this context?
-		return &t_api.CallbackCreateRequest{
-			Id:        util.ResumeId(d.Awaiter, d.Awaited),
-			PromiseId: d.Awaited,
-			Recv:      []byte{},
-			Mesg:      &message.Mesg{Type: "resume", Head: map[string]string{}, Root: d.Awaiter, Leaf: d.Awaited},
+		return &t_api.PromiseRegisterRequest{
+			Awaiter: d.Awaiter,
+			Awaited: d.Awaited,
 		}, nil
 
 	case "promise.subscribe":
@@ -198,12 +193,9 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			return nil, err
 		}
 
-		// TODO(avillega): What will be the Head in this context?
-		return &t_api.CallbackCreateRequest{
-			Id:        util.NotifyId(d.Id, d.Address),
-			PromiseId: d.Id,
-			Recv:      []byte(d.Address),
-			Mesg:      &message.Mesg{Type: "notify", Head: map[string]string{}, Root: d.Id},
+		return &t_api.PromiseSubscribeRequest{
+			Awaited: d.Awaited,
+			Address: d.Address,
 		}, nil
 
 	case "task.create":
@@ -313,6 +305,20 @@ func (s *server) mapResponse(kind string, res *t_api.Response) *Res {
 			Kind: kind,
 			Head: map[string]any{"status": status},
 			Data: map[string]any{"promise": mapPromise(res.AsPromiseCompleteResponse().Promise)},
+		}
+
+	case "promise.register":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
+			Data: map[string]any{"promise": mapPromise(res.AsPromiseRegisterResponse().Promise)},
+		}
+
+	case "promise.subscribe":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
+			Data: map[string]any{"promise": mapPromise(res.AsPromiseSubscribeResponse().Promise)},
 		}
 
 	case "task.create":

@@ -177,6 +177,62 @@ var processTestCases = []*processTestCase{
 		HttpCode:     200,
 		ExpectedBody: `{"kind":"promise.settle","head":{"corrId":"test-corr-4","status":200},"data":{"promise":{"id":"foo","state":"RESOLVED","param":{},"value":{},"timeoutAt":0,"createdAt":100,"settledAt":200}}}`,
 	},
+	// Promise Register
+	{
+		Name: "PromiseRegister",
+		ReqBody: Req{
+			Kind: "promise.register",
+			Head: Head{CorrId: "test-corr-register"},
+			Data: json.RawMessage(`{"awaiter": "awaiter-promise", "awaited": "awaited-promise"}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-register", "name": "promise.register", "protocol": "http"},
+			Data: &t_api.PromiseRegisterRequest{
+				Awaiter: "awaiter-promise",
+				Awaited: "awaited-promise",
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusOK,
+			Data: &t_api.PromiseRegisterResponse{
+				Promise: &promise.Promise{
+					Id:        "awaited-promise",
+					State:     promise.Pending,
+					CreatedOn: util.ToPointer(int64(100)),
+				},
+			},
+		},
+		HttpCode:     200,
+		ExpectedBody: `{"kind":"promise.register","head":{"corrId":"test-corr-register","status":200},"data":{"promise":{"id":"awaited-promise","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":100}}}`,
+	},
+	// Promise Subscribe
+	{
+		Name: "PromiseSubscribe",
+		ReqBody: Req{
+			Kind: "promise.subscribe",
+			Head: Head{CorrId: "test-corr-subscribe"},
+			Data: json.RawMessage(`{"awaited": "awaited-promise", "address": "http://localhost:8080/callback"}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-subscribe", "name": "promise.subscribe", "protocol": "http"},
+			Data: &t_api.PromiseSubscribeRequest{
+				Awaited: "awaited-promise",
+				Address: "http://localhost:8080/callback",
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusOK,
+			Data: &t_api.PromiseSubscribeResponse{
+				Promise: &promise.Promise{
+					Id:        "awaited-promise",
+					State:     promise.Pending,
+					CreatedOn: util.ToPointer(int64(200)),
+				},
+			},
+		},
+		HttpCode:     200,
+		ExpectedBody: `{"kind":"promise.subscribe","head":{"corrId":"test-corr-subscribe","status":200},"data":{"promise":{"id":"awaited-promise","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":200}}}`,
+	},
 	// Task Create
 	{
 		Name: "TaskCreate",
@@ -579,6 +635,30 @@ func TestProcessValidationErrors(t *testing.T) {
 			Name:         "ScheduleCreateMissingCron",
 			ReqBody:      `{"kind": "schedule.create", "head": {"corrId": "test"}, "data": {"id": "sched", "promiseId": "prom", "promiseTimeout": 1000}}`,
 			ExpectedKind: "schedule.create",
+			HttpCode:     400,
+		},
+		{
+			Name:         "PromiseRegisterMissingAwaiter",
+			ReqBody:      `{"kind": "promise.register", "head": {"corrId": "test"}, "data": {"awaited": "foo"}}`,
+			ExpectedKind: "promise.register",
+			HttpCode:     400,
+		},
+		{
+			Name:         "PromiseRegisterMissingAwaited",
+			ReqBody:      `{"kind": "promise.register", "head": {"corrId": "test"}, "data": {"awaiter": "foo"}}`,
+			ExpectedKind: "promise.register",
+			HttpCode:     400,
+		},
+		{
+			Name:         "PromiseSubscribeMissingAwaited",
+			ReqBody:      `{"kind": "promise.subscribe", "head": {"corrId": "test"}, "data": {"address": "http://localhost"}}`,
+			ExpectedKind: "promise.subscribe",
+			HttpCode:     400,
+		},
+		{
+			Name:         "PromiseSubscribeMissingAddress",
+			ReqBody:      `{"kind": "promise.subscribe", "head": {"corrId": "test"}, "data": {"awaited": "foo"}}`,
+			ExpectedKind: "promise.subscribe",
 			HttpCode:     400,
 		},
 		{
