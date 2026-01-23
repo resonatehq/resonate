@@ -10,6 +10,10 @@ const (
 	PromiseCreate
 	PromiseComplete
 	PromiseRegister
+	PromiseSubscribe
+
+	// CALLBACKS (old api)
+	CallbackCreate
 
 	// SCHEDULES
 	ScheduleRead
@@ -44,6 +48,12 @@ func (k Kind) String() string {
 		return "promise.complete"
 	case PromiseRegister:
 		return "promise.register"
+	case PromiseSubscribe:
+		return "promise.subscribe"
+
+	case CallbackCreate:
+		return "callback.create"
+
 	// SCHEDULES
 	case ScheduleRead:
 		return "schedule.get"

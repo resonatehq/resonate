@@ -104,7 +104,7 @@ func TestAuthenticate(t *testing.T) {
 	t.Run("missing authorization header", func(t *testing.T) {
 		req := &t_api.Request{
 			Head: map[string]string{},
-			Data:  &t_api.EchoRequest{Data: "test"},
+			Data: &t_api.EchoRequest{Data: "test"},
 		}
 		_, err := auth.authenticate(req)
 		if err == nil {
@@ -127,7 +127,7 @@ func TestAuthenticate(t *testing.T) {
 
 		req := &t_api.Request{
 			Head: map[string]string{"authorization": token},
-			Data:  &t_api.EchoRequest{Data: "test"},
+			Data: &t_api.EchoRequest{Data: "test"},
 		}
 		returnedClaims, err := auth.authenticate(req)
 		if err != nil {
@@ -157,7 +157,7 @@ func TestAuthenticate(t *testing.T) {
 
 		req := &t_api.Request{
 			Head: map[string]string{"authorization": token},
-			Data:  &t_api.EchoRequest{Data: "test"},
+			Data: &t_api.EchoRequest{Data: "test"},
 		}
 		_, err = auth.authenticate(req)
 		if err == nil {
@@ -264,7 +264,7 @@ func TestMatchPromisePrefix(t *testing.T) {
 		// Callback requests
 		{
 			name:        "PromiseRegisterRequest - matching prefix",
-			payload:     &t_api.PromiseRegisterRequest{PromiseId: "test.123"},
+			payload:     &t_api.CallbackCreateRequest{PromiseId: "test.123"},
 			prefix:      "test",
 			shouldMatch: true,
 		},
@@ -387,7 +387,7 @@ func TestProcess(t *testing.T) {
 
 		req := &t_api.Request{
 			Head: map[string]string{"authorization": token},
-			Data:  &t_api.PromiseGetRequest{Id: "app.promise.1"},
+			Data: &t_api.PromiseGetRequest{Id: "app.promise.1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr != nil {
@@ -409,7 +409,7 @@ func TestProcess(t *testing.T) {
 
 		req := &t_api.Request{
 			Head: map[string]string{"authorization": token},
-			Data:  &t_api.PromiseGetRequest{Id: "any.prefix.promise"},
+			Data: &t_api.PromiseGetRequest{Id: "any.prefix.promise"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr != nil {
@@ -432,7 +432,7 @@ func TestProcess(t *testing.T) {
 
 		req := &t_api.Request{
 			Head: map[string]string{"authorization": token},
-			Data:  &t_api.PromiseGetRequest{Id: "other.promise.1"},
+			Data: &t_api.PromiseGetRequest{Id: "other.promise.1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr == nil {
@@ -443,7 +443,7 @@ func TestProcess(t *testing.T) {
 	t.Run("full flow - missing token", func(t *testing.T) {
 		req := &t_api.Request{
 			Head: map[string]string{},
-			Data:  &t_api.PromiseGetRequest{Id: "app:promise:1"},
+			Data: &t_api.PromiseGetRequest{Id: "app:promise:1"},
 		}
 		apiErr := auth.Process(req)
 		if apiErr == nil {
@@ -506,7 +506,7 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		},
 		{
 			name:       "PromiseRegisterRequest - authorized",
-			payload:    &t_api.PromiseRegisterRequest{PromiseId: "test:promise"},
+			payload:    &t_api.CallbackCreateRequest{PromiseId: "test:promise"},
 			shouldPass: true,
 		},
 		{
@@ -525,7 +525,7 @@ func TestProcessMultipleRequestTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &t_api.Request{
 				Head: metadata,
-				Data:  tt.payload,
+				Data: tt.payload,
 			}
 			apiErr := auth.Process(req)
 			if tt.shouldPass && apiErr != nil {

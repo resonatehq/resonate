@@ -30,8 +30,6 @@ type Res struct {
 	Data any            `json:"data,omitempty"`
 }
 
-// Request data types per spec.md
-
 type promiseGetData struct {
 	Id string `json:"id" binding:"required"`
 }
@@ -47,6 +45,16 @@ type promiseSettleData struct {
 	Id    string        `json:"id" binding:"required"`
 	State promise.State `json:"state" binding:"required"`
 	Value promise.Value `json:"value,omitempty"`
+}
+
+type promiseRegisterData struct {
+	Awaiter string `json:"awaiter" binding:"required"`
+	Awaited string `json:"awaited" binding:"required"`
+}
+
+type promiseSubscribeData struct {
+	Awaited string `json:"awaited" binding:"required"`
+	Address string `json:"address" binding:"required"`
 }
 
 type taskCreateData struct {
@@ -168,6 +176,28 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			Value: d.Value,
 		}, nil
 
+	case "promise.register":
+		d, err := bind[promiseRegisterData](data)
+		if err != nil {
+			return nil, err
+		}
+
+		return &t_api.PromiseRegisterRequest{
+			Awaiter: d.Awaiter,
+			Awaited: d.Awaited,
+		}, nil
+
+	case "promise.subscribe":
+		d, err := bind[promiseSubscribeData](data)
+		if err != nil {
+			return nil, err
+		}
+
+		return &t_api.PromiseSubscribeRequest{
+			Awaited: d.Awaited,
+			Address: d.Address,
+		}, nil
+
 	case "task.create":
 		d, err := bind[taskCreateData](data)
 		if err != nil {
@@ -275,6 +305,20 @@ func (s *server) mapResponse(kind string, res *t_api.Response) *Res {
 			Kind: kind,
 			Head: map[string]any{"status": status},
 			Data: map[string]any{"promise": mapPromise(res.AsPromiseCompleteResponse().Promise)},
+		}
+
+	case "promise.register":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
+			Data: map[string]any{"promise": mapPromise(res.AsPromiseRegisterResponse().Promise)},
+		}
+
+	case "promise.subscribe":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
+			Data: map[string]any{"promise": mapPromise(res.AsPromiseSubscribeResponse().Promise)},
 		}
 
 	case "task.create":

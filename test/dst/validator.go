@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
@@ -193,7 +194,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 				model.promises.set(req.Id, res.Promise)
 				return model, nil
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s' model: %v", p.State, res.Promise.State, req.Id, p)
 			}
 		}
 		return model.Copy(), nil
@@ -257,9 +258,88 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 	}
 }
 
+func (v *Validator) ValidateRegisterPromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	registerPromiseReq := req.Data.(*t_api.PromiseRegisterRequest)
+	registerPromiseRes := res.Data.(*t_api.PromiseRegisterResponse)
+	awaited := model.promises.get(registerPromiseReq.Awaited)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if awaited == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", registerPromiseReq.Awaited)
+		}
+		if awaited.State != registerPromiseRes.Promise.State {
+			if registerPromiseRes.Promise.State == promise.GetTimedoutState(awaited.Tags) && resTime >= awaited.Timeout {
+				model = model.Copy()
+				model.promises.set(registerPromiseReq.Awaited, registerPromiseRes.Promise)
+				return model, nil
+			}
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", awaited.State, registerPromiseRes.Promise.State, registerPromiseReq.Awaited)
+		}
+
+		cbId := util.ResumeId(registerPromiseReq.Awaiter, registerPromiseReq.Awaited)
+		// Assume the callback is created, for compatibility with old protocol and its validation
+		model = model.Copy()
+		model.callbacks.set(cbId, &callback.Callback{
+			Id:            cbId,
+			PromiseId:     awaited.Id,
+			RootPromiseId: registerPromiseReq.Awaiter,
+		})
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		// TODO(avillega) what can we validate?
+		return model, nil
+	case t_api.StatusPromiseRecvNotFound:
+		// TODO(avillega) can we validate this?
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
+func (v *Validator) ValidateSubscribePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	subscribePromiseReq := req.Data.(*t_api.PromiseSubscribeRequest)
+	subscribePromiseRes := res.Data.(*t_api.PromiseSubscribeResponse)
+	p := model.promises.get(subscribePromiseReq.Awaited)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", subscribePromiseReq.Awaited)
+		}
+		if subscribePromiseRes.Promise.State == promise.Pending && reqTime > p.Timeout {
+			return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
+		}
+		if p.State != subscribePromiseRes.Promise.State {
+			if subscribePromiseRes.Promise.State == promise.GetTimedoutState(p.Tags) && resTime >= p.Timeout {
+				model = model.Copy()
+				model.promises.set(subscribePromiseReq.Awaited, subscribePromiseRes.Promise)
+				return model, nil
+			}
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, subscribePromiseRes.Promise.State, subscribePromiseReq.Awaited)
+		}
+		cbId := util.NotifyId(p.Id, subscribePromiseReq.Address)
+		// Assume the callback is created, for compatibility with old protocol and its validation
+		model = model.Copy()
+		model.callbacks.set(cbId, &callback.Callback{
+			Id:            cbId,
+			PromiseId:     p.Id,
+			RootPromiseId: p.Id,
+		})
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", subscribePromiseReq.Awaited)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
 func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	createCallbackReq := req.Data.(*t_api.PromiseRegisterRequest)
-	createCallbackRes := res.Data.(*t_api.PromiseRegisterResponse)
+	createCallbackReq := req.Data.(*t_api.CallbackCreateRequest)
+	createCallbackRes := res.Data.(*t_api.CallbackCreateResponse)
 	p := model.promises.get(createCallbackReq.PromiseId)
 
 	switch res.Status {
@@ -271,11 +351,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		if p.State != promise.Pending {
 			return model, fmt.Errorf("promise '%s' must be pending", createCallbackReq.PromiseId)
 		}
-
-		if model.callbacks.get(createCallbackRes.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%s' exists", createCallbackRes.Callback.Id)
-		}
-
+		// Set the callback unconditionally to play nicely with promiseRegister and promiseSubscribe
 		model = model.Copy()
 		model.callbacks.set(createCallbackRes.Callback.Id, createCallbackRes.Callback)
 		return model, nil

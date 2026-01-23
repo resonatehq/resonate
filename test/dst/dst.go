@@ -106,9 +106,11 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.PromiseCreate, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.TaskCreate, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
 	d.Add(t_api.PromiseComplete, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
+	d.Add(t_api.PromiseRegister, d.generator.GenerateRegisterPromise, d.validator.ValidateRegisterPromise)
+	d.Add(t_api.PromiseSubscribe, d.generator.GenerateSubscribePromise, d.validator.ValidateSubscribePromise)
 
 	// callbacks
-	d.Add(t_api.PromiseRegister, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
+	d.Add(t_api.CallbackCreate, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
 	// schedules
 	d.Add(t_api.ScheduleRead, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
@@ -598,11 +600,18 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		case t_api.StatusFieldValidationError:
-			if req.Kind() == t_api.PromiseRegister {
-				callbackReq := req.Data.(*t_api.PromiseRegisterRequest)
+			if req.Kind() == t_api.CallbackCreate {
+				callbackReq := req.Data.(*t_api.CallbackCreateRequest)
 				if callbackReq.Mesg.Type == "resume" && callbackReq.PromiseId == callbackReq.Mesg.Root {
 					// sometimes we generate create callback requests with the same root and
 					// leaf promise ids by chance
+					return model, nil
+				}
+			} else if req.Kind() == t_api.PromiseRegister {
+				registerReq := req.Data.(*t_api.PromiseRegisterRequest)
+				if registerReq.Awaited == registerReq.Awaiter {
+					// sometimes we generate promise.register requests with the same awaiter and
+					// awaited promise ids by chance
 					return model, nil
 				}
 			}
@@ -613,7 +622,7 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 	}
 
 	if req.Kind() != res.Kind() {
-		return model, fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind(), req.Kind())
+		return model, fmt.Errorf("unexpected response kind '%s' for request kind '%s'", res.Kind().String(), req.Kind().String())
 	}
 
 	return d.validator.Validate(model, reqTime, resTime, req, res)
