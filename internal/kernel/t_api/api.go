@@ -27,6 +27,7 @@ const (
 	TaskRelease
 	TaskComplete
 	TaskFulfill
+	TaskSuspend
 	TaskHeartbeat
 
 	// Echo
@@ -71,6 +72,8 @@ func (k Kind) String() string {
 		return "task.complete"
 	case TaskFulfill:
 		return "task.fulfill"
+	case TaskSuspend:
+		return "task.suspend"
 	case TaskRelease:
 		return "task.release"
 	case TaskHeartbeat:

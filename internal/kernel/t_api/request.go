@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
@@ -347,7 +348,7 @@ type TaskFulfillRequest struct {
 }
 
 func (r *TaskFulfillRequest) String() string {
-	return fmt.Sprintf("TaskFulfill(id=%s, counter=%d, action=(promiseId=%s, state=%v, value=%v))", r.Id, r.Version, r.Action.Id, r.Action.State, r.Action.Value)
+	return fmt.Sprintf("TaskFulfill(id=%s, version=%d, action=(promiseId=%s, state=%v, value=%v))", r.Id, r.Version, r.Action.Id, r.Action.State, r.Action.Value)
 }
 
 func (r *TaskFulfillRequest) Validate() error {
@@ -356,6 +357,43 @@ func (r *TaskFulfillRequest) Validate() error {
 
 func (r *TaskFulfillRequest) Kind() Kind {
 	return TaskFulfill
+}
+
+type TaskSuspendRequest struct {
+	Id      string `json:"id"`
+	Version int    `json:"version"`
+	Actions []PromiseRegisterRequest
+}
+
+func (r *TaskSuspendRequest) String() string {
+	return fmt.Sprintf("TaskSuspend(id=%s, version=%d, actions=(%d)", r.Id, r.Version, len(r.Actions))
+}
+
+func (r *TaskSuspendRequest) Validate() error {
+	if len(r.Actions) == 0 {
+		return errors.New("must register to atleast one promise")
+	}
+	awaiter := r.Actions[0].Awaiter
+
+	diffAwaiter := slices.ContainsFunc(r.Actions, func(e PromiseRegisterRequest) bool {
+		return e.Awaiter != awaiter
+	})
+	if diffAwaiter {
+		return errors.New("must register all callbacks for the same awaiter")
+	}
+
+	sameId := slices.ContainsFunc(r.Actions, func(e PromiseRegisterRequest) bool {
+		return e.Awaiter == e.Awaited
+	})
+	if sameId {
+		return errors.New("awaiter and awaited promises must be different")
+	}
+
+	return nil
+}
+
+func (r *TaskSuspendRequest) Kind() Kind {
+	return TaskSuspend
 }
 
 type TaskHeartbeatRequest struct {
@@ -426,6 +464,7 @@ func (r *TaskAcquireRequest) isRequestPayload()      {}
 func (r *TaskCompleteRequest) isRequestPayload()     {}
 func (r *TaskReleaseRequest) isRequestPayload()      {}
 func (r *TaskFulfillRequest) isRequestPayload()      {}
+func (r *TaskSuspendRequest) isRequestPayload()      {}
 func (r *TaskHeartbeatRequest) isRequestPayload()    {}
 func (r *EchoRequest) isRequestPayload()             {}
 func (r *NoopRequest) isRequestPayload()             {}

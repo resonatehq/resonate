@@ -453,6 +453,58 @@ var processTestCases = []*processTestCase{
 		HttpCode:     200,
 		ExpectedBody: `{"kind":"task.heartbeat","head":{"corrId":"test-corr-9","status":200}}`,
 	},
+	// Task Suspend
+	{
+		Name: "TaskSuspend",
+		ReqBody: Req{
+			Kind: "task.suspend",
+			Head: Head{CorrId: "test-corr-suspend"},
+			Data: json.RawMessage(`{"id": "task-1", "version": 1, "actions": [{"awaiter": "promise-1", "awaited": "promise-2"}]}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-suspend", "name": "task.suspend", "protocol": "http"},
+			Data: &t_api.TaskSuspendRequest{
+				Id:      "task-1",
+				Version: 1,
+				Actions: []t_api.PromiseRegisterRequest{
+					{Awaiter: "promise-1", Awaited: "promise-2"},
+				},
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusOK,
+			Data:   &t_api.TaskSuspendResponse{},
+		},
+		HttpCode:     200,
+		ExpectedBody: `{"kind":"task.suspend","head":{"corrId":"test-corr-suspend","status":200}}`,
+	},
+	// Task Suspend with multiple actions
+	{
+		Name: "TaskSuspendMultipleActions",
+		ReqBody: Req{
+			Kind: "task.suspend",
+			Head: Head{CorrId: "test-corr-suspend-multi"},
+			Data: json.RawMessage(`{"id": "task-2", "version": 3, "actions": [{"awaiter": "p1", "awaited": "p2"}, {"awaiter": "p1", "awaited": "p3"}, {"awaiter": "p1", "awaited": "p4"}]}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-suspend-multi", "name": "task.suspend", "protocol": "http"},
+			Data: &t_api.TaskSuspendRequest{
+				Id:      "task-2",
+				Version: 3,
+				Actions: []t_api.PromiseRegisterRequest{
+					{Awaiter: "p1", Awaited: "p2"},
+					{Awaiter: "p1", Awaited: "p3"},
+					{Awaiter: "p1", Awaited: "p4"},
+				},
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusOK,
+			Data:   &t_api.TaskSuspendResponse{},
+		},
+		HttpCode:     200,
+		ExpectedBody: `{"kind":"task.suspend","head":{"corrId":"test-corr-suspend-multi","status":200}}`,
+	},
 	// Schedule Get
 	{
 		Name: "ScheduleGet",
@@ -713,6 +765,24 @@ func TestProcessValidationErrors(t *testing.T) {
 			Name:         "TaskFulfillMissingAction",
 			ReqBody:      `{"kind": "task.fulfill", "head": {"corrId": "test"}, "data": {"id": "task-1", "version": 1}}`,
 			ExpectedKind: "task.fulfill",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskSuspendMissingId",
+			ReqBody:      `{"kind": "task.suspend", "head": {"corrId": "test"}, "data": {"version": 1, "actions": []}}`,
+			ExpectedKind: "task.suspend",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskSuspendMissingVersion",
+			ReqBody:      `{"kind": "task.suspend", "head": {"corrId": "test"}, "data": {"id": "task-1", "actions": []}}`,
+			ExpectedKind: "task.suspend",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskSuspendMissingActions",
+			ReqBody:      `{"kind": "task.suspend", "head": {"corrId": "test"}, "data": {"id": "task-1", "version": 1}}`,
+			ExpectedKind: "task.suspend",
 			HttpCode:     400,
 		},
 		{
