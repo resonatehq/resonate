@@ -373,6 +373,10 @@ func (g *Generator) GenerateHeartbeatTasks(r *rand.Rand, t int64) *t_api.Request
 	return g.pop(r, t_api.TaskHeartbeat)
 }
 
+func (g *Generator) GenerateFulfillTask(r *rand.Rand, t int64) *t_api.Request {
+	return g.pop(r, t_api.TaskFulfill)
+}
+
 // Helpers
 
 func (g *Generator) promiseId(r *rand.Rand) string {
@@ -425,8 +429,8 @@ func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
 func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, partitionId string) {
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
-	for i := 0; i < r.Intn(3); i++ {
-		switch r.Intn(5) {
+	for i := 0; i < r.Intn(4); i++ {
+		switch r.Intn(6) {
 		case 0:
 			g.AddRequest(&t_api.Request{
 				Head: map[string]string{"partitionId": partitionId},
@@ -461,6 +465,20 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 				},
 			})
 		case 4:
+			state := promise.State(math.Exp2(float64(r.Intn(3) + 1))) // Same formula as CompletePromiseRequest
+			g.AddRequest(&t_api.Request{
+				Head: map[string]string{"partitionId": partitionId}, // partitionId is the rootPromiseId
+				Data: &t_api.TaskFulfillRequest{
+					Id:      id,
+					Version: counter,
+					Action: t_api.PromiseCompleteRequest{
+						Id:    partitionId,
+						State: state,
+						Value: promise.Value{Headers: g.headers(r), Data: g.dataSet[r.Intn(len(g.dataSet))]},
+					},
+				},
+			})
+		case 5:
 			// do nothing
 		}
 	}

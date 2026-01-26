@@ -26,6 +26,7 @@ const (
 	TaskAcquire
 	TaskRelease
 	TaskComplete
+	TaskFulfill
 	TaskHeartbeat
 
 	// Echo
@@ -68,6 +69,8 @@ func (k Kind) String() string {
 		return "task.acquire"
 	case TaskComplete:
 		return "task.complete"
+	case TaskFulfill:
+		return "task.fulfill"
 	case TaskRelease:
 		return "task.release"
 	case TaskHeartbeat:

@@ -189,6 +189,7 @@ func RunDSTCmd(cfg *config.Config, vip *viper.Viper) *cobra.Command {
 			system.AddOnRequest(t_api.ScheduleDelete, coroutines.DeleteSchedule)
 			system.AddOnRequest(t_api.TaskAcquire, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.TaskComplete, coroutines.CompleteTask)
+			system.AddOnRequest(t_api.TaskFulfill, coroutines.TaskFulfill)
 			system.AddOnRequest(t_api.TaskRelease, coroutines.DropTask)
 			system.AddOnRequest(t_api.TaskHeartbeat, coroutines.HeartbeatTasks)
 
