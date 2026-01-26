@@ -114,6 +114,7 @@ func TaskFulfill(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			return nil, err
 		}
 		if !completed {
+			slog.Debug("Couldn't fulfill task and settle promise", "taskId", t.Id, "version", t.Counter, "promiseId", p.Id)
 			return &t_api.Response{
 				Status: t_api.StatusTaskNotClaimed,
 				Head:   r.Head,
