@@ -59,6 +59,10 @@ func (s StatusCode) String() string {
 		return "The task counter is invalid"
 	case StatusTaskInvalidState:
 		return "The task state is invalid"
+	case StatusTaskNotClaimed:
+		return "The task state is invalid"
+	case StatusTaskInvalidVersion:
+		return "The task version is invalid"
 	case StatusTaskPreconditionFailed:
 		return "The task precondition failed"
 	case StatusPromiseNotFound:

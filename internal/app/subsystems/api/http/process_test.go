@@ -366,6 +366,72 @@ var processTestCases = []*processTestCase{
 		HttpCode:     200,
 		ExpectedBody: `{"kind":"task.release","head":{"corrId":"test-corr-8","status":200}}`,
 	},
+	// Task Fulfill
+	{
+		Name: "TaskFulfill",
+		ReqBody: Req{
+			Kind: "task.fulfill",
+			Head: Head{CorrId: "test-corr-fulfill"},
+			Data: json.RawMessage(`{"id": "task-1", "version": 1, "action": {"id": "task-promise-1", "state": "RESOLVED", "value": {"headers": {"Content-Type": "application/json"}, "data": "cmVzdWx0"}}}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-fulfill", "name": "task.fulfill", "protocol": "http"},
+			Data: &t_api.TaskFulfillRequest{
+				Id:      "task-1",
+				Version: 1,
+				Action: t_api.PromiseCompleteRequest{
+					Id:    "task-promise-1",
+					State: promise.Resolved,
+					Value: promise.Value{
+						Headers: map[string]string{"Content-Type": "application/json"},
+						Data:    []byte("result"),
+					},
+				},
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusOK,
+			Data: &t_api.TaskFulfillResponse{
+				Promise: &promise.Promise{
+					Id:    "task-promise-1",
+					State: promise.Resolved,
+					Value: promise.Value{
+						Headers: map[string]string{"Content-Type": "application/json"},
+						Data:    []byte("result"),
+					},
+					CreatedOn:   util.ToPointer(int64(100)),
+					CompletedOn: util.ToPointer(int64(200)),
+				},
+			},
+		},
+		HttpCode:     200,
+		ExpectedBody: `{"kind":"task.fulfill","head":{"corrId":"test-corr-fulfill","status":200},"data":{"promise":{"id":"task-promise-1","state":"RESOLVED","param":{},"value":{"headers":{"Content-Type":"application/json"},"data":"cmVzdWx0"},"timeoutAt":0,"createdAt":100,"settledAt":200}}}`,
+	},
+	// Task Fulfill Conflict (already claimed)
+	{
+		Name: "TaskFulfillConflict",
+		ReqBody: Req{
+			Kind: "task.fulfill",
+			Head: Head{CorrId: "test-corr-fulfill-conflict"},
+			Data: json.RawMessage(`{"id": "task-1", "version": 1, "action": {"id": "task-promise-1", "state": "RESOLVED"}}`),
+		},
+		Expected: &t_api.Request{
+			Head: map[string]string{"id": "test-corr-fulfill-conflict", "name": "task.fulfill", "protocol": "http"},
+			Data: &t_api.TaskFulfillRequest{
+				Id:      "task-1",
+				Version: 1,
+				Action: t_api.PromiseCompleteRequest{
+					Id:    "task-promise-1",
+					State: promise.Resolved,
+				},
+			},
+		},
+		Response: &t_api.Response{
+			Status: t_api.StatusTaskNotClaimed,
+		},
+		HttpCode:     409,
+		ExpectedBody: `{"kind":"task.fulfill","head":{"corrId":"test-corr-fulfill-conflict","status":409},"data":"The task state is invalid"}`,
+	},
 	// Task Heartbeat
 	{
 		Name: "TaskHeartbeat",
@@ -629,6 +695,24 @@ func TestProcessValidationErrors(t *testing.T) {
 			Name:         "TaskAcquireMissingVersion",
 			ReqBody:      `{"kind": "task.acquire", "head": {"corrId": "test"}, "data": {"id": "foo", "pid": "worker", "ttl": 1000}}`,
 			ExpectedKind: "task.acquire",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskFulfillMissingId",
+			ReqBody:      `{"kind": "task.fulfill", "head": {"corrId": "test"}, "data": {"version": 1, "action": {"id": "foo", "state": "RESOLVED"}}}`,
+			ExpectedKind: "task.fulfill",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskFulfillMissingVersion",
+			ReqBody:      `{"kind": "task.fulfill", "head": {"corrId": "test"}, "data": {"id": "task-1", "action": {"id": "foo", "state": "RESOLVED"}}}`,
+			ExpectedKind: "task.fulfill",
+			HttpCode:     400,
+		},
+		{
+			Name:         "TaskFulfillMissingAction",
+			ReqBody:      `{"kind": "task.fulfill", "head": {"corrId": "test"}, "data": {"id": "task-1", "version": 1}}`,
+			ExpectedKind: "task.fulfill",
 			HttpCode:     400,
 		},
 		{
