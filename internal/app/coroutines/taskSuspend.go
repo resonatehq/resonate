@@ -51,6 +51,13 @@ func TaskSuspend(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 	util.Assert(len(req.Actions) > 0, "must have at least one action")
 	awaiter, err := gocoro.SpawnAndAwait(c, readPromise(r.Head, req.Actions[0].Awaiter))
+	if awaiter == nil {
+		return &t_api.Response{
+			Status: t_api.StatusPromiseNotFound,
+			Head:   r.Head,
+			Data:   &t_api.TaskSuspendResponse{},
+		}, nil
+	}
 
 	if awaiter.State != promise.Pending {
 		return &t_api.Response{
@@ -70,15 +77,23 @@ func TaskSuspend(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		}, nil
 	}
 
-	awaiting := []gocoroPromise.Awaitable[bool]{}
+	awaiting := make([]gocoroPromise.Awaitable[bool], len(req.Actions))
 	for i, action := range req.Actions {
 		awaiting[i] = gocoro.Spawn(c, promiseRegister(r.Head, awaiter, recv, action.Awaited))
 	}
 
 	for _, p := range awaiting {
 		created, err := gocoro.Await(c, p)
+		var error *t_api.Error
 		if err != nil {
-			return nil, err
+			if !errors.As(err, &error) && error.Code() != t_api.StatusPromiseNotFound {
+				return nil, err
+			}
+			return &t_api.Response{
+				Status: t_api.StatusPromiseNotFound,
+				Head:   r.Head,
+				Data:   &t_api.TaskSuspendResponse{},
+			}, nil
 		}
 
 		if !created {
@@ -165,7 +180,7 @@ func promiseRegister(head map[string]string, awaiter *promise.Promise, recv stri
 		result := t_aio.AsAlterCallbacks(completion.Store.Results[0])
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-		return result.RowsAffected == 1, nil
+		return true, nil
 	}
 
 }

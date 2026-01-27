@@ -377,6 +377,10 @@ func (g *Generator) GenerateFulfillTask(r *rand.Rand, t int64) *t_api.Request {
 	return g.pop(r, t_api.TaskFulfill)
 }
 
+func (g *Generator) GenerateSuspendTask(r *rand.Rand, t int64) *t_api.Request {
+	return g.pop(r, t_api.TaskSuspend)
+}
+
 // Helpers
 
 func (g *Generator) promiseId(r *rand.Rand) string {
@@ -430,7 +434,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(4); i++ {
-		switch r.Intn(6) {
+		switch r.Intn(7) {
 		case 0:
 			g.AddRequest(&t_api.Request{
 				Head: map[string]string{"partitionId": partitionId},
@@ -479,6 +483,23 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 				},
 			})
 		case 5:
+			numActions := r.Intn(3) + 1
+			actions := make([]t_api.PromiseRegisterRequest, numActions)
+			for i := 0; i < numActions; i++ {
+				actions[i] = t_api.PromiseRegisterRequest{
+					Awaiter: partitionId,
+					Awaited: g.promiseId(r),
+				}
+			}
+			g.AddRequest(&t_api.Request{
+				Head: map[string]string{"partitionId": partitionId},
+				Data: &t_api.TaskSuspendRequest{
+					Id:      id,
+					Version: counter,
+					Actions: actions,
+				},
+			})
+		case 6:
 			// do nothing
 		}
 	}

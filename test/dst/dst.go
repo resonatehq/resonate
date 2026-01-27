@@ -123,6 +123,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.TaskRelease, d.generator.GenerateDropTask, d.validator.ValidateDropTask)
 	d.Add(t_api.TaskHeartbeat, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
 	d.Add(t_api.TaskFulfill, d.generator.GenerateFulfillTask, d.validator.ValidateFulfillTask)
+	d.Add(t_api.TaskSuspend, d.generator.GenerateSuspendTask, d.validator.ValidateSuspendTask)
 
 	// backchannel validators
 	d.bcValidator.AddBcValidator(ValidateTasksWithSameRootPromiseId)
@@ -615,6 +616,9 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 					// awaited promise ids by chance
 					return model, nil
 				}
+			} else if req.Kind() == t_api.TaskSuspend {
+				// Allow all task.suspend
+				return model, nil
 			}
 			fallthrough
 		default:
