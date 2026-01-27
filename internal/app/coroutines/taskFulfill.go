@@ -82,11 +82,7 @@ func TaskFulfill(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		if !ok {
 			slog.Debug("Couldn't fulfill task and settle promise", "taskId", t.Id, "version", t.Counter, "promiseId", p.Id)
 			// Assume the task somehow got acquire by another process that completed the promise
-			return &t_api.Response{
-				Status: t_api.StatusTaskNotClaimed,
-				Head:   r.Head,
-				Data:   &t_api.TaskFulfillResponse{},
-			}, nil
+			return TaskFulfill(c, r)
 		}
 
 		metrics.TasksTotal.WithLabelValues("completed").Inc()
