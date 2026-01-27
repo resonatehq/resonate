@@ -24,6 +24,8 @@ const (
 	StatusScheduleNotFound       StatusCode = 40401
 	StatusTaskNotFound           StatusCode = 40403
 	StatusPromiseRecvNotFound    StatusCode = 40404
+	StatusTaskNotClaimed         StatusCode = 40901
+	StatusTaskInvalidVersion     StatusCode = 40902
 	StatusTaskPreconditionFailed StatusCode = 41200
 
 	// Platform level status (50000-59909)
@@ -57,6 +59,10 @@ func (s StatusCode) String() string {
 		return "The task counter is invalid"
 	case StatusTaskInvalidState:
 		return "The task state is invalid"
+	case StatusTaskNotClaimed:
+		return "The task state is invalid"
+	case StatusTaskInvalidVersion:
+		return "The task version is invalid"
 	case StatusTaskPreconditionFailed:
 		return "The task precondition failed"
 	case StatusPromiseNotFound:

@@ -122,6 +122,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.TaskComplete, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
 	d.Add(t_api.TaskRelease, d.generator.GenerateDropTask, d.validator.ValidateDropTask)
 	d.Add(t_api.TaskHeartbeat, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
+	d.Add(t_api.TaskFulfill, d.generator.GenerateFulfillTask, d.validator.ValidateFulfillTask)
 
 	// backchannel validators
 	d.bcValidator.AddBcValidator(ValidateTasksWithSameRootPromiseId)

@@ -309,6 +309,8 @@ type TaskCompleteRequest struct {
 	Counter int    `json:"counter"`
 }
 
+// For old api, new api uses TaskFulfill
+// TODO(avillega): remove it once old api is fully deprecated
 func (r *TaskCompleteRequest) String() string {
 	return fmt.Sprintf("TaskComplete(id=%s, counter=%d)", r.Id, r.Counter)
 }
@@ -336,6 +338,24 @@ func (r *TaskReleaseRequest) Validate() error {
 
 func (r *TaskReleaseRequest) Kind() Kind {
 	return TaskRelease
+}
+
+type TaskFulfillRequest struct {
+	Id      string `json:"id"`
+	Version int    `json:"version"`
+	Action  PromiseCompleteRequest
+}
+
+func (r *TaskFulfillRequest) String() string {
+	return fmt.Sprintf("TaskFulfill(id=%s, counter=%d, action=(promiseId=%s, state=%v, value=%v))", r.Id, r.Version, r.Action.Id, r.Action.State, r.Action.Value)
+}
+
+func (r *TaskFulfillRequest) Validate() error {
+	return nil
+}
+
+func (r *TaskFulfillRequest) Kind() Kind {
+	return TaskFulfill
 }
 
 type TaskHeartbeatRequest struct {
@@ -405,6 +425,7 @@ func (r *ScheduleDeleteRequest) isRequestPayload()   {}
 func (r *TaskAcquireRequest) isRequestPayload()      {}
 func (r *TaskCompleteRequest) isRequestPayload()     {}
 func (r *TaskReleaseRequest) isRequestPayload()      {}
+func (r *TaskFulfillRequest) isRequestPayload()      {}
 func (r *TaskHeartbeatRequest) isRequestPayload()    {}
 func (r *EchoRequest) isRequestPayload()             {}
 func (r *NoopRequest) isRequestPayload()             {}

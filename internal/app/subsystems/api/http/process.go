@@ -75,6 +75,12 @@ type taskReleaseData struct {
 	Version int    `json:"version" binding:"required"`
 }
 
+type taskFulfillData struct {
+	Id      string            `json:"id" binding:"required"`
+	Version int               `json:"version" binding:"required"`
+	Action  promiseSettleData `json:"action" binding:"required"`
+}
+
 type taskHeartbeatData struct {
 	Pid string `json:"pid" binding:"required"`
 }
@@ -240,6 +246,21 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			Counter: d.Version,
 		}, nil
 
+	case "task.fulfill":
+		d, err := bind[taskFulfillData](data)
+		if err != nil {
+			return nil, err
+		}
+		return &t_api.TaskFulfillRequest{
+			Id:      d.Id,
+			Version: d.Version,
+			Action: t_api.PromiseCompleteRequest{
+				Id:    d.Action.Id,
+				State: d.Action.State,
+				Value: d.Action.Value,
+			},
+		}, nil
+
 	case "task.heartbeat":
 		d, err := bind[taskHeartbeatData](data)
 		if err != nil {
@@ -357,6 +378,13 @@ func (s *server) mapResponse(kind string, res *t_api.Response) *Res {
 		return &Res{
 			Kind: kind,
 			Head: map[string]any{"status": status},
+		}
+
+	case "task.fulfill":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
+			Data: map[string]any{"promise": mapPromise(res.AsTaskFulfillResponse().Promise)},
 		}
 
 	case "task.heartbeat":

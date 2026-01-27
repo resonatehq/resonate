@@ -726,3 +726,54 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
+
+// TODO(avillega) revisit this validation once TasksV2 is implemented
+func (v *Validator) ValidateFulfillTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	fulfillTaskReq := req.Data.(*t_api.TaskFulfillRequest)
+	fulfillTaskRes := res.Data.(*t_api.TaskFulfillResponse)
+	t := model.tasks.get(fulfillTaskReq.Id)
+	p := model.promises.get(fulfillTaskReq.Action.Id)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%s' state not claimed", fulfillTaskReq.Id)
+		}
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", fulfillTaskReq.Action.Id)
+		}
+		if fulfillTaskRes.Promise.State == promise.Pending {
+			return model, fmt.Errorf("promise '%s' should not be pending after fulfill", fulfillTaskReq.Action.Id)
+		}
+
+		model = model.Copy()
+		model.promises.set(fulfillTaskReq.Action.Id, fulfillTaskRes.Promise)
+		return model, nil
+	case t_api.StatusTaskNotClaimed:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		if t.State == task.Claimed {
+			return model, fmt.Errorf("task '%s' is claimed", fulfillTaskReq.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidVersion:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		if fulfillTaskReq.Version == t.Counter && t.ExpiresAt >= resTime {
+			return model, fmt.Errorf("task '%s' version match (%d == %d)", fulfillTaskReq.Id, fulfillTaskReq.Version, t.Counter)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%s' exists", fulfillTaskReq.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}

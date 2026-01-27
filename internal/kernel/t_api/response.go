@@ -186,6 +186,16 @@ func (r *TaskReleaseResponse) String() string {
 
 func (r *TaskReleaseResponse) Kind() Kind { return TaskRelease }
 
+type TaskFulfillResponse struct {
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+func (r *TaskFulfillResponse) String() string {
+	return fmt.Sprintf("TaskFulfill(promise=%v)", r.Promise)
+}
+
+func (r *TaskFulfillResponse) Kind() Kind { return TaskFulfill }
+
 type TaskHeartbeatResponse struct {
 	TasksAffected int64 `json:"tasksAffected"`
 }
@@ -235,6 +245,7 @@ func (r *ScheduleDeleteResponse) isResponsePayload()   {}
 func (r *TaskAcquireResponse) isResponsePayload()      {}
 func (r *TaskCompleteResponse) isResponsePayload()     {}
 func (r *TaskReleaseResponse) isResponsePayload()      {}
+func (r *TaskFulfillResponse) isResponsePayload()      {}
 func (r *TaskHeartbeatResponse) isResponsePayload()    {}
 func (r *EchoResponse) isResponsePayload()             {}
 func (r *NoopResponse) isResponsePayload()             {}
@@ -308,6 +319,10 @@ func (r *Response) AsTaskCompleteResponse() *TaskCompleteResponse {
 
 func (r *Response) AsTaskReleaseResponse() *TaskReleaseResponse {
 	return r.Data.(*TaskReleaseResponse)
+}
+
+func (r *Response) AsTaskFulfillResponse() *TaskFulfillResponse {
+	return r.Data.(*TaskFulfillResponse)
 }
 
 func (r *Response) AsTaskHeartbeatResponse() *TaskHeartbeatResponse {
