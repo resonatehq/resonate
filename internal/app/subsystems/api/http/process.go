@@ -81,6 +81,12 @@ type taskFulfillData struct {
 	Action  promiseSettleData `json:"action" binding:"required"`
 }
 
+type taskSuspendData struct {
+	Id      string                `json:"id" binding:"required"`
+	Version int                   `json:"version" binding:"required"`
+	Actions []promiseRegisterData `json:"actions" binding:"required,dive"`
+}
+
 type taskHeartbeatData struct {
 	Pid string `json:"pid" binding:"required"`
 }
@@ -261,6 +267,24 @@ func (s *server) bindRequest(kind string, data json.RawMessage) (t_api.RequestPa
 			},
 		}, nil
 
+	case "task.suspend":
+		d, err := bind[taskSuspendData](data)
+		if err != nil {
+			return nil, err
+		}
+		actions := make([]t_api.PromiseRegisterRequest, len(d.Actions))
+		for i, a := range d.Actions {
+			actions[i] = t_api.PromiseRegisterRequest{
+				Awaiter: a.Awaiter,
+				Awaited: a.Awaited,
+			}
+		}
+		return &t_api.TaskSuspendRequest{
+			Id:      d.Id,
+			Version: d.Version,
+			Actions: actions,
+		}, nil
+
 	case "task.heartbeat":
 		d, err := bind[taskHeartbeatData](data)
 		if err != nil {
@@ -385,6 +409,12 @@ func (s *server) mapResponse(kind string, res *t_api.Response) *Res {
 			Kind: kind,
 			Head: map[string]any{"status": status},
 			Data: map[string]any{"promise": mapPromise(res.AsTaskFulfillResponse().Promise)},
+		}
+
+	case "task.suspend":
+		return &Res{
+			Kind: kind,
+			Head: map[string]any{"status": status},
 		}
 
 	case "task.heartbeat":

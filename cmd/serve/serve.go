@@ -200,6 +200,7 @@ func Serve(cfg *config.Config) error {
 	system.AddOnRequest(t_api.TaskAcquire, coroutines.ClaimTask)
 	system.AddOnRequest(t_api.TaskComplete, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.TaskFulfill, coroutines.TaskFulfill)
+	system.AddOnRequest(t_api.TaskSuspend, coroutines.TaskSuspend)
 	system.AddOnRequest(t_api.TaskRelease, coroutines.DropTask)
 	system.AddOnRequest(t_api.TaskHeartbeat, coroutines.HeartbeatTasks)
 	system.AddOnRequest(t_api.Noop, coroutines.Noop)

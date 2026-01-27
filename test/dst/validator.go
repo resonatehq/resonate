@@ -749,16 +749,17 @@ func (v *Validator) ValidateFulfillTask(model *Model, reqTime int64, resTime int
 			return model, fmt.Errorf("promise '%s' should not be pending after fulfill", fulfillTaskReq.Action.Id)
 		}
 
+		new_t := *t
+		new_t.State = task.Completed
 		model = model.Copy()
+		model.tasks.set(new_t.Id, &new_t)
 		model.promises.set(fulfillTaskReq.Action.Id, fulfillTaskRes.Promise)
 		return model, nil
 	case t_api.StatusTaskNotClaimed:
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
 		}
-		if t.State == task.Claimed {
-			return model, fmt.Errorf("task '%s' is claimed", fulfillTaskReq.Id)
-		}
+		// We could have lost the task by another process completing the underlying promise
 		return model, nil
 	case t_api.StatusTaskInvalidVersion:
 		if t == nil {
@@ -771,6 +772,50 @@ func (v *Validator) ValidateFulfillTask(model *Model, reqTime int64, resTime int
 	case t_api.StatusTaskNotFound:
 		if t != nil {
 			return model, fmt.Errorf("task '%s' exists", fulfillTaskReq.Id)
+		}
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", fulfillTaskReq.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
+// TODO(avillega): revisit once taskV2 is implemented
+func (v *Validator) ValidateSuspendTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	suspendTaskReq := req.Data.(*t_api.TaskSuspendRequest)
+	t := model.tasks.get(suspendTaskReq.Id)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", suspendTaskReq.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%s' state not claimed", suspendTaskReq.Id)
+		}
+
+		new_t := *t
+		new_t.State = task.Completed
+		model = model.Copy()
+		model.tasks.set(new_t.Id, &new_t)
+		return model, nil
+	case t_api.StatusKeepGoing:
+		return model, nil
+	case t_api.StatusPromiseRecvNotFound:
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		return model, nil
+	case t_api.StatusTaskNotClaimed:
+		return model, nil
+	case t_api.StatusTaskInvalidVersion:
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%s' exists", suspendTaskReq.Id)
 		}
 		return model, nil
 	default:
