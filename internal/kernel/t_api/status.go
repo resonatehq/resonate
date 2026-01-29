@@ -12,6 +12,7 @@ const (
 	StatusOK        StatusCode = 20000
 	StatusCreated   StatusCode = 20100
 	StatusNoContent StatusCode = 20400
+	StatusKeepGoing StatusCode = 30000
 
 	StatusFieldValidationError   StatusCode = 40000
 	StatusUnauthorized           StatusCode = 40100
@@ -45,6 +46,8 @@ func (s StatusCode) String() string {
 	switch s {
 	case StatusOK, StatusCreated, StatusNoContent:
 		return "The request was successful"
+	case StatusKeepGoing:
+		return "The request was successful (keep going)"
 	case StatusFieldValidationError:
 		return "The request is invalid"
 	case StatusUnauthorized:
@@ -95,5 +98,5 @@ func (s StatusCode) String() string {
 }
 
 func (s StatusCode) IsSuccessful() bool {
-	return s >= 20000 && s < 30000
+	return s >= 20000 && s < 40000
 }

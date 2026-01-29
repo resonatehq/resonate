@@ -196,6 +196,15 @@ func (r *TaskFulfillResponse) String() string {
 
 func (r *TaskFulfillResponse) Kind() Kind { return TaskFulfill }
 
+type TaskSuspendResponse struct {
+}
+
+func (r *TaskSuspendResponse) String() string {
+	return fmt.Sprintf("TaskSuspend()")
+}
+
+func (r *TaskSuspendResponse) Kind() Kind { return TaskSuspend }
+
 type TaskHeartbeatResponse struct {
 	TasksAffected int64 `json:"tasksAffected"`
 }
@@ -246,6 +255,7 @@ func (r *TaskAcquireResponse) isResponsePayload()      {}
 func (r *TaskCompleteResponse) isResponsePayload()     {}
 func (r *TaskReleaseResponse) isResponsePayload()      {}
 func (r *TaskFulfillResponse) isResponsePayload()      {}
+func (r *TaskSuspendResponse) isResponsePayload()      {}
 func (r *TaskHeartbeatResponse) isResponsePayload()    {}
 func (r *EchoResponse) isResponsePayload()             {}
 func (r *NoopResponse) isResponsePayload()             {}
@@ -323,6 +333,10 @@ func (r *Response) AsTaskReleaseResponse() *TaskReleaseResponse {
 
 func (r *Response) AsTaskFulfillResponse() *TaskFulfillResponse {
 	return r.Data.(*TaskFulfillResponse)
+}
+
+func (r *Response) AsTaskSuspendResponse() *TaskSuspendResponse {
+	return r.Data.(*TaskSuspendResponse)
 }
 
 func (r *Response) AsTaskHeartbeatResponse() *TaskHeartbeatResponse {
