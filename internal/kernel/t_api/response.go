@@ -200,7 +200,7 @@ type TaskSuspendResponse struct {
 }
 
 func (r *TaskSuspendResponse) String() string {
-	return fmt.Sprintf("TaskSuspend()")
+	return "TaskSuspend()"
 }
 
 func (r *TaskSuspendResponse) Kind() Kind { return TaskSuspend }

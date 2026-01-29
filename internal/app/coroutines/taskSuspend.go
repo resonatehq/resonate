@@ -51,6 +51,11 @@ func TaskSuspend(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 	util.Assert(len(req.Actions) > 0, "must have at least one action")
 	awaiter, err := gocoro.SpawnAndAwait(c, readPromise(r.Head, req.Actions[0].Awaiter))
+
+	if err != nil {
+		return nil, err
+	}
+
 	if awaiter == nil {
 		return &t_api.Response{
 			Status: t_api.StatusPromiseNotFound,
@@ -133,7 +138,7 @@ func promiseRegister(head map[string]string, awaiter *promise.Promise, recv stri
 		}
 
 		if awaited == nil {
-			return false, t_api.NewError(t_api.StatusPromiseNotFound, errors.New("Promise not found"))
+			return false, t_api.NewError(t_api.StatusPromiseNotFound, errors.New("promise not found"))
 		}
 
 		if awaited.State != promise.Pending {
