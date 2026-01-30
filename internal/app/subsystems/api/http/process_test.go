@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -304,10 +305,15 @@ var processTestCases = []*processTestCase{
 					State:     promise.Pending,
 					CreatedOn: util.ToPointer(int64(100)),
 				},
+				Task: &task.Task{
+					Mesg: &message.Mesg{
+						Type: "invoke",
+					},
+				},
 			},
 		},
 		HttpCode:     200,
-		ExpectedBody: `{"kind":"task.acquire","head":{"corrId":"test-corr-6","status":200},"data":{"data":{"invoked":{"id":"task-1","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":100}},"kind":"invoke"}}`,
+		ExpectedBody: `{"kind":"task.acquire","head":{"corrId":"test-corr-6","status":200},"data":{"data":{"preload": [], "promise":{"id":"task-1","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":100}},"kind":"invoke"}}`,
 	},
 	// Task Acquire (resume case)
 	{
@@ -339,10 +345,15 @@ var processTestCases = []*processTestCase{
 					State:     promise.Pending,
 					CreatedOn: util.ToPointer(int64(100)),
 				},
+				Task: &task.Task{
+					Mesg: &message.Mesg{
+						Type: "resume",
+					},
+				},
 			},
 		},
 		HttpCode:     200,
-		ExpectedBody: `{"kind":"task.acquire","head":{"corrId":"test-corr-7","status":200},"data":{"data":{"awaited":{"id":"child-promise","state":"RESOLVED","param":{},"value":{},"timeoutAt":0,"createdAt":50},"invoked":{"id":"root-promise","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":100}},"kind":"resume"}}`,
+		ExpectedBody: `{"kind":"task.acquire","head":{"corrId":"test-corr-7","status":200},"data":{"kind": "resume", "data":{"preload": [], "promise":{"id":"root-promise","state":"PENDING","param":{},"value":{},"timeoutAt":0,"createdAt":100}}}}`,
 	},
 	// Task Release
 	{
@@ -668,7 +679,7 @@ func TestProcess(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.HttpCode, res.StatusCode, string(body))
-			assert.JSONEq(t, tc.ExpectedBody, string(body))
+			assert.JSONEq(t, tc.ExpectedBody, string(body), string(body))
 
 			select {
 			case err := <-httpTest.errors:

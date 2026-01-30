@@ -20,8 +20,9 @@ type Req struct {
 }
 
 type Head struct {
-	Auth   string `json:"auth,omitempty"`
-	CorrId string `json:"corrId"`
+	Version string `json:"version,omitempty"`
+	Auth    string `json:"auth,omitempty"`
+	CorrId  string `json:"corrId"`
 }
 
 type Res struct {
@@ -57,6 +58,11 @@ type promiseSubscribeData struct {
 	Address string `json:"address" binding:"required"`
 }
 
+type TaskData struct {
+	Id      string `json:"id" binding:"required"`
+	Version string `json:"version" binding:"required"`
+}
+
 type taskCreateData struct {
 	Pid    string            `json:"pid" binding:"required"`
 	Ttl    int64             `json:"ttl" binding:"required"`
@@ -88,7 +94,8 @@ type taskSuspendData struct {
 }
 
 type taskHeartbeatData struct {
-	Pid string `json:"pid" binding:"required"`
+	Pid   string     `json:"pid" binding:"required"`
+	Tasks []TaskData `json:"tasks" binding:"dive"`
 }
 
 type scheduleGetData struct {
@@ -379,18 +386,12 @@ func (s *server) mapResponse(kind string, res *t_api.Response) *Res {
 
 	case "task.acquire":
 		r := res.AsTaskAcquireResponse()
-		data := map[string]any{}
-		if r.LeafPromise != nil && r.RootPromise != nil && r.LeafPromise.Id != r.RootPromise.Id {
-			data["kind"] = "resume"
-			data["data"] = map[string]any{
-				"invoked": mapPromise(r.RootPromise),
-				"awaited": mapPromise(r.LeafPromise),
-			}
-		} else {
-			data["kind"] = "invoke"
-			data["data"] = map[string]any{
-				"invoked": mapPromise(r.LeafPromise),
-			}
+		data := map[string]any{
+			"kind": r.Task.Mesg.Type,
+			"data": map[string]any{
+				"promise": mapPromise(r.RootPromise),
+				"preload": []any{},
+			},
 		}
 		return &Res{
 			Kind: kind,
