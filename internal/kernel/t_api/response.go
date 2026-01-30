@@ -76,18 +76,38 @@ func (r *PromiseCompleteResponse) String() string {
 
 func (r *PromiseCompleteResponse) Kind() Kind { return PromiseComplete }
 
+type PromiseRegisterResponse struct {
+	Promise *promise.Promise `json:"promise"`
+}
+
+func (r *PromiseRegisterResponse) String() string {
+	return fmt.Sprintf("PromiseRegister(promise=%v)", r.Promise)
+}
+
+func (r *PromiseRegisterResponse) Kind() Kind { return PromiseRegister }
+
+type PromiseSubscribeResponse struct {
+	Promise *promise.Promise `json:"promise"`
+}
+
+func (r *PromiseSubscribeResponse) String() string {
+	return fmt.Sprintf("PromiseSubscribe(promise=%v)", r.Promise)
+}
+
+func (r *PromiseSubscribeResponse) Kind() Kind { return PromiseSubscribe }
+
 // Callbacks
 
-type PromiseRegisterResponse struct {
+type CallbackCreateResponse struct {
 	Promise  *promise.Promise   `json:"promise,omitempty"`
 	Callback *callback.Callback `json:"callback,omitempty"`
 }
 
-func (r *PromiseRegisterResponse) String() string {
-	return fmt.Sprintf("PromiseRegister(promise=%v, callback=%v)", r.Promise, r.Callback)
+func (r *CallbackCreateResponse) String() string {
+	return fmt.Sprintf("CallbackCreate(promise=%v, callback=%v)", r.Promise, r.Callback)
 }
 
-func (r *PromiseRegisterResponse) Kind() Kind { return PromiseRegister }
+func (r *CallbackCreateResponse) Kind() Kind { return CallbackCreate }
 
 // Schedules
 
@@ -166,6 +186,25 @@ func (r *TaskReleaseResponse) String() string {
 
 func (r *TaskReleaseResponse) Kind() Kind { return TaskRelease }
 
+type TaskFulfillResponse struct {
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+func (r *TaskFulfillResponse) String() string {
+	return fmt.Sprintf("TaskFulfill(promise=%v)", r.Promise)
+}
+
+func (r *TaskFulfillResponse) Kind() Kind { return TaskFulfill }
+
+type TaskSuspendResponse struct {
+}
+
+func (r *TaskSuspendResponse) String() string {
+	return "TaskSuspend()"
+}
+
+func (r *TaskSuspendResponse) Kind() Kind { return TaskSuspend }
+
 type TaskHeartbeatResponse struct {
 	TasksAffected int64 `json:"tasksAffected"`
 }
@@ -200,22 +239,26 @@ func (r *NoopResponse) Kind() Kind { return Noop }
 
 // Marker methods that make each of the request types be a
 // ResponsePayload type.
-func (r *PromiseGetResponse) isResponsePayload()      {}
-func (r *PromiseSearchResponse) isResponsePayload()   {}
-func (r *PromiseCreateResponse) isResponsePayload()   {}
-func (r *TaskCreateResponse) isResponsePayload()      {}
-func (r *PromiseCompleteResponse) isResponsePayload() {}
-func (r *PromiseRegisterResponse) isResponsePayload() {}
-func (r *ScheduleGetResponse) isResponsePayload()     {}
-func (r *ScheduleSearchResponse) isResponsePayload()  {}
-func (r *ScheduleCreateResponse) isResponsePayload()  {}
-func (r *ScheduleDeleteResponse) isResponsePayload()  {}
-func (r *TaskAcquireResponse) isResponsePayload()     {}
-func (r *TaskCompleteResponse) isResponsePayload()    {}
-func (r *TaskReleaseResponse) isResponsePayload()     {}
-func (r *TaskHeartbeatResponse) isResponsePayload()   {}
-func (r *EchoResponse) isResponsePayload()            {}
-func (r *NoopResponse) isResponsePayload()            {}
+func (r *PromiseGetResponse) isResponsePayload()       {}
+func (r *PromiseSearchResponse) isResponsePayload()    {}
+func (r *PromiseCreateResponse) isResponsePayload()    {}
+func (r *TaskCreateResponse) isResponsePayload()       {}
+func (r *PromiseCompleteResponse) isResponsePayload()  {}
+func (r *PromiseRegisterResponse) isResponsePayload()  {}
+func (r *PromiseSubscribeResponse) isResponsePayload() {}
+func (r *CallbackCreateResponse) isResponsePayload()   {}
+func (r *ScheduleGetResponse) isResponsePayload()      {}
+func (r *ScheduleSearchResponse) isResponsePayload()   {}
+func (r *ScheduleCreateResponse) isResponsePayload()   {}
+func (r *ScheduleDeleteResponse) isResponsePayload()   {}
+func (r *TaskAcquireResponse) isResponsePayload()      {}
+func (r *TaskCompleteResponse) isResponsePayload()     {}
+func (r *TaskReleaseResponse) isResponsePayload()      {}
+func (r *TaskFulfillResponse) isResponsePayload()      {}
+func (r *TaskSuspendResponse) isResponsePayload()      {}
+func (r *TaskHeartbeatResponse) isResponsePayload()    {}
+func (r *EchoResponse) isResponsePayload()             {}
+func (r *NoopResponse) isResponsePayload()             {}
 
 func (r *Response) String() string {
 	util.Assert(r.Data != nil, "Payload must not be nil")
@@ -248,8 +291,8 @@ func (r *Response) AsPromiseCompleteResponse() *PromiseCompleteResponse {
 	return r.Data.(*PromiseCompleteResponse)
 }
 
-func (r *Response) AsPromiseRegisterResponse() *PromiseRegisterResponse {
-	return r.Data.(*PromiseRegisterResponse)
+func (r *Response) AsCreateCallbackResponse() *CallbackCreateResponse {
+	return r.Data.(*CallbackCreateResponse)
 }
 
 func (r *Response) AsScheduleGetResponse() *ScheduleGetResponse {
@@ -268,6 +311,14 @@ func (r *Response) AsScheduleDeleteResponse() *ScheduleDeleteResponse {
 	return r.Data.(*ScheduleDeleteResponse)
 }
 
+func (r *Response) AsPromiseRegisterResponse() *PromiseRegisterResponse {
+	return r.Data.(*PromiseRegisterResponse)
+}
+
+func (r *Response) AsPromiseSubscribeResponse() *PromiseSubscribeResponse {
+	return r.Data.(*PromiseSubscribeResponse)
+}
+
 func (r *Response) AsTaskAcquireResponse() *TaskAcquireResponse {
 	return r.Data.(*TaskAcquireResponse)
 }
@@ -278,6 +329,14 @@ func (r *Response) AsTaskCompleteResponse() *TaskCompleteResponse {
 
 func (r *Response) AsTaskReleaseResponse() *TaskReleaseResponse {
 	return r.Data.(*TaskReleaseResponse)
+}
+
+func (r *Response) AsTaskFulfillResponse() *TaskFulfillResponse {
+	return r.Data.(*TaskFulfillResponse)
+}
+
+func (r *Response) AsTaskSuspendResponse() *TaskSuspendResponse {
+	return r.Data.(*TaskSuspendResponse)
 }
 
 func (r *Response) AsTaskHeartbeatResponse() *TaskHeartbeatResponse {

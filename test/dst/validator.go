@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
@@ -193,7 +194,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 				model.promises.set(req.Id, res.Promise)
 				return model, nil
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s' model: %v", p.State, res.Promise.State, req.Id, p)
 			}
 		}
 		return model.Copy(), nil
@@ -257,9 +258,88 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 	}
 }
 
+func (v *Validator) ValidateRegisterPromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	registerPromiseReq := req.Data.(*t_api.PromiseRegisterRequest)
+	registerPromiseRes := res.Data.(*t_api.PromiseRegisterResponse)
+	awaited := model.promises.get(registerPromiseReq.Awaited)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if awaited == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", registerPromiseReq.Awaited)
+		}
+		if awaited.State != registerPromiseRes.Promise.State {
+			if registerPromiseRes.Promise.State == promise.GetTimedoutState(awaited.Tags) && resTime >= awaited.Timeout {
+				model = model.Copy()
+				model.promises.set(registerPromiseReq.Awaited, registerPromiseRes.Promise)
+				return model, nil
+			}
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", awaited.State, registerPromiseRes.Promise.State, registerPromiseReq.Awaited)
+		}
+
+		cbId := util.ResumeId(registerPromiseReq.Awaiter, registerPromiseReq.Awaited)
+		// Assume the callback is created, for compatibility with old protocol and its validation
+		model = model.Copy()
+		model.callbacks.set(cbId, &callback.Callback{
+			Id:            cbId,
+			PromiseId:     awaited.Id,
+			RootPromiseId: registerPromiseReq.Awaiter,
+		})
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		// TODO(avillega) what can we validate?
+		return model, nil
+	case t_api.StatusPromiseRecvNotFound:
+		// TODO(avillega) can we validate this?
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
+func (v *Validator) ValidateSubscribePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	subscribePromiseReq := req.Data.(*t_api.PromiseSubscribeRequest)
+	subscribePromiseRes := res.Data.(*t_api.PromiseSubscribeResponse)
+	p := model.promises.get(subscribePromiseReq.Awaited)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", subscribePromiseReq.Awaited)
+		}
+		if subscribePromiseRes.Promise.State == promise.Pending && reqTime > p.Timeout {
+			return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
+		}
+		if p.State != subscribePromiseRes.Promise.State {
+			if subscribePromiseRes.Promise.State == promise.GetTimedoutState(p.Tags) && resTime >= p.Timeout {
+				model = model.Copy()
+				model.promises.set(subscribePromiseReq.Awaited, subscribePromiseRes.Promise)
+				return model, nil
+			}
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, subscribePromiseRes.Promise.State, subscribePromiseReq.Awaited)
+		}
+		cbId := util.NotifyId(p.Id, subscribePromiseReq.Address)
+		// Assume the callback is created, for compatibility with old protocol and its validation
+		model = model.Copy()
+		model.callbacks.set(cbId, &callback.Callback{
+			Id:            cbId,
+			PromiseId:     p.Id,
+			RootPromiseId: p.Id,
+		})
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", subscribePromiseReq.Awaited)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
 func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	createCallbackReq := req.Data.(*t_api.PromiseRegisterRequest)
-	createCallbackRes := res.Data.(*t_api.PromiseRegisterResponse)
+	createCallbackReq := req.Data.(*t_api.CallbackCreateRequest)
+	createCallbackRes := res.Data.(*t_api.CallbackCreateResponse)
 	p := model.promises.get(createCallbackReq.PromiseId)
 
 	switch res.Status {
@@ -271,11 +351,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		if p.State != promise.Pending {
 			return model, fmt.Errorf("promise '%s' must be pending", createCallbackReq.PromiseId)
 		}
-
-		if model.callbacks.get(createCallbackRes.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%s' exists", createCallbackRes.Callback.Id)
-		}
-
+		// Set the callback unconditionally to play nicely with promiseRegister and promiseSubscribe
 		model = model.Copy()
 		model.callbacks.set(createCallbackRes.Callback.Id, createCallbackRes.Callback)
 		return model, nil
@@ -645,6 +721,102 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 			model.tasks.set(t.Id, t)
 		}
 
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
+// TODO(avillega) revisit this validation once TasksV2 is implemented
+func (v *Validator) ValidateFulfillTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	fulfillTaskReq := req.Data.(*t_api.TaskFulfillRequest)
+	fulfillTaskRes := res.Data.(*t_api.TaskFulfillResponse)
+	t := model.tasks.get(fulfillTaskReq.Id)
+	p := model.promises.get(fulfillTaskReq.Action.Id)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%s' state not claimed", fulfillTaskReq.Id)
+		}
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", fulfillTaskReq.Action.Id)
+		}
+		if fulfillTaskRes.Promise.State == promise.Pending {
+			return model, fmt.Errorf("promise '%s' should not be pending after fulfill", fulfillTaskReq.Action.Id)
+		}
+
+		new_t := *t
+		new_t.State = task.Completed
+		model = model.Copy()
+		model.tasks.set(new_t.Id, &new_t)
+		model.promises.set(fulfillTaskReq.Action.Id, fulfillTaskRes.Promise)
+		return model, nil
+	case t_api.StatusTaskNotClaimed:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		// We could have lost the task by another process completing the underlying promise
+		return model, nil
+	case t_api.StatusTaskInvalidVersion:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", fulfillTaskReq.Id)
+		}
+		if fulfillTaskReq.Version == t.Counter && t.ExpiresAt >= resTime {
+			return model, fmt.Errorf("task '%s' version match (%d == %d)", fulfillTaskReq.Id, fulfillTaskReq.Version, t.Counter)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%s' exists", fulfillTaskReq.Id)
+		}
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", fulfillTaskReq.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
+	}
+}
+
+// TODO(avillega): revisit once taskV2 is implemented
+func (v *Validator) ValidateSuspendTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	suspendTaskReq := req.Data.(*t_api.TaskSuspendRequest)
+	t := model.tasks.get(suspendTaskReq.Id)
+
+	switch res.Status {
+	case t_api.StatusOK:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", suspendTaskReq.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%s' state not claimed", suspendTaskReq.Id)
+		}
+
+		new_t := *t
+		new_t.State = task.Completed
+		model = model.Copy()
+		model.tasks.set(new_t.Id, &new_t)
+		return model, nil
+	case t_api.StatusKeepGoing:
+		return model, nil
+	case t_api.StatusPromiseRecvNotFound:
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		return model, nil
+	case t_api.StatusTaskNotClaimed:
+		return model, nil
+	case t_api.StatusTaskInvalidVersion:
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%s' exists", suspendTaskReq.Id)
+		}
 		return model, nil
 	default:
 		return model, fmt.Errorf("unexpected response status '%d'", res.Status)

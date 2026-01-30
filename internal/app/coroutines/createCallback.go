@@ -13,7 +13,7 @@ import (
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Data.(*t_api.PromiseRegisterRequest)
+	req := r.Data.(*t_api.CallbackCreateRequest)
 	util.Assert(req != nil, "create callback must not be nil")
 	util.Assert(req.Mesg.Type == "resume" || req.Mesg.Type == "notify", "message type must be resume or notify")
 	util.Assert(req.Mesg.Type == "resume" || req.PromiseId == req.Mesg.Root, "if notify, root promise id must equal leaf promise id")
@@ -21,7 +21,6 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	var res *t_api.Response
 
-	// read the promise to see if it exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Head,
@@ -114,18 +113,18 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		res = &t_api.Response{
 			// Status could be StatusOk or StatusCreated if the Callback Id was already present
-			Status:   status,
-			Head: r.Head,
-			Data: &t_api.PromiseRegisterResponse{
+			Status: status,
+			Head:   r.Head,
+			Data: &t_api.CallbackCreateResponse{
 				Callback: cb,
 				Promise:  p,
 			},
 		}
 	} else {
 		res = &t_api.Response{
-			Status:   t_api.StatusPromiseNotFound,
-			Head: r.Head,
-			Data:  &t_api.PromiseRegisterResponse{},
+			Status: t_api.StatusPromiseNotFound,
+			Head:   r.Head,
+			Data:   &t_api.CallbackCreateResponse{},
 		}
 	}
 
