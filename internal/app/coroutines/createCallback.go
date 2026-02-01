@@ -13,7 +13,7 @@ import (
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.CreateCallbackRequest)
+	req := r.Data.(*t_api.PromiseRegisterRequest)
 	util.Assert(req != nil, "create callback must not be nil")
 	util.Assert(req.Mesg.Type == "resume" || req.Mesg.Type == "notify", "message type must be resume or notify")
 	util.Assert(req.Mesg.Type == "resume" || req.PromiseId == req.Mesg.Root, "if notify, root promise id must equal leaf promise id")
@@ -24,10 +24,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	// read the promise to see if it exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Fence: r.Fence,
 				Commands: []t_aio.Command{
 					&t_aio.ReadPromiseCommand{
 						Id: req.PromiseId,
@@ -68,10 +67,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Metadata,
+				Tags: r.Head,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Fence: r.Fence,
 						Commands: []t_aio.Command{
 							&t_aio.CreateCallbackCommand{
 								Id:        req.Id,
@@ -117,8 +115,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		res = &t_api.Response{
 			// Status could be StatusOk or StatusCreated if the Callback Id was already present
 			Status:   status,
-			Metadata: r.Metadata,
-			Payload: &t_api.CreateCallbackResponse{
+			Head: r.Head,
+			Data: &t_api.PromiseRegisterResponse{
 				Callback: cb,
 				Promise:  p,
 			},
@@ -126,8 +124,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,
-			Metadata: r.Metadata,
-			Payload:  &t_api.CreateCallbackResponse{},
+			Head: r.Head,
+			Data:  &t_api.PromiseRegisterResponse{},
 		}
 	}
 

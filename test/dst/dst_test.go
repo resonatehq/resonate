@@ -76,29 +76,25 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
-	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
-	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
-	system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
-	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
-	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
-	system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
-	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
-	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
-	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
-	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
-	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
-	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
-	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+	system.AddOnRequest(t_api.PromiseGet, coroutines.ReadPromise)
+	system.AddOnRequest(t_api.PromiseSearch, coroutines.SearchPromises)
+	system.AddOnRequest(t_api.PromiseCreate, coroutines.CreatePromise)
+	system.AddOnRequest(t_api.TaskCreate, coroutines.CreatePromiseAndTask)
+	system.AddOnRequest(t_api.PromiseComplete, coroutines.CompletePromise)
+	system.AddOnRequest(t_api.PromiseComplete, coroutines.CompletePromise)
+	system.AddOnRequest(t_api.PromiseRegister, coroutines.CreateCallback)
+	system.AddOnRequest(t_api.ScheduleRead, coroutines.ReadSchedule)
+	system.AddOnRequest(t_api.ScheduleSearch, coroutines.SearchSchedules)
+	system.AddOnRequest(t_api.ScheduleCreate, coroutines.CreateSchedule)
+	system.AddOnRequest(t_api.ScheduleDelete, coroutines.DeleteSchedule)
+	system.AddOnRequest(t_api.TaskAcquire, coroutines.ClaimTask)
+	system.AddOnRequest(t_api.TaskComplete, coroutines.CompleteTask)
+	system.AddOnRequest(t_api.TaskRelease, coroutines.DropTask)
+	system.AddOnRequest(t_api.TaskHeartbeat, coroutines.HeartbeatTasks)
 
 	if !l {
 		system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 		system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
-		system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
 		system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 		system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 	}
@@ -125,7 +121,6 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		ReqsPerTick:        func() int { return util.RangeIntn(r, 0, 15) },
 		MaxReqsPerTick:     25,
 		Ids:                10,
-		IdempotencyKeys:    10,
 		Headers:            10,
 		Data:               10,
 		Tags:               10,

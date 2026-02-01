@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -19,14 +18,13 @@ type Schedule struct {
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
 	LastRunTime    *int64            `json:"lastRunTime,omitempty"`
 	NextRunTime    int64             `json:"nextRunTime"`
-	IdempotencyKey *idempotency.Key  `json:"idempotencyKey,omitempty"`
 	CreatedOn      int64             `json:"createdOn"`
 	SortId         int64             `json:"-"` // unexported
 }
 
 func (s *Schedule) String() string {
 	return fmt.Sprintf(
-		"Schedule(id=%s, desc=%s, cron=%s, tags=%s, promiseId=%s, promiseTimeout=%d, promiseParam=%s, promiseTags=%s, lastRunTime=%d, nextRunTime=%d, idempotencyKey=%s, createdOn=%d)",
+		"Schedule(id=%s, desc=%s, cron=%s, tags=%s, promiseId=%s, promiseTimeout=%d, promiseParam=%s, promiseTags=%s, lastRunTime=%d, nextRunTime=%d, createdOn=%d)",
 		s.Id,
 		s.Description,
 		s.Cron,
@@ -37,12 +35,11 @@ func (s *Schedule) String() string {
 		s.PromiseTags,
 		util.SafeDeref(s.LastRunTime),
 		s.NextRunTime,
-		s.IdempotencyKey,
 		s.CreatedOn,
 	)
 }
 
 func (s1 *Schedule) Equals(s2 *Schedule) bool {
 	// for dst only
-	return s1.Id == s2.Id && s1.IdempotencyKey.Equals(s2.IdempotencyKey)
+	return s1.Id == s2.Id
 }

@@ -19,7 +19,7 @@ type Client interface {
 // Client
 
 type client struct {
-	v1    v1.ClientWithResponsesInterface
+	v1       v1.ClientWithResponsesInterface
 	username string
 	password string
 	token    string

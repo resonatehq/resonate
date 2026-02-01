@@ -3,7 +3,6 @@ package schedule
 import (
 	"encoding/json"
 
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -19,7 +18,6 @@ type ScheduleRecord struct {
 	PromiseTags         []byte
 	LastRunTime         *int64
 	NextRunTime         int64
-	IdempotencyKey      *idempotency.Key
 	CreatedOn           int64
 	SortId              int64
 }
@@ -51,7 +49,6 @@ func (r *ScheduleRecord) Schedule() (*Schedule, error) {
 		PromiseTags:    promiseTags,
 		LastRunTime:    r.LastRunTime,
 		NextRunTime:    r.NextRunTime,
-		IdempotencyKey: r.IdempotencyKey,
 		CreatedOn:      r.CreatedOn,
 		SortId:         r.SortId,
 	}, nil

@@ -7,10 +7,8 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,8 +32,8 @@ func (s *server) readPromise(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.ReadPromiseRequest{
+		Head: metadata,
+		Data: &t_api.PromiseGetRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})
@@ -44,7 +42,7 @@ func (s *server) readPromise(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsReadPromiseResponse().Promise)
+	c.JSON(s.code(res.Status), res.AsPromiseGetResponse().Promise)
 }
 
 // Search
@@ -97,15 +95,15 @@ func (s *server) searchPromises(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  req,
+		Head: metadata,
+		Data: req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	searchPromise := res.AsSearchPromisesResponse()
+	searchPromise := res.AsPromiseSearchResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"promises": searchPromise.Promises,
 		"cursor":   searchPromise.Cursor,
@@ -115,13 +113,11 @@ func (s *server) searchPromises(c *gin.Context) {
 // Create
 
 type createPromiseHeader struct {
-	RequestId      string           `header:"request-id"`
-	Traceparent    string           `header:"traceparent"`
-	Tracestate     string           `header:"tracestate"`
-	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
-	Strict         bool             `header:"strict"`
-	TaskId         string           `header:"task-id"`
-	TaskCounter    int64            `header:"task-counter"`
+	RequestId   string `header:"request-id"`
+	Traceparent string `header:"traceparent"`
+	Tracestate  string `header:"tracestate"`
+	TaskId      string `header:"task-id"`
+	TaskCounter int64  `header:"task-counter"`
 }
 
 type createPromiseBody struct {
@@ -148,14 +144,6 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	var fence *task.FencingToken
-	if header.TaskId != "" {
-		fence = &task.FencingToken{
-			TaskId:      header.TaskId,
-			TaskCounter: header.TaskCounter,
-		}
-	}
-
 	metadata := map[string]string{}
 	if header.Traceparent != "" {
 		metadata["traceparent"] = header.Traceparent
@@ -169,15 +157,12 @@ func (s *server) createPromise(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Fence:    fence,
-		Payload: &t_api.CreatePromiseRequest{
-			Id:             body.Id,
-			IdempotencyKey: header.IdempotencyKey,
-			Strict:         header.Strict,
-			Param:          body.Param,
-			Timeout:        body.Timeout,
-			Tags:           body.Tags,
+		Head: metadata,
+		Data: &t_api.PromiseCreateRequest{
+			Id:      body.Id,
+			Param:   body.Param,
+			Timeout: body.Timeout,
+			Tags:    body.Tags,
 		},
 	})
 	if err != nil {
@@ -185,7 +170,7 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsCreatePromiseResponse().Promise)
+	c.JSON(s.code(res.Status), res.AsPromiseCreateResponse().Promise)
 }
 
 type createPromiseAndTaskBody struct {
@@ -228,15 +213,13 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.CreatePromiseAndTaskRequest{
-			Promise: &t_api.CreatePromiseRequest{
-				Id:             body.Promise.Id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Param:          body.Promise.Param,
-				Timeout:        body.Promise.Timeout,
-				Tags:           body.Promise.Tags,
+		Head: metadata,
+		Data: &t_api.TaskCreateRequest{
+			Promise: &t_api.PromiseCreateRequest{
+				Id:      body.Promise.Id,
+				Param:   body.Promise.Param,
+				Timeout: body.Promise.Timeout,
+				Tags:    body.Promise.Tags,
 			},
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: body.Promise.Id,
@@ -251,7 +234,7 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 		return
 	}
 
-	createPromiseAndTask := res.AsCreatePromiseAndTaskResponse()
+	createPromiseAndTask := res.AsTaskCreateResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"promise": createPromiseAndTask.Promise,
 		"task":    createPromiseAndTask.Task,
@@ -261,11 +244,9 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 // Complete
 
 type completePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
-	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
-	Strict         bool             `header:"strict"`
-	TaskId         string           `header:"task-id"`
-	TaskCounter    int64            `header:"task-counter"`
+	RequestId   string `header:"request-id"`
+	TaskId      string `header:"task-id"`
+	TaskCounter int64  `header:"task-counter"`
 }
 
 type completePromiseBody struct {
@@ -294,28 +275,17 @@ func (s *server) completePromise(c *gin.Context) {
 		return
 	}
 
-	var fence *task.FencingToken
-	if header.TaskId != "" {
-		fence = &task.FencingToken{
-			TaskId:      header.TaskId,
-			TaskCounter: header.TaskCounter,
-		}
-	}
-
 	metadata := map[string]string{}
 	if auth := c.GetString("authorization"); auth != "" {
 		metadata["authorization"] = auth
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Fence:    fence,
-		Payload: &t_api.CompletePromiseRequest{
-			Id:             extractId(c.Param("id")),
-			IdempotencyKey: header.IdempotencyKey,
-			Strict:         header.Strict,
-			State:          body.State,
-			Value:          body.Value,
+		Head: metadata,
+		Data: &t_api.PromiseCompleteRequest{
+			Id:    extractId(c.Param("id")),
+			State: body.State,
+			Value: body.Value,
 		},
 	})
 	if err != nil {
@@ -323,7 +293,7 @@ func (s *server) completePromise(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsCompletePromiseResponse().Promise)
+	c.JSON(s.code(res.Status), res.AsPromiseCompleteResponse().Promise)
 }
 
 // Callback
@@ -373,23 +343,14 @@ func (s *server) createCallback(c *gin.Context) {
 		}
 	}
 
-	var fence *task.FencingToken
-	if header.TaskId != "" {
-		fence = &task.FencingToken{
-			TaskId:      header.TaskId,
-			TaskCounter: header.TaskCounter,
-		}
-	}
-
 	metadata := map[string]string{}
 	if auth := c.GetString("authorization"); auth != "" {
 		metadata["authorization"] = auth
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Fence:    fence,
-		Payload: &t_api.CreateCallbackRequest{
+		Head: metadata,
+		Data: &t_api.PromiseRegisterRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
@@ -402,7 +363,7 @@ func (s *server) createCallback(c *gin.Context) {
 		return
 	}
 
-	createCallback := res.AsCreateCallbackResponse()
+	createCallback := res.AsPromiseRegisterResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"callback": createCallback.Callback,
 		"promise":  createCallback.Promise,
@@ -459,8 +420,8 @@ func (s *server) createSubscription(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload: &t_api.CreateCallbackRequest{
+		Head: metadata,
+		Data: &t_api.PromiseRegisterRequest{
 			Id:        util.NotifyId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
@@ -473,7 +434,7 @@ func (s *server) createSubscription(c *gin.Context) {
 		return
 	}
 
-	createCallback := res.AsCreateCallbackResponse()
+	createCallback := res.AsPromiseRegisterResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"callback": createCallback.Callback,
 		"promise":  createCallback.Promise,

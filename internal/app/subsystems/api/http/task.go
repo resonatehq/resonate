@@ -32,7 +32,7 @@ func (s *server) claimTask(c *gin.Context) {
 		return
 	}
 
-	var claimTask *t_api.ClaimTaskRequest
+	var claimTask *t_api.TaskAcquireRequest
 
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
@@ -42,7 +42,7 @@ func (s *server) claimTask(c *gin.Context) {
 			return
 		}
 
-		claimTask = &t_api.ClaimTaskRequest{
+		claimTask = &t_api.TaskAcquireRequest{
 			Id:        c.Param("id"),
 			Counter:   counter,
 			ProcessId: s.api.TaskProcessId(c.Param("id"), counter),
@@ -56,7 +56,7 @@ func (s *server) claimTask(c *gin.Context) {
 			return
 		}
 
-		claimTask = &t_api.ClaimTaskRequest{
+		claimTask = &t_api.TaskAcquireRequest{
 			Id:        body.Id,
 			Counter:   body.Counter,
 			ProcessId: body.ProcessId,
@@ -69,15 +69,15 @@ func (s *server) claimTask(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  claimTask,
+		Head: metadata,
+		Data:  claimTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	claimTaskRes := res.AsClaimTaskResponse()
+	claimTaskRes := res.AsTaskAcquireResponse()
 	util.Assert(res.Status != t_api.StatusCreated || (claimTaskRes.Task != nil && claimTaskRes.Task.Mesg != nil), "task and mesg must not be nil if created")
 
 	if res.Status == t_api.StatusCreated {
@@ -125,7 +125,7 @@ func (s *server) completeTask(c *gin.Context) {
 		return
 	}
 
-	var completeTask *t_api.CompleteTaskRequest
+	var completeTask *t_api.TaskCompleteRequest
 
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
@@ -135,7 +135,7 @@ func (s *server) completeTask(c *gin.Context) {
 			return
 		}
 
-		completeTask = &t_api.CompleteTaskRequest{
+		completeTask = &t_api.TaskCompleteRequest{
 			Id:      c.Param("id"),
 			Counter: counter,
 		}
@@ -147,7 +147,7 @@ func (s *server) completeTask(c *gin.Context) {
 			return
 		}
 
-		completeTask = &t_api.CompleteTaskRequest{
+		completeTask = &t_api.TaskCompleteRequest{
 			Id:      body.Id,
 			Counter: body.Counter,
 		}
@@ -158,15 +158,15 @@ func (s *server) completeTask(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  completeTask,
+		Head: metadata,
+		Data:  completeTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.AsCompleteTaskResponse().Task)
+	c.JSON(s.code(res.Status), res.AsTaskCompleteResponse().Task)
 }
 
 // Drop tasks
@@ -187,7 +187,7 @@ func (s *server) dropTask(c *gin.Context) {
 		return
 	}
 
-	var dropTask *t_api.DropTaskRequest
+	var dropTask *t_api.TaskReleaseRequest
 
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
@@ -197,7 +197,7 @@ func (s *server) dropTask(c *gin.Context) {
 			return
 		}
 
-		dropTask = &t_api.DropTaskRequest{
+		dropTask = &t_api.TaskReleaseRequest{
 			Id:      c.Param("id"),
 			Counter: counter,
 		}
@@ -210,7 +210,7 @@ func (s *server) dropTask(c *gin.Context) {
 			return
 		}
 
-		dropTask = &t_api.DropTaskRequest{
+		dropTask = &t_api.TaskReleaseRequest{
 			Id:      body.Id,
 			Counter: body.Counter,
 		}
@@ -221,15 +221,15 @@ func (s *server) dropTask(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  dropTask,
+		Head: metadata,
+		Data:  dropTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	_ = res.AsDropTaskResponse() // Serves as a type assertion
+	_ = res.AsTaskReleaseResponse() // Serves as a type assertion
 	c.Status(s.code(res.Status))
 }
 
@@ -251,7 +251,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		return
 	}
 
-	var heartbeatTasks *t_api.HeartbeatTasksRequest
+	var heartbeatTasks *t_api.TaskHeartbeatRequest
 
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
@@ -261,7 +261,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 			return
 		}
 
-		heartbeatTasks = &t_api.HeartbeatTasksRequest{
+		heartbeatTasks = &t_api.TaskHeartbeatRequest{
 			ProcessId: s.api.TaskProcessId(c.Param("id"), counter),
 		}
 	} else {
@@ -272,7 +272,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 			return
 		}
 
-		heartbeatTasks = &t_api.HeartbeatTasksRequest{
+		heartbeatTasks = &t_api.TaskHeartbeatRequest{
 			ProcessId: body.ProcessId,
 		}
 	}
@@ -282,8 +282,8 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		metadata["authorization"] = auth
 	}
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Metadata: metadata,
-		Payload:  heartbeatTasks,
+		Head: metadata,
+		Data:  heartbeatTasks,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -291,6 +291,6 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 	}
 
 	c.JSON(s.code(res.Status), gin.H{
-		"tasksAffected": res.AsHeartbeatTasksResponse().TasksAffected,
+		"tasksAffected": res.AsTaskHeartbeatResponse().TasksAffected,
 	})
 }

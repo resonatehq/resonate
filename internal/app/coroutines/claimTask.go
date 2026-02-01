@@ -15,7 +15,7 @@ import (
 )
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.ClaimTaskRequest)
+	req := r.Data.(*t_api.TaskAcquireRequest)
 	util.Assert(req.ProcessId != "", "process id must be set")
 	util.Assert(req.Ttl >= 0, "ttl must be greater than or equal to 0")
 
@@ -28,7 +28,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -67,7 +67,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Metadata,
+				Tags: r.Head,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: []t_aio.Command{
@@ -106,7 +106,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 					Kind: t_aio.Store,
-					Tags: r.Metadata,
+					Tags: r.Head,
 					Store: &t_aio.StoreSubmission{
 						Transaction: &t_aio.Transaction{
 							Commands: commands,
@@ -172,8 +172,8 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 	return &t_api.Response{
 		Status:   status,
-		Metadata: r.Metadata,
-		Payload: &t_api.ClaimTaskResponse{
+		Head: r.Head,
+		Data: &t_api.TaskAcquireResponse{
 			Task:            t,
 			RootPromise:     rp,
 			LeafPromise:     lp,

@@ -114,7 +114,7 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 		handler.Use(cors.New(cors.Config{
 			AllowOrigins:  config.Cors.AllowOrigins,
 			AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
+			AllowHeaders:  []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 			ExposeHeaders: []string{"Resonate-Version"},
 		}))
 	}
@@ -172,11 +172,6 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 	authorized.GET("/schedules/*id", server.readSchedule)
 	authorized.DELETE("/schedules/*id", server.deleteSchedule)
 
-	// Locks API
-	authorized.POST("/locks/acquire", server.acquireLock)
-	authorized.POST("/locks/release", server.releaseLock)
-	authorized.POST("/locks/heartbeat", server.heartbeatLocks)
-
 	// Tasks API
 	authorized.POST("/tasks/claim", server.claimTask)
 	authorized.GET("/tasks/claim/:id/:counter", server.claimTask)
@@ -214,8 +209,8 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 				metadata["authorization"] = auth
 			}
 			_, err := server.api.Process(c.GetHeader("RequestId"), &t_api.Request{
-				Metadata: metadata,
-				Payload:  &t_api.NoopRequest{},
+				Head: metadata,
+				Data:  &t_api.NoopRequest{},
 			})
 
 			if err != nil {

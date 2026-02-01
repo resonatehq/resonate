@@ -6,8 +6,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -77,6 +75,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -115,20 +114,110 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "CreatePromiseResolved",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreatePromiseCommand{
+						Id:    "foo",
+						State: promise.Resolved,
+						Param: promise.Value{
+							Headers: map[string]string{},
+							Data:    []byte{},
+						},
+						Tags:      map[string]string{},
+						Timeout:   1,
+						CreatedOn: 1,
+					},
+					&t_aio.ReadPromiseCommand{
+						Id: "foo",
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterPromisesResult{
+						RowsAffected: 1,
+					},
+					&t_aio.QueryPromisesResult{
+						RowsReturned: 1,
+						Records: []*promise.PromiseRecord{{
+							Id:           "foo",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+						}},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "CreatePromiseTimedout",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreatePromiseCommand{
+						Id:    "foo",
+						State: promise.Timedout,
+						Param: promise.Value{
+							Headers: map[string]string{},
+							Data:    []byte{},
+						},
+						Tags:      map[string]string{},
+						Timeout:   1,
+						CreatedOn: 1,
+					},
+					&t_aio.ReadPromiseCommand{
+						Id: "foo",
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterPromisesResult{
+						RowsAffected: 1,
+					},
+					&t_aio.QueryPromisesResult{
+						RowsReturned: 1,
+						Records: []*promise.PromiseRecord{{
+							Id:           "foo",
+							State:        16,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+						}},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "CreatePromiseWithIdKey",
 		transactions: []*t_aio.Transaction{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "bar",
+						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
 						},
-						Timeout:        2,
-						IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-						Tags:           map[string]string{},
-						CreatedOn:      1,
+						Timeout:   2,
+						Tags:      map[string]string{},
+						CreatedOn: 1,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "bar",
@@ -146,14 +235,13 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                      "bar",
-							State:                   1,
-							ParamHeaders:            []byte("{}"),
-							IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("bar")),
-							ParamData:               []byte{},
-							Timeout:                 2,
-							Tags:                    []byte("{}"),
-							CreatedOn:               util.ToPointer(int64(1)),
+							Id:           "bar",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
 						}},
 					},
 				},
@@ -166,15 +254,15 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte("baz"),
 						},
-						Timeout:        3,
-						IdempotencyKey: util.ToPointer(idempotency.Key("baz")),
-						Tags:           map[string]string{},
-						CreatedOn:      1,
+						Timeout:   3,
+						Tags:      map[string]string{},
+						CreatedOn: 1,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "baz",
@@ -192,14 +280,13 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                      "baz",
-							State:                   1,
-							ParamHeaders:            []byte("{}"),
-							IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("baz")),
-							ParamData:               []byte("baz"),
-							Timeout:                 3,
-							Tags:                    []byte("{}"),
-							CreatedOn:               util.ToPointer(int64(1)),
+							Id:           "baz",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte("baz"),
+							Timeout:      3,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
 						}},
 					},
 				},
@@ -212,7 +299,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{
 								"a": "a",
@@ -221,10 +309,9 @@ var TestCases = []*testCase{
 							},
 							Data: []byte("baz"),
 						},
-						Timeout:        3,
-						IdempotencyKey: util.ToPointer(idempotency.Key("baz")),
-						Tags:           map[string]string{},
-						CreatedOn:      1,
+						Timeout:   3,
+						Tags:      map[string]string{},
+						CreatedOn: 1,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "baz",
@@ -242,14 +329,13 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                      "baz",
-							State:                   1,
-							ParamHeaders:            []byte(`{"a":"a","b":"b","c":"c"}`),
-							IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("baz")),
-							ParamData:               []byte("baz"),
-							Timeout:                 3,
-							Tags:                    []byte("{}"),
-							CreatedOn:               util.ToPointer(int64(1)),
+							Id:           "baz",
+							State:        1,
+							ParamHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
+							ParamData:    []byte("baz"),
+							Timeout:      3,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
 						}},
 					},
 				},
@@ -262,7 +348,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "baz",
+						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{
 								"a": "a",
@@ -271,8 +358,7 @@ var TestCases = []*testCase{
 							},
 							Data: []byte("baz"),
 						},
-						Timeout:        3,
-						IdempotencyKey: util.ToPointer(idempotency.Key("baz")),
+						Timeout: 3,
 						Tags: map[string]string{
 							"x": "x",
 							"y": "y",
@@ -296,14 +382,13 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                      "baz",
-							State:                   1,
-							ParamHeaders:            []byte(`{"a":"a","b":"b","c":"c"}`),
-							IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("baz")),
-							ParamData:               []byte("baz"),
-							Timeout:                 3,
-							Tags:                    []byte(`{"x":"x","y":"y","z":"z"}`),
-							CreatedOn:               util.ToPointer(int64(1)),
+							Id:           "baz",
+							State:        1,
+							ParamHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
+							ParamData:    []byte("baz"),
+							Timeout:      3,
+							Tags:         []byte(`{"x":"x","y":"y","z":"z"}`),
+							CreatedOn:    util.ToPointer(int64(1)),
 						}},
 					},
 				},
@@ -316,7 +401,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -325,7 +411,8 @@ var TestCases = []*testCase{
 						CreatedOn: 1,
 					},
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -357,6 +444,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -379,6 +467,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -459,6 +548,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -474,14 +564,14 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte{},
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("foo")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "foo",
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -497,8 +587,7 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte{},
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "bar",
@@ -519,17 +608,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "foo",
-							State:                     2,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte("{}"),
-							ValueData:                 []byte{},
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("foo")),
-							Timeout:                   1,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "foo",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 					&t_aio.AlterPromisesResult{
@@ -541,17 +629,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "bar",
-							State:                     4,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte("{}"),
-							ValueData:                 []byte{},
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
-							Timeout:                   2,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "bar",
+							State:        4,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      2,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 				},
@@ -565,6 +652,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -580,14 +668,14 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("foo"),
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("foo")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "foo",
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -603,8 +691,7 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("bar"),
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "bar",
@@ -625,17 +712,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "foo",
-							State:                     2,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte("{}"),
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("foo")),
-							ValueData:                 []byte("foo"),
-							Timeout:                   1,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "foo",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte("foo"),
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 					&t_aio.AlterPromisesResult{
@@ -647,17 +733,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "bar",
-							State:                     4,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte("{}"),
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
-							ValueData:                 []byte("bar"),
-							Timeout:                   2,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "bar",
+							State:        4,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte("bar"),
+							Timeout:      2,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 				},
@@ -671,6 +756,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -690,14 +776,14 @@ var TestCases = []*testCase{
 							},
 							Data: []byte("foo"),
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("foo")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "foo",
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -717,8 +803,7 @@ var TestCases = []*testCase{
 							},
 							Data: []byte("bar"),
 						},
-						IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-						CompletedOn:    2,
+						CompletedOn: 2,
 					},
 					&t_aio.ReadPromiseCommand{
 						Id: "bar",
@@ -739,17 +824,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "foo",
-							State:                     2,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte(`{"a":"a","b":"b","c":"c"}`),
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("foo")),
-							ValueData:                 []byte("foo"),
-							Timeout:                   1,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "foo",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
+							ValueData:    []byte("foo"),
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 					&t_aio.AlterPromisesResult{
@@ -761,17 +845,16 @@ var TestCases = []*testCase{
 					&t_aio.QueryPromisesResult{
 						RowsReturned: 1,
 						Records: []*promise.PromiseRecord{{
-							Id:                        "bar",
-							State:                     4,
-							ParamHeaders:              []byte("{}"),
-							ParamData:                 []byte{},
-							ValueHeaders:              []byte(`{"a":"a","b":"b","c":"c"}`),
-							IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
-							ValueData:                 []byte("bar"),
-							Timeout:                   2,
-							Tags:                      []byte("{}"),
-							CreatedOn:                 util.ToPointer(int64(1)),
-							CompletedOn:               util.ToPointer(int64(2)),
+							Id:           "bar",
+							State:        4,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
+							ValueData:    []byte("bar"),
+							Timeout:      2,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer(int64(1)),
+							CompletedOn:  util.ToPointer(int64(2)),
 						}},
 					},
 				},
@@ -784,7 +867,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -811,7 +895,8 @@ var TestCases = []*testCase{
 						CompletedOn: 2,
 					},
 					&t_aio.CreatePromiseCommand{
-						Id: "bar",
+						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},
@@ -935,6 +1020,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 1,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -945,6 +1031,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -955,6 +1042,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1022,6 +1110,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo.a",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1032,6 +1121,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo.b",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1042,6 +1132,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "a.bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1052,6 +1143,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "b.bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1227,6 +1319,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1237,6 +1330,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1256,6 +1350,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1275,6 +1370,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "qux",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1294,6 +1390,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "quy",
+						State:   promise.Pending,
 						Timeout: 3,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1561,6 +1658,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:      "foo",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1574,6 +1672,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "bar",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1586,6 +1685,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:      "baz",
+						State:   promise.Pending,
 						Timeout: 2,
 						Param: promise.Value{
 							Headers: map[string]string{},
@@ -1720,6 +1820,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1762,6 +1863,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1804,6 +1906,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1862,6 +1965,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1878,6 +1982,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1894,6 +1999,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "baz",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1910,6 +2016,7 @@ var TestCases = []*testCase{
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "qux",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -1978,11 +2085,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2065,10 +2174,9 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("Created Durable Promise"),
 						},
-						PromiseTags:    map[string]string{},
-						NextRunTime:    1000,
-						IdempotencyKey: nil,
-						CreatedOn:      500,
+						PromiseTags: map[string]string{},
+						NextRunTime: 1000,
+						CreatedOn:   500,
 					},
 					&t_aio.UpdateScheduleCommand{
 						Id:          "foo",
@@ -2112,7 +2220,6 @@ var TestCases = []*testCase{
 							LastRunTime:         util.ToPointer[int64](1000),
 							NextRunTime:         1500,
 							CreatedOn:           500,
-							IdempotencyKey:      nil,
 						}},
 					},
 					&t_aio.AlterSchedulesResult{
@@ -2142,10 +2249,9 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("Created Durable Promise"),
 						},
-						PromiseTags:    map[string]string{},
-						NextRunTime:    1000,
-						IdempotencyKey: nil,
-						CreatedOn:      500,
+						PromiseTags: map[string]string{},
+						NextRunTime: 1000,
+						CreatedOn:   500,
 					},
 					&t_aio.CreateScheduleCommand{
 						Id:             "foo-2",
@@ -2158,10 +2264,9 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("Created Durable Promise"),
 						},
-						PromiseTags:    map[string]string{},
-						NextRunTime:    2000,
-						IdempotencyKey: nil,
-						CreatedOn:      500,
+						PromiseTags: map[string]string{},
+						NextRunTime: 2000,
+						CreatedOn:   500,
 					},
 					&t_aio.CreateScheduleCommand{
 						Id:             "foo-3",
@@ -2174,10 +2279,9 @@ var TestCases = []*testCase{
 							Headers: map[string]string{},
 							Data:    []byte("Created Durable Promise"),
 						},
-						PromiseTags:    map[string]string{},
-						NextRunTime:    3000,
-						IdempotencyKey: nil,
-						CreatedOn:      500,
+						PromiseTags: map[string]string{},
+						NextRunTime: 3000,
+						CreatedOn:   500,
 					},
 					&t_aio.ReadSchedulesCommand{
 						NextRunTime: 2500,
@@ -2236,31 +2340,28 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreateScheduleCommand{
-						Id:             "foo",
-						Description:    "",
-						Cron:           "* * * * *",
-						Tags:           map[string]string{"foo": "foo"},
-						NextRunTime:    1,
-						IdempotencyKey: nil,
-						CreatedOn:      1,
+						Id:          "foo",
+						Description: "",
+						Cron:        "* * * * *",
+						Tags:        map[string]string{"foo": "foo"},
+						NextRunTime: 1,
+						CreatedOn:   1,
 					},
 					&t_aio.CreateScheduleCommand{
-						Id:             "bar",
-						Description:    "",
-						Cron:           "* * * * *",
-						Tags:           map[string]string{"bar": "bar"},
-						NextRunTime:    2,
-						IdempotencyKey: nil,
-						CreatedOn:      2,
+						Id:          "bar",
+						Description: "",
+						Cron:        "* * * * *",
+						Tags:        map[string]string{"bar": "bar"},
+						NextRunTime: 2,
+						CreatedOn:   2,
 					},
 					&t_aio.CreateScheduleCommand{
-						Id:             "baz",
-						Description:    "",
-						Cron:           "* * * * *",
-						Tags:           map[string]string{"baz": "baz"},
-						NextRunTime:    3,
-						IdempotencyKey: nil,
-						CreatedOn:      3,
+						Id:          "baz",
+						Description: "",
+						Cron:        "* * * * *",
+						Tags:        map[string]string{"baz": "baz"},
+						NextRunTime: 3,
+						CreatedOn:   3,
 					},
 					&t_aio.SearchSchedulesCommand{
 						Id:    "*",
@@ -2353,6 +2454,7 @@ var TestCases = []*testCase{
 					&t_aio.CreatePromiseAndTaskCommand{
 						PromiseCommand: &t_aio.CreatePromiseCommand{
 							Id:      "foo",
+							State:   promise.Pending,
 							Timeout: 1,
 							Param: promise.Value{
 								Headers: map[string]string{},
@@ -2431,6 +2533,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:        "foo",
+						State:     promise.Pending,
 						Timeout:   1,
 						Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:      map[string]string{},
@@ -2439,6 +2542,7 @@ var TestCases = []*testCase{
 					&t_aio.CreatePromiseAndTaskCommand{
 						PromiseCommand: &t_aio.CreatePromiseCommand{
 							Id:        "foo",
+							State:     promise.Pending,
 							Timeout:   1,
 							Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
 							Tags:      map[string]string{},
@@ -2573,6 +2677,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2666,11 +2771,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "pbar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2843,6 +2950,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -2979,6 +3087,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3053,16 +3162,19 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3138,21 +3250,25 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root1",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "root2",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "bar",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3264,11 +3380,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3345,11 +3463,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3435,11 +3555,13 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "root",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3524,6 +3646,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3623,6 +3746,7 @@ var TestCases = []*testCase{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
 						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
 						Tags:  map[string]string{},
 					},
@@ -3691,276 +3815,6 @@ var TestCases = []*testCase{
 								CreatedOn:     util.ToPointer[int64](0),
 							},
 						},
-					},
-				},
-			},
-		},
-	},
-	// LOCKS
-	{
-		name: "AcquireLock",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						ExpiresAt:   1736571600000,
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "AcquireLockDifferentProcessId",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "barUpdated",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571700000,
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "AcquireLockFail",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz1",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz2",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 0,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "ReleaseLock",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.ReadLockCommand{
-						ResourceId: "foo",
-					},
-					&t_aio.ReleaseLockCommand{
-						ResourceId:  "foo",
-						ExecutionId: "baz",
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.QueryLocksResult{
-						RowsReturned: 1,
-						Records: []*lock.LockRecord{{
-							ResourceId:  "foo",
-							ProcessId:   "bar",
-							ExecutionId: "baz",
-							Ttl:         10_000,
-							ExpiresAt:   1736571600000,
-						}},
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "ReleaseLockNoop",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.ReleaseLockCommand{
-						ResourceId:  "foo",
-						ExecutionId: "bazOther",
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 0,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "HeartbeatLocks",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo-1",
-						ProcessId:   "a",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo-2",
-						ProcessId:   "a",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo-3",
-						ProcessId:   "b",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.HeartbeatLocksCommand{
-						ProcessId: "a",
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 2,
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "TimeoutLocks",
-		transactions: []*t_aio.Transaction{
-			{
-				Commands: []t_aio.Command{
-					&t_aio.AcquireLockCommand{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Ttl:         10_000,
-						ExpiresAt:   1736571600000,
-					},
-					&t_aio.TimeoutLocksCommand{
-						Timeout: 1736571700000,
-					},
-				},
-			},
-		},
-		expected: []*t_aio.StoreCompletion{
-			{
-				Valid: true,
-				Results: []t_aio.Result{
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
-					},
-					&t_aio.AlterLocksResult{
-						RowsAffected: 1,
 					},
 				},
 			},
@@ -4173,7 +4027,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: nil,
 							Data:    []byte{},
@@ -4191,7 +4046,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    nil,
@@ -4209,7 +4065,8 @@ var TestCases = []*testCase{
 			{
 				Commands: []t_aio.Command{
 					&t_aio.CreatePromiseCommand{
-						Id: "foo",
+						Id:    "foo",
+						State: promise.Pending,
 						Param: promise.Value{
 							Headers: map[string]string{},
 							Data:    []byte{},

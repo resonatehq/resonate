@@ -12,7 +12,7 @@ import (
 )
 
 func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.CreateScheduleRequest)
+	req := r.Data.(*t_api.ScheduleCreateRequest)
 	if req.Tags == nil {
 		req.Tags = map[string]string{}
 	}
@@ -30,7 +30,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -62,7 +62,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: r.Metadata,
+			Tags: r.Head,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []t_aio.Command{
@@ -76,7 +76,6 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							PromiseParam:   req.PromiseParam,
 							PromiseTags:    req.PromiseTags,
 							NextRunTime:    next,
-							IdempotencyKey: req.IdempotencyKey,
 							CreatedOn:      createdOn,
 						},
 					},
@@ -95,8 +94,8 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		if result.RowsAffected == 1 {
 			res = &t_api.Response{
 				Status:   t_api.StatusCreated,
-				Metadata: r.Metadata,
-				Payload: &t_api.CreateScheduleResponse{
+				Head: r.Head,
+				Data: &t_api.ScheduleCreateResponse{
 					Schedule: &schedule.Schedule{
 						Id:             req.Id,
 						Description:    req.Description,
@@ -108,7 +107,6 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 						PromiseTags:    req.PromiseTags,
 						LastRunTime:    nil,
 						NextRunTime:    next,
-						IdempotencyKey: req.IdempotencyKey,
 						CreatedOn:      createdOn,
 					},
 				},
@@ -122,22 +120,17 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			return CreateSchedule(c, r)
 		}
 	} else {
-		// return resource conflict.
+		// return the already created schedule
 		s, err := result.Records[0].Schedule()
 		if err != nil {
 			slog.Error("failed to parse schedule", "req", r, "err", err)
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
-		status := t_api.StatusScheduleAlreadyExists
-		if s.IdempotencyKey.Match(req.IdempotencyKey) {
-			status = t_api.StatusOK
-		}
-
 		res = &t_api.Response{
-			Status:   status,
-			Metadata: r.Metadata,
-			Payload: &t_api.CreateScheduleResponse{
+			Status:   t_api.StatusOK,
+			Head: r.Head,
+			Data: &t_api.ScheduleCreateResponse{
 				Schedule: s,
 			},
 		}

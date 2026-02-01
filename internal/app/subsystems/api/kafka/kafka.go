@@ -19,7 +19,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
-	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -30,15 +29,11 @@ type CreatePromisePayload struct {
 	Timeout int64             `json:"timeout"`
 	Param   promise.Value     `json:"param,omitempty"`
 	Tags    map[string]string `json:"tags,omitempty"`
-	IKey    *idempotency.Key  `json:"iKey,omitempty"`
-	Strict  bool              `json:"strict,omitempty"`
 }
 
 type CreatePromiseAndTaskPayload struct {
 	Promise CreatePromisePayload `json:"promise"`
 	Task    CreateTaskPayload    `json:"task"`
-	IKey    *idempotency.Key     `json:"iKey,omitempty"`
-	Strict  bool                 `json:"strict,omitempty"`
 }
 
 type CreateTaskPayload struct {
@@ -51,11 +46,9 @@ type ReadPromisePayload struct {
 }
 
 type CompletePromisePayload struct {
-	ID     string           `json:"id"`
-	State  promise.State    `json:"state"`
-	Value  promise.Value    `json:"value,omitempty"`
-	IKey   *idempotency.Key `json:"iKey,omitempty"`
-	Strict bool             `json:"strict,omitempty"`
+	ID    string        `json:"id"`
+	State promise.State `json:"state"`
+	Value promise.Value `json:"value,omitempty"`
 }
 
 type CreateCallbackPayload struct {
@@ -90,7 +83,6 @@ type CreateSchedulePayload struct {
 	PromiseTimeout int64             `json:"promiseTimeout,omitempty"`
 	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
-	IKey           *idempotency.Key  `json:"iKey,omitempty"`
 }
 
 type ReadSchedulePayload struct {
@@ -380,14 +372,6 @@ func (s *server) handleRequest(msg *kafka.Message) {
 	case "schedules.delete":
 		s.handleDeleteSchedule(&kafkaReq)
 
-	// Locks
-	case "locks.acquire":
-		s.handleAcquireLock(&kafkaReq)
-	case "locks.release":
-		s.handleReleaseLock(&kafkaReq)
-	case "locks.heartbeat":
-		s.handleHeartbeatLocks(&kafkaReq)
-
 	// Tasks
 	case "tasks.claim":
 		s.handleClaimTask(&kafkaReq)
@@ -416,15 +400,15 @@ func (s *server) processRequest(kafkaReq *KafkaRequest, payload t_api.RequestPay
 
 	// Process the request
 	res, apiErr := s.api.Process(kafkaReq.RequestId, &t_api.Request{
-		Metadata: kafkaReq.Metadata,
-		Payload:  payload,
+		Head: kafkaReq.Metadata,
+		Data: payload,
 	})
 
 	if apiErr != nil {
 		return nil, apiErr
 	}
 
-	return res.Payload, nil
+	return res.Data, nil
 }
 
 func (s *server) respondError(kafkaReq *KafkaRequest, error *api.Error) {

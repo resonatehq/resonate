@@ -8,7 +8,6 @@ import (
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/invoke"
 	"github.com/resonatehq/resonate/cmd/migrate"
-	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
@@ -21,7 +20,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -38,7 +36,6 @@ var rootCmd = &cobra.Command{
 func init() {
 	// Add Subsystems
 	cfg.API.Subsystems.Add("http", true, &http.Config{})
-	cfg.API.Subsystems.Add("grpc", true, &grpc.Config{})
 	cfg.AIO.Subsystems.Add("router", true, &router.Config{})
 	cfg.AIO.Subsystems.Add("sender", true, &sender.Config{})
 	cfg.AIO.Subsystems.Add("store-postgres", false, &postgres.Config{}) // do not change order
@@ -53,7 +50,6 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
 	rootCmd.AddCommand(migrate.NewCmd(cfg, viper.New()))
-	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(serve.NewCmd(cfg, viper.New()))

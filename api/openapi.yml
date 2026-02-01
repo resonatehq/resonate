@@ -90,16 +90,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -153,16 +143,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -275,16 +255,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
-        - in: header
-          name: strict
-          description: If true, deduplicates only when promise state matches the request
-          schema:
-            type: boolean
       requestBody:
         required: true
         content:
@@ -506,11 +476,6 @@ paths:
           description: Unique tracking id
           schema:
             type: string
-        - in: header
-          name: idempotency-key
-          description: Deduplicates requests
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -538,8 +503,6 @@ paths:
                   type: object
                   additionalProperties:
                     type: string
-                idempotencyKey:
-                  type: string
         required: true
       responses:
         200:
@@ -575,8 +538,6 @@ paths:
                     type: object
                     additionalProperties:
                       type: string
-                  idempotencyKey:
-                    type: string
         201:
           description: Created
           content:
@@ -640,116 +601,6 @@ paths:
           description: Schedule deleted
         404:
           description: Schedule not found
-
-  # Locks
-  /locks/acquire:
-    post:
-      tags:
-        - Locks
-      summary: Acquire lock
-      operationId: acquireLock
-      parameters:
-        - in: header
-          name: request-id
-          description: Unique tracking id
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - resourceId
-                - executionId
-                - processId
-                - ttl
-              properties:
-                resourceId:
-                  type: string
-                executionId:
-                  type: string
-                processId:
-                  type: string
-                ttl:
-                  type: integer
-        required: true
-      responses:
-        201:
-          description: Lock acquired
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Lock"
-        403:
-          description: Lock already acquired
-
-  /locks/release:
-    post:
-      tags:
-        - Locks
-      summary: Release lock
-      operationId: releaseLock
-      parameters:
-        - in: header
-          name: request-id
-          description: Unique tracking id
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - resourceId
-                - executionId
-              properties:
-                resourceId:
-                  type: string
-                executionId:
-                  type: string
-        required: true
-      responses:
-        204:
-          description: Lock released
-        404:
-          description: Lock not found
-
-  /locks/heartbeat:
-    post:
-      tags:
-        - Locks
-      summary: Heartbeat locks
-      operationId: heartbeatLocks
-      parameters:
-        - in: header
-          name: request-id
-          description: Unique tracking id
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - processId
-              properties:
-                processId:
-                  type: string
-        required: true
-      responses:
-        200:
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  locksAffected:
-                    type: integer
-                    format: int64
 
   # Tasks
   /tasks/claim:
@@ -1077,12 +928,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        idempotencyKeyForCreate:
-          type: string
-          readOnly: true
-        idempotencyKeyForComplete:
-          type: string
-          readOnly: true
         createdOn:
           type: integer
           format: int64
@@ -1153,8 +998,6 @@ components:
           type: object
           additionalProperties:
             type: string
-        idempotencyKey:
-          type: string
         lastRunTime:
           type: integer
           format: int64
@@ -1162,27 +1005,6 @@ components:
           type: integer
           format: int64
         createdOn:
-          type: integer
-          format: int64
-
-    # Locks
-    Lock:
-      type: object
-      required:
-        - resourceId
-        - executionId
-        - processId
-        - ttl
-      properties:
-        resourceId:
-          type: string
-        executionId:
-          type: string
-        processId:
-          type: string
-        ttl:
-          type: integer
-        expiresAt:
           type: integer
           format: int64
 

@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/promise"
 )
 
 func SchedulePromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
@@ -81,13 +82,14 @@ func SchedulePromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, a
 			// create promise command
 			commands[i] = &t_aio.CreatePromiseCommand{
 				Id:        id,
+				State:     promise.Pending,
 				Param:     s.PromiseParam,
 				Timeout:   util.ClampAddInt64(s.PromiseTimeout, s.NextRunTime),
 				Tags:      s.PromiseTags,
-				CreatedOn: c.Time(),
+				CreatedOn: s.NextRunTime,
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(m, nil, commands[i], nil, &t_aio.UpdateScheduleCommand{
+			awaiting[i] = gocoro.Spawn(c, createPromise(m, commands[i], nil, &t_aio.UpdateScheduleCommand{
 				Id:          s.Id,
 				LastRunTime: &s.NextRunTime,
 				NextRunTime: next,

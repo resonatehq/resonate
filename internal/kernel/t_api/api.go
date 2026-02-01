@@ -3,32 +3,26 @@ package t_api
 type Kind int
 
 const (
+	_ Kind = iota
 	// PROMISES
-	ReadPromise Kind = iota
-	SearchPromises
-	CreatePromise
-	CreatePromiseAndTask
-	CompletePromise
-
-	// CALLBACKS
-	CreateCallback
+	PromiseGet
+	PromiseSearch
+	PromiseCreate
+	PromiseComplete
+	PromiseRegister
 
 	// SCHEDULES
-	ReadSchedule
-	SearchSchedules
-	CreateSchedule
-	DeleteSchedule
-
-	// LOCKS
-	AcquireLock
-	ReleaseLock
-	HeartbeatLocks
+	ScheduleRead
+	ScheduleSearch
+	ScheduleCreate
+	ScheduleDelete
 
 	// TASKS
-	ClaimTask
-	CompleteTask
-	DropTask
-	HeartbeatTasks
+	TaskCreate
+	TaskAcquire
+	TaskRelease
+	TaskComplete
+	TaskHeartbeat
 
 	// Echo
 	Echo
@@ -40,50 +34,42 @@ const (
 func (k Kind) String() string {
 	switch k {
 	// PROMISES
-	case ReadPromise:
-		return "ReadPromise"
-	case SearchPromises:
-		return "SearchPromises"
-	case CreatePromise:
-		return "CreatePromise"
-	case CreatePromiseAndTask:
-		return "CreatePromiseAndTask"
-	case CompletePromise:
-		return "CompletePromise"
-	// CALLBACKS
-	case CreateCallback:
-		return "CreateCallback"
+	case PromiseGet:
+		return "promise.get"
+	case PromiseSearch:
+		return "promise.search"
+	case PromiseCreate:
+		return "promise.create"
+	case PromiseComplete:
+		return "promise.complete"
+	case PromiseRegister:
+		return "promise.register"
 	// SCHEDULES
-	case ReadSchedule:
-		return "ReadSchedule"
-	case SearchSchedules:
-		return "SearchSchedules"
-	case CreateSchedule:
-		return "CreateSchedule"
-	case DeleteSchedule:
-		return "DeleteSchedule"
-	// LOCKS
-	case AcquireLock:
-		return "AcquireLock"
-	case ReleaseLock:
-		return "ReleaseLock"
-	case HeartbeatLocks:
-		return "HeartbeatLocks"
+	case ScheduleRead:
+		return "schedule.get"
+	case ScheduleSearch:
+		return "schedule.search"
+	case ScheduleCreate:
+		return "schedule.create"
+	case ScheduleDelete:
+		return "schedule.delete"
 	// TASKS
-	case ClaimTask:
-		return "ClaimTask"
-	case CompleteTask:
-		return "CompleteTask"
-	case DropTask:
-		return "DropTask"
-	case HeartbeatTasks:
-		return "HeartbeatTasks"
+	case TaskAcquire:
+		return "task.acquire"
+	case TaskComplete:
+		return "task.complete"
+	case TaskRelease:
+		return "task.release"
+	case TaskHeartbeat:
+		return "task.hearbeat"
+	case TaskCreate:
+		return "task.create"
 	// ECHO
 	case Echo:
-		return "Echo"
+		return "echo"
 	// NOOP
 	case Noop:
-		return "Noop"
+		return "noop"
 	default:
 		panic("invalid api")
 	}

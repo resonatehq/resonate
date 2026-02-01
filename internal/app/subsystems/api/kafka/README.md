@@ -175,12 +175,6 @@ The Kafka API subsystem can be configured with the following flags:
 - `schedules.create` - Create a new schedule
 - `schedules.delete` - Delete a schedule
 
-### Locks
-
-- `locks.acquire` - Acquire a distributed lock
-- `locks.release` - Release a distributed lock
-- `locks.heartbeat` - Send heartbeat for locks
-
 ### Tasks
 
 - `tasks.claim` - Claim a task
@@ -370,26 +364,6 @@ echo '{
 }' | rpk topic produce resonate.requests
 ```
 
-#### Example 6: Acquire a Lock
-
-```bash
-echo '{
-  "target": "resonate.server",
-  "replyTo": {
-    "topic": "resonate.replies",
-    "target": "my-client"
-  },
-  "correlationId": "req-006",
-  "operation": "locks.acquire",
-  "payload": {
-    "resourceId": "my-resource",
-    "processId": "process-1",
-    "executionId": "exec-1",
-    "expiryInMilliseconds": 60000
-  }
-}' | rpk topic produce resonate.requests
-```
-
 #### Example 7: Create Promise and Task
 
 ```bash
@@ -500,7 +474,7 @@ The target filtering enables multi-tenancy on a single topic. Start multiple Res
 ./resonate dev --api-kafka-enable --api-kafka-target server1
 
 # Server 2 (in another terminal)
-./resonate dev --api-kafka-enable --api-kafka-target server2 --api-http-addr :9001 --api-grpc-addr :50052
+./resonate dev --api-kafka-enable --api-kafka-target server2 --api-http-addr :9001
 ```
 
 Send requests to different servers:
@@ -533,8 +507,6 @@ echo '{
 ```json
 {
   "id": "string",
-  "idempotencyKey": "string (optional)",
-  "strict": false,
   "param": {"headers": {}, "data": null},
   "timeout": 3600000,
   "tags": {"key": "value"}
@@ -545,8 +517,6 @@ echo '{
 ```json
 {
   "id": "string",
-  "idempotencyKey": "string (optional)",
-  "strict": false,
   "state": "RESOLVED|REJECTED|REJECTED_CANCELED|REJECTED_TIMEDOUT",
   "value": {"headers": {}, "data": null}
 }
@@ -565,19 +535,6 @@ echo '{
   "promiseTimeout": 3600000,
   "promiseParam": {"headers": {}, "data": null},
   "promiseTags": {"key": "value"},
-  "idempotencyKey": "string (optional)"
-}
-```
-
-### Lock Operations
-
-#### locks.acquire
-```json
-{
-  "resourceId": "string",
-  "processId": "string",
-  "executionId": "string",
-  "expiryInMilliseconds": 60000
 }
 ```
 
@@ -631,5 +588,5 @@ echo '{
 - The Kafka API uses the IBM Sarama library (github.com/IBM/sarama)
 - Consumer group rebalancing is handled automatically
 - Message offsets are committed after processing
-- All 21 operations from HTTP/gRPC APIs are supported
+- All 21 operations from HTTP API are supported
 - Target filtering happens at application level (after Kafka delivery)

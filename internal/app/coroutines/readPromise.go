@@ -11,11 +11,11 @@ import (
 )
 
 func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	req := r.Payload.(*t_api.ReadPromiseRequest)
+	req := r.Data.(*t_api.PromiseGetRequest)
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Metadata,
+		Tags: r.Head,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []t_aio.Command{
@@ -48,14 +48,13 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			cmd := &t_aio.UpdatePromiseCommand{
-				Id:             req.Id,
-				State:          promise.GetTimedoutState(p),
-				Value:          promise.Value{},
-				IdempotencyKey: nil,
-				CompletedOn:    p.Timeout,
+				Id:          req.Id,
+				State:       promise.GetTimedoutState(p.Tags),
+				Value:       promise.Value{},
+				CompletedOn: p.Timeout,
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, nil, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Head, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -68,27 +67,25 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 			res = &t_api.Response{
 				Status:   t_api.StatusOK,
-				Metadata: r.Metadata,
-				Payload: &t_api.ReadPromiseResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseGetResponse{
 					Promise: &promise.Promise{
-						Id:                        p.Id,
-						State:                     cmd.State,
-						Param:                     p.Param,
-						Value:                     cmd.Value,
-						Timeout:                   p.Timeout,
-						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: cmd.IdempotencyKey,
-						Tags:                      p.Tags,
-						CreatedOn:                 p.CreatedOn,
-						CompletedOn:               &cmd.CompletedOn,
+						Id:          p.Id,
+						State:       cmd.State,
+						Param:       p.Param,
+						Value:       cmd.Value,
+						Timeout:     p.Timeout,
+						Tags:        p.Tags,
+						CreatedOn:   p.CreatedOn,
+						CompletedOn: &cmd.CompletedOn,
 					},
 				},
 			}
 		} else {
 			res = &t_api.Response{
 				Status:   t_api.StatusOK,
-				Metadata: r.Metadata,
-				Payload: &t_api.ReadPromiseResponse{
+				Head: r.Head,
+				Data: &t_api.PromiseGetResponse{
 					Promise: p,
 				},
 			}
@@ -96,8 +93,8 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,
-			Metadata: r.Metadata,
-			Payload:  &t_api.ReadPromiseResponse{},
+			Head: r.Head,
+			Data:  &t_api.PromiseGetResponse{},
 		}
 	}
 

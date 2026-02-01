@@ -16,22 +16,14 @@ const (
 	StatusFieldValidationError   StatusCode = 40000
 	StatusUnauthorized           StatusCode = 40100
 	StatusForbidden              StatusCode = 40300
-	StatusPromiseAlreadyResolved StatusCode = 40301
-	StatusPromiseAlreadyRejected StatusCode = 40302
-	StatusPromiseAlreadyCanceled StatusCode = 40303
-	StatusPromiseAlreadyTimedout StatusCode = 40304
-	StatusLockAlreadyAcquired    StatusCode = 40305
 	StatusTaskAlreadyClaimed     StatusCode = 40306
 	StatusTaskAlreadyCompleted   StatusCode = 40307
 	StatusTaskInvalidCounter     StatusCode = 40308
 	StatusTaskInvalidState       StatusCode = 40309
 	StatusPromiseNotFound        StatusCode = 40400
 	StatusScheduleNotFound       StatusCode = 40401
-	StatusLockNotFound           StatusCode = 40402
 	StatusTaskNotFound           StatusCode = 40403
 	StatusPromiseRecvNotFound    StatusCode = 40404
-	StatusPromiseAlreadyExists   StatusCode = 40900
-	StatusScheduleAlreadyExists  StatusCode = 40901
 	StatusTaskPreconditionFailed StatusCode = 41200
 
 	// Platform level status (50000-59909)
@@ -57,16 +49,6 @@ func (s StatusCode) String() string {
 		return "The request is unauthorized"
 	case StatusForbidden:
 		return "The request is forbidden"
-	case StatusPromiseAlreadyResolved:
-		return "The promise has already been resolved"
-	case StatusPromiseAlreadyRejected:
-		return "The promise has already been rejected"
-	case StatusPromiseAlreadyCanceled:
-		return "The promise has already been canceled"
-	case StatusPromiseAlreadyTimedout:
-		return "The promise has already timedout"
-	case StatusLockAlreadyAcquired:
-		return "The lock is already acquired"
 	case StatusTaskAlreadyClaimed:
 		return "The task is already claimed"
 	case StatusTaskAlreadyCompleted:
@@ -81,16 +63,10 @@ func (s StatusCode) String() string {
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:
 		return "The specified schedule was not found"
-	case StatusLockNotFound:
-		return "The specified lock was not found"
 	case StatusTaskNotFound:
 		return "The specified task was not found"
 	case StatusPromiseRecvNotFound:
 		return "The specified recv couldn't be found"
-	case StatusPromiseAlreadyExists:
-		return "The specified promise already exists"
-	case StatusScheduleAlreadyExists:
-		return "The specified schedule already exists"
 	case StatusInternalServerError:
 		return "There was an internal server error"
 	case StatusAIOEchoError:

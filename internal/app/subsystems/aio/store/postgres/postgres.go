@@ -25,7 +25,6 @@ import (
 
 	cmdUtil "github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -51,7 +50,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on
 	FROM
 		promises
 	WHERE
@@ -59,7 +58,7 @@ const (
 
 	PROMISE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -69,7 +68,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -84,10 +83,10 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7)
-	ON CONFLICT(id) DO NOTHING`
+		($1, $2, $3, $4, $5, $6, $7, $8)
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	PROMISE_UPDATE_STATEMENT = `
 	UPDATE
@@ -95,7 +94,7 @@ const (
 	SET
 		state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $4, completed_on = $5
 	WHERE
-		id = $6 AND state = 1`
+		id = $6 AND state = 1 -- idempotency_key must be equal to id for this stmt`
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
@@ -112,7 +111,7 @@ const (
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
-		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, idempotency_key, created_on
+		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, created_on
 	FROM
 		schedules
 	WHERE
@@ -132,7 +131,7 @@ const (
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
-		id, cron, tags, last_run_time, next_run_time, idempotency_key, created_on, sort_id
+		id, cron, tags, last_run_time, next_run_time, created_on, sort_id
 	FROM
 		schedules
 	WHERE
@@ -149,7 +148,7 @@ const (
 		(id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, next_run_time, idempotency_key, created_on)
 	VALUES
 		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-	ON CONFLICT(id) DO NOTHING`
+	ON CONFLICT(id) DO NOTHING -- idempotency_key must be equal to id for this stmt`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
@@ -161,40 +160,6 @@ const (
 
 	SCHEDULE_DELETE_STATEMENT = `
 	DELETE FROM schedules WHERE id = $1`
-
-	LOCK_READ_STATEMENT = `
-	SELECT
-		resource_id, process_id, execution_id, ttl, expires_at
-	FROM
-		locks
-	WHERE
-		resource_id = $1`
-
-	LOCK_ACQUIRE_STATEMENT = `
-	INSERT INTO locks
-		(resource_id, execution_id, process_id, ttl, expires_at)
-	VALUES
-		($1, $2, $3, $4, $5)
-	ON CONFLICT(resource_id)
-	DO UPDATE SET
-		process_id = EXCLUDED.process_id,
-		ttl = EXCLUDED.ttl,
-		expires_at = EXCLUDED.expires_at
-	WHERE locks.execution_id = EXCLUDED.execution_id`
-
-	LOCK_RELEASE_STATEMENT = `
-	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
-
-	LOCK_HEARTBEAT_STATEMENT = `
-	UPDATE
-		locks
-	SET
-		expires_at = $1 + ttl
-	WHERE
-		process_id = $2`
-
-	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks WHERE expires_at <= $1`
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
@@ -614,10 +579,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var scheduleInsertStmt *sql.Stmt
 	var scheduleUpdateStmt *sql.Stmt
 	var scheduleDeleteStmt *sql.Stmt
-	var lockAcquireStmt *sql.Stmt
-	var lockReleaseStmt *sql.Stmt
-	var lockHeartbeatStmt *sql.Stmt
-	var lockTimeoutStmt *sql.Stmt
 	var tasksInsertStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
@@ -726,42 +687,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				}
 				results[j], err = w.deleteSchedule(tx, scheduleDeleteStmt, v)
 
-			// Locks
-			case *t_aio.ReadLockCommand:
-				results[j], err = w.readLock(tx, v)
-			case *t_aio.AcquireLockCommand:
-				if lockAcquireStmt == nil {
-					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.acquireLock(tx, lockAcquireStmt, v)
-			case *t_aio.ReleaseLockCommand:
-				if lockReleaseStmt == nil {
-					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.releaseLock(tx, lockReleaseStmt, v)
-			case *t_aio.HeartbeatLocksCommand:
-				if lockHeartbeatStmt == nil {
-					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, v)
-			case *t_aio.TimeoutLocksCommand:
-				if lockTimeoutStmt == nil {
-					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[j], err = w.timeoutLocks(tx, lockTimeoutStmt, v)
-
 			// Tasks
 			case *t_aio.ReadTaskCommand:
 				results[j], err = w.readTask(tx, v)
@@ -855,8 +780,6 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 		&record.ValueHeaders,
 		&record.ValueData,
 		&record.Timeout,
-		&record.IdempotencyKeyForCreate,
-		&record.IdempotencyKeyForComplete,
 		&record.Tags,
 		&record.CreatedOn,
 		&record.CompletedOn,
@@ -900,8 +823,6 @@ func (w *PostgresStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCo
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -976,8 +897,6 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 			&record.ValueHeaders,
 			&record.ValueData,
 			&record.Timeout,
-			&record.IdempotencyKeyForCreate,
-			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -999,6 +918,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 }
 
 func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.AlterPromisesResult, error) {
+	util.Assert(cmd.State.In(promise.Pending|promise.Resolved|promise.Timedout), "init state must be one of pending, resolved, timedout")
 	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -1014,7 +934,7 @@ func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.Id, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -1055,7 +975,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.IdempotencyKey, cmd.CompletedOn, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.Id, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -1131,7 +1051,6 @@ func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCo
 		&record.PromiseTags,
 		&record.LastRunTime,
 		&record.NextRunTime,
-		&record.IdempotencyKey,
 		&record.CreatedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -1223,7 +1142,6 @@ func (w *PostgresStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSched
 			&record.Tags,
 			&record.LastRunTime,
 			&record.NextRunTime,
-			&record.IdempotencyKey,
 			&record.CreatedOn,
 			&record.SortId,
 		); err != nil {
@@ -1269,7 +1187,7 @@ func (w *PostgresStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 		cmd.PromiseParam.Data,
 		promiseTags,
 		cmd.NextRunTime,
-		cmd.IdempotencyKey,
+		cmd.Id,
 		cmd.CreatedOn,
 	)
 	if err != nil {
@@ -1314,107 +1232,6 @@ func (w *PostgresStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 	}
 
 	return &t_aio.AlterSchedulesResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-// Locks
-
-func (w *PostgresStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t_aio.QueryLocksResult, error) {
-	// select
-	row := tx.QueryRow(LOCK_READ_STATEMENT, cmd.ResourceId)
-	record := &lock.LockRecord{}
-	rowsReturned := int64(1)
-
-	if err := row.Scan(
-		&record.ResourceId,
-		&record.ProcessId,
-		&record.ExecutionId,
-		&record.Ttl,
-		&record.ExpiresAt,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			rowsReturned = 0
-		} else {
-			return nil, err
-		}
-	}
-
-	var records []*lock.LockRecord
-	if rowsReturned == 1 {
-		records = append(records, record)
-	}
-
-	return &t_aio.QueryLocksResult{
-		RowsReturned: rowsReturned,
-		Records:      records,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.AlterLocksResult, error) {
-	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.Ttl, cmd.ExpiresAt)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.ReleaseLockCommand) (*t_aio.AlterLocksResult, error) {
-	// delete
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.AlterLocksResult, error) {
-	// update
-	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
-		RowsAffected: rowsAffected,
-	}, nil
-}
-
-func (w *PostgresStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutLocksCommand) (*t_aio.AlterLocksResult, error) {
-	// delete
-	res, err := stmt.Exec(cmd.Timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterLocksResult{
 		RowsAffected: rowsAffected,
 	}, nil
 }

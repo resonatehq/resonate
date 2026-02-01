@@ -42,7 +42,6 @@ type Config struct {
 	ReqsPerTick        func() int
 	MaxReqsPerTick     int64
 	Ids                int
-	IdempotencyKeys    int
 	Headers            int
 	Data               int
 	Tags               int
@@ -103,29 +102,24 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	util.Assert(d.config.Backchannel != nil, "backchannel must be non nil")
 
 	// promises
-	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
-	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
-	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
-	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
+	d.Add(t_api.PromiseGet, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
+	d.Add(t_api.PromiseCreate, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
+	d.Add(t_api.TaskCreate, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
+	d.Add(t_api.PromiseComplete, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
 	// callbacks
-	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
+	d.Add(t_api.PromiseRegister, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
 	// schedules
-	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
-	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
-	d.Add(t_api.DeleteSchedule, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
-
-	// locks
-	d.Add(t_api.AcquireLock, d.generator.GenerateAcquireLock, d.validator.ValidateAcquireLock)
-	d.Add(t_api.ReleaseLock, d.generator.GenerateReleaseLock, d.validator.ValidateReleaseLock)
-	d.Add(t_api.HeartbeatLocks, d.generator.GenerateHeartbeatLocks, d.validator.ValidateHeartbeatLocks)
+	d.Add(t_api.ScheduleRead, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
+	d.Add(t_api.ScheduleCreate, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
+	d.Add(t_api.ScheduleDelete, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
 
 	// tasks
-	d.Add(t_api.ClaimTask, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
-	d.Add(t_api.CompleteTask, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
-	d.Add(t_api.DropTask, d.generator.GenerateDropTask, d.validator.ValidateDropTask)
-	d.Add(t_api.HeartbeatTasks, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
+	d.Add(t_api.TaskAcquire, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
+	d.Add(t_api.TaskComplete, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
+	d.Add(t_api.TaskRelease, d.generator.GenerateDropTask, d.validator.ValidateDropTask)
+	d.Add(t_api.TaskHeartbeat, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
 
 	// backchannel validators
 	d.bcValidator.AddBcValidator(ValidateTasksWithSameRootPromiseId)
@@ -144,12 +138,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			req := req
 			reqTime := time
 
-			if req.Metadata == nil {
-				req.Metadata = make(map[string]string)
+			if req.Head == nil {
+				req.Head = make(map[string]string)
 			}
 
-			req.Metadata["id"] = strconv.FormatInt(i, 10)
-			req.Metadata["name"] = req.Kind().String()
+			req.Head["id"] = strconv.FormatInt(i, 10)
+			req.Head["name"] = req.Kind().String()
 
 			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
@@ -161,7 +155,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 					if d.config.PrintOps {
 						// log
-						slog.Info("DST", "id", req.Metadata["id"], "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err)
+						slog.Info("DST", "id", req.Head["id"], "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err)
 					}
 
 					// add operation to porcupine
@@ -208,8 +202,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 				// add claim req to generator
 				d.generator.AddRequest(&t_api.Request{
-					Metadata: map[string]string{"partitionId": obj.RootPromiseId},
-					Payload: &t_api.ClaimTaskRequest{
+					Head: map[string]string{"partitionId": obj.RootPromiseId},
+					Data: &t_api.TaskAcquireRequest{
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
@@ -334,7 +328,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 	var err error
 	if req.kind == Op {
 		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
-		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Metadata["id"], req.time, res.time, req.req, res.res)
+		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Head["id"], req.time, res.time, req.req, res.res)
 	} else {
 		_, err = d.StepBc(model, req.time, res.time, req)
 		var obj any
@@ -424,7 +418,7 @@ func (d *DST) Model() porcupine.Model {
 					status = int(res.res.Status)
 				}
 
-				return fmt.Sprintf("%s | %s → %d", req.req.Metadata["id"], req.req, status)
+				return fmt.Sprintf("%s | %s → %d", req.req.Head["id"], req.req, status)
 			case Bc:
 				if req.bc.Task != nil {
 					return fmt.Sprintf("Backchannel | %s", req.bc.Task)
@@ -454,12 +448,10 @@ func (d *DST) Model() porcupine.Model {
 					<tr>
 						<td align="right">%s</td>
 						<td>%s</td>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
 						<td align="right">%d</td>
 						<td align="right">%s</td>
 					</tr>
-				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout, completedOn)
+				`, p.value.Id, p.value.State, p.value.Timeout, completedOn)
 				}
 
 				var callbacks string
@@ -502,8 +494,6 @@ func (d *DST) Model() porcupine.Model {
 									<tr>
 										<td><b>id</b></td>
 										<td><b>state</b></td>
-										<td><b>ikeyCreate</b></td>
-										<td><b>ikeyComplete</b></td>
 										<td><b>timeout</b></td>
 										<td><b>completedOn</b></td>
 									</tr>
@@ -556,9 +546,8 @@ func (d *DST) Model() porcupine.Model {
 					schedules = schedules + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
-						<td align="right">%s</td>
 					</tr>
-				`, s.value.Id, s.value.IdempotencyKey)
+				`, s.value.Id)
 				}
 
 				return fmt.Sprintf(`
@@ -575,7 +564,6 @@ func (d *DST) Model() porcupine.Model {
 										<thead>
 											<tr>
 												<td><b>id</b></td>
-												<td><b>ikey</b></td>
 											</tr>
 										</thead>
 										<tbody>
@@ -587,47 +575,7 @@ func (d *DST) Model() porcupine.Model {
 						</tbody>
 					</table>
 				`, schedules)
-			case len(*model.locks) > 0:
-				var locks string
-				for _, s := range *model.locks {
-					locks = locks + fmt.Sprintf(`
-					<tr>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
-						<td align="right">%s</td>
-						<td align="right">%d</td>
-					</tr>
-				`, s.value.ResourceId, s.value.ExecutionId, s.value.ProcessId, s.value.ExpiresAt)
-				}
 
-				return fmt.Sprintf(`
-					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<thead>
-							<tr>
-								<td><b>Locks</b></td>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>rid</b></td>
-												<td><b>eid</b></td>
-												<td><b>pid</b></td>
-												<td><b>timeout</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				`, locks)
 			default:
 				return ""
 			}
@@ -650,8 +598,8 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		case t_api.StatusFieldValidationError:
-			if req.Kind() == t_api.CreateCallback {
-				callbackReq := req.Payload.(*t_api.CreateCallbackRequest)
+			if req.Kind() == t_api.PromiseRegister {
+				callbackReq := req.Data.(*t_api.PromiseRegisterRequest)
 				if callbackReq.Mesg.Type == "resume" && callbackReq.PromiseId == callbackReq.Mesg.Root {
 					// sometimes we generate create callback requests with the same root and
 					// leaf promise ids by chance
@@ -686,9 +634,8 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
+		"DST(ids=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
 		d.config.Ids,
-		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,
@@ -701,7 +648,7 @@ func (d *DST) String() string {
 func partition(req *Req) string {
 	switch req.kind {
 	case Op:
-		partition, ok := req.req.Metadata["partitionId"]
+		partition, ok := req.req.Head["partitionId"]
 		util.Assert(ok, "partition id must be set")
 		return partition
 	case Bc:

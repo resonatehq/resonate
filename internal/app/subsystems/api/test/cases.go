@@ -3,17 +3,10 @@ package test
 import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/protobuf/reflect/protoreflect"
-
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
-	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type testCase struct {
@@ -21,7 +14,6 @@ type testCase struct {
 	Req    *t_api.Request
 	Res    *t_api.Response
 	Http   *httpTestCase
-	Grpc   *grpcTestCase
 	NoAuth bool
 }
 
@@ -42,12 +34,6 @@ type httpTestCaseResponse struct {
 	Body []byte
 }
 
-type grpcTestCase struct {
-	Req  protoreflect.ProtoMessage
-	Res  protoreflect.ProtoMessage
-	Code codes.Code
-}
-
 var TestCases = []*testCase{
 	// Ping
 	{
@@ -65,25 +51,19 @@ var TestCases = []*testCase{
 				Body: []byte(`{"status":"ok"}`),
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &grpc_health_v1.HealthCheckRequest{},
-			Res: &grpc_health_v1.HealthCheckResponse{
-				Status: grpc_health_v1.HealthCheckResponse_SERVING,
-			},
-		},
 	},
 	// Promises
 	{
 		Name: "ReadPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromise", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromise", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadPromiseResponse{
+			Data: &t_api.PromiseGetResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Pending,
@@ -100,24 +80,18 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "foo",
-				RequestId: "ReadPromise",
-			},
-		},
 	},
 	{
 		Name: "ReadPromiseWithSlash",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromiseWithSlash", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromiseWithSlash", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "foo/bar",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadPromiseResponse{
+			Data: &t_api.PromiseGetResponse{
 				Promise: &promise.Promise{
 					Id:    "foo/bar",
 					State: promise.Pending,
@@ -134,24 +108,18 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "foo/bar",
-				RequestId: "ReadPromiseWithSlash",
-			},
-		},
 	},
 	{
 		Name: "ReadPromiseNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadPromiseNotFound", "name": "ReadPromise"},
-			Payload: &t_api.ReadPromiseRequest{
+			Head: map[string]string{"id": "ReadPromiseNotFound", "name": "promise.get"},
+			Data: &t_api.PromiseGetRequest{
 				Id: "bar",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusPromiseNotFound,
-			Payload: &t_api.ReadPromiseResponse{
+			Data: &t_api.PromiseGetResponse{
 				Promise: nil,
 			},
 		},
@@ -165,19 +133,12 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadPromiseRequest{
-				Id:        "bar",
-				RequestId: "ReadPromiseNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 	{
 		Name: "SearchPromises",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromises", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromises", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -192,7 +153,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -207,19 +168,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				Limit:     10,
-				RequestId: "SearchPromises",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesCursor",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesCursor", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesCursor", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -231,7 +185,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -246,19 +200,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				Cursor:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.XKusWO-Jl4v7QVIwh5Pn3oIElBvtpf0VPOLJkXPvQLk",
-				RequestId: "SearchPromisesCursor",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesPending",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesPending", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesPending", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -269,7 +216,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -284,20 +231,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_PENDING,
-				Limit:     10,
-				RequestId: "SearchPromisesPending",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesResolved",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesResolved", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesResolved", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Resolved,
@@ -308,7 +247,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -323,20 +262,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_RESOLVED,
-				Limit:     10,
-				RequestId: "SearchPromisesResolved",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesRejected",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesRejected", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesRejected", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Rejected,
@@ -349,7 +280,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -364,20 +295,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				State:     pb.SearchState_SEARCH_REJECTED,
-				Limit:     10,
-				RequestId: "SearchPromisesRejected",
-			},
-		},
 	},
 	{
 		Name: "SearchPromisesTags",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesTags", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesTags", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -394,7 +317,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -407,16 +330,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id: "*",
-				Tags: map[string]string{
-					"foo": "bar",
-				},
-				Limit:     10,
-				RequestId: "SearchPromisesTags",
 			},
 		},
 	},
@@ -433,12 +346,6 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id: "",
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidState",
@@ -453,20 +360,12 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: 10,
-				State: -1,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchPromisesDefaultLimit",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "SearchPromises"},
-			Payload: &t_api.SearchPromisesRequest{
+			Head: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "promise.search"},
+			Data: &t_api.PromiseSearchRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -481,7 +380,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchPromisesResponse{
+			Data: &t_api.PromiseSearchResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -494,12 +393,6 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:        "*",
-				RequestId: "SearchPromisesDefaultLimit",
 			},
 		},
 	},
@@ -516,13 +409,6 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: -1,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchPromisesInvalidLimitUpper",
@@ -537,22 +423,13 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchPromisesRequest{
-				Id:    "*",
-				Limit: 101,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "CreatePromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromise", "name": "CreatePromise"},
-			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
+			Head: map[string]string{"id": "CreatePromise", "name": "promise.create"},
+			Data: &t_api.PromiseCreateRequest{
+				Id: "foo",
 				Param: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("pending"),
@@ -562,11 +439,10 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Data: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("pending"),
@@ -580,9 +456,7 @@ var TestCases = []*testCase{
 				Method: "POST",
 				Path:   "promises",
 				Headers: map[string]string{
-					"Request-Id":      "CreatePromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "CreatePromise",
 				},
 				Body: []byte(`{
 					"id": "foo",
@@ -597,55 +471,25 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Param: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("pending"),
-				},
-				Timeout:   1,
-				RequestId: "CreatePromise",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "bar",
-					Param: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("pending"),
-					},
-					Value:   &pb.Value{},
-					Timeout: 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseMinimal", "name": "CreatePromise"},
-			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				Param:          promise.Value{},
-				Timeout:        1,
+			Head: map[string]string{"id": "CreatePromiseMinimal", "name": "promise.create"},
+			Data: &t_api.PromiseCreateRequest{
+				Id:      "foo",
+				Param:   promise.Value{},
+				Timeout: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Data: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: nil,
-					Param:                   promise.Value{},
-					Timeout:                 1,
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
 				},
 			},
 		},
@@ -665,46 +509,25 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:        "foo",
-				Timeout:   1,
-				RequestId: "CreatePromiseMinimal",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "CreatePromise", "traceparent": "foo", "tracestate": "bar"},
-			Payload: &t_api.CreatePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				Param:          promise.Value{},
-				Timeout:        1,
+			Head: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "promise.create", "traceparent": "foo", "tracestate": "bar"},
+			Data: &t_api.PromiseCreateRequest{
+				Id:      "foo",
+				Param:   promise.Value{},
+				Timeout: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseResponse{
+			Data: &t_api.PromiseCreateResponse{
 				Promise: &promise.Promise{
-					Id:                      "foo",
-					State:                   promise.Pending,
-					IdempotencyKeyForCreate: nil,
-					Param:                   promise.Value{},
-					Timeout:                 1,
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
 				},
 			},
 		},
@@ -726,33 +549,13 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseRequest{
-				Id:          "foo",
-				Timeout:     1,
-				RequestId:   "CreatePromiseWithTraceContext",
-				Traceparent: "foo",
-				Tracestate:  "bar",
-			},
-			Res: &pb.CreatePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -767,7 +570,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Data: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -793,38 +596,13 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       2,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTaskWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTaskWithTraceContext", "name": "CreatePromiseAndTask", "traceparent": "baz", "tracestate": "qux"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTaskWithTraceContext", "name": "task.create", "traceparent": "baz", "tracestate": "qux"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -839,7 +617,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Data: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -867,33 +645,6 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:          "foo",
-					Timeout:     1,
-					Tags:        map[string]string{"resonate:invoke": "baz"},
-					RequestId:   "CreatePromiseAndTaskWithTraceContext",
-					Traceparent: "baz",
-					Tracestate:  "qux",
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       2,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseTimeoutTooLarge",
@@ -917,12 +668,10 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Resolved,
+			Head: map[string]string{"id": "ResolvePromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Resolved,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("resolve"),
@@ -931,11 +680,10 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Resolved,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Resolved,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("resolve"),
@@ -948,9 +696,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "ResolvePromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "ResolvePromise",
 				},
 				Body: []byte(`{
 					"state": "RESOLVED",
@@ -964,52 +710,24 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				RequestId:      "ResolvePromise",
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("resolve"),
-				},
-			},
-			Res: &pb.ResolvePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_RESOLVED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("resolve"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "ResolvePromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Resolved,
-				Value:          promise.Value{},
+			Head: map[string]string{"id": "ResolvePromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Resolved,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Resolved,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Resolved,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -1028,76 +746,14 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				Id:        "foo",
-				RequestId: "ResolvePromiseMinimal",
-			},
-			Res: &pb.ResolvePromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_RESOLVED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
-	},
-	{
-		Name: "ResolvePromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ResolvePromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Resolved,
-				Value:          promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyResolved,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Resolved,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "ResolvePromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "RESOLVED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ResolvePromiseRequest{
-				Id:        "foo",
-				RequestId: "ResolvePromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
-		},
 	},
 	{
 		Name: "RejectPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Rejected,
+			Head: map[string]string{"id": "RejectPromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Rejected,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("reject"),
@@ -1106,11 +762,10 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Rejected,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Rejected,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("reject"),
@@ -1123,9 +778,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "RejectPromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "RejectPromise",
 				},
 				Body: []byte(`{
 					"state": "REJECTED",
@@ -1139,52 +792,24 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				RequestId:      "RejectPromise",
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("reject"),
-				},
-			},
-			Res: &pb.RejectPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("reject"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "RejectPromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Rejected,
-				Value:          promise.Value{},
+			Head: map[string]string{"id": "RejectPromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Rejected,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Rejected,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Rejected,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -1203,76 +828,14 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				Id:        "foo",
-				RequestId: "RejectPromiseMinimal",
-			},
-			Res: &pb.RejectPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
-	},
-	{
-		Name: "RejectPromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "RejectPromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Rejected,
-				Value:          promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyRejected,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Rejected,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "RejectPromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "REJECTED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.RejectPromiseRequest{
-				Id:        "foo",
-				RequestId: "RejectPromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
-		},
 	},
 	{
 		Name: "CancelPromise",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				Strict:         true,
-				State:          promise.Canceled,
+			Head: map[string]string{"id": "CancelPromise", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Canceled,
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
@@ -1281,11 +844,10 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Canceled,
-					IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+					Id:    "foo",
+					State: promise.Canceled,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("cancel"),
@@ -1298,9 +860,7 @@ var TestCases = []*testCase{
 				Method: "PATCH",
 				Path:   "promises/foo",
 				Headers: map[string]string{
-					"Request-Id":      "CancelPromise",
-					"Idempotency-Key": "bar",
-					"Strict":          "true",
+					"Request-Id": "CancelPromise",
 				},
 				Body: []byte(`{
 					"state": "REJECTED_CANCELED",
@@ -1314,52 +874,24 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &pb.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("cancel"),
-				},
-				RequestId: "CancelPromise",
-			},
-			Res: &pb.CancelPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED_CANCELED,
-					IdempotencyKeyForComplete: "bar",
-					Param:                     &pb.Value{},
-					Value: &pb.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("cancel"),
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "CancelPromiseMinimal",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromiseMinimal", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Canceled,
-				Value:          promise.Value{},
+			Head: map[string]string{"id": "CancelPromiseMinimal", "name": "promise.complete"},
+			Data: &t_api.PromiseCompleteRequest{
+				Id:    "foo",
+				State: promise.Canceled,
+				Value: promise.Value{},
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CompletePromiseResponse{
+			Data: &t_api.PromiseCompleteResponse{
 				Promise: &promise.Promise{
-					Id:                        "foo",
-					State:                     promise.Canceled,
-					IdempotencyKeyForComplete: nil,
-					Value:                     promise.Value{},
+					Id:    "foo",
+					State: promise.Canceled,
+					Value: promise.Value{},
 				},
 			},
 		},
@@ -1378,74 +910,14 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				RequestId: "CancelPromiseMinimal",
-				Id:        "foo",
-			},
-			Res: &pb.CancelPromiseResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                        "foo",
-					State:                     pb.State_REJECTED_CANCELED,
-					IdempotencyKeyForComplete: "",
-					Param:                     &pb.Value{},
-					Value:                     &pb.Value{},
-				},
-			},
-		},
-	},
-	{
-		Name: "CancelPromiseAlreadyCompleted",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CancelPromiseAlreadyCompleted", "name": "CompletePromise"},
-			Payload: &t_api.CompletePromiseRequest{
-				Id:             "foo",
-				IdempotencyKey: nil,
-				Strict:         false,
-				State:          promise.Canceled,
-				Value:          promise.Value{},
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusPromiseAlreadyRejected,
-			Payload: &t_api.CompletePromiseResponse{
-				Promise: &promise.Promise{
-					Id:    "foo",
-					State: promise.Canceled,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "PATCH",
-				Path:   "promises/foo",
-				Headers: map[string]string{
-					"Request-Id": "CancelPromiseAlreadyCompleted",
-				},
-				Body: []byte(`{
-					"state": "REJECTED_CANCELED"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 403,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CancelPromiseRequest{
-				Id:        "foo",
-				RequestId: "CancelPromiseAlreadyCompleted",
-			},
-			Code: codes.PermissionDenied,
-		},
 	},
 
 	// Callbacks
 	{
 		Name: "CreateCallbackLogicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1455,7 +927,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1472,23 +944,14 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallback",
 			},
 		},
 	},
 	{
 		Name: "CreateCallbackLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallback", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1498,7 +961,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1518,21 +981,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallback",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackPhysicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1542,7 +996,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1561,21 +1015,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackPhysicalReceiver",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1585,7 +1030,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1605,21 +1050,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackPhysicalReceiver",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1629,7 +1065,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1650,23 +1086,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:     "CreateCallbackWithTraceContext",
-				Traceparent:   "foo",
-				Tracestate:    "bar",
-			},
-		},
 	},
 	{
 		Name: "CreateCallbackNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1676,7 +1101,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1695,22 +1120,12 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallbackNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 	{
 		Name: "CreateCallbackNotFoundDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateCallbackNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1720,7 +1135,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1740,24 +1155,14 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId:     "CreateCallbackNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 
 	// Subscriptions
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1767,7 +1172,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1784,23 +1189,14 @@ var TestCases = []*testCase{
 			},
 			Res: &httpTestCaseResponse{
 				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscription",
 			},
 		},
 	},
 	{
 		Name: "CreateSubscriptionLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscription", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1810,7 +1206,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1830,21 +1226,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscription",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1854,7 +1241,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1874,21 +1261,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId: "CreateSubscriptionPhysicalRecv",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1898,7 +1276,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1917,21 +1295,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId: "CreateSubscriptionPhysicalRecv",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionWithTraceContext",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1941,7 +1310,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1963,23 +1332,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:          "foo.1",
-				PromiseId:   "foo",
-				Timeout:     1,
-				Recv:        &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId:   "CreateSubscriptionWithTraceContext",
-				Traceparent: "baz",
-				Tracestate:  "qux",
-			},
-		},
 	},
 	{
 		Name: "CreateSubscriptionNotFound",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1989,7 +1347,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2008,22 +1366,12 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscriptionNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 	{
 		Name: "CreateSubscriptionNotFoundDeprecated",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			Payload: &t_api.CreateCallbackRequest{
+			Head: map[string]string{"id": "CreateSubscriptionNotFound", "name": "promise.register"},
+			Data: &t_api.PromiseRegisterRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -2033,7 +1381,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusPromiseNotFound,
-			Payload: &t_api.CreateCallbackResponse{},
+			Data: &t_api.PromiseRegisterResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2053,29 +1401,19 @@ var TestCases = []*testCase{
 				Code: 404,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateSubscriptionRequest{
-				Id:        "foo.1",
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateSubscriptionNotFound",
-			},
-			Code: codes.NotFound,
-		},
 	},
 	// Schedules
 	{
 		Name: "ReadSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReadSchedule", "name": "ReadSchedule"},
-			Payload: &t_api.ReadScheduleRequest{
+			Head: map[string]string{"id": "ReadSchedule", "name": "schedule.get"},
+			Data: &t_api.ScheduleGetRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.ReadScheduleResponse{
+			Data: &t_api.ScheduleGetResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
@@ -2097,18 +1435,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReadScheduleRequest{
-				Id:        "foo",
-				RequestId: "ReadSchedule",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedules",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedules", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedules", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 10,
@@ -2116,7 +1448,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Data: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2133,19 +1465,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				RequestId: "SearchSchedules",
-				Id:        "*",
-				Limit:     10,
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesCursor",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesCursor", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesCursor", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:     "*",
 				Tags:   map[string]string{},
 				Limit:  10,
@@ -2154,7 +1479,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Data: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2169,19 +1494,12 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:        "*",
-				Cursor:    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.w5_elkl3n5yUHKIbxBzdA1sWRxvKLGVqsnz-H69p_JI",
-				RequestId: "SearchSchedulesCursor",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesTags",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesTags", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesTags", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id: "*",
 				Tags: map[string]string{
 					"foo": "bar",
@@ -2191,7 +1509,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Data: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2208,16 +1526,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id: "*",
-				Tags: map[string]string{
-					"foo": "bar",
-				},
-				Limit:     10,
-				RequestId: "SearchSchedulesTags",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesInvalidQuery",
@@ -2232,18 +1540,12 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id: "",
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "SearchSchedulesDefaultLimit",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "SearchSchedules"},
-			Payload: &t_api.SearchSchedulesRequest{
+			Head: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "schedule.search"},
+			Data: &t_api.ScheduleSearchRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 100,
@@ -2251,7 +1553,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.SearchSchedulesResponse{
+			Data: &t_api.ScheduleSearchResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2268,12 +1570,6 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:        "*",
-				RequestId: "SearchSchedulesDefaultLimit",
-			},
-		},
 	},
 	{
 		Name: "SearchSchedulesInvalidLimitLower",
@@ -2287,13 +1583,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:    "*",
-				Limit: -1,
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 	{
@@ -2309,21 +1598,13 @@ var TestCases = []*testCase{
 				Code: 400,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.SearchSchedulesRequest{
-				Id:    "*",
-				Limit: 101,
-			},
-			Code: codes.InvalidArgument,
-		},
 	},
 	{
 		Name: "CreateSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreateSchedule", "name": "CreateSchedule"},
-			Payload: &t_api.CreateScheduleRequest{
+			Head: map[string]string{"id": "CreateSchedule", "name": "schedule.create"},
+			Data: &t_api.ScheduleCreateRequest{
 				Id:             "foo",
-				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Cron:           "* * * * *",
 				PromiseId:      "foo.{{.timestamp}}",
 				PromiseTimeout: 1,
@@ -2331,14 +1612,13 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreateScheduleResponse{
+			Data: &t_api.ScheduleCreateResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
 					Cron:           "* * * * *",
 					PromiseId:      "foo.{{.timestamp}}",
 					PromiseTimeout: 1,
-					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				},
 			},
 		},
@@ -2347,8 +1627,7 @@ var TestCases = []*testCase{
 				Method: "POST",
 				Path:   "schedules",
 				Headers: map[string]string{
-					"Request-Id":      "CreateSchedule",
-					"Idempotency-Key": "bar",
+					"Request-Id": "CreateSchedule",
 				},
 				Body: []byte(`{
 					"id": "foo",
@@ -2362,41 +1641,18 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreateScheduleRequest{
-				Id:             "foo",
-				Description:    "",
-				Cron:           "* * * * *",
-				PromiseId:      "foo.{{.timestamp}}",
-				PromiseTimeout: 1,
-				IdempotencyKey: "bar",
-				RequestId:      "CreateSchedule",
-			},
-			Res: &pb.CreatedScheduleResponse{
-				Noop: false,
-				Schedule: &pb.Schedule{
-					Id:             "foo",
-					Description:    "",
-					Cron:           "* * * * *",
-					PromiseId:      "foo.{{.timestamp}}",
-					PromiseTimeout: 1,
-					PromiseParam:   &pb.Value{},
-					IdempotencyKey: "bar",
-				},
-			},
-		},
 	},
 	{
 		Name: "DeleteSchedule",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DeleteSchedule", "name": "DeleteSchedule"},
-			Payload: &t_api.DeleteScheduleRequest{
+			Head: map[string]string{"id": "DeleteSchedule", "name": "schedule.delete"},
+			Data: &t_api.ScheduleDeleteRequest{
 				Id: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusNoContent,
-			Payload: &t_api.DeleteScheduleResponse{},
+			Data: &t_api.ScheduleDeleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2410,145 +1666,14 @@ var TestCases = []*testCase{
 				Code: 204,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DeleteScheduleRequest{
-				Id:        "foo",
-				RequestId: "DeleteSchedule",
-			},
-		},
-	},
-
-	// Locks
-	{
-		Name: "AcquireLock",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "AcquireLock", "name": "AcquireLock"},
-			Payload: &t_api.AcquireLockRequest{
-				ResourceId:  "foo",
-				ProcessId:   "bar",
-				ExecutionId: "baz",
-				Ttl:         1,
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusCreated,
-			Payload: &t_api.AcquireLockResponse{
-				Lock: &lock.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Ttl:         1,
-				},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/acquire",
-				Headers: map[string]string{
-					"Request-Id": "AcquireLock",
-				},
-				Body: []byte(`{
-					"resourceId": "foo",
-					"processId": "bar",
-					"executionId": "baz",
-					"ttl": 1
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.AcquireLockRequest{
-				RequestId:   "AcquireLock",
-				ResourceId:  "foo",
-				ProcessId:   "bar",
-				ExecutionId: "baz",
-				Ttl:         1,
-			},
-		},
-	},
-	{
-		Name: "ReleaseLock",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ReleaseLock", "name": "ReleaseLock"},
-			Payload: &t_api.ReleaseLockRequest{
-				ResourceId:  "foo",
-				ExecutionId: "bar",
-			},
-		},
-		Res: &t_api.Response{
-			Status:  t_api.StatusNoContent,
-			Payload: &t_api.ReleaseLockResponse{},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/release",
-				Headers: map[string]string{
-					"Request-Id": "ReleaseLock",
-				},
-				Body: []byte(`{
-					"resourceId": "foo",
-					"executionId": "bar"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 204,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ReleaseLockRequest{
-				RequestId:   "ReleaseLock",
-				ResourceId:  "foo",
-				ExecutionId: "bar",
-			},
-		},
-	},
-	{
-		Name: "HeartbeatLocks",
-		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatLocks", "name": "HeartbeatLocks"},
-			Payload: &t_api.HeartbeatLocksRequest{
-				ProcessId: "foo",
-			},
-		},
-		Res: &t_api.Response{
-			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatLocksResponse{
-				LocksAffected: 1,
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "locks/heartbeat",
-				Headers: map[string]string{
-					"Request-Id": "HeartbeatLocks",
-				},
-				Body: []byte(`{
-					"processId": "foo"
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 200,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatLocksRequest{
-				RequestId: "HeartbeatLocks",
-				ProcessId: "foo",
-			},
-		},
 	},
 
 	// Tasks
 	{
 		Name: "ClaimTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTask", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTask", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -2557,7 +1682,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Data: &t_api.TaskAcquireResponse{
 				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
@@ -2579,21 +1704,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTask",
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTaskGet", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTaskGet", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "foo/1", // default process id for get endpoint
@@ -2602,7 +1718,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Data: &t_api.TaskAcquireResponse{
 				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
@@ -2618,21 +1734,12 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "foo/1",
-				Ttl:       60000,
-				RequestId: "ClaimTaskGet",
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskInvoke",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "ClaimTaskInvoke", "name": "ClaimTask"},
-			Payload: &t_api.ClaimTaskRequest{
+			Head: map[string]string{"id": "ClaimTaskInvoke", "name": "task.acquire"},
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -2641,7 +1748,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Data: &t_api.TaskAcquireResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Invoke, Root: "foo"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				RootPromiseHref: "http://localhost:8001/promises/foo",
@@ -2671,38 +1778,16 @@ var TestCases = []*testCase{
 				}`)),
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTaskInvoke",
-			},
-			Res: &pb.ClaimTaskResponse{
-				Claimed: true,
-				Mesg: &pb.Mesg{
-					Type: "invoke",
-					Promises: map[string]*pb.MesgPromise{
-						"root": {
-							Id:   "foo",
-							Href: "http://localhost:8001/promises/foo",
-							Data: &pb.Promise{Id: "foo", State: pb.State_PENDING, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskResume",
 		Req: &t_api.Request{
-			Metadata: map[string]string{
+			Head: map[string]string{
 				"id":       "ClaimTaskResume",
-				"name":     "ClaimTask",
+				"name":     "task.acquire",
 				"protocol": "http",
 			},
-			Payload: &t_api.ClaimTaskRequest{
+			Data: &t_api.TaskAcquireRequest{
 				Id:        "foo",
 				Counter:   2,
 				ProcessId: "bar",
@@ -2711,7 +1796,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.ClaimTaskResponse{
+			Data: &t_api.TaskAcquireResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				LeafPromise:     &promise.Promise{Id: "bar", State: promise.Resolved},
@@ -2744,33 +1829,6 @@ var TestCases = []*testCase{
 				}`)),
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   2,
-				ProcessId: "bar",
-				Ttl:       1,
-				RequestId: "ClaimTaskResume",
-			},
-			Res: &pb.ClaimTaskResponse{
-				Claimed: true,
-				Mesg: &pb.Mesg{
-					Type: "resume",
-					Promises: map[string]*pb.MesgPromise{
-						"root": {
-							Id:   "foo",
-							Href: "http://localhost:8001/promises/foo",
-							Data: &pb.Promise{Id: "foo", State: pb.State_PENDING, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-						"leaf": {
-							Id:   "bar",
-							Href: "http://localhost:8001/promises/bar",
-							Data: &pb.Promise{Id: "bar", State: pb.State_RESOLVED, Param: &pb.Value{}, Value: &pb.Value{}},
-						},
-					},
-				},
-			},
-		},
 	},
 	{
 		Name: "ClaimTaskTtlTooLarge",
@@ -2796,15 +1854,15 @@ var TestCases = []*testCase{
 	{
 		Name: "CompleteTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CompleteTask", "name": "CompleteTask"},
-			Payload: &t_api.CompleteTaskRequest{
+			Head: map[string]string{"id": "CompleteTask", "name": "task.complete"},
+			Data: &t_api.TaskCompleteRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CompleteTaskResponse{},
+			Data: &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2822,26 +1880,19 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CompleteTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "CompleteTask",
-			},
-		},
 	},
 	{
 		Name: "CompleteTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CompleteTaskGet", "name": "CompleteTask"},
-			Payload: &t_api.CompleteTaskRequest{
+			Head: map[string]string{"id": "CompleteTaskGet", "name": "task.complete"},
+			Data: &t_api.TaskCompleteRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.CompleteTaskResponse{},
+			Data: &t_api.TaskCompleteResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2855,26 +1906,19 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CompleteTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "CompleteTaskGet",
-			},
-		},
 	},
 	{
 		Name: "DropTask",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DropTask", "name": "DropTask"},
-			Payload: &t_api.DropTaskRequest{
+			Head: map[string]string{"id": "DropTask", "name": "task.release"},
+			Data: &t_api.TaskReleaseRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.DropTaskResponse{},
+			Data: &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2892,26 +1936,19 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DropTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "DropTask",
-			},
-		},
 	},
 	{
 		Name: "DropTaskGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "DropTaskGet", "name": "DropTask"},
-			Payload: &t_api.DropTaskRequest{
+			Head: map[string]string{"id": "DropTaskGet", "name": "task.release"},
+			Data: &t_api.TaskReleaseRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
 		},
 		Res: &t_api.Response{
 			Status:  t_api.StatusCreated,
-			Payload: &t_api.DropTaskResponse{},
+			Data: &t_api.TaskReleaseResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2925,25 +1962,18 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.DropTaskRequest{
-				Id:        "foo",
-				Counter:   1,
-				RequestId: "DropTaskGet",
-			},
-		},
 	},
 	{
 		Name: "HeartbeatTasks",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatTasks", "name": "HeartbeatTasks"},
-			Payload: &t_api.HeartbeatTasksRequest{
+			Head: map[string]string{"id": "HeartbeatTasks", "name": "task.hearbeat"},
+			Data: &t_api.TaskHeartbeatRequest{
 				ProcessId: "foo",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatTasksResponse{
+			Data: &t_api.TaskHeartbeatResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -2962,24 +1992,18 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatTasksRequest{
-				ProcessId: "foo",
-				RequestId: "HeartbeatTasks",
-			},
-		},
 	},
 	{
 		Name: "HeartbeatTasksGet",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "HeartbeatTasksGet", "name": "HeartbeatTasks"},
-			Payload: &t_api.HeartbeatTasksRequest{
+			Head: map[string]string{"id": "HeartbeatTasksGet", "name": "task.hearbeat"},
+			Data: &t_api.TaskHeartbeatRequest{
 				ProcessId: "foo/1",
 			},
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusOK,
-			Payload: &t_api.HeartbeatTasksResponse{
+			Data: &t_api.TaskHeartbeatResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -2995,19 +2019,13 @@ var TestCases = []*testCase{
 				Code: 200,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.HeartbeatTasksRequest{
-				ProcessId: "foo/1",
-				RequestId: "HeartbeatTasksGet",
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTaskWithTtlZero",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -3022,7 +2040,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Data: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -3048,38 +2066,13 @@ var TestCases = []*testCase{
 				Code: 201,
 			},
 		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       0,
-				},
-			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
 	},
 	{
 		Name: "CreatePromiseAndTaskWithNegativeTtl",
 		Req: &t_api.Request{
-			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			Payload: &t_api.CreatePromiseAndTaskRequest{
-				Promise: &t_api.CreatePromiseRequest{
+			Head: map[string]string{"id": "CreatePromiseAndTask", "name": "task.create"},
+			Data: &t_api.TaskCreateRequest{
+				Promise: &t_api.PromiseCreateRequest{
 					Id:      "foo",
 					Timeout: 1,
 					Tags:    map[string]string{"resonate:invoke": "baz"},
@@ -3094,7 +2087,7 @@ var TestCases = []*testCase{
 		},
 		Res: &t_api.Response{
 			Status: t_api.StatusCreated,
-			Payload: &t_api.CreatePromiseAndTaskResponse{
+			Data: &t_api.TaskCreateResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -3119,21 +2112,6 @@ var TestCases = []*testCase{
 			Res: &httpTestCaseResponse{
 				Code: 400,
 			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndTaskRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndTask",
-					Tags:      map[string]string{"resonate:invoke": "baz"},
-				},
-				Task: &pb.CreatePromiseTaskRequest{
-					ProcessId: "bar",
-					Ttl:       -1,
-				},
-			},
-			Code: codes.InvalidArgument,
 		},
 	},
 }
