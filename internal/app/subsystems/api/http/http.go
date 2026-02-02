@@ -172,6 +172,9 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 	authorized.GET("/schedules/*id", server.readSchedule)
 	authorized.DELETE("/schedules/*id", server.deleteSchedule)
 
+	// Protocol API (spec.md)
+	authorized.POST("/api", server.process)
+
 	// Tasks API
 	authorized.POST("/tasks/claim", server.claimTask)
 	authorized.GET("/tasks/claim/:id/:counter", server.claimTask)
@@ -210,7 +213,7 @@ func New(a i_api.API, metrics *metrics.Metrics, config *Config) (i_api.Subsystem
 			}
 			_, err := server.api.Process(c.GetHeader("RequestId"), &t_api.Request{
 				Head: metadata,
-				Data:  &t_api.NoopRequest{},
+				Data: &t_api.NoopRequest{},
 			})
 
 			if err != nil {

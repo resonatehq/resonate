@@ -350,7 +350,7 @@ func (s *server) createCallback(c *gin.Context) {
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Head: metadata,
-		Data: &t_api.PromiseRegisterRequest{
+		Data: &t_api.CallbackCreateRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
@@ -363,7 +363,7 @@ func (s *server) createCallback(c *gin.Context) {
 		return
 	}
 
-	createCallback := res.AsPromiseRegisterResponse()
+	createCallback := res.AsCreateCallbackResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"callback": createCallback.Callback,
 		"promise":  createCallback.Promise,
@@ -421,7 +421,7 @@ func (s *server) createSubscription(c *gin.Context) {
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Head: metadata,
-		Data: &t_api.PromiseRegisterRequest{
+		Data: &t_api.CallbackCreateRequest{
 			Id:        util.NotifyId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
@@ -434,7 +434,7 @@ func (s *server) createSubscription(c *gin.Context) {
 		return
 	}
 
-	createCallback := res.AsPromiseRegisterResponse()
+	createCallback := res.AsCreateCallbackResponse()
 	c.JSON(s.code(res.Status), gin.H{
 		"callback": createCallback.Callback,
 		"promise":  createCallback.Promise,

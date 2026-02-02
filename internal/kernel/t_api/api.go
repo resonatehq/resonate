@@ -10,6 +10,10 @@ const (
 	PromiseCreate
 	PromiseComplete
 	PromiseRegister
+	PromiseSubscribe
+
+	// CALLBACKS (old api)
+	CallbackCreate
 
 	// SCHEDULES
 	ScheduleRead
@@ -22,6 +26,8 @@ const (
 	TaskAcquire
 	TaskRelease
 	TaskComplete
+	TaskFulfill
+	TaskSuspend
 	TaskHeartbeat
 
 	// Echo
@@ -44,6 +50,12 @@ func (k Kind) String() string {
 		return "promise.complete"
 	case PromiseRegister:
 		return "promise.register"
+	case PromiseSubscribe:
+		return "promise.subscribe"
+
+	case CallbackCreate:
+		return "callback.create"
+
 	// SCHEDULES
 	case ScheduleRead:
 		return "schedule.get"
@@ -58,6 +70,10 @@ func (k Kind) String() string {
 		return "task.acquire"
 	case TaskComplete:
 		return "task.complete"
+	case TaskFulfill:
+		return "task.fulfill"
+	case TaskSuspend:
+		return "task.suspend"
 	case TaskRelease:
 		return "task.release"
 	case TaskHeartbeat:
