@@ -103,6 +103,10 @@ def ntfy(_: Context, i: int):
 resonate = Resonate.remote()
 resonate.start()  # Start Resonate threads
 Event().wait()  # Keep the main thread alive
+```
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-py)
+
 ### 4. Start the server
 
 ```shell
