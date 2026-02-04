@@ -1,4 +1,4 @@
-![resonate component banner](/assets/resonate-component.png)
+![resonate banner](/assets/resonate-banner.png)
 
 # Resonate Server
 
@@ -18,27 +18,162 @@ To provide those abstractions at the application level (i.e. to enable API-like 
 
 The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to provide those APIs.
 
-### [How to contribute to this repo](./CONTRIBUTING.md)
+- [How to contribute to this repo](./CONTRIBUTING.md)
+- [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
+- [Example application library](https://github.com/resonatehq-examples)
+- [The concepts that power Resonate](https://www.distributed-async-await.io/)
+- [Join the Discord](https://resonatehq.io/discord)
+- [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
+- [Follow on Twitter](https://twitter.com/resonatehqio)
+- [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
+- [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
-### [Get started with Resonate](https://docs.resonatehq.io/get-started/)
+## Resonate quickstart
 
-### [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
+![resonate quickstart banner](./assets/quickstart-banner.png)
 
-### [Example application library](https://github.com/resonatehq-examples)
+### 1. Install the Resonate Server & CLI
 
-### [The concepts that power Resonate](https://www.distributed-async-await.io/)
+```shell
+brew install resonatehq/tap/resonate
+```
 
-### [Join the Discord](https://resonatehq.io/discord)
+### 2. Install the Resonate SDK
 
-### [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
+#### TypeScript
 
-### [Follow on Twitter](https://twitter.com/resonatehqio)
+```shell
+npm install @resonatehq/sdk
+```
 
-### [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
+#### Python
 
-### [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
+```shell
+pip install resonate-sdk
+```
 
-## Server quick start instructions
+### 3. Write your first Resonate Function
+
+A countdown as a loop. Simple, but the function can run for minutes, hours, or days, despite restarts.
+
+#### TypeScript (countdown.ts)
+
+```typescript
+import { Resonate, type Context } from "@resonatehq/sdk";
+
+function* countdown(context: Context, count: number, delay: number) {
+  for (let i = count; i > 0; i--) {
+    // Run a function, persist its result
+    yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
+    // Sleep
+    yield* context.sleep(delay * 1000);
+  }
+  console.log("Done!");
+}
+// Instantiate Resonate
+const resonate = new Resonate({ url: "http://localhost:8001" });
+// Register the function
+resonate.register(countdown);
+```
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-ts)
+
+#### Python (countdown.py)
+
+```python
+from resonate import Resonate, Context
+from threading import Event
+
+# Register the function
+@resonate.register
+def countdown(ctx: Context, count: int, delay: int):
+    for i in range(count, 0, -1):
+        # Run a function, persist its result
+        yield ctx.run(ntfy, i)
+        # Sleep
+        yield ctx.sleep(delay)
+    print("Done!")
+
+
+def ntfy(_: Context, i: int):
+    print(f"Countdown: {i}")
+
+
+# Instantiate Resonate
+resonate = Resonate.remote()
+resonate.start()  # Start Resonate threads
+Event().wait()  # Keep the main thread alive
+```
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-py)
+
+### 4. Start the server
+
+```shell
+resonate dev
+```
+
+### 5. Start the worker
+
+#### TypeScript
+
+```shell
+npx ts-node countdown.ts
+```
+
+#### Python
+
+```shell
+python countdown.py
+```
+
+### 6. Activate the function
+
+Activate the function with execution ID `countdown.1`:
+
+```shell
+resonate invoke countdown.1 --func countdown --arg 5 --arg 60
+```
+
+### 7. Result
+
+You will see the countdown in the terminal
+
+#### TypeScript
+
+```shell
+npx ts-node countdown.ts
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+Done!
+```
+
+#### Python
+
+```shell
+python countdown.py
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+Done!
+```
+
+### What to try
+
+After starting the function, inspect the current state of the execution using the `resonate tree` command. The tree command visualizes the call graph of the function execution as a graph of durable promises.
+
+```shell
+resonate tree countdown.1
+```
+
+Now try killing the worker mid-countdown and restarting. **The countdown picks up right where it left off without missing a beat.**
+
+## More ways to install the server
 
 For more Resonate Server deployment information see the [Set up and run a Resonate Server](https://docs.resonatehq.io/operate/run-server) guide.
 
