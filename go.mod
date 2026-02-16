@@ -3,7 +3,7 @@ module github.com/resonatehq/resonate
 go 1.24.0
 
 require (
-	github.com/anishathalye/porcupine v1.0.3
+	github.com/anishathalye/porcupine v1.1.0
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.30.1
