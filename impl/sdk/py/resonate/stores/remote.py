@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -27,16 +26,16 @@ logger = logging.getLogger(__name__)
 class RemoteStore:
     def __init__(
         self,
-        host: str | None = None,
-        port: str | None = None,
+        url: str | None = None,
         auth: tuple[str, str] | None = None,
+        token: str | None = None,
         encoder: Encoder[str | None, str | None] | None = None,
         timeout: float | tuple[float, float] = 5,
         retry_policy: RetryPolicy | None = None,
     ) -> None:
-        self._host = host or os.getenv("RESONATE_HOST_STORE", os.getenv("RESONATE_HOST", "http://localhost"))
-        self._port = port or os.getenv("RESONATE_PORT_STORE", "8001")
-        self._auth = auth or ((os.getenv("RESONATE_USERNAME", ""), os.getenv("RESONATE_PASSWORD", "")) if "RESONATE_USERNAME" in os.environ else None)
+        self._url = url or "http://localhost:8001"
+        self._auth = auth
+        self._token = token
         self._encoder = encoder or Base64Encoder()
         self._timeout = timeout
         self._retry_policy = retry_policy or Constant(delay=1, max_retries=sys.maxsize)  # We will retry forever until we implement the drop task strategy
@@ -47,7 +46,7 @@ class RemoteStore:
 
     @property
     def url(self) -> str:
-        return f"{self._host}:{self._port}"
+        return self._url
 
     @property
     def encoder(self) -> Encoder[str | None, str | None]:
@@ -67,7 +66,10 @@ class RemoteStore:
 
     def call(self, req: PreparedRequest) -> Any:
         attempt = 0
-        req.prepare_auth(self._auth)
+        if self._token:
+            req.headers["Authorization"] = f"Bearer {self._token}"
+        elif self._auth:
+            req.prepare_auth(self._auth)
 
         with Session() as s:
             while True:

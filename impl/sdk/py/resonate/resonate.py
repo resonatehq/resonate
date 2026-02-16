@@ -4,6 +4,7 @@ import copy
 import functools
 import inspect
 import logging
+import os
 import random
 import time
 import uuid
@@ -15,7 +16,7 @@ from resonate.conventions import Base, Local, Remote, Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI, Promise
 from resonate.dependencies import Dependencies
 from resonate.loggers import ContextLogger
-from resonate.message_sources import LocalMessageSource, Poller
+from resonate.message_sources import Poller
 from resonate.models.handle import Handle
 from resonate.models.message_source import MessageSource
 from resonate.models.store import Store
@@ -36,22 +37,75 @@ ALLOWED_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 class Resonate:
-    """Resonate client."""
+    """Resonate client.
+
+    Creates a Resonate client that auto-detects local vs remote mode.
+
+    When no ``url`` is provided (and no ``RESONATE_URL`` or ``RESONATE_HOST``
+    environment variable is set), the client runs in **local mode** with
+    in-memory state — no external dependencies required.
+
+    When a ``url`` is provided (or resolved from environment variables), the
+    client runs in **remote mode**, connecting to a Resonate Server for
+    distributed durable execution.
+
+    Args:
+        url: Server URL (e.g. ``http://localhost:8001``). If not set, falls
+            back to ``RESONATE_URL`` env, then ``RESONATE_HOST``/``RESONATE_PORT``.
+        auth: Basic auth credentials as ``(username, password)``. Falls back
+            to ``RESONATE_USERNAME``/``RESONATE_PASSWORD`` env vars.
+        token: Bearer token for authentication. Falls back to
+            ``RESONATE_TOKEN`` env var. Takes priority over basic auth.
+        group: Worker group name. Defaults to ``"default"``.
+        pid: Process identifier. Auto-generated if not provided.
+        ttl: Time-to-live in seconds for claimed tasks. Defaults to ``10``.
+        log_level: Logging verbosity. Defaults to ``logging.INFO``.
+        workers: Number of worker threads for function execution.
+        store: Advanced — provide a custom store implementation.
+        message_source: Advanced — provide a custom message source.
+        dependencies: Optional dependency injection container.
+        registry: Optional function registry.
+
+    Examples:
+        Local mode (in-memory, no server needed)::
+
+            resonate = Resonate()
+
+        Remote mode via explicit URL::
+
+            resonate = Resonate(url="http://localhost:8001")
+
+        Remote mode via environment variables::
+
+            # export RESONATE_URL=http://my-server:8001
+            resonate = Resonate()
+
+        Remote mode with token auth::
+
+            resonate = Resonate(url="http://localhost:8001", token="my-secret")
+
+        Remote mode with basic auth::
+
+            resonate = Resonate(url="http://localhost:8001", auth=("user", "pass"))
+
+    """
 
     def __init__(
         self,
         *,
-        dependencies: Dependencies | None = None,
+        url: str | None = None,
+        auth: tuple[str, str] | None = None,
+        token: str | None = None,
         group: str = "default",
-        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.NOTSET,
-        message_source: MessageSource | None = None,
         pid: str | None = None,
-        registry: Registry | None = None,
-        store: Store | None = None,
         ttl: int = 10,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
         workers: int | None = None,
+        store: Store | None = None,
+        message_source: MessageSource | None = None,
+        dependencies: Dependencies | None = None,
+        registry: Registry | None = None,
     ) -> None:
-        """Create a Resonate client."""
         # dependencies
         if dependencies is not None and not isinstance(dependencies, Dependencies):
             msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
@@ -72,7 +126,7 @@ class Resonate:
 
         # message source
         if message_source is not None and not isinstance(message_source, MessageSource):
-            msg = f"message_source must be `MessageSource | None`, got {type(dependencies).__name__}"
+            msg = f"message_source must be `MessageSource | None`, got {type(message_source).__name__}"
             raise TypeError(msg)
 
         # pid
@@ -87,13 +141,7 @@ class Resonate:
 
         # store
         if store is not None and not isinstance(store, Store):
-            msg = f"store must be `Store | None`, got {type(registry).__name__}"
-            raise TypeError(msg)
-        if isinstance(store, LocalStore) and not isinstance(message_source, LocalMessageSource):
-            msg = "message source must be LocalMessageSource when store is LocalStore"
-            raise TypeError(msg)
-        if isinstance(store, RemoteStore) and isinstance(message_source, LocalMessageSource):
-            msg = "message source must not be LocalMessageSource when store is RemoteStore"
+            msg = f"store must be `Store | None`, got {type(store).__name__}"
             raise TypeError(msg)
 
         # ttl
@@ -101,7 +149,7 @@ class Resonate:
             msg = f"ttl must be `int`, got {type(ttl).__name__}"
             raise TypeError(msg)
 
-        # store / message source
+        # store / message source must both be set or both be unset
         if (store is None) != (message_source is None):
             msg = "store and message source must both be set or both be unset"
             raise ValueError(msg)
@@ -117,11 +165,38 @@ class Resonate:
         self._workers = workers
 
         if store and message_source:
+            # Power user mode: use provided store and message source directly
             self._store = store
             self._message_source = message_source
         else:
-            self._store = LocalStore()
-            self._message_source = self._store.message_source(self._group, self._pid)
+            # Auto-detect mode: resolve URL from params and env vars
+            resolved_url = url
+            if not resolved_url:
+                resolved_url = os.getenv("RESONATE_URL")
+            if not resolved_url:
+                resonate_host = os.getenv("RESONATE_HOST")
+                if resonate_host:
+                    resonate_scheme = os.getenv("RESONATE_SCHEME", "http")
+                    resonate_port = os.getenv("RESONATE_PORT", "8001")
+                    resolved_url = f"{resonate_scheme}://{resonate_host}:{resonate_port}"
+
+            # Resolve auth from params and env vars
+            resolved_token = token or os.getenv("RESONATE_TOKEN")
+            resolved_auth = auth
+            if not resolved_auth:
+                resonate_username = os.getenv("RESONATE_USERNAME")
+                if resonate_username:
+                    resonate_password = os.getenv("RESONATE_PASSWORD", "")
+                    resolved_auth = (resonate_username, resonate_password)
+
+            if resolved_url:
+                # Remote mode
+                self._store = RemoteStore(url=resolved_url, auth=resolved_auth, token=resolved_token)
+                self._message_source = Poller(group=self._group, id=self._pid, url=resolved_url, auth=resolved_auth, token=resolved_token)
+            else:
+                # Local mode
+                self._store = LocalStore()
+                self._message_source = self._store.message_source(self._group, self._pid)
 
         self._bridge = Bridge(
             ctx=lambda id, cid, info: Context(id, cid, info, self._registry, self._dependencies, ContextLogger(cid, id, self._log_level)),
@@ -134,123 +209,6 @@ class Resonate:
             registry=self._registry,
             store=self._store,
             message_source=self._message_source,
-        )
-
-    @classmethod
-    def local(
-        cls,
-        dependencies: Dependencies | None = None,
-        group: str = "default",
-        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
-        pid: str | None = None,
-        registry: Registry | None = None,
-        ttl: int = 10,
-        workers: int | None = None,
-    ) -> Resonate:
-        """Initialize a Resonate client instance for local development.
-
-        Initializes and returns a Resonate Client with zero dependencies.
-        There is no external persistence — all state is stored in local memory,
-        so there is no need to connect to a network. This client enables rapid
-        API testing and experimentation before connecting to a Resonate Server.
-
-        Args:
-            dependencies (Dependencies | None): Optional dependency injection container.
-            group (str): Worker group name. Defaults to ``default``.
-            log_level (int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
-                Logging verbosity level. Defaults to ``logging.INFO``.
-            pid (str | None): Optional process identifier for the worker.
-            registry (Registry | None): Optional registry to manage in-memory objects.
-            ttl (int): Time-to-live (in seconds) for claimed tasks. Defaults to ``10``.
-            workers (int | None): Optional number of worker threads or processes
-                for function execution.
-
-        Returns:
-            Resonate: A Resonate Client instance.
-
-        Example:
-            Creating a local client and running a registered function::
-
-                resonate = Resonate.local(ttl=30, log_level="DEBUG")
-                resonate.register(foo)
-                resonate.run("foo.1", foo, ...)
-
-        """
-        pid = pid or uuid.uuid4().hex
-        store = LocalStore()
-
-        return cls(
-            pid=pid,
-            ttl=ttl,
-            group=group,
-            registry=registry,
-            dependencies=dependencies,
-            log_level=log_level,
-            store=store,
-            message_source=store.message_source(group=group, id=pid),
-            workers=workers,
-        )
-
-    @classmethod
-    def remote(
-        cls,
-        auth: tuple[str, str] | None = None,
-        dependencies: Dependencies | None = None,
-        group: str = "default",
-        host: str | None = None,
-        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
-        message_source_port: str | None = None,
-        pid: str | None = None,
-        registry: Registry | None = None,
-        store_port: str | None = None,
-        ttl: int = 10,
-        workers: int | None = None,
-    ) -> Resonate:
-        """Initialize a Resonate client with remote configuration.
-
-        This method initializes and returns a Resonate Client that has
-        dependencies on a Resonate Server and/or additional message sources.
-        These dependencies enable distributed durable workers to work together via durable RPCs.
-        The default remote configuration expects to connect to a Resonate Server on your localhost network as both a promise store and message source.
-
-        Args:
-            auth (tuple[str, str] | None): Optional authentication credentials for
-                connecting to the remote store. Expected format is `(username, password)`.
-            dependencies (Dependencies | None): Optional dependency injection container.
-            group (str): Client group name. Defaults to `"default"`.
-            host (str | None): Host address of the remote store service.
-            log_level (int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
-                Logging verbosity level. Defaults to `logging.INFO`.
-            message_source_port (str | None): Port used for message source communication.
-            pid (str | None): Optional process identifier for the client.
-            registry (Registry | None): Optional registry to manage remote object mappings.
-            store_port (str | None): Port used for the remote store service.
-            ttl (int): Time-to-live (in seconds) for claimed tasks. Defaults to `10`.
-            workers (int | None): Optional number of worker threads or processes for function execution.
-
-        Returns:
-            Resonate: A Resonate Client instance
-
-        Example:
-            Creating a remote client and running a registered function::
-
-                resonate = Resonate.local(ttl=30, log_level="DEBUG")
-                resonate.register(foo)
-                resonate.run("foo.1", foo, ...)
-
-        """
-        pid = pid or uuid.uuid4().hex
-
-        return cls(
-            pid=pid,
-            ttl=ttl,
-            group=group,
-            registry=registry,
-            dependencies=dependencies,
-            log_level=log_level,
-            store=RemoteStore(host=host, port=store_port, auth=auth),
-            message_source=Poller(group=group, id=pid, host=host, port=message_source_port, auth=auth),
-            workers=workers,
         )
 
     @property

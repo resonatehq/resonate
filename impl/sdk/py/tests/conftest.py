@@ -22,6 +22,21 @@ def pytest_configure() -> None:
     logging.basicConfig(level=logging.ERROR)  # set log levels very high for tests
 
 
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove Resonate env vars so tests start from a clean slate."""
+    for key in (
+        "RESONATE_URL",
+        "RESONATE_HOST",
+        "RESONATE_PORT",
+        "RESONATE_SCHEME",
+        "RESONATE_TOKEN",
+        "RESONATE_USERNAME",
+        "RESONATE_PASSWORD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--seed", action="store")
     parser.addoption("--steps", action="store")
@@ -93,7 +108,7 @@ def message_source(store: Store) -> Generator[MessageSource]:
             ms = store.message_source(group="default", id="test")
         case _:
             assert isinstance(store, RemoteStore)
-            ms = Poller(group="default", id="test")
+            ms = Poller(group="default", id="test", url=store.url)
 
     # start the message source
     ms.start()

@@ -494,6 +494,10 @@ class LocalPromiseStore:
             # create invoke task
             for router in self._store.routers:
                 if recv := router.route(promise):
+                    # In local mode, resolve the recv address through the
+                    # targets map. The local store loop disregards the
+                    # target and routes all messages to the single
+                    # connected message source regardless.
                     task, applied = self._store.tasks.transition(
                         id=f"__invoke:{promise.id}",
                         to="INIT",
