@@ -56,7 +56,7 @@ func ServerError(err error) *Error {
 			Message: message,
 			Domain:  "server",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", error.Code()),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/debug/errors#%d", error.Code()),
 			},
 		}},
 	}
@@ -71,7 +71,7 @@ func RequestError(status t_api.StatusCode) *Error {
 			Message: "Request errors are not retryable since they are caused by invalid client requests",
 			Domain:  "request",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", status),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/debug/errors#%d", status),
 			},
 		}},
 	}
@@ -87,7 +87,7 @@ func RequestValidationError(err error) *Error {
 			Message: err,
 			Domain:  "request",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", code),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/debug/errors#%d", code),
 			},
 		})
 	}

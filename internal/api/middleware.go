@@ -56,7 +56,7 @@ func (a *JwtAuthenticator) Process(req *t_api.Request) *t_api.Error {
 
 	err = a.authorize(claims, req)
 	if err != nil {
-		return t_api.NewError(t_api.StatusForbidden, err)
+		return t_api.NewError(t_api.StatusForbiddenPrefix, err)
 	}
 
 	return nil

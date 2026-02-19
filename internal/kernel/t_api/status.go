@@ -17,6 +17,7 @@ const (
 	StatusFieldValidationError   StatusCode = 40000
 	StatusUnauthorized           StatusCode = 40100
 	StatusForbidden              StatusCode = 40300
+	StatusForbiddenPrefix        StatusCode = 40310
 	StatusTaskAlreadyClaimed     StatusCode = 40306
 	StatusTaskAlreadyCompleted   StatusCode = 40307
 	StatusTaskInvalidCounter     StatusCode = 40308
@@ -54,6 +55,8 @@ func (s StatusCode) String() string {
 		return "The request is unauthorized"
 	case StatusForbidden:
 		return "The request is forbidden"
+	case StatusForbiddenPrefix:
+		return "The request prefix is not authorized"
 	case StatusTaskAlreadyClaimed:
 		return "The task is already claimed"
 	case StatusTaskAlreadyCompleted:
