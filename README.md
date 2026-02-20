@@ -9,7 +9,7 @@
 
 ## About this component
 
-The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to give your application reliable, distributed function execution. It acts as both a supervisor and orchestrator for Resonate Workers, persisting execution state so that long-running functions survive process restarts and failures.
+The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to bring durable execution to your application — reliable, distributed function execution that survives process restarts and failures. It acts as both a supervisor and orchestrator for Resonate Workers, persisting execution state so long-running functions always run to completion.
 
 - [How to contribute to this repo](./CONTRIBUTING.md)
 - [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
