@@ -9,14 +9,7 @@
 
 ## About this component
 
-The Resonate Server acts as a supervisor and orchestrator for Resonate Workers — that is, it provides reliability and scalability to applications built with a Resonate SDK.
-
-**Why does this component exist?**
-
-Popular programming languages like Python and TypeScript are not designed with abstractions that address distribution.
-To provide those abstractions at the application level (i.e. to enable API-like abstractions that simplify the implementation of reliable process to process message passing) the system needs a service that acts as both an orchestrator of messages and a supervisor of the processes sending them.
-
-The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to provide those APIs.
+The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to bring durable execution to your application — reliable, distributed function execution that survives process restarts and failures. It acts as both a supervisor and orchestrator for Resonate Workers, persisting execution state so long-running functions always run to completion.
 
 - [How to contribute to this repo](./CONTRIBUTING.md)
 - [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
@@ -24,7 +17,7 @@ The Resonate Server is a highly efficient single binary that pairs with a Resona
 - [The concepts that power Resonate](https://www.distributed-async-await.io/)
 - [Join the Discord](https://resonatehq.io/discord)
 - [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
-- [Follow on Twitter](https://twitter.com/resonatehqio)
+- [Follow on X](https://x.com/resonatehqio)
 - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
 - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
