@@ -17,7 +17,7 @@ The Resonate Python SDK enables developers to build reliable and scalable cloud 
 - [The concepts that power Resonate](https://www.distributed-async-await.io/)
 - [Join the Discord](https://resonatehq.io/discord)
 - [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
-- [Follow on Twitter](https://twitter.com/resonatehqio)
+- [Follow on X](https://x.com/resonatehqio)
 - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
 - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
