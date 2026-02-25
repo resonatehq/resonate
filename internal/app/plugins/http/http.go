@@ -142,9 +142,11 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 			_ = res.Body.Close()
 		}
 
-		// when request fails and the connection was not established, close
-		// the channel and return false
-		if err != nil && !succeeded {
+		// when the request completes without ConnectDone firing (e.g. keep-alive
+		// connection reuse), close the channel; succeeded reflects whether the
+		// request itself succeeded
+		if !succeeded {
+			succeeded = (err == nil)
 			close(connected)
 		}
 	}()
