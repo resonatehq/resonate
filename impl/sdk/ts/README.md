@@ -4,6 +4,7 @@
 
 [![cicd](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/cicd.yaml/badge.svg)](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/cicd.yaml)
 [![codecov](https://codecov.io/gh/resonatehq/resonate-sdk-ts/branch/main/graph/badge.svg)](https://codecov.io/gh/resonatehq/resonate-sdk-ts)
+[![dst](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/dst.yml/badge.svg)](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/dst.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## About this component
@@ -15,7 +16,7 @@ The Resonate TypeScript SDK enables developers to build reliable and scalable cl
 - [Example application library](https://github.com/resonatehq-examples)
 - [Join the Discord](https://resonatehq.io/discord)
 - [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
-- [Follow on Twitter](https://twitter.com/resonatehqio)
+- [Follow on X](https://x.com/resonatehqio)
 - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
 - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
