@@ -24,7 +24,7 @@ impl Default for Options {
         Self {
             tags: HashMap::new(),
             target: "default".to_string(),
-            timeout: Duration::from_secs(60), // 1 minute default
+            timeout: Duration::from_secs(86_400), // 24 hours (24 * 60 * 60), matches TS SDK
             version: 0,
             retry_policy: None,
         }

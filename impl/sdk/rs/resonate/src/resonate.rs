@@ -1248,7 +1248,7 @@ mod tests {
     async fn options_returns_defaults_when_none() {
         let r = Resonate::local(None);
         let opts = r.options(None);
-        assert_eq!(opts.timeout, Duration::from_secs(60));
+        assert_eq!(opts.timeout, Duration::from_secs(86_400));
         assert_eq!(opts.version, 0);
         assert!(opts.tags.is_empty());
         // Default target "default" is resolved through network.match
