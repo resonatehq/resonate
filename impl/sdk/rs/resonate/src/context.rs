@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::codec::deserialize_error;
@@ -104,9 +105,18 @@ impl Context {
         format!("{}.{}", self.id, seq)
     }
 
+    /// Default timeout for child promises (24 hours), matching TS SDK.
+    const DEFAULT_CHILD_TIMEOUT: Duration = Duration::from_secs(86_400);
+
     /// Calculate timeout for child promises.
-    fn child_timeout(&self) -> i64 {
-        self.timeout_at
+    /// Computes `min(now + requested_timeout, parent_timeout)`, matching the
+    /// TS SDK behavior: `Math.min(now + opts.timeout, parent.timeout)`.
+    /// If no explicit timeout is provided, defaults to 24 hours.
+    fn child_timeout(&self, requested: Option<Duration>) -> i64 {
+        let timeout = requested.unwrap_or(Self::DEFAULT_CHILD_TIMEOUT);
+        let now = now_ms();
+        let child_deadline = now + timeout.as_millis() as i64;
+        std::cmp::min(child_deadline, self.timeout_at)
     }
 
     /// Get read-only info for this context.
@@ -148,6 +158,7 @@ impl Context {
         id: &str,
         _func_name: &str,
         args: &impl Serialize,
+        timeout: Option<Duration>,
     ) -> PromiseCreateReq {
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "local".to_string());
@@ -157,7 +168,7 @@ impl Context {
 
         PromiseCreateReq {
             id: id.to_string(),
-            timeout_at: self.child_timeout(),
+            timeout_at: self.child_timeout(timeout),
             param: Value {
                 headers: None,
                 data: Some(serde_json::to_value(args).unwrap_or(serde_json::Value::Null)),
@@ -172,6 +183,7 @@ impl Context {
         id: &str,
         func_name: &str,
         args: &impl Serialize,
+        timeout: Option<Duration>,
     ) -> PromiseCreateReq {
         let target = (self.match_fn)(func_name);
         let mut tags = HashMap::new();
@@ -183,7 +195,7 @@ impl Context {
 
         PromiseCreateReq {
             id: id.to_string(),
-            timeout_at: self.child_timeout(),
+            timeout_at: self.child_timeout(timeout),
             param: Value {
                 headers: None,
                 data: Some(serde_json::json!({
@@ -207,14 +219,32 @@ impl Context {
 
     /// Local call-and-wait. Creates a durable promise, executes the function locally,
     /// settles the promise, and returns the result.
+    ///
+    /// The child promise timeout is capped to the parent's timeout. If `timeout`
+    /// is `None`, the default (24 hours) is used, still capped to the parent.
     pub async fn run<D, Args, T>(&self, func: D, args: Args) -> Result<T>
     where
         D: Durable<Args, T>,
         Args: Serialize + DeserializeOwned + Send + 'static,
         T: Serialize + DeserializeOwned + Send + 'static,
     {
+        self.run_with_timeout(func, args, None).await
+    }
+
+    /// Like `run`, but with an explicit timeout duration for the child promise.
+    pub async fn run_with_timeout<D, Args, T>(
+        &self,
+        func: D,
+        args: Args,
+        timeout: Option<Duration>,
+    ) -> Result<T>
+    where
+        D: Durable<Args, T>,
+        Args: Serialize + DeserializeOwned + Send + 'static,
+        T: Serialize + DeserializeOwned + Send + 'static,
+    {
         let child_id = self.next_id();
-        let req = self.local_create_req(&child_id, D::NAME, &args);
+        let req = self.local_create_req(&child_id, D::NAME, &args, timeout);
 
         // Create durable promise BEFORE execution
         let record = self.effects.create_promise(req).await?;
@@ -253,14 +283,31 @@ impl Context {
 
     /// Local fire-and-start. Creates a durable promise, spawns the function,
     /// and returns a DurableFuture handle.
+    ///
+    /// The child promise timeout is capped to the parent's timeout.
     pub async fn begin_run<D, Args, T>(&self, func: D, args: Args) -> DurableFuture<T>
     where
         D: Durable<Args, T> + Send + 'static,
         Args: Serialize + DeserializeOwned + Send + 'static,
         T: Serialize + DeserializeOwned + Send + 'static,
     {
+        self.begin_run_with_timeout(func, args, None).await
+    }
+
+    /// Like `begin_run`, but with an explicit timeout duration for the child promise.
+    pub async fn begin_run_with_timeout<D, Args, T>(
+        &self,
+        func: D,
+        args: Args,
+        timeout: Option<Duration>,
+    ) -> DurableFuture<T>
+    where
+        D: Durable<Args, T> + Send + 'static,
+        Args: Serialize + DeserializeOwned + Send + 'static,
+        T: Serialize + DeserializeOwned + Send + 'static,
+    {
         let child_id = self.next_id();
-        let req = self.local_create_req(&child_id, D::NAME, &args);
+        let req = self.local_create_req(&child_id, D::NAME, &args, timeout);
 
         let record = match self.effects.create_promise(req).await {
             Ok(r) => r,
@@ -353,12 +400,27 @@ impl Context {
     }
 
     /// Remote call-and-wait.
+    ///
+    /// The child promise timeout is capped to the parent's timeout.
     pub async fn rpc<T>(&self, func: &str, args: &impl Serialize) -> Result<T>
     where
         T: DeserializeOwned,
     {
+        self.rpc_with_timeout(func, args, None).await
+    }
+
+    /// Like `rpc`, but with an explicit timeout duration for the child promise.
+    pub async fn rpc_with_timeout<T>(
+        &self,
+        func: &str,
+        args: &impl Serialize,
+        timeout: Option<Duration>,
+    ) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
         let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args);
+        let req = self.remote_create_req(&child_id, func, args, timeout);
 
         let record = self.effects.create_promise(req).await?;
 
@@ -373,6 +435,8 @@ impl Context {
     }
 
     /// Remote fire-and-start.
+    ///
+    /// The child promise timeout is capped to the parent's timeout.
     pub async fn begin_rpc<T>(
         &self,
         func: &str,
@@ -381,8 +445,21 @@ impl Context {
     where
         T: DeserializeOwned,
     {
+        self.begin_rpc_with_timeout(func, args, None).await
+    }
+
+    /// Like `begin_rpc`, but with an explicit timeout duration for the child promise.
+    pub async fn begin_rpc_with_timeout<T>(
+        &self,
+        func: &str,
+        args: &impl Serialize,
+        timeout: Option<Duration>,
+    ) -> RemoteFuture<T>
+    where
+        T: DeserializeOwned,
+    {
         let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args);
+        let req = self.remote_create_req(&child_id, func, args, timeout);
 
         let record = match self.effects.create_promise(req).await {
             Ok(r) => r,
@@ -444,6 +521,14 @@ impl Context {
     pub(crate) fn effects(&self) -> &Effects {
         &self.effects
     }
+}
+
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
 }
 
 /// Convert an Outcome reference to a sendable form for the oneshot channel.
@@ -1521,5 +1606,236 @@ mod tests {
             }
             other => panic!("expected Done(Err), got {:?}", other),
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Timeout Capping Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn child_timeout_capped_to_parent_for_local_run() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        // Parent timeout is 5 seconds from now
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _: i32 = ctx.run(Bar, ()).await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        // Default child timeout is 24h, which exceeds parent's 5s → clamped
+        assert!(
+            create.timeout_at <= parent_timeout,
+            "child timeout_at ({}) should be <= parent timeout_at ({})",
+            create.timeout_at,
+            parent_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn child_timeout_capped_to_parent_for_remote_rpc() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _: crate::error::Result<i32> = ctx.rpc("remote_func", &()).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert!(
+            create.timeout_at <= parent_timeout,
+            "child timeout_at ({}) should be <= parent timeout_at ({})",
+            create.timeout_at,
+            parent_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn child_timeout_capped_to_parent_for_begin_run() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _future = ctx.begin_run(Bar, ()).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert!(
+            create.timeout_at <= parent_timeout,
+            "child timeout_at ({}) should be <= parent timeout_at ({})",
+            create.timeout_at,
+            parent_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn child_timeout_capped_to_parent_for_begin_rpc() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _future: RemoteFuture<i32> = ctx.begin_rpc("remote", &()).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert!(
+            create.timeout_at <= parent_timeout,
+            "child timeout_at ({}) should be <= parent timeout_at ({})",
+            create.timeout_at,
+            parent_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_child_timeout_smaller_than_parent_is_respected() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 60_000; // 60 seconds
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        // Request 10 seconds — smaller than parent's 60s, should be respected
+        let child_timeout = std::time::Duration::from_secs(10);
+        let _: i32 = ctx.run_with_timeout(Bar, (), Some(child_timeout)).await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        // Should be approximately now + 10s, not parent's 60s
+        let expected_approx = now + 10_000;
+        let tolerance = 1_000; // 1 second tolerance for test execution time
+        assert!(
+            create.timeout_at >= expected_approx - tolerance
+                && create.timeout_at <= expected_approx + tolerance,
+            "child timeout_at ({}) should be ~{} (now + 10s), not parent timeout_at ({})",
+            create.timeout_at,
+            expected_approx,
+            parent_timeout
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_child_timeout_exceeding_parent_is_clamped() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000; // 5 seconds
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        // Request 60 seconds — exceeds parent's 5s, should be clamped
+        let child_timeout = std::time::Duration::from_secs(60);
+        let _: i32 = ctx.run_with_timeout(Bar, (), Some(child_timeout)).await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.timeout_at, parent_timeout,
+            "child timeout_at should be clamped to parent timeout_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_with_timeout_smaller_than_parent_is_respected() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 60_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let child_timeout = std::time::Duration::from_secs(10);
+        let _: crate::error::Result<i32> =
+            ctx.rpc_with_timeout("remote", &(), Some(child_timeout)).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        let expected_approx = now + 10_000;
+        let tolerance = 1_000;
+        assert!(
+            create.timeout_at >= expected_approx - tolerance
+                && create.timeout_at <= expected_approx + tolerance,
+            "child timeout_at ({}) should be ~{} (now + 10s)",
+            create.timeout_at,
+            expected_approx
+        );
+    }
+
+    #[tokio::test]
+    async fn begin_rpc_with_timeout_exceeding_parent_is_clamped() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000;
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let child_timeout = std::time::Duration::from_secs(60);
+        let _future: RemoteFuture<i32> =
+            ctx.begin_rpc_with_timeout("remote", &(), Some(child_timeout)).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.timeout_at, parent_timeout,
+            "child timeout_at should be clamped to parent timeout_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_child_timeout_with_large_parent_uses_24h() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        // Parent timeout is very far in the future (i64::MAX)
+        let ctx = test_context("root", effects);
+
+        let _: i32 = ctx.run(Bar, ()).await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        let now = super::now_ms();
+        let expected_24h = now + 86_400_000; // 24 hours in ms
+        let tolerance = 2_000; // 2 second tolerance
+
+        // With i64::MAX parent, child should get ~now + 24h
+        assert!(
+            create.timeout_at >= expected_24h - tolerance
+                && create.timeout_at <= expected_24h + tolerance,
+            "child timeout_at ({}) should be ~{} (now + 24h), got diff={}ms",
+            create.timeout_at,
+            expected_24h,
+            (create.timeout_at - expected_24h).abs()
+        );
     }
 }

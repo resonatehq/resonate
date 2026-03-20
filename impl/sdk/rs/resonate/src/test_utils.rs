@@ -309,6 +309,12 @@ pub fn test_context_with_match(id: &str, effects: Effects, match_fn: crate::cont
     Context::root(id.to_string(), i64::MAX, "test".to_string(), effects, match_fn)
 }
 
+/// Build a root Context for testing with a specific timeout_at.
+#[allow(dead_code)]
+pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) -> Context {
+    Context::root(id.to_string(), timeout_at, "test".to_string(), effects, test_match_fn())
+}
+
 /// Finalize a context into an Outcome after a workflow function has been called.
 /// Call this after running operations on the context to determine Done vs Suspended.
 pub async fn finalize_context(
