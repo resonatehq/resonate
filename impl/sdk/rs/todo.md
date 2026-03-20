@@ -103,7 +103,7 @@ The TS SDK uses `opts.target` (resolved through `network.match()`) for the `reso
 
 The TS SDK's context-level `rpc` and `rfi` resolve `opts.target` (defaulting to `"default"`) through `network.match()` for the `resonate:target` tag. The Rust SDK's `remote_create_req` hardcodes `func_name` as the input to `match_fn`, ignoring any user-provided target option. Users cannot override RPC targets at the context level.
 
-- [ ] Add an optional target parameter to `Context::rpc` and `Context::begin_rpc` (or accept it via an options struct)
-- [ ] Update `remote_create_req` to use the provided target (or default to `func_name`) as the input to `match_fn`
-- [ ] Ensure URL targets pass through `match_fn` unchanged (this is already handled by the `match_fn` closure built in `Resonate::new`)
-- [ ] Add tests: `ctx.rpc` with custom target uses that target in `resonate:target` tag, default behavior uses `func_name` through `match_fn`, URL target passes through unchanged
+- [x] Add an optional target parameter to `Context::rpc` and `Context::begin_rpc` (or accept it via an options struct)
+- [x] Update `remote_create_req` to use the provided target (or default to `func_name`) as the input to `match_fn`
+- [x] Ensure URL targets pass through `match_fn` unchanged (this is already handled by the `match_fn` closure built in `Resonate::new`)
+- [x] Add tests: `ctx.rpc` with custom target uses that target in `resonate:target` tag, default behavior uses `func_name` through `match_fn`, URL target passes through unchanged

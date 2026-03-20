@@ -184,14 +184,19 @@ impl Context {
     }
 
     /// Build a remote create request.
+    ///
+    /// If `target_override` is provided, it is resolved through `match_fn`;
+    /// otherwise `func_name` is used as the default target input.
     fn remote_create_req(
         &self,
         id: &str,
         func_name: &str,
         args: &impl Serialize,
         timeout: Option<Duration>,
+        target_override: Option<&str>,
     ) -> PromiseCreateReq {
-        let target = (self.match_fn)(func_name);
+        let target_input = target_override.unwrap_or(func_name);
+        let target = (self.match_fn)(target_input);
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:target".to_string(), target);
@@ -425,8 +430,25 @@ impl Context {
     where
         T: DeserializeOwned,
     {
+        self.rpc_with_opts(func, args, timeout, None).await
+    }
+
+    /// Like `rpc`, but with explicit timeout and target override.
+    ///
+    /// If `target` is `Some`, it overrides the default target (which is `func`).
+    /// URL targets (containing `://`) pass through `match_fn` unchanged.
+    pub async fn rpc_with_opts<T>(
+        &self,
+        func: &str,
+        args: &impl Serialize,
+        timeout: Option<Duration>,
+        target: Option<&str>,
+    ) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
         let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args, timeout);
+        let req = self.remote_create_req(&child_id, func, args, timeout, target);
 
         let record = self.effects.create_promise(req).await?;
 
@@ -464,8 +486,25 @@ impl Context {
     where
         T: DeserializeOwned,
     {
+        self.begin_rpc_with_opts(func, args, timeout, None).await
+    }
+
+    /// Like `begin_rpc`, but with explicit timeout and target override.
+    ///
+    /// If `target` is `Some`, it overrides the default target (which is `func`).
+    /// URL targets (containing `://`) pass through `match_fn` unchanged.
+    pub async fn begin_rpc_with_opts<T>(
+        &self,
+        func: &str,
+        args: &impl Serialize,
+        timeout: Option<Duration>,
+        target: Option<&str>,
+    ) -> RemoteFuture<T>
+    where
+        T: DeserializeOwned,
+    {
         let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args, timeout);
+        let req = self.remote_create_req(&child_id, func, args, timeout, target);
 
         let record = match self.effects.create_promise(req).await {
             Ok(r) => r,
@@ -1531,6 +1570,102 @@ mod tests {
         assert_eq!(create.tags.get("resonate:scope").unwrap(), "local");
         assert!(!create.tags.contains_key("resonate:target"),
             "local run should not set resonate:target");
+    }
+
+    // ── Target override via rpc_with_opts / begin_rpc_with_opts ───
+
+    #[tokio::test]
+    async fn rpc_with_opts_custom_target_overrides_func_name() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let match_fn: crate::context::MatchFn =
+            std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
+        let ctx = test_context_with_match("root", effects, match_fn);
+
+        let _: crate::error::Result<i32> =
+            ctx.rpc_with_opts("my_func", &(), None, Some("custom-target")).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "local://any@custom-target",
+            "custom target should override func_name in match_fn"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_with_opts_none_target_defaults_to_func_name() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let match_fn: crate::context::MatchFn =
+            std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
+        let ctx = test_context_with_match("root", effects, match_fn);
+
+        let _: crate::error::Result<i32> =
+            ctx.rpc_with_opts("my_func", &(), None, None).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "local://any@my_func",
+            "None target should fall back to func_name"
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_with_opts_url_target_passes_through() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let match_fn: crate::context::MatchFn =
+            std::sync::Arc::new(|target: &str| {
+                if target.contains("://") { target.to_string() }
+                else { format!("local://any@{}", target) }
+            });
+        let ctx = test_context_with_match("root", effects, match_fn);
+
+        let _: crate::error::Result<i32> =
+            ctx.rpc_with_opts("my_func", &(), None, Some("https://remote:9000/workers/foo")).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "https://remote:9000/workers/foo",
+            "URL target should pass through unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn begin_rpc_with_opts_custom_target() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let match_fn: crate::context::MatchFn =
+            std::sync::Arc::new(|target: &str| format!("remote://{}", target));
+        let ctx = test_context_with_match("root", effects, match_fn);
+
+        let _: crate::futures::RemoteFuture<i32> =
+            ctx.begin_rpc_with_opts("my_func", &(), None, Some("override-target")).await;
+
+        let requests = harness.sent_requests().await;
+        let create = requests.iter().find_map(|r| {
+            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+        }).expect("should have sent promise.create");
+
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "remote://override-target",
+        );
     }
 
     // ── Deterministic IDs ──────────────────────────────────────────
