@@ -186,14 +186,31 @@ impl Core {
             entry.factory.clone()
         };
 
-        // 3. SHORT-CIRCUIT: if root promise is already settled
+        // 3. SHORT-CIRCUIT: if root promise is already settled, fulfill the task
+        //    without executing the function (matching TS SDK behavior).
         if root_promise.state != PromiseState::Pending {
             tracing::info!(
                 task_id = task_id,
                 promise_id = %root_promise.id,
                 state = ?root_promise.state,
-                "root promise already settled, skipping execution"
+                "root promise already settled, fulfilling task without execution"
             );
+            // Value is already decoded (decode_promise was called before this point)
+            let settled_value = root_promise.value.data_as_ref().clone();
+            let result: Result<serde_json::Value> = match root_promise.state {
+                PromiseState::Resolved => Ok(settled_value),
+                PromiseState::Rejected
+                | PromiseState::RejectedCanceled
+                | PromiseState::RejectedTimedout => Err(Error::Application {
+                    message: settled_value
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("rejected")
+                        .to_string(),
+                }),
+                PromiseState::Pending => unreachable!(),
+            };
+            self.fulfill_task(task_id, &root_promise.id, &result).await?;
             return Ok(Status::Done);
         }
 
@@ -830,7 +847,7 @@ mod tests {
     async fn execute_until_blocked_short_circuits_on_settled_promise() {
         let harness = TestHarness::new();
         let codec = Codec;
-        // Promise is already resolved — factory must never be called
+        // Promise is already resolved — factory must never be called but task must be fulfilled
         let param_data = serde_json::json!({"func": "noop", "args": null});
         let root = PromiseRecord {
             id: "settled-p".to_string(),
@@ -854,9 +871,83 @@ mod tests {
             .unwrap();
         assert_eq!(status, Status::Done);
 
-        // Short-circuits before calling the factory — no requests sent
+        // Short-circuits before calling the factory but still sends TaskFulfill
         let requests = harness.sent_requests().await;
-        assert!(requests.is_empty(), "no requests should be sent for settled promise");
+        assert!(
+            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            "settled promise should still send TaskFulfill"
+        );
+    }
+
+    #[tokio::test]
+    async fn short_circuit_resolved_promise_sends_fulfill_with_resolved_state() {
+        let harness = TestHarness::new();
+        let codec = Codec;
+        let param_data = serde_json::json!({"func": "noop", "args": null});
+        let root = PromiseRecord {
+            id: "resolved-p".to_string(),
+            state: PromiseState::Resolved,
+            timeout_at: i64::MAX,
+            param: codec.encode(&param_data).unwrap(),
+            value: codec.encode(&serde_json::json!(42)).unwrap(),
+            tags: HashMap::new(),
+            created_at: 0,
+            settled_at: Some(1),
+        };
+
+        let mut registry = Registry::new();
+        registry.register(Noop);
+
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let decoded = codec.decode_promise(&root).unwrap();
+        core.execute_until_blocked("task-resolved", decoded, None)
+            .await
+            .unwrap();
+
+        let requests = harness.sent_requests().await;
+        let fulfill = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+        assert!(fulfill.is_some(), "should have sent TaskFulfill");
+        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
+            assert_eq!(settle.state, SettleState::Resolved);
+        }
+    }
+
+    #[tokio::test]
+    async fn short_circuit_rejected_promise_sends_fulfill_with_rejected_state() {
+        let harness = TestHarness::new();
+        let codec = Codec;
+        let param_data = serde_json::json!({"func": "noop", "args": null});
+        let err_val = serde_json::json!({"__type": "error", "message": "something failed"});
+        let root = PromiseRecord {
+            id: "rejected-p".to_string(),
+            state: PromiseState::Rejected,
+            timeout_at: i64::MAX,
+            param: codec.encode(&param_data).unwrap(),
+            value: codec.encode(&err_val).unwrap(),
+            tags: HashMap::new(),
+            created_at: 0,
+            settled_at: Some(1),
+        };
+
+        let mut registry = Registry::new();
+        registry.register(Noop);
+
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let decoded = codec.decode_promise(&root).unwrap();
+        core.execute_until_blocked("task-rejected", decoded, None)
+            .await
+            .unwrap();
+
+        let requests = harness.sent_requests().await;
+        let fulfill = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+        assert!(fulfill.is_some(), "should have sent TaskFulfill");
+        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
+            assert_eq!(settle.state, SettleState::Rejected);
+        }
     }
 
     // ── Error handling: release on error ───────────────────────────

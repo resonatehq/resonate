@@ -64,9 +64,9 @@ The TS SDK's `suspendTask` returns `{ continue: true, preload }` on redirect, an
 
 The TS SDK's `processGenerator` returns a `Done` status with the settled value when the root promise is already settled, which flows back to `Core.executeUntilBlocked` → `fulfillTask(task, status)`. The Rust SDK's `execute_until_blocked_inner` returns `Ok(Status::Done)` without calling `fulfill_task` when short-circuiting on a settled promise. This leaves the task in "acquired" state forever (leaked task).
 
-- [ ] When short-circuiting on a settled root promise in `execute_until_blocked_inner`, call `fulfill_task(task_id, &root_promise.id, &result)` before returning `Ok(Status::Done)`
-- [ ] Extract the settled value from the root promise to pass to `fulfill_task` (resolved → `Ok(value)`, rejected → `Err(...)`)
-- [ ] Add tests: settled root promise still sends `TaskFulfill`, task does not remain in "acquired" state after short-circuit, both resolved and rejected settled promises trigger fulfillment
+- [x] When short-circuiting on a settled root promise in `execute_until_blocked_inner`, call `fulfill_task(task_id, &root_promise.id, &result)` before returning `Ok(Status::Done)`
+- [x] Extract the settled value from the root promise to pass to `fulfill_task` (resolved → `Ok(value)`, rejected → `Err(...)`)
+- [x] Add tests: settled root promise still sends `TaskFulfill`, task does not remain in "acquired" state after short-circuit, both resolved and rejected settled promises trigger fulfillment
 
 ## 7. Store and cancel subscription refresh handle on `stop()`
 
