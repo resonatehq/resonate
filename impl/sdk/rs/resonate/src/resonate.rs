@@ -250,7 +250,7 @@ impl Resonate {
             }
         });
 
-        let core = Arc::new(Core::new(send_fn, codec.clone(), registry.clone(), match_fn));
+        let core = Arc::new(Core::new(send_fn, codec.clone(), registry.clone(), match_fn, heartbeat.clone()));
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 

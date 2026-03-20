@@ -7,6 +7,7 @@ use crate::codec::Codec;
 use crate::context::{Context, MatchFn};
 use crate::effects::Effects;
 use crate::error::{Error, Result};
+use crate::heartbeat::Heartbeat;
 use crate::registry::Registry;
 use crate::send::{Request, Response, SendFn};
 use crate::types::{Outcome, PromiseRecord, PromiseState, SettleState, Status, TaskData};
@@ -30,15 +31,23 @@ pub struct Core {
     codec: Codec,
     registry: Arc<RwLock<Registry>>,
     match_fn: MatchFn,
+    heartbeat: Arc<dyn Heartbeat>,
 }
 
 impl Core {
-    pub fn new(send: SendFn, codec: Codec, registry: Arc<RwLock<Registry>>, match_fn: MatchFn) -> Self {
+    pub fn new(
+        send: SendFn,
+        codec: Codec,
+        registry: Arc<RwLock<Registry>>,
+        match_fn: MatchFn,
+        heartbeat: Arc<dyn Heartbeat>,
+    ) -> Self {
         Self {
             send,
             codec,
             registry,
             match_fn,
+            heartbeat,
         }
     }
 
@@ -49,6 +58,7 @@ impl Core {
             codec: self.codec.clone(),
             registry: self.registry.clone(),
             match_fn: self.match_fn.clone(),
+            heartbeat: self.heartbeat.clone(),
         })
     }
 
@@ -115,10 +125,21 @@ impl Core {
         root_promise: PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
-        match self
+        // Start heartbeat before execution to keep the task lease alive
+        if let Err(e) = self.heartbeat.start().await {
+            tracing::warn!(error = %e, task_id = task_id, "failed to start heartbeat");
+        }
+
+        let result = self
             .execute_until_blocked_inner(task_id, &root_promise, preload)
-            .await
-        {
+            .await;
+
+        // Stop heartbeat after execution completes (both success and error)
+        if let Err(e) = self.heartbeat.stop().await {
+            tracing::warn!(error = %e, task_id = task_id, "failed to stop heartbeat");
+        }
+
+        match result {
             Ok(status) => Ok(status),
             Err(e) => {
                 // On error → release the task so another worker can retry
@@ -317,6 +338,7 @@ mod tests {
     use super::*;
     use crate::codec::Codec;
     use crate::error::{Error, Result};
+    use crate::heartbeat::NoopHeartbeat;
     use crate::registry::Registry;
     use crate::test_utils::*;
     use crate::types::{PromiseRecord, PromiseState, Value};
@@ -324,10 +346,11 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tokio::sync::RwLock;
 
-    /// Build a Core for testing with a no-op match function.
+    /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(send: SendFn, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
         let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
-        Core::new(send, codec, registry, match_fn)
+        let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
+        Core::new(send, codec, registry, match_fn, heartbeat)
     }
 
     // ── Test functions ─────────────────────────────────────────────
@@ -799,5 +822,126 @@ mod tests {
         let reqs2 = harness2.sent_requests().await;
         assert!(!reqs2.iter().any(|r| matches!(r, Request::TaskAcquire { .. })));
         assert!(reqs2.iter().any(|r| matches!(r, Request::TaskFulfill { .. })));
+    }
+
+    // ── Heartbeat tests ───────────────────────────────────────────
+
+    /// A tracking heartbeat that records start/stop calls.
+    struct TrackingHeartbeat {
+        started: std::sync::atomic::AtomicUsize,
+        stopped: std::sync::atomic::AtomicUsize,
+    }
+
+    impl TrackingHeartbeat {
+        fn new() -> Self {
+            Self {
+                started: AtomicUsize::new(0),
+                stopped: AtomicUsize::new(0),
+            }
+        }
+
+        fn start_count(&self) -> usize {
+            self.started.load(AtomicOrdering::SeqCst)
+        }
+
+        fn stop_count(&self) -> usize {
+            self.stopped.load(AtomicOrdering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Heartbeat for TrackingHeartbeat {
+        async fn start(&self) -> Result<()> {
+            self.started.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        }
+        async fn stop(&self) -> Result<()> {
+            self.stopped.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn test_core_with_heartbeat(
+        send: SendFn,
+        codec: Codec,
+        registry: Arc<RwLock<Registry>>,
+        heartbeat: Arc<dyn Heartbeat>,
+    ) -> Core {
+        let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
+        Core::new(send, codec, registry, match_fn, heartbeat)
+    }
+
+    #[tokio::test]
+    async fn heartbeat_started_and_stopped_on_successful_execution() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "simple", serde_json::json!(null));
+
+        let mut registry = Registry::new();
+        registry.register(Simple);
+
+        let hb = Arc::new(TrackingHeartbeat::new());
+        let core = test_core_with_heartbeat(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+            hb.clone(),
+        );
+        let decoded = Codec.decode_promise(&root).unwrap();
+        let status = core
+            .execute_until_blocked("task-hb", decoded, None)
+            .await
+            .unwrap();
+
+        assert_eq!(status, Status::Done);
+        assert_eq!(hb.start_count(), 1, "heartbeat should be started once");
+        assert_eq!(hb.stop_count(), 1, "heartbeat should be stopped once");
+    }
+
+    #[tokio::test]
+    async fn heartbeat_stopped_on_error() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "missing_func", serde_json::json!(null));
+
+        let registry = Registry::new(); // empty — function not registered
+        let hb = Arc::new(TrackingHeartbeat::new());
+        let core = test_core_with_heartbeat(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+            hb.clone(),
+        );
+        let decoded = Codec.decode_promise(&root).unwrap();
+        let result = core
+            .execute_until_blocked("task-hb-err", decoded, None)
+            .await;
+
+        assert!(result.is_err(), "should fail when function not found");
+        assert_eq!(hb.start_count(), 1, "heartbeat should be started once");
+        assert_eq!(hb.stop_count(), 1, "heartbeat should be stopped even on error");
+    }
+
+    #[tokio::test]
+    async fn noop_heartbeat_does_not_interfere_in_local_mode() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "add", serde_json::json!([5, 10]));
+
+        let mut registry = Registry::new();
+        registry.register(Add);
+
+        // Use NoopHeartbeat (same as local mode)
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let decoded = Codec.decode_promise(&root).unwrap();
+        let status = core
+            .execute_until_blocked("task-noop-hb", decoded, None)
+            .await
+            .unwrap();
+
+        assert_eq!(status, Status::Done);
+
+        let requests = harness.sent_requests().await;
+        assert!(
+            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            "should complete normally with NoopHeartbeat"
+        );
     }
 }
