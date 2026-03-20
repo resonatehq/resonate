@@ -80,11 +80,11 @@ The subscription refresh `JoinHandle` is immediately dropped after spawning (`dr
 
 The TS SDK allows custom IDs on context calls (`opts.id`), which introduces `breaksLineage` logic to reset `resonate:origin` when the user overrides the ID. The Rust SDK's `local_create_req` and `remote_create_req` always set `origin = self.origin_id` — lineage never breaks regardless. Instead of replicating the complex lineage-breaking logic, remove custom IDs from Context-level calls entirely. Context calls (`run`, `begin_run`, `rpc`, `begin_rpc`) should always use deterministic sequential IDs (`parent.N`). Custom IDs remain available only at the top-level `Resonate` API (`Resonate::run`, `Resonate::begin_run`, `Resonate::rpc`, etc.).
 
-- [ ] Ensure `Context::run`, `Context::begin_run`, `Context::rpc`, `Context::begin_rpc` do not accept an ID parameter — IDs are always generated via `self.next_id()`
-- [ ] Verify that `local_create_req` and `remote_create_req` always use `self.origin_id` for `resonate:origin` (no lineage-breaking path needed)
-- [ ] Confirm the top-level `Resonate` API still requires the user to provide an explicit ID for `run`, `begin_run`, `rpc`, `begin_rpc`
-- [ ] Document this as an intentional divergence from TS: Context calls are always deterministic, custom IDs are a top-level concern only
-- [ ] Add tests: sequential Context calls produce deterministic IDs (`root.0`, `root.1`, ...), `resonate:origin` always matches the root ID for all nested calls, top-level `Resonate` calls still use user-provided IDs
+- [x] Ensure `Context::run`, `Context::begin_run`, `Context::rpc`, `Context::begin_rpc` do not accept an ID parameter — IDs are always generated via `self.next_id()`
+- [x] Verify that `local_create_req` and `remote_create_req` always use `self.origin_id` for `resonate:origin` (no lineage-breaking path needed)
+- [x] Confirm the top-level `Resonate` API still requires the user to provide an explicit ID for `run`, `begin_run`, `rpc`, `begin_rpc`
+- [x] Document this as an intentional divergence from TS: Context calls are always deterministic, custom IDs are a top-level concern only
+- [x] Add tests: sequential Context calls produce deterministic IDs (`root.0`, `root.1`, ...), `resonate:origin` always matches the root ID for all nested calls, top-level `Resonate` calls still use user-provided IDs
 
 ## 9. `begin_run_by_name` should use resolved target, not `network.anycast()`
 

@@ -113,7 +113,7 @@ pub struct Resonate {
 
     // Subscriptions (for awaiting remote promise completion)
     subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>>,
-    subscribe_every: Duration,
+
 
     // Sub-clients
     pub promises: Promises,
@@ -325,7 +325,6 @@ impl Resonate {
             dependencies: Arc::new(RwLock::new(HashMap::new())),
             opts_builder,
             subscriptions: subscriptions.clone(),
-            subscribe_every,
             promises,
             schedules,
             subscription_refresh_handle: Mutex::new(Some(refresh_handle)),

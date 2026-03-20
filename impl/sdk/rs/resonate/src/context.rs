@@ -27,6 +27,12 @@ pub(crate) struct SpawnedTask {
 
 /// The primary interface for workflow functions.
 /// Provides four core operations: run, begin_run, rpc, begin_rpc.
+///
+/// **Intentional divergence from TS SDK**: Context calls do not accept custom IDs.
+/// IDs are always generated deterministically via `next_id()` (`parent.0`, `parent.1`, …).
+/// This eliminates the need for `breaksLineage` logic — `resonate:origin` always matches
+/// the root ID for the entire call tree. Custom IDs are only available at the top-level
+/// `Resonate` API (`Resonate::run`, `Resonate::begin_run`, etc.).
 pub struct Context {
     id: String,
     origin_id: String,
@@ -1290,6 +1296,46 @@ mod tests {
         assert_eq!(create.tags.get("resonate:parent").unwrap(), "root");
         assert_eq!(create.tags.get("resonate:origin").unwrap(), "root");
         assert!(create.tags.contains_key("resonate:branch"));
+    }
+
+    // ── Deterministic IDs & origin consistency ───────────────────
+
+    #[tokio::test]
+    async fn origin_matches_root_for_all_nested_calls() {
+        // All promises created by nested Context calls should carry
+        // resonate:origin == the root context ID.
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        // ChildWithLeaves creates two nested children inside root.0
+        let _: i32 = ctx.run(ChildWithLeaves, ()).await.unwrap();
+        // Another direct child at root.1
+        let _: i32 = ctx.run(Bar, ()).await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let creates: Vec<_> = requests
+            .iter()
+            .filter_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+            })
+            .collect();
+
+        // All created promises should have origin == "root"
+        for create in &creates {
+            assert_eq!(
+                create.tags.get("resonate:origin").unwrap(),
+                "root",
+                "promise {} should have origin 'root'",
+                create.id,
+            );
+        }
+        // Verify we got the nested ones too (root.0, root.0.0, root.0.1, root.1)
+        let ids: Vec<&str> = creates.iter().map(|c| c.id.as_str()).collect();
+        assert!(ids.contains(&"root.0"), "should have root.0");
+        assert!(ids.contains(&"root.0.0"), "should have root.0.0");
+        assert!(ids.contains(&"root.0.1"), "should have root.0.1");
+        assert!(ids.contains(&"root.1"), "should have root.1");
     }
 
     // ── Match Function (target resolution) ─────────────────────────
