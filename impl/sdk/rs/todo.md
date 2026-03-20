@@ -32,11 +32,11 @@ The TS SDK defaults to `24 * HOUR` (86,400,000 ms). The Rust SDK defaults to 60 
 
 The TS SDK caps child timeouts to the parent's timeout: `Math.min(now + opts.timeout, parent.timeout)`. The Rust SDK just passes through the parent's `timeout_at` without considering the child's requested timeout.
 
-- [ ] Update `Context::local_create_req` to compute `timeout_at` as `min(now_ms() + child_requested_timeout, self.timeout_at)` instead of just `self.timeout_at`
-- [ ] Update `Context::remote_create_req` with the same capping logic
-- [ ] Accept a child timeout parameter (from `Options` or a duration) in `run`, `begin_run`, `rpc`, `begin_rpc` on `Context` and thread it through to the create request builders
-- [ ] For detached calls (if/when added), use `i64::MAX` as the cap instead of parent timeout (matching TS `maxTimeout` behavior)
-- [ ] Add tests: child timeout exceeding parent's is clamped to parent's `timeout_at`, child timeout smaller than parent's is respected as-is, both local (`run`/`begin_run`) and remote (`rpc`/`begin_rpc`) paths apply capping correctly, detached calls use `i64::MAX` cap
+- [x] Update `Context::local_create_req` to compute `timeout_at` as `min(now_ms() + child_requested_timeout, self.timeout_at)` instead of just `self.timeout_at`
+- [x] Update `Context::remote_create_req` with the same capping logic
+- [x] Accept a child timeout parameter (from `Options` or a duration) in `run`, `begin_run`, `rpc`, `begin_rpc` on `Context` and thread it through to the create request builders
+- [x] For detached calls (if/when added), use `i64::MAX` as the cap instead of parent timeout (matching TS `maxTimeout` behavior)
+- [x] Add tests: child timeout exceeding parent's is clamped to parent's `timeout_at`, child timeout smaller than parent's is respected as-is, both local (`run`/`begin_run`) and remote (`rpc`/`begin_rpc`) paths apply capping correctly, detached calls use `i64::MAX` cap
 
 ## 4. Start heartbeat when task is acquired in Core
 

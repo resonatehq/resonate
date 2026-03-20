@@ -18,7 +18,7 @@ async fn shout(message: String) -> Result<String> {
 async fn hello_workflow(ctx: &Context, names: (String, String)) -> Result<String> {
     let f = ctx.begin_rpc::<String>("hello", &names.0).await;
     let greeting2: String = ctx.run(Hello, names.1).await?;
-    let greeting1: String = f.await_result().await?;
+    let greeting1: String = f.await?;
     let shouted: String = ctx
         .run(Shout, format!("{} and {}", greeting1, greeting2))
         .await?;

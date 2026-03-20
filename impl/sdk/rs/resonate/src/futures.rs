@@ -155,10 +155,10 @@ where
 
 impl<T> IntoFuture for RemoteFuture<T>
 where
-    T: DeserializeOwned + 'static,
+    T: DeserializeOwned + Send + 'static,
 {
     type Output = Result<T>;
-    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>>>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(self.await_result())
