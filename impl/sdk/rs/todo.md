@@ -92,10 +92,10 @@ The TS SDK allows custom IDs on context calls (`opts.id`), which introduces `bre
 
 The TS SDK uses `opts.target` (resolved through `network.match()`) for the `resonate:target` tag in `beginRun`. The Rust SDK's `begin_run_by_name` hardcodes `self.network.anycast()` as the target, ignoring any user-provided target option.
 
-- [ ] Replace `self.network.anycast().to_string()` in `begin_run_by_name` with the resolved target from opts (URL targets pass through, bare names go through `network.match()`)
-- [ ] Ensure consistency with `begin_rpc` which already resolves the target via `is_url` / `network.match()`
-- [ ] After TODO #1 (OptionsBuilder merge) is done, both `begin_run_by_name` and `begin_rpc` should get target resolution from `OptionsBuilder::build()`
-- [ ] Add tests: `begin_run_by_name` with custom target option uses that target, default target uses `network.match("default")`, URL target passes through unchanged
+- [x] Replace `self.network.anycast().to_string()` in `begin_run_by_name` with the resolved target from opts (URL targets pass through, bare names go through `network.match()`)
+- [x] Ensure consistency with `begin_rpc` which already resolves the target via `is_url` / `network.match()`
+- [x] After TODO #1 (OptionsBuilder merge) is done, both `begin_run_by_name` and `begin_rpc` should get target resolution from `OptionsBuilder::build()`
+- [x] Add tests: `begin_run_by_name` with custom target option uses that target, default target uses `network.match("default")`, URL target passes through unchanged
 
 ## 10. Context `rpc`/`begin_rpc` should use resolved target option
 

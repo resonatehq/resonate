@@ -1627,6 +1627,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn begin_run_by_name_with_custom_target() {
+        let r = Resonate::local(None);
+        r.register(Noop);
+
+        let opts = PartialOptions {
+            target: Some("my-target".into()),
+            ..Default::default()
+        };
+
+        let _handle = r
+            .begin_run_by_name::<serde_json::Value>(
+                "run-target-test",
+                "noop",
+                serde_json::json!(null),
+                Some(opts),
+            )
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "run-target-test",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
+
+        // Bare name resolved via network.match
+        assert_eq!(target, "local://any@my-target");
+    }
+
+    #[tokio::test]
+    async fn begin_run_by_name_default_target_uses_network_match() {
+        let r = Resonate::local(None);
+        r.register(Noop);
+
+        let _handle = r
+            .begin_run_by_name::<serde_json::Value>(
+                "run-default-target",
+                "noop",
+                serde_json::json!(null),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "run-default-target",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
+
+        assert_eq!(target, "local://any@default");
+    }
+
+    #[tokio::test]
+    async fn begin_run_by_name_url_target_passes_through() {
+        let r = Resonate::local(None);
+        r.register(Noop);
+
+        let opts = PartialOptions {
+            target: Some("https://remote:9000/workers/noop".into()),
+            ..Default::default()
+        };
+
+        let _handle = r
+            .begin_run_by_name::<serde_json::Value>(
+                "run-url-target",
+                "noop",
+                serde_json::json!(null),
+                Some(opts),
+            )
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "run-url-target",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
+
+        assert_eq!(target, "https://remote:9000/workers/noop");
+    }
+
+    #[tokio::test]
     async fn begin_rpc_with_no_target_uses_default() {
         let r = Resonate::local(None);
         r.register(Noop);
