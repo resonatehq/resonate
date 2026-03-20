@@ -1,7 +1,6 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::Deserialize;
-use tokio::sync::RwLock;
 
 use crate::codec::Codec;
 use crate::context::{Context, MatchFn};
@@ -179,7 +178,7 @@ impl Core {
 
         // 2. Look up the function in the registry (hold lock briefly, clone factory out)
         let factory = {
-            let reg = self.registry.read().await;
+            let reg = self.registry.read().unwrap();
             let entry = reg
                 .get(&task_data.func)
                 .ok_or_else(|| Error::FunctionNotFound(task_data.func.clone()))?;
@@ -365,7 +364,7 @@ mod tests {
     use crate::types::{PromiseRecord, PromiseState, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    use tokio::sync::RwLock;
+    use std::sync::RwLock;
 
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(send: SendFn, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
