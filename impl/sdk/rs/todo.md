@@ -55,10 +55,10 @@ The TS SDK calls `heartbeat.start()` in `Computation` before executing a functio
 
 The TS SDK's `suspendTask` returns `{ continue: true, preload }` on redirect, and the caller loops back into `executeUntilBlocked(task, rootPromise, preload)` — same already-acquired task, no re-acquire. The Rust SDK's `suspend_task` calls `self.on_message(task_id)` on redirect, which re-acquires the task from scratch. This causes an extra round-trip and a possible race condition if another worker acquires between release and re-acquire.
 
-- [ ] Change `suspend_task` to return the preloaded promises from the `Response::Redirect` variant instead of calling `self.on_message`
-- [ ] Update `execute_until_blocked_inner` (or `execute_until_blocked`) to loop on redirect: when `suspend_task` returns a redirect with preload, call `execute_until_blocked_inner` again with the same `task_id` and `root_promise` but the new preloaded promises
-- [ ] Remove the recursive `self.on_message(task_id)` call from `suspend_task`
-- [ ] Add tests: redirect re-executes without sending a second `TaskAcquire`, preloaded promises from redirect are passed to the next execution round, multiple consecutive redirects are handled correctly
+- [x] Change `suspend_task` to return the preloaded promises from the `Response::Redirect` variant instead of calling `self.on_message`
+- [x] Update `execute_until_blocked_inner` (or `execute_until_blocked`) to loop on redirect: when `suspend_task` returns a redirect with preload, call `execute_until_blocked_inner` again with the same `task_id` and `root_promise` but the new preloaded promises
+- [x] Remove the recursive `self.on_message(task_id)` call from `suspend_task`
+- [x] Add tests: redirect re-executes without sending a second `TaskAcquire`, preloaded promises from redirect are passed to the next execution round, multiple consecutive redirects are handled correctly
 
 ## 6. Short-circuit on settled promise must still fulfill the task
 

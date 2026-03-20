@@ -10,7 +10,13 @@ use crate::error::{Error, Result};
 use crate::heartbeat::Heartbeat;
 use crate::registry::Registry;
 use crate::send::{Request, Response, SendFn};
-use crate::types::{Outcome, PromiseRecord, PromiseState, SettleState, Status, TaskData};
+use crate::types::{PromiseRecord, PromiseState, SettleState, Status, TaskData};
+
+/// Internal result of a suspend attempt.
+enum SuspendResult {
+    Suspended,
+    Redirect { preloaded: Vec<PromiseRecord> },
+}
 
 /// Core is the top-level component that manages the full lifecycle of a task.
 /// It takes a `send` function and uses it for all server communication.
@@ -167,18 +173,11 @@ impl Core {
         root_promise: &PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
-        // 1. Build Effects from send + codec + preloaded promises
-        let effects = Effects::new(
-            self.send.clone(),
-            self.codec.clone(),
-            preload.unwrap_or_default(),
-        );
-
-        // 2. Extract function name and args from root promise
+        // 1. Extract function name and args from root promise
         let task_data: TaskData = TaskData::deserialize(root_promise.param.data_as_ref())
             .map_err(|e| Error::DecodingError(format!("invalid task data: {}", e)))?;
 
-        // 3. Look up the function in the registry (hold lock briefly, clone factory out)
+        // 2. Look up the function in the registry (hold lock briefly, clone factory out)
         let factory = {
             let reg = self.registry.read().await;
             let entry = reg
@@ -187,7 +186,7 @@ impl Core {
             entry.factory.clone()
         };
 
-        // 4. SHORT-CIRCUIT: if root promise is already settled
+        // 3. SHORT-CIRCUIT: if root promise is already settled
         if root_promise.state != PromiseState::Pending {
             tracing::info!(
                 task_id = task_id,
@@ -198,49 +197,57 @@ impl Core {
             return Ok(Status::Done);
         }
 
-        // 5. EXECUTE
-        let ctx = Context::root(
-            root_promise.id.clone(),
-            root_promise.timeout_at,
-            task_data.func.clone(),
-            effects.clone(),
-            self.match_fn.clone(),
-        );
+        // 4. EXECUTE in a loop — on redirect, re-execute with new preloaded promises
+        //    without re-acquiring the task (matching TS SDK behavior).
+        let mut current_preload = preload;
+        loop {
+            let effects = Effects::new(
+                self.send.clone(),
+                self.codec.clone(),
+                current_preload.unwrap_or_default(),
+            );
 
-        let info = crate::info::Info::new(
-            root_promise.id.clone(),
-            String::new(),
-            root_promise.id.clone(),
-            root_promise.id.clone(),
-            root_promise.timeout_at,
-            task_data.func.clone(),
-            root_promise.tags.clone(),
-        );
+            let ctx = Context::root(
+                root_promise.id.clone(),
+                root_promise.timeout_at,
+                task_data.func.clone(),
+                effects.clone(),
+                self.match_fn.clone(),
+            );
 
-        // Execute via the factory
-        let result = (factory)(Some(&ctx), Some(&info), task_data.args).await;
+            let info = crate::info::Info::new(
+                root_promise.id.clone(),
+                String::new(),
+                root_promise.id.clone(),
+                root_promise.id.clone(),
+                root_promise.timeout_at,
+                task_data.func.clone(),
+                root_promise.tags.clone(),
+            );
 
-        // Flush remaining local work
-        let flush_remote = ctx.flush_local_work().await;
-        let mut remote_todos = ctx.take_remote_todos().await;
-        remote_todos.extend(flush_remote);
+            // Execute via the factory
+            let result = (factory)(Some(&ctx), Some(&info), task_data.args.clone()).await;
 
-        // 6. FINALIZE: determine outcome
-        let outcome = if remote_todos.is_empty() {
-            Outcome::Done(result)
-        } else {
-            Outcome::Suspended { remote_todos }
-        };
+            // Flush remaining local work
+            let flush_remote = ctx.flush_local_work().await;
+            let mut remote_todos = ctx.take_remote_todos().await;
+            remote_todos.extend(flush_remote);
 
-        // 7. HANDLE OUTCOME
-        match outcome {
-            Outcome::Done(result) => {
+            // 5. FINALIZE: determine outcome
+            if remote_todos.is_empty() {
                 self.fulfill_task(task_id, &root_promise.id, &result)
                     .await?;
-                Ok(Status::Done)
+                return Ok(Status::Done);
             }
-            Outcome::Suspended { remote_todos } => {
-                self.suspend_task(task_id, remote_todos).await
+
+            // 6. SUSPEND: if redirect, loop with new preload; otherwise return Suspended
+            match self.suspend_task(task_id, remote_todos).await? {
+                SuspendResult::Suspended => return Ok(Status::Suspended),
+                SuspendResult::Redirect { preloaded } => {
+                    tracing::info!(task_id = task_id, "redirect received, re-executing task");
+                    current_preload = Some(preloaded);
+                    continue;
+                }
             }
         }
     }
@@ -294,13 +301,14 @@ impl Core {
     }
 
     /// Suspend a task by registering callbacks for the unresolved remote
-    /// dependencies. If the server responds with a redirect (some deps already
-    /// resolved), re-acquires and re-executes immediately.
+    /// dependencies. Returns `SuspendResult::Redirect` with preloaded promises
+    /// if the server indicates some deps are already resolved, allowing the
+    /// caller to re-execute without re-acquiring the task.
     async fn suspend_task(
         &self,
         task_id: &str,
         remote_todos: Vec<String>,
-    ) -> Result<Status> {
+    ) -> Result<SuspendResult> {
         let req = Request::TaskSuspend {
             task_id: task_id.to_string(),
             callbacks: remote_todos,
@@ -309,12 +317,8 @@ impl Core {
         let response = (self.send)(req).await?;
 
         match response {
-            Response::Suspended => Ok(Status::Suspended),
-            Response::Redirect { preloaded: _ } => {
-                // Some deps already resolved — re-acquire and re-execute
-                tracing::info!(task_id = task_id, "redirect received, re-executing task");
-                self.on_message(task_id).await
-            }
+            Response::Suspended => Ok(SuspendResult::Suspended),
+            Response::Redirect { preloaded } => Ok(SuspendResult::Redirect { preloaded }),
             _ => Err(Error::ServerError {
                 code: 500,
                 message: "unexpected response for task.suspend".into(),
@@ -572,6 +576,129 @@ mod tests {
             2,
             "computation should have been called twice (suspend + redirect)"
         );
+    }
+
+    static REDIR_NO_ACQUIRE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    #[resonate_macros::function]
+    async fn redir_no_acquire(ctx: &Context) -> Result<i64> {
+        let count = REDIR_NO_ACQUIRE_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
+        if count == 0 {
+            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            Ok(0)
+        } else {
+            Ok(42)
+        }
+    }
+
+    #[tokio::test]
+    async fn redirect_does_not_send_second_task_acquire() {
+        let harness = TestHarness::new();
+        harness.set_suspend_returns_redirect(true).await;
+
+        REDIR_NO_ACQUIRE_COUNT.store(0, AtomicOrdering::SeqCst);
+
+        let root = make_root_promise("p1", "redir_no_acquire", serde_json::json!(null));
+        harness.add_task("task1", root, vec![]).await;
+
+        let mut registry = Registry::new();
+        registry.register(RedirNoAcquire);
+
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        core.on_execute("task1").await.unwrap();
+
+        let requests = harness.sent_requests().await;
+        let acquire_count = requests
+            .iter()
+            .filter(|r| matches!(r, Request::TaskAcquire { .. }))
+            .count();
+        assert_eq!(
+            acquire_count, 1,
+            "redirect should re-execute without sending a second TaskAcquire"
+        );
+    }
+
+    static REDIR_PRELOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    #[resonate_macros::function]
+    async fn redir_preload(ctx: &Context) -> Result<i64> {
+        let count = REDIR_PRELOAD_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
+        if count == 0 {
+            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            Ok(0)
+        } else {
+            Ok(42)
+        }
+    }
+
+    #[tokio::test]
+    async fn redirect_preloaded_promises_passed_to_next_execution() {
+        let harness = TestHarness::new();
+        harness.set_suspend_returns_redirect(true).await;
+
+        REDIR_PRELOAD_COUNT.store(0, AtomicOrdering::SeqCst);
+
+        let root = make_root_promise("p1", "redir_preload", serde_json::json!(null));
+        harness.add_task("task1", root, vec![]).await;
+
+        let mut registry = Registry::new();
+        registry.register(RedirPreload);
+
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        core.on_execute("task1").await.unwrap();
+
+        // After redirect + re-execution, task should complete with fulfill
+        let requests = harness.sent_requests().await;
+        assert!(
+            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            "task should be fulfilled after redirect re-execution"
+        );
+    }
+
+    static MULTI_REDIR_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    #[resonate_macros::function]
+    async fn multi_redirect(ctx: &Context) -> Result<i64> {
+        let count = MULTI_REDIR_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
+        if count < 2 {
+            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+        }
+        Ok(count as i64)
+    }
+
+    #[tokio::test]
+    async fn multiple_consecutive_redirects_handled_correctly() {
+        let harness = TestHarness::new();
+        harness.set_suspend_returns_redirect(true).await;
+        // Allow up to 2 redirects
+        {
+            let mut net = harness.network.lock().await;
+            net.max_redirects = 2;
+        }
+
+        MULTI_REDIR_COUNT.store(0, AtomicOrdering::SeqCst);
+
+        let root = make_root_promise("p1", "multi_redirect", serde_json::json!(null));
+        harness.add_task("task1", root, vec![]).await;
+
+        let mut registry = Registry::new();
+        registry.register(MultiRedirect);
+
+        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        core.on_execute("task1").await.unwrap();
+
+        assert_eq!(
+            MULTI_REDIR_COUNT.load(AtomicOrdering::SeqCst),
+            3,
+            "should have been called 3 times (initial + 2 redirects)"
+        );
+
+        let requests = harness.sent_requests().await;
+        let acquire_count = requests
+            .iter()
+            .filter(|r| matches!(r, Request::TaskAcquire { .. }))
+            .count();
+        assert_eq!(acquire_count, 1, "only one TaskAcquire even with multiple redirects");
     }
 
     // ── on_message (Path 1): acquires then executes ──────────────
