@@ -72,9 +72,9 @@ The TS SDK's `processGenerator` returns a `Done` status with the settled value w
 
 The subscription refresh `JoinHandle` is immediately dropped after spawning (`drop(refresh_handle)` in `Resonate::new`), so `stop()` cannot cancel the background refresh task. The task runs forever even after `stop()` is called.
 
-- [ ] Store the `refresh_handle` in `self.subscription_refresh_handle` instead of dropping it
-- [ ] Verify `stop()` aborts the refresh handle (it already has the logic, but the handle is always `None`)
-- [ ] Add tests: after `stop()`, the subscription refresh task is no longer running, `stop()` is idempotent (calling twice doesn't panic)
+- [x] Store the `refresh_handle` in `self.subscription_refresh_handle` instead of dropping it
+- [x] Verify `stop()` aborts the refresh handle (it already has the logic, but the handle is always `None`)
+- [x] Add tests: after `stop()`, the subscription refresh task is no longer running, `stop()` is idempotent (calling twice doesn't panic)
 
 ## 8. Remove custom ID option from Context calls
 

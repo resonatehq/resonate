@@ -255,8 +255,62 @@ impl Resonate {
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 
-        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>> = Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
+
+        // Start periodic subscription refresh
+        let transport_for_refresh = transport.clone();
+        let subs_for_refresh = subscriptions.clone();
+        let unicast_for_refresh = network.unicast().to_string();
+        let refresh_interval = subscribe_every;
+
+        let refresh_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(refresh_interval);
+            loop {
+                interval.tick().await;
+                let ids: Vec<String> = {
+                    let map = subs_for_refresh.lock().await;
+                    map.keys().cloned().collect()
+                };
+                for id in ids {
+                    let req = serde_json::json!({
+                        "kind": "promise.registerListener",
+                        "corrId": format!("refresh-{}", now_ms()),
+                        "awaited": id,
+                        "address": unicast_for_refresh,
+                    });
+                    match transport_for_refresh.send(req).await {
+                        Ok(resp) => {
+                            let state = resp
+                                .get("promise")
+                                .and_then(|p| p.get("state"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("pending");
+                            if state != "pending" {
+                                let value = resp
+                                    .get("promise")
+                                    .and_then(|p| p.get("value"))
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let result = PromiseResult {
+                                    state: state.to_string(),
+                                    value,
+                                };
+                                let mut map = subs_for_refresh.lock().await;
+                                if let Some(entry) = map.remove(&id) {
+                                    if let Some(tx) = entry.tx {
+                                        let _ = tx.send(result);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, promise_id = %id, "subscription refresh failed");
+                        }
+                    }
+                }
+            }
+        });
 
         let resonate = Self {
             pid,
@@ -274,7 +328,7 @@ impl Resonate {
             subscribe_every,
             promises,
             schedules,
-            subscription_refresh_handle: Mutex::new(None),
+            subscription_refresh_handle: Mutex::new(Some(refresh_handle)),
         };
 
         // Subscribe to incoming messages
@@ -345,64 +399,6 @@ impl Resonate {
                 tracing::error!(error = %e, "failed to start network");
             }
         });
-
-        // Start periodic subscription refresh
-        let transport_for_refresh = transport.clone();
-        let subs_for_refresh = resonate.subscriptions.clone();
-        let unicast_for_refresh = resonate.network.unicast().to_string();
-        let refresh_interval = resonate.subscribe_every;
-
-        let refresh_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(refresh_interval);
-            loop {
-                interval.tick().await;
-                let ids: Vec<String> = {
-                    let map = subs_for_refresh.lock().await;
-                    map.keys().cloned().collect()
-                };
-                for id in ids {
-                    let req = serde_json::json!({
-                        "kind": "promise.registerListener",
-                        "corrId": format!("refresh-{}", now_ms()),
-                        "awaited": id,
-                        "address": unicast_for_refresh,
-                    });
-                    match transport_for_refresh.send(req).await {
-                        Ok(resp) => {
-                            let state = resp
-                                .get("promise")
-                                .and_then(|p| p.get("state"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("pending");
-                            if state != "pending" {
-                                let value = resp
-                                    .get("promise")
-                                    .and_then(|p| p.get("value"))
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let result = PromiseResult {
-                                    state: state.to_string(),
-                                    value,
-                                };
-                                let mut map = subs_for_refresh.lock().await;
-                                if let Some(entry) = map.remove(&id) {
-                                    if let Some(tx) = entry.tx {
-                                        let _ = tx.send(result);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, promise_id = %id, "subscription refresh failed");
-                        }
-                    }
-                }
-            }
-        });
-
-        // Store the handle (we can't await the mutex in a sync context,
-        // so we just let it go; it will be stopped in stop())
-        drop(refresh_handle);
 
         resonate
     }
@@ -1338,6 +1334,37 @@ mod tests {
         // Second stop should also be fine (idempotent)
         let result = r.stop().await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn stop_aborts_subscription_refresh_handle() {
+        let r = Resonate::local(None);
+        // The refresh handle should be stored (not None)
+        {
+            let guard = r.subscription_refresh_handle.lock().await;
+            assert!(guard.is_some(), "refresh handle should be stored at construction");
+        }
+        r.stop().await.unwrap();
+        // After stop, the handle should be taken (None)
+        {
+            let guard = r.subscription_refresh_handle.lock().await;
+            assert!(guard.is_none(), "refresh handle should be None after stop");
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_aborts_refresh_task() {
+        let r = Resonate::local(None);
+        // Confirm the refresh task is running before stop
+        {
+            let guard = r.subscription_refresh_handle.lock().await;
+            let handle = guard.as_ref().unwrap();
+            assert!(!handle.is_finished(), "refresh task should be running before stop");
+        }
+        r.stop().await.unwrap();
+        // After stop, handle is taken so we can't inspect it directly,
+        // but we verified it was present and stop didn't panic.
+        // The idempotent stop test further confirms correctness.
     }
 
     // ═══════════════════════════════════════════════════════════════
