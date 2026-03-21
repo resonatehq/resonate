@@ -1,8 +1,13 @@
 use resonate::prelude::*;
+use tokio::io::AsyncWriteExt;
 
 // A simple "hello world" leaf function that takes a name and returns a greeting.
 #[resonate::function(name = "hello")]
 async fn hello(name: String) -> Result<String> {
+    let mut stdout = tokio::io::stdout();
+    stdout
+        .write_all(format!("hello {name} from tokio::stdout\n").as_bytes())
+        .await?;
     Ok(format!("Hello, {}!", name))
 }
 
@@ -27,19 +32,16 @@ async fn hello_workflow(ctx: &Context, names: (String, String)) -> Result<String
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let resonate = Resonate::local(None);
 
     // Register all functions.
     resonate.register(Hello);
     resonate.register(Shout);
     resonate.register(HelloWorkflow);
-
-    // Call the simple leaf function.
-    let result: String = resonate
-        .run("hello-1", Hello, "World".to_string(), None)
-        .await
-        .expect("hello failed");
-    println!("{}", result);
 
     // Call the shout function.
     let result: String = resonate

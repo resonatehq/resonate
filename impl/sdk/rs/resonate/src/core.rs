@@ -88,6 +88,8 @@ impl Core {
         })
         .await?;
 
+        tracing::debug!(task_id = task_id, "task acquired");
+
         let (root_promise_raw, preloaded_raw) = match acquire_response {
             Response::TaskAcquireResult {
                 root_promise,
@@ -134,6 +136,8 @@ impl Core {
         if let Err(e) = self.heartbeat.start().await {
             tracing::warn!(error = %e, task_id = task_id, "failed to start heartbeat");
         }
+
+        tracing::debug!(task_id = task_id, promise_id = %root_promise.id, "starting execution");
 
         let result = self
             .execute_until_blocked_inner(task_id, &root_promise, preload)
@@ -253,14 +257,19 @@ impl Core {
             if remote_todos.is_empty() {
                 self.fulfill_task(task_id, &root_promise.id, &result)
                     .await?;
+                tracing::debug!(task_id = task_id, promise_id = %root_promise.id, "task fulfilled");
                 return Ok(Status::Done);
             }
 
             // 6. SUSPEND: if redirect, loop with new preload; otherwise return Suspended
+            tracing::debug!(task_id = task_id, remote_deps = remote_todos.len(), "attempting to suspend task");
             match self.suspend_task(task_id, remote_todos).await? {
-                SuspendResult::Suspended => return Ok(Status::Suspended),
+                SuspendResult::Suspended => {
+                    tracing::debug!(task_id = task_id, "task suspended");
+                    return Ok(Status::Suspended);
+                }
                 SuspendResult::Redirect { preloaded } => {
-                    tracing::info!(task_id = task_id, "redirect received, re-executing task");
+                    tracing::debug!(task_id = task_id, preloaded = preloaded.len(), "suspend returned redirect, re-executing task");
                     current_preload = Some(preloaded);
                     continue;
                 }
