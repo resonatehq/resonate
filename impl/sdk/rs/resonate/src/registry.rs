@@ -111,9 +111,7 @@ mod tests {
     use super::*;
 
     fn dummy_factory() -> Factory {
-        Arc::new(|_ctx, _info, _args| {
-            Box::pin(async { Ok(serde_json::Value::Null) })
-        })
+        Arc::new(|_ctx, _info, _args| Box::pin(async { Ok(serde_json::Value::Null) }))
     }
 
     #[test]

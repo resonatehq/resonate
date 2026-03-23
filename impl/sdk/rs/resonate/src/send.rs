@@ -73,7 +73,8 @@ pub enum Response {
 pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Response> {
     match req {
         Request::PromiseCreate(_) | Request::PromiseSettle(_) => {
-            let promise = json.get("promise")
+            let promise = json
+                .get("promise")
                 .ok_or_else(|| Error::DecodingError("missing 'promise' in response".into()))?;
             let record: PromiseRecord = PromiseRecord::deserialize(promise)
                 .map_err(|e| Error::DecodingError(format!("invalid promise record: {}", e)))?;
@@ -81,11 +82,14 @@ pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Respons
         }
 
         Request::TaskAcquire { .. } => {
-            let promise = json.get("promise")
-                .ok_or_else(|| Error::DecodingError("missing 'promise' in task.acquire response".into()))?;
-            let root_promise: PromiseRecord = PromiseRecord::deserialize(promise)
-                .map_err(|e| Error::DecodingError(format!("invalid promise in task.acquire: {}", e)))?;
-            let preloaded = json.get("preload")
+            let promise = json.get("promise").ok_or_else(|| {
+                Error::DecodingError("missing 'promise' in task.acquire response".into())
+            })?;
+            let root_promise: PromiseRecord = PromiseRecord::deserialize(promise).map_err(|e| {
+                Error::DecodingError(format!("invalid promise in task.acquire: {}", e))
+            })?;
+            let preloaded = json
+                .get("preload")
                 .or_else(|| json.get("preloaded"))
                 .and_then(|v| v.as_array())
                 .map(|arr| {
@@ -94,7 +98,10 @@ pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Respons
                         .collect()
                 })
                 .unwrap_or_default();
-            Ok(Response::TaskAcquireResult { root_promise, preloaded })
+            Ok(Response::TaskAcquireResult {
+                root_promise,
+                preloaded,
+            })
         }
 
         Request::TaskFulfill { .. } | Request::TaskRelease { .. } => {
@@ -103,10 +110,14 @@ pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Respons
 
         Request::TaskSuspend { .. } => {
             // Check for redirect (status 300 in TS SDK, or "redirect": true in local network)
-            let is_redirect = json.get("redirect").and_then(|v| v.as_bool()).unwrap_or(false)
+            let is_redirect = json
+                .get("redirect")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
                 || json.get("status").and_then(|v| v.as_u64()) == Some(300);
             if is_redirect {
-                let preloaded = json.get("preload")
+                let preloaded = json
+                    .get("preload")
                     .or_else(|| json.get("preloaded"))
                     .and_then(|v| v.as_array())
                     .map(|arr| {
@@ -125,9 +136,8 @@ pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Respons
 
 /// The Send function type alias.
 /// Wraps an HTTP client and handles serialization, deserialization, and error conversion.
-pub type SendFn = Arc<
-    dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> + Send + Sync,
->;
+pub type SendFn =
+    Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> + Send + Sync>;
 
 /// Build a Send function from a reqwest client and base URL.
 pub fn build_send(client: reqwest::Client, base_url: &str) -> SendFn {
@@ -162,11 +172,7 @@ pub fn build_send(client: reqwest::Client, base_url: &str) -> SendFn {
                 Request::TaskRelease { .. } => reqwest::Method::POST,
             };
 
-            let res = client
-                .request(method, &url)
-                .json(&req)
-                .send()
-                .await?;
+            let res = client.request(method, &url).json(&req).send().await?;
 
             let status = res.status();
             let text = res.text().await?;
@@ -178,12 +184,11 @@ pub fn build_send(client: reqwest::Client, base_url: &str) -> SendFn {
                 });
             }
 
-            let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-                Error::ServerError {
+            let json: serde_json::Value =
+                serde_json::from_str(&text).map_err(|e| Error::ServerError {
                     code: status.as_u16(),
                     message: format!("invalid response JSON: {} (body: {})", e, text),
-                }
-            })?;
+                })?;
 
             parse_response(&req, &json)
         })
@@ -289,7 +294,10 @@ mod tests {
             tags: HashMap::new(),
         });
         let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net.send(serde_json::to_string(&req_json).unwrap()).await.unwrap();
+        let resp_str = net
+            .send(serde_json::to_string(&req_json).unwrap())
+            .await
+            .unwrap();
         let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
 
         let resp = parse_response(&req, &resp_json).unwrap();
@@ -336,7 +344,10 @@ mod tests {
             task_id: task_id.clone(),
         };
         let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net.send(serde_json::to_string(&req_json).unwrap()).await.unwrap();
+        let resp_str = net
+            .send(serde_json::to_string(&req_json).unwrap())
+            .await
+            .unwrap();
         let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
 
         let resp = parse_response(&req, &resp_json).unwrap();
@@ -382,7 +393,10 @@ mod tests {
             },
         };
         let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net.send(serde_json::to_string(&req_json).unwrap()).await.unwrap();
+        let resp_str = net
+            .send(serde_json::to_string(&req_json).unwrap())
+            .await
+            .unwrap();
         let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
 
         let resp = parse_response(&req, &resp_json).unwrap();
@@ -417,7 +431,10 @@ mod tests {
             callbacks: vec!["dep-a".into()],
         };
         let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net.send(serde_json::to_string(&req_json).unwrap()).await.unwrap();
+        let resp_str = net
+            .send(serde_json::to_string(&req_json).unwrap())
+            .await
+            .unwrap();
         let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
 
         let resp = parse_response(&req, &resp_json).unwrap();
@@ -448,7 +465,10 @@ mod tests {
             task_id: task_id.clone(),
         };
         let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net.send(serde_json::to_string(&req_json).unwrap()).await.unwrap();
+        let resp_str = net
+            .send(serde_json::to_string(&req_json).unwrap())
+            .await
+            .unwrap();
         let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
 
         let resp = parse_response(&req, &resp_json).unwrap();

@@ -262,7 +262,9 @@ impl Context {
 
         match record.state {
             PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-            PromiseState::Rejected | PromiseState::RejectedCanceled | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
             PromiseState::Pending => match D::KIND {
                 DurableKind::Function => {
                     let info = self.child_info(&child_id, D::NAME, record.timeout_at);
@@ -332,7 +334,9 @@ impl Context {
 
         match record.state {
             PromiseState::Resolved => DurableFuture::completed(record.value.data_or_null()),
-            PromiseState::Rejected | PromiseState::RejectedCanceled | PromiseState::RejectedTimedout => DurableFuture::failed(record.value.data_or_null()),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => DurableFuture::failed(record.value.data_or_null()),
             PromiseState::Pending => {
                 let effects = self.effects.clone();
                 let child_id_for_task = child_id.clone();
@@ -347,8 +351,9 @@ impl Context {
                         tokio::spawn(async move {
                             let result = func.execute(None, Some(&info), args).await;
                             let json_result = match &result {
-                                Ok(val) => serde_json::to_value(val)
-                                    .map_err(Error::SerializationError),
+                                Ok(val) => {
+                                    serde_json::to_value(val).map_err(Error::SerializationError)
+                                }
                                 Err(e) => Err(Error::Application {
                                     message: e.to_string(),
                                 }),
@@ -363,8 +368,7 @@ impl Context {
                         })
                     }
                     DurableKind::Workflow => {
-                        let child_ctx =
-                            self.child(&child_id, D::NAME, record.timeout_at);
+                        let child_ctx = self.child(&child_id, D::NAME, record.timeout_at);
                         tokio::spawn(async move {
                             let result = func.execute(Some(&child_ctx), None, args).await;
                             let flush_remote = child_ctx.flush_local_work().await;
@@ -372,8 +376,9 @@ impl Context {
                             child_remote.extend(flush_remote);
 
                             let json_result = match &result {
-                                Ok(val) => serde_json::to_value(val)
-                                    .map_err(Error::SerializationError),
+                                Ok(val) => {
+                                    serde_json::to_value(val).map_err(Error::SerializationError)
+                                }
                                 Err(e) => Err(Error::Application {
                                     message: e.to_string(),
                                 }),
@@ -385,7 +390,10 @@ impl Context {
                                     .await;
                                 Outcome::Done(json_result)
                             } else {
-                                parent_remote_todos.lock().await.extend(child_remote.clone());
+                                parent_remote_todos
+                                    .lock()
+                                    .await
+                                    .extend(child_remote.clone());
                                 Outcome::Suspended {
                                     remote_todos: child_remote,
                                 }
@@ -454,7 +462,9 @@ impl Context {
 
         match record.state {
             PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-            PromiseState::Rejected | PromiseState::RejectedCanceled | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
             PromiseState::Pending => {
                 self.remote_todos.lock().await.push(child_id);
                 Err(Error::Suspended)
@@ -465,11 +475,7 @@ impl Context {
     /// Remote fire-and-start.
     ///
     /// The child promise timeout is capped to the parent's timeout.
-    pub async fn begin_rpc<T>(
-        &self,
-        func: &str,
-        args: &impl Serialize,
-    ) -> RemoteFuture<T>
+    pub async fn begin_rpc<T>(&self, func: &str, args: &impl Serialize) -> RemoteFuture<T>
     where
         T: DeserializeOwned,
     {
@@ -518,7 +524,9 @@ impl Context {
 
         match record.state {
             PromiseState::Resolved => RemoteFuture::completed(record.value.data_or_null()),
-            PromiseState::Rejected | PromiseState::RejectedCanceled | PromiseState::RejectedTimedout => RemoteFuture::failed(record.value.data_or_null()),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => RemoteFuture::failed(record.value.data_or_null()),
             PromiseState::Pending => {
                 self.remote_todos.lock().await.push(child_id.clone());
                 RemoteFuture::pending(child_id, self.effects.clone())
@@ -608,7 +616,10 @@ mod tests {
         const NAME: &'static str = "bar";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             Ok(42)
         }
@@ -619,7 +630,10 @@ mod tests {
         const NAME: &'static str = "baz";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             Ok(31416)
         }
@@ -630,7 +644,10 @@ mod tests {
         const NAME: &'static str = "add";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, args: (i32, i32),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            args: (i32, i32),
         ) -> crate::error::Result<i32> {
             Ok(args.0 + args.1)
         }
@@ -641,7 +658,10 @@ mod tests {
         const NAME: &'static str = "double";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, args: i32,
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            args: i32,
         ) -> crate::error::Result<i32> {
             Ok(args * 2)
         }
@@ -652,7 +672,10 @@ mod tests {
         const NAME: &'static str = "square";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, args: i32,
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            args: i32,
         ) -> crate::error::Result<i32> {
             Ok(args * args)
         }
@@ -663,7 +686,10 @@ mod tests {
         const NAME: &'static str = "multiply";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, args: (i32, i32),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            args: (i32, i32),
         ) -> crate::error::Result<i32> {
             Ok(args.0 * args.1)
         }
@@ -674,7 +700,10 @@ mod tests {
         const NAME: &'static str = "failing";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             Err(Error::Application {
                 message: "boom".to_string(),
@@ -687,7 +716,10 @@ mod tests {
         const NAME: &'static str = "noop";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<()> {
             Ok(())
         }
@@ -698,7 +730,10 @@ mod tests {
         const NAME: &'static str = "concat";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, args: (String, String, String),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            args: (String, String, String),
         ) -> crate::error::Result<String> {
             Ok(format!("{}-{}-{}", args.0, args.1, args.2))
         }
@@ -709,7 +744,10 @@ mod tests {
         const NAME: &'static str = "slow";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             Ok(1)
@@ -721,7 +759,10 @@ mod tests {
         const NAME: &'static str = "fast";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             Ok(2)
         }
@@ -735,7 +776,10 @@ mod tests {
         const NAME: &'static str = "counter";
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
-            &self, _ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            _ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             let val = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(val + 1)
@@ -748,7 +792,10 @@ mod tests {
         const NAME: &'static str = "child";
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
-            &self, ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             let ctx = ctx.unwrap();
             let v: i32 = ctx.rpc("remoteFunc", &()).await?;
@@ -762,7 +809,10 @@ mod tests {
         const NAME: &'static str = "child_with_leaves";
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
-            &self, ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             let ctx = ctx.unwrap();
             let a: i32 = ctx.run(Bar, ()).await?;
@@ -777,7 +827,10 @@ mod tests {
         const NAME: &'static str = "inner_failing";
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
-            &self, ctx: Option<&Context>, _info: Option<&Info>, _args: (),
+            &self,
+            ctx: Option<&Context>,
+            _info: Option<&Info>,
+            _args: (),
         ) -> crate::error::Result<i32> {
             let ctx = ctx.unwrap();
             ctx.run(Failing, ()).await
@@ -842,17 +895,21 @@ mod tests {
         };
 
         // Settle the remote promise in the stub
-        harness.settle_promise_in_stub(&remote_id, serde_json::json!(100)).await;
+        harness
+            .settle_promise_in_stub(&remote_id, serde_json::json!(100))
+            .await;
 
         // Second execution: remote promise is now resolved via preload
-        let effects2 = harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(100))]);
+        let effects2 =
+            harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(100))]);
         let ctx2 = test_context("root", effects2);
 
         let local_future2 = ctx2.begin_run(Bar, ()).await;
         let remote_future2: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
         let local_val2: i32 = local_future2.await.unwrap();
         let remote_val2: i32 = remote_future2.await.unwrap();
-        let outcome2 = finalize_context(&ctx2, Ok(serde_json::json!(local_val2 + remote_val2))).await;
+        let outcome2 =
+            finalize_context(&ctx2, Ok(serde_json::json!(local_val2 + remote_val2))).await;
 
         match outcome2 {
             Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(142)),
@@ -880,10 +937,13 @@ mod tests {
         };
 
         // Settle first remote
-        harness.settle_promise_in_stub(&todos[0], serde_json::json!(10)).await;
+        harness
+            .settle_promise_in_stub(&todos[0], serde_json::json!(10))
+            .await;
 
         // Second execution: one resolved, one still pending
-        let effects2 = harness.build_effects(vec![resolved_promise(&todos[0], serde_json::json!(10))]);
+        let effects2 =
+            harness.build_effects(vec![resolved_promise(&todos[0], serde_json::json!(10))]);
         let ctx2 = test_context("root", effects2);
         let _r1: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
         let _r2: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
@@ -897,7 +957,9 @@ mod tests {
         }
 
         // Settle second remote
-        harness.settle_promise_in_stub(&todos[1], serde_json::json!(20)).await;
+        harness
+            .settle_promise_in_stub(&todos[1], serde_json::json!(20))
+            .await;
 
         // Third execution: both resolved
         let effects3 = harness.build_effects(vec![
@@ -1022,10 +1084,13 @@ mod tests {
         };
 
         // Settle the remote promise
-        harness.settle_promise_in_stub(&remote_id, serde_json::json!(21)).await;
+        harness
+            .settle_promise_in_stub(&remote_id, serde_json::json!(21))
+            .await;
 
         // Second execution: remote resolved, child completes, parent completes
-        let effects2 = harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(21))]);
+        let effects2 =
+            harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(21))]);
         let ctx2 = test_context("foo", effects2);
 
         let result2: crate::error::Result<i32> = ctx2.run(ChildWorkflow, ()).await;
@@ -1306,7 +1371,11 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         let create_req = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+            if let crate::send::Request::PromiseCreate(c) = r {
+                Some(c)
+            } else {
+                None
+            }
         });
         assert!(create_req.is_some(), "should have sent a PromiseCreate");
         let create = create_req.unwrap();
@@ -1326,7 +1395,11 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         let create_req = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+            if let crate::send::Request::PromiseCreate(c) = r {
+                Some(c)
+            } else {
+                None
+            }
         });
         assert!(create_req.is_some());
         let create = create_req.unwrap();
@@ -1356,7 +1429,11 @@ mod tests {
         let creates: Vec<_> = requests
             .iter()
             .filter_map(|r| {
-                if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -1390,11 +1467,21 @@ mod tests {
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
-        assert_eq!(create.tags.get("resonate:target").unwrap(), "local://any@hello");
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "local://any@hello"
+        );
     }
 
     #[tokio::test]
@@ -1408,9 +1495,16 @@ mod tests {
         let _: crate::error::Result<String> = ctx.rpc("my_func", &42i32).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1429,11 +1523,21 @@ mod tests {
         let _future: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("greet", &"world").await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
-        assert_eq!(create.tags.get("resonate:target").unwrap(), "remote://group/greet");
+        assert_eq!(
+            create.tags.get("resonate:target").unwrap(),
+            "remote://group/greet"
+        );
     }
 
     #[tokio::test]
@@ -1448,9 +1552,16 @@ mod tests {
         let _: crate::error::Result<i32> = ctx.rpc("bare_name", &()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(create.tags.get("resonate:target").unwrap(), "bare_name");
     }
@@ -1470,13 +1581,26 @@ mod tests {
         let _: crate::error::Result<i32> = ctx.rpc("func_b", &()).await;
 
         let requests = harness.sent_requests().await;
-        let creates: Vec<_> = requests.iter().filter_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).collect();
+        let creates: Vec<_> = requests
+            .iter()
+            .filter_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         assert_eq!(creates.len(), 2);
-        assert_eq!(creates[0].tags.get("resonate:target").unwrap(), "custom://func_a");
-        assert_eq!(creates[1].tags.get("resonate:target").unwrap(), "custom://func_b");
+        assert_eq!(
+            creates[0].tags.get("resonate:target").unwrap(),
+            "custom://func_a"
+        );
+        assert_eq!(
+            creates[1].tags.get("resonate:target").unwrap(),
+            "custom://func_b"
+        );
     }
 
     #[tokio::test]
@@ -1485,14 +1609,13 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         // This match_fn would prefix "local://any@" — but it should NOT
         // be called when the target already looks like a URL.
-        let match_fn: crate::context::MatchFn =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") {
-                    target.to_string()
-                } else {
-                    format!("local://any@{}", target)
-                }
-            });
+        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
+            if target.contains("://") {
+                target.to_string()
+            } else {
+                format!("local://any@{}", target)
+            }
+        });
         let ctx = test_context_with_match("root", effects, match_fn);
 
         // Pass a full URL as the function name — should be kept as-is
@@ -1500,9 +1623,16 @@ mod tests {
             ctx.rpc("http://other-host:8001/workers/hello", &()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1516,26 +1646,33 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         // Simulates real behavior: bare names get rewritten, URLs don't
-        let match_fn: crate::context::MatchFn =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") {
-                    target.to_string()
-                } else {
-                    format!("local://any@{}", target)
-                }
-            });
+        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
+            if target.contains("://") {
+                target.to_string()
+            } else {
+                format!("local://any@{}", target)
+            }
+        });
         let ctx = test_context_with_match("root", effects, match_fn);
 
         // Bare name — should be rewritten
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
         // URL — should NOT be rewritten
-        let _: crate::error::Result<i32> =
-            ctx.rpc("https://remote.example.com/workers/greet", &()).await;
+        let _: crate::error::Result<i32> = ctx
+            .rpc("https://remote.example.com/workers/greet", &())
+            .await;
 
         let requests = harness.sent_requests().await;
-        let creates: Vec<_> = requests.iter().filter_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).collect();
+        let creates: Vec<_> = requests
+            .iter()
+            .filter_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         assert_eq!(creates.len(), 2);
         assert_eq!(
@@ -1562,14 +1699,23 @@ mod tests {
         let _: i32 = ctx.run(Bar, ()).await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         // Local calls set scope=local and should NOT have resonate:target
         assert_eq!(create.tags.get("resonate:scope").unwrap(), "local");
-        assert!(!create.tags.contains_key("resonate:target"),
-            "local run should not set resonate:target");
+        assert!(
+            !create.tags.contains_key("resonate:target"),
+            "local run should not set resonate:target"
+        );
     }
 
     // ── Target override via rpc_with_opts / begin_rpc_with_opts ───
@@ -1582,13 +1728,21 @@ mod tests {
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::error::Result<i32> =
-            ctx.rpc_with_opts("my_func", &(), None, Some("custom-target")).await;
+        let _: crate::error::Result<i32> = ctx
+            .rpc_with_opts("my_func", &(), None, Some("custom-target"))
+            .await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1605,13 +1759,19 @@ mod tests {
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::error::Result<i32> =
-            ctx.rpc_with_opts("my_func", &(), None, None).await;
+        let _: crate::error::Result<i32> = ctx.rpc_with_opts("my_func", &(), None, None).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1624,20 +1784,35 @@ mod tests {
     async fn rpc_with_opts_url_target_passes_through() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") { target.to_string() }
-                else { format!("local://any@{}", target) }
-            });
+        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
+            if target.contains("://") {
+                target.to_string()
+            } else {
+                format!("local://any@{}", target)
+            }
+        });
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::error::Result<i32> =
-            ctx.rpc_with_opts("my_func", &(), None, Some("https://remote:9000/workers/foo")).await;
+        let _: crate::error::Result<i32> = ctx
+            .rpc_with_opts(
+                "my_func",
+                &(),
+                None,
+                Some("https://remote:9000/workers/foo"),
+            )
+            .await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1654,13 +1829,21 @@ mod tests {
             std::sync::Arc::new(|target: &str| format!("remote://{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::futures::RemoteFuture<i32> =
-            ctx.begin_rpc_with_opts("my_func", &(), None, Some("override-target")).await;
+        let _: crate::futures::RemoteFuture<i32> = ctx
+            .begin_rpc_with_opts("my_func", &(), None, Some("override-target"))
+            .await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.tags.get("resonate:target").unwrap(),
@@ -1684,7 +1867,11 @@ mod tests {
         let create_ids: Vec<String> = requests
             .iter()
             .filter_map(|r| {
-                if let crate::send::Request::PromiseCreate(c) = r { Some(c.id.clone()) } else { None }
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c.id.clone())
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -1705,7 +1892,11 @@ mod tests {
         let create_ids: Vec<String> = requests
             .iter()
             .filter_map(|r| {
-                if let crate::send::Request::PromiseCreate(c) = r { Some(c.id.clone()) } else { None }
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c.id.clone())
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -1761,7 +1952,10 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let result = ctx.run(Failing, ()).await.map(|v: i32| serde_json::json!(v));
+        let result = ctx
+            .run(Failing, ())
+            .await
+            .map(|v: i32| serde_json::json!(v));
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -1778,7 +1972,10 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let result = ctx.run(InnerFailing, ()).await.map(|v: i32| serde_json::json!(v));
+        let result = ctx
+            .run(InnerFailing, ())
+            .await
+            .map(|v: i32| serde_json::json!(v));
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -1805,9 +2002,16 @@ mod tests {
         let _: i32 = ctx.run(Bar, ()).await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         // Default child timeout is 24h, which exceeds parent's 5s → clamped
         assert!(
@@ -1829,9 +2033,16 @@ mod tests {
         let _: crate::error::Result<i32> = ctx.rpc("remote_func", &()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert!(
             create.timeout_at <= parent_timeout,
@@ -1852,9 +2063,16 @@ mod tests {
         let _future = ctx.begin_run(Bar, ()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert!(
             create.timeout_at <= parent_timeout,
@@ -1875,9 +2093,16 @@ mod tests {
         let _future: RemoteFuture<i32> = ctx.begin_rpc("remote", &()).await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert!(
             create.timeout_at <= parent_timeout,
@@ -1897,12 +2122,22 @@ mod tests {
 
         // Request 10 seconds — smaller than parent's 60s, should be respected
         let child_timeout = std::time::Duration::from_secs(10);
-        let _: i32 = ctx.run_with_timeout(Bar, (), Some(child_timeout)).await.unwrap();
+        let _: i32 = ctx
+            .run_with_timeout(Bar, (), Some(child_timeout))
+            .await
+            .unwrap();
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         // Should be approximately now + 10s, not parent's 60s
         let expected_approx = now + 10_000;
@@ -1927,12 +2162,22 @@ mod tests {
 
         // Request 60 seconds — exceeds parent's 5s, should be clamped
         let child_timeout = std::time::Duration::from_secs(60);
-        let _: i32 = ctx.run_with_timeout(Bar, (), Some(child_timeout)).await.unwrap();
+        let _: i32 = ctx
+            .run_with_timeout(Bar, (), Some(child_timeout))
+            .await
+            .unwrap();
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.timeout_at, parent_timeout,
@@ -1949,13 +2194,21 @@ mod tests {
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
         let child_timeout = std::time::Duration::from_secs(10);
-        let _: crate::error::Result<i32> =
-            ctx.rpc_with_timeout("remote", &(), Some(child_timeout)).await;
+        let _: crate::error::Result<i32> = ctx
+            .rpc_with_timeout("remote", &(), Some(child_timeout))
+            .await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         let expected_approx = now + 10_000;
         let tolerance = 1_000;
@@ -1977,13 +2230,21 @@ mod tests {
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
         let child_timeout = std::time::Duration::from_secs(60);
-        let _future: RemoteFuture<i32> =
-            ctx.begin_rpc_with_timeout("remote", &(), Some(child_timeout)).await;
+        let _future: RemoteFuture<i32> = ctx
+            .begin_rpc_with_timeout("remote", &(), Some(child_timeout))
+            .await;
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         assert_eq!(
             create.timeout_at, parent_timeout,
@@ -2001,9 +2262,16 @@ mod tests {
         let _: i32 = ctx.run(Bar, ()).await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let create = requests.iter().find_map(|r| {
-            if let crate::send::Request::PromiseCreate(c) = r { Some(c) } else { None }
-        }).expect("should have sent promise.create");
+        let create = requests
+            .iter()
+            .find_map(|r| {
+                if let crate::send::Request::PromiseCreate(c) = r {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have sent promise.create");
 
         let now = super::now_ms();
         let expected_24h = now + 86_400_000; // 24 hours in ms

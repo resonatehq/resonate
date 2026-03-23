@@ -38,11 +38,7 @@ impl Codec {
             serde_json::Value::String(s) if s.is_empty() => return Ok(None),
             serde_json::Value::String(s) => s,
             serde_json::Value::Null => return Ok(None),
-            _ => {
-                return Err(Error::DecodingError(
-                    "expected string or null data".into(),
-                ))
-            }
+            _ => return Err(Error::DecodingError("expected string or null data".into())),
         };
         let bytes = BASE64.decode(s)?;
         let json_str = String::from_utf8(bytes)?;
@@ -79,10 +75,7 @@ impl Codec {
 
     /// Decode a promise from a raw JSON value (as returned by the network).
     /// Parses the JSON into a PromiseRecord, then decodes param/value fields.
-    pub fn decode_promise_from_json(
-        &self,
-        json: &serde_json::Value,
-    ) -> Result<PromiseRecord> {
+    pub fn decode_promise_from_json(&self, json: &serde_json::Value) -> Result<PromiseRecord> {
         let record: PromiseRecord = PromiseRecord::deserialize(json)
             .map_err(|e| Error::DecodingError(format!("invalid promise JSON: {}", e)))?;
         self.decode_promise(&record)
@@ -184,7 +177,10 @@ mod tests {
     fn encode_null_produces_empty_data() {
         let c = codec();
         let encoded = c.encode(&serde_json::Value::Null).unwrap();
-        assert_eq!(encoded.data_or_null(), serde_json::Value::String(String::new()));
+        assert_eq!(
+            encoded.data_or_null(),
+            serde_json::Value::String(String::new())
+        );
 
         let decoded: Option<serde_json::Value> = c.decode(&encoded).unwrap();
         assert!(decoded.is_none());
@@ -226,8 +222,14 @@ mod tests {
         };
 
         let decoded = c.decode_promise(&record).unwrap();
-        assert_eq!(decoded.param.data_or_null(), serde_json::json!({"func": "f"}));
-        assert_eq!(decoded.value.data_or_null(), serde_json::json!({"result": 42}));
+        assert_eq!(
+            decoded.param.data_or_null(),
+            serde_json::json!({"func": "f"})
+        );
+        assert_eq!(
+            decoded.value.data_or_null(),
+            serde_json::json!({"result": 42})
+        );
     }
 
     // ── decode invalid base64 returns error ─────────────────────────

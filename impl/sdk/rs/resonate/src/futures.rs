@@ -107,10 +107,7 @@ enum RemoteFutureInner {
     /// The promise was already rejected.
     Failed(serde_json::Value),
     /// The promise is pending on a remote worker.
-    Pending {
-        _id: String,
-        _effects: Effects,
-    },
+    Pending { _id: String, _effects: Effects },
 }
 
 impl<T> RemoteFuture<T>
@@ -133,7 +130,10 @@ where
 
     pub(crate) fn pending(id: String, effects: Effects) -> Self {
         Self {
-            inner: RemoteFutureInner::Pending { _id: id, _effects: effects },
+            inner: RemoteFutureInner::Pending {
+                _id: id,
+                _effects: effects,
+            },
             _phantom: PhantomData,
         }
     }
@@ -148,7 +148,10 @@ where
                 Ok(result)
             }
             RemoteFutureInner::Failed(value) => Err(deserialize_error(value)),
-            RemoteFutureInner::Pending { _id: _, _effects: _ } => Err(Error::Suspended),
+            RemoteFutureInner::Pending {
+                _id: _,
+                _effects: _,
+            } => Err(Error::Suspended),
         }
     }
 }
@@ -195,7 +198,8 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let future: DurableFuture<String> = DurableFuture::pending("test-id".into(), rx);
 
-        tx.send(Outcome::Done(Ok(serde_json::json!("hello")))).unwrap();
+        tx.send(Outcome::Done(Ok(serde_json::json!("hello"))))
+            .unwrap();
         let result: String = future.await.unwrap();
         assert_eq!(result, "hello");
     }

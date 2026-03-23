@@ -10,9 +10,7 @@ use crate::context::Context;
 use crate::effects::Effects;
 use crate::error;
 use crate::send::{Request, Response, SendFn};
-use crate::types::{
-    PromiseRecord, PromiseState, SettleState, Value,
-};
+use crate::types::{PromiseRecord, PromiseState, SettleState, Value};
 
 /// A stub task for Core tests.
 #[derive(Clone)]
@@ -69,11 +67,23 @@ impl TestHarness {
         net.promises.insert(record.id.clone(), record);
     }
 
-    pub async fn add_task(&self, task_id: &str, root_promise: PromiseRecord, preloaded: Vec<PromiseRecord>) {
+    pub async fn add_task(
+        &self,
+        task_id: &str,
+        root_promise: PromiseRecord,
+        preloaded: Vec<PromiseRecord>,
+    ) {
         let mut net = self.network.lock().await;
         // Also add root promise to the promise store
-        net.promises.insert(root_promise.id.clone(), root_promise.clone());
-        net.tasks.insert(task_id.to_string(), StubTask { root_promise, preloaded });
+        net.promises
+            .insert(root_promise.id.clone(), root_promise.clone());
+        net.tasks.insert(
+            task_id.to_string(),
+            StubTask {
+                root_promise,
+                preloaded,
+            },
+        );
     }
 
     pub async fn set_suspend_returns_redirect(&self, val: bool) {
@@ -294,25 +304,53 @@ pub fn test_match_fn() -> crate::context::MatchFn {
 
 /// Build a root Context for testing with mock effects.
 pub fn test_context(id: &str, effects: Effects) -> Context {
-    Context::root(id.to_string(), i64::MAX, "test".to_string(), effects, test_match_fn())
+    Context::root(
+        id.to_string(),
+        i64::MAX,
+        "test".to_string(),
+        effects,
+        test_match_fn(),
+    )
 }
 
 /// Build a root Context for testing with a specific function name.
 #[allow(dead_code)]
 pub fn test_context_with_func(id: &str, func_name: &str, effects: Effects) -> Context {
-    Context::root(id.to_string(), i64::MAX, func_name.to_string(), effects, test_match_fn())
+    Context::root(
+        id.to_string(),
+        i64::MAX,
+        func_name.to_string(),
+        effects,
+        test_match_fn(),
+    )
 }
 
 /// Build a root Context for testing with a custom match function.
 #[allow(dead_code)]
-pub fn test_context_with_match(id: &str, effects: Effects, match_fn: crate::context::MatchFn) -> Context {
-    Context::root(id.to_string(), i64::MAX, "test".to_string(), effects, match_fn)
+pub fn test_context_with_match(
+    id: &str,
+    effects: Effects,
+    match_fn: crate::context::MatchFn,
+) -> Context {
+    Context::root(
+        id.to_string(),
+        i64::MAX,
+        "test".to_string(),
+        effects,
+        match_fn,
+    )
 }
 
 /// Build a root Context for testing with a specific timeout_at.
 #[allow(dead_code)]
 pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) -> Context {
-    Context::root(id.to_string(), timeout_at, "test".to_string(), effects, test_match_fn())
+    Context::root(
+        id.to_string(),
+        timeout_at,
+        "test".to_string(),
+        effects,
+        test_match_fn(),
+    )
 }
 
 /// Finalize a context into an Outcome after a workflow function has been called.

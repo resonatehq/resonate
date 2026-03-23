@@ -34,7 +34,9 @@ impl<'de> serde::Deserialize<'de> for Message {
     {
         let v = serde_json::Value::deserialize(deserializer)?;
         // Accept both "kind" (TS/server) and "type" (Rust LocalNetwork) as the tag
-        let tag = v.get("kind").or_else(|| v.get("type"))
+        let tag = v
+            .get("kind")
+            .or_else(|| v.get("type"))
             .and_then(|k| k.as_str())
             .unwrap_or("");
 
@@ -49,7 +51,10 @@ impl<'de> serde::Deserialize<'de> for Message {
                     .ok_or_else(|| serde::de::Error::custom("invalid unblock message"))?;
                 Ok(Message::Unblock(msg))
             }
-            other => Err(serde::de::Error::custom(format!("unknown message kind: {}", other))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown message kind: {}",
+                other
+            ))),
         }
     }
 }
@@ -76,14 +81,24 @@ impl ExecuteMsg {
         // TS format: { data: { task: { id, version } } }
         if let Some(data) = v.get("data") {
             if let Some(task) = data.get("task") {
-                let id = task.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let id = task
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let version = task.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
-                return Some(ExecuteMsg { task_id: id, version });
+                return Some(ExecuteMsg {
+                    task_id: id,
+                    version,
+                });
             }
         }
         // Local format: { taskId: "..." }
         if let Some(id) = v.get("taskId").and_then(|v| v.as_str()) {
-            return Some(ExecuteMsg { task_id: id.to_string(), version: 0 });
+            return Some(ExecuteMsg {
+                task_id: id.to_string(),
+                version: 0,
+            });
         }
         None
     }
@@ -106,12 +121,16 @@ impl UnblockMsg {
         // TS format: { data: { promise: {...} } }
         if let Some(data) = v.get("data") {
             if let Some(promise) = data.get("promise") {
-                return Some(UnblockMsg { promise: promise.clone() });
+                return Some(UnblockMsg {
+                    promise: promise.clone(),
+                });
             }
         }
         // Local format: { promise: {...} }
         if let Some(promise) = v.get("promise") {
-            return Some(UnblockMsg { promise: promise.clone() });
+            return Some(UnblockMsg {
+                promise: promise.clone(),
+            });
         }
         None
     }
@@ -134,19 +153,16 @@ impl Transport {
         let req_corr_id = request.get("corrId").cloned();
 
         let req_str = serde_json::to_string(&request)?;
-        tracing::debug!(direction = "send", body = %req_str, "transport");
+        tracing::debug!(direction = "send_req", body = %req_str, "transport");
 
         let resp_str = self.network.send(req_str).await?;
-        tracing::debug!(direction = "recv", body = %resp_str, "transport");
+        tracing::debug!(direction = "send_res", body = %resp_str, "transport");
 
         let response: serde_json::Value = serde_json::from_str(&resp_str)
             .map_err(|e| Error::DecodingError(format!("invalid response JSON: {}", e)))?;
 
         // Validate kind matches
-        let resp_kind = response
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .unwrap_or("");
+        let resp_kind = response.get("kind").and_then(|k| k.as_str()).unwrap_or("");
         if resp_kind != req_kind {
             return Err(Error::ServerError {
                 code: 500,
@@ -179,7 +195,10 @@ impl Transport {
     pub fn recv(&self, callback: Box<dyn Fn(Message) + Send + Sync>) {
         self.network.recv(Box::new(move |raw: String| {
             match serde_json::from_str::<Message>(&raw) {
-                Ok(msg) => callback(msg),
+                Ok(msg) => {
+                    tracing::debug!(direction = "recv", body = %raw, "transport");
+                    callback(msg)
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, raw = %raw, "failed to parse incoming message");
                 }

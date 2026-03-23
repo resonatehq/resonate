@@ -5,9 +5,7 @@ use tokio::sync::Mutex;
 use crate::codec::Codec;
 use crate::error::{Error, Result};
 use crate::send::{Request, Response, SendFn};
-use crate::types::{
-    PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseState, SettleState,
-};
+use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseState, SettleState};
 
 /// The two durable operations the SDK needs. Built from Send + Codec.
 /// Maintains an internal cache of decoded PromiseRecords.
@@ -92,10 +90,7 @@ impl Effects {
         // 2. Build settle request
         let (state, value_data) = match result {
             Ok(val) => (SettleState::Resolved, val.clone()),
-            Err(err) => (
-                SettleState::Rejected,
-                crate::codec::encode_error(err),
-            ),
+            Err(err) => (SettleState::Rejected, crate::codec::encode_error(err)),
         };
 
         // 3. Encode value via codec
@@ -328,7 +323,10 @@ mod tests {
         effects.create_promise(req).await.unwrap();
 
         let val = serde_json::json!({"result": "success", "count": 7});
-        effects.settle_promise("v4", &Ok(val.clone())).await.unwrap();
+        effects
+            .settle_promise("v4", &Ok(val.clone()))
+            .await
+            .unwrap();
 
         // Second settle from cache
         let record = effects
@@ -357,7 +355,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r1.state, PromiseState::Pending);
-        assert_eq!(r1.param.data_or_null(), serde_json::json!({"func": "f", "args": []}));
+        assert_eq!(
+            r1.param.data_or_null(),
+            serde_json::json!({"func": "f", "args": []})
+        );
 
         let r2 = effects
             .settle_promise("m2", &Ok(serde_json::json!(0)))

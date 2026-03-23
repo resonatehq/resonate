@@ -114,7 +114,6 @@ pub struct Resonate {
     // Subscriptions (for awaiting remote promise completion)
     subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>>,
 
-
     // Sub-clients
     pub promises: Promises,
     pub schedules: Schedules,
@@ -251,11 +250,18 @@ impl Resonate {
             }
         });
 
-        let core = Arc::new(Core::new(send_fn, codec.clone(), registry.clone(), match_fn, heartbeat.clone()));
+        let core = Arc::new(Core::new(
+            send_fn,
+            codec.clone(),
+            registry.clone(),
+            match_fn,
+            heartbeat.clone(),
+        ));
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 
-        let subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>> = Arc::new(Mutex::new(HashMap::new()));
+        let subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
 
         // Start periodic subscription refresh
@@ -1341,7 +1347,10 @@ mod tests {
         // The refresh handle should be stored (not None)
         {
             let guard = r.subscription_refresh_handle.lock().await;
-            assert!(guard.is_some(), "refresh handle should be stored at construction");
+            assert!(
+                guard.is_some(),
+                "refresh handle should be stored at construction"
+            );
         }
         r.stop().await.unwrap();
         // After stop, the handle should be taken (None)
@@ -1358,7 +1367,10 @@ mod tests {
         {
             let guard = r.subscription_refresh_handle.lock().await;
             let handle = guard.as_ref().unwrap();
-            assert!(!handle.is_finished(), "refresh task should be running before stop");
+            assert!(
+                !handle.is_finished(),
+                "refresh task should be running before stop"
+            );
         }
         r.stop().await.unwrap();
         // After stop, handle is taken so we can't inspect it directly,

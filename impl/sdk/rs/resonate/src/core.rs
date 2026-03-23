@@ -213,7 +213,8 @@ impl Core {
                 }),
                 PromiseState::Pending => unreachable!(),
             };
-            self.fulfill_task(task_id, &root_promise.id, &result).await?;
+            self.fulfill_task(task_id, &root_promise.id, &result)
+                .await?;
             return Ok(Status::Done);
         }
 
@@ -262,14 +263,22 @@ impl Core {
             }
 
             // 6. SUSPEND: if redirect, loop with new preload; otherwise return Suspended
-            tracing::debug!(task_id = task_id, remote_deps = remote_todos.len(), "attempting to suspend task");
+            tracing::debug!(
+                task_id = task_id,
+                remote_deps = remote_todos.len(),
+                "attempting to suspend task"
+            );
             match self.suspend_task(task_id, remote_todos).await? {
                 SuspendResult::Suspended => {
                     tracing::debug!(task_id = task_id, "task suspended");
                     return Ok(Status::Suspended);
                 }
                 SuspendResult::Redirect { preloaded } => {
-                    tracing::debug!(task_id = task_id, preloaded = preloaded.len(), "suspend returned redirect, re-executing task");
+                    tracing::debug!(
+                        task_id = task_id,
+                        preloaded = preloaded.len(),
+                        "suspend returned redirect, re-executing task"
+                    );
                     current_preload = Some(preloaded);
                     continue;
                 }
@@ -484,11 +493,17 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Add);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let fulfill = requests.iter().find(|r| matches!(r, Request::TaskFulfill { .. }));
+        let fulfill = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskFulfill { .. }));
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
         if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
@@ -505,11 +520,17 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Fail);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let fulfill = requests.iter().find(|r| matches!(r, Request::TaskFulfill { .. }));
+        let fulfill = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskFulfill { .. }));
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
         if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
@@ -526,11 +547,17 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Obj);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let fulfill = requests.iter().find(|r| matches!(r, Request::TaskFulfill { .. }));
+        let fulfill = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskFulfill { .. }));
         assert!(fulfill.is_some());
 
         if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
@@ -551,7 +578,11 @@ mod tests {
         // Task not found in stub → 404 error
         let harness = TestHarness::new();
         let registry = Registry::new();
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
 
         let result = core.on_execute("nonexistent").await;
         assert!(result.is_err(), "should fail when task doesn't exist");
@@ -568,11 +599,17 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(SuspendingMulti);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
-        let suspend = requests.iter().find(|r| matches!(r, Request::TaskSuspend { .. }));
+        let suspend = requests
+            .iter()
+            .find(|r| matches!(r, Request::TaskSuspend { .. }));
         assert!(suspend.is_some(), "should have sent task.suspend");
 
         if let Request::TaskSuspend { callbacks, .. } = suspend.unwrap() {
@@ -593,7 +630,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(SuspendingThenDone);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         assert_eq!(
@@ -629,7 +670,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(RedirNoAcquire);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
@@ -669,13 +714,19 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(RedirPreload);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         // After redirect + re-execution, task should complete with fulfill
         let requests = harness.sent_requests().await;
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskFulfill { .. })),
             "task should be fulfilled after redirect re-execution"
         );
     }
@@ -709,7 +760,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(MultiRedirect);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         assert_eq!(
@@ -723,7 +778,10 @@ mod tests {
             .iter()
             .filter(|r| matches!(r, Request::TaskAcquire { .. }))
             .count();
-        assert_eq!(acquire_count, 1, "only one TaskAcquire even with multiple redirects");
+        assert_eq!(
+            acquire_count, 1,
+            "only one TaskAcquire even with multiple redirects"
+        );
     }
 
     // ── on_message (Path 1): acquires then executes ──────────────
@@ -737,7 +795,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Simple);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let status = core.on_message("task1").await.unwrap();
         assert_eq!(status, Status::Done);
 
@@ -758,7 +820,11 @@ mod tests {
     async fn on_message_acquire_failure_returns_error() {
         let harness = TestHarness::new();
         let registry = Registry::new();
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
 
         let result = core.on_message("nonexistent").await;
         assert!(result.is_err(), "should fail when task doesn't exist");
@@ -773,7 +839,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(SuspendingOnce);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let status = core.on_message("task1").await.unwrap();
         assert_eq!(status, Status::Suspended);
     }
@@ -789,7 +859,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Add);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = Codec.decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-already-acquired", decoded, None)
@@ -799,11 +873,15 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         assert!(
-            !requests.iter().any(|r| matches!(r, Request::TaskAcquire { .. })),
+            !requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskAcquire { .. })),
             "execute_until_blocked should NOT send TaskAcquire"
         );
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskFulfill { .. })),
             "should have sent TaskFulfill"
         );
     }
@@ -819,7 +897,11 @@ mod tests {
         // Child promise "p1.0" is preloaded as resolved — rpc won't suspend
         let preloaded = vec![resolved_promise("p1.0", serde_json::json!(99))];
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = Codec.decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-preloaded", decoded, Some(preloaded))
@@ -836,7 +918,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(RemoteDep);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = Codec.decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-suspend", decoded, None)
@@ -846,7 +932,9 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskSuspend { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskSuspend { .. })),
             "should have sent TaskSuspend"
         );
     }
@@ -871,7 +959,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Noop);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = codec.decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-settled", decoded, None)
@@ -882,7 +974,9 @@ mod tests {
         // Short-circuits before calling the factory but still sends TaskFulfill
         let requests = harness.sent_requests().await;
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskFulfill { .. })),
             "settled promise should still send TaskFulfill"
         );
     }
@@ -906,7 +1000,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Noop);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = codec.decode_promise(&root).unwrap();
         core.execute_until_blocked("task-resolved", decoded, None)
             .await
@@ -942,7 +1040,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Noop);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = codec.decode_promise(&root).unwrap();
         core.execute_until_blocked("task-rejected", decoded, None)
             .await
@@ -966,7 +1068,11 @@ mod tests {
         let root = make_root_promise("p1", "missing_func", serde_json::json!(null));
 
         let registry = Registry::new(); // empty — function not registered
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = Codec.decode_promise(&root).unwrap();
         let result = core
             .execute_until_blocked("task-error", decoded, None)
@@ -976,7 +1082,9 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskRelease { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskRelease { .. })),
             "should send TaskRelease when execution errors"
         );
     }
@@ -992,7 +1100,11 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Simple);
 
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         core.on_execute("task1").await.unwrap();
 
         let requests = harness.sent_requests().await;
@@ -1002,7 +1114,9 @@ mod tests {
             "first request should be TaskAcquire"
         );
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskFulfill { .. })),
             "should have sent TaskFulfill"
         );
     }
@@ -1019,7 +1133,11 @@ mod tests {
         let mut registry1 = Registry::new();
         registry1.register(Double);
 
-        let core1 = test_core(harness1.build_send_fn(), Codec, Arc::new(RwLock::new(registry1)));
+        let core1 = test_core(
+            harness1.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry1)),
+        );
         let status1 = core1.on_message("task1").await.unwrap();
 
         // Path 2: execute_until_blocked (already acquired)
@@ -1029,7 +1147,11 @@ mod tests {
         let mut registry2 = Registry::new();
         registry2.register(Double);
 
-        let core2 = test_core(harness2.build_send_fn(), Codec, Arc::new(RwLock::new(registry2)));
+        let core2 = test_core(
+            harness2.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry2)),
+        );
         let decoded = Codec.decode_promise(&root2).unwrap();
         let status2 = core2
             .execute_until_blocked("task-direct", decoded, None)
@@ -1041,13 +1163,21 @@ mod tests {
 
         // Path 1: Acquire + Fulfill
         let reqs1 = harness1.sent_requests().await;
-        assert!(reqs1.iter().any(|r| matches!(r, Request::TaskAcquire { .. })));
-        assert!(reqs1.iter().any(|r| matches!(r, Request::TaskFulfill { .. })));
+        assert!(reqs1
+            .iter()
+            .any(|r| matches!(r, Request::TaskAcquire { .. })));
+        assert!(reqs1
+            .iter()
+            .any(|r| matches!(r, Request::TaskFulfill { .. })));
 
         // Path 2: Fulfill only (no Acquire)
         let reqs2 = harness2.sent_requests().await;
-        assert!(!reqs2.iter().any(|r| matches!(r, Request::TaskAcquire { .. })));
-        assert!(reqs2.iter().any(|r| matches!(r, Request::TaskFulfill { .. })));
+        assert!(!reqs2
+            .iter()
+            .any(|r| matches!(r, Request::TaskAcquire { .. })));
+        assert!(reqs2
+            .iter()
+            .any(|r| matches!(r, Request::TaskFulfill { .. })));
     }
 
     // ── Heartbeat tests ───────────────────────────────────────────
@@ -1143,7 +1273,11 @@ mod tests {
 
         assert!(result.is_err(), "should fail when function not found");
         assert_eq!(hb.start_count(), 1, "heartbeat should be started once");
-        assert_eq!(hb.stop_count(), 1, "heartbeat should be stopped even on error");
+        assert_eq!(
+            hb.stop_count(),
+            1,
+            "heartbeat should be stopped even on error"
+        );
     }
 
     #[tokio::test]
@@ -1155,7 +1289,11 @@ mod tests {
         registry.register(Add);
 
         // Use NoopHeartbeat (same as local mode)
-        let core = test_core(harness.build_send_fn(), Codec, Arc::new(RwLock::new(registry)));
+        let core = test_core(
+            harness.build_send_fn(),
+            Codec,
+            Arc::new(RwLock::new(registry)),
+        );
         let decoded = Codec.decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-noop-hb", decoded, None)
@@ -1166,7 +1304,9 @@ mod tests {
 
         let requests = harness.sent_requests().await;
         assert!(
-            requests.iter().any(|r| matches!(r, Request::TaskFulfill { .. })),
+            requests
+                .iter()
+                .any(|r| matches!(r, Request::TaskFulfill { .. })),
             "should complete normally with NoopHeartbeat"
         );
     }

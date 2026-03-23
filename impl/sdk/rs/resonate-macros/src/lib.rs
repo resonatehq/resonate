@@ -167,10 +167,14 @@ fn generate_durable_impl(
                     #fn_name(args).await
                 }
             } else {
-                let destructure: Vec<_> = arg_names.iter().enumerate().map(|(i, name)| {
-                    let idx = syn::Index::from(i);
-                    quote! { let #name = args.#idx; }
-                }).collect();
+                let destructure: Vec<_> = arg_names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| {
+                        let idx = syn::Index::from(i);
+                        quote! { let #name = args.#idx; }
+                    })
+                    .collect();
                 quote! {
                     #(#destructure)*
                     #fn_name(#(#arg_names),*).await
@@ -187,10 +191,14 @@ fn generate_durable_impl(
                     #fn_name(info, args).await
                 }
             } else {
-                let destructure: Vec<_> = arg_names.iter().enumerate().map(|(i, name)| {
-                    let idx = syn::Index::from(i);
-                    quote! { let #name = args.#idx; }
-                }).collect();
+                let destructure: Vec<_> = arg_names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| {
+                        let idx = syn::Index::from(i);
+                        quote! { let #name = args.#idx; }
+                    })
+                    .collect();
                 quote! {
                     #info_unwrap
                     #(#destructure)*
@@ -208,10 +216,14 @@ fn generate_durable_impl(
                     #fn_name(ctx, args).await
                 }
             } else {
-                let destructure: Vec<_> = arg_names.iter().enumerate().map(|(i, name)| {
-                    let idx = syn::Index::from(i);
-                    quote! { let #name = args.#idx; }
-                }).collect();
+                let destructure: Vec<_> = arg_names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| {
+                        let idx = syn::Index::from(i);
+                        quote! { let #name = args.#idx; }
+                    })
+                    .collect();
                 quote! {
                     #ctx_unwrap
                     #(#destructure)*
@@ -248,9 +260,7 @@ fn generate_durable_impl(
 }
 
 /// Detect the function kind by inspecting the first parameter's type.
-fn detect_kind<'a>(
-    params: &'a [&'a FnArg],
-) -> syn::Result<(FunctionKind, Vec<&'a FnArg>)> {
+fn detect_kind<'a>(params: &'a [&'a FnArg]) -> syn::Result<(FunctionKind, Vec<&'a FnArg>)> {
     if params.is_empty() {
         return Ok((FunctionKind::PureLeaf, vec![]));
     }
@@ -284,17 +294,14 @@ fn is_reference_to(ty: &Type, name: &str) -> bool {
 /// Extract the T from `-> Result<T>` return type.
 fn extract_return_type(output: &syn::ReturnType) -> syn::Result<proc_macro2::TokenStream> {
     match output {
-        syn::ReturnType::Default => {
-            Ok(quote! { () })
-        }
+        syn::ReturnType::Default => Ok(quote! { () }),
         syn::ReturnType::Type(_, ty) => {
             // Try to extract T from Result<T>
             if let Type::Path(type_path) = ty.as_ref() {
                 if let Some(segment) = type_path.path.segments.last() {
                     if segment.ident == "Result" {
                         if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
-                            {
+                            if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
                                 return Ok(quote! { #inner_ty });
                             }
                         }

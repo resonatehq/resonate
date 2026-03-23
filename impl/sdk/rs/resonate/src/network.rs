@@ -102,10 +102,20 @@ struct Schedule {
     last_run_at: Option<i64>,
 }
 
-struct PTimeout { id: String, timeout: i64 }
-struct TTimeout { id: String, typ: u8, timeout: i64 }
+struct PTimeout {
+    id: String,
+    timeout: i64,
+}
+struct TTimeout {
+    id: String,
+    typ: u8,
+    timeout: i64,
+}
 #[allow(dead_code)]
-struct STimeout { id: String, timeout: i64 }
+struct STimeout {
+    id: String,
+    timeout: i64,
+}
 
 struct OutgoingMessage {
     address: String,
@@ -140,11 +150,18 @@ impl ServerState {
         }
     }
 
-    fn apply(&mut self, now: i64, req: &serde_json::Value) -> std::result::Result<serde_json::Value, Error> {
+    fn apply(
+        &mut self,
+        now: i64,
+        req: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, Error> {
         self.outgoing.clear();
 
         let kind = req.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-        let corr_id = req.get("corrId").cloned().unwrap_or(serde_json::Value::Null);
+        let corr_id = req
+            .get("corrId")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         // Auto-timeout relevant promises before processing
         match kind {
@@ -225,7 +242,9 @@ impl ServerState {
             }
         }
         for tt in &self.t_timeouts {
-            if now < tt.timeout { continue; }
+            if now < tt.timeout {
+                continue;
+            }
             if tt.typ == 1 {
                 if let Some(t) = self.tasks.get(&tt.id) {
                     if t.state == "acquired" {
@@ -244,7 +263,9 @@ impl ServerState {
         // Phase 1: Settle promises
         for id in &promise_settles {
             if let Some(p) = self.promises.get(id) {
-                if p.state != "pending" { continue; }
+                if p.state != "pending" {
+                    continue;
+                }
                 let state = self.timeout_state(&p.tags.clone());
                 let timeout_at = p.timeout_at;
                 if let Some(p) = self.promises.get_mut(id) {
@@ -307,7 +328,9 @@ impl ServerState {
     // =========================================================================
 
     fn promise_get(
-        &self, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &self,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
         match self.promises.get(id) {
@@ -323,10 +346,16 @@ impl ServerState {
     }
 
     fn promise_create(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let promise_data = req.get("promise").unwrap_or(req);
-        let id = promise_data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let id = promise_data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         if let Some(existing) = self.promises.get(id) {
             return Ok(serde_json::json!({
@@ -335,17 +364,29 @@ impl ServerState {
             }));
         }
 
-        let timeout_at = promise_data.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
-        let param = promise_data.get("param").cloned().unwrap_or(serde_json::Value::Null);
+        let timeout_at = promise_data
+            .get("timeoutAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::MAX);
+        let param = promise_data
+            .get("param")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let tags = extract_tags(promise_data);
 
         if now >= timeout_at {
             let state = self.timeout_state(&tags);
             let promise = DurablePromise {
-                id: id.to_string(), state: state.clone(), param,
-                value: serde_json::Value::Null, tags, timeout_at,
-                created_at: timeout_at, settled_at: Some(timeout_at),
-                awaiters: HashSet::new(), subscribers: HashSet::new(),
+                id: id.to_string(),
+                state: state.clone(),
+                param,
+                value: serde_json::Value::Null,
+                tags,
+                timeout_at,
+                created_at: timeout_at,
+                settled_at: Some(timeout_at),
+                awaiters: HashSet::new(),
+                subscribers: HashSet::new(),
             };
             let record = promise.to_record();
             self.promises.insert(id.to_string(), promise);
@@ -359,10 +400,16 @@ impl ServerState {
         }
 
         let promise = DurablePromise {
-            id: id.to_string(), state: "pending".to_string(), param,
-            value: serde_json::Value::Null, tags: tags.clone(), timeout_at,
-            created_at: now, settled_at: None,
-            awaiters: HashSet::new(), subscribers: HashSet::new(),
+            id: id.to_string(),
+            state: "pending".to_string(),
+            param,
+            value: serde_json::Value::Null,
+            tags: tags.clone(),
+            timeout_at,
+            created_at: now,
+            settled_at: None,
+            awaiters: HashSet::new(),
+            subscribers: HashSet::new(),
         };
         let record = promise.to_record();
         self.promises.insert(id.to_string(), promise);
@@ -370,15 +417,29 @@ impl ServerState {
 
         // Auto-create task and dispatch execute when target tag is present
         if let Some(address) = tags.get("resonate:target").cloned() {
-            let delay = tags.get("resonate:delay").and_then(|d| d.parse::<i64>().ok());
+            let delay = tags
+                .get("resonate:delay")
+                .and_then(|d| d.parse::<i64>().ok());
             let deferred = delay.map_or(false, |d| now < d);
 
             let task = Task {
-                id: id.to_string(), state: "pending".to_string(), version: 0,
-                pid: None, ttl: None, resumes: HashSet::new(),
+                id: id.to_string(),
+                state: "pending".to_string(),
+                version: 0,
+                pid: None,
+                ttl: None,
+                resumes: HashSet::new(),
             };
             self.tasks.insert(id.to_string(), task);
-            self.set_t_timeout(id, 0, if deferred { delay.unwrap() } else { now + PENDING_RETRY_TTL });
+            self.set_t_timeout(
+                id,
+                0,
+                if deferred {
+                    delay.unwrap()
+                } else {
+                    now + PENDING_RETRY_TTL
+                },
+            );
 
             if !deferred {
                 self.send_execute_message(&address, id, 0);
@@ -392,10 +453,16 @@ impl ServerState {
     }
 
     fn promise_settle(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let settle_state = req.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
+        let settle_state = req
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("resolved");
         let value = req.get("value").cloned().unwrap_or(serde_json::Value::Null);
 
         match self.promises.get(id) {
@@ -427,7 +494,9 @@ impl ServerState {
     }
 
     fn promise_register_listener(
-        &mut self, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let awaited = req.get("awaited").and_then(|v| v.as_str()).unwrap_or("");
         let address = req.get("address").and_then(|v| v.as_str()).unwrap_or("");
@@ -454,11 +523,18 @@ impl ServerState {
     // =========================================================================
 
     fn task_create(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
-        let ttl = req.get("ttl")
-            .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64)))
+        let ttl = req
+            .get("ttl")
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64))
+            })
             .unwrap_or(60_000);
         let promise_req = req.get("promise").unwrap_or(&serde_json::Value::Null);
         let promise_id = promise_req.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -466,7 +542,10 @@ impl ServerState {
         // Task already exists?
         if let Some(existing_task) = self.tasks.get(promise_id) {
             let task_state = existing_task.state.clone();
-            let promise_record = self.promises.get(promise_id).map(|p| p.to_record())
+            let promise_record = self
+                .promises
+                .get(promise_id)
+                .map(|p| p.to_record())
                 .unwrap_or(serde_json::Value::Null);
 
             match task_state.as_str() {
@@ -510,24 +589,40 @@ impl ServerState {
             }));
         }
 
-        let timeout_at = promise_req.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
-        let param = promise_req.get("param").cloned().unwrap_or(serde_json::Value::Null);
+        let timeout_at = promise_req
+            .get("timeoutAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::MAX);
+        let param = promise_req
+            .get("param")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let tags = extract_tags(promise_req);
 
         // Already timed out?
         if now >= timeout_at {
             let state = self.timeout_state(&tags);
             let promise = DurablePromise {
-                id: promise_id.to_string(), state, param,
-                value: serde_json::Value::Null, tags, timeout_at,
-                created_at: timeout_at, settled_at: Some(timeout_at),
-                awaiters: HashSet::new(), subscribers: HashSet::new(),
+                id: promise_id.to_string(),
+                state,
+                param,
+                value: serde_json::Value::Null,
+                tags,
+                timeout_at,
+                created_at: timeout_at,
+                settled_at: Some(timeout_at),
+                awaiters: HashSet::new(),
+                subscribers: HashSet::new(),
             };
             let pr = promise.to_record();
             self.promises.insert(promise_id.to_string(), promise);
             let task = Task {
-                id: promise_id.to_string(), state: "fulfilled".to_string(), version: 0,
-                pid: None, ttl: None, resumes: HashSet::new(),
+                id: promise_id.to_string(),
+                state: "fulfilled".to_string(),
+                version: 0,
+                pid: None,
+                ttl: None,
+                resumes: HashSet::new(),
             };
             let tr = task.to_record();
             self.tasks.insert(promise_id.to_string(), task);
@@ -539,18 +634,28 @@ impl ServerState {
 
         // Create promise + task (acquired)
         let promise = DurablePromise {
-            id: promise_id.to_string(), state: "pending".to_string(), param,
-            value: serde_json::Value::Null, tags, timeout_at,
-            created_at: now, settled_at: None,
-            awaiters: HashSet::new(), subscribers: HashSet::new(),
+            id: promise_id.to_string(),
+            state: "pending".to_string(),
+            param,
+            value: serde_json::Value::Null,
+            tags,
+            timeout_at,
+            created_at: now,
+            settled_at: None,
+            awaiters: HashSet::new(),
+            subscribers: HashSet::new(),
         };
         let pr = promise.to_record();
         self.promises.insert(promise_id.to_string(), promise);
         self.set_p_timeout(promise_id, timeout_at);
 
         let task = Task {
-            id: promise_id.to_string(), state: "acquired".to_string(), version: 0,
-            pid: Some(pid.to_string()), ttl: Some(ttl), resumes: HashSet::new(),
+            id: promise_id.to_string(),
+            state: "acquired".to_string(),
+            version: 0,
+            pid: Some(pid.to_string()),
+            ttl: Some(ttl),
+            resumes: HashSet::new(),
         };
         let tr = task.to_record();
         self.tasks.insert(promise_id.to_string(), task);
@@ -565,7 +670,10 @@ impl ServerState {
     }
 
     fn task_acquire(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
@@ -590,8 +698,11 @@ impl ServerState {
                 }
                 self.set_t_timeout(task_id, 1, now.saturating_add(ttl));
                 let task_record = self.tasks.get(task_id).unwrap().to_record();
-                let promise_record = self.promises.get(task_id)
-                    .map(|p| p.to_record()).unwrap_or(serde_json::Value::Null);
+                let promise_record = self
+                    .promises
+                    .get(task_id)
+                    .map(|p| p.to_record())
+                    .unwrap_or(serde_json::Value::Null);
                 Ok(serde_json::json!({
                     "kind": "task.acquire", "corrId": corr_id, "status": 200,
                     "task": task_record, "promise": promise_record, "preload": preload,
@@ -601,7 +712,10 @@ impl ServerState {
     }
 
     fn task_release(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -634,27 +748,43 @@ impl ServerState {
     }
 
     fn task_fulfill(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
 
         match self.tasks.get(task_id) {
-            None => return Ok(serde_json::json!({
-                "kind": "task.fulfill", "corrId": corr_id, "status": 404,
-            })),
-            Some(t) if t.state != "acquired" => return Ok(serde_json::json!({
-                "kind": "task.fulfill", "corrId": corr_id, "status": 409,
-            })),
+            None => {
+                return Ok(serde_json::json!({
+                    "kind": "task.fulfill", "corrId": corr_id, "status": 404,
+                }))
+            }
+            Some(t) if t.state != "acquired" => {
+                return Ok(serde_json::json!({
+                    "kind": "task.fulfill", "corrId": corr_id, "status": 409,
+                }))
+            }
             _ => {}
         }
 
         let settle = req.get("settle").unwrap_or(&serde_json::Value::Null);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
-        let settle_state = settle.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
-        let value = settle.get("value").cloned().unwrap_or(serde_json::Value::Null);
+        let settle_state = settle
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("resolved");
+        let value = settle
+            .get("value")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         // Settle the promise if still pending
-        let was_pending = self.promises.get(promise_id).map_or(false, |p| p.state == "pending");
+        let was_pending = self
+            .promises
+            .get(promise_id)
+            .map_or(false, |p| p.state == "pending");
         if was_pending {
             if let Some(p) = self.promises.get_mut(promise_id) {
                 p.state = settle_state.to_string();
@@ -664,8 +794,11 @@ impl ServerState {
             self.del_p_timeout(promise_id);
         }
 
-        let promise_record = self.promises.get(promise_id)
-            .map(|p| p.to_record()).unwrap_or(serde_json::Value::Null);
+        let promise_record = self
+            .promises
+            .get(promise_id)
+            .map(|p| p.to_record())
+            .unwrap_or(serde_json::Value::Null);
 
         self.enqueue_settle(task_id);
         self.resume_awaiters(promise_id, now);
@@ -678,22 +811,32 @@ impl ServerState {
     }
 
     fn task_suspend(
-        &mut self, _now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        _now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
 
         match self.tasks.get(task_id) {
-            None => return Ok(serde_json::json!({
-                "kind": "task.suspend", "corrId": corr_id, "status": 404,
-            })),
-            Some(t) if t.state != "acquired" => return Ok(serde_json::json!({
-                "kind": "task.suspend", "corrId": corr_id, "status": 409,
-            })),
+            None => {
+                return Ok(serde_json::json!({
+                    "kind": "task.suspend", "corrId": corr_id, "status": 404,
+                }))
+            }
+            Some(t) if t.state != "acquired" => {
+                return Ok(serde_json::json!({
+                    "kind": "task.suspend", "corrId": corr_id, "status": 409,
+                }))
+            }
             _ => {}
         }
 
         // If task already has resumes (dependency resolved while acquired), redirect
-        let has_resumes = self.tasks.get(task_id).map_or(false, |t| !t.resumes.is_empty());
+        let has_resumes = self
+            .tasks
+            .get(task_id)
+            .map_or(false, |t| !t.resumes.is_empty());
         if has_resumes {
             if let Some(t) = self.tasks.get_mut(task_id) {
                 t.resumes.clear();
@@ -706,9 +849,14 @@ impl ServerState {
         }
 
         // Parse callbacks (list of awaited promise IDs)
-        let callbacks: Vec<String> = req.get("callbacks")
+        let callbacks: Vec<String> = req
+            .get("callbacks")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Register this task as an awaiter on each awaited promise.
@@ -752,7 +900,10 @@ impl ServerState {
     }
 
     fn task_heartbeat(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         // Accept both single-task { taskId, pid } and multi-task { tasks: [...], pid }
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
@@ -790,10 +941,16 @@ impl ServerState {
     // =========================================================================
 
     fn schedule_create(
-        &mut self, now: i64, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req.get("id").or_else(|| req.get("name"))
-            .and_then(|v| v.as_str()).unwrap_or("");
+        let id = req
+            .get("id")
+            .or_else(|| req.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if self.schedules.contains_key(id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,
@@ -801,10 +958,24 @@ impl ServerState {
         }
         let schedule = Schedule {
             id: id.to_string(),
-            cron: req.get("cron").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            promise_id: req.get("promiseId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            promise_timeout: req.get("promiseTimeout").and_then(|v| v.as_i64()).unwrap_or(60_000),
-            promise_param: req.get("promiseParam").cloned().unwrap_or(serde_json::Value::Null),
+            cron: req
+                .get("cron")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            promise_id: req
+                .get("promiseId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            promise_timeout: req
+                .get("promiseTimeout")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(60_000),
+            promise_param: req
+                .get("promiseParam")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
             promise_tags: extract_tags(req),
             created_at: now,
             last_run_at: None,
@@ -816,7 +987,9 @@ impl ServerState {
     }
 
     fn schedule_get(
-        &self, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &self,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
         if self.schedules.contains_key(id) {
@@ -831,10 +1004,15 @@ impl ServerState {
     }
 
     fn schedule_delete(
-        &mut self, corr_id: &serde_json::Value, req: &serde_json::Value,
+        &mut self,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req.get("id").or_else(|| req.get("name"))
-            .and_then(|v| v.as_str()).unwrap_or("");
+        let id = req
+            .get("id")
+            .or_else(|| req.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         self.schedules.remove(id);
         Ok(serde_json::json!({
             "kind": "schedule.delete", "corrId": corr_id, "status": 200,
@@ -847,9 +1025,13 @@ impl ServerState {
 
     /// Auto-timeout a promise if it has expired.
     fn try_auto_timeout(&mut self, now: i64, id: &str) {
-        let should_timeout = self.promises.get(id)
+        let should_timeout = self
+            .promises
+            .get(id)
             .map_or(false, |p| p.state == "pending" && now >= p.timeout_at);
-        if !should_timeout { return; }
+        if !should_timeout {
+            return;
+        }
 
         let tags = self.promises.get(id).unwrap().tags.clone();
         let state = self.timeout_state(&tags);
@@ -870,13 +1052,22 @@ impl ServerState {
         match self.tasks.get(promise_id) {
             None => {
                 // If promise has a target but no task, create a fulfilled task
-                let has_target = self.promises.get(promise_id)
+                let has_target = self
+                    .promises
+                    .get(promise_id)
                     .map_or(false, |p| p.tags.contains_key("resonate:target"));
                 if has_target {
-                    self.tasks.insert(promise_id.to_string(), Task {
-                        id: promise_id.to_string(), state: "fulfilled".to_string(), version: 0,
-                        pid: None, ttl: None, resumes: HashSet::new(),
-                    });
+                    self.tasks.insert(
+                        promise_id.to_string(),
+                        Task {
+                            id: promise_id.to_string(),
+                            state: "fulfilled".to_string(),
+                            version: 0,
+                            pid: None,
+                            ttl: None,
+                            resumes: HashSet::new(),
+                        },
+                    );
                 }
             }
             Some(t) if t.state == "fulfilled" => {}
@@ -901,7 +1092,9 @@ impl ServerState {
 
     /// When a promise settles, resume all tasks that were awaiting it.
     fn resume_awaiters(&mut self, promise_id: &str, now: i64) {
-        let awaiter_ids: Vec<String> = self.promises.get(promise_id)
+        let awaiter_ids: Vec<String> = self
+            .promises
+            .get(promise_id)
             .map(|p| p.awaiters.iter().cloned().collect())
             .unwrap_or_default();
 
@@ -942,9 +1135,10 @@ impl ServerState {
     /// Notify all subscribers (listener addresses) of a settled promise.
     fn notify_subscribers(&mut self, promise_id: &str) {
         let (subscribers, record) = match self.promises.get(promise_id) {
-            Some(p) if !p.subscribers.is_empty() => {
-                (p.subscribers.iter().cloned().collect::<Vec<_>>(), p.to_record())
-            }
+            Some(p) if !p.subscribers.is_empty() => (
+                p.subscribers.iter().cloned().collect::<Vec<_>>(),
+                p.to_record(),
+            ),
             _ => return,
         };
 
@@ -974,8 +1168,14 @@ impl ServerState {
             None => return vec![],
         };
 
-        self.promises.values()
-            .filter(|p| p.id != promise_id && p.tags.get("resonate:branch").map_or(false, |b| b == &branch))
+        self.promises
+            .values()
+            .filter(|p| {
+                p.id != promise_id
+                    && p.tags
+                        .get("resonate:branch")
+                        .map_or(false, |b| b == &branch)
+            })
             .map(|p| p.to_record())
             .collect()
     }
@@ -992,7 +1192,10 @@ impl ServerState {
         if let Some(pt) = self.p_timeouts.iter_mut().find(|pt| pt.id == id) {
             pt.timeout = timeout;
         } else {
-            self.p_timeouts.push(PTimeout { id: id.to_string(), timeout });
+            self.p_timeouts.push(PTimeout {
+                id: id.to_string(),
+                timeout,
+            });
         }
     }
 
@@ -1005,7 +1208,11 @@ impl ServerState {
             tt.typ = typ;
             tt.timeout = timeout;
         } else {
-            self.t_timeouts.push(TTimeout { id: id.to_string(), typ, timeout });
+            self.t_timeouts.push(TTimeout {
+                id: id.to_string(),
+                typ,
+                timeout,
+            });
         }
     }
 
@@ -1021,10 +1228,12 @@ impl ServerState {
         // Upsert: replace existing execute message for same task (like TS)
         if let Some(existing) = self.outgoing.iter_mut().find(|m| {
             m.message.get("kind").and_then(|k| k.as_str()) == Some("execute")
-                && m.message.get("data")
+                && m.message
+                    .get("data")
                     .and_then(|d| d.get("task"))
                     .and_then(|t| t.get("id"))
-                    .and_then(|id| id.as_str()) == Some(task_id)
+                    .and_then(|id| id.as_str())
+                    == Some(task_id)
         }) {
             existing.address = address.to_string();
             existing.message = msg;
@@ -1088,10 +1297,18 @@ impl LocalNetwork {
 
 #[async_trait::async_trait]
 impl Network for LocalNetwork {
-    fn pid(&self) -> &str { &self.pid }
-    fn group(&self) -> &str { &self.group }
-    fn unicast(&self) -> &str { &self.unicast }
-    fn anycast(&self) -> &str { &self.anycast }
+    fn pid(&self) -> &str {
+        &self.pid
+    }
+    fn group(&self) -> &str {
+        &self.group
+    }
+    fn unicast(&self) -> &str {
+        &self.unicast
+    }
+    fn anycast(&self) -> &str {
+        &self.anycast
+    }
 
     async fn start(&self) -> Result<()> {
         let state = self.state.clone();
@@ -1162,13 +1379,19 @@ impl Network for LocalNetwork {
 
 fn uuid_no_dashes() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("{:032x}", now ^ 0xdeadbeef_cafebabe_u128)
 }
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
 }
 
 fn extract_tags(v: &serde_json::Value) -> HashMap<String, String> {
@@ -1322,7 +1545,12 @@ mod tests {
 
         let state = net.state.lock().await;
         assert_eq!(state.tasks.get("parent").unwrap().state, "suspended");
-        assert!(state.promises.get("child-1").unwrap().awaiters.contains("parent"));
+        assert!(state
+            .promises
+            .get("child-1")
+            .unwrap()
+            .awaiters
+            .contains("parent"));
     }
 
     #[tokio::test]
