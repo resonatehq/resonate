@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+
+use dashmap::DashMap;
 
 use crate::codec::Codec;
 use crate::error::{Error, Result};
@@ -13,13 +13,13 @@ use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseSta
 pub struct Effects {
     send: SendFn,
     codec: Codec,
-    cache: Arc<Mutex<HashMap<String, PromiseRecord>>>,
+    cache: Arc<DashMap<String, PromiseRecord>>,
 }
 
 impl Effects {
     /// Build Effects from a Send function, Codec, and optional preloaded promises.
     pub fn new(send: SendFn, codec: Codec, preload: Vec<PromiseRecord>) -> Self {
-        let mut map = HashMap::new();
+        let map = DashMap::new();
         for p in preload {
             if let Ok(decoded) = codec.decode_promise(&p) {
                 map.insert(decoded.id.clone(), decoded);
@@ -29,7 +29,7 @@ impl Effects {
         Self {
             send,
             codec,
-            cache: Arc::new(Mutex::new(map)),
+            cache: Arc::new(map),
         }
     }
 
@@ -37,11 +37,8 @@ impl Effects {
     /// This is idempotent — if the promise already exists, it returns the existing record.
     pub async fn create_promise(&self, req: PromiseCreateReq) -> Result<PromiseRecord> {
         // 1. Check cache
-        {
-            let cache = self.cache.lock().await;
-            if let Some(cached) = cache.get(&req.id) {
-                return Ok(cached.clone());
-            }
+        if let Some(cached) = self.cache.get(&req.id) {
+            return Ok(cached.clone());
         }
 
         // 2. Encode param via codec
@@ -60,8 +57,7 @@ impl Effects {
         match response {
             Response::Promise(record) => {
                 let decoded = self.codec.decode_promise(&record)?;
-                let mut cache = self.cache.lock().await;
-                cache.insert(decoded.id.clone(), decoded.clone());
+                self.cache.insert(decoded.id.clone(), decoded.clone());
                 Ok(decoded)
             }
             _ => Err(Error::ServerError {
@@ -78,12 +74,9 @@ impl Effects {
         result: &Result<serde_json::Value>,
     ) -> Result<PromiseRecord> {
         // 1. Check cache — if already settled, return cached
-        {
-            let cache = self.cache.lock().await;
-            if let Some(cached) = cache.get(id) {
-                if cached.state != PromiseState::Pending {
-                    return Ok(cached.clone());
-                }
+        if let Some(cached) = self.cache.get(id) {
+            if cached.state != PromiseState::Pending {
+                return Ok(cached.clone());
             }
         }
 
@@ -109,8 +102,7 @@ impl Effects {
         match response {
             Response::Promise(record) => {
                 let decoded = self.codec.decode_promise(&record)?;
-                let mut cache = self.cache.lock().await;
-                cache.insert(decoded.id.clone(), decoded.clone());
+                self.cache.insert(decoded.id.clone(), decoded.clone());
                 Ok(decoded)
             }
             _ => Err(Error::ServerError {
