@@ -21,7 +21,7 @@ impl Effects {
     pub fn new(send: SendFn, codec: Codec, preload: Vec<PromiseRecord>) -> Self {
         let map = DashMap::new();
         for p in preload {
-            if let Ok(decoded) = codec.decode_promise(&p) {
+            if let Ok(decoded) = codec.decode_promise(p) {
                 map.insert(decoded.id.clone(), decoded);
             }
         }
@@ -56,7 +56,7 @@ impl Effects {
         // 4. Decode response, cache, return
         match response {
             Response::Promise(record) => {
-                let decoded = self.codec.decode_promise(&record)?;
+                let decoded = self.codec.decode_promise(record)?;
                 self.cache.insert(decoded.id.clone(), decoded.clone());
                 Ok(decoded)
             }
@@ -101,7 +101,7 @@ impl Effects {
         // 5. Decode response, cache, return
         match response {
             Response::Promise(record) => {
-                let decoded = self.codec.decode_promise(&record)?;
+                let decoded = self.codec.decode_promise(record)?;
                 self.cache.insert(decoded.id.clone(), decoded.clone());
                 Ok(decoded)
             }

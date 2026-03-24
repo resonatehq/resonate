@@ -79,8 +79,8 @@ impl Codec {
         Ok(Some(decoded))
     }
 
-    /// Decode an entire PromiseRecord's param and value fields in place.
-    pub fn decode_promise(&self, promise: &PromiseRecord) -> Result<PromiseRecord> {
+    /// Decode an entire PromiseRecord's param and value fields, consuming the original.
+    pub fn decode_promise(&self, promise: PromiseRecord) -> Result<PromiseRecord> {
         let decoded_param_data: serde_json::Value = self
             .decode(&promise.param)?
             .unwrap_or(serde_json::Value::Null);
@@ -89,18 +89,18 @@ impl Codec {
             .unwrap_or(serde_json::Value::Null);
 
         Ok(PromiseRecord {
-            id: promise.id.clone(),
-            state: promise.state.clone(),
+            id: promise.id,
+            state: promise.state,
             timeout_at: promise.timeout_at,
             param: Value {
-                headers: promise.param.headers.clone(),
+                headers: promise.param.headers,
                 data: Some(decoded_param_data),
             },
             value: Value {
-                headers: promise.value.headers.clone(),
+                headers: promise.value.headers,
                 data: Some(decoded_value_data),
             },
-            tags: promise.tags.clone(),
+            tags: promise.tags,
             created_at: promise.created_at,
             settled_at: promise.settled_at,
         })
@@ -111,7 +111,7 @@ impl Codec {
     pub fn decode_promise_from_json(&self, json: &serde_json::Value) -> Result<PromiseRecord> {
         let record: PromiseRecord = PromiseRecord::deserialize(json)
             .map_err(|e| Error::DecodingError(format!("invalid promise JSON: {}", e)))?;
-        self.decode_promise(&record)
+        self.decode_promise(record)
     }
 }
 
@@ -254,7 +254,7 @@ mod tests {
             settled_at: Some(1),
         };
 
-        let decoded = c.decode_promise(&record).unwrap();
+        let decoded = c.decode_promise(record).unwrap();
         assert_eq!(
             decoded.param.data_or_null(),
             serde_json::json!({"func": "f"})

@@ -104,7 +104,7 @@ impl Core {
         };
 
         // 2. Decode root promise
-        let root_promise = self.codec.decode_promise(&root_promise_raw)?;
+        let root_promise = self.codec.decode_promise(root_promise_raw)?;
 
         // 3. Delegate to execute_until_blocked
         self.execute_until_blocked(task_id, root_promise, Some(preloaded_raw))
@@ -868,7 +868,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-already-acquired", decoded, None)
             .await
@@ -906,7 +906,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-preloaded", decoded, Some(preloaded))
             .await
@@ -927,7 +927,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-suspend", decoded, None)
             .await
@@ -968,7 +968,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = codec.decode_promise(&root).unwrap();
+        let decoded = codec.decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-settled", decoded, None)
             .await
@@ -1009,7 +1009,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = codec.decode_promise(&root).unwrap();
+        let decoded = codec.decode_promise(root).unwrap();
         core.execute_until_blocked("task-resolved", decoded, None)
             .await
             .unwrap();
@@ -1049,7 +1049,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = codec.decode_promise(&root).unwrap();
+        let decoded = codec.decode_promise(root).unwrap();
         core.execute_until_blocked("task-rejected", decoded, None)
             .await
             .unwrap();
@@ -1077,7 +1077,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let result = core
             .execute_until_blocked("task-error", decoded, None)
             .await;
@@ -1156,7 +1156,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry2)),
         );
-        let decoded = noop_codec().decode_promise(&root2).unwrap();
+        let decoded = noop_codec().decode_promise(root2).unwrap();
         let status2 = core2
             .execute_until_blocked("task-direct", decoded, None)
             .await
@@ -1246,7 +1246,7 @@ mod tests {
             Arc::new(RwLock::new(registry)),
             hb.clone(),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-hb", decoded, None)
             .await
@@ -1270,7 +1270,7 @@ mod tests {
             Arc::new(RwLock::new(registry)),
             hb.clone(),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let result = core
             .execute_until_blocked("task-hb-err", decoded, None)
             .await;
@@ -1298,7 +1298,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = noop_codec().decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
             .execute_until_blocked("task-noop-hb", decoded, None)
             .await
