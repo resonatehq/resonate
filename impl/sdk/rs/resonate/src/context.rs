@@ -54,10 +54,6 @@ pub struct Context {
     spawned_tasks: Arc<Mutex<Vec<SpawnedTask>>>,
 }
 
-// Context needs to be Sync for use in async functions, but AtomicU32 is already Sync.
-// The Mutex-wrapped fields provide interior mutability safely.
-unsafe impl Sync for Context {}
-
 impl Context {
     /// Create a root context for a top-level task execution.
     pub(crate) fn root(
