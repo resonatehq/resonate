@@ -958,6 +958,7 @@ dependencies = [
  "base64",
  "dashmap",
  "futures",
+ "parking_lot",
  "reqwest",
  "resonate-macros",
  "serde",

@@ -203,7 +203,7 @@ And `Resonate::register` propagates the panic. Library code should not panic on 
 
 ---
 
-### E2. `RwLock::read().unwrap()` / `write().unwrap()` on poisoned locks
+### ✅ E2. `RwLock::read().unwrap()` / `write().unwrap()` on poisoned locks
 **Files:** `core.rs:185`, `resonate.rs:470, 502`
 ```rust
 let reg = self.registry.read().unwrap();

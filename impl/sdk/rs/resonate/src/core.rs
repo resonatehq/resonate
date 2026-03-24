@@ -1,4 +1,5 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use serde::Deserialize;
 
@@ -171,7 +172,7 @@ impl Core {
 
         // 2. Look up the function in the registry (hold lock briefly, clone factory out)
         let factory = {
-            let reg = self.registry.read().unwrap();
+            let reg = self.registry.read();
             let entry = reg
                 .get(&task_data.func)
                 .ok_or_else(|| Error::FunctionNotFound(task_data.func.clone()))?;
@@ -371,7 +372,7 @@ mod tests {
     use crate::types::{PromiseRecord, PromiseState, Value};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    use std::sync::RwLock;
+    use parking_lot::RwLock;
 
     fn noop_codec() -> Codec {
         Codec::new(Arc::new(NoopEncryptor))

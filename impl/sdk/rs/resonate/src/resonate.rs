@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Serialize};
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use tokio::sync::{oneshot, Mutex};
 
 use crate::codec::{Codec, Encryptor, NoopEncryptor};
@@ -406,7 +406,7 @@ impl Resonate {
         Args: DeserializeOwned + Send + 'static,
         T: Serialize + Send + 'static,
     {
-        let mut reg = self.registry.write().unwrap();
+        let mut reg = self.registry.write();
         reg.register(func)
     }
 
@@ -481,7 +481,7 @@ impl Resonate {
 
         // Verify function is registered
         {
-            let reg = self.registry.read().unwrap();
+            let reg = self.registry.read();
             if !reg.contains(func_name) {
                 return Err(Error::FunctionNotFound(func_name.to_string()));
             }
@@ -684,7 +684,7 @@ impl Resonate {
 
     /// Set a named dependency that functions can access.
     pub async fn set_dependency(&self, name: &str, obj: Box<dyn Any + Send + Sync>) {
-        let mut deps = self.dependencies.write().unwrap();
+        let mut deps = self.dependencies.write();
         deps.insert(name.to_string(), obj);
     }
 
