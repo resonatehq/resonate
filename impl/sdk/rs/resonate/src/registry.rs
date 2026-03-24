@@ -7,7 +7,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::context::Context;
 use crate::durable::Durable;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::info::Info;
 use crate::types::DurableKind;
 
@@ -44,14 +44,13 @@ impl Registry {
 
     /// Register a durable function.
     ///
-    /// # Panics
-    /// Panics if a function with the same name is already registered.
-    pub fn add(&mut self, name: &str, kind: DurableKind, factory: Factory) {
+    /// Returns an error if `name` is empty or already registered.
+    pub fn add(&mut self, name: &str, kind: DurableKind, factory: Factory) -> Result<()> {
         if name.is_empty() {
-            panic!("name is required");
+            return Err(Error::Application { message: "name is required".to_string() });
         }
         if self.by_name.contains_key(name) {
-            panic!("Function '{}' is already registered", name);
+            return Err(Error::AlreadyRegistered(name.to_string()));
         }
         self.by_name.insert(
             name.to_string(),
@@ -61,11 +60,12 @@ impl Registry {
                 factory,
             },
         );
+        Ok(())
     }
 
     /// Register a durable function from a `Durable` impl.
     /// The name and kind are derived from `D::NAME` and `D::KIND`.
-    pub fn register<D, Args, T>(&mut self, func: D)
+    pub fn register<D, Args, T>(&mut self, func: D) -> Result<()>
     where
         D: Durable<Args, T> + Copy + Send + Sync + 'static,
         Args: DeserializeOwned + Send + 'static,
@@ -81,7 +81,7 @@ impl Registry {
                 }
             })
         });
-        self.add(D::NAME, D::KIND, factory);
+        self.add(D::NAME, D::KIND, factory)
     }
 
     /// Look up a registered function by name.
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn register_a_function_by_name() {
         let mut registry = Registry::new();
-        registry.add("foo", DurableKind::Function, dummy_factory());
+        registry.add("foo", DurableKind::Function, dummy_factory()).unwrap();
         let entry = registry.get("foo");
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().name, "foo");
@@ -126,18 +126,19 @@ mod tests {
     #[test]
     fn register_with_custom_name() {
         let mut registry = Registry::new();
-        registry.add("bar*", DurableKind::Function, dummy_factory());
+        registry.add("bar*", DurableKind::Function, dummy_factory()).unwrap();
         let entry = registry.get("bar*");
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().name, "bar*");
     }
 
     #[test]
-    #[should_panic(expected = "already registered")]
     fn reject_duplicate_name_registration() {
         let mut registry = Registry::new();
-        registry.add("baz", DurableKind::Function, dummy_factory());
-        registry.add("baz", DurableKind::Function, dummy_factory());
+        registry.add("baz", DurableKind::Function, dummy_factory()).unwrap();
+        let err = registry.add("baz", DurableKind::Function, dummy_factory());
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("already registered"));
     }
 
     #[test]
@@ -147,9 +148,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "name is required")]
     fn reject_functions_without_a_name() {
         let mut registry = Registry::new();
-        registry.add("", DurableKind::Function, dummy_factory());
+        let err = registry.add("", DurableKind::Function, dummy_factory());
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("name is required"));
     }
 }

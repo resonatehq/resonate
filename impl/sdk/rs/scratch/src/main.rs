@@ -42,9 +42,9 @@ async fn main() {
     let resonate = Resonate::local(None);
 
     // Register all functions.
-    resonate.register(Hello);
-    resonate.register(Shout);
-    resonate.register(HelloWorkflow);
+    resonate.register(Hello).unwrap();
+    resonate.register(Shout).unwrap();
+    resonate.register(HelloWorkflow).unwrap();
 
     // Call the shout function.
     let result: String = resonate

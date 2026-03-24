@@ -189,7 +189,7 @@ Both have: `child_id`, `ctx`, `req`, `record: OnceCell`, `_phantom`, plus `ensur
 
 ## 7. 🟤 Error Handling
 
-### E1. Registry panics instead of returning errors
+### ✅ E1. Registry panics instead of returning errors
 **File:** `registry.rs:52-55`
 ```rust
 pub fn add(&mut self, name: &str, kind: DurableKind, factory: Factory) {
