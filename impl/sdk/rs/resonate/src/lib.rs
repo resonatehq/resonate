@@ -26,7 +26,7 @@ pub use resonate_macros::function;
 /// Prelude module for convenient imports.
 pub mod prelude {
     pub use crate::codec::Codec;
-    pub use crate::context::Context;
+    pub use crate::context::{Context, RpcTask, RunTask};
     pub use crate::durable::Durable;
     pub use crate::effects::Effects;
     pub use crate::error::{Error, Result};

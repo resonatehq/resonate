@@ -23,7 +23,7 @@ enum SuspendResult {
 /// Core exposes two entry points:
 ///
 /// 1. **`execute_until_blocked(task_id, root_promise, preload)`**
-///    Called from `Resonate::begin_run` when the task is *already acquired*.
+///    Called from `Resonate::run` / `Resonate::begin_run` when the task is *already acquired*.
 ///    Skips the acquire step. Runs the registered function until it completes
 ///    (Done → fulfills the task) or suspends (Suspended → suspends the task).
 ///    On error → releases the task.
@@ -428,15 +428,15 @@ mod tests {
     /// Workflow that suspends on a single remote dependency.
     #[resonate_macros::function]
     async fn suspending_once(ctx: &Context) -> Result<i64> {
-        let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+        let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
         Ok(0)
     }
 
     /// Workflow that suspends on two remote dependencies.
     #[resonate_macros::function]
     async fn suspending_multi(ctx: &Context) -> Result<i64> {
-        let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep-a", &()).await;
-        let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep-b", &()).await;
+        let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
+        let _ = ctx.rpc::<i32>("dep-b", &()).spawn().await?;
         Ok(0)
     }
 
@@ -447,7 +447,7 @@ mod tests {
     async fn suspending_then_done(ctx: &Context) -> Result<i64> {
         let count = COMP_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
             Ok(0)
         } else {
             Ok(42)
@@ -462,7 +462,7 @@ mod tests {
 
     #[resonate_macros::function]
     async fn remote_dep(ctx: &Context) -> Result<i32> {
-        let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep-a", &()).await;
+        let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
         Ok(0)
     }
 
@@ -650,7 +650,7 @@ mod tests {
     async fn redir_no_acquire(ctx: &Context) -> Result<i64> {
         let count = REDIR_NO_ACQUIRE_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
             Ok(0)
         } else {
             Ok(42)
@@ -694,7 +694,7 @@ mod tests {
     async fn redir_preload(ctx: &Context) -> Result<i64> {
         let count = REDIR_PRELOAD_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
             Ok(0)
         } else {
             Ok(42)
@@ -737,7 +737,7 @@ mod tests {
     async fn multi_redirect(ctx: &Context) -> Result<i64> {
         let count = MULTI_REDIR_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count < 2 {
-            let _: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("dep", &()).await;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
         }
         Ok(count as i64)
     }

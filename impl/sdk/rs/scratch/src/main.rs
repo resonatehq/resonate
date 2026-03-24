@@ -21,9 +21,12 @@ async fn shout(message: String) -> Result<String> {
 // and combines the results.
 #[resonate::function]
 async fn hello_workflow(ctx: &Context, names: (String, String)) -> Result<String> {
-    let f = ctx.begin_rpc::<String>("hello", &names.0).await;
-    let greeting2: String = ctx.run(Hello, names.1).await?;
-    let greeting1: String = f.await?;
+    let (greeting1, greeting2) = tokio::join!(
+        ctx.rpc::<String>("hello", &names.0),
+        ctx.run(Hello, names.1),
+    );
+    let greeting1: String = greeting1?;
+    let greeting2: String = greeting2?;
     let shouted: String = ctx
         .run(Shout, format!("{} and {}", greeting1, greeting2))
         .await?;

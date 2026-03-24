@@ -10,7 +10,7 @@ use crate::types::Outcome;
 
 /// A handle to an eagerly spawned local durable task.
 ///
-/// Created by `ctx.begin_run()`. Awaiting this future returns the result
+/// Created by `ctx.run(F, args).spawn()`. Awaiting this future returns the result
 /// once the spawned task completes.
 pub struct DurableFuture<T> {
     inner: DurableFutureInner,
@@ -94,7 +94,7 @@ where
 
 /// A handle to a remote durable task.
 ///
-/// Created by `ctx.begin_rpc()`. Awaiting this future returns the result
+/// Created by `ctx.rpc("func", &args).spawn()`. Awaiting this future returns the result
 /// once the remote worker resolves the promise.
 pub struct RemoteFuture<T> {
     inner: RemoteFutureInner,

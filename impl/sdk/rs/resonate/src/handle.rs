@@ -7,7 +7,7 @@ use crate::codec::{deserialize_error, Codec};
 use crate::error::{Error, Result};
 use crate::transport::Transport;
 
-/// A handle to a durable promise, returned from `begin_run`, `begin_rpc`, and `get`.
+/// A handle to a durable promise, returned from `Resonate::run`, `Resonate::rpc`, and `get`.
 /// Allows non-blocking observation and eventual awaiting of a durable promise.
 pub struct ResonateHandle<T> {
     pub id: String,

@@ -239,7 +239,7 @@ pub enum Outcome {
 pub enum DurableKind {
     /// Leaf function — no sub-tasks, always completes.
     Function,
-    /// Workflow function — can call ctx.run/begin_run/rpc, may suspend.
+    /// Workflow function — can call ctx.run/rpc, may suspend.
     Workflow,
 }
 

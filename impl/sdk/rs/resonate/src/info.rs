@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 /// Read-only execution metadata for leaf functions.
-/// Cannot spawn durable sub-tasks — no run/begin_run/rpc methods.
+/// Cannot spawn durable sub-tasks — no run/rpc methods.
 #[derive(Debug, Clone)]
 pub struct Info {
     id: String,

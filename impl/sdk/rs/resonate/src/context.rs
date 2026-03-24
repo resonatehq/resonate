@@ -1,6 +1,9 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::{Future, IntoFuture};
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +15,7 @@ use crate::effects::Effects;
 use crate::error::{Error, Result};
 use crate::futures::{DurableFuture, RemoteFuture};
 use crate::info::Info;
-use crate::types::{DurableKind, Outcome, PromiseCreateReq, PromiseState, Value};
+use crate::types::{DurableKind, Outcome, PromiseCreateReq, PromiseRecord, PromiseState, Value};
 
 /// A function that resolves a logical target name to a routable address.
 /// Mirrors `network.match()` — passed down from Resonate → Core → Context.
@@ -26,7 +29,11 @@ pub(crate) struct SpawnedTask {
 }
 
 /// The primary interface for workflow functions.
-/// Provides four core operations: run, begin_run, rpc, begin_rpc.
+/// Provides two core operations: `run` (local execution) and `rpc` (remote execution).
+///
+/// Both return builder structs (`RunTask`, `RpcTask`) that implement `IntoFuture`,
+/// so `.await` works seamlessly for the sequential case. Use `.spawn()` for true
+/// parallelism via `tokio::spawn`, or `tokio::join!` for cooperative concurrency.
 ///
 /// **Intentional divergence from TS SDK**: Context calls do not accept custom IDs.
 /// IDs are always generated deterministically via `next_id()` (`parent.0`, `parent.1`, …).
@@ -162,7 +169,6 @@ impl Context {
     fn local_create_req(
         &self,
         id: &str,
-        _func_name: &str,
         args: &impl Serialize,
         timeout: Option<Duration>,
     ) -> PromiseCreateReq {
@@ -228,309 +234,71 @@ impl Context {
         }
     }
 
-    /// Local call-and-wait. Creates a durable promise, executes the function locally,
-    /// settles the promise, and returns the result.
+    /// Local execution. Returns a `RunTask` builder that implements `IntoFuture`.
     ///
-    /// The child promise timeout is capped to the parent's timeout. If `timeout`
-    /// is `None`, the default (24 hours) is used, still capped to the parent.
-    pub async fn run<D, Args, T>(&self, func: D, args: Args) -> Result<T>
+    /// # Usage patterns
+    /// ```ignore
+    /// // Sequential (common case)
+    /// let result: i32 = ctx.run(MyFunc, args).await?;
+    ///
+    /// // With timeout
+    /// let result: i32 = ctx.run(MyFunc, args).timeout(Duration::from_secs(30)).await?;
+    ///
+    /// // Access promise ID before execution
+    /// let task = ctx.run(MyFunc, args);
+    /// let id = task.id().await?;
+    /// let result = task.await?;
+    ///
+    /// // Concurrency via tokio::join!
+    /// let (r1, r2) = tokio::join!(ctx.run(F, a), ctx.run(F, b));
+    ///
+    /// // True parallelism via .spawn()
+    /// let handle = ctx.run(MyFunc, args).spawn().await?;
+    /// let result = handle.await?;
+    /// ```
+    pub fn run<D, Args, T>(&self, func: D, args: Args) -> RunTask<'_, D, Args, T>
     where
         D: Durable<Args, T>,
-        Args: Serialize + DeserializeOwned + Send + 'static,
-        T: Serialize + DeserializeOwned + Send + 'static,
-    {
-        self.run_with_timeout(func, args, None).await
-    }
-
-    /// Like `run`, but with an explicit timeout duration for the child promise.
-    pub async fn run_with_timeout<D, Args, T>(
-        &self,
-        func: D,
-        args: Args,
-        timeout: Option<Duration>,
-    ) -> Result<T>
-    where
-        D: Durable<Args, T>,
-        Args: Serialize + DeserializeOwned + Send + 'static,
-        T: Serialize + DeserializeOwned + Send + 'static,
+        Args: Serialize,
     {
         let child_id = self.next_id();
-        let req = self.local_create_req(&child_id, D::NAME, &args, timeout);
-
-        // Create durable promise BEFORE execution
-        let record = self.effects.create_promise(req).await?;
-
-        match record.state {
-            PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
-            PromiseState::Pending => match D::KIND {
-                DurableKind::Function => {
-                    let info = self.child_info(&child_id, D::NAME, record.timeout_at);
-                    let result = func.execute(None, Some(&info), args).await;
-                    let json_result = Self::to_json_result(&result);
-                    self.effects.settle_promise(&child_id, &json_result).await?;
-                    result
-                }
-                DurableKind::Workflow => {
-                    let child_ctx = self.child(&child_id, D::NAME, record.timeout_at);
-                    let result = func.execute(Some(&child_ctx), None, args).await;
-
-                    // Flush child's local work
-                    let flush_remote = child_ctx.flush_local_work().await;
-                    let mut child_remote = child_ctx.take_remote_todos().await;
-                    child_remote.extend(flush_remote);
-
-                    if child_remote.is_empty() {
-                        let json_result = Self::to_json_result(&result);
-                        self.effects.settle_promise(&child_id, &json_result).await?;
-                    } else {
-                        self.remote_todos.lock().await.extend(child_remote);
-                    }
-                    result
-                }
-            },
+        let req = self.local_create_req(&child_id, &args, None);
+        RunTask {
+            child_id,
+            ctx: self,
+            func,
+            args,
+            req,
+            record: tokio::sync::OnceCell::new(),
+            _phantom: PhantomData,
         }
     }
 
-    /// Local fire-and-start. Creates a durable promise, spawns the function,
-    /// and returns a DurableFuture handle.
+    /// Remote execution. Returns an `RpcTask` builder that implements `IntoFuture`.
     ///
-    /// The child promise timeout is capped to the parent's timeout.
-    pub async fn begin_run<D, Args, T>(&self, func: D, args: Args) -> DurableFuture<T>
-    where
-        D: Durable<Args, T> + Send + 'static,
-        Args: Serialize + DeserializeOwned + Send + 'static,
-        T: Serialize + DeserializeOwned + Send + 'static,
-    {
-        self.begin_run_with_timeout(func, args, None).await
-    }
-
-    /// Like `begin_run`, but with an explicit timeout duration for the child promise.
-    pub async fn begin_run_with_timeout<D, Args, T>(
-        &self,
-        func: D,
-        args: Args,
-        timeout: Option<Duration>,
-    ) -> DurableFuture<T>
-    where
-        D: Durable<Args, T> + Send + 'static,
-        Args: Serialize + DeserializeOwned + Send + 'static,
-        T: Serialize + DeserializeOwned + Send + 'static,
-    {
+    /// # Usage patterns
+    /// ```ignore
+    /// // Sequential (common case)
+    /// let result: i32 = ctx.rpc("func", &args).await?;
+    ///
+    /// // With timeout and/or target override
+    /// let result: i32 = ctx.rpc("func", &args)
+    ///     .timeout(Duration::from_secs(30))
+    ///     .target("custom-worker")
+    ///     .await?;
+    ///
+    /// // Fire-and-start via .spawn()
+    /// let handle = ctx.rpc::<i32>("func", &args).spawn().await?;
+    /// ```
+    pub fn rpc<T>(&self, func: &str, args: &impl Serialize) -> RpcTask<'_, T> {
         let child_id = self.next_id();
-        let req = self.local_create_req(&child_id, D::NAME, &args, timeout);
-
-        let record = match self.effects.create_promise(req).await {
-            Ok(r) => r,
-            Err(e) => {
-                return DurableFuture::failed(serde_json::json!({
-                    "__type": "error",
-                    "message": e.to_string(),
-                }));
-            }
-        };
-
-        match record.state {
-            PromiseState::Resolved => DurableFuture::completed(record.value.data_or_null()),
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => DurableFuture::failed(record.value.data_or_null()),
-            PromiseState::Pending => {
-                let effects = self.effects.clone();
-                let child_id_for_task = child_id.clone();
-                let parent_remote_todos = self.remote_todos.clone();
-
-                // Create a oneshot channel for the DurableFuture
-                let (tx, rx) = tokio::sync::oneshot::channel();
-
-                let handle = match D::KIND {
-                    DurableKind::Function => {
-                        let info = self.child_info(&child_id, D::NAME, record.timeout_at);
-                        tokio::spawn(async move {
-                            let result = func.execute(None, Some(&info), args).await;
-                            let json_result = match &result {
-                                Ok(val) => {
-                                    serde_json::to_value(val).map_err(Error::SerializationError)
-                                }
-                                Err(e) => Err(Error::Application {
-                                    message: e.to_string(),
-                                }),
-                            };
-                            let _ = effects
-                                .settle_promise(&child_id_for_task, &json_result)
-                                .await;
-                            let outcome = Outcome::Done(json_result);
-                            // Try to send to the DurableFuture; if it was dropped, that's fine
-                            let _ = tx.send(outcome_to_sendable(&outcome));
-                            outcome
-                        })
-                    }
-                    DurableKind::Workflow => {
-                        let child_ctx = self.child(&child_id, D::NAME, record.timeout_at);
-                        tokio::spawn(async move {
-                            let result = func.execute(Some(&child_ctx), None, args).await;
-                            let flush_remote = child_ctx.flush_local_work().await;
-                            let mut child_remote = child_ctx.take_remote_todos().await;
-                            child_remote.extend(flush_remote);
-
-                            let json_result = match &result {
-                                Ok(val) => {
-                                    serde_json::to_value(val).map_err(Error::SerializationError)
-                                }
-                                Err(e) => Err(Error::Application {
-                                    message: e.to_string(),
-                                }),
-                            };
-
-                            let outcome = if child_remote.is_empty() {
-                                let _ = effects
-                                    .settle_promise(&child_id_for_task, &json_result)
-                                    .await;
-                                Outcome::Done(json_result)
-                            } else {
-                                parent_remote_todos
-                                    .lock()
-                                    .await
-                                    .extend(child_remote.clone());
-                                Outcome::Suspended {
-                                    remote_todos: child_remote,
-                                }
-                            };
-                            let _ = tx.send(outcome_to_sendable(&outcome));
-                            outcome
-                        })
-                    }
-                };
-
-                // Track the spawned task for flush
-                {
-                    let mut tasks = self.spawned_tasks.lock().await;
-                    tasks.push(SpawnedTask {
-                        id: child_id.clone(),
-                        handle,
-                    });
-                }
-
-                DurableFuture::pending(child_id, rx)
-            }
-        }
-    }
-
-    /// Remote call-and-wait.
-    ///
-    /// The child promise timeout is capped to the parent's timeout.
-    pub async fn rpc<T>(&self, func: &str, args: &impl Serialize) -> Result<T>
-    where
-        T: DeserializeOwned,
-    {
-        self.rpc_with_timeout(func, args, None).await
-    }
-
-    /// Like `rpc`, but with an explicit timeout duration for the child promise.
-    pub async fn rpc_with_timeout<T>(
-        &self,
-        func: &str,
-        args: &impl Serialize,
-        timeout: Option<Duration>,
-    ) -> Result<T>
-    where
-        T: DeserializeOwned,
-    {
-        self.rpc_with_opts(func, args, timeout, None).await
-    }
-
-    /// Like `rpc`, but with explicit timeout and target override.
-    ///
-    /// If `target` is `Some`, it overrides the default target (which is `func`).
-    /// URL targets (containing `://`) pass through `match_fn` unchanged.
-    pub async fn rpc_with_opts<T>(
-        &self,
-        func: &str,
-        args: &impl Serialize,
-        timeout: Option<Duration>,
-        target: Option<&str>,
-    ) -> Result<T>
-    where
-        T: DeserializeOwned,
-    {
-        let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args, timeout, target);
-
-        let record = self.effects.create_promise(req).await?;
-
-        match record.state {
-            PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => Err(deserialize_error(record.value.data_or_null())),
-            PromiseState::Pending => {
-                self.remote_todos.lock().await.push(child_id);
-                Err(Error::Suspended)
-            }
-        }
-    }
-
-    /// Remote fire-and-start.
-    ///
-    /// The child promise timeout is capped to the parent's timeout.
-    pub async fn begin_rpc<T>(&self, func: &str, args: &impl Serialize) -> RemoteFuture<T>
-    where
-        T: DeserializeOwned,
-    {
-        self.begin_rpc_with_timeout(func, args, None).await
-    }
-
-    /// Like `begin_rpc`, but with an explicit timeout duration for the child promise.
-    pub async fn begin_rpc_with_timeout<T>(
-        &self,
-        func: &str,
-        args: &impl Serialize,
-        timeout: Option<Duration>,
-    ) -> RemoteFuture<T>
-    where
-        T: DeserializeOwned,
-    {
-        self.begin_rpc_with_opts(func, args, timeout, None).await
-    }
-
-    /// Like `begin_rpc`, but with explicit timeout and target override.
-    ///
-    /// If `target` is `Some`, it overrides the default target (which is `func`).
-    /// URL targets (containing `://`) pass through `match_fn` unchanged.
-    pub async fn begin_rpc_with_opts<T>(
-        &self,
-        func: &str,
-        args: &impl Serialize,
-        timeout: Option<Duration>,
-        target: Option<&str>,
-    ) -> RemoteFuture<T>
-    where
-        T: DeserializeOwned,
-    {
-        let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args, timeout, target);
-
-        let record = match self.effects.create_promise(req).await {
-            Ok(r) => r,
-            Err(e) => {
-                return RemoteFuture::failed(serde_json::json!({
-                    "__type": "error",
-                    "message": e.to_string(),
-                }));
-            }
-        };
-
-        match record.state {
-            PromiseState::Resolved => RemoteFuture::completed(record.value.data_or_null()),
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => RemoteFuture::failed(record.value.data_or_null()),
-            PromiseState::Pending => {
-                self.remote_todos.lock().await.push(child_id.clone());
-                RemoteFuture::pending(child_id, self.effects.clone())
-            }
+        let req = self.remote_create_req(&child_id, func, args, None, None);
+        RpcTask {
+            child_id,
+            ctx: self,
+            req,
+            record: tokio::sync::OnceCell::new(),
+            _phantom: PhantomData,
         }
     }
 
@@ -576,6 +344,359 @@ impl Context {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  RunTask — builder returned by ctx.run()
+// ═══════════════════════════════════════════════════════════════
+
+/// A lazy local execution task. Created by `ctx.run()`.
+///
+/// Implements `IntoFuture` so `.await` works directly. The durable promise is
+/// created lazily — at most once — triggered by whichever comes first: `.id()`,
+/// `.spawn()`, or `.await`.
+pub struct RunTask<'ctx, D, Args, T> {
+    child_id: String,
+    ctx: &'ctx Context,
+    func: D,
+    args: Args,
+    req: PromiseCreateReq,
+    record: tokio::sync::OnceCell<PromiseRecord>,
+    _phantom: PhantomData<fn() -> T>,
+}
+
+impl<'ctx, D, Args, T> RunTask<'ctx, D, Args, T>
+where
+    Args: Serialize,
+{
+    /// Set an explicit timeout for the child promise (capped to parent's timeout).
+    ///
+    /// Must be called before `.id()`, `.await`, or `.spawn()`.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        debug_assert!(self.record.get().is_none(), "cannot set timeout after promise creation");
+        self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
+        self
+    }
+
+    /// Returns the promise ID, creating the durable promise if it hasn't been yet.
+    pub async fn id(&self) -> Result<String> {
+        self.ensure_created().await?;
+        Ok(self.child_id.clone())
+    }
+
+    /// Ensure the durable promise exists (lazy creation via OnceCell).
+    async fn ensure_created(&self) -> Result<&PromiseRecord> {
+        if let Some(record) = self.record.get() {
+            return Ok(record);
+        }
+        self.record
+            .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
+            .await
+    }
+
+    /// Spawn the task onto a new tokio task for true parallelism.
+    /// Replaces the old `ctx.begin_run()`.
+    ///
+    /// This is async because it eagerly creates the durable promise, then
+    /// spawns execution via `tokio::spawn`. Requires `D: Send + 'static`
+    /// because the function is moved into the spawned task.
+    pub async fn spawn(self) -> Result<DurableFuture<T>>
+    where
+        D: Durable<Args, T> + Send + 'static,
+        Args: Serialize + DeserializeOwned + Send + 'static,
+        T: Serialize + DeserializeOwned + Send + 'static,
+    {
+        let RunTask {
+            child_id,
+            ctx,
+            func,
+            args,
+            req,
+            record: cell,
+            _phantom,
+        } = self;
+
+        // Eagerly create the promise
+        cell.get_or_try_init(|| ctx.effects.create_promise(req))
+            .await?;
+        let record = cell.into_inner().unwrap();
+
+        match record.state {
+            PromiseState::Resolved => Ok(DurableFuture::completed(record.value.data_or_null())),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => {
+                Ok(DurableFuture::failed(record.value.data_or_null()))
+            }
+            PromiseState::Pending => {
+                let effects = ctx.effects.clone();
+                let child_id_for_task = child_id.clone();
+                let parent_remote_todos = ctx.remote_todos.clone();
+                let (tx, rx) = tokio::sync::oneshot::channel();
+
+                let handle = match D::KIND {
+                    DurableKind::Function => {
+                        let info = ctx.child_info(&child_id, D::NAME, record.timeout_at);
+                        tokio::spawn(async move {
+                            let result = func.execute(None, Some(&info), args).await;
+                            let json_result = match &result {
+                                Ok(val) => {
+                                    serde_json::to_value(val).map_err(Error::SerializationError)
+                                }
+                                Err(e) => Err(Error::Application {
+                                    message: e.to_string(),
+                                }),
+                            };
+                            let _ = effects
+                                .settle_promise(&child_id_for_task, &json_result)
+                                .await;
+                            let outcome = Outcome::Done(json_result);
+                            let _ = tx.send(outcome_to_sendable(&outcome));
+                            outcome
+                        })
+                    }
+                    DurableKind::Workflow => {
+                        let child_ctx = ctx.child(&child_id, D::NAME, record.timeout_at);
+                        tokio::spawn(async move {
+                            let result = func.execute(Some(&child_ctx), None, args).await;
+                            let flush_remote = child_ctx.flush_local_work().await;
+                            let mut child_remote = child_ctx.take_remote_todos().await;
+                            child_remote.extend(flush_remote);
+
+                            let json_result = match &result {
+                                Ok(val) => {
+                                    serde_json::to_value(val).map_err(Error::SerializationError)
+                                }
+                                Err(e) => Err(Error::Application {
+                                    message: e.to_string(),
+                                }),
+                            };
+
+                            let outcome = if child_remote.is_empty() {
+                                let _ = effects
+                                    .settle_promise(&child_id_for_task, &json_result)
+                                    .await;
+                                Outcome::Done(json_result)
+                            } else {
+                                parent_remote_todos
+                                    .lock()
+                                    .await
+                                    .extend(child_remote.clone());
+                                Outcome::Suspended {
+                                    remote_todos: child_remote,
+                                }
+                            };
+                            let _ = tx.send(outcome_to_sendable(&outcome));
+                            outcome
+                        })
+                    }
+                };
+
+                // Track for flush
+                {
+                    let mut tasks = ctx.spawned_tasks.lock().await;
+                    tasks.push(SpawnedTask {
+                        id: child_id.clone(),
+                        handle,
+                    });
+                }
+
+                Ok(DurableFuture::pending(child_id, rx))
+            }
+        }
+    }
+}
+
+impl<'ctx, D, Args, T> IntoFuture for RunTask<'ctx, D, Args, T>
+where
+    D: Durable<Args, T>,
+    Args: Serialize + DeserializeOwned + Send + 'static,
+    T: Serialize + DeserializeOwned + Send + 'static,
+{
+    type Output = Result<T>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let RunTask {
+                child_id,
+                ctx,
+                func,
+                args,
+                req,
+                record: cell,
+                _phantom,
+            } = self;
+
+            // Ensure promise is created, then take ownership
+            cell.get_or_try_init(|| ctx.effects.create_promise(req))
+                .await?;
+            let record = cell.into_inner().unwrap();
+
+            match record.state {
+                PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
+                PromiseState::Rejected
+                | PromiseState::RejectedCanceled
+                | PromiseState::RejectedTimedout => {
+                    Err(deserialize_error(record.value.data_or_null()))
+                }
+                PromiseState::Pending => {
+                    let timeout_at = record.timeout_at;
+                    match D::KIND {
+                        DurableKind::Function => {
+                            let info = ctx.child_info(&child_id, D::NAME, timeout_at);
+                            let result = func.execute(None, Some(&info), args).await;
+                            let json_result = Context::to_json_result(&result);
+                            ctx.effects.settle_promise(&child_id, &json_result).await?;
+                            result
+                        }
+                        DurableKind::Workflow => {
+                            let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
+                            let result = func.execute(Some(&child_ctx), None, args).await;
+
+                            let flush_remote = child_ctx.flush_local_work().await;
+                            let mut child_remote = child_ctx.take_remote_todos().await;
+                            child_remote.extend(flush_remote);
+
+                            if child_remote.is_empty() {
+                                let json_result = Context::to_json_result(&result);
+                                ctx.effects.settle_promise(&child_id, &json_result).await?;
+                            } else {
+                                ctx.remote_todos.lock().await.extend(child_remote);
+                            }
+                            result
+                        }
+                    }
+                }
+            }
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RpcTask — builder returned by ctx.rpc()
+// ═══════════════════════════════════════════════════════════════
+
+/// A lazy remote execution task. Created by `ctx.rpc()`.
+///
+/// Implements `IntoFuture` so `.await` works directly. On `Pending` state,
+/// awaiting pushes to `remote_todos` and returns `Err(Suspended)`.
+pub struct RpcTask<'ctx, T> {
+    child_id: String,
+    ctx: &'ctx Context,
+    req: PromiseCreateReq,
+    record: tokio::sync::OnceCell<PromiseRecord>,
+    _phantom: PhantomData<T>,
+}
+
+impl<'ctx, T> RpcTask<'ctx, T> {
+    /// Set an explicit timeout for the child promise (capped to parent's timeout).
+    ///
+    /// Must be called before `.id()`, `.await`, or `.spawn()`.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        debug_assert!(self.record.get().is_none(), "cannot set timeout after promise creation");
+        self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
+        self
+    }
+
+    /// Override the target for this RPC call (resolved through `match_fn`).
+    ///
+    /// Must be called before `.id()`, `.await`, or `.spawn()`.
+    pub fn target(mut self, target: &str) -> Self {
+        debug_assert!(self.record.get().is_none(), "cannot set target after promise creation");
+        let resolved = (self.ctx.match_fn)(target);
+        self.req
+            .tags
+            .insert("resonate:target".to_string(), resolved);
+        self
+    }
+
+    /// Returns the promise ID, creating the durable promise if it hasn't been yet.
+    pub async fn id(&self) -> Result<String> {
+        self.ensure_created().await?;
+        Ok(self.child_id.clone())
+    }
+
+    /// Ensure the durable promise exists (lazy creation via OnceCell).
+    async fn ensure_created(&self) -> Result<&PromiseRecord> {
+        if let Some(record) = self.record.get() {
+            return Ok(record);
+        }
+        self.record
+            .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
+            .await
+    }
+
+    /// Eagerly create the promise and return a `RemoteFuture` handle.
+    /// Replaces the old `ctx.begin_rpc()`.
+    pub async fn spawn(self) -> Result<RemoteFuture<T>>
+    where
+        T: DeserializeOwned,
+    {
+        let RpcTask {
+            child_id,
+            ctx,
+            req,
+            record: cell,
+            _phantom,
+        } = self;
+
+        // Eagerly create the promise
+        cell.get_or_try_init(|| ctx.effects.create_promise(req))
+            .await?;
+        let record = cell.into_inner().unwrap();
+
+        match record.state {
+            PromiseState::Resolved => Ok(RemoteFuture::completed(record.value.data_or_null())),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => {
+                Ok(RemoteFuture::failed(record.value.data_or_null()))
+            }
+            PromiseState::Pending => {
+                ctx.remote_todos.lock().await.push(child_id.clone());
+                Ok(RemoteFuture::pending(child_id, ctx.effects.clone()))
+            }
+        }
+    }
+}
+
+impl<'ctx, T> IntoFuture for RpcTask<'ctx, T>
+where
+    T: DeserializeOwned + Send + 'static,
+{
+    type Output = Result<T>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let RpcTask {
+                child_id,
+                ctx,
+                req,
+                record: cell,
+                _phantom,
+            } = self;
+
+            // Ensure promise is created, then take ownership
+            cell.get_or_try_init(|| ctx.effects.create_promise(req))
+                .await?;
+            let record = cell.into_inner().unwrap();
+
+            match record.state {
+                PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
+                PromiseState::Rejected
+                | PromiseState::RejectedCanceled
+                | PromiseState::RejectedTimedout => {
+                    Err(deserialize_error(record.value.data_or_null()))
+                }
+                PromiseState::Pending => {
+                    ctx.remote_todos.lock().await.push(child_id);
+                    Err(Error::Suspended)
+                }
+            }
+        })
+    }
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -603,6 +724,7 @@ fn outcome_to_sendable(outcome: &Outcome) -> Outcome {
 mod tests {
     use super::*;
     use crate::durable::Durable;
+    #[allow(unused_imports)]
     use crate::futures::RemoteFuture;
     use crate::test_utils::*;
     use crate::types::{DurableKind, Outcome};
@@ -881,8 +1003,8 @@ mod tests {
         let ctx = test_context("root", effects);
 
         // First execution: local bar runs, remote suspends
-        let local_future = ctx.begin_run(Bar, ()).await;
-        let _remote_future: RemoteFuture<i32> = ctx.begin_rpc("bar", &()).await;
+        let local_future = ctx.run(Bar, ()).spawn().await.unwrap();
+        let _remote_future: RemoteFuture<i32> = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let local_val: i32 = local_future.await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(local_val))).await;
 
@@ -904,8 +1026,8 @@ mod tests {
             harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(100))]);
         let ctx2 = test_context("root", effects2);
 
-        let local_future2 = ctx2.begin_run(Bar, ()).await;
-        let remote_future2: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
+        let local_future2 = ctx2.run(Bar, ()).spawn().await.unwrap();
+        let remote_future2: RemoteFuture<i32> = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let local_val2: i32 = local_future2.await.unwrap();
         let remote_val2: i32 = remote_future2.await.unwrap();
         let outcome2 =
@@ -924,8 +1046,8 @@ mod tests {
         // First execution: two remotes, both pending
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
-        let _r1: RemoteFuture<i32> = ctx.begin_rpc("bar", &()).await;
-        let _r2: RemoteFuture<i32> = ctx.begin_rpc("bar", &()).await;
+        let _r1 = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
+        let _r2 = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(99))).await;
 
         let todos = match &outcome {
@@ -945,8 +1067,8 @@ mod tests {
         let effects2 =
             harness.build_effects(vec![resolved_promise(&todos[0], serde_json::json!(10))]);
         let ctx2 = test_context("root", effects2);
-        let _r1: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
-        let _r2: RemoteFuture<i32> = ctx2.begin_rpc("bar", &()).await;
+        let _r1 = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
+        let _r2 = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let outcome2 = finalize_context(&ctx2, Ok(serde_json::json!(99))).await;
 
         match &outcome2 {
@@ -967,8 +1089,8 @@ mod tests {
             resolved_promise(&todos[1], serde_json::json!(20)),
         ]);
         let ctx3 = test_context("root", effects3);
-        let _r1: RemoteFuture<i32> = ctx3.begin_rpc("bar", &()).await;
-        let _r2: RemoteFuture<i32> = ctx3.begin_rpc("bar", &()).await;
+        let _r1 = ctx3.rpc::<i32>("bar", &()).spawn().await.unwrap();
+        let _r2 = ctx3.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let outcome3 = finalize_context(&ctx3, Ok(serde_json::json!(99))).await;
 
         match outcome3 {
@@ -985,8 +1107,8 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let _f1 = ctx.begin_run(Bar, ()).await;
-        let _f2 = ctx.begin_run(Baz, ()).await;
+        let _f1 = ctx.run(Bar, ()).spawn().await.unwrap();
+        let _f2 = ctx.run(Baz, ()).spawn().await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(99))).await;
 
         match outcome {
@@ -1001,8 +1123,8 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let _local = ctx.begin_run(Bar, ()).await;
-        let _remote: RemoteFuture<i32> = ctx.begin_rpc("someRemote", &()).await;
+        let _local = ctx.run(Bar, ()).spawn().await.unwrap();
+        let _remote = ctx.rpc::<i32>("someRemote", &()).spawn().await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(77))).await;
 
         match &outcome {
@@ -1046,8 +1168,8 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let f_slow = ctx.begin_run(Slow, ()).await;
-        let f_fast = ctx.begin_run(Fast, ()).await;
+        let f_slow = ctx.run(Slow, ()).spawn().await.unwrap();
+        let f_fast = ctx.run(Fast, ()).spawn().await.unwrap();
         let a: i32 = f_slow.await.unwrap();
         let b: i32 = f_fast.await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
@@ -1117,7 +1239,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let future = ctx.begin_run(Bar, ()).await;
+        let future = ctx.run(Bar, ()).spawn().await.unwrap();
         let v: i32 = future.await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(v))).await;
 
@@ -1187,13 +1309,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multiple_begin_rpc_suspends_with_multiple_awaited_ids() {
+    async fn multiple_rpc_spawn_suspends_with_multiple_awaited_ids() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("main", effects);
 
-        let _a: RemoteFuture<i32> = ctx.begin_rpc("a", &()).await;
-        let _b: RemoteFuture<i32> = ctx.begin_rpc("b", &()).await;
+        let _a = ctx.rpc::<i32>("a", &()).spawn().await.unwrap();
+        let _b = ctx.rpc::<i32>("b", &()).spawn().await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(0))).await;
 
         match outcome {
@@ -1230,13 +1352,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_run_local_and_begin_rpc_remote_in_parallel() {
+    async fn spawn_local_and_rpc_remote_in_parallel() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("main", effects);
 
-        let local_future = ctx.begin_run(Multiply, (3, 7)).await;
-        let _remote_future: RemoteFuture<i32> = ctx.begin_rpc("remote", &()).await;
+        let local_future = ctx.run(Multiply, (3, 7)).spawn().await.unwrap();
+        let _remote_future = ctx.rpc::<i32>("remote", &()).spawn().await.unwrap();
         let local_val: i32 = local_future.await.unwrap();
         let outcome = finalize_context(&ctx, Ok(serde_json::json!(local_val))).await;
 
@@ -1513,14 +1635,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_target_is_resolved_through_match_fn() {
+    async fn rpc_spawn_target_is_resolved_through_match_fn() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let match_fn: crate::context::MatchFn =
             std::sync::Arc::new(|target: &str| format!("remote://group/{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _future: crate::futures::RemoteFuture<i32> = ctx.begin_rpc("greet", &"world").await;
+        let _future = ctx.rpc::<i32>("greet", &"world").spawn().await.unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -1721,16 +1843,15 @@ mod tests {
     // ── Target override via rpc_with_opts / begin_rpc_with_opts ───
 
     #[tokio::test]
-    async fn rpc_with_opts_custom_target_overrides_func_name() {
+    async fn rpc_with_target_builder_overrides_func_name() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let match_fn: crate::context::MatchFn =
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::error::Result<i32> = ctx
-            .rpc_with_opts("my_func", &(), None, Some("custom-target"))
-            .await;
+        let _: crate::error::Result<i32> =
+            ctx.rpc::<i32>("my_func", &()).target("custom-target").await;
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -1752,14 +1873,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_with_opts_none_target_defaults_to_func_name() {
+    async fn rpc_default_target_uses_func_name() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let match_fn: crate::context::MatchFn =
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::error::Result<i32> = ctx.rpc_with_opts("my_func", &(), None, None).await;
+        let _: crate::error::Result<i32> = ctx.rpc::<i32>("my_func", &()).await;
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -1781,7 +1902,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_with_opts_url_target_passes_through() {
+    async fn rpc_with_url_target_passes_through() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
@@ -1794,12 +1915,8 @@ mod tests {
         let ctx = test_context_with_match("root", effects, match_fn);
 
         let _: crate::error::Result<i32> = ctx
-            .rpc_with_opts(
-                "my_func",
-                &(),
-                None,
-                Some("https://remote:9000/workers/foo"),
-            )
+            .rpc::<i32>("my_func", &())
+            .target("https://remote:9000/workers/foo")
             .await;
 
         let requests = harness.sent_requests().await;
@@ -1822,16 +1939,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_opts_custom_target() {
+    async fn rpc_spawn_with_target_builder() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let match_fn: crate::context::MatchFn =
             std::sync::Arc::new(|target: &str| format!("remote://{}", target));
         let ctx = test_context_with_match("root", effects, match_fn);
 
-        let _: crate::futures::RemoteFuture<i32> = ctx
-            .begin_rpc_with_opts("my_func", &(), None, Some("override-target"))
-            .await;
+        let _ = ctx
+            .rpc::<i32>("my_func", &())
+            .target("override-target")
+            .spawn()
+            .await
+            .unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -1908,14 +2028,14 @@ mod tests {
     // ── Concurrent vs Sequential execution ─────────────────────────
 
     #[tokio::test]
-    async fn concurrent_execution_begin_run_is_actually_concurrent() {
+    async fn concurrent_execution_spawn_is_actually_concurrent() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
         let start = tokio::time::Instant::now();
 
-        let f1 = ctx.begin_run(Slow, ()).await;
-        let f2 = ctx.begin_run(Fast, ()).await;
+        let f1 = ctx.run(Slow, ()).spawn().await.unwrap();
+        let f2 = ctx.run(Fast, ()).spawn().await.unwrap();
         let a: i32 = f1.await.unwrap();
         let b: i32 = f2.await.unwrap();
         let elapsed = start.elapsed();
@@ -2053,14 +2173,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_timeout_capped_to_parent_for_begin_run() {
+    async fn child_timeout_capped_to_parent_for_run_spawn() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let now = super::now_ms();
         let parent_timeout = now + 5_000;
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
-        let _future = ctx.begin_run(Bar, ()).await;
+        let _future = ctx.run(Bar, ()).spawn().await.unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -2083,14 +2203,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_timeout_capped_to_parent_for_begin_rpc() {
+    async fn child_timeout_capped_to_parent_for_rpc_spawn() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let now = super::now_ms();
         let parent_timeout = now + 5_000;
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
-        let _future: RemoteFuture<i32> = ctx.begin_rpc("remote", &()).await;
+        let _future = ctx.rpc::<i32>("remote", &()).spawn().await.unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -2122,10 +2242,7 @@ mod tests {
 
         // Request 10 seconds — smaller than parent's 60s, should be respected
         let child_timeout = std::time::Duration::from_secs(10);
-        let _: i32 = ctx
-            .run_with_timeout(Bar, (), Some(child_timeout))
-            .await
-            .unwrap();
+        let _: i32 = ctx.run(Bar, ()).timeout(child_timeout).await.unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -2162,10 +2279,7 @@ mod tests {
 
         // Request 60 seconds — exceeds parent's 5s, should be clamped
         let child_timeout = std::time::Duration::from_secs(60);
-        let _: i32 = ctx
-            .run_with_timeout(Bar, (), Some(child_timeout))
-            .await
-            .unwrap();
+        let _: i32 = ctx.run(Bar, ()).timeout(child_timeout).await.unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -2186,7 +2300,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_with_timeout_smaller_than_parent_is_respected() {
+    async fn rpc_with_timeout_builder_smaller_than_parent_is_respected() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let now = super::now_ms();
@@ -2194,9 +2308,8 @@ mod tests {
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
         let child_timeout = std::time::Duration::from_secs(10);
-        let _: crate::error::Result<i32> = ctx
-            .rpc_with_timeout("remote", &(), Some(child_timeout))
-            .await;
+        let _: crate::error::Result<i32> =
+            ctx.rpc::<i32>("remote", &()).timeout(child_timeout).await;
 
         let requests = harness.sent_requests().await;
         let create = requests
@@ -2222,7 +2335,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_timeout_exceeding_parent_is_clamped() {
+    async fn rpc_spawn_with_timeout_exceeding_parent_is_clamped() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let now = super::now_ms();
@@ -2230,9 +2343,12 @@ mod tests {
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
         let child_timeout = std::time::Duration::from_secs(60);
-        let _future: RemoteFuture<i32> = ctx
-            .begin_rpc_with_timeout("remote", &(), Some(child_timeout))
-            .await;
+        let _future = ctx
+            .rpc::<i32>("remote", &())
+            .timeout(child_timeout)
+            .spawn()
+            .await
+            .unwrap();
 
         let requests = harness.sent_requests().await;
         let create = requests
