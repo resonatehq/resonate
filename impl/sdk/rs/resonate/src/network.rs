@@ -137,6 +137,20 @@ struct ServerState {
     outgoing: Vec<OutgoingMessage>,
 }
 
+/// Extract a required non-empty string field from a JSON value.
+fn require_str<'a>(
+    obj: &'a serde_json::Value,
+    field: &str,
+) -> std::result::Result<&'a str, Error> {
+    match obj.get(field).and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => Ok(s),
+        _ => Err(Error::ServerError {
+            code: 400,
+            message: format!("missing or empty required field: {}", field),
+        }),
+    }
+}
+
 impl ServerState {
     fn new() -> Self {
         Self {
@@ -332,7 +346,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let id = require_str(req, "id")?;
         match self.promises.get(id) {
             Some(p) => Ok(serde_json::json!({
                 "kind": "promise.get", "corrId": corr_id, "status": 200,
@@ -352,10 +366,7 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let promise_data = req.get("promise").unwrap_or(req);
-        let id = promise_data
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let id = require_str(promise_data, "id")?;
 
         if let Some(existing) = self.promises.get(id) {
             return Ok(serde_json::json!({
@@ -458,7 +469,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let id = require_str(req, "id")?;
         let settle_state = req
             .get("state")
             .and_then(|v| v.as_str())
@@ -498,8 +509,8 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let awaited = req.get("awaited").and_then(|v| v.as_str()).unwrap_or("");
-        let address = req.get("address").and_then(|v| v.as_str()).unwrap_or("");
+        let awaited = require_str(req, "awaited")?;
+        let address = require_str(req, "address")?;
 
         match self.promises.get_mut(awaited) {
             Some(p) => {
@@ -528,7 +539,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
+        let pid = require_str(req, "pid")?;
         let ttl = req
             .get("ttl")
             .and_then(|v| {
@@ -537,7 +548,7 @@ impl ServerState {
             })
             .unwrap_or(60_000);
         let promise_req = req.get("promise").unwrap_or(&serde_json::Value::Null);
-        let promise_id = promise_req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let promise_id = require_str(promise_req, "id")?;
 
         // Task already exists?
         if let Some(existing_task) = self.tasks.get(promise_id) {
@@ -675,7 +686,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+        let task_id = require_str(req, "taskId")?;
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
         let ttl = req.get("ttl").and_then(|v| v.as_i64()).unwrap_or(60_000);
 
@@ -717,7 +728,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+        let task_id = require_str(req, "taskId")?;
 
         match self.tasks.get(task_id) {
             None => Ok(serde_json::json!({
@@ -753,7 +764,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+        let task_id = require_str(req, "taskId")?;
 
         match self.tasks.get(task_id) {
             None => {
@@ -816,7 +827,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+        let task_id = require_str(req, "taskId")?;
 
         match self.tasks.get(task_id) {
             None => {
@@ -906,11 +917,11 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         // Accept both single-task { taskId, pid } and multi-task { tasks: [...], pid }
-        let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
+        let pid = require_str(req, "pid")?;
 
         if let Some(tasks) = req.get("tasks").and_then(|v| v.as_array()) {
             for task_ref in tasks {
-                let id = task_ref.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id = require_str(task_ref, "id")?;
                 let version = task_ref.get("version").and_then(|v| v.as_i64());
                 if let Some(t) = self.tasks.get(id) {
                     if t.state == "acquired"
@@ -950,7 +961,11 @@ impl ServerState {
             .get("id")
             .or_else(|| req.get("name"))
             .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::ServerError {
+                code: 400,
+                message: "missing or empty required field: id".to_string(),
+            })?;
         if self.schedules.contains_key(id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,
@@ -958,13 +973,10 @@ impl ServerState {
         }
         let schedule = Schedule {
             id: id.to_string(),
-            cron: req
-                .get("cron")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
+            cron: require_str(req, "cron")?.to_string(),
             promise_id: req
                 .get("promiseId")
+                .or_else(|| req.get("promiseIdTemplate"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
@@ -991,7 +1003,15 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let id = req
+            .get("id")
+            .or_else(|| req.get("name"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::ServerError {
+                code: 400,
+                message: "missing or empty required field: id".to_string(),
+            })?;
         if self.schedules.contains_key(id) {
             Ok(serde_json::json!({
                 "kind": "schedule.get", "corrId": corr_id, "status": 200,
@@ -1012,7 +1032,11 @@ impl ServerState {
             .get("id")
             .or_else(|| req.get("name"))
             .and_then(|v| v.as_str())
-            .unwrap_or("");
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::ServerError {
+                code: 400,
+                message: "missing or empty required field: id".to_string(),
+            })?;
         self.schedules.remove(id);
         Ok(serde_json::json!({
             "kind": "schedule.delete", "corrId": corr_id, "status": 200,
