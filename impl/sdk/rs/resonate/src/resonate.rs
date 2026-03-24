@@ -459,6 +459,15 @@ impl Resonate {
             .await
     }
 
+    /// Build root-level tags for a top-level run or rpc call.
+    fn build_root_tags(id: &str, target: &str, tags: &mut HashMap<String, String>) {
+        tags.insert("resonate:origin".to_string(), id.to_string());
+        tags.insert("resonate:branch".to_string(), id.to_string());
+        tags.insert("resonate:parent".to_string(), id.to_string());
+        tags.insert("resonate:scope".to_string(), "global".to_string());
+        tags.insert("resonate:target".to_string(), target.to_string());
+    }
+
     /// Start a function execution by name and return a handle for later awaiting.
     pub async fn begin_run_by_name<T: DeserializeOwned>(
         &self,
@@ -490,11 +499,7 @@ impl Resonate {
 
         // Build tags
         let mut tags = opts.tags.clone();
-        tags.insert("resonate:origin".to_string(), prefixed_id.clone());
-        tags.insert("resonate:branch".to_string(), prefixed_id.clone());
-        tags.insert("resonate:parent".to_string(), prefixed_id.clone());
-        tags.insert("resonate:scope".to_string(), "global".to_string());
-        tags.insert("resonate:target".to_string(), opts.target.clone());
+        Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
         // Build task.create request
         let corr_id = format!("tc-{}", now_ms());
@@ -597,11 +602,7 @@ impl Resonate {
 
         // Build tags
         let mut tags = opts.tags.clone();
-        tags.insert("resonate:origin".to_string(), prefixed_id.clone());
-        tags.insert("resonate:branch".to_string(), prefixed_id.clone());
-        tags.insert("resonate:parent".to_string(), prefixed_id.clone());
-        tags.insert("resonate:scope".to_string(), "global".to_string());
-        tags.insert("resonate:target".to_string(), opts.target.clone());
+        Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
         // Build promise.create request (NOT task.create — key difference from run)
         let corr_id = format!("pc-{}", now_ms());

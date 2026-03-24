@@ -168,7 +168,7 @@ Both have three states: `Completed(Value)`, `Failed(Value)`, `Pending(...)`. The
 
 ## 5. 🟣 Code Duplication
 
-### D1. Tag building repeated in `begin_run_by_name` and `begin_rpc`
+### ✅ D1. Tag building repeated in `begin_run_by_name` and `begin_rpc`
 **File:** `resonate.rs:506-511` and `resonate.rs:613-618`
 ```rust
 // Exact same 5 lines in both methods:
