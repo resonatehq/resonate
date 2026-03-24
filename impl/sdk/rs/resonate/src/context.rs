@@ -693,13 +693,7 @@ where
     }
 }
 
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-}
+use crate::now_ms;
 
 /// Convert an Outcome reference to a sendable form for the oneshot channel.
 fn outcome_to_sendable(outcome: &Outcome) -> Outcome {

@@ -1409,13 +1409,7 @@ fn uuid_no_dashes() -> String {
     format!("{:032x}", now ^ 0xdeadbeef_cafebabe_u128)
 }
 
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-}
+use crate::now_ms;
 
 fn extract_tags(v: &serde_json::Value) -> HashMap<String, String> {
     v.get("tags")

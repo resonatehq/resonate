@@ -17,6 +17,14 @@ pub mod send;
 pub mod transport;
 pub mod types;
 
+/// Current time in milliseconds since UNIX epoch.
+pub(crate) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
 #[cfg(test)]
 mod test_utils;
 
