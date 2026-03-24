@@ -167,22 +167,22 @@ impl Context {
         id: &str,
         args: &impl Serialize,
         timeout: Option<Duration>,
-    ) -> PromiseCreateReq {
+    ) -> Result<PromiseCreateReq> {
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "local".to_string());
         tags.insert("resonate:branch".to_string(), self.branch_id.clone());
         tags.insert("resonate:parent".to_string(), self.id.clone());
         tags.insert("resonate:origin".to_string(), self.origin_id.clone());
 
-        PromiseCreateReq {
+        Ok(PromiseCreateReq {
             id: id.to_string(),
             timeout_at: self.child_timeout(timeout),
             param: Value {
                 headers: None,
-                data: Some(serde_json::to_value(args).unwrap_or(serde_json::Value::Null)),
+                data: Some(serde_json::to_value(args)?),
             },
             tags,
-        }
+        })
     }
 
     /// Build a remote create request.
@@ -196,7 +196,7 @@ impl Context {
         args: &impl Serialize,
         timeout: Option<Duration>,
         target_override: Option<&str>,
-    ) -> PromiseCreateReq {
+    ) -> Result<PromiseCreateReq> {
         let target_input = target_override.unwrap_or(func_name);
         let target = (self.match_fn)(target_input);
         let mut tags = HashMap::new();
@@ -206,18 +206,18 @@ impl Context {
         tags.insert("resonate:parent".to_string(), self.id.clone());
         tags.insert("resonate:origin".to_string(), self.origin_id.clone());
 
-        PromiseCreateReq {
+        Ok(PromiseCreateReq {
             id: id.to_string(),
             timeout_at: self.child_timeout(timeout),
             param: Value {
                 headers: None,
                 data: Some(serde_json::json!({
                     "func": func_name,
-                    "args": serde_json::to_value(args).unwrap_or(serde_json::Value::Null),
+                    "args": serde_json::to_value(args)?,
                 })),
             },
             tags,
-        }
+        })
     }
 
     /// Convert a typed Result<T> into a Result<serde_json::Value>.
@@ -258,13 +258,17 @@ impl Context {
         Args: Serialize,
     {
         let child_id = self.next_id();
-        let req = self.local_create_req(&child_id, &args, None);
+        let (req, serialization_error) = match self.local_create_req(&child_id, &args, None) {
+            Ok(req) => (req, None),
+            Err(e) => (PromiseCreateReq::default_with_id(&child_id), Some(e.to_string())),
+        };
         RunTask {
             child_id,
             ctx: self,
             func,
             args,
             req,
+            serialization_error,
             record: tokio::sync::OnceCell::new(),
             _phantom: PhantomData,
         }
@@ -288,11 +292,15 @@ impl Context {
     /// ```
     pub fn rpc<T>(&self, func: &str, args: &impl Serialize) -> RpcTask<'_, T> {
         let child_id = self.next_id();
-        let req = self.remote_create_req(&child_id, func, args, None, None);
+        let (req, serialization_error) = match self.remote_create_req(&child_id, func, args, None, None) {
+            Ok(req) => (req, None),
+            Err(e) => (PromiseCreateReq::default_with_id(&child_id), Some(e.to_string())),
+        };
         RpcTask {
             child_id,
             ctx: self,
             req,
+            serialization_error,
             record: tokio::sync::OnceCell::new(),
             _phantom: PhantomData,
         }
@@ -355,6 +363,8 @@ pub struct RunTask<'ctx, D, Args, T> {
     func: D,
     args: Args,
     req: PromiseCreateReq,
+    /// Serialization error deferred from construction (if args failed to serialize).
+    serialization_error: Option<String>,
     record: tokio::sync::OnceCell<PromiseRecord>,
     _phantom: PhantomData<fn() -> T>,
 }
@@ -383,6 +393,9 @@ where
         if let Some(record) = self.record.get() {
             return Ok(record);
         }
+        if let Some(ref err) = self.serialization_error {
+            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+        }
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
             .await
@@ -400,6 +413,9 @@ where
         Args: Serialize + DeserializeOwned + Send + 'static,
         T: Serialize + DeserializeOwned + Send + 'static,
     {
+        if let Some(ref err) = self.serialization_error {
+            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+        }
         let RunTask {
             child_id,
             ctx,
@@ -407,7 +423,7 @@ where
             args,
             req,
             record: cell,
-            _phantom,
+            ..
         } = self;
 
         // Eagerly create the promise
@@ -512,6 +528,9 @@ where
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
+            if let Some(ref err) = self.serialization_error {
+                return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            }
             let RunTask {
                 child_id,
                 ctx,
@@ -519,7 +538,7 @@ where
                 args,
                 req,
                 record: cell,
-                _phantom,
+                ..
             } = self;
 
             // Ensure promise is created, then take ownership
@@ -579,6 +598,8 @@ pub struct RpcTask<'ctx, T> {
     child_id: String,
     ctx: &'ctx Context,
     req: PromiseCreateReq,
+    /// Serialization error deferred from construction (if args failed to serialize).
+    serialization_error: Option<String>,
     record: tokio::sync::OnceCell<PromiseRecord>,
     _phantom: PhantomData<T>,
 }
@@ -616,6 +637,9 @@ impl<'ctx, T> RpcTask<'ctx, T> {
         if let Some(record) = self.record.get() {
             return Ok(record);
         }
+        if let Some(ref err) = self.serialization_error {
+            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+        }
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
             .await
@@ -627,12 +651,15 @@ impl<'ctx, T> RpcTask<'ctx, T> {
     where
         T: DeserializeOwned,
     {
+        if let Some(ref err) = self.serialization_error {
+            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+        }
         let RpcTask {
             child_id,
             ctx,
             req,
             record: cell,
-            _phantom,
+            ..
         } = self;
 
         // Eagerly create the promise
@@ -664,12 +691,15 @@ where
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
+            if let Some(ref err) = self.serialization_error {
+                return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            }
             let RpcTask {
                 child_id,
                 ctx,
                 req,
                 record: cell,
-                _phantom,
+                ..
             } = self;
 
             // Ensure promise is created, then take ownership

@@ -204,6 +204,18 @@ pub struct PromiseCreateReq {
     pub tags: HashMap<String, String>,
 }
 
+impl PromiseCreateReq {
+    /// Create a minimal placeholder request (used when serialization fails at construction time).
+    pub(crate) fn default_with_id(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            timeout_at: 0,
+            param: Value { headers: None, data: None },
+            tags: HashMap::new(),
+        }
+    }
+}
+
 /// Request to settle a durable promise (`promise.settle` data payload).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromiseSettleReq {

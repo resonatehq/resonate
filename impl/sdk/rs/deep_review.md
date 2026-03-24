@@ -109,7 +109,7 @@ This is an anti-pattern. A `start()` method would be cleaner.
 
 ---
 
-### C5. `serde_json::to_value(args).unwrap_or(Null)` silently swallows errors
+### ✅ C5. `serde_json::to_value(args).unwrap_or(Null)` silently swallows errors
 **File:** `context.rs:193, 211`
 ```rust
 data: Some(serde_json::to_value(args).unwrap_or(serde_json::Value::Null)),
