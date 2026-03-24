@@ -420,7 +420,7 @@ impl ServerState {
             let delay = tags
                 .get("resonate:delay")
                 .and_then(|d| d.parse::<i64>().ok());
-            let deferred = delay.map_or(false, |d| now < d);
+            let deferred = delay.is_some_and(|d| now < d);
 
             let task = Task {
                 id: id.to_string(),
@@ -784,7 +784,7 @@ impl ServerState {
         let was_pending = self
             .promises
             .get(promise_id)
-            .map_or(false, |p| p.state == "pending");
+            .is_some_and(|p| p.state == "pending");
         if was_pending {
             if let Some(p) = self.promises.get_mut(promise_id) {
                 p.state = settle_state.to_string();
@@ -836,7 +836,7 @@ impl ServerState {
         let has_resumes = self
             .tasks
             .get(task_id)
-            .map_or(false, |t| !t.resumes.is_empty());
+            .is_some_and(|t| !t.resumes.is_empty());
         if has_resumes {
             if let Some(t) = self.tasks.get_mut(task_id) {
                 t.resumes.clear();
@@ -915,7 +915,7 @@ impl ServerState {
                 if let Some(t) = self.tasks.get(id) {
                     if t.state == "acquired"
                         && t.pid.as_deref() == Some(pid)
-                        && version.map_or(true, |v| v == t.version)
+                        && version.is_none_or(|v| v == t.version)
                     {
                         let ttl = t.ttl.unwrap_or(30_000);
                         self.set_t_timeout(id, 1, now.saturating_add(ttl));
@@ -1028,7 +1028,7 @@ impl ServerState {
         let should_timeout = self
             .promises
             .get(id)
-            .map_or(false, |p| p.state == "pending" && now >= p.timeout_at);
+            .is_some_and(|p| p.state == "pending" && now >= p.timeout_at);
         if !should_timeout {
             return;
         }
@@ -1055,7 +1055,7 @@ impl ServerState {
                 let has_target = self
                     .promises
                     .get(promise_id)
-                    .map_or(false, |p| p.tags.contains_key("resonate:target"));
+                    .is_some_and(|p| p.tags.contains_key("resonate:target"));
                 if has_target {
                     self.tasks.insert(
                         promise_id.to_string(),
@@ -1172,16 +1172,15 @@ impl ServerState {
             .values()
             .filter(|p| {
                 p.id != promise_id
-                    && p.tags
-                        .get("resonate:branch")
-                        .map_or(false, |b| b == &branch)
+                    && (p.tags
+                        .get("resonate:branch") == Some(&branch))
             })
             .map(|p| p.to_record())
             .collect()
     }
 
     fn timeout_state(&self, tags: &HashMap<String, String>) -> String {
-        if tags.get("resonate:timer").map_or(false, |v| v == "true") {
+        if tags.get("resonate:timer").is_some_and(|v| v == "true") {
             "resolved".to_string()
         } else {
             "rejected_timedout".to_string()
