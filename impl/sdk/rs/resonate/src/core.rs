@@ -56,17 +56,6 @@ impl Core {
         }
     }
 
-    /// Clone a reference to this Core for spawning into background tasks.
-    pub fn clone_core_ref(&self) -> Arc<Core> {
-        Arc::new(Core {
-            send: self.send.clone(),
-            codec: self.codec.clone(),
-            registry: self.registry.clone(),
-            match_fn: self.match_fn.clone(),
-            heartbeat: self.heartbeat.clone(),
-        })
-    }
-
     // ═══════════════════════════════════════════════════════════════
     //  Path 1: on_message — acquires the task, then executes
     // ═══════════════════════════════════════════════════════════════

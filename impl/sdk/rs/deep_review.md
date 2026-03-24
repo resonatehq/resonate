@@ -137,7 +137,7 @@ The `Resonate` struct bypasses the `send::Request` type system entirely, constru
 
 ---
 
-### T5. `Core::clone_core_ref` manually clones each field
+### ✅ T5. `Core::clone_core_ref` manually clones each field
 **File:** `core.rs:61-68`
 ```rust
 pub fn clone_core_ref(&self) -> Arc<Core> {
