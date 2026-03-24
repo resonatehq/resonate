@@ -374,7 +374,7 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::Codec;
+    use crate::codec::{Codec, NoopEncryptor};
     use crate::error::{Error, Result};
     use crate::heartbeat::NoopHeartbeat;
     use crate::registry::Registry;
@@ -383,6 +383,10 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::RwLock;
+
+    fn noop_codec() -> Codec {
+        Codec::new(Arc::new(NoopEncryptor))
+    }
 
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(send: SendFn, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
@@ -468,7 +472,7 @@ mod tests {
 
     /// Helper: create an encoded root promise for a task.
     fn make_root_promise(id: &str, func: &str, args: serde_json::Value) -> PromiseRecord {
-        let codec = Codec;
+        let codec = noop_codec();
         let param_data = serde_json::json!({"func": func, "args": args});
         PromiseRecord {
             id: id.to_string(),
@@ -495,7 +499,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -522,7 +526,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -549,7 +553,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -580,7 +584,7 @@ mod tests {
         let registry = Registry::new();
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
 
@@ -601,7 +605,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -632,7 +636,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -672,7 +676,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -716,7 +720,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -762,7 +766,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -797,7 +801,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let status = core.on_message("task1").await.unwrap();
@@ -822,7 +826,7 @@ mod tests {
         let registry = Registry::new();
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
 
@@ -841,7 +845,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let status = core.on_message("task1").await.unwrap();
@@ -861,10 +865,10 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-already-acquired", decoded, None)
             .await
@@ -899,10 +903,10 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-preloaded", decoded, Some(preloaded))
             .await
@@ -920,10 +924,10 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-suspend", decoded, None)
             .await
@@ -942,7 +946,7 @@ mod tests {
     #[tokio::test]
     async fn execute_until_blocked_short_circuits_on_settled_promise() {
         let harness = TestHarness::new();
-        let codec = Codec;
+        let codec = noop_codec();
         // Promise is already resolved — factory must never be called but task must be fulfilled
         let param_data = serde_json::json!({"func": "noop", "args": null});
         let root = PromiseRecord {
@@ -961,7 +965,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let decoded = codec.decode_promise(&root).unwrap();
@@ -984,7 +988,7 @@ mod tests {
     #[tokio::test]
     async fn short_circuit_resolved_promise_sends_fulfill_with_resolved_state() {
         let harness = TestHarness::new();
-        let codec = Codec;
+        let codec = noop_codec();
         let param_data = serde_json::json!({"func": "noop", "args": null});
         let root = PromiseRecord {
             id: "resolved-p".to_string(),
@@ -1002,7 +1006,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let decoded = codec.decode_promise(&root).unwrap();
@@ -1023,7 +1027,7 @@ mod tests {
     #[tokio::test]
     async fn short_circuit_rejected_promise_sends_fulfill_with_rejected_state() {
         let harness = TestHarness::new();
-        let codec = Codec;
+        let codec = noop_codec();
         let param_data = serde_json::json!({"func": "noop", "args": null});
         let err_val = serde_json::json!({"__type": "error", "message": "something failed"});
         let root = PromiseRecord {
@@ -1042,7 +1046,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let decoded = codec.decode_promise(&root).unwrap();
@@ -1070,10 +1074,10 @@ mod tests {
         let registry = Registry::new(); // empty — function not registered
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let result = core
             .execute_until_blocked("task-error", decoded, None)
             .await;
@@ -1102,7 +1106,7 @@ mod tests {
 
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         core.on_execute("task1").await.unwrap();
@@ -1135,7 +1139,7 @@ mod tests {
 
         let core1 = test_core(
             harness1.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry1)),
         );
         let status1 = core1.on_message("task1").await.unwrap();
@@ -1149,10 +1153,10 @@ mod tests {
 
         let core2 = test_core(
             harness2.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry2)),
         );
-        let decoded = Codec.decode_promise(&root2).unwrap();
+        let decoded = noop_codec().decode_promise(&root2).unwrap();
         let status2 = core2
             .execute_until_blocked("task-direct", decoded, None)
             .await
@@ -1238,11 +1242,11 @@ mod tests {
         let hb = Arc::new(TrackingHeartbeat::new());
         let core = test_core_with_heartbeat(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
             hb.clone(),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-hb", decoded, None)
             .await
@@ -1262,11 +1266,11 @@ mod tests {
         let hb = Arc::new(TrackingHeartbeat::new());
         let core = test_core_with_heartbeat(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
             hb.clone(),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let result = core
             .execute_until_blocked("task-hb-err", decoded, None)
             .await;
@@ -1291,10 +1295,10 @@ mod tests {
         // Use NoopHeartbeat (same as local mode)
         let core = test_core(
             harness.build_send_fn(),
-            Codec,
+            noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let decoded = Codec.decode_promise(&root).unwrap();
+        let decoded = noop_codec().decode_promise(&root).unwrap();
         let status = core
             .execute_until_blocked("task-noop-hb", decoded, None)
             .await

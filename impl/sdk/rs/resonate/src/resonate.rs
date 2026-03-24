@@ -7,7 +7,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::RwLock;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::codec::Codec;
+use crate::codec::{Codec, Encryptor, NoopEncryptor};
 use crate::core::Core;
 use crate::durable::Durable;
 use crate::error::{Error, Result};
@@ -47,24 +47,6 @@ pub struct ResonateConfig {
 pub struct BasicAuth {
     pub username: String,
     pub password: String,
-}
-
-/// Encryption trait for codec (default: no-op).
-pub trait Encryptor: Send + Sync {
-    fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>>;
-    fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>>;
-}
-
-/// No-op encryptor (passthrough).
-#[allow(dead_code)]
-struct NoopEncryptor;
-impl Encryptor for NoopEncryptor {
-    fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        Ok(data.to_vec())
-    }
-    fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        Ok(data.to_vec())
-    }
 }
 
 /// Subscription entry for awaiting remote promise completion.
@@ -220,7 +202,11 @@ impl Resonate {
 
         let pid = network.pid().to_string();
         let transport = Transport::new(network.clone());
-        let codec = Codec;
+        let encryptor: Arc<dyn Encryptor> = match config.encryptor {
+            Some(e) => Arc::from(e),
+            None => Arc::new(NoopEncryptor),
+        };
+        let codec = Codec::new(encryptor);
         let registry = Arc::new(RwLock::new(Registry::new()));
 
         let opts_builder = OptionsBuilder::new(network.clone(), id_prefix.clone());

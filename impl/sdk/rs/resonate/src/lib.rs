@@ -38,7 +38,8 @@ pub mod prelude {
     pub use crate::options::{Options, PartialOptions};
     pub use crate::promises::{Promises, Schedules};
     pub use crate::registry::Registry;
-    pub use crate::resonate::{BasicAuth, Encryptor, Resonate, ResonateConfig, ResonateSchedule};
+    pub use crate::codec::{Encryptor, NoopEncryptor};
+    pub use crate::resonate::{BasicAuth, Resonate, ResonateConfig, ResonateSchedule};
     pub use crate::transport::Transport;
     pub use crate::types::{DurableKind, Outcome, PromiseState};
     pub use resonate_macros::function;

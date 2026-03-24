@@ -5,12 +5,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::codec::Codec;
+use crate::codec::{Codec, NoopEncryptor};
 use crate::context::Context;
 use crate::effects::Effects;
 use crate::error;
 use crate::send::{Request, Response, SendFn};
 use crate::types::{PromiseRecord, PromiseState, SettleState, Value};
+
+fn test_codec() -> Codec {
+    Codec::new(Arc::new(NoopEncryptor))
+}
 
 /// A stub task for Core tests.
 #[derive(Clone)]
@@ -199,7 +203,7 @@ impl TestHarness {
     }
 
     pub fn build_effects(&self, preload: Vec<PromiseRecord>) -> Effects {
-        Effects::new(self.build_send_fn(), Codec, preload)
+        Effects::new(self.build_send_fn(), test_codec(), preload)
     }
 
     pub async fn sent_requests(&self) -> Vec<Request> {
@@ -208,7 +212,7 @@ impl TestHarness {
 
     /// Settle a promise in the stub directly (simulating remote completion).
     pub async fn settle_promise_in_stub(&self, id: &str, value: serde_json::Value) {
-        let codec = Codec;
+        let codec = test_codec();
         let encoded = codec.encode(&value).unwrap();
         let mut net = self.network.lock().await;
         if let Some(p) = net.promises.get_mut(id) {
@@ -235,7 +239,7 @@ impl TestHarness {
 
 /// Helper to create a pending PromiseRecord (with encoded param).
 pub fn pending_promise(id: &str) -> PromiseRecord {
-    let codec = Codec;
+    let codec = test_codec();
     PromiseRecord {
         id: id.to_string(),
         state: PromiseState::Pending,
@@ -252,7 +256,7 @@ pub fn pending_promise(id: &str) -> PromiseRecord {
 
 /// Helper to create a pending PromiseRecord with a specific param.
 pub fn pending_promise_with_param(id: &str, param: serde_json::Value) -> PromiseRecord {
-    let codec = Codec;
+    let codec = test_codec();
     PromiseRecord {
         id: id.to_string(),
         state: PromiseState::Pending,
@@ -267,7 +271,7 @@ pub fn pending_promise_with_param(id: &str, param: serde_json::Value) -> Promise
 
 /// Helper to create a resolved PromiseRecord (with encoded value).
 pub fn resolved_promise(id: &str, value: serde_json::Value) -> PromiseRecord {
-    let codec = Codec;
+    let codec = test_codec();
     PromiseRecord {
         id: id.to_string(),
         state: PromiseState::Resolved,
@@ -283,7 +287,7 @@ pub fn resolved_promise(id: &str, value: serde_json::Value) -> PromiseRecord {
 /// Helper to create a rejected PromiseRecord (with encoded error value).
 #[allow(dead_code)]
 pub fn rejected_promise(id: &str, message: &str) -> PromiseRecord {
-    let codec = Codec;
+    let codec = test_codec();
     let err_val = serde_json::json!({"__type": "error", "message": message});
     PromiseRecord {
         id: id.to_string(),

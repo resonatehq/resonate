@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::de::DeserializeOwned;
@@ -6,14 +8,43 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::types::{PromiseRecord, Value};
 
+/// Encryption trait for codec (default: no-op).
+pub trait Encryptor: Send + Sync {
+    fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>>;
+    fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>>;
+}
+
+/// No-op encryptor (passthrough).
+pub struct NoopEncryptor;
+impl Encryptor for NoopEncryptor {
+    fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
+    }
+    fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        Ok(data.to_vec())
+    }
+}
+
 /// Handles encoding/decoding of values for the durability boundary.
 ///
-/// Encode: Rust value → JSON → base64 → Value { headers, data }
-/// Decode: Value { headers, data } → base64 → JSON → Rust value
-#[derive(Debug, Clone)]
-pub struct Codec;
+/// Encode: Rust value → JSON → encrypt → base64 → Value { headers, data }
+/// Decode: Value { headers, data } → base64 → decrypt → JSON → Rust value
+#[derive(Clone)]
+pub struct Codec {
+    encryptor: Arc<dyn Encryptor>,
+}
+
+impl std::fmt::Debug for Codec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Codec").finish()
+    }
+}
 
 impl Codec {
+    pub fn new(encryptor: Arc<dyn Encryptor>) -> Self {
+        Self { encryptor }
+    }
+
     /// Encode a serializable value into the wire format.
     pub fn encode(&self, value: &impl Serialize) -> Result<Value> {
         let json_val = serde_json::to_value(value)?;
@@ -24,7 +55,8 @@ impl Codec {
             });
         }
         let json_str = serde_json::to_string(&json_val)?;
-        let b64 = BASE64.encode(json_str.as_bytes());
+        let encrypted = self.encryptor.encrypt(json_str.as_bytes())?;
+        let b64 = BASE64.encode(&encrypted);
         Ok(Value {
             headers: None,
             data: Some(serde_json::Value::String(b64)),
@@ -41,7 +73,8 @@ impl Codec {
             _ => return Err(Error::DecodingError("expected string or null data".into())),
         };
         let bytes = BASE64.decode(s)?;
-        let json_str = String::from_utf8(bytes)?;
+        let decrypted = self.encryptor.decrypt(&bytes)?;
+        let json_str = String::from_utf8(decrypted)?;
         let decoded: T = serde_json::from_str(&json_str)?;
         Ok(Some(decoded))
     }
@@ -120,7 +153,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn codec() -> Codec {
-        Codec
+        Codec::new(Arc::new(NoopEncryptor))
     }
 
     // ── encode/decode roundtrip for primitives ──────────────────────
