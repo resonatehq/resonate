@@ -53,9 +53,5 @@ pub trait Durable<Args, T>: Send + Sync + 'static {
     ///
     /// The `env` parameter provides either a `Context` (for workflows) or
     /// an `Info` (for leaf functions). Pure leaf functions may ignore it.
-    fn execute(
-        &self,
-        env: ExecutionEnv<'_>,
-        args: Args,
-    ) -> impl Future<Output = Result<T>> + Send;
+    fn execute(&self, env: ExecutionEnv<'_>, args: Args) -> impl Future<Output = Result<T>> + Send;
 }
