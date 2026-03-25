@@ -44,33 +44,6 @@ The method checks `subs.get_mut(&id)` for a pre-existing notification, then inse
 
 ---
 
-### T1. `Durable` trait uses `Option<&Context>` + `Option<&Info>` — should be an enum
-**File:** `durable.rs:27-31`
-```rust
-fn execute(&self, ctx: Option<&Context>, info: Option<&Info>, args: Args) -> ...;
-```
-In practice: workflows always get `(Some(ctx), None)`, leaves get `(None, Some(info))` or `(None, None)`. This is a **boolean blindness** anti-pattern. Better:
-```rust
-enum ExecutionContext<'a> {
-    Workflow(&'a Context),
-    Leaf(Option<&'a Info>),
-}
-```
-
----
-
-### T2. `SendFn` type alias is extremely complex
-**File:** `send.rs:133-134`
-```rust
-pub type SendFn = Arc<
-    dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>>
-    + Send + Sync
->;
-```
-This could be an `async_trait`-based trait, which would be far more readable and allow `impl Send` bounds naturally.
-
----
-
 ### D2. Promise state matching repeated ~6 times
 The pattern:
 ```rust
@@ -131,9 +104,3 @@ Users importing the prelude get types that don't actually work.
 ### A3. No graceful shutdown story
 `Resonate::stop()` aborts background tasks. There's no drain period, no waiting for in-flight operations, no `Drop` implementation. If the Resonate struct is dropped without calling `stop()`, background tasks are leaked.
 
----
-
-### A4. `Context` doesn't implement `Clone` or `Send` explicitly
-The `unsafe impl Sync` hack is needed because Context is shared across async task boundaries. A redesign where Context operations go through a channel to a single owner would be safer and eliminate the unsafe.
-
----

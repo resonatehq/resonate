@@ -3,10 +3,10 @@ use tokio::io::AsyncWriteExt;
 
 // A simple "hello world" leaf function that takes a name and returns a greeting.
 #[resonate::function(name = "hello")]
-async fn hello(name: String) -> Result<String> {
+async fn hello(greeting: String, name: String) -> Result<String> {
     let mut stdout = tokio::io::stdout();
     stdout
-        .write_all(format!("hello {name} from tokio::stdout\n").as_bytes())
+        .write_all(format!("{greeting} {name} from tokio::stdout\n").as_bytes())
         .await?;
     Ok(format!("Hello, {}!", name))
 }
@@ -23,12 +23,12 @@ async fn shout(message: String) -> Result<String> {
 async fn hello_workflow(ctx: &Context, names: (String, String)) -> Result<String> {
     let (greeting1, greeting2) = tokio::join!(
         ctx.rpc::<String>("hello", &names.0),
-        ctx.run(Hello, names.1),
+        ctx.run(hello, ("hello".to_string(), names.1.to_string())),
     );
     let greeting1: String = greeting1?;
     let greeting2: String = greeting2?;
     let shouted: String = ctx
-        .run(Shout, format!("{} and {}", greeting1, greeting2))
+        .run(shout, format!("{} and {}", greeting1, greeting2))
         .await?;
     Ok(shouted)
 }
@@ -42,13 +42,13 @@ async fn main() {
     let resonate = Resonate::local(None);
 
     // Register all functions.
-    resonate.register(Hello).unwrap();
-    resonate.register(Shout).unwrap();
-    resonate.register(HelloWorkflow).unwrap();
+    resonate.register(hello).unwrap();
+    resonate.register(shout).unwrap();
+    resonate.register(hello_workflow).unwrap();
 
     // Call the shout function.
     let result: String = resonate
-        .run("shout-1", Shout, "hello world".to_string(), None)
+        .run("shout-1", shout, "hello world".to_string(), None)
         .await
         .expect("shout failed");
     println!("{}", result);
@@ -57,7 +57,7 @@ async fn main() {
     let result: String = resonate
         .run(
             "hello-workflow-1",
-            HelloWorkflow,
+            hello_workflow,
             ("Alice".to_string(), "Bob".to_string()),
             None,
         )

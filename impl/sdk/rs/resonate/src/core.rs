@@ -469,7 +469,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(Add).unwrap();
+        registry.register(add).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -495,7 +495,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(Fail).unwrap();
+        registry.register(fail).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -521,7 +521,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(Obj).unwrap();
+        registry.register(obj).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -571,7 +571,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(SuspendingMulti).unwrap();
+        registry.register(suspending_multi).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -600,7 +600,7 @@ mod tests {
         COMP_COUNT.store(0, AtomicOrdering::SeqCst);
 
         let mut registry = Registry::new();
-        registry.register(SuspendingThenDone).unwrap();
+        registry.register(suspending_then_done).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -640,7 +640,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(RedirNoAcquire).unwrap();
+        registry.register(redir_no_acquire).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -684,7 +684,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(RedirPreload).unwrap();
+        registry.register(redir_preload).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -725,7 +725,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(MultiRedirect).unwrap();
+        registry.register(multi_redirect).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -760,7 +760,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(Simple).unwrap();
+        registry.register(simple).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -802,7 +802,7 @@ mod tests {
         harness.add_task("task1", root, vec![]).await;
 
         let mut registry = Registry::new();
-        registry.register(SuspendingOnce).unwrap();
+        registry.register(suspending_once).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -822,7 +822,7 @@ mod tests {
         let root = make_root_promise("p1", "add", serde_json::json!([10, 20]));
 
         let mut registry = Registry::new();
-        registry.register(Add).unwrap();
+        registry.register(add).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -853,7 +853,7 @@ mod tests {
         let root = make_root_promise("p1", "use_preload", serde_json::json!(null));
 
         let mut registry = Registry::new();
-        registry.register(UsePreload).unwrap();
+        registry.register(use_preload).unwrap();
 
         // Child promise "p1.0" is preloaded as resolved — rpc won't suspend
         let preloaded = vec![resolved_promise("p1.0", serde_json::json!(99))];
@@ -877,7 +877,7 @@ mod tests {
         let root = make_root_promise("p1", "remote_dep", serde_json::json!(null));
 
         let mut registry = Registry::new();
-        registry.register(RemoteDep).unwrap();
+        registry.register(remote_dep).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -916,7 +916,7 @@ mod tests {
         };
 
         let mut registry = Registry::new();
-        registry.register(Noop).unwrap();
+        registry.register(noop).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -955,7 +955,7 @@ mod tests {
         };
 
         let mut registry = Registry::new();
-        registry.register(Noop).unwrap();
+        registry.register(noop).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -994,7 +994,7 @@ mod tests {
         };
 
         let mut registry = Registry::new();
-        registry.register(Noop).unwrap();
+        registry.register(noop).unwrap();
 
         let core = test_core(
             harness.build_sender(),
@@ -1052,7 +1052,7 @@ mod tests {
         harness1.add_task("task1", root1.clone(), vec![]).await;
 
         let mut registry1 = Registry::new();
-        registry1.register(Double).unwrap();
+        registry1.register(double).unwrap();
 
         let core1 = test_core(
             harness1.build_sender(),
@@ -1066,7 +1066,7 @@ mod tests {
         let root2 = make_root_promise("p1", "double", serde_json::json!(5));
 
         let mut registry2 = Registry::new();
-        registry2.register(Double).unwrap();
+        registry2.register(double).unwrap();
 
         let core2 = test_core(
             harness2.build_sender(),
@@ -1155,7 +1155,7 @@ mod tests {
         let root = make_root_promise("p1", "simple", serde_json::json!(null));
 
         let mut registry = Registry::new();
-        registry.register(Simple).unwrap();
+        registry.register(simple).unwrap();
 
         let hb = Arc::new(TrackingHeartbeat::new());
         let core = test_core_with_heartbeat(
@@ -1208,7 +1208,7 @@ mod tests {
         let root = make_root_promise("p1", "add", serde_json::json!([5, 10]));
 
         let mut registry = Registry::new();
-        registry.register(Add).unwrap();
+        registry.register(add).unwrap();
 
         // Use NoopHeartbeat (same as local mode)
         let core = test_core(

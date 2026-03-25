@@ -931,18 +931,18 @@ mod tests {
     #[tokio::test]
     async fn register_function_by_name() {
         let r = Resonate::local(None);
-        r.register(Add).unwrap();
+        r.register(add).unwrap();
 
         // Verify function is registered (begin_run won't fail with FunctionNotFound)
-        let result = r.begin_run("test-id", Add, (1i64, 2i64), None).await;
+        let result = r.begin_run("test-id", add, (1i64, 2i64), None).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn register_duplicate_function_returns_error() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
-        let err = r.register(Noop);
+        r.register(noop).unwrap();
+        let err = r.register(noop);
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("already registered"));
     }
@@ -954,9 +954,9 @@ mod tests {
     #[tokio::test]
     async fn begin_run_returns_handle_for_registered_function() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let handle = r.begin_run("greet-1", Noop, (), None).await;
+        let handle = r.begin_run("greet-1", noop, (), None).await;
         assert!(handle.is_ok());
         assert_eq!(handle.unwrap().id, "greet-1");
     }
@@ -981,18 +981,18 @@ mod tests {
             pid: Some("default".into()),
             ..Default::default()
         });
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", Noop, (), None).await.unwrap();
+        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
         assert_eq!(handle.id, "app:my-id");
     }
 
     #[tokio::test]
     async fn begin_run_creates_task_and_promise() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let _handle = r.begin_run("task-1", Noop, (), None).await.unwrap();
+        let _handle = r.begin_run("task-1", noop, (), None).await.unwrap();
 
         // The promise should exist in the local network — we can verify via get
         let get_handle = r.get::<()>("task-1").await;
@@ -1002,13 +1002,13 @@ mod tests {
     #[tokio::test]
     async fn begin_run_idempotent_same_id_returns_existing_promise() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let h1 = r.begin_run("same-id", Noop, (), None).await;
+        let h1 = r.begin_run("same-id", noop, (), None).await;
         assert!(h1.is_ok());
 
         // Second call with same ID should not fail (idempotent: 409 handled)
-        let h2 = r.begin_run("same-id", Noop, (), None).await;
+        let h2 = r.begin_run("same-id", noop, (), None).await;
         assert!(h2.is_ok());
         assert_eq!(h2.unwrap().id, "same-id");
     }
@@ -1016,7 +1016,7 @@ mod tests {
     #[tokio::test]
     async fn begin_run_sets_correct_tags() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let custom_opts = PartialOptions {
             tags: Some({
@@ -1027,21 +1027,21 @@ mod tests {
             ..Default::default()
         };
 
-        let handle = r.begin_run("tag-test", Noop, (), Some(custom_opts)).await;
+        let handle = r.begin_run("tag-test", noop, (), Some(custom_opts)).await;
         assert!(handle.is_ok());
     }
 
     #[tokio::test]
     async fn begin_run_with_custom_timeout() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let opts = PartialOptions {
             timeout: Some(Duration::from_secs(300)),
             ..Default::default()
         };
 
-        let handle = r.begin_run("timeout-test", Noop, (), Some(opts)).await;
+        let handle = r.begin_run("timeout-test", noop, (), Some(opts)).await;
         assert!(handle.is_ok());
     }
 
@@ -1372,9 +1372,9 @@ mod tests {
     #[tokio::test]
     async fn no_prefix_leaves_id_unchanged() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", Noop, (), None).await.unwrap();
+        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
         assert_eq!(handle.id, "my-id");
     }
 
@@ -1384,9 +1384,9 @@ mod tests {
             prefix: Some("prefix".into()),
             ..Default::default()
         });
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", Noop, (), None).await.unwrap();
+        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
         assert_eq!(handle.id, "prefix:my-id");
     }
 
@@ -1396,10 +1396,10 @@ mod tests {
             prefix: Some("p".into()),
             ..Default::default()
         });
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         // begin_run with prefix
-        let h1 = r.begin_run("id1", Noop, (), None).await.unwrap();
+        let h1 = r.begin_run("id1", noop, (), None).await.unwrap();
         assert_eq!(h1.id, "p:id1");
 
         // begin_rpc with prefix
@@ -1450,9 +1450,9 @@ mod tests {
     #[tokio::test]
     async fn handle_id_matches_requested_id() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let handle = r.begin_run("handle-test", Noop, (), None).await.unwrap();
+        let handle = r.begin_run("handle-test", noop, (), None).await.unwrap();
         assert_eq!(handle.id, "handle-test");
     }
 
@@ -1473,11 +1473,11 @@ mod tests {
     #[tokio::test]
     async fn multiple_begin_runs_with_different_ids() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let h1 = r.begin_run("m1", Noop, (), None).await;
-        let h2 = r.begin_run("m2", Noop, (), None).await;
-        let h3 = r.begin_run("m3", Noop, (), None).await;
+        let h1 = r.begin_run("m1", noop, (), None).await;
+        let h2 = r.begin_run("m2", noop, (), None).await;
+        let h3 = r.begin_run("m3", noop, (), None).await;
 
         assert!(h1.is_ok());
         assert!(h2.is_ok());
@@ -1490,9 +1490,9 @@ mod tests {
     #[tokio::test]
     async fn mixed_run_and_rpc_operations() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
-        let local_h = r.begin_run("local-1", Noop, (), None).await;
+        let local_h = r.begin_run("local-1", noop, (), None).await;
         let remote_h = r
             .begin_rpc::<serde_json::Value>("remote-1", "remote-fn", serde_json::json!(null), None)
             .await;
@@ -1592,7 +1592,7 @@ mod tests {
     #[tokio::test]
     async fn begin_rpc_with_url_target_passes_through_unchanged() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         // Use a URL as the target option — should NOT be rewritten by network.match
         let opts = PartialOptions {
@@ -1628,7 +1628,7 @@ mod tests {
     #[tokio::test]
     async fn begin_run_by_name_with_custom_target() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let opts = PartialOptions {
             target: Some("my-target".into()),
@@ -1662,7 +1662,7 @@ mod tests {
     #[tokio::test]
     async fn begin_run_by_name_default_target_uses_network_match() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let _handle = r
             .begin_run_by_name::<serde_json::Value>(
@@ -1690,7 +1690,7 @@ mod tests {
     #[tokio::test]
     async fn begin_run_by_name_url_target_passes_through() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let opts = PartialOptions {
             target: Some("https://remote:9000/workers/noop".into()),
@@ -1723,7 +1723,7 @@ mod tests {
     #[tokio::test]
     async fn begin_rpc_with_no_target_uses_default() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let handle = r
             .begin_rpc::<serde_json::Value>(
@@ -1752,7 +1752,7 @@ mod tests {
     #[tokio::test]
     async fn begin_rpc_with_bare_name_target_gets_rewritten() {
         let r = Resonate::local(None);
-        r.register(Noop).unwrap();
+        r.register(noop).unwrap();
 
         let opts = PartialOptions {
             target: Some("noop".into()),

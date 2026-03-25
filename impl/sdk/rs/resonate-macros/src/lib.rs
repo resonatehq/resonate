@@ -26,7 +26,9 @@ fn resonate_crate() -> TokenStream2 {
 /// - `&Info` → Leaf with metadata
 /// - anything else → Pure leaf
 ///
-/// Generates a unit struct implementing the `Durable` trait.
+/// Generates a PascalCase unit struct implementing `Durable`, plus a
+/// lowercase const alias matching the original function name. The original
+/// function is consumed — its body is inlined into the `Durable::execute` impl.
 ///
 /// # Examples
 ///
@@ -36,8 +38,14 @@ fn resonate_crate() -> TokenStream2 {
 ///
 /// #[resonate::function]
 /// async fn my_workflow(ctx: &Context, x: i32) -> Result<i32> {
-///     ctx.run(MyLeaf, x).await
+///     ctx.run(my_leaf, x).await
 /// }
+///
+/// // Both lowercase const and PascalCase struct work:
+/// ctx.run(my_leaf, 42).await     // preferred
+/// ctx.run(MyLeaf, 42).await      // also works
+/// resonate.register(my_leaf)     // preferred
+/// resonate.register(MyLeaf)      // also works
 /// ```
 #[proc_macro_attribute]
 pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -155,19 +163,27 @@ fn generate_durable_impl(
         FunctionKind::Workflow => quote! { #krate::types::DurableKind::Workflow },
     };
 
-    // Generate the execute body based on kind
+    // Extract the function body and any attributes (e.g. #[allow(...)])
+    let fn_body = &input.block;
+    let fn_attrs = &input.attrs;
+
+    // Generate the execute body based on kind.
+    // Instead of delegating to the original function, we inline the body directly.
+    // We destructure the `args` tuple and set up `ctx`/`info` bindings as needed.
     let execute_body = match kind {
         FunctionKind::PureLeaf => {
             let ignore_env = quote! { let _ = env; };
             if arg_names.is_empty() {
                 quote! {
                     #ignore_env
-                    #fn_name().await
+                    async move #fn_body .await
                 }
             } else if arg_names.len() == 1 {
+                let name = &arg_names[0];
                 quote! {
                     #ignore_env
-                    #fn_name(args).await
+                    let #name = args;
+                    async move #fn_body .await
                 }
             } else {
                 let destructure: Vec<_> = arg_names
@@ -181,7 +197,7 @@ fn generate_durable_impl(
                 quote! {
                     #ignore_env
                     #(#destructure)*
-                    #fn_name(#(#arg_names),*).await
+                    async move #fn_body .await
                 }
             }
         }
@@ -189,10 +205,17 @@ fn generate_durable_impl(
             let info_unwrap = quote! {
                 let info = env.into_info();
             };
-            if arg_names.len() == 1 {
+            if arg_names.is_empty() {
                 quote! {
                     #info_unwrap
-                    #fn_name(info, args).await
+                    async move #fn_body .await
+                }
+            } else if arg_names.len() == 1 {
+                let name = &arg_names[0];
+                quote! {
+                    #info_unwrap
+                    let #name = args;
+                    async move #fn_body .await
                 }
             } else {
                 let destructure: Vec<_> = arg_names
@@ -206,7 +229,7 @@ fn generate_durable_impl(
                 quote! {
                     #info_unwrap
                     #(#destructure)*
-                    #fn_name(info, #(#arg_names),*).await
+                    async move #fn_body .await
                 }
             }
         }
@@ -214,10 +237,17 @@ fn generate_durable_impl(
             let ctx_unwrap = quote! {
                 let ctx = env.into_context();
             };
-            if arg_names.len() == 1 {
+            if arg_names.is_empty() {
                 quote! {
                     #ctx_unwrap
-                    #fn_name(ctx, args).await
+                    async move #fn_body .await
+                }
+            } else if arg_names.len() == 1 {
+                let name = &arg_names[0];
+                quote! {
+                    #ctx_unwrap
+                    let #name = args;
+                    async move #fn_body .await
                 }
             } else {
                 let destructure: Vec<_> = arg_names
@@ -231,21 +261,26 @@ fn generate_durable_impl(
                 quote! {
                     #ctx_unwrap
                     #(#destructure)*
-                    #fn_name(ctx, #(#arg_names),*).await
+                    async move #fn_body .await
                 }
             }
         }
     };
 
+    let internal_struct_name = format_ident!("__Durable_{}", struct_name);
+
     let output = quote! {
-        // Keep the original function
-        #input
-
-        /// Generated durable function struct for `#fn_name`.
+        /// Generated durable function struct (internal — use the const `#fn_name` instead).
+        #(#fn_attrs)*
         #[derive(Debug, Clone, Copy)]
-        #vis struct #struct_name;
+        #[doc(hidden)]
+        #vis struct #internal_struct_name;
 
-        impl #krate::durable::Durable<#args_type, #return_type> for #struct_name {
+        /// Durable function handle. Use with `ctx.run(#fn_name, args)` or `resonate.register(#fn_name)`.
+        #[allow(non_upper_case_globals)]
+        #vis const #fn_name: #internal_struct_name = #internal_struct_name;
+
+        impl #krate::durable::Durable<#args_type, #return_type> for #internal_struct_name {
             const NAME: &'static str = #registered_name;
             const KIND: #krate::types::DurableKind = #kind_token;
 
