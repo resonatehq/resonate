@@ -195,7 +195,8 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
         });
 
         let resp = self.transport.send(req).await?;
-        let promise = resp.get("promise").cloned().unwrap_or_default();
+        let rdata = crate::transport::response_data(&resp);
+        let promise = rdata.get("promise").cloned().unwrap_or_default();
         Ok(promise)
     }
 

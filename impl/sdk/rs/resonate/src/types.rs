@@ -116,6 +116,26 @@ pub struct PromiseRecord {
     pub settled_at: Option<i64>,
 }
 
+/// The state of a task.
+///
+/// Mirrors the TS type:
+/// ```ts
+/// state: "pending" | "acquired" | "suspended" | "halted" | "fulfilled"
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskState {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "acquired")]
+    Acquired,
+    #[serde(rename = "suspended")]
+    Suspended,
+    #[serde(rename = "halted")]
+    Halted,
+    #[serde(rename = "fulfilled")]
+    Fulfilled,
+}
+
 /// A task record as returned by the server.
 ///
 /// Mirrors the TS type:
@@ -132,7 +152,7 @@ pub struct PromiseRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,
-    pub state: String,
+    pub state: TaskState,
     pub version: i64,
     /// Resumes can be an array of strings, a number, or a boolean.
     #[serde(default)]

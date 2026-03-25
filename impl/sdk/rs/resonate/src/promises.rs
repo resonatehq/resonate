@@ -22,7 +22,8 @@ impl Promises {
 
         let resp = self.transport.send(req).await?;
         check_status(&resp)?;
-        Ok(resp.get("promise").cloned().unwrap_or_default())
+        let rdata = crate::transport::response_data(&resp);
+        Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
     /// Create a promise.
@@ -45,7 +46,8 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        Ok(resp.get("promise").cloned().unwrap_or_default())
+        let rdata = crate::transport::response_data(&resp);
+        Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
     /// Settle (resolve or reject) a promise.
@@ -64,7 +66,8 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        Ok(resp.get("promise").cloned().unwrap_or_default())
+        let rdata = crate::transport::response_data(&resp);
+        Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
     /// Register a listener on a promise.
@@ -81,7 +84,8 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        Ok(resp.get("promise").cloned().unwrap_or_default())
+        let rdata = crate::transport::response_data(&resp);
+        Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 }
 
@@ -145,11 +149,12 @@ impl Schedules {
 }
 
 fn check_status(resp: &serde_json::Value) -> Result<()> {
-    let status = resp.get("status").and_then(|s| s.as_u64()).unwrap_or(200);
+    let status = crate::transport::response_status(resp);
     if status >= 400 {
-        let error_msg = resp
-            .get("error")
-            .and_then(|e| e.as_str())
+        let rdata = crate::transport::response_data(resp);
+        let error_msg = rdata
+            .as_str()
+            .or_else(|| rdata.get("error").and_then(|e| e.as_str()))
             .unwrap_or("unknown error");
         return Err(Error::ServerError {
             code: status as u16,

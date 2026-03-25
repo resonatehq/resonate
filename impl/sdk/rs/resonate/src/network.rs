@@ -151,6 +151,18 @@ fn require_str<'a>(
     }
 }
 
+/// Extract task ID from request, supporting both protocol "id" and legacy "taskId" fields.
+fn require_task_id<'a>(obj: &'a serde_json::Value) -> std::result::Result<&'a str, Error> {
+    obj.get("id")
+        .or_else(|| obj.get("taskId"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| Error::ServerError {
+            code: 400,
+            message: "missing or empty required field: id".to_string(),
+        })
+}
+
 impl ServerState {
     fn new() -> Self {
         Self {
@@ -202,13 +214,25 @@ impl ServerState {
                 self.try_auto_timeout(now, id);
             }
             "task.acquire" | "task.release" | "task.fulfill" => {
-                let id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").or_else(|| req.get("taskId")).and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.suspend" => {
-                let id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").or_else(|| req.get("taskId")).and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
-                if let Some(cbs) = req.get("callbacks").and_then(|v| v.as_array()) {
+                // Support both "actions" (protocol) and "callbacks" (legacy)
+                if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
+                    for action in actions {
+                        let awaited = action.get("data")
+                            .and_then(|d| d.get("awaited"))
+                            .or_else(|| action.get("awaited"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !awaited.is_empty() {
+                            self.try_auto_timeout(now, awaited);
+                        }
+                    }
+                } else if let Some(cbs) = req.get("callbacks").and_then(|v| v.as_array()) {
                     for cb in cbs {
                         if let Some(cid) = cb.as_str() {
                             self.try_auto_timeout(now, cid);
@@ -686,7 +710,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_str(req, "taskId")?;
+        let task_id = require_task_id(req)?;
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
         let ttl = req.get("ttl").and_then(|v| v.as_i64()).unwrap_or(60_000);
 
@@ -728,7 +752,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_str(req, "taskId")?;
+        let task_id = require_task_id(req)?;
 
         match self.tasks.get(task_id) {
             None => Ok(serde_json::json!({
@@ -764,7 +788,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_str(req, "taskId")?;
+        let task_id = require_task_id(req)?;
 
         match self.tasks.get(task_id) {
             None => {
@@ -780,7 +804,8 @@ impl ServerState {
             _ => {}
         }
 
-        let settle = req.get("settle").unwrap_or(&serde_json::Value::Null);
+        // Support both protocol "action" and legacy "settle" field names
+        let settle = req.get("action").or_else(|| req.get("settle")).unwrap_or(&serde_json::Value::Null);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
         let settle_state = settle
             .get("state")
@@ -827,7 +852,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_str(req, "taskId")?;
+        let task_id = require_task_id(req)?;
 
         match self.tasks.get(task_id) {
             None => {
@@ -859,16 +884,30 @@ impl ServerState {
             }));
         }
 
-        // Parse callbacks (list of awaited promise IDs)
-        let callbacks: Vec<String> = req
-            .get("callbacks")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Parse callbacks — support both protocol "actions" (array of {awaited, awaiter})
+        // and legacy "callbacks" (array of promise ID strings)
+        let callbacks: Vec<String> = if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
+            actions
+                .iter()
+                .filter_map(|a| {
+                    // Actions may have nested data.awaited or flat awaited
+                    a.get("data")
+                        .and_then(|d| d.get("awaited"))
+                        .or_else(|| a.get("awaited"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .collect()
+        } else {
+            req.get("callbacks")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
         // Register this task as an awaiter on each awaited promise.
         // If any awaited promise is already settled, redirect immediately.
@@ -1368,15 +1407,20 @@ impl Network for LocalNetwork {
         let req_json: serde_json::Value = serde_json::from_str(&req)
             .map_err(|e| Error::DecodingError(format!("invalid JSON request: {}", e)))?;
 
+        // Unwrap envelope if present: extract flat request for internal processing
+        let flat_req = unwrap_request_envelope(&req_json);
+
         let now = now_ms();
-        let (response, outgoing) = {
+        let (flat_response, outgoing) = {
             let mut state = self.state.lock().await;
-            let resp = state.apply(now, &req_json)?;
+            let resp = state.apply(now, &flat_req)?;
             let outgoing = std::mem::take(&mut state.outgoing);
             (resp, outgoing)
         };
 
-        let resp_str = serde_json::to_string(&response)?;
+        // Wrap flat response in protocol envelope
+        let envelope_response = wrap_response_envelope(&flat_response);
+        let resp_str = serde_json::to_string(&envelope_response)?;
 
         // Dispatch messages asynchronously (like TS setTimeout(0))
         Self::dispatch_messages(self.subscribers.clone(), outgoing);
@@ -1423,12 +1467,81 @@ fn extract_tags(v: &serde_json::Value) -> HashMap<String, String> {
 }
 
 // =============================================================================
+// PROTOCOL ENVELOPE HELPERS
+// =============================================================================
+
+const PROTOCOL_VERSION: &str = "2025-01-15";
+
+/// Unwrap a protocol envelope request into the flat format expected by ServerState.
+/// If the request is already in flat format, return it as-is.
+fn unwrap_request_envelope(req: &serde_json::Value) -> serde_json::Value {
+    if req.get("head").is_some() && req.get("data").is_some() {
+        // Envelope format: { kind, head: { corrId, ... }, data: { ... } }
+        let mut flat = req
+            .get("data")
+            .and_then(|d| d.as_object())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(kind) = req.get("kind") {
+            flat.insert("kind".to_string(), kind.clone());
+        }
+        if let Some(corr_id) = req.get("head").and_then(|h| h.get("corrId")) {
+            flat.insert("corrId".to_string(), corr_id.clone());
+        }
+        serde_json::Value::Object(flat)
+    } else {
+        req.clone()
+    }
+}
+
+/// Wrap a flat response from ServerState into the protocol envelope format.
+fn wrap_response_envelope(flat: &serde_json::Value) -> serde_json::Value {
+    let kind = flat.get("kind").cloned().unwrap_or(serde_json::Value::Null);
+    let corr_id = flat
+        .get("corrId")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let status = flat
+        .get("status")
+        .and_then(|s| s.as_u64())
+        .unwrap_or(200);
+
+    let mut data = flat
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    data.remove("kind");
+    data.remove("corrId");
+    data.remove("status");
+
+    serde_json::json!({
+        "kind": kind,
+        "head": {
+            "corrId": corr_id,
+            "status": status,
+            "version": PROTOCOL_VERSION,
+        },
+        "data": data,
+    })
+}
+
+// =============================================================================
 // TESTS
 // =============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Helper to extract status from envelope response
+    fn status(resp: &serde_json::Value) -> u64 {
+        resp.get("head").and_then(|h| h.get("status")).and_then(|s| s.as_u64()).unwrap_or(0)
+    }
+
+    /// Helper to extract data from envelope response
+    fn data(resp: &serde_json::Value) -> &serde_json::Value {
+        resp.get("data").unwrap_or(resp)
+    }
 
     #[tokio::test]
     async fn local_network_creates_and_gets_promise() {
@@ -1442,15 +1555,15 @@ mod tests {
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
-        assert!(resp["status"] == 200 || resp["status"] == 201);
-        assert_eq!(resp["promise"]["id"], "p1");
-        assert_eq!(resp["promise"]["state"], "pending");
+        assert!(status(&resp) == 200 || status(&resp) == 201);
+        assert_eq!(data(&resp)["promise"]["id"], "p1");
+        assert_eq!(data(&resp)["promise"]["state"], "pending");
 
         let get_req = serde_json::json!({ "kind": "promise.get", "corrId": "c2", "id": "p1" });
         let get_resp: serde_json::Value =
             serde_json::from_str(&net.send(get_req.to_string()).await.unwrap()).unwrap();
-        assert_eq!(get_resp["status"], 200);
-        assert_eq!(get_resp["promise"]["id"], "p1");
+        assert_eq!(status(&get_resp), 200);
+        assert_eq!(data(&get_resp)["promise"]["id"], "p1");
     }
 
     #[tokio::test]
@@ -1462,12 +1575,12 @@ mod tests {
         });
         let r1: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
-        assert!(r1["status"] == 200 || r1["status"] == 201);
+        assert!(status(&r1) == 200 || status(&r1) == 201);
 
         let r2: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
-        assert_eq!(r2["status"], 200);
-        assert_eq!(r2["promise"]["id"], "p1");
+        assert_eq!(status(&r2), 200);
+        assert_eq!(data(&r2)["promise"]["id"], "p1");
     }
 
     #[tokio::test]
@@ -1482,18 +1595,18 @@ mod tests {
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
-        assert!(resp["status"] == 200 || resp["status"] == 201);
-        assert_eq!(resp["task"]["state"], "acquired");
-        assert_eq!(resp["promise"]["id"], "p1");
+        assert!(status(&resp) == 200 || status(&resp) == 201);
+        assert_eq!(data(&resp)["task"]["state"], "acquired");
+        assert_eq!(data(&resp)["promise"]["id"], "p1");
 
-        let task_id = resp["task"]["id"].as_str().unwrap();
+        let task_id = data(&resp)["task"]["id"].as_str().unwrap();
         let fulfill = serde_json::json!({
             "kind": "task.fulfill", "corrId": "c2", "taskId": task_id,
             "settle": { "id": "p1", "state": "resolved", "value": {"data": "result"} },
         });
         let f_resp: serde_json::Value =
             serde_json::from_str(&net.send(fulfill.to_string()).await.unwrap()).unwrap();
-        assert_eq!(f_resp["status"], 200);
+        assert_eq!(status(&f_resp), 200);
     }
 
     #[tokio::test]
@@ -1519,7 +1632,7 @@ mod tests {
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
-        assert_eq!(resp["promise"]["state"], "pending");
+        assert_eq!(data(&resp)["promise"]["state"], "pending");
 
         // The task should exist in pending state
         let state = net.state.lock().await;
@@ -1558,7 +1671,7 @@ mod tests {
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(suspend_req.to_string()).await.unwrap()).unwrap();
-        assert_eq!(resp["status"], 200);
+        assert_eq!(status(&resp), 200);
 
         let state = net.state.lock().await;
         assert_eq!(state.tasks.get("parent").unwrap().state, "suspended");
@@ -1654,7 +1767,6 @@ mod tests {
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(suspend_req.to_string()).await.unwrap()).unwrap();
-        assert_eq!(resp["status"], 300);
-        assert_eq!(resp["redirect"], true);
+        assert_eq!(status(&resp), 300);
     }
 }

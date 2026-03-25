@@ -47,34 +47,68 @@ impl StubNetwork {
     }
 
     /// Handle a JSON request string and return a JSON response string.
+    /// Accepts both envelope and flat formats. Always returns envelope format.
     fn handle_request(&mut self, req_json: &serde_json::Value) -> serde_json::Value {
-        let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-        match kind {
-            "promise.create" => self.handle_promise_create(req_json),
-            "promise.settle" => self.handle_promise_settle(req_json),
-            "task.acquire" => self.handle_task_acquire(req_json),
-            "task.fulfill" => self.handle_task_fulfill(req_json),
-            "task.suspend" => self.handle_task_suspend(req_json),
-            "task.release" => self.handle_task_release(req_json),
-            _ => serde_json::json!({"kind": kind, "error": "unknown request kind"}),
-        }
+        // Unwrap envelope if present
+        let (kind, corr_id, data) = if req_json.get("head").is_some() && req_json.get("data").is_some() {
+            let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
+            let corr_id = req_json.get("head").and_then(|h| h.get("corrId")).cloned().unwrap_or_default();
+            let data = req_json.get("data").cloned().unwrap_or(serde_json::json!({}));
+            (kind, corr_id, data)
+        } else {
+            let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
+            let corr_id = req_json.get("corrId").cloned().unwrap_or_default();
+            (kind, corr_id, req_json.clone())
+        };
+
+        let (status, resp_data) = match kind.as_str() {
+            "promise.create" => (200, self.handle_promise_create(&data)),
+            "promise.settle" => (200, self.handle_promise_settle(&data)),
+            "task.acquire" => {
+                // Support both new ("id") and old ("taskId") field names
+                let task_id = data.get("id")
+                    .or_else(|| data.get("taskId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !self.tasks.contains_key(task_id) {
+                    (404, serde_json::json!(format!("task {} not found", task_id)))
+                } else {
+                    (200, self.handle_task_acquire(task_id))
+                }
+            }
+            "task.fulfill" => (200, self.handle_task_fulfill(&data)),
+            "task.suspend" => {
+                let (s, d) = self.handle_task_suspend(&data);
+                (s, d)
+            }
+            "task.release" => (200, self.handle_task_release(&data)),
+            _ => (400, serde_json::json!(format!("unknown request kind: {}", kind))),
+        };
+
+        serde_json::json!({
+            "kind": kind,
+            "head": {
+                "corrId": corr_id,
+                "status": status,
+                "version": "2025-01-15",
+            },
+            "data": resp_data,
+        })
     }
 
-    fn handle_promise_create(&mut self, req: &serde_json::Value) -> serde_json::Value {
-        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let kind = "promise.create";
+    fn handle_promise_create(&mut self, data: &serde_json::Value) -> serde_json::Value {
+        let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
         // Idempotent: if exists, return existing
         if let Some(existing) = self.promises.get(id) {
             return serde_json::json!({
-                "kind": kind,
                 "promise": promise_to_json(existing),
             });
         }
 
-        let timeout_at = req.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
-        let param = req.get("param").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
-        let tags: HashMap<String, String> = req.get("tags")
+        let timeout_at = data.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
+        let param = data.get("param").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
+        let tags: HashMap<String, String> = data.get("tags")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -90,16 +124,14 @@ impl StubNetwork {
         };
         self.promises.insert(id.to_string(), record.clone());
         serde_json::json!({
-            "kind": kind,
             "promise": promise_to_json(&record),
         })
     }
 
-    fn handle_promise_settle(&mut self, req: &serde_json::Value) -> serde_json::Value {
-        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let kind = "promise.settle";
-        let state_str = req.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
-        let value = req.get("value").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
+    fn handle_promise_settle(&mut self, data: &serde_json::Value) -> serde_json::Value {
+        let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let state_str = data.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
+        let value = data.get("value").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
 
         let settle_state = match state_str {
             "resolved" => SettleState::Resolved,
@@ -114,7 +146,6 @@ impl StubNetwork {
         if let Some(p) = self.promises.get_mut(id) {
             if p.state != PromiseState::Pending {
                 return serde_json::json!({
-                    "kind": kind,
                     "promise": promise_to_json(p),
                 });
             }
@@ -122,7 +153,6 @@ impl StubNetwork {
             p.value = serde_json::from_value(value).unwrap_or_default();
             p.settled_at = Some(1);
             return serde_json::json!({
-                "kind": kind,
                 "promise": promise_to_json(p),
             });
         }
@@ -140,50 +170,71 @@ impl StubNetwork {
         };
         self.promises.insert(id.to_string(), record.clone());
         serde_json::json!({
-            "kind": kind,
             "promise": promise_to_json(&record),
         })
     }
 
-    fn handle_task_acquire(&self, req: &serde_json::Value) -> serde_json::Value {
-        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
-        let kind = "task.acquire";
-
+    fn handle_task_acquire(&self, task_id: &str) -> serde_json::Value {
         if let Some(task) = self.tasks.get(task_id) {
             let preloaded: Vec<serde_json::Value> = task.preloaded.iter().map(promise_to_json).collect();
             serde_json::json!({
-                "kind": kind,
+                "task": {
+                    "id": task_id,
+                    "state": "acquired",
+                    "version": 0,
+                    "resumes": [],
+                },
                 "promise": promise_to_json(&task.root_promise),
                 "preload": preloaded,
             })
         } else {
-            serde_json::json!({
-                "kind": kind,
-                "error": format!("task {} not found", task_id),
-                "status": 404,
-            })
+            // Shouldn't reach here — 404 is handled in handle_request
+            serde_json::json!({})
         }
     }
 
-    fn handle_task_fulfill(&self, _req: &serde_json::Value) -> serde_json::Value {
-        serde_json::json!({"kind": "task.fulfill"})
+    fn handle_task_fulfill(&self, data: &serde_json::Value) -> serde_json::Value {
+        // Return the promise from the action
+        let action = data.get("action").or_else(|| data.get("settle"));
+        let id = action
+            .and_then(|a| a.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let state = action
+            .and_then(|a| a.get("state"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("resolved");
+        let value = action
+            .and_then(|a| a.get("value"))
+            .cloned()
+            .unwrap_or_default();
+
+        serde_json::json!({
+            "promise": {
+                "id": id,
+                "state": state,
+                "param": {},
+                "value": value,
+                "tags": {},
+                "timeoutAt": i64::MAX,
+                "createdAt": 0,
+                "settledAt": 1,
+            }
+        })
     }
 
-    fn handle_task_suspend(&mut self, _req: &serde_json::Value) -> serde_json::Value {
+    /// Returns (status_code, data)
+    fn handle_task_suspend(&mut self, _data: &serde_json::Value) -> (u16, serde_json::Value) {
         if self.suspend_returns_redirect && self.redirect_count < self.max_redirects {
             self.redirect_count += 1;
-            serde_json::json!({
-                "kind": "task.suspend",
-                "redirect": true,
-                "preload": [],
-            })
+            (300, serde_json::json!({ "preload": [] }))
         } else {
-            serde_json::json!({"kind": "task.suspend"})
+            (200, serde_json::json!({}))
         }
     }
 
-    fn handle_task_release(&self, _req: &serde_json::Value) -> serde_json::Value {
-        serde_json::json!({"kind": "task.release"})
+    fn handle_task_release(&self, _data: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({})
     }
 }
 
@@ -239,19 +290,6 @@ impl crate::network::Network for StubNetworkAdapter {
         self.sent_json.lock().await.push(req_json.clone());
 
         let mut net = self.network.lock().await;
-
-        // Check for task.acquire 404 — return as server error
-        let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-        if kind == "task.acquire" {
-            let task_id = req_json.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
-            if !net.tasks.contains_key(task_id) {
-                return Err(error::Error::ServerError {
-                    code: 404,
-                    message: format!("task {} not found", task_id),
-                });
-            }
-        }
-
         let resp = net.handle_request(&req_json);
         Ok(serde_json::to_string(&resp).unwrap())
     }
@@ -335,9 +373,30 @@ impl TestHarness {
         Effects::new(self.build_sender(), test_codec(), preload)
     }
 
-    /// Return the raw JSON values of all sent requests (for assertions).
+    /// Return the sent requests as flattened JSON (for test assertions).
+    /// Unwraps envelope format: merges `data` fields and `kind` into a flat object.
     pub async fn sent_requests_json(&self) -> Vec<serde_json::Value> {
-        self.sent_json.lock().await.clone()
+        self.sent_json
+            .lock()
+            .await
+            .iter()
+            .map(|req| {
+                if req.get("head").is_some() && req.get("data").is_some() {
+                    // Envelope format — flatten for test convenience
+                    let mut flat = req
+                        .get("data")
+                        .and_then(|d| d.as_object())
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(kind) = req.get("kind") {
+                        flat.insert("kind".to_string(), kind.clone());
+                    }
+                    serde_json::Value::Object(flat)
+                } else {
+                    req.clone()
+                }
+            })
+            .collect()
     }
 
     /// Settle a promise in the stub directly (simulating remote completion).

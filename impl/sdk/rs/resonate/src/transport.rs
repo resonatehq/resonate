@@ -136,6 +136,22 @@ impl UnblockMsg {
     }
 }
 
+/// Helper to extract the `data` portion from a protocol envelope response.
+/// Falls back to the full value if no envelope structure is found.
+pub fn response_data(resp: &serde_json::Value) -> &serde_json::Value {
+    resp.get("data").unwrap_or(resp)
+}
+
+/// Helper to extract the `head.status` from a protocol envelope response.
+/// Falls back to checking top-level `status`, then defaults to 200.
+pub fn response_status(resp: &serde_json::Value) -> u64 {
+    resp.get("head")
+        .and_then(|h| h.get("status"))
+        .and_then(|s| s.as_u64())
+        .or_else(|| resp.get("status").and_then(|s| s.as_u64()))
+        .unwrap_or(200)
+}
+
 impl Transport {
     /// Build a Transport from a Network.
     pub fn new(network: Arc<dyn Network>) -> Self {
@@ -143,14 +159,21 @@ impl Transport {
     }
 
     /// Send a typed request through the network, returning the parsed response.
-    /// Validates that `response.kind == request.kind` and `response.corrId == request.corrId`.
+    /// Validates that `response.kind == request.kind` and correlation IDs match.
+    /// Supports both protocol envelope format (`head.corrId`) and flat format (`corrId`).
     pub async fn send(&self, request: serde_json::Value) -> Result<serde_json::Value> {
         let req_kind = request
             .get("kind")
             .and_then(|k| k.as_str())
             .unwrap_or("")
             .to_string();
-        let req_corr_id = request.get("corrId").cloned();
+
+        // Support both envelope (head.corrId) and flat (corrId) formats
+        let req_corr_id = request
+            .get("head")
+            .and_then(|h| h.get("corrId"))
+            .or_else(|| request.get("corrId"))
+            .cloned();
 
         let req_str = serde_json::to_string(&request)?;
         tracing::debug!(direction = "send_req", body = %req_str, "transport");
@@ -173,9 +196,12 @@ impl Transport {
             });
         }
 
-        // Validate corrId matches
+        // Validate corrId matches (support both envelope and flat formats)
         if let Some(ref expected_corr) = req_corr_id {
-            let resp_corr = response.get("corrId");
+            let resp_corr = response
+                .get("head")
+                .and_then(|h| h.get("corrId"))
+                .or_else(|| response.get("corrId"));
             if resp_corr != Some(expected_corr) {
                 return Err(Error::ServerError {
                     code: 500,
@@ -218,10 +244,11 @@ mod tests {
     use crate::network::LocalNetwork;
 
     #[tokio::test]
-    async fn transport_send_and_validate() {
+    async fn transport_send_and_validate_flat_format() {
         let net = Arc::new(LocalNetwork::new(Some("test".into()), None));
         let transport = Transport::new(net);
 
+        // Flat format request — LocalNetwork wraps response in envelope
         let req = serde_json::json!({
             "kind": "promise.create",
             "corrId": "abc123",
@@ -233,7 +260,34 @@ mod tests {
 
         let resp = transport.send(req).await.unwrap();
         assert_eq!(resp["kind"], "promise.create");
-        assert_eq!(resp["corrId"], "abc123");
-        assert_eq!(resp["promise"]["id"], "p1");
+        // Response is now in envelope format
+        assert_eq!(resp["head"]["corrId"], "abc123");
+        assert_eq!(resp["data"]["promise"]["id"], "p1");
+    }
+
+    #[tokio::test]
+    async fn transport_send_and_validate_envelope_format() {
+        let net = Arc::new(LocalNetwork::new(Some("test".into()), None));
+        let transport = Transport::new(net);
+
+        // Envelope format request
+        let req = serde_json::json!({
+            "kind": "promise.create",
+            "head": {
+                "corrId": "env123",
+                "version": "2025-01-15",
+            },
+            "data": {
+                "id": "p2",
+                "timeoutAt": i64::MAX,
+                "param": {},
+                "tags": {},
+            },
+        });
+
+        let resp = transport.send(req).await.unwrap();
+        assert_eq!(resp["kind"], "promise.create");
+        assert_eq!(resp["head"]["corrId"], "env123");
+        assert_eq!(resp["data"]["promise"]["id"], "p2");
     }
 }

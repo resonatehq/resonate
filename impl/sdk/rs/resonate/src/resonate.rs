@@ -232,6 +232,8 @@ impl Resonate {
             registry.clone(),
             match_fn,
             heartbeat.clone(),
+            pid.clone(),
+            ttl as i64,
         ));
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
@@ -263,13 +265,14 @@ impl Resonate {
                     });
                     match transport_for_refresh.send(req).await {
                         Ok(resp) => {
-                            let state = resp
+                            let rdata = crate::transport::response_data(&resp);
+                            let state = rdata
                                 .get("promise")
                                 .and_then(|p| p.get("state"))
                                 .and_then(|s| s.as_str())
                                 .unwrap_or("pending");
                             if state != "pending" {
-                                let value = resp
+                                let value = rdata
                                     .get("promise")
                                     .and_then(|p| p.get("value"))
                                     .cloned()
@@ -321,10 +324,11 @@ impl Resonate {
             match msg {
                 Message::Execute(exec_msg) => {
                     // Path 1: execute message from network → core.on_message (acquires task)
-                    tracing::debug!(task_id = %exec_msg.task_id, "received execute message");
+                    tracing::debug!(task_id = %exec_msg.task_id, version = exec_msg.version, "received execute message");
                     let task_id = exec_msg.task_id.clone();
+                    let version = exec_msg.version;
                     tokio::spawn(async move {
-                        if let Err(e) = core.on_message(&task_id).await {
+                        if let Err(e) = core.on_message(&task_id, version).await {
                             tracing::error!(
                                 error = %e,
                                 task_id = %task_id,
@@ -507,9 +511,10 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let status = resp.get("status").and_then(|s| s.as_u64()).unwrap_or(0);
-        let promise = resp.get("promise").cloned().unwrap_or_default();
-        let task = resp.get("task").cloned();
+        let rdata = crate::transport::response_data(&resp);
+        let status = crate::transport::response_status(&resp);
+        let promise = rdata.get("promise").cloned().unwrap_or_default();
+        let task = rdata.get("task").cloned();
 
         if status == 409 {
             // Promise already exists — register listener and return handle
@@ -526,6 +531,10 @@ impl Resonate {
                     .and_then(|s| s.as_str())
                     .unwrap_or("")
                     .to_string();
+                let task_version = task_val
+                    .get("version")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
 
                 // Decode the promise for execute_until_blocked
                 let root_promise = self.codec.decode_promise_from_json(&promise);
@@ -534,7 +543,7 @@ impl Resonate {
                 tokio::spawn(async move {
                     match root_promise {
                         Ok(rp) => {
-                            if let Err(e) = core.execute_until_blocked(&task_id, rp, None).await {
+                            if let Err(e) = core.execute_until_blocked(&task_id, task_version, rp, None).await {
                                 tracing::error!(
                                     error = %e,
                                     task_id = %task_id,
@@ -608,7 +617,8 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let promise = resp.get("promise").cloned().unwrap_or_default();
+        let rdata = crate::transport::response_data(&resp);
+        let promise = rdata.get("promise").cloned().unwrap_or_default();
 
         self.create_handle(prefixed_id, &promise).await
     }
@@ -624,7 +634,7 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let status = resp.get("status").and_then(|s| s.as_u64()).unwrap_or(0);
+        let status = crate::transport::response_status(&resp);
         if status == 404 {
             return Err(Error::ServerError {
                 code: 404,
@@ -632,7 +642,8 @@ impl Resonate {
             });
         }
 
-        let promise = resp.get("promise").cloned().unwrap_or_default();
+        let rdata = crate::transport::response_data(&resp);
+        let promise = rdata.get("promise").cloned().unwrap_or_default();
         self.create_handle(prefixed_id, &promise).await
     }
 
@@ -770,7 +781,8 @@ impl Resonate {
                 "address": self.network.unicast(),
             });
             let resp = self.transport.send(req).await?;
-            let resp_promise = resp.get("promise").cloned().unwrap_or_default();
+            let rdata = crate::transport::response_data(&resp);
+            let resp_promise = rdata.get("promise").cloned().unwrap_or_default();
             let resp_state = resp_promise
                 .get("state")
                 .and_then(|s| s.as_str())
@@ -1602,7 +1614,7 @@ mod tests {
             "id": "url-target-test",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 
@@ -1636,7 +1648,7 @@ mod tests {
             "id": "run-target-test",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 
@@ -1665,7 +1677,7 @@ mod tests {
             "id": "run-default-target",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 
@@ -1698,7 +1710,7 @@ mod tests {
             "id": "run-url-target",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 
@@ -1726,7 +1738,7 @@ mod tests {
             "id": "bare-target-test",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 
@@ -1760,7 +1772,7 @@ mod tests {
             "id": "bare-target-test2",
         });
         let resp = r.transport().send(get_req).await.unwrap();
-        let target = resp["promise"]["tags"]["resonate:target"]
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
 

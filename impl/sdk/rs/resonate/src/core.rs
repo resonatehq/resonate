@@ -17,7 +17,7 @@ use crate::types::{PromiseRecord, PromiseState, SettleState, Status, TaskData};
 ///
 /// Core exposes two entry points:
 ///
-/// 1. **`execute_until_blocked(task_id, root_promise, preload)`**
+/// 1. **`execute_until_blocked(task_id, promise, preload)`**
 ///    Called from `Resonate::run` / `Resonate::begin_run` when the task is *already acquired*.
 ///    Skips the acquire step. Runs the registered function until it completes
 ///    (Done → fulfills the task) or suspends (Suspended → suspends the task).
@@ -32,6 +32,8 @@ pub struct Core {
     registry: Arc<RwLock<Registry>>,
     match_fn: MatchFn,
     heartbeat: Arc<dyn Heartbeat>,
+    pid: String,
+    ttl: i64,
 }
 
 impl Core {
@@ -41,6 +43,8 @@ impl Core {
         registry: Arc<RwLock<Registry>>,
         match_fn: MatchFn,
         heartbeat: Arc<dyn Heartbeat>,
+        pid: String,
+        ttl: i64,
     ) -> Self {
         Self {
             sender,
@@ -48,6 +52,8 @@ impl Core {
             registry,
             match_fn,
             heartbeat,
+            pid,
+            ttl,
         }
     }
 
@@ -56,26 +62,31 @@ impl Core {
     // ═══════════════════════════════════════════════════════════════
 
     /// Called when an `execute` message arrives from the network.
-    /// Acquires the task, decodes the root promise, then runs
+    /// Acquires the task, decodes the promise, then runs
     /// `execute_until_blocked`.
     pub fn on_message<'a>(
         &'a self,
         task_id: &'a str,
+        version: i64,
     ) -> futures::future::BoxFuture<'a, Result<Status>> {
-        Box::pin(self.on_message_inner(task_id))
+        Box::pin(self.on_message_inner(task_id, version))
     }
 
-    async fn on_message_inner(&self, task_id: &str) -> Result<Status> {
+    async fn on_message_inner(&self, task_id: &str, version: i64) -> Result<Status> {
         // 1. ACQUIRE the task
-        let result = self.sender.task_acquire(task_id).await?;
+        let result = self
+            .sender
+            .task_acquire(task_id, version, &self.pid, self.ttl)
+            .await?;
 
         tracing::debug!(task_id = task_id, "task acquired");
 
-        // 2. Decode root promise
-        let root_promise = self.codec.decode_promise(result.root_promise)?;
+        // 2. Decode promise
+        let task_version = result.task.version;
+        let promise = self.codec.decode_promise(result.promise)?;
 
         // 3. Delegate to execute_until_blocked
-        self.execute_until_blocked(task_id, root_promise, Some(result.preloaded))
+        self.execute_until_blocked(task_id, task_version, promise, Some(result.preload))
             .await
     }
 
@@ -86,7 +97,7 @@ impl Core {
     /// Runs the registered function for the given task + promise until it
     /// completes (Done) or suspends waiting on remote promises (Suspended).
     ///
-    /// - On Done → fulfills the task (settles the root promise and completes
+    /// - On Done → fulfills the task (settles the promise and completes
     ///   the task).
     /// - On Suspended → suspends the task (registers callbacks for unresolved
     ///   remote dependencies).
@@ -97,7 +108,8 @@ impl Core {
     pub async fn execute_until_blocked(
         &self,
         task_id: &str,
-        root_promise: PromiseRecord,
+        task_version: i64,
+        promise: PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
         // Start heartbeat before execution to keep the task lease alive
@@ -105,10 +117,10 @@ impl Core {
             tracing::warn!(error = %e, task_id = task_id, "failed to start heartbeat");
         }
 
-        tracing::debug!(task_id = task_id, promise_id = %root_promise.id, "starting execution");
+        tracing::debug!(task_id = task_id, promise_id = %promise.id, "starting execution");
 
         let result = self
-            .execute_until_blocked_inner(task_id, &root_promise, preload)
+            .execute_until_blocked_inner(task_id, task_version, &promise, preload)
             .await;
 
         // Stop heartbeat after execution completes (both success and error)
@@ -123,10 +135,10 @@ impl Core {
                 tracing::error!(
                     error = %e,
                     task_id = task_id,
-                    promise_id = %root_promise.id,
+                    promise_id = %promise.id,
                     "execution failed, releasing task"
                 );
-                if let Err(release_err) = self.release_task(task_id).await {
+                if let Err(release_err) = self.release_task(task_id, task_version).await {
                     tracing::error!(
                         error = %release_err,
                         task_id = task_id,
@@ -141,11 +153,12 @@ impl Core {
     async fn execute_until_blocked_inner(
         &self,
         task_id: &str,
-        root_promise: &PromiseRecord,
+        task_version: i64,
+        promise: &PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
-        // 1. Extract function name and args from root promise
-        let task_data: TaskData = TaskData::deserialize(root_promise.param.data_as_ref())
+        // 1. Extract function name and args from promise
+        let task_data: TaskData = TaskData::deserialize(promise.param.data_as_ref())
             .map_err(|e| Error::DecodingError(format!("invalid task data: {}", e)))?;
 
         // 2. Look up the function in the registry (hold lock briefly, clone factory out)
@@ -157,18 +170,18 @@ impl Core {
             entry.factory.clone()
         };
 
-        // 3. SHORT-CIRCUIT: if root promise is already settled, fulfill the task
+        // 3. SHORT-CIRCUIT: if promise is already settled, fulfill the task
         //    without executing the function.
-        if root_promise.state != PromiseState::Pending {
+        if promise.state != PromiseState::Pending {
             tracing::info!(
                 task_id = task_id,
-                promise_id = %root_promise.id,
-                state = ?root_promise.state,
-                "root promise already settled, fulfilling task without execution"
+                promise_id = %promise.id,
+                state = ?promise.state,
+                "promise already settled, fulfilling task without execution"
             );
             // Value is already decoded (decode_promise was called before this point)
-            let settled_value = root_promise.value.data_as_ref().clone();
-            let result: Result<serde_json::Value> = match root_promise.state {
+            let settled_value = promise.value.data_as_ref().clone();
+            let result: Result<serde_json::Value> = match promise.state {
                 PromiseState::Resolved => Ok(settled_value),
                 PromiseState::Rejected
                 | PromiseState::RejectedCanceled
@@ -181,7 +194,7 @@ impl Core {
                 }),
                 PromiseState::Pending => unreachable!(),
             };
-            self.fulfill_task(task_id, &root_promise.id, &result)
+            self.fulfill_task(task_id, task_version, &promise.id, &result)
                 .await?;
             return Ok(Status::Done);
         }
@@ -197,21 +210,21 @@ impl Core {
             );
 
             let ctx = Context::root(
-                root_promise.id.clone(),
-                root_promise.timeout_at,
+                promise.id.clone(),
+                promise.timeout_at,
                 task_data.func.clone(),
                 effects.clone(),
                 self.match_fn.clone(),
             );
 
             let info = crate::info::Info::new(
-                root_promise.id.clone(),
+                promise.id.clone(),
                 String::new(),
-                root_promise.id.clone(),
-                root_promise.id.clone(),
-                root_promise.timeout_at,
+                promise.id.clone(),
+                promise.id.clone(),
+                promise.timeout_at,
                 task_data.func.clone(),
-                root_promise.tags.clone(),
+                promise.tags.clone(),
             );
 
             // Execute via the factory
@@ -224,9 +237,9 @@ impl Core {
 
             // 5. FINALIZE: determine outcome
             if remote_todos.is_empty() {
-                self.fulfill_task(task_id, &root_promise.id, &result)
+                self.fulfill_task(task_id, task_version, &promise.id, &result)
                     .await?;
-                tracing::debug!(task_id = task_id, promise_id = %root_promise.id, "task fulfilled");
+                tracing::debug!(task_id = task_id, promise_id = %promise.id, "task fulfilled");
                 return Ok(Status::Done);
             }
 
@@ -236,18 +249,21 @@ impl Core {
                 remote_deps = remote_todos.len(),
                 "attempting to suspend task"
             );
-            match self.suspend_task(task_id, remote_todos).await? {
+            match self
+                .suspend_task(task_id, task_version, remote_todos)
+                .await?
+            {
                 SuspendResult::Suspended => {
                     tracing::debug!(task_id = task_id, "task suspended");
                     return Ok(Status::Suspended);
                 }
-                SuspendResult::Redirect { preloaded } => {
+                SuspendResult::Redirect { preload } => {
                     tracing::debug!(
                         task_id = task_id,
-                        preloaded = preloaded.len(),
+                        preload = preload.len(),
                         "suspend returned redirect, re-executing task"
                     );
-                    current_preload = Some(preloaded);
+                    current_preload = Some(preload);
                     continue;
                 }
             }
@@ -258,13 +274,14 @@ impl Core {
     //  Task lifecycle helpers
     // ═══════════════════════════════════════════════════════════════
 
-    /// Fulfill a task by settling its root promise and completing the task.
+    /// Fulfill a task by settling its promise and completing the task.
     async fn fulfill_task(
         &self,
         task_id: &str,
+        task_version: i64,
         promise_id: &str,
         result: &Result<serde_json::Value>,
-    ) -> Result<()> {
+    ) -> Result<PromiseRecord> {
         let (state, value_data) = match result {
             Ok(val) => (SettleState::Resolved, val.clone()),
             Err(err) => (SettleState::Rejected, crate::codec::encode_error(err)),
@@ -275,6 +292,7 @@ impl Core {
         self.sender
             .task_fulfill(
                 task_id,
+                task_version,
                 crate::types::PromiseSettleReq {
                     id: promise_id.to_string(),
                     state,
@@ -291,15 +309,25 @@ impl Core {
     async fn suspend_task(
         &self,
         task_id: &str,
+        task_version: i64,
         remote_todos: Vec<String>,
     ) -> Result<SuspendResult> {
-        self.sender.task_suspend(task_id, remote_todos).await
+        let actions = remote_todos
+            .into_iter()
+            .map(|awaited| crate::types::PromiseRegisterCallbackData {
+                awaited,
+                awaiter: task_id.to_string(),
+            })
+            .collect();
+        self.sender
+            .task_suspend(task_id, task_version, actions)
+            .await
     }
 
     /// Release a task so another worker can pick it up.
     /// Called when execution fails with an error.
-    async fn release_task(&self, task_id: &str) -> Result<()> {
-        self.sender.task_release(task_id).await
+    async fn release_task(&self, task_id: &str, version: i64) -> Result<()> {
+        self.sender.task_release(task_id, version).await
     }
 }
 
@@ -324,7 +352,15 @@ mod tests {
     fn test_core(sender: Sender, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
         let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
         let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
-        Core::new(sender, codec, registry, match_fn, heartbeat)
+        Core::new(
+            sender,
+            codec,
+            registry,
+            match_fn,
+            heartbeat,
+            "test-pid".to_string(),
+            60_000,
+        )
     }
 
     // ── Test functions ─────────────────────────────────────────────
@@ -402,7 +438,7 @@ mod tests {
         Ok(0)
     }
 
-    /// Helper: create an encoded root promise for a task.
+    /// Helper: create an encoded promise for a task.
     fn make_root_promise(id: &str, func: &str, args: serde_json::Value) -> PromiseRecord {
         let codec = noop_codec();
         let param_data = serde_json::json!({"func": func, "args": args});
@@ -434,16 +470,15 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let fulfill = requests
-            .iter()
-            .find(|r| r["kind"] == "task.fulfill");
+        let fulfill = requests.iter().find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
-        let fulfill = fulfill.unwrap(); {
-            assert_eq!(fulfill["settle"]["state"], "resolved");
+        let fulfill = fulfill.unwrap();
+        {
+            assert_eq!(fulfill["action"]["state"], "resolved");
         }
     }
 
@@ -461,16 +496,15 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let fulfill = requests
-            .iter()
-            .find(|r| r["kind"] == "task.fulfill");
+        let fulfill = requests.iter().find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
-        let fulfill = fulfill.unwrap(); {
-            assert_eq!(fulfill["settle"]["state"], "rejected");
+        let fulfill = fulfill.unwrap();
+        {
+            assert_eq!(fulfill["action"]["state"], "rejected");
         }
     }
 
@@ -488,17 +522,15 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let fulfill = requests
-            .iter()
-            .find(|r| r["kind"] == "task.fulfill");
+        let fulfill = requests.iter().find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some());
 
         let fulfill = fulfill.unwrap();
         {
-            let data_str = fulfill["settle"]["value"]["data"].as_str().unwrap();
+            let data_str = fulfill["action"]["value"]["data"].as_str().unwrap();
             assert!(
                 Codec::is_valid_base64(data_str),
                 "value.data should be valid base64: {}",
@@ -520,7 +552,7 @@ mod tests {
             Arc::new(RwLock::new(registry)),
         );
 
-        let result = core.on_message("nonexistent").await;
+        let result = core.on_message("nonexistent", 0).await;
         assert!(result.is_err(), "should fail when task doesn't exist");
     }
 
@@ -540,17 +572,15 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let suspend = requests
-            .iter()
-            .find(|r| r["kind"] == "task.suspend");
+        let suspend = requests.iter().find(|r| r["kind"] == "task.suspend");
         assert!(suspend.is_some(), "should have sent task.suspend");
 
         let suspend = suspend.unwrap();
-        let callbacks = suspend["callbacks"].as_array().unwrap();
-        assert_eq!(callbacks.len(), 2, "should have 2 awaited IDs");
+        let actions = suspend["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2, "should have 2 awaited IDs");
     }
 
     #[tokio::test]
@@ -571,7 +601,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         assert_eq!(
             COMP_COUNT.load(AtomicOrdering::SeqCst),
@@ -611,7 +641,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         let requests = harness.sent_requests_json().await;
         let acquire_count = requests
@@ -655,14 +685,12 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         // After redirect + re-execution, task should complete with fulfill
         let requests = harness.sent_requests_json().await;
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.fulfill"),
+            requests.iter().any(|r| r["kind"] == "task.fulfill"),
             "task should be fulfilled after redirect re-execution"
         );
     }
@@ -698,7 +726,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_message("task1").await.unwrap();
+        core.on_message("task1", 0).await.unwrap();
 
         assert_eq!(
             MULTI_REDIR_COUNT.load(AtomicOrdering::SeqCst),
@@ -733,7 +761,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let status = core.on_message("task1").await.unwrap();
+        let status = core.on_message("task1", 0).await.unwrap();
         assert_eq!(status, Status::Done);
 
         let requests = harness.sent_requests_json().await;
@@ -743,9 +771,7 @@ mod tests {
             "first request should be TaskAcquire"
         );
 
-        let has_fulfill = requests
-            .iter()
-            .any(|r| r["kind"] == "task.fulfill");
+        let has_fulfill = requests.iter().any(|r| r["kind"] == "task.fulfill");
         assert!(has_fulfill, "should have sent TaskFulfill");
     }
 
@@ -759,7 +785,7 @@ mod tests {
             Arc::new(RwLock::new(registry)),
         );
 
-        let result = core.on_message("nonexistent").await;
+        let result = core.on_message("nonexistent", 0).await;
         assert!(result.is_err(), "should fail when task doesn't exist");
     }
 
@@ -777,7 +803,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        let status = core.on_message("task1").await.unwrap();
+        let status = core.on_message("task1", 0).await.unwrap();
         assert_eq!(status, Status::Suspended);
     }
 
@@ -799,22 +825,18 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-already-acquired", decoded, None)
+            .execute_until_blocked("task-already-acquired", 0, decoded, None)
             .await
             .unwrap();
         assert_eq!(status, Status::Done);
 
         let requests = harness.sent_requests_json().await;
         assert!(
-            !requests
-                .iter()
-                .any(|r| r["kind"] == "task.acquire"),
+            !requests.iter().any(|r| r["kind"] == "task.acquire"),
             "execute_until_blocked should NOT send TaskAcquire"
         );
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.fulfill"),
+            requests.iter().any(|r| r["kind"] == "task.fulfill"),
             "should have sent TaskFulfill"
         );
     }
@@ -837,7 +859,7 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-preloaded", decoded, Some(preloaded))
+            .execute_until_blocked("task-preloaded", 0, decoded, Some(preloaded))
             .await
             .unwrap();
         assert_eq!(status, Status::Done);
@@ -858,16 +880,14 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-suspend", decoded, None)
+            .execute_until_blocked("task-suspend", 0, decoded, None)
             .await
             .unwrap();
         assert_eq!(status, Status::Suspended);
 
         let requests = harness.sent_requests_json().await;
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.suspend"),
+            requests.iter().any(|r| r["kind"] == "task.suspend"),
             "should have sent TaskSuspend"
         );
     }
@@ -899,7 +919,7 @@ mod tests {
         );
         let decoded = codec.decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-settled", decoded, None)
+            .execute_until_blocked("task-settled", 0, decoded, None)
             .await
             .unwrap();
         assert_eq!(status, Status::Done);
@@ -907,9 +927,7 @@ mod tests {
         // Short-circuits before calling the factory but still sends TaskFulfill
         let requests = harness.sent_requests_json().await;
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.fulfill"),
+            requests.iter().any(|r| r["kind"] == "task.fulfill"),
             "settled promise should still send TaskFulfill"
         );
     }
@@ -939,17 +957,16 @@ mod tests {
             Arc::new(RwLock::new(registry)),
         );
         let decoded = codec.decode_promise(root).unwrap();
-        core.execute_until_blocked("task-resolved", decoded, None)
+        core.execute_until_blocked("task-resolved", 0, decoded, None)
             .await
             .unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let fulfill = requests
-            .iter()
-            .find(|r| r["kind"] == "task.fulfill");
+        let fulfill = requests.iter().find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent TaskFulfill");
-        let fulfill = fulfill.unwrap(); {
-            assert_eq!(fulfill["settle"]["state"], "resolved");
+        let fulfill = fulfill.unwrap();
+        {
+            assert_eq!(fulfill["action"]["state"], "resolved");
         }
     }
 
@@ -979,17 +996,16 @@ mod tests {
             Arc::new(RwLock::new(registry)),
         );
         let decoded = codec.decode_promise(root).unwrap();
-        core.execute_until_blocked("task-rejected", decoded, None)
+        core.execute_until_blocked("task-rejected", 0, decoded, None)
             .await
             .unwrap();
 
         let requests = harness.sent_requests_json().await;
-        let fulfill = requests
-            .iter()
-            .find(|r| r["kind"] == "task.fulfill");
+        let fulfill = requests.iter().find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent TaskFulfill");
-        let fulfill = fulfill.unwrap(); {
-            assert_eq!(fulfill["settle"]["state"], "rejected");
+        let fulfill = fulfill.unwrap();
+        {
+            assert_eq!(fulfill["action"]["state"], "rejected");
         }
     }
 
@@ -1008,16 +1024,14 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let result = core
-            .execute_until_blocked("task-error", decoded, None)
+            .execute_until_blocked("task-error", 0, decoded, None)
             .await;
 
         assert!(result.is_err(), "should fail when function not found");
 
         let requests = harness.sent_requests_json().await;
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.release"),
+            requests.iter().any(|r| r["kind"] == "task.release"),
             "should send TaskRelease when execution errors"
         );
     }
@@ -1039,7 +1053,7 @@ mod tests {
             noop_codec(),
             Arc::new(RwLock::new(registry1)),
         );
-        let status1 = core1.on_message("task1").await.unwrap();
+        let status1 = core1.on_message("task1", 0).await.unwrap();
 
         // Path 2: execute_until_blocked (already acquired)
         let harness2 = TestHarness::new();
@@ -1055,7 +1069,7 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root2).unwrap();
         let status2 = core2
-            .execute_until_blocked("task-direct", decoded, None)
+            .execute_until_blocked("task-direct", 0, decoded, None)
             .await
             .unwrap();
 
@@ -1064,21 +1078,13 @@ mod tests {
 
         // Path 1: Acquire + Fulfill
         let reqs1 = harness1.sent_requests_json().await;
-        assert!(reqs1
-            .iter()
-            .any(|r| r["kind"] == "task.acquire"));
-        assert!(reqs1
-            .iter()
-            .any(|r| r["kind"] == "task.fulfill"));
+        assert!(reqs1.iter().any(|r| r["kind"] == "task.acquire"));
+        assert!(reqs1.iter().any(|r| r["kind"] == "task.fulfill"));
 
         // Path 2: Fulfill only (no Acquire)
         let reqs2 = harness2.sent_requests_json().await;
-        assert!(!reqs2
-            .iter()
-            .any(|r| r["kind"] == "task.acquire"));
-        assert!(reqs2
-            .iter()
-            .any(|r| r["kind"] == "task.fulfill"));
+        assert!(!reqs2.iter().any(|r| r["kind"] == "task.acquire"));
+        assert!(reqs2.iter().any(|r| r["kind"] == "task.fulfill"));
     }
 
     // ── Heartbeat tests ───────────────────────────────────────────
@@ -1125,7 +1131,15 @@ mod tests {
         heartbeat: Arc<dyn Heartbeat>,
     ) -> Core {
         let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
-        Core::new(sender, codec, registry, match_fn, heartbeat)
+        Core::new(
+            sender,
+            codec,
+            registry,
+            match_fn,
+            heartbeat,
+            "test-pid".to_string(),
+            60_000,
+        )
     }
 
     #[tokio::test]
@@ -1145,7 +1159,7 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-hb", decoded, None)
+            .execute_until_blocked("task-hb", 0, decoded, None)
             .await
             .unwrap();
 
@@ -1169,7 +1183,7 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let result = core
-            .execute_until_blocked("task-hb-err", decoded, None)
+            .execute_until_blocked("task-hb-err", 0, decoded, None)
             .await;
 
         assert!(result.is_err(), "should fail when function not found");
@@ -1197,7 +1211,7 @@ mod tests {
         );
         let decoded = noop_codec().decode_promise(root).unwrap();
         let status = core
-            .execute_until_blocked("task-noop-hb", decoded, None)
+            .execute_until_blocked("task-noop-hb", 0, decoded, None)
             .await
             .unwrap();
 
@@ -1205,9 +1219,7 @@ mod tests {
 
         let requests = harness.sent_requests_json().await;
         assert!(
-            requests
-                .iter()
-                .any(|r| r["kind"] == "task.fulfill"),
+            requests.iter().any(|r| r["kind"] == "task.fulfill"),
             "should complete normally with NoopHeartbeat"
         );
     }
