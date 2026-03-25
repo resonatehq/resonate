@@ -35,7 +35,7 @@ pub use resonate_macros::function;
 pub mod prelude {
     pub use crate::codec::Codec;
     pub use crate::context::{Context, RpcTask, RunTask};
-    pub use crate::durable::Durable;
+    pub use crate::durable::{Durable, ExecutionEnv};
     pub use crate::effects::Effects;
     pub use crate::error::{Error, Result};
     pub use crate::futures::{DurableFuture, RemoteFuture};

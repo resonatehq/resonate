@@ -214,11 +214,11 @@ impl Resonate {
         // Build the Sender for Core from the transport
         let sender = Sender::new(transport.clone());
 
-        // Build match_fn from the network for target resolution.
+        // Build target_resolver from the network for target resolution.
         // If the target already looks like a URL, pass it through unchanged
         // (mirrors TS: `util.isUrl(target) ? target : match(target)`).
         let network_for_match = network.clone();
-        let match_fn: crate::context::MatchFn = Arc::new(move |target: &str| {
+        let target_resolver: crate::context::TargetResolver = Arc::new(move |target: &str| {
             if is_url(target) {
                 target.to_string()
             } else {
@@ -230,7 +230,7 @@ impl Resonate {
             sender,
             codec.clone(),
             registry.clone(),
-            match_fn,
+            target_resolver,
             heartbeat.clone(),
             pid.clone(),
             ttl as i64,
@@ -1571,7 +1571,7 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  is_url / match_fn URL bypass Tests
+    //  is_url / target_resolver URL bypass Tests
     // ═══════════════════════════════════════════════════════════════
 
     #[test]

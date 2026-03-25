@@ -4,13 +4,14 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::codec::Codec;
-use crate::context::{Context, MatchFn};
+use crate::context::{Context, TargetResolver};
+use crate::durable::ExecutionEnv;
 use crate::effects::Effects;
 use crate::error::{Error, Result};
 use crate::heartbeat::Heartbeat;
 use crate::registry::Registry;
 use crate::send::{Sender, SuspendResult};
-use crate::types::{PromiseRecord, PromiseState, SettleState, Status, TaskData};
+use crate::types::{DurableKind, PromiseRecord, PromiseState, SettleState, Status, TaskData};
 
 /// Core is the top-level component that manages the full lifecycle of a task.
 /// It takes a `send` function and uses it for all server communication.
@@ -30,7 +31,7 @@ pub struct Core {
     sender: Sender,
     codec: Codec,
     registry: Arc<RwLock<Registry>>,
-    match_fn: MatchFn,
+    target_resolver: TargetResolver,
     heartbeat: Arc<dyn Heartbeat>,
     pid: String,
     ttl: i64,
@@ -41,7 +42,7 @@ impl Core {
         sender: Sender,
         codec: Codec,
         registry: Arc<RwLock<Registry>>,
-        match_fn: MatchFn,
+        target_resolver: TargetResolver,
         heartbeat: Arc<dyn Heartbeat>,
         pid: String,
         ttl: i64,
@@ -50,7 +51,7 @@ impl Core {
             sender,
             codec,
             registry,
-            match_fn,
+            target_resolver,
             heartbeat,
             pid,
             ttl,
@@ -162,12 +163,12 @@ impl Core {
             .map_err(|e| Error::DecodingError(format!("invalid task data: {}", e)))?;
 
         // 2. Look up the function in the registry (hold lock briefly, clone factory out)
-        let factory = {
+        let (factory, kind) = {
             let reg = self.registry.read();
             let entry = reg
                 .get(&task_data.func)
                 .ok_or_else(|| Error::FunctionNotFound(task_data.func.clone()))?;
-            entry.factory.clone()
+            (entry.factory.clone(), entry.kind)
         };
 
         // 3. SHORT-CIRCUIT: if promise is already settled, fulfill the task
@@ -214,7 +215,7 @@ impl Core {
                 promise.timeout_at,
                 task_data.func.clone(),
                 effects.clone(),
-                self.match_fn.clone(),
+                self.target_resolver.clone(),
             );
 
             let info = crate::info::Info::new(
@@ -228,7 +229,11 @@ impl Core {
             );
 
             // Execute via the factory
-            let result = (factory)(Some(&ctx), Some(&info), task_data.args.clone()).await;
+            let env = match kind {
+                DurableKind::Function => ExecutionEnv::Function(&info),
+                DurableKind::Workflow => ExecutionEnv::Workflow(&ctx),
+            };
+            let result = (factory)(env, task_data.args.clone()).await;
 
             // Flush remaining local work
             let flush_remote = ctx.flush_local_work().await;
@@ -350,13 +355,13 @@ mod tests {
 
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(sender: Sender, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
-        let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
+        let target_resolver: TargetResolver = std::sync::Arc::new(|target: &str| target.to_string());
         let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
         Core::new(
             sender,
             codec,
             registry,
-            match_fn,
+            target_resolver,
             heartbeat,
             "test-pid".to_string(),
             60_000,
@@ -1130,12 +1135,12 @@ mod tests {
         registry: Arc<RwLock<Registry>>,
         heartbeat: Arc<dyn Heartbeat>,
     ) -> Core {
-        let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
+        let target_resolver: TargetResolver = std::sync::Arc::new(|target: &str| target.to_string());
         Core::new(
             sender,
             codec,
             registry,
-            match_fn,
+            target_resolver,
             heartbeat,
             "test-pid".to_string(),
             60_000,

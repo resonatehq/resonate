@@ -158,12 +158,15 @@ fn generate_durable_impl(
     // Generate the execute body based on kind
     let execute_body = match kind {
         FunctionKind::PureLeaf => {
+            let ignore_env = quote! { let _ = env; };
             if arg_names.is_empty() {
                 quote! {
+                    #ignore_env
                     #fn_name().await
                 }
             } else if arg_names.len() == 1 {
                 quote! {
+                    #ignore_env
                     #fn_name(args).await
                 }
             } else {
@@ -176,6 +179,7 @@ fn generate_durable_impl(
                     })
                     .collect();
                 quote! {
+                    #ignore_env
                     #(#destructure)*
                     #fn_name(#(#arg_names),*).await
                 }
@@ -183,7 +187,7 @@ fn generate_durable_impl(
         }
         FunctionKind::LeafWithInfo => {
             let info_unwrap = quote! {
-                let info = info.expect("Info must be provided for leaf+info functions");
+                let info = env.into_info();
             };
             if arg_names.len() == 1 {
                 quote! {
@@ -208,7 +212,7 @@ fn generate_durable_impl(
         }
         FunctionKind::Workflow => {
             let ctx_unwrap = quote! {
-                let ctx = ctx.expect("Context must be provided for workflow functions");
+                let ctx = env.into_context();
             };
             if arg_names.len() == 1 {
                 quote! {
@@ -247,8 +251,7 @@ fn generate_durable_impl(
 
             async fn execute(
                 &self,
-                ctx: Option<&#krate::context::Context>,
-                info: Option<&#krate::info::Info>,
+                env: #krate::durable::ExecutionEnv<'_>,
                 args: #args_type,
             ) -> #krate::error::Result<#return_type> {
                 #execute_body

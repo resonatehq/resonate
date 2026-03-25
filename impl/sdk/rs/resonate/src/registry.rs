@@ -5,18 +5,15 @@ use std::sync::Arc;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use crate::context::Context;
-use crate::durable::Durable;
+use crate::durable::{Durable, ExecutionEnv};
 use crate::error::{Error, Result};
-use crate::info::Info;
 use crate::types::DurableKind;
 
 /// Type-erased factory function for executing a registered durable function.
 /// Wrapped in Arc so it can be cloned out of the registry while holding a read lock briefly.
 pub type Factory = Arc<
     dyn for<'a> Fn(
-            Option<&'a Context>,
-            Option<&'a Info>,
+            ExecutionEnv<'a>,
             serde_json::Value,
         ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value>> + Send + 'a>>
         + Send
@@ -71,10 +68,10 @@ impl Registry {
         Args: DeserializeOwned + Send + 'static,
         T: Serialize + Send + 'static,
     {
-        let factory: Factory = Arc::new(move |ctx, info, args_json| {
+        let factory: Factory = Arc::new(move |env, args_json| {
             Box::pin(async move {
                 let args: Args = serde_json::from_value(args_json)?;
-                let result = func.execute(ctx, info, args).await;
+                let result = func.execute(env, args).await;
                 match result {
                     Ok(val) => serde_json::to_value(val).map_err(Into::into),
                     Err(e) => Err(e),
@@ -111,7 +108,7 @@ mod tests {
     use super::*;
 
     fn dummy_factory() -> Factory {
-        Arc::new(|_ctx, _info, _args| Box::pin(async { Ok(serde_json::Value::Null) }))
+        Arc::new(|_env, _args| Box::pin(async { Ok(serde_json::Value::Null) }))
     }
 
     #[test]

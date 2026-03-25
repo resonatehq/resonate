@@ -19,9 +19,9 @@ pub struct DurableFuture<T> {
 
 enum DurableFutureInner {
     /// The promise was already resolved — return the cached value.
-    Completed(serde_json::Value),
+    Resolved(serde_json::Value),
     /// The promise was already rejected — return the cached error.
-    Failed(serde_json::Value),
+    Rejected(serde_json::Value),
     /// The task is running — await the join handle.
     Pending {
         id: String,
@@ -33,16 +33,16 @@ impl<T> DurableFuture<T>
 where
     T: DeserializeOwned,
 {
-    pub(crate) fn completed(value: serde_json::Value) -> Self {
+    pub(crate) fn resolved(value: serde_json::Value) -> Self {
         Self {
-            inner: DurableFutureInner::Completed(value),
+            inner: DurableFutureInner::Resolved(value),
             _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn failed(value: serde_json::Value) -> Self {
+    pub(crate) fn rejected(value: serde_json::Value) -> Self {
         Self {
-            inner: DurableFutureInner::Failed(value),
+            inner: DurableFutureInner::Rejected(value),
             _phantom: PhantomData,
         }
     }
@@ -57,11 +57,11 @@ where
     /// Await the result of the durable task.
     pub async fn await_result(self) -> Result<T> {
         match self.inner {
-            DurableFutureInner::Completed(value) => {
+            DurableFutureInner::Resolved(value) => {
                 let result: T = serde_json::from_value(value)?;
                 Ok(result)
             }
-            DurableFutureInner::Failed(value) => Err(deserialize_error(value)),
+            DurableFutureInner::Rejected(value) => Err(deserialize_error(value)),
             DurableFutureInner::Pending { id, receiver } => {
                 let outcome = receiver
                     .await
@@ -102,11 +102,8 @@ pub struct RemoteFuture<T> {
 }
 
 enum RemoteFutureInner {
-    /// The promise was already resolved.
-    Completed(serde_json::Value),
-    /// The promise was already rejected.
-    Failed(serde_json::Value),
-    /// The promise is pending on a remote worker.
+    Resolved(serde_json::Value),
+    Rejected(serde_json::Value),
     Pending { _id: String, _effects: Effects },
 }
 
@@ -114,16 +111,16 @@ impl<T> RemoteFuture<T>
 where
     T: DeserializeOwned,
 {
-    pub(crate) fn completed(value: serde_json::Value) -> Self {
+    pub(crate) fn resolved(value: serde_json::Value) -> Self {
         Self {
-            inner: RemoteFutureInner::Completed(value),
+            inner: RemoteFutureInner::Resolved(value),
             _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn failed(value: serde_json::Value) -> Self {
+    pub(crate) fn rejected(value: serde_json::Value) -> Self {
         Self {
-            inner: RemoteFutureInner::Failed(value),
+            inner: RemoteFutureInner::Rejected(value),
             _phantom: PhantomData,
         }
     }
@@ -143,11 +140,11 @@ where
     /// since remote tasks can only be resolved by another worker.
     pub async fn await_result(self) -> Result<T> {
         match self.inner {
-            RemoteFutureInner::Completed(value) => {
+            RemoteFutureInner::Resolved(value) => {
                 let result: T = serde_json::from_value(value)?;
                 Ok(result)
             }
-            RemoteFutureInner::Failed(value) => Err(deserialize_error(value)),
+            RemoteFutureInner::Rejected(value) => Err(deserialize_error(value)),
             RemoteFutureInner::Pending {
                 _id: _,
                 _effects: _,
@@ -178,14 +175,14 @@ mod tests {
 
     #[tokio::test]
     async fn durable_future_completed_via_await() {
-        let future: DurableFuture<i32> = DurableFuture::completed(serde_json::json!(42));
+        let future: DurableFuture<i32> = DurableFuture::resolved(serde_json::json!(42));
         let result: i32 = future.await.unwrap();
         assert_eq!(result, 42);
     }
 
     #[tokio::test]
     async fn durable_future_failed_via_await() {
-        let future: DurableFuture<i32> = DurableFuture::failed(serde_json::json!({
+        let future: DurableFuture<i32> = DurableFuture::rejected(serde_json::json!({
             "type": "application",
             "message": "boom"
         }));
@@ -235,14 +232,14 @@ mod tests {
     #[tokio::test]
     async fn remote_future_completed_via_await() {
         let future: RemoteFuture<String> =
-            RemoteFuture::completed(serde_json::json!("remote-value"));
+            RemoteFuture::resolved(serde_json::json!("remote-value"));
         let result: String = future.await.unwrap();
         assert_eq!(result, "remote-value");
     }
 
     #[tokio::test]
     async fn remote_future_failed_via_await() {
-        let future: RemoteFuture<i32> = RemoteFuture::failed(serde_json::json!({
+        let future: RemoteFuture<i32> = RemoteFuture::rejected(serde_json::json!({
             "type": "application",
             "message": "remote error"
         }));

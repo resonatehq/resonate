@@ -152,7 +152,7 @@ fn require_str<'a>(
 }
 
 /// Extract task ID from request, supporting both protocol "id" and legacy "taskId" fields.
-fn require_task_id<'a>(obj: &'a serde_json::Value) -> std::result::Result<&'a str, Error> {
+fn require_task_id(obj: &serde_json::Value) -> std::result::Result<&str, Error> {
     obj.get("id")
         .or_else(|| obj.get("taskId"))
         .and_then(|v| v.as_str())

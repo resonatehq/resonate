@@ -490,8 +490,8 @@ pub fn rejected_promise(id: &str, message: &str) -> PromiseRecord {
     }
 }
 
-/// A no-op match function for tests (returns target unchanged).
-pub fn test_match_fn() -> crate::context::MatchFn {
+/// A no-op target resolver for tests (returns target unchanged).
+pub fn test_target_resolver() -> crate::context::TargetResolver {
     std::sync::Arc::new(|target: &str| target.to_string())
 }
 
@@ -502,7 +502,7 @@ pub fn test_context(id: &str, effects: Effects) -> Context {
         i64::MAX,
         "test".to_string(),
         effects,
-        test_match_fn(),
+        test_target_resolver(),
     )
 }
 
@@ -514,23 +514,23 @@ pub fn test_context_with_func(id: &str, func_name: &str, effects: Effects) -> Co
         i64::MAX,
         func_name.to_string(),
         effects,
-        test_match_fn(),
+        test_target_resolver(),
     )
 }
 
-/// Build a root Context for testing with a custom match function.
+/// Build a root Context for testing with a custom target resolver.
 #[allow(dead_code)]
 pub fn test_context_with_match(
     id: &str,
     effects: Effects,
-    match_fn: crate::context::MatchFn,
+    target_resolver: crate::context::TargetResolver,
 ) -> Context {
     Context::root(
         id.to_string(),
         i64::MAX,
         "test".to_string(),
         effects,
-        match_fn,
+        target_resolver,
     )
 }
 
@@ -542,7 +542,7 @@ pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) ->
         timeout_at,
         "test".to_string(),
         effects,
-        test_match_fn(),
+        test_target_resolver(),
     )
 }
 

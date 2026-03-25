@@ -10,20 +10,22 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::codec::deserialize_error;
-use crate::durable::Durable;
+use crate::durable::{Durable, ExecutionEnv};
 use crate::effects::Effects;
 use crate::error::{Error, Result};
 use crate::futures::{DurableFuture, RemoteFuture};
 use crate::info::Info;
 use crate::types::{DurableKind, Outcome, PromiseCreateReq, PromiseRecord, PromiseState, Value};
 
-/// A function that resolves a logical target name to a routable address.
+/// Resolves a logical target name (e.g. a function name like `"payments"`)
+/// into a routable address (e.g. a URL or network identifier).
+/// If the input is already a URL, it is returned unchanged.
 /// Mirrors `network.match()` — passed down from Resonate → Core → Context.
-pub type MatchFn = Arc<dyn Fn(&str) -> String + Send + Sync>;
+pub type TargetResolver = Arc<dyn Fn(&str) -> String + Send + Sync>;
 
 /// Shared state between a spawned task and the context's flush mechanism.
 /// The DurableFuture also reads from this via a oneshot channel.
-pub(crate) struct SpawnedTask {
+pub(crate) struct SpawnedLocal {
     pub id: String,
     pub handle: tokio::task::JoinHandle<Outcome>,
 }
@@ -34,12 +36,6 @@ pub(crate) struct SpawnedTask {
 /// Both return builder structs (`RunTask`, `RpcTask`) that implement `IntoFuture`,
 /// so `.await` works seamlessly for the sequential case. Use `.spawn()` for true
 /// parallelism via `tokio::spawn`, or `tokio::join!` for cooperative concurrency.
-///
-/// **Intentional divergence from TS SDK**: Context calls do not accept custom IDs.
-/// IDs are always generated deterministically via `next_id()` (`parent.0`, `parent.1`, …).
-/// This eliminates the need for `breaksLineage` logic — `resonate:origin` always matches
-/// the root ID for the entire call tree. Custom IDs are only available at the top-level
-/// `Resonate` API (`Resonate::run`, `Resonate::begin_run`, etc.).
 pub struct Context {
     id: String,
     origin_id: String,
@@ -49,9 +45,9 @@ pub struct Context {
     timeout_at: i64,
     seq: AtomicU32,
     effects: Effects,
-    match_fn: MatchFn,
-    remote_todos: Arc<Mutex<Vec<String>>>,
-    spawned_tasks: Arc<Mutex<Vec<SpawnedTask>>>,
+    target_resolver: TargetResolver,
+    spawned_remote: Arc<Mutex<Vec<String>>>,
+    spawned_locals: Arc<Mutex<Vec<SpawnedLocal>>>,
 }
 
 impl Context {
@@ -61,7 +57,7 @@ impl Context {
         timeout_at: i64,
         func_name: String,
         effects: Effects,
-        match_fn: MatchFn,
+        target_resolver: TargetResolver,
     ) -> Self {
         Self {
             origin_id: id.clone(),
@@ -72,9 +68,9 @@ impl Context {
             timeout_at,
             seq: AtomicU32::new(0),
             effects,
-            match_fn,
-            remote_todos: Arc::new(Mutex::new(Vec::new())),
-            spawned_tasks: Arc::new(Mutex::new(Vec::new())),
+            target_resolver,
+            spawned_remote: Arc::new(Mutex::new(Vec::new())),
+            spawned_locals: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -89,9 +85,9 @@ impl Context {
             timeout_at,
             seq: AtomicU32::new(0),
             effects: self.effects.clone(),
-            match_fn: self.match_fn.clone(),
-            remote_todos: Arc::new(Mutex::new(Vec::new())),
-            spawned_tasks: Arc::new(Mutex::new(Vec::new())),
+            target_resolver: self.target_resolver.clone(),
+            spawned_remote: Arc::new(Mutex::new(Vec::new())),
+            spawned_locals: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -115,14 +111,14 @@ impl Context {
     }
 
     /// Default timeout for child promises (24 hours), matching TS SDK.
-    const DEFAULT_CHILD_TIMEOUT: Duration = Duration::from_secs(86_400);
+    const DEFAULT_TIMEOUT: Duration = Duration::from_secs(86_400);
 
     /// Calculate timeout for child promises.
     /// Computes `min(now + requested_timeout, parent_timeout)`, matching the
     /// TS SDK behavior: `Math.min(now + opts.timeout, parent.timeout)`.
     /// If no explicit timeout is provided, defaults to 24 hours.
     fn child_timeout(&self, requested: Option<Duration>) -> i64 {
-        let timeout = requested.unwrap_or(Self::DEFAULT_CHILD_TIMEOUT);
+        let timeout = requested.unwrap_or(Self::DEFAULT_TIMEOUT);
         let now = now_ms();
         let child_deadline = now + timeout.as_millis() as i64;
         std::cmp::min(child_deadline, self.timeout_at)
@@ -187,7 +183,7 @@ impl Context {
 
     /// Build a remote create request.
     ///
-    /// If `target_override` is provided, it is resolved through `match_fn`;
+    /// If `target_override` is provided, it is resolved through `target_resolver`;
     /// otherwise `func_name` is used as the default target input.
     fn remote_create_req(
         &self,
@@ -198,7 +194,7 @@ impl Context {
         target_override: Option<&str>,
     ) -> Result<PromiseCreateReq> {
         let target_input = target_override.unwrap_or(func_name);
-        let target = (self.match_fn)(target_input);
+        let target = (self.target_resolver)(target_input);
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:target".to_string(), target);
@@ -260,7 +256,10 @@ impl Context {
         let child_id = self.next_id();
         let (req, serialization_error) = match self.local_create_req(&child_id, &args, None) {
             Ok(req) => (req, None),
-            Err(e) => (PromiseCreateReq::default_with_id(&child_id), Some(e.to_string())),
+            Err(e) => (
+                PromiseCreateReq::default_with_id(&child_id),
+                Some(e.to_string()),
+            ),
         };
         RunTask {
             child_id,
@@ -292,10 +291,14 @@ impl Context {
     /// ```
     pub fn rpc<T>(&self, func: &str, args: &impl Serialize) -> RpcTask<'_, T> {
         let child_id = self.next_id();
-        let (req, serialization_error) = match self.remote_create_req(&child_id, func, args, None, None) {
-            Ok(req) => (req, None),
-            Err(e) => (PromiseCreateReq::default_with_id(&child_id), Some(e.to_string())),
-        };
+        let (req, serialization_error) =
+            match self.remote_create_req(&child_id, func, args, None, None) {
+                Ok(req) => (req, None),
+                Err(e) => (
+                    PromiseCreateReq::default_with_id(&child_id),
+                    Some(e.to_string()),
+                ),
+            };
         RpcTask {
             child_id,
             ctx: self,
@@ -308,7 +311,7 @@ impl Context {
 
     /// Take all accumulated remote todos.
     pub(crate) async fn take_remote_todos(&self) -> Vec<String> {
-        let mut todos = self.remote_todos.lock().await;
+        let mut todos = self.spawned_remote.lock().await;
         std::mem::take(&mut *todos)
     }
 
@@ -317,7 +320,7 @@ impl Context {
     /// any that suspended.
     pub(crate) async fn flush_local_work(&self) -> Vec<String> {
         let tasks = {
-            let mut tasks = self.spawned_tasks.lock().await;
+            let mut tasks = self.spawned_locals.lock().await;
             std::mem::take(&mut *tasks)
         };
 
@@ -340,11 +343,6 @@ impl Context {
         }
 
         remote_todos
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn effects(&self) -> &Effects {
-        &self.effects
     }
 }
 
@@ -377,7 +375,10 @@ where
     ///
     /// Must be called before `.id()`, `.await`, or `.spawn()`.
     pub fn timeout(mut self, timeout: Duration) -> Self {
-        debug_assert!(self.record.get().is_none(), "cannot set timeout after promise creation");
+        debug_assert!(
+            self.record.get().is_none(),
+            "cannot set timeout after promise creation"
+        );
         self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
         self
     }
@@ -394,7 +395,10 @@ where
             return Ok(record);
         }
         if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            return Err(Error::EncodingError(format!(
+                "failed to serialize args: {}",
+                err
+            )));
         }
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
@@ -402,7 +406,6 @@ where
     }
 
     /// Spawn the task onto a new tokio task for true parallelism.
-    /// Replaces the old `ctx.begin_run()`.
     ///
     /// This is async because it eagerly creates the durable promise, then
     /// spawns execution via `tokio::spawn`. Requires `D: Send + 'static`
@@ -414,7 +417,10 @@ where
         T: Serialize + DeserializeOwned + Send + 'static,
     {
         if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            return Err(Error::EncodingError(format!(
+                "failed to serialize args: {}",
+                err
+            )));
         }
         let RunTask {
             child_id,
@@ -432,80 +438,66 @@ where
         let record = cell.into_inner().unwrap();
 
         match record.state {
-            PromiseState::Resolved => Ok(DurableFuture::completed(record.value.data_or_null())),
+            PromiseState::Resolved => Ok(DurableFuture::resolved(record.value.data_or_null())),
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
-                Ok(DurableFuture::failed(record.value.data_or_null()))
+                Ok(DurableFuture::rejected(record.value.data_or_null()))
             }
             PromiseState::Pending => {
                 let effects = ctx.effects.clone();
                 let child_id_for_task = child_id.clone();
-                let parent_remote_todos = ctx.remote_todos.clone();
+                let parent_remote_todos = ctx.spawned_remote.clone();
                 let (tx, rx) = tokio::sync::oneshot::channel();
 
-                let handle = match D::KIND {
-                    DurableKind::Function => {
-                        let info = ctx.child_info(&child_id, D::NAME, record.timeout_at);
-                        tokio::spawn(async move {
-                            let result = func.execute(None, Some(&info), args).await;
-                            let json_result = match &result {
-                                Ok(val) => {
-                                    serde_json::to_value(val).map_err(Error::SerializationError)
-                                }
-                                Err(e) => Err(Error::Application {
-                                    message: e.to_string(),
-                                }),
-                            };
-                            let _ = effects
-                                .settle_promise(&child_id_for_task, &json_result)
-                                .await;
-                            let outcome = Outcome::Done(json_result);
-                            let _ = tx.send(outcome_to_sendable(&outcome));
-                            outcome
-                        })
-                    }
-                    DurableKind::Workflow => {
-                        let child_ctx = ctx.child(&child_id, D::NAME, record.timeout_at);
-                        tokio::spawn(async move {
-                            let result = func.execute(Some(&child_ctx), None, args).await;
-                            let flush_remote = child_ctx.flush_local_work().await;
-                            let mut child_remote = child_ctx.take_remote_todos().await;
-                            child_remote.extend(flush_remote);
+                let info = ctx.child_info(&child_id, D::NAME, record.timeout_at);
+                let child_ctx = ctx.child(&child_id, D::NAME, record.timeout_at);
 
-                            let json_result = match &result {
-                                Ok(val) => {
-                                    serde_json::to_value(val).map_err(Error::SerializationError)
-                                }
-                                Err(e) => Err(Error::Application {
-                                    message: e.to_string(),
-                                }),
-                            };
+                let handle = tokio::spawn(async move {
+                    let env = match D::KIND {
+                        DurableKind::Function => ExecutionEnv::Function(&info),
+                        DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
+                    };
+                    let result = func.execute(env, args).await;
 
-                            let outcome = if child_remote.is_empty() {
-                                let _ = effects
-                                    .settle_promise(&child_id_for_task, &json_result)
-                                    .await;
-                                Outcome::Done(json_result)
-                            } else {
-                                parent_remote_todos
-                                    .lock()
-                                    .await
-                                    .extend(child_remote.clone());
-                                Outcome::Suspended {
-                                    remote_todos: child_remote,
-                                }
-                            };
-                            let _ = tx.send(outcome_to_sendable(&outcome));
-                            outcome
-                        })
+                    let json_result = match &result {
+                        Ok(val) => {
+                            serde_json::to_value(val).map_err(Error::SerializationError)
+                        }
+                        Err(e) => Err(Error::Application {
+                            message: e.to_string(),
+                        }),
+                    };
+
+                    let mut child_remote = Vec::new();
+                    if D::KIND == DurableKind::Workflow {
+                        let flush_remote = child_ctx.flush_local_work().await;
+                        child_remote = child_ctx.take_remote_todos().await;
+                        child_remote.extend(flush_remote);
                     }
-                };
+
+                    let outcome = if child_remote.is_empty() {
+                        let _ = effects
+                            .settle_promise(&child_id_for_task, &json_result)
+                            .await;
+                        Outcome::Done(json_result)
+                    } else {
+                        parent_remote_todos
+                            .lock()
+                            .await
+                            .extend(child_remote.clone());
+                        Outcome::Suspended {
+                            remote_todos: child_remote,
+                        }
+                    };
+                    let _ = tx.send(outcome_to_sendable(&outcome));
+                    outcome
+                });
 
                 // Track for flush
                 {
-                    let mut tasks = ctx.spawned_tasks.lock().await;
-                    tasks.push(SpawnedTask {
+                    let mut tasks = ctx.spawned_locals.lock().await;
+                    tasks.push(SpawnedLocal {
                         id: child_id.clone(),
                         handle,
                     });
@@ -529,7 +521,10 @@ where
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
             if let Some(ref err) = self.serialization_error {
-                return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+                return Err(Error::EncodingError(format!(
+                    "failed to serialize args: {}",
+                    err
+                )));
             }
             let RunTask {
                 child_id,
@@ -555,31 +550,29 @@ where
                 }
                 PromiseState::Pending => {
                     let timeout_at = record.timeout_at;
-                    match D::KIND {
-                        DurableKind::Function => {
-                            let info = ctx.child_info(&child_id, D::NAME, timeout_at);
-                            let result = func.execute(None, Some(&info), args).await;
-                            let json_result = Context::to_json_result(&result);
-                            ctx.effects.settle_promise(&child_id, &json_result).await?;
-                            result
-                        }
-                        DurableKind::Workflow => {
-                            let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
-                            let result = func.execute(Some(&child_ctx), None, args).await;
+                    let info = ctx.child_info(&child_id, D::NAME, timeout_at);
+                    let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
 
-                            let flush_remote = child_ctx.flush_local_work().await;
-                            let mut child_remote = child_ctx.take_remote_todos().await;
-                            child_remote.extend(flush_remote);
+                    let env = match D::KIND {
+                        DurableKind::Function => ExecutionEnv::Function(&info),
+                        DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
+                    };
+                    let result = func.execute(env, args).await;
 
-                            if child_remote.is_empty() {
-                                let json_result = Context::to_json_result(&result);
-                                ctx.effects.settle_promise(&child_id, &json_result).await?;
-                            } else {
-                                ctx.remote_todos.lock().await.extend(child_remote);
-                            }
-                            result
-                        }
+                    let mut child_remote = Vec::new();
+                    if D::KIND == DurableKind::Workflow {
+                        let flush_remote = child_ctx.flush_local_work().await;
+                        child_remote = child_ctx.take_remote_todos().await;
+                        child_remote.extend(flush_remote);
                     }
+
+                    if child_remote.is_empty() {
+                        let json_result = Context::to_json_result(&result);
+                        ctx.effects.settle_promise(&child_id, &json_result).await?;
+                    } else {
+                        ctx.spawned_remote.lock().await.extend(child_remote);
+                    }
+                    result
                 }
             }
         })
@@ -609,17 +602,23 @@ impl<'ctx, T> RpcTask<'ctx, T> {
     ///
     /// Must be called before `.id()`, `.await`, or `.spawn()`.
     pub fn timeout(mut self, timeout: Duration) -> Self {
-        debug_assert!(self.record.get().is_none(), "cannot set timeout after promise creation");
+        debug_assert!(
+            self.record.get().is_none(),
+            "cannot set timeout after promise creation"
+        );
         self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
         self
     }
 
-    /// Override the target for this RPC call (resolved through `match_fn`).
+    /// Override the target for this RPC call (resolved through `target_resolver`).
     ///
     /// Must be called before `.id()`, `.await`, or `.spawn()`.
     pub fn target(mut self, target: &str) -> Self {
-        debug_assert!(self.record.get().is_none(), "cannot set target after promise creation");
-        let resolved = (self.ctx.match_fn)(target);
+        debug_assert!(
+            self.record.get().is_none(),
+            "cannot set target after promise creation"
+        );
+        let resolved = (self.ctx.target_resolver)(target);
         self.req
             .tags
             .insert("resonate:target".to_string(), resolved);
@@ -638,7 +637,10 @@ impl<'ctx, T> RpcTask<'ctx, T> {
             return Ok(record);
         }
         if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            return Err(Error::EncodingError(format!(
+                "failed to serialize args: {}",
+                err
+            )));
         }
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
@@ -646,13 +648,15 @@ impl<'ctx, T> RpcTask<'ctx, T> {
     }
 
     /// Eagerly create the promise and return a `RemoteFuture` handle.
-    /// Replaces the old `ctx.begin_rpc()`.
     pub async fn spawn(self) -> Result<RemoteFuture<T>>
     where
         T: DeserializeOwned,
     {
         if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+            return Err(Error::EncodingError(format!(
+                "failed to serialize args: {}",
+                err
+            )));
         }
         let RpcTask {
             child_id,
@@ -668,14 +672,14 @@ impl<'ctx, T> RpcTask<'ctx, T> {
         let record = cell.into_inner().unwrap();
 
         match record.state {
-            PromiseState::Resolved => Ok(RemoteFuture::completed(record.value.data_or_null())),
+            PromiseState::Resolved => Ok(RemoteFuture::resolved(record.value.data_or_null())),
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
-                Ok(RemoteFuture::failed(record.value.data_or_null()))
+                Ok(RemoteFuture::rejected(record.value.data_or_null()))
             }
             PromiseState::Pending => {
-                ctx.remote_todos.lock().await.push(child_id.clone());
+                ctx.spawned_remote.lock().await.push(child_id.clone());
                 Ok(RemoteFuture::pending(child_id, ctx.effects.clone()))
             }
         }
@@ -692,7 +696,10 @@ where
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
             if let Some(ref err) = self.serialization_error {
-                return Err(Error::EncodingError(format!("failed to serialize args: {}", err)));
+                return Err(Error::EncodingError(format!(
+                    "failed to serialize args: {}",
+                    err
+                )));
             }
             let RpcTask {
                 child_id,
@@ -715,7 +722,7 @@ where
                     Err(deserialize_error(record.value.data_or_null()))
                 }
                 PromiseState::Pending => {
-                    ctx.remote_todos.lock().await.push(child_id);
+                    ctx.spawned_remote.lock().await.push(child_id);
                     Err(Error::Suspended)
                 }
             }
@@ -743,7 +750,7 @@ fn outcome_to_sendable(outcome: &Outcome) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::durable::Durable;
+    use crate::durable::{Durable, ExecutionEnv};
     #[allow(unused_imports)]
     use crate::futures::RemoteFuture;
     use crate::test_utils::*;
@@ -759,8 +766,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             Ok(42)
@@ -773,8 +779,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             Ok(31416)
@@ -787,8 +792,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             args: (i32, i32),
         ) -> crate::error::Result<i32> {
             Ok(args.0 + args.1)
@@ -801,8 +805,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             args: i32,
         ) -> crate::error::Result<i32> {
             Ok(args * 2)
@@ -815,8 +818,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             args: i32,
         ) -> crate::error::Result<i32> {
             Ok(args * args)
@@ -829,8 +831,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             args: (i32, i32),
         ) -> crate::error::Result<i32> {
             Ok(args.0 * args.1)
@@ -843,8 +844,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             Err(Error::Application {
@@ -859,8 +859,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<()> {
             Ok(())
@@ -873,8 +872,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             args: (String, String, String),
         ) -> crate::error::Result<String> {
             Ok(format!("{}-{}-{}", args.0, args.1, args.2))
@@ -887,8 +885,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -902,8 +899,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             Ok(2)
@@ -919,8 +915,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Function;
         async fn execute(
             &self,
-            _ctx: Option<&Context>,
-            _info: Option<&Info>,
+            _env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
             let val = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -935,11 +930,10 @@ mod tests {
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
             &self,
-            ctx: Option<&Context>,
-            _info: Option<&Info>,
+            env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
-            let ctx = ctx.unwrap();
+            let ctx = env.into_context();
             let v: i32 = ctx.rpc("remoteFunc", &()).await?;
             Ok(v * 2)
         }
@@ -952,11 +946,10 @@ mod tests {
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
             &self,
-            ctx: Option<&Context>,
-            _info: Option<&Info>,
+            env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
-            let ctx = ctx.unwrap();
+            let ctx = env.into_context();
             let a: i32 = ctx.run(Bar, ()).await?;
             let b: i32 = ctx.run(Bar, ()).await?;
             Ok(a + b)
@@ -970,11 +963,10 @@ mod tests {
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(
             &self,
-            ctx: Option<&Context>,
-            _info: Option<&Info>,
+            env: ExecutionEnv<'_>,
             _args: (),
         ) -> crate::error::Result<i32> {
-            let ctx = ctx.unwrap();
+            let ctx = env.into_context();
             ctx.run(Failing, ()).await
         }
     }
@@ -1219,7 +1211,7 @@ mod tests {
 
         let remote_id = match &outcome {
             Outcome::Suspended { remote_todos } => {
-                assert!(remote_todos.len() >= 1, "expected at least 1 remote todo");
+                assert!(!remote_todos.is_empty(), "expected at least 1 remote todo");
                 remote_todos[0].clone()
             }
             other => panic!("expected Suspended, got {:?}", other),
@@ -1534,7 +1526,10 @@ mod tests {
         assert!(create_req.is_some());
         let create = create_req.unwrap();
         assert_eq!(create["tags"]["resonate:scope"].as_str().unwrap(), "global");
-        assert_eq!(create["tags"]["resonate:target"].as_str().unwrap(), "remote");
+        assert_eq!(
+            create["tags"]["resonate:target"].as_str().unwrap(),
+            "remote"
+        );
         assert_eq!(create["tags"]["resonate:parent"].as_str().unwrap(), "root");
         assert_eq!(create["tags"]["resonate:origin"].as_str().unwrap(), "root");
         assert!(create["tags"].get("resonate:branch").is_some());
@@ -1581,12 +1576,12 @@ mod tests {
     // ── Match Function (target resolution) ─────────────────────────
 
     #[tokio::test]
-    async fn rpc_target_is_resolved_through_match_fn() {
+    async fn rpc_target_is_resolved_through_target_resolver() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
 
@@ -1603,12 +1598,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_target_uses_custom_prefix_from_match_fn() {
+    async fn rpc_target_uses_custom_prefix_from_target_resolver() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("http://server:8001/workers/{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<String> = ctx.rpc("my_func", &42i32).await;
 
@@ -1625,12 +1620,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_spawn_target_is_resolved_through_match_fn() {
+    async fn rpc_spawn_target_is_resolved_through_target_resolver() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("remote://group/{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _future = ctx.rpc::<i32>("greet", &"world").spawn().await.unwrap();
 
@@ -1647,13 +1642,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn identity_match_fn_passes_target_through_unchanged() {
+    async fn identity_target_resolver_passes_target_through_unchanged() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        // Identity match — no transformation
-        let match_fn: crate::context::MatchFn =
+        // Identity resolver — no transformation
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| target.to_string());
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc("bare_name", &()).await;
 
@@ -1663,21 +1658,24 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
-        assert_eq!(create["tags"]["resonate:target"].as_str().unwrap(), "bare_name");
+        assert_eq!(
+            create["tags"]["resonate:target"].as_str().unwrap(),
+            "bare_name"
+        );
     }
 
     #[tokio::test]
-    async fn match_fn_propagates_through_multiple_rpc_calls() {
+    async fn target_resolver_propagates_through_multiple_rpc_calls() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
 
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("custom://{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         // First rpc call
         let _: crate::error::Result<i32> = ctx.rpc("func_a", &()).await;
-        // Second rpc call — same context, match_fn should still work
+        // Second rpc call — same context, target_resolver should still work
         let _: crate::error::Result<i32> = ctx.rpc("func_b", &()).await;
 
         let requests = harness.sent_requests_json().await;
@@ -1698,19 +1696,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn match_fn_skips_rewrite_when_target_is_already_a_url() {
+    async fn target_resolver_skips_rewrite_when_target_is_already_a_url() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        // This match_fn would prefix "local://any@" — but it should NOT
+        // This resolver would prefix "local://any@" — but it should NOT
         // be called when the target already looks like a URL.
-        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
-            if target.contains("://") {
-                target.to_string()
-            } else {
-                format!("local://any@{}", target)
-            }
-        });
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let target_resolver: crate::context::TargetResolver =
+            std::sync::Arc::new(|target: &str| {
+                if target.contains("://") {
+                    target.to_string()
+                } else {
+                    format!("local://any@{}", target)
+                }
+            });
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         // Pass a full URL as the function name — should be kept as-is
         let _: crate::error::Result<i32> =
@@ -1730,18 +1729,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn match_fn_rewrites_bare_name_but_not_url() {
+    async fn target_resolver_rewrites_bare_name_but_not_url() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         // Simulates real behavior: bare names get rewritten, URLs don't
-        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
-            if target.contains("://") {
-                target.to_string()
-            } else {
-                format!("local://any@{}", target)
-            }
-        });
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let target_resolver: crate::context::TargetResolver =
+            std::sync::Arc::new(|target: &str| {
+                if target.contains("://") {
+                    target.to_string()
+                } else {
+                    format!("local://any@{}", target)
+                }
+            });
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         // Bare name — should be rewritten
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
@@ -1773,9 +1773,9 @@ mod tests {
     async fn local_run_does_not_set_target_tag() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("SHOULD_NOT_APPEAR://{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         // ctx.run uses local_create_req, not remote_create_req
         let _: i32 = ctx.run(Bar, ()).await.unwrap();
@@ -1789,7 +1789,7 @@ mod tests {
         // Local calls set scope=local and should NOT have resonate:target
         assert_eq!(create["tags"]["resonate:scope"].as_str().unwrap(), "local");
         assert!(
-            !create["tags"].get("resonate:target").is_some(),
+            create["tags"].get("resonate:target").is_none(),
             "local run should not set resonate:target"
         );
     }
@@ -1800,9 +1800,9 @@ mod tests {
     async fn rpc_with_target_builder_overrides_func_name() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> =
             ctx.rpc::<i32>("my_func", &()).target("custom-target").await;
@@ -1816,7 +1816,7 @@ mod tests {
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
             "local://any@custom-target",
-            "custom target should override func_name in match_fn"
+            "custom target should override func_name in target_resolver"
         );
     }
 
@@ -1824,9 +1824,9 @@ mod tests {
     async fn rpc_default_target_uses_func_name() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc::<i32>("my_func", &()).await;
 
@@ -1847,14 +1847,15 @@ mod tests {
     async fn rpc_with_url_target_passes_through() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn = std::sync::Arc::new(|target: &str| {
-            if target.contains("://") {
-                target.to_string()
-            } else {
-                format!("local://any@{}", target)
-            }
-        });
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let target_resolver: crate::context::TargetResolver =
+            std::sync::Arc::new(|target: &str| {
+                if target.contains("://") {
+                    target.to_string()
+                } else {
+                    format!("local://any@{}", target)
+                }
+            });
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx
             .rpc::<i32>("my_func", &())
@@ -1878,9 +1879,9 @@ mod tests {
     async fn rpc_spawn_with_target_builder() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        let match_fn: crate::context::MatchFn =
+        let target_resolver: crate::context::TargetResolver =
             std::sync::Arc::new(|target: &str| format!("remote://{}", target));
-        let ctx = test_context_with_match("root", effects, match_fn);
+        let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _ = ctx
             .rpc::<i32>("my_func", &())
@@ -2178,7 +2179,8 @@ mod tests {
             .expect("should have sent promise.create");
 
         assert_eq!(
-            create["timeoutAt"].as_i64().unwrap(), parent_timeout,
+            create["timeoutAt"].as_i64().unwrap(),
+            parent_timeout,
             "child timeout_at should be clamped to parent timeout_at"
         );
     }
@@ -2235,7 +2237,8 @@ mod tests {
             .expect("should have sent promise.create");
 
         assert_eq!(
-            create["timeoutAt"].as_i64().unwrap(), parent_timeout,
+            create["timeoutAt"].as_i64().unwrap(),
+            parent_timeout,
             "child timeout_at should be clamped to parent timeout_at"
         );
     }
