@@ -460,6 +460,33 @@ where
                     };
                     let result = func.execute(env, args).await;
 
+                    // Collect remote work (workflows only)
+                    let mut child_remote = Vec::new();
+                    if D::KIND == DurableKind::Workflow {
+                        let flush_remote = child_ctx.flush_local_work().await;
+                        child_remote = child_ctx.take_remote_todos().await;
+                        child_remote.extend(flush_remote);
+                    }
+
+                    // Explicit suspension handling: if the workflow suspended
+                    // (e.g. a pending ctx.rpc().await), handle it directly
+                    // instead of letting it fall through as an application error.
+                    if matches!(&result, Err(Error::Suspended)) {
+                        debug_assert!(
+                            !child_remote.is_empty(),
+                            "Suspended error but no remote todos — this is a bug"
+                        );
+                        parent_remote_todos
+                            .lock()
+                            .await
+                            .extend(child_remote.clone());
+                        let outcome = Outcome::Suspended {
+                            remote_todos: child_remote,
+                        };
+                        let _ = tx.send(outcome_to_sendable(&outcome));
+                        return outcome;
+                    }
+
                     let json_result = match &result {
                         Ok(val) => {
                             serde_json::to_value(val).map_err(Error::SerializationError)
@@ -469,13 +496,8 @@ where
                         }),
                     };
 
-                    let mut child_remote = Vec::new();
-                    if D::KIND == DurableKind::Workflow {
-                        let flush_remote = child_ctx.flush_local_work().await;
-                        child_remote = child_ctx.take_remote_todos().await;
-                        child_remote.extend(flush_remote);
-                    }
-
+                    // Spawned sub-workflows may have remote todos even if the
+                    // main function completed successfully.
                     let outcome = if child_remote.is_empty() {
                         let _ = effects
                             .settle_promise(&child_id_for_task, &json_result)
@@ -559,6 +581,7 @@ where
                     };
                     let result = func.execute(env, args).await;
 
+                    // Collect remote work (workflows only)
                     let mut child_remote = Vec::new();
                     if D::KIND == DurableKind::Workflow {
                         let flush_remote = child_ctx.flush_local_work().await;
@@ -566,6 +589,19 @@ where
                         child_remote.extend(flush_remote);
                     }
 
+                    // Explicit suspension handling: propagate Suspended directly
+                    // instead of letting it fall through as an application error.
+                    if matches!(&result, Err(Error::Suspended)) {
+                        debug_assert!(
+                            !child_remote.is_empty(),
+                            "Suspended error but no remote todos — this is a bug"
+                        );
+                        ctx.spawned_remote.lock().await.extend(child_remote);
+                        return Err(Error::Suspended);
+                    }
+
+                    // Spawned sub-workflows may have remote todos even if the
+                    // main function completed successfully.
                     if child_remote.is_empty() {
                         let json_result = Context::to_json_result(&result);
                         ctx.effects.settle_promise(&child_id, &json_result).await?;
