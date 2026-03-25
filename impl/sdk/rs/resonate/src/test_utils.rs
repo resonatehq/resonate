@@ -50,28 +50,48 @@ impl StubNetwork {
     /// Accepts both envelope and flat formats. Always returns envelope format.
     fn handle_request(&mut self, req_json: &serde_json::Value) -> serde_json::Value {
         // Unwrap envelope if present
-        let (kind, corr_id, data) = if req_json.get("head").is_some() && req_json.get("data").is_some() {
-            let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
-            let corr_id = req_json.get("head").and_then(|h| h.get("corrId")).cloned().unwrap_or_default();
-            let data = req_json.get("data").cloned().unwrap_or(serde_json::json!({}));
-            (kind, corr_id, data)
-        } else {
-            let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
-            let corr_id = req_json.get("corrId").cloned().unwrap_or_default();
-            (kind, corr_id, req_json.clone())
-        };
+        let (kind, corr_id, data) =
+            if req_json.get("head").is_some() && req_json.get("data").is_some() {
+                let kind = req_json
+                    .get("kind")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let corr_id = req_json
+                    .get("head")
+                    .and_then(|h| h.get("corrId"))
+                    .cloned()
+                    .unwrap_or_default();
+                let data = req_json
+                    .get("data")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                (kind, corr_id, data)
+            } else {
+                let kind = req_json
+                    .get("kind")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let corr_id = req_json.get("corrId").cloned().unwrap_or_default();
+                (kind, corr_id, req_json.clone())
+            };
 
         let (status, resp_data) = match kind.as_str() {
             "promise.create" => (200, self.handle_promise_create(&data)),
             "promise.settle" => (200, self.handle_promise_settle(&data)),
             "task.acquire" => {
                 // Support both new ("id") and old ("taskId") field names
-                let task_id = data.get("id")
+                let task_id = data
+                    .get("id")
                     .or_else(|| data.get("taskId"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 if !self.tasks.contains_key(task_id) {
-                    (404, serde_json::json!(format!("task {} not found", task_id)))
+                    (
+                        404,
+                        serde_json::json!(format!("task {} not found", task_id)),
+                    )
                 } else {
                     (200, self.handle_task_acquire(task_id))
                 }
@@ -82,7 +102,10 @@ impl StubNetwork {
                 (s, d)
             }
             "task.release" => (200, self.handle_task_release(&data)),
-            _ => (400, serde_json::json!(format!("unknown request kind: {}", kind))),
+            _ => (
+                400,
+                serde_json::json!(format!("unknown request kind: {}", kind)),
+            ),
         };
 
         serde_json::json!({
@@ -106,9 +129,16 @@ impl StubNetwork {
             });
         }
 
-        let timeout_at = data.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
-        let param = data.get("param").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
-        let tags: HashMap<String, String> = data.get("tags")
+        let timeout_at = data
+            .get("timeoutAt")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(i64::MAX);
+        let param = data
+            .get("param")
+            .cloned()
+            .unwrap_or(serde_json::json!({"headers": null, "data": null}));
+        let tags: HashMap<String, String> = data
+            .get("tags")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -130,8 +160,14 @@ impl StubNetwork {
 
     fn handle_promise_settle(&mut self, data: &serde_json::Value) -> serde_json::Value {
         let id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let state_str = data.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
-        let value = data.get("value").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
+        let state_str = data
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("resolved");
+        let value = data
+            .get("value")
+            .cloned()
+            .unwrap_or(serde_json::json!({"headers": null, "data": null}));
 
         let settle_state = match state_str {
             "resolved" => SettleState::Resolved,
@@ -176,7 +212,8 @@ impl StubNetwork {
 
     fn handle_task_acquire(&self, task_id: &str) -> serde_json::Value {
         if let Some(task) = self.tasks.get(task_id) {
-            let preloaded: Vec<serde_json::Value> = task.preloaded.iter().map(promise_to_json).collect();
+            let preloaded: Vec<serde_json::Value> =
+                task.preloaded.iter().map(promise_to_json).collect();
             serde_json::json!({
                 "task": {
                     "id": task_id,
@@ -274,12 +311,24 @@ struct StubNetworkAdapter {
 
 #[async_trait::async_trait]
 impl crate::network::Network for StubNetworkAdapter {
-    fn pid(&self) -> &str { "test-pid" }
-    fn group(&self) -> &str { "test-group" }
-    fn unicast(&self) -> &str { "test-unicast" }
-    fn anycast(&self) -> &str { "test-anycast" }
-    async fn start(&self) -> error::Result<()> { Ok(()) }
-    async fn stop(&self) -> error::Result<()> { Ok(()) }
+    fn pid(&self) -> &str {
+        "test-pid"
+    }
+    fn group(&self) -> &str {
+        "test-group"
+    }
+    fn unicast(&self) -> &str {
+        "test-unicast"
+    }
+    fn anycast(&self) -> &str {
+        "test-anycast"
+    }
+    async fn start(&self) -> error::Result<()> {
+        Ok(())
+    }
+    async fn stop(&self) -> error::Result<()> {
+        Ok(())
+    }
 
     async fn send(&self, req: String) -> error::Result<String> {
         self.send_count.fetch_add(1, Ordering::SeqCst);

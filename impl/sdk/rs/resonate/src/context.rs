@@ -438,7 +438,10 @@ where
         let record = cell.into_inner().unwrap();
 
         match record.state {
-            PromiseState::Resolved => Ok(DurableFuture::resolved(record.value.data_or_null())),
+            PromiseState::Resolved => {
+                let val: T = serde_json::from_value(record.value.data_or_null())?;
+                Ok(DurableFuture::resolved(val))
+            }
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
@@ -480,17 +483,15 @@ where
                             .lock()
                             .await
                             .extend(child_remote.clone());
-                        let outcome = Outcome::Suspended {
+                        let _ = tx.send(Err(Error::Suspended));
+                        return Outcome::Suspended {
                             remote_todos: child_remote,
                         };
-                        let _ = tx.send(outcome_to_sendable(&outcome));
-                        return outcome;
                     }
 
+                    // Serialize by reference for promise settling
                     let json_result = match &result {
-                        Ok(val) => {
-                            serde_json::to_value(val).map_err(Error::SerializationError)
-                        }
+                        Ok(val) => serde_json::to_value(val).map_err(Error::SerializationError),
                         Err(e) => Err(Error::Application {
                             message: e.to_string(),
                         }),
@@ -502,17 +503,19 @@ where
                         let _ = effects
                             .settle_promise(&child_id_for_task, &json_result)
                             .await;
+                        // Send the original typed result — no JSON roundtrip
+                        let _ = tx.send(result);
                         Outcome::Done(json_result)
                     } else {
                         parent_remote_todos
                             .lock()
                             .await
                             .extend(child_remote.clone());
+                        let _ = tx.send(Err(Error::Suspended));
                         Outcome::Suspended {
                             remote_todos: child_remote,
                         }
                     };
-                    let _ = tx.send(outcome_to_sendable(&outcome));
                     outcome
                 });
 
@@ -708,7 +711,10 @@ impl<'ctx, T> RpcTask<'ctx, T> {
         let record = cell.into_inner().unwrap();
 
         match record.state {
-            PromiseState::Resolved => Ok(RemoteFuture::resolved(record.value.data_or_null())),
+            PromiseState::Resolved => {
+                let val: T = serde_json::from_value(record.value.data_or_null())?;
+                Ok(RemoteFuture::resolved(val))
+            }
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
@@ -716,7 +722,7 @@ impl<'ctx, T> RpcTask<'ctx, T> {
             }
             PromiseState::Pending => {
                 ctx.spawned_remote.lock().await.push(child_id.clone());
-                Ok(RemoteFuture::pending(child_id, ctx.effects.clone()))
+                Ok(RemoteFuture::pending())
             }
         }
     }
@@ -768,21 +774,6 @@ where
 
 use crate::now_ms;
 
-/// Convert an Outcome reference to a sendable form for the oneshot channel.
-fn outcome_to_sendable(outcome: &Outcome) -> Outcome {
-    match outcome {
-        Outcome::Done(result) => match result {
-            Ok(v) => Outcome::Done(Ok(v.clone())),
-            Err(e) => Outcome::Done(Err(Error::Application {
-                message: e.to_string(),
-            })),
-        },
-        Outcome::Suspended { remote_todos } => Outcome::Suspended {
-            remote_todos: remote_todos.clone(),
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,11 +791,7 @@ mod tests {
     impl Durable<(), i32> for Bar {
         const NAME: &'static str = "bar";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             Ok(42)
         }
     }
@@ -813,11 +800,7 @@ mod tests {
     impl Durable<(), i32> for Baz {
         const NAME: &'static str = "baz";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             Ok(31416)
         }
     }
@@ -839,11 +822,7 @@ mod tests {
     impl Durable<i32, i32> for Double {
         const NAME: &'static str = "double";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            args: i32,
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, args: i32) -> crate::error::Result<i32> {
             Ok(args * 2)
         }
     }
@@ -852,11 +831,7 @@ mod tests {
     impl Durable<i32, i32> for Square {
         const NAME: &'static str = "square";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            args: i32,
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, args: i32) -> crate::error::Result<i32> {
             Ok(args * args)
         }
     }
@@ -878,11 +853,7 @@ mod tests {
     impl Durable<(), i32> for Failing {
         const NAME: &'static str = "failing";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             Err(Error::Application {
                 message: "boom".to_string(),
             })
@@ -893,11 +864,7 @@ mod tests {
     impl Durable<(), ()> for Noop {
         const NAME: &'static str = "noop";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<()> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<()> {
             Ok(())
         }
     }
@@ -919,11 +886,7 @@ mod tests {
     impl Durable<(), i32> for Slow {
         const NAME: &'static str = "slow";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             Ok(1)
         }
@@ -933,11 +896,7 @@ mod tests {
     impl Durable<(), i32> for Fast {
         const NAME: &'static str = "fast";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             Ok(2)
         }
     }
@@ -949,11 +908,7 @@ mod tests {
     impl Durable<(), i32> for Counter {
         const NAME: &'static str = "counter";
         const KIND: DurableKind = DurableKind::Function;
-        async fn execute(
-            &self,
-            _env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, _env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             let val = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(val + 1)
         }
@@ -964,11 +919,7 @@ mod tests {
     impl Durable<(), i32> for ChildWorkflow {
         const NAME: &'static str = "child";
         const KIND: DurableKind = DurableKind::Workflow;
-        async fn execute(
-            &self,
-            env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             let ctx = env.into_context();
             let v: i32 = ctx.rpc("remoteFunc", &()).await?;
             Ok(v * 2)
@@ -980,11 +931,7 @@ mod tests {
     impl Durable<(), i32> for ChildWithLeaves {
         const NAME: &'static str = "child_with_leaves";
         const KIND: DurableKind = DurableKind::Workflow;
-        async fn execute(
-            &self,
-            env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             let ctx = env.into_context();
             let a: i32 = ctx.run(Bar, ()).await?;
             let b: i32 = ctx.run(Bar, ()).await?;
@@ -997,11 +944,7 @@ mod tests {
     impl Durable<(), i32> for InnerFailing {
         const NAME: &'static str = "inner_failing";
         const KIND: DurableKind = DurableKind::Workflow;
-        async fn execute(
-            &self,
-            env: ExecutionEnv<'_>,
-            _args: (),
-        ) -> crate::error::Result<i32> {
+        async fn execute(&self, env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             let ctx = env.into_context();
             ctx.run(Failing, ()).await
         }
@@ -1277,7 +1220,7 @@ mod tests {
     }
 
     // ── Double-await ───────────────────────────────────────────────
-    // NOTE: In Rust, DurableFuture::await_result() consumes self (takes ownership).
+    // NOTE: In Rust, DurableFuture's IntoFuture impl consumes self (takes ownership).
     // Double-await is prevented at compile time by Rust's ownership model.
     // We test that a single await works correctly.
 

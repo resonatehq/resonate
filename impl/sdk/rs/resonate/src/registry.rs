@@ -44,7 +44,9 @@ impl Registry {
     /// Returns an error if `name` is empty or already registered.
     pub fn add(&mut self, name: &str, kind: DurableKind, factory: Factory) -> Result<()> {
         if name.is_empty() {
-            return Err(Error::Application { message: "name is required".to_string() });
+            return Err(Error::Application {
+                message: "name is required".to_string(),
+            });
         }
         if self.by_name.contains_key(name) {
             return Err(Error::AlreadyRegistered(name.to_string()));
@@ -114,7 +116,9 @@ mod tests {
     #[test]
     fn register_a_function_by_name() {
         let mut registry = Registry::new();
-        registry.add("foo", DurableKind::Function, dummy_factory()).unwrap();
+        registry
+            .add("foo", DurableKind::Function, dummy_factory())
+            .unwrap();
         let entry = registry.get("foo");
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().name, "foo");
@@ -123,7 +127,9 @@ mod tests {
     #[test]
     fn register_with_custom_name() {
         let mut registry = Registry::new();
-        registry.add("bar*", DurableKind::Function, dummy_factory()).unwrap();
+        registry
+            .add("bar*", DurableKind::Function, dummy_factory())
+            .unwrap();
         let entry = registry.get("bar*");
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().name, "bar*");
@@ -132,7 +138,9 @@ mod tests {
     #[test]
     fn reject_duplicate_name_registration() {
         let mut registry = Registry::new();
-        registry.add("baz", DurableKind::Function, dummy_factory()).unwrap();
+        registry
+            .add("baz", DurableKind::Function, dummy_factory())
+            .unwrap();
         let err = registry.add("baz", DurableKind::Function, dummy_factory());
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("already registered"));

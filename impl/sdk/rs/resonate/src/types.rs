@@ -230,7 +230,10 @@ impl PromiseCreateReq {
         Self {
             id: id.to_string(),
             timeout_at: 0,
-            param: Value { headers: None, data: None },
+            param: Value {
+                headers: None,
+                data: None,
+            },
             tags: HashMap::new(),
         }
     }

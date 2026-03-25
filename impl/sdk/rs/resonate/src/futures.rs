@@ -1,94 +1,63 @@
-use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
-use std::marker::PhantomData;
 use std::pin::Pin;
 
 use crate::codec::deserialize_error;
-use crate::effects::Effects;
 use crate::error::{Error, Result};
-use crate::types::Outcome;
 
 /// A handle to an eagerly spawned local durable task.
 ///
 /// Created by `ctx.run(F, args).spawn()`. Awaiting this future returns the result
 /// once the spawned task completes.
 pub struct DurableFuture<T> {
-    inner: DurableFutureInner,
-    _phantom: PhantomData<T>,
+    inner: DurableFutureInner<T>,
 }
 
-enum DurableFutureInner {
-    /// The promise was already resolved — return the cached value.
-    Resolved(serde_json::Value),
+enum DurableFutureInner<T> {
+    /// The promise was already resolved — return the typed value directly.
+    Resolved(T),
     /// The promise was already rejected — return the cached error.
     Rejected(serde_json::Value),
-    /// The task is running — await the join handle.
+    /// The task is running — await the oneshot receiver for the typed result.
     Pending {
         id: String,
-        receiver: tokio::sync::oneshot::Receiver<Outcome>,
+        receiver: tokio::sync::oneshot::Receiver<Result<T>>,
     },
 }
 
-impl<T> DurableFuture<T>
-where
-    T: DeserializeOwned,
-{
-    pub(crate) fn resolved(value: serde_json::Value) -> Self {
+impl<T> DurableFuture<T> {
+    pub(crate) fn resolved(value: T) -> Self {
         Self {
             inner: DurableFutureInner::Resolved(value),
-            _phantom: PhantomData,
         }
     }
 
     pub(crate) fn rejected(value: serde_json::Value) -> Self {
         Self {
             inner: DurableFutureInner::Rejected(value),
-            _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn pending(id: String, receiver: tokio::sync::oneshot::Receiver<Outcome>) -> Self {
+    pub(crate) fn pending(id: String, receiver: tokio::sync::oneshot::Receiver<Result<T>>) -> Self {
         Self {
             inner: DurableFutureInner::Pending { id, receiver },
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Await the result of the durable task.
-    pub async fn await_result(self) -> Result<T> {
-        match self.inner {
-            DurableFutureInner::Resolved(value) => {
-                let result: T = serde_json::from_value(value)?;
-                Ok(result)
-            }
-            DurableFutureInner::Rejected(value) => Err(deserialize_error(value)),
-            DurableFutureInner::Pending { id, receiver } => {
-                let outcome = receiver
-                    .await
-                    .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?;
-
-                match outcome {
-                    Outcome::Done(Ok(value)) => {
-                        let result: T = serde_json::from_value(value)?;
-                        Ok(result)
-                    }
-                    Outcome::Done(Err(err)) => Err(err),
-                    Outcome::Suspended { .. } => Err(Error::Suspended),
-                }
-            }
         }
     }
 }
 
-impl<T> IntoFuture for DurableFuture<T>
-where
-    T: DeserializeOwned + 'static,
-{
+impl<T: 'static> IntoFuture for DurableFuture<T> {
     type Output = Result<T>;
     type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>>>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.await_result())
+        Box::pin(async move {
+            match self.inner {
+                DurableFutureInner::Resolved(value) => Ok(value),
+                DurableFutureInner::Rejected(value) => Err(deserialize_error(value)),
+                DurableFutureInner::Pending { id, receiver } => receiver
+                    .await
+                    .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?,
+            }
+        })
     }
 }
 
@@ -97,85 +66,61 @@ where
 /// Created by `ctx.rpc("func", &args).spawn()`. Awaiting this future returns the result
 /// once the remote worker resolves the promise.
 pub struct RemoteFuture<T> {
-    inner: RemoteFutureInner,
-    _phantom: PhantomData<T>,
+    inner: RemoteFutureInner<T>,
 }
 
-enum RemoteFutureInner {
-    Resolved(serde_json::Value),
+enum RemoteFutureInner<T> {
+    /// The promise was already resolved — return the typed value directly.
+    Resolved(T),
+    /// The promise was already rejected — return the cached error.
     Rejected(serde_json::Value),
-    Pending { _id: String, _effects: Effects },
+    /// The task is pending — only another worker can resolve it.
+    Pending,
 }
 
-impl<T> RemoteFuture<T>
-where
-    T: DeserializeOwned,
-{
-    pub(crate) fn resolved(value: serde_json::Value) -> Self {
+impl<T> RemoteFuture<T> {
+    pub(crate) fn resolved(value: T) -> Self {
         Self {
             inner: RemoteFutureInner::Resolved(value),
-            _phantom: PhantomData,
         }
     }
 
     pub(crate) fn rejected(value: serde_json::Value) -> Self {
         Self {
             inner: RemoteFutureInner::Rejected(value),
-            _phantom: PhantomData,
         }
     }
 
-    pub(crate) fn pending(id: String, effects: Effects) -> Self {
+    pub(crate) fn pending() -> Self {
         Self {
-            inner: RemoteFutureInner::Pending {
-                _id: id,
-                _effects: effects,
-            },
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Await the result of the remote task.
-    /// Note: For pending remote futures, this will return a Suspended error
-    /// since remote tasks can only be resolved by another worker.
-    pub async fn await_result(self) -> Result<T> {
-        match self.inner {
-            RemoteFutureInner::Resolved(value) => {
-                let result: T = serde_json::from_value(value)?;
-                Ok(result)
-            }
-            RemoteFutureInner::Rejected(value) => Err(deserialize_error(value)),
-            RemoteFutureInner::Pending {
-                _id: _,
-                _effects: _,
-            } => Err(Error::Suspended),
+            inner: RemoteFutureInner::Pending,
         }
     }
 }
 
-impl<T> IntoFuture for RemoteFuture<T>
-where
-    T: DeserializeOwned + Send + 'static,
-{
+impl<T: Send + 'static> IntoFuture for RemoteFuture<T> {
     type Output = Result<T>;
     type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(self.await_result())
+        Box::pin(async move {
+            match self.inner {
+                RemoteFutureInner::Resolved(value) => Ok(value),
+                RemoteFutureInner::Rejected(value) => Err(deserialize_error(value)),
+                RemoteFutureInner::Pending => Err(Error::Suspended),
+            }
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestHarness;
-    use crate::types::Outcome;
-
     // ── DurableFuture ──────────────────────────────────────────────
 
     #[tokio::test]
     async fn durable_future_completed_via_await() {
-        let future: DurableFuture<i32> = DurableFuture::resolved(serde_json::json!(42));
+        let future: DurableFuture<i32> = DurableFuture::resolved(42);
         let result: i32 = future.await.unwrap();
         assert_eq!(result, 42);
     }
@@ -195,8 +140,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let future: DurableFuture<String> = DurableFuture::pending("test-id".into(), rx);
 
-        tx.send(Outcome::Done(Ok(serde_json::json!("hello"))))
-            .unwrap();
+        tx.send(Ok("hello".to_string())).unwrap();
         let result: String = future.await.unwrap();
         assert_eq!(result, "hello");
     }
@@ -206,9 +150,9 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let future: DurableFuture<i32> = DurableFuture::pending("test-id".into(), rx);
 
-        tx.send(Outcome::Done(Err(Error::Application {
+        tx.send(Err(Error::Application {
             message: "task failed".into(),
-        })))
+        }))
         .unwrap();
         let err = future.await.unwrap_err();
         assert!(matches!(err, Error::Application { .. }));
@@ -219,10 +163,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let future: DurableFuture<i32> = DurableFuture::pending("test-id".into(), rx);
 
-        tx.send(Outcome::Suspended {
-            remote_todos: vec![],
-        })
-        .unwrap();
+        tx.send(Err(Error::Suspended)).unwrap();
         let err = future.await.unwrap_err();
         assert!(matches!(err, Error::Suspended));
     }
@@ -231,8 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn remote_future_completed_via_await() {
-        let future: RemoteFuture<String> =
-            RemoteFuture::resolved(serde_json::json!("remote-value"));
+        let future: RemoteFuture<String> = RemoteFuture::resolved("remote-value".to_string());
         let result: String = future.await.unwrap();
         assert_eq!(result, "remote-value");
     }
@@ -249,9 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn remote_future_pending_returns_suspended_via_await() {
-        let harness = TestHarness::new();
-        let effects = harness.build_effects(vec![]);
-        let future: RemoteFuture<i32> = RemoteFuture::pending("remote-id".into(), effects);
+        let future: RemoteFuture<i32> = RemoteFuture::pending();
         let err = future.await.unwrap_err();
         assert!(matches!(err, Error::Suspended));
     }

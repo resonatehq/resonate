@@ -138,10 +138,7 @@ struct ServerState {
 }
 
 /// Extract a required non-empty string field from a JSON value.
-fn require_str<'a>(
-    obj: &'a serde_json::Value,
-    field: &str,
-) -> std::result::Result<&'a str, Error> {
+fn require_str<'a>(obj: &'a serde_json::Value, field: &str) -> std::result::Result<&'a str, Error> {
     match obj.get(field).and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => Ok(s),
         _ => Err(Error::ServerError {
@@ -214,16 +211,25 @@ impl ServerState {
                 self.try_auto_timeout(now, id);
             }
             "task.acquire" | "task.release" | "task.fulfill" => {
-                let id = req.get("id").or_else(|| req.get("taskId")).and_then(|v| v.as_str()).unwrap_or("");
+                let id = req
+                    .get("id")
+                    .or_else(|| req.get("taskId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.suspend" => {
-                let id = req.get("id").or_else(|| req.get("taskId")).and_then(|v| v.as_str()).unwrap_or("");
+                let id = req
+                    .get("id")
+                    .or_else(|| req.get("taskId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 self.try_auto_timeout(now, id);
                 // Support both "actions" (protocol) and "callbacks" (legacy)
                 if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
                     for action in actions {
-                        let awaited = action.get("data")
+                        let awaited = action
+                            .get("data")
                             .and_then(|d| d.get("awaited"))
                             .or_else(|| action.get("awaited"))
                             .and_then(|v| v.as_str())
@@ -805,7 +811,10 @@ impl ServerState {
         }
 
         // Support both protocol "action" and legacy "settle" field names
-        let settle = req.get("action").or_else(|| req.get("settle")).unwrap_or(&serde_json::Value::Null);
+        let settle = req
+            .get("action")
+            .or_else(|| req.get("settle"))
+            .unwrap_or(&serde_json::Value::Null);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
         let settle_state = settle
             .get("state")
@@ -886,28 +895,29 @@ impl ServerState {
 
         // Parse callbacks — support both protocol "actions" (array of {awaited, awaiter})
         // and legacy "callbacks" (array of promise ID strings)
-        let callbacks: Vec<String> = if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
-            actions
-                .iter()
-                .filter_map(|a| {
-                    // Actions may have nested data.awaited or flat awaited
-                    a.get("data")
-                        .and_then(|d| d.get("awaited"))
-                        .or_else(|| a.get("awaited"))
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                })
-                .collect()
-        } else {
-            req.get("callbacks")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        let callbacks: Vec<String> =
+            if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
+                actions
+                    .iter()
+                    .filter_map(|a| {
+                        // Actions may have nested data.awaited or flat awaited
+                        a.get("data")
+                            .and_then(|d| d.get("awaited"))
+                            .or_else(|| a.get("awaited"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .collect()
+            } else {
+                req.get("callbacks")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
 
         // Register this task as an awaiter on each awaited promise.
         // If any awaited promise is already settled, redirect immediately.
@@ -1233,11 +1243,7 @@ impl ServerState {
 
         self.promises
             .values()
-            .filter(|p| {
-                p.id != promise_id
-                    && (p.tags
-                        .get("resonate:branch") == Some(&branch))
-            })
+            .filter(|p| p.id != promise_id && (p.tags.get("resonate:branch") == Some(&branch)))
             .map(|p| p.to_record())
             .collect()
     }
@@ -1501,15 +1507,9 @@ fn wrap_response_envelope(flat: &serde_json::Value) -> serde_json::Value {
         .get("corrId")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let status = flat
-        .get("status")
-        .and_then(|s| s.as_u64())
-        .unwrap_or(200);
+    let status = flat.get("status").and_then(|s| s.as_u64()).unwrap_or(200);
 
-    let mut data = flat
-        .as_object()
-        .cloned()
-        .unwrap_or_default();
+    let mut data = flat.as_object().cloned().unwrap_or_default();
     data.remove("kind");
     data.remove("corrId");
     data.remove("status");
@@ -1535,7 +1535,10 @@ mod tests {
 
     /// Helper to extract status from envelope response
     fn status(resp: &serde_json::Value) -> u64 {
-        resp.get("head").and_then(|h| h.get("status")).and_then(|s| s.as_u64()).unwrap_or(0)
+        resp.get("head")
+            .and_then(|h| h.get("status"))
+            .and_then(|s| s.as_u64())
+            .unwrap_or(0)
     }
 
     /// Helper to extract data from envelope response

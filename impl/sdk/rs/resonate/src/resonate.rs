@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::{de::DeserializeOwned, Serialize};
 use parking_lot::RwLock;
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::codec::{Codec, Encryptor, NoopEncryptor};
@@ -543,7 +543,10 @@ impl Resonate {
                 tokio::spawn(async move {
                     match root_promise {
                         Ok(rp) => {
-                            if let Err(e) = core.execute_until_blocked(&task_id, task_version, rp, None).await {
+                            if let Err(e) = core
+                                .execute_until_blocked(&task_id, task_version, rp, None)
+                                .await
+                            {
                                 tracing::error!(
                                     error = %e,
                                     task_id = %task_id,

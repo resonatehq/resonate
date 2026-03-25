@@ -34,6 +34,7 @@ pub use resonate_macros::function;
 /// Prelude module for convenient imports.
 pub mod prelude {
     pub use crate::codec::Codec;
+    pub use crate::codec::{Encryptor, NoopEncryptor};
     pub use crate::context::{Context, RpcTask, RunTask};
     pub use crate::durable::{Durable, ExecutionEnv};
     pub use crate::effects::Effects;
@@ -46,7 +47,6 @@ pub mod prelude {
     pub use crate::options::{Options, PartialOptions};
     pub use crate::promises::{Promises, Schedules};
     pub use crate::registry::Registry;
-    pub use crate::codec::{Encryptor, NoopEncryptor};
     pub use crate::resonate::{BasicAuth, Resonate, ResonateConfig, ResonateSchedule};
     pub use crate::transport::Transport;
     pub use crate::types::{DurableKind, Outcome, PromiseState};

@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::transport::Transport;
-use crate::types::{PromiseCreateReq, PromiseRecord, PromiseRegisterCallbackData, PromiseSettleReq, ScheduleRecord, TaskRecord};
+use crate::types::{
+    PromiseCreateReq, PromiseRecord, PromiseRegisterCallbackData, PromiseSettleReq, ScheduleRecord,
+    TaskRecord,
+};
 
 /// Protocol version string sent in all requests.
 const PROTOCOL_VERSION: &str = "2025-01-15";
@@ -159,9 +162,7 @@ impl Sender {
 
     /// Get a task by ID.
     pub async fn task_get(&self, id: &str) -> Result<TaskRecord> {
-        let req = Request::TaskGet {
-            id: id.to_string(),
-        };
+        let req = Request::TaskGet { id: id.to_string() };
         let (_, data) = self.send_request(&req).await?;
         let task = data
             .get("task")
@@ -188,18 +189,14 @@ impl Sender {
 
     /// Halt a task, preventing it from being acquired or making progress.
     pub async fn task_halt(&self, id: &str) -> Result<()> {
-        let req = Request::TaskHalt {
-            id: id.to_string(),
-        };
+        let req = Request::TaskHalt { id: id.to_string() };
         self.send_request(&req).await?;
         Ok(())
     }
 
     /// Continue a halted task, transitioning it back to pending.
     pub async fn task_continue(&self, id: &str) -> Result<()> {
-        let req = Request::TaskContinue {
-            id: id.to_string(),
-        };
+        let req = Request::TaskContinue { id: id.to_string() };
         self.send_request(&req).await?;
         Ok(())
     }
@@ -225,9 +222,12 @@ impl Sender {
             .get("data")
             .and_then(|d| d.get("promise"))
             .or_else(|| action_resp.get("promise"))
-            .ok_or_else(|| Error::DecodingError("missing promise in fence action response".into()))?;
-        let promise = PromiseRecord::deserialize(promise_val)
-            .map_err(|e| Error::DecodingError(format!("invalid promise in fence response: {}", e)))?;
+            .ok_or_else(|| {
+                Error::DecodingError("missing promise in fence action response".into())
+            })?;
+        let promise = PromiseRecord::deserialize(promise_val).map_err(|e| {
+            Error::DecodingError(format!("invalid promise in fence response: {}", e))
+        })?;
         let preload = parse_preloaded(&data);
         Ok(TaskFenceResult { promise, preload })
     }
@@ -272,9 +272,7 @@ impl Sender {
 
     /// Get a promise by ID.
     pub async fn promise_get(&self, id: &str) -> Result<PromiseRecord> {
-        let req = Request::PromiseGet {
-            id: id.to_string(),
-        };
+        let req = Request::PromiseGet { id: id.to_string() };
         let (_, data) = self.send_request(&req).await?;
         parse_promise(&data)
     }
@@ -353,9 +351,7 @@ impl Sender {
 
     /// Get a schedule by ID.
     pub async fn schedule_get(&self, id: &str) -> Result<ScheduleRecord> {
-        let req = Request::ScheduleGet {
-            id: id.to_string(),
-        };
+        let req = Request::ScheduleGet { id: id.to_string() };
         let (_, data) = self.send_request(&req).await?;
         let schedule = data
             .get("schedule")
@@ -377,9 +373,7 @@ impl Sender {
 
     /// Delete a schedule.
     pub async fn schedule_delete(&self, id: &str) -> Result<()> {
-        let req = Request::ScheduleDelete {
-            id: id.to_string(),
-        };
+        let req = Request::ScheduleDelete { id: id.to_string() };
         self.send_request(&req).await?;
         Ok(())
     }
@@ -456,10 +450,7 @@ impl Sender {
             .unwrap_or(200) as u16;
 
         // Extract data from response
-        let data = resp
-            .get("data")
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
+        let data = resp.get("data").cloned().unwrap_or(serde_json::json!({}));
 
         // Check for error status codes
         if status >= 400 {
@@ -489,9 +480,7 @@ impl Sender {
 #[serde(tag = "kind")]
 pub(crate) enum Request {
     #[serde(rename = "promise.get")]
-    PromiseGet {
-        id: String,
-    },
+    PromiseGet { id: String },
 
     #[serde(rename = "promise.create")]
     PromiseCreate(PromiseCreateReq),
@@ -503,10 +492,7 @@ pub(crate) enum Request {
     PromiseRegisterCallback(PromiseRegisterCallbackData),
 
     #[serde(rename = "promise.register_listener")]
-    PromiseRegisterListener {
-        awaited: String,
-        address: String,
-    },
+    PromiseRegisterListener { awaited: String, address: String },
 
     #[serde(rename = "promise.search")]
     PromiseSearch {
@@ -521,9 +507,7 @@ pub(crate) enum Request {
     },
 
     #[serde(rename = "task.get")]
-    TaskGet {
-        id: String,
-    },
+    TaskGet { id: String },
 
     #[serde(rename = "task.create")]
     TaskCreate {
@@ -555,20 +539,13 @@ pub(crate) enum Request {
     },
 
     #[serde(rename = "task.release")]
-    TaskRelease {
-        id: String,
-        version: i64,
-    },
+    TaskRelease { id: String, version: i64 },
 
     #[serde(rename = "task.halt")]
-    TaskHalt {
-        id: String,
-    },
+    TaskHalt { id: String },
 
     #[serde(rename = "task.continue")]
-    TaskContinue {
-        id: String,
-    },
+    TaskContinue { id: String },
 
     #[serde(rename = "task.fence")]
     TaskFence {
@@ -578,10 +555,7 @@ pub(crate) enum Request {
     },
 
     #[serde(rename = "task.heartbeat")]
-    TaskHeartbeat {
-        pid: String,
-        tasks: Vec<TaskRef>,
-    },
+    TaskHeartbeat { pid: String, tasks: Vec<TaskRef> },
 
     #[serde(rename = "task.search")]
     TaskSearch {
@@ -594,17 +568,13 @@ pub(crate) enum Request {
     },
 
     #[serde(rename = "schedule.get")]
-    ScheduleGet {
-        id: String,
-    },
+    ScheduleGet { id: String },
 
     #[serde(rename = "schedule.create")]
     ScheduleCreate(ScheduleCreateReq),
 
     #[serde(rename = "schedule.delete")]
-    ScheduleDelete {
-        id: String,
-    },
+    ScheduleDelete { id: String },
 
     #[serde(rename = "schedule.search")]
     ScheduleSearch {
@@ -632,15 +602,15 @@ fn parse_promise(json: &serde_json::Value) -> Result<PromiseRecord> {
 
 /// Parse a task.acquire response.
 fn parse_task_acquire(json: &serde_json::Value) -> Result<TaskAcquireResult> {
-    let task_val = json.get("task").ok_or_else(|| {
-        Error::DecodingError("missing 'task' in task.acquire response".into())
-    })?;
+    let task_val = json
+        .get("task")
+        .ok_or_else(|| Error::DecodingError("missing 'task' in task.acquire response".into()))?;
     let task: TaskRecord = TaskRecord::deserialize(task_val)
         .map_err(|e| Error::DecodingError(format!("invalid task in task.acquire: {}", e)))?;
 
-    let promise_val = json.get("promise").ok_or_else(|| {
-        Error::DecodingError("missing 'promise' in task.acquire response".into())
-    })?;
+    let promise_val = json
+        .get("promise")
+        .ok_or_else(|| Error::DecodingError("missing 'promise' in task.acquire response".into()))?;
     let promise: PromiseRecord = PromiseRecord::deserialize(promise_val)
         .map_err(|e| Error::DecodingError(format!("invalid promise in task.acquire: {}", e)))?;
 
@@ -680,7 +650,9 @@ fn parse_preloaded(json: &serde_json::Value) -> Vec<PromiseRecord> {
 mod tests {
     use super::*;
     use crate::network::{LocalNetwork, Network};
-    use crate::types::{PromiseCreateReq, PromiseRegisterCallbackData, PromiseSettleReq, SettleState, Value};
+    use crate::types::{
+        PromiseCreateReq, PromiseRegisterCallbackData, PromiseSettleReq, SettleState, Value,
+    };
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -758,8 +730,14 @@ mod tests {
             id: "t1".into(),
             version: 1,
             actions: vec![
-                PromiseRegisterCallbackData { awaited: "dep-a".into(), awaiter: "t1".into() },
-                PromiseRegisterCallbackData { awaited: "dep-b".into(), awaiter: "t1".into() },
+                PromiseRegisterCallbackData {
+                    awaited: "dep-a".into(),
+                    awaiter: "t1".into(),
+                },
+                PromiseRegisterCallbackData {
+                    awaited: "dep-b".into(),
+                    awaiter: "t1".into(),
+                },
             ],
         };
         let json = serde_json::to_value(&req).unwrap();
@@ -838,7 +816,10 @@ mod tests {
 
         // Now acquire via Sender
         let sender = test_sender(net);
-        let result = sender.task_acquire(&task_id, 1, "pid1", 60000).await.unwrap();
+        let result = sender
+            .task_acquire(&task_id, 1, "pid1", 60000)
+            .await
+            .unwrap();
         assert_eq!(result.promise.id, "rt-p2");
     }
 
