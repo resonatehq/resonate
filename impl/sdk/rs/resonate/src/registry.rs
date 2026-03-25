@@ -9,9 +9,9 @@ use crate::durable::{Durable, ExecutionEnv};
 use crate::error::{Error, Result};
 use crate::types::DurableKind;
 
-/// Type-erased factory function for executing a registered durable function.
+/// Type-erased function for executing a registered durable function.
 /// Wrapped in Arc so it can be cloned out of the registry while holding a read lock briefly.
-pub type Factory = Arc<
+pub type Func = Arc<
     dyn for<'a> Fn(
             ExecutionEnv<'a>,
             serde_json::Value,
@@ -24,7 +24,7 @@ pub type Factory = Arc<
 pub struct RegistryEntry {
     pub name: String,
     pub kind: DurableKind,
-    pub factory: Factory,
+    pub func: Func,
 }
 
 /// Maps function names to their implementations.
@@ -42,7 +42,7 @@ impl Registry {
     /// Register a durable function.
     ///
     /// Returns an error if `name` is empty or already registered.
-    pub fn add(&mut self, name: &str, kind: DurableKind, factory: Factory) -> Result<()> {
+    pub fn add(&mut self, name: &str, kind: DurableKind, func: Func) -> Result<()> {
         if name.is_empty() {
             return Err(Error::Application {
                 message: "name is required".to_string(),
@@ -56,7 +56,7 @@ impl Registry {
             RegistryEntry {
                 name: name.to_string(),
                 kind,
-                factory,
+                func,
             },
         );
         Ok(())
@@ -70,7 +70,7 @@ impl Registry {
         Args: DeserializeOwned + Send + 'static,
         T: Serialize + Send + 'static,
     {
-        let factory: Factory = Arc::new(move |env, args_json| {
+        let func: Func = Arc::new(move |env, args_json| {
             Box::pin(async move {
                 let args: Args = serde_json::from_value(args_json)?;
                 let result = func.execute(env, args).await;
@@ -80,7 +80,7 @@ impl Registry {
                 }
             })
         });
-        self.add(D::NAME, D::KIND, factory)
+        self.add(D::NAME, D::KIND, func)
     }
 
     /// Look up a registered function by name.
@@ -109,7 +109,7 @@ impl Default for Registry {
 mod tests {
     use super::*;
 
-    fn dummy_factory() -> Factory {
+    fn dummy_func() -> Func {
         Arc::new(|_env, _args| Box::pin(async { Ok(serde_json::Value::Null) }))
     }
 
@@ -117,7 +117,7 @@ mod tests {
     fn register_a_function_by_name() {
         let mut registry = Registry::new();
         registry
-            .add("foo", DurableKind::Function, dummy_factory())
+            .add("foo", DurableKind::Function, dummy_func())
             .unwrap();
         let entry = registry.get("foo");
         assert!(entry.is_some());
@@ -128,7 +128,7 @@ mod tests {
     fn register_with_custom_name() {
         let mut registry = Registry::new();
         registry
-            .add("bar*", DurableKind::Function, dummy_factory())
+            .add("bar*", DurableKind::Function, dummy_func())
             .unwrap();
         let entry = registry.get("bar*");
         assert!(entry.is_some());
@@ -139,9 +139,9 @@ mod tests {
     fn reject_duplicate_name_registration() {
         let mut registry = Registry::new();
         registry
-            .add("baz", DurableKind::Function, dummy_factory())
+            .add("baz", DurableKind::Function, dummy_func())
             .unwrap();
-        let err = registry.add("baz", DurableKind::Function, dummy_factory());
+        let err = registry.add("baz", DurableKind::Function, dummy_func());
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("already registered"));
     }
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn reject_functions_without_a_name() {
         let mut registry = Registry::new();
-        let err = registry.add("", DurableKind::Function, dummy_factory());
+        let err = registry.add("", DurableKind::Function, dummy_func());
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("name is required"));
     }

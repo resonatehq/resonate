@@ -3,7 +3,7 @@ use tokio::io::AsyncWriteExt;
 
 // A simple "hello world" leaf function that takes a name and returns a greeting.
 #[resonate::function(name = "hello")]
-async fn hello(greeting: String, name: String) -> Result<String> {
+async fn greet(greeting: String, name: String) -> Result<String> {
     let mut stdout = tokio::io::stdout();
     stdout
         .write_all(format!("{greeting} {name} from tokio::stdout\n").as_bytes())
@@ -22,8 +22,8 @@ async fn shout(message: String) -> Result<String> {
 #[resonate::function]
 async fn hello_workflow(ctx: &Context, names: (String, String)) -> Result<String> {
     let (greeting1, greeting2) = tokio::join!(
-        ctx.rpc::<String>("hello", &names.0),
-        ctx.run(hello, ("hello".to_string(), names.1.to_string())),
+        ctx.rpc::<String>("greet", ("hola".to_string(), names.0.to_string())),
+        ctx.run(greet, ("hello".to_string(), names.1.to_string())),
     );
     let greeting1: String = greeting1?;
     let greeting2: String = greeting2?;
@@ -42,7 +42,7 @@ async fn main() {
     let resonate = Resonate::local(None);
 
     // Register all functions.
-    resonate.register(hello).unwrap();
+    resonate.register(greet).unwrap();
     resonate.register(shout).unwrap();
     resonate.register(hello_workflow).unwrap();
 

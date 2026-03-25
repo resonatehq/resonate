@@ -1,4 +1,3 @@
-
 ### P3. Hot-path clone storm in `Core::execute_until_blocked_inner`
 **File:** `core.rs:220-250`
 
@@ -44,18 +43,6 @@ The method checks `subs.get_mut(&id)` for a pre-existing notification, then inse
 
 ---
 
-### D2. Promise state matching repeated ~6 times
-The pattern:
-```rust
-match state {
-    "resolved" => { /* decode and return Ok */ }
-    "rejected" | "rejected_canceled" | "rejected_timedout" => { /* decode and return Err */ }
-}
-```
-appears in `handle.rs` (3x), `context.rs` (`IntoFuture` for `RunTask`, `IntoFuture` for `RpcTask`, `spawn` for `RunTask`, `spawn` for `RpcTask`), `core.rs`, `futures.rs`. Extract to a shared function.
-
----
-
 ## 6. ⚪ Dead Code & Unused Dependencies
 
 | Item | Location | Notes |
@@ -71,28 +58,6 @@ appears in `handle.rs` (3x), `context.rs` (`IntoFuture` for `RunTask`, `IntoFutu
 | `_token` / `_auth` | `resonate.rs:171-182` | Resolved from env but unused |
 | `ScheduleRecord`, `TaskRecord` | `types.rs` | Defined but never deserialized into |
 | `Promises::register_listener` | `promises.rs` | Public but unused |
-
----
-
-### E3. Error type doesn't implement `Clone`
-**File:** `error.rs`
-
-`Error` wraps `reqwest::Error`, `serde_json::Error`, etc. which don't implement `Clone`. This forces the lossy `outcome_to_sendable` conversion. Consider using `Arc<Error>` for shared errors, or making Error clonable via string snapshots.
-
-## 8. 🟢 API Design
-
-### A1. `Resonate::run` takes `_func: D` for name only
-**File:** `resonate.rs:435`
-```rust
-pub async fn run<D, Args, T>(
-    &self, id: &str, _func: D, args: Args, opts: Option<PartialOptions>,
-) -> Result<T>
-where D: Durable<Args, T>, ...
-{
-    self.run_by_name::<T>(id, D::NAME, json_args, opts).await
-}
-```
-The function value is passed only to extract `D::NAME` at compile time. This forces users to construct (or pass) the struct. A cleaner API would be `run::<MyFunc>(id, args, opts)` using turbofish, though this requires a different trait design.
 
 ---
 

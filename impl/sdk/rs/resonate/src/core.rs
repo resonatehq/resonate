@@ -162,13 +162,13 @@ impl Core {
         let task_data: TaskData = TaskData::deserialize(promise.param.data_as_ref())
             .map_err(|e| Error::DecodingError(format!("invalid task data: {}", e)))?;
 
-        // 2. Look up the function in the registry (hold lock briefly, clone factory out)
-        let (factory, kind) = {
+        // 2. Look up the function in the registry (hold lock briefly, clone func out)
+        let (func, kind) = {
             let reg = self.registry.read();
             let entry = reg
                 .get(&task_data.func)
                 .ok_or_else(|| Error::FunctionNotFound(task_data.func.clone()))?;
-            (entry.factory.clone(), entry.kind)
+            (entry.func.clone(), entry.kind)
         };
 
         // 3. SHORT-CIRCUIT: if promise is already settled, fulfill the task
@@ -228,12 +228,12 @@ impl Core {
                 promise.tags.clone(),
             );
 
-            // Execute via the factory
+            // Execute via the func
             let env = match kind {
                 DurableKind::Function => ExecutionEnv::Function(&info),
                 DurableKind::Workflow => ExecutionEnv::Workflow(&ctx),
             };
-            let result = (factory)(env, task_data.args.clone()).await;
+            let result = (func)(env, task_data.args.clone()).await;
 
             // Flush remaining local work
             let flush_remote = ctx.flush_local_work().await;
@@ -902,7 +902,7 @@ mod tests {
     async fn execute_until_blocked_short_circuits_on_settled_promise() {
         let harness = TestHarness::new();
         let codec = noop_codec();
-        // Promise is already resolved — factory must never be called but task must be fulfilled
+        // Promise is already resolved — func must never be called but task must be fulfilled
         let param_data = serde_json::json!({"func": "noop", "args": null});
         let root = PromiseRecord {
             id: "settled-p".to_string(),
@@ -930,7 +930,7 @@ mod tests {
             .unwrap();
         assert_eq!(status, Status::Done);
 
-        // Short-circuits before calling the factory but still sends TaskFulfill
+        // Short-circuits before calling the func but still sends TaskFulfill
         let requests = harness.sent_requests_json().await;
         assert!(
             requests.iter().any(|r| r["kind"] == "task.fulfill"),
