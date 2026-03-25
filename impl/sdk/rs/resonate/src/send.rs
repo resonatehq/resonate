@@ -1,16 +1,118 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::transport::Transport;
 use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq};
+
+// ═══════════════════════════════════════════════════════════════════
+//  Public result types
+// ═══════════════════════════════════════════════════════════════════
+
+/// Result of acquiring a task.
+#[derive(Debug, Clone)]
+pub struct TaskAcquireResult {
+    pub root_promise: PromiseRecord,
+    pub preloaded: Vec<PromiseRecord>,
+}
+
+/// Result of suspending a task — either actually suspended or redirected.
+#[derive(Debug, Clone)]
+pub enum SuspendResult {
+    Suspended,
+    Redirect { preloaded: Vec<PromiseRecord> },
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Sender — typed interface over Transport
+// ═══════════════════════════════════════════════════════════════════
+
+/// The Sender wraps a Transport and provides typed methods for each
+/// server operation. It handles JSON serialization, response parsing,
+/// and error conversion so callers never deal with raw JSON.
+///
+/// Cloning is cheap — Transport wraps `Arc<dyn Network>`.
+#[derive(Clone)]
+pub struct Sender {
+    transport: Transport,
+}
+
+impl Sender {
+    pub fn new(transport: Transport) -> Self {
+        Self { transport }
+    }
+
+    /// Acquire a task, returning the root promise and any preloaded promises.
+    pub async fn task_acquire(&self, task_id: &str) -> Result<TaskAcquireResult> {
+        let req = Request::TaskAcquire {
+            task_id: task_id.to_string(),
+        };
+        let json = self.send_request(&req).await?;
+        parse_task_acquire(&json)
+    }
+
+    /// Fulfill a task by settling its root promise.
+    pub async fn task_fulfill(&self, task_id: &str, settle: PromiseSettleReq) -> Result<()> {
+        let req = Request::TaskFulfill {
+            task_id: task_id.to_string(),
+            settle,
+        };
+        self.send_request(&req).await?;
+        Ok(())
+    }
+
+    /// Suspend a task, registering callbacks for awaited promises.
+    /// Returns whether the task was actually suspended or redirected.
+    pub async fn task_suspend(
+        &self,
+        task_id: &str,
+        callbacks: Vec<String>,
+    ) -> Result<SuspendResult> {
+        let req = Request::TaskSuspend {
+            task_id: task_id.to_string(),
+            callbacks,
+        };
+        let json = self.send_request(&req).await?;
+        parse_suspend_result(&json)
+    }
+
+    /// Release a task (give up the lock without fulfilling).
+    pub async fn task_release(&self, task_id: &str) -> Result<()> {
+        let req = Request::TaskRelease {
+            task_id: task_id.to_string(),
+        };
+        self.send_request(&req).await?;
+        Ok(())
+    }
+
+    /// Create a durable promise.
+    pub async fn promise_create(&self, req: PromiseCreateReq) -> Result<PromiseRecord> {
+        let request = Request::PromiseCreate(req);
+        let json = self.send_request(&request).await?;
+        parse_promise(&json)
+    }
+
+    /// Settle (resolve/reject) a durable promise.
+    pub async fn promise_settle(&self, req: PromiseSettleReq) -> Result<PromiseRecord> {
+        let request = Request::PromiseSettle(req);
+        let json = self.send_request(&request).await?;
+        parse_promise(&json)
+    }
+
+    /// Internal: serialize a Request, send via transport, return raw JSON response.
+    async fn send_request(&self, req: &Request) -> Result<serde_json::Value> {
+        let req_json = serde_json::to_value(req)?;
+        self.transport.send(req_json).await
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Request enum (internal serialization format)
+// ═══════════════════════════════════════════════════════════════════
 
 /// Request types sent to the Resonate server.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind")]
-pub enum Request {
+pub(crate) enum Request {
     #[serde(rename = "promise.create")]
     PromiseCreate(PromiseCreateReq),
 
@@ -44,163 +146,74 @@ pub enum Request {
     },
 }
 
-/// Response types received from the Resonate server.
-///
-/// The server echoes back the request kind (e.g., `"promise.create"`, `"task.acquire"`).
-/// Because response shapes vary by operation, deserialization is handled manually
-/// by `parse_response` rather than via serde's tag dispatch.
-#[derive(Debug, Clone)]
-pub enum Response {
-    Promise(PromiseRecord),
+// ═══════════════════════════════════════════════════════════════════
+//  Response parsing helpers (internal)
+// ═══════════════════════════════════════════════════════════════════
 
-    TaskAcquireResult {
-        root_promise: PromiseRecord,
-        preloaded: Vec<PromiseRecord>,
-    },
-
-    Suspended,
-
-    Redirect {
-        preloaded: Vec<PromiseRecord>,
-    },
+/// Parse a promise record from a server JSON response.
+fn parse_promise(json: &serde_json::Value) -> Result<PromiseRecord> {
+    let promise = json
+        .get("promise")
+        .ok_or_else(|| Error::DecodingError("missing 'promise' in response".into()))?;
+    PromiseRecord::deserialize(promise)
+        .map_err(|e| Error::DecodingError(format!("invalid promise record: {}", e)))
 }
 
-/// Parse a server JSON response into a `Response`, using the originating `Request`
-/// to determine which response shape to expect.
-///
-/// The server always echoes the request kind back (e.g. `"promise.create"`,
-/// `"task.acquire"`). The response body structure depends on the operation.
-pub fn parse_response(req: &Request, json: &serde_json::Value) -> Result<Response> {
-    match req {
-        Request::PromiseCreate(_) | Request::PromiseSettle(_) => {
-            let promise = json
-                .get("promise")
-                .ok_or_else(|| Error::DecodingError("missing 'promise' in response".into()))?;
-            let record: PromiseRecord = PromiseRecord::deserialize(promise)
-                .map_err(|e| Error::DecodingError(format!("invalid promise record: {}", e)))?;
-            Ok(Response::Promise(record))
-        }
+/// Parse a task.acquire response.
+fn parse_task_acquire(json: &serde_json::Value) -> Result<TaskAcquireResult> {
+    let promise = json.get("promise").ok_or_else(|| {
+        Error::DecodingError("missing 'promise' in task.acquire response".into())
+    })?;
+    let root_promise: PromiseRecord = PromiseRecord::deserialize(promise)
+        .map_err(|e| Error::DecodingError(format!("invalid promise in task.acquire: {}", e)))?;
+    let preloaded = parse_preloaded(json);
+    Ok(TaskAcquireResult {
+        root_promise,
+        preloaded,
+    })
+}
 
-        Request::TaskAcquire { .. } => {
-            let promise = json.get("promise").ok_or_else(|| {
-                Error::DecodingError("missing 'promise' in task.acquire response".into())
-            })?;
-            let root_promise: PromiseRecord = PromiseRecord::deserialize(promise).map_err(|e| {
-                Error::DecodingError(format!("invalid promise in task.acquire: {}", e))
-            })?;
-            let preloaded = json
-                .get("preload")
-                .or_else(|| json.get("preloaded"))
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| PromiseRecord::deserialize(v).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-            Ok(Response::TaskAcquireResult {
-                root_promise,
-                preloaded,
-            })
-        }
+/// Parse a task.suspend response — either Suspended or Redirect.
+fn parse_suspend_result(json: &serde_json::Value) -> Result<SuspendResult> {
+    let is_redirect = json
+        .get("redirect")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || json.get("status").and_then(|v| v.as_u64()) == Some(300);
 
-        Request::TaskFulfill { .. } | Request::TaskRelease { .. } => {
-            Ok(Response::Suspended) // Ack — no meaningful data to extract
-        }
-
-        Request::TaskSuspend { .. } => {
-            // Check for redirect (status 300 in TS SDK, or "redirect": true in local network)
-            let is_redirect = json
-                .get("redirect")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-                || json.get("status").and_then(|v| v.as_u64()) == Some(300);
-            if is_redirect {
-                let preloaded = json
-                    .get("preload")
-                    .or_else(|| json.get("preloaded"))
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| PromiseRecord::deserialize(v).ok())
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Ok(Response::Redirect { preloaded })
-            } else {
-                Ok(Response::Suspended)
-            }
-        }
+    if is_redirect {
+        Ok(SuspendResult::Redirect {
+            preloaded: parse_preloaded(json),
+        })
+    } else {
+        Ok(SuspendResult::Suspended)
     }
 }
 
-/// The Send function type alias.
-/// Wraps an HTTP client and handles serialization, deserialization, and error conversion.
-pub type SendFn =
-    Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> + Send + Sync>;
-
-/// Build a Send function from a reqwest client and base URL.
-pub fn build_send(client: reqwest::Client, base_url: &str) -> SendFn {
-    let base = base_url.to_string();
-    Arc::new(move |req: Request| {
-        let client = client.clone();
-        let base = base.clone();
-        Box::pin(async move {
-            let url = match &req {
-                Request::PromiseCreate(_) => format!("{}/promises", base),
-                Request::PromiseSettle(r) => format!("{}/promises/{}", base, r.id),
-                Request::TaskAcquire { task_id } => {
-                    format!("{}/tasks/{}/acquire", base, task_id)
-                }
-                Request::TaskFulfill { task_id, .. } => {
-                    format!("{}/tasks/{}/fulfill", base, task_id)
-                }
-                Request::TaskSuspend { task_id, .. } => {
-                    format!("{}/tasks/{}/suspend", base, task_id)
-                }
-                Request::TaskRelease { task_id } => {
-                    format!("{}/tasks/{}/release", base, task_id)
-                }
-            };
-
-            let method = match &req {
-                Request::PromiseCreate(_) => reqwest::Method::POST,
-                Request::PromiseSettle(_) => reqwest::Method::PATCH,
-                Request::TaskAcquire { .. } => reqwest::Method::POST,
-                Request::TaskFulfill { .. } => reqwest::Method::POST,
-                Request::TaskSuspend { .. } => reqwest::Method::POST,
-                Request::TaskRelease { .. } => reqwest::Method::POST,
-            };
-
-            let res = client.request(method, &url).json(&req).send().await?;
-
-            let status = res.status();
-            let text = res.text().await?;
-
-            if !status.is_success() && status.as_u16() != 409 {
-                return Err(Error::ServerError {
-                    code: status.as_u16(),
-                    message: text,
-                });
-            }
-
-            let json: serde_json::Value =
-                serde_json::from_str(&text).map_err(|e| Error::ServerError {
-                    code: status.as_u16(),
-                    message: format!("invalid response JSON: {} (body: {})", e, text),
-                })?;
-
-            parse_response(&req, &json)
+/// Extract preloaded promises from a response (accepts both "preload" and "preloaded" keys).
+fn parse_preloaded(json: &serde_json::Value) -> Vec<PromiseRecord> {
+    json.get("preload")
+        .or_else(|| json.get("preloaded"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| PromiseRecord::deserialize(v).ok())
+                .collect()
         })
-    })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::network::Network;
+    use crate::network::{LocalNetwork, Network};
     use crate::types::{PromiseCreateReq, PromiseSettleReq, SettleState, Value};
     use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn test_sender(net: Arc<LocalNetwork>) -> Sender {
+        Sender::new(Transport::new(net))
+    }
 
     // ── Serialization: verify "kind" uses "subject.verb" format ─────
 
@@ -254,7 +267,6 @@ mod tests {
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["kind"], "task.fulfill");
         assert_eq!(json["taskId"], "t1");
-        // settle should be a nested object, not flattened
         assert_eq!(json["settle"]["id"], "p1");
         assert_eq!(json["settle"]["state"], "resolved");
     }
@@ -281,40 +293,29 @@ mod tests {
         assert_eq!(json["taskId"], "t1");
     }
 
-    // ── Round-trip: Request → LocalNetwork → parse_response ─────────
+    // ── Round-trip: Sender methods through LocalNetwork ─────────────
 
     #[tokio::test]
-    async fn promise_create_roundtrip_through_local_network() {
-        let net = crate::network::LocalNetwork::new(Some("test".into()), None);
+    async fn promise_create_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("test".into()), None));
+        let sender = test_sender(net);
 
-        let req = Request::PromiseCreate(PromiseCreateReq {
+        let req = PromiseCreateReq {
             id: "rt-p1".into(),
             timeout_at: i64::MAX,
             param: Value::default(),
             tags: HashMap::new(),
-        });
-        let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net
-            .send(serde_json::to_string(&req_json).unwrap())
-            .await
-            .unwrap();
-        let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-
-        let resp = parse_response(&req, &resp_json).unwrap();
-        match resp {
-            Response::Promise(record) => {
-                assert_eq!(record.id, "rt-p1");
-                assert_eq!(record.state, crate::types::PromiseState::Pending);
-            }
-            other => panic!("expected Promise, got {:?}", other),
-        }
+        };
+        let record = sender.promise_create(req).await.unwrap();
+        assert_eq!(record.id, "rt-p1");
+        assert_eq!(record.state, crate::types::PromiseState::Pending);
     }
 
     #[tokio::test]
-    async fn task_acquire_roundtrip_through_local_network() {
-        let net = crate::network::LocalNetwork::new(Some("pid1".into()), None);
+    async fn task_acquire_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
 
-        // First create a task
+        // First create a task via raw network
         let create_req = serde_json::json!({
             "kind": "task.create",
             "corrId": "c1",
@@ -339,29 +340,15 @@ mod tests {
         });
         net.send(release_req.to_string()).await.unwrap();
 
-        // Now acquire via the Request enum path
-        let req = Request::TaskAcquire {
-            task_id: task_id.clone(),
-        };
-        let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net
-            .send(serde_json::to_string(&req_json).unwrap())
-            .await
-            .unwrap();
-        let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-
-        let resp = parse_response(&req, &resp_json).unwrap();
-        match resp {
-            Response::TaskAcquireResult { root_promise, .. } => {
-                assert_eq!(root_promise.id, "rt-p2");
-            }
-            other => panic!("expected TaskAcquireResult, got {:?}", other),
-        }
+        // Now acquire via Sender
+        let sender = test_sender(net);
+        let result = sender.task_acquire(&task_id).await.unwrap();
+        assert_eq!(result.root_promise.id, "rt-p2");
     }
 
     #[tokio::test]
-    async fn task_fulfill_roundtrip_through_local_network() {
-        let net = crate::network::LocalNetwork::new(Some("pid1".into()), None);
+    async fn task_fulfill_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
 
         // Create a task
         let create_req = serde_json::json!({
@@ -380,33 +367,27 @@ mod tests {
         let create_resp: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
         let task_id = create_resp["task"]["id"].as_str().unwrap().to_string();
 
-        // Fulfill via the Request enum path
-        let req = Request::TaskFulfill {
-            task_id: task_id.clone(),
-            settle: PromiseSettleReq {
-                id: "rt-p3".into(),
-                state: SettleState::Resolved,
-                value: Value {
-                    headers: None,
-                    data: Some(serde_json::json!("result")),
+        // Fulfill via Sender
+        let sender = test_sender(net);
+        sender
+            .task_fulfill(
+                &task_id,
+                PromiseSettleReq {
+                    id: "rt-p3".into(),
+                    state: SettleState::Resolved,
+                    value: Value {
+                        headers: None,
+                        data: Some(serde_json::json!("result")),
+                    },
                 },
-            },
-        };
-        let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net
-            .send(serde_json::to_string(&req_json).unwrap())
+            )
             .await
             .unwrap();
-        let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-
-        let resp = parse_response(&req, &resp_json).unwrap();
-        // Fulfill returns Suspended (ack)
-        assert!(matches!(resp, Response::Suspended));
     }
 
     #[tokio::test]
-    async fn task_suspend_roundtrip_through_local_network() {
-        let net = crate::network::LocalNetwork::new(Some("pid1".into()), None);
+    async fn task_suspend_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
 
         // Create a task
         let create_req = serde_json::json!({
@@ -425,25 +406,18 @@ mod tests {
         let create_resp: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
         let task_id = create_resp["task"]["id"].as_str().unwrap().to_string();
 
-        // Suspend via the Request enum path
-        let req = Request::TaskSuspend {
-            task_id: task_id.clone(),
-            callbacks: vec!["dep-a".into()],
-        };
-        let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net
-            .send(serde_json::to_string(&req_json).unwrap())
+        // Suspend via Sender
+        let sender = test_sender(net);
+        let result = sender
+            .task_suspend(&task_id, vec!["dep-a".into()])
             .await
             .unwrap();
-        let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-
-        let resp = parse_response(&req, &resp_json).unwrap();
-        assert!(matches!(resp, Response::Suspended));
+        assert!(matches!(result, SuspendResult::Suspended));
     }
 
     #[tokio::test]
-    async fn task_release_roundtrip_through_local_network() {
-        let net = crate::network::LocalNetwork::new(Some("pid1".into()), None);
+    async fn task_release_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
 
         // Create a task
         let create_req = serde_json::json!({
@@ -460,18 +434,8 @@ mod tests {
         let create_resp: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
         let task_id = create_resp["task"]["id"].as_str().unwrap().to_string();
 
-        // Release via the Request enum path
-        let req = Request::TaskRelease {
-            task_id: task_id.clone(),
-        };
-        let req_json = serde_json::to_value(&req).unwrap();
-        let resp_str = net
-            .send(serde_json::to_string(&req_json).unwrap())
-            .await
-            .unwrap();
-        let resp_json: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-
-        let resp = parse_response(&req, &resp_json).unwrap();
-        assert!(matches!(resp, Response::Suspended));
+        // Release via Sender
+        let sender = test_sender(net);
+        sender.task_release(&task_id).await.unwrap();
     }
 }

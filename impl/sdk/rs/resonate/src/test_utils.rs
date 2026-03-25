@@ -9,7 +9,8 @@ use crate::codec::{Codec, NoopEncryptor};
 use crate::context::Context;
 use crate::effects::Effects;
 use crate::error;
-use crate::send::{Request, Response, SendFn};
+use crate::send::Sender;
+use crate::transport::Transport;
 use crate::types::{PromiseRecord, PromiseState, SettleState, Value};
 
 fn test_codec() -> Codec {
@@ -44,13 +45,231 @@ impl StubNetwork {
             max_redirects: 1,
         }
     }
+
+    /// Handle a JSON request string and return a JSON response string.
+    fn handle_request(&mut self, req_json: &serde_json::Value) -> serde_json::Value {
+        let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        match kind {
+            "promise.create" => self.handle_promise_create(req_json),
+            "promise.settle" => self.handle_promise_settle(req_json),
+            "task.acquire" => self.handle_task_acquire(req_json),
+            "task.fulfill" => self.handle_task_fulfill(req_json),
+            "task.suspend" => self.handle_task_suspend(req_json),
+            "task.release" => self.handle_task_release(req_json),
+            _ => serde_json::json!({"kind": kind, "error": "unknown request kind"}),
+        }
+    }
+
+    fn handle_promise_create(&mut self, req: &serde_json::Value) -> serde_json::Value {
+        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = "promise.create";
+
+        // Idempotent: if exists, return existing
+        if let Some(existing) = self.promises.get(id) {
+            return serde_json::json!({
+                "kind": kind,
+                "promise": promise_to_json(existing),
+            });
+        }
+
+        let timeout_at = req.get("timeoutAt").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
+        let param = req.get("param").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
+        let tags: HashMap<String, String> = req.get("tags")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let record = PromiseRecord {
+            id: id.to_string(),
+            state: PromiseState::Pending,
+            timeout_at,
+            param: serde_json::from_value(param).unwrap_or_default(),
+            value: Value::default(),
+            tags,
+            created_at: 0,
+            settled_at: None,
+        };
+        self.promises.insert(id.to_string(), record.clone());
+        serde_json::json!({
+            "kind": kind,
+            "promise": promise_to_json(&record),
+        })
+    }
+
+    fn handle_promise_settle(&mut self, req: &serde_json::Value) -> serde_json::Value {
+        let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = "promise.settle";
+        let state_str = req.get("state").and_then(|v| v.as_str()).unwrap_or("resolved");
+        let value = req.get("value").cloned().unwrap_or(serde_json::json!({"headers": null, "data": null}));
+
+        let settle_state = match state_str {
+            "resolved" => SettleState::Resolved,
+            "rejected" => SettleState::Rejected,
+            _ => SettleState::RejectedCanceled,
+        };
+        let promise_state = match settle_state {
+            SettleState::Resolved => PromiseState::Resolved,
+            SettleState::Rejected | SettleState::RejectedCanceled => PromiseState::Rejected,
+        };
+
+        if let Some(p) = self.promises.get_mut(id) {
+            if p.state != PromiseState::Pending {
+                return serde_json::json!({
+                    "kind": kind,
+                    "promise": promise_to_json(p),
+                });
+            }
+            p.state = promise_state;
+            p.value = serde_json::from_value(value).unwrap_or_default();
+            p.settled_at = Some(1);
+            return serde_json::json!({
+                "kind": kind,
+                "promise": promise_to_json(p),
+            });
+        }
+
+        // Promise not found — create and settle it
+        let record = PromiseRecord {
+            id: id.to_string(),
+            state: promise_state,
+            timeout_at: i64::MAX,
+            param: Value::default(),
+            value: serde_json::from_value(value).unwrap_or_default(),
+            tags: HashMap::new(),
+            created_at: 0,
+            settled_at: Some(1),
+        };
+        self.promises.insert(id.to_string(), record.clone());
+        serde_json::json!({
+            "kind": kind,
+            "promise": promise_to_json(&record),
+        })
+    }
+
+    fn handle_task_acquire(&self, req: &serde_json::Value) -> serde_json::Value {
+        let task_id = req.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = "task.acquire";
+
+        if let Some(task) = self.tasks.get(task_id) {
+            let preloaded: Vec<serde_json::Value> = task.preloaded.iter().map(promise_to_json).collect();
+            serde_json::json!({
+                "kind": kind,
+                "promise": promise_to_json(&task.root_promise),
+                "preload": preloaded,
+            })
+        } else {
+            serde_json::json!({
+                "kind": kind,
+                "error": format!("task {} not found", task_id),
+                "status": 404,
+            })
+        }
+    }
+
+    fn handle_task_fulfill(&self, _req: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"kind": "task.fulfill"})
+    }
+
+    fn handle_task_suspend(&mut self, _req: &serde_json::Value) -> serde_json::Value {
+        if self.suspend_returns_redirect && self.redirect_count < self.max_redirects {
+            self.redirect_count += 1;
+            serde_json::json!({
+                "kind": "task.suspend",
+                "redirect": true,
+                "preload": [],
+            })
+        } else {
+            serde_json::json!({"kind": "task.suspend"})
+        }
+    }
+
+    fn handle_task_release(&self, _req: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"kind": "task.release"})
+    }
+}
+
+/// Convert a PromiseRecord to JSON matching the server response format.
+fn promise_to_json(p: &PromiseRecord) -> serde_json::Value {
+    serde_json::json!({
+        "id": p.id,
+        "state": match p.state {
+            PromiseState::Pending => "pending",
+            PromiseState::Resolved => "resolved",
+            PromiseState::Rejected => "rejected",
+            PromiseState::RejectedCanceled => "rejected_canceled",
+            PromiseState::RejectedTimedout => "rejected_timedout",
+        },
+        "param": {
+            "headers": p.param.headers,
+            "data": p.param.data,
+        },
+        "value": {
+            "headers": p.value.headers,
+            "data": p.value.data,
+        },
+        "tags": p.tags,
+        "timeoutAt": p.timeout_at,
+        "createdAt": p.created_at,
+        "settledAt": p.settled_at,
+    })
+}
+
+/// A Network implementation backed by StubNetwork for testing.
+/// Tracks all sent requests and their count.
+struct StubNetworkAdapter {
+    network: Arc<Mutex<StubNetwork>>,
+    send_count: Arc<AtomicUsize>,
+    sent_json: Arc<Mutex<Vec<serde_json::Value>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::network::Network for StubNetworkAdapter {
+    fn pid(&self) -> &str { "test-pid" }
+    fn group(&self) -> &str { "test-group" }
+    fn unicast(&self) -> &str { "test-unicast" }
+    fn anycast(&self) -> &str { "test-anycast" }
+    async fn start(&self) -> error::Result<()> { Ok(()) }
+    async fn stop(&self) -> error::Result<()> { Ok(()) }
+
+    async fn send(&self, req: String) -> error::Result<String> {
+        self.send_count.fetch_add(1, Ordering::SeqCst);
+
+        let req_json: serde_json::Value = serde_json::from_str(&req)
+            .map_err(|e| error::Error::DecodingError(format!("invalid request JSON: {}", e)))?;
+
+        self.sent_json.lock().await.push(req_json.clone());
+
+        let mut net = self.network.lock().await;
+
+        // Check for task.acquire 404 — return as server error
+        let kind = req_json.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        if kind == "task.acquire" {
+            let task_id = req_json.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+            if !net.tasks.contains_key(task_id) {
+                return Err(error::Error::ServerError {
+                    code: 404,
+                    message: format!("task {} not found", task_id),
+                });
+            }
+        }
+
+        let resp = net.handle_request(&req_json);
+        Ok(serde_json::to_string(&resp).unwrap())
+    }
+
+    fn recv(&self, _callback: Box<dyn Fn(String) + Send + Sync>) {
+        // No-op for tests
+    }
+
+    fn r#match(&self, target: &str) -> String {
+        target.to_string()
+    }
 }
 
 /// Test harness wrapping a StubNetwork with tracking.
 pub struct TestHarness {
-    pub network: Arc<Mutex<StubNetwork>>,
-    pub send_count: Arc<AtomicUsize>,
-    pub sent_requests: Arc<Mutex<Vec<Request>>>,
+    network: Arc<Mutex<StubNetwork>>,
+    send_count: Arc<AtomicUsize>,
+    sent_json: Arc<Mutex<Vec<serde_json::Value>>>,
 }
 
 impl TestHarness {
@@ -58,7 +277,7 @@ impl TestHarness {
         Self {
             network: Arc::new(Mutex::new(StubNetwork::new())),
             send_count: Arc::new(AtomicUsize::new(0)),
-            sent_requests: Arc::new(Mutex::new(Vec::new())),
+            sent_json: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -95,119 +314,30 @@ impl TestHarness {
         net.suspend_returns_redirect = val;
     }
 
-    pub fn build_send_fn(&self) -> SendFn {
-        let network = self.network.clone();
-        let send_count = self.send_count.clone();
-        let sent_requests = self.sent_requests.clone();
-
-        Arc::new(move |req: Request| {
-            let network = network.clone();
-            let send_count = send_count.clone();
-            let sent_requests = sent_requests.clone();
-            Box::pin(async move {
-                send_count.fetch_add(1, Ordering::SeqCst);
-                sent_requests.lock().await.push(req.clone());
-
-                let mut net = network.lock().await;
-
-                match req {
-                    Request::PromiseCreate(create_req) => {
-                        // Idempotent: if exists, return existing
-                        if let Some(existing) = net.promises.get(&create_req.id) {
-                            return Ok(Response::Promise(existing.clone()));
-                        }
-                        let record = PromiseRecord {
-                            id: create_req.id.clone(),
-                            state: PromiseState::Pending,
-                            timeout_at: create_req.timeout_at,
-                            param: create_req.param,
-                            value: Value::default(),
-                            tags: create_req.tags,
-                            created_at: 0,
-                            settled_at: None,
-                        };
-                        net.promises.insert(create_req.id, record.clone());
-                        Ok(Response::Promise(record))
-                    }
-                    Request::PromiseSettle(settle_req) => {
-                        let promise = net.promises.get_mut(&settle_req.id);
-                        match promise {
-                            Some(p) => {
-                                if p.state != PromiseState::Pending {
-                                    return Ok(Response::Promise(p.clone()));
-                                }
-                                p.state = match settle_req.state {
-                                    SettleState::Resolved => PromiseState::Resolved,
-                                    SettleState::Rejected | SettleState::RejectedCanceled => {
-                                        PromiseState::Rejected
-                                    }
-                                };
-                                p.value = settle_req.value;
-                                p.settled_at = Some(1);
-                                Ok(Response::Promise(p.clone()))
-                            }
-                            None => {
-                                let state = match settle_req.state {
-                                    SettleState::Resolved => PromiseState::Resolved,
-                                    SettleState::Rejected | SettleState::RejectedCanceled => {
-                                        PromiseState::Rejected
-                                    }
-                                };
-                                let record = PromiseRecord {
-                                    id: settle_req.id.clone(),
-                                    state,
-                                    timeout_at: i64::MAX,
-                                    param: Value::default(),
-                                    value: settle_req.value,
-                                    tags: HashMap::new(),
-                                    created_at: 0,
-                                    settled_at: Some(1),
-                                };
-                                net.promises.insert(settle_req.id, record.clone());
-                                Ok(Response::Promise(record))
-                            }
-                        }
-                    }
-                    Request::TaskAcquire { task_id } => {
-                        if let Some(task) = net.tasks.get(&task_id) {
-                            Ok(Response::TaskAcquireResult {
-                                root_promise: task.root_promise.clone(),
-                                preloaded: task.preloaded.clone(),
-                            })
-                        } else {
-                            Err(error::Error::ServerError {
-                                code: 404,
-                                message: format!("task {} not found", task_id),
-                            })
-                        }
-                    }
-                    Request::TaskFulfill { .. } => {
-                        Ok(Response::Suspended) // Reuse Suspended as ack
-                    }
-                    Request::TaskSuspend { .. } => {
-                        if net.suspend_returns_redirect && net.redirect_count < net.max_redirects {
-                            net.redirect_count += 1;
-                            Ok(Response::Redirect {
-                                preloaded: Vec::new(),
-                            })
-                        } else {
-                            Ok(Response::Suspended)
-                        }
-                    }
-                    Request::TaskRelease { .. } => {
-                        Ok(Response::Suspended) // Reuse Suspended as ack
-                    }
-                }
-            })
-        })
+    pub async fn set_max_redirects(&self, max: usize) {
+        let mut net = self.network.lock().await;
+        net.max_redirects = max;
     }
 
+    /// Build a Sender backed by the StubNetwork.
+    pub fn build_sender(&self) -> Sender {
+        let adapter = StubNetworkAdapter {
+            network: self.network.clone(),
+            send_count: self.send_count.clone(),
+            sent_json: self.sent_json.clone(),
+        };
+        let transport = Transport::new(Arc::new(adapter));
+        Sender::new(transport)
+    }
+
+    /// Build Effects from the stub, with optional preloaded promises.
     pub fn build_effects(&self, preload: Vec<PromiseRecord>) -> Effects {
-        Effects::new(self.build_send_fn(), test_codec(), preload)
+        Effects::new(self.build_sender(), test_codec(), preload)
     }
 
-    pub async fn sent_requests(&self) -> Vec<Request> {
-        self.sent_requests.lock().await.clone()
+    /// Return the raw JSON values of all sent requests (for assertions).
+    pub async fn sent_requests_json(&self) -> Vec<serde_json::Value> {
+        self.sent_json.lock().await.clone()
     }
 
     /// Settle a promise in the stub directly (simulating remote completion).

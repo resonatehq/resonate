@@ -17,7 +17,7 @@ use crate::network::{LocalNetwork, Network};
 use crate::options::{is_url, Options, OptionsBuilder, PartialOptions};
 use crate::promises::{Promises, Schedules};
 use crate::registry::Registry;
-use crate::send::SendFn;
+use crate::send::Sender;
 use crate::transport::{Message, Transport};
 
 /// Configuration for constructing a Resonate instance.
@@ -211,18 +211,8 @@ impl Resonate {
 
         let opts_builder = OptionsBuilder::new(network.clone(), id_prefix.clone());
 
-        // Build the SendFn for Core from the transport
-        let transport_for_core = transport.clone();
-        let send_fn: SendFn = Arc::new(move |req| {
-            let transport = transport_for_core.clone();
-            Box::pin(async move {
-                // Serialize Request → JSON with correct "subject.verb" kinds
-                let req_json = serde_json::to_value(&req)?;
-                let resp_json = transport.send(req_json).await?;
-                // Parse response based on request type (server echoes request kind)
-                crate::send::parse_response(&req, &resp_json)
-            })
-        });
+        // Build the Sender for Core from the transport
+        let sender = Sender::new(transport.clone());
 
         // Build match_fn from the network for target resolution.
         // If the target already looks like a URL, pass it through unchanged
@@ -237,7 +227,7 @@ impl Resonate {
         });
 
         let core = Arc::new(Core::new(
-            send_fn,
+            sender,
             codec.clone(),
             registry.clone(),
             match_fn,

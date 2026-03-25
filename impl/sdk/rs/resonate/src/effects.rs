@@ -1,24 +1,23 @@
+use dashmap::DashMap;
 use std::sync::Arc;
 
-use dashmap::DashMap;
-
 use crate::codec::Codec;
-use crate::error::{Error, Result};
-use crate::send::{Request, Response, SendFn};
+use crate::error::Result;
+use crate::send::Sender;
 use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseState, SettleState};
 
-/// The two durable operations the SDK needs. Built from Send + Codec.
+/// The two durable operations the SDK needs. Built from Sender + Codec.
 /// Maintains an internal cache of decoded PromiseRecords.
 #[derive(Clone)]
 pub struct Effects {
-    send: SendFn,
+    sender: Sender,
     codec: Codec,
     cache: Arc<DashMap<String, PromiseRecord>>,
 }
 
 impl Effects {
-    /// Build Effects from a Send function, Codec, and optional preloaded promises.
-    pub fn new(send: SendFn, codec: Codec, preload: Vec<PromiseRecord>) -> Self {
+    /// Build Effects from a Sender, Codec, and optional preloaded promises.
+    pub fn new(sender: Sender, codec: Codec, preload: Vec<PromiseRecord>) -> Self {
         let map = DashMap::new();
         for p in preload {
             if let Ok(decoded) = codec.decode_promise(p) {
@@ -27,7 +26,7 @@ impl Effects {
         }
 
         Self {
-            send,
+            sender,
             codec,
             cache: Arc::new(map),
         }
@@ -51,20 +50,12 @@ impl Effects {
         };
 
         // 3. Send request
-        let response = (self.send)(Request::PromiseCreate(encoded_req)).await?;
+        let record = self.sender.promise_create(encoded_req).await?;
 
         // 4. Decode response, cache, return
-        match response {
-            Response::Promise(record) => {
-                let decoded = self.codec.decode_promise(record)?;
-                self.cache.insert(decoded.id.clone(), decoded.clone());
-                Ok(decoded)
-            }
-            _ => Err(Error::ServerError {
-                code: 500,
-                message: "unexpected response type for create_promise".into(),
-            }),
-        }
+        let decoded = self.codec.decode_promise(record)?;
+        self.cache.insert(decoded.id.clone(), decoded.clone());
+        Ok(decoded)
     }
 
     /// Settle a durable promise with a result.
@@ -96,20 +87,12 @@ impl Effects {
         };
 
         // 4. Send request
-        let response = (self.send)(Request::PromiseSettle(req)).await?;
+        let record = self.sender.promise_settle(req).await?;
 
         // 5. Decode response, cache, return
-        match response {
-            Response::Promise(record) => {
-                let decoded = self.codec.decode_promise(record)?;
-                self.cache.insert(decoded.id.clone(), decoded.clone());
-                Ok(decoded)
-            }
-            _ => Err(Error::ServerError {
-                code: 500,
-                message: "unexpected response type for settle_promise".into(),
-            }),
-        }
+        let decoded = self.codec.decode_promise(record)?;
+        self.cache.insert(decoded.id.clone(), decoded.clone());
+        Ok(decoded)
     }
 }
 

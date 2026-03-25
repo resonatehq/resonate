@@ -113,6 +113,11 @@ impl Codec {
             .map_err(|e| Error::DecodingError(format!("invalid promise JSON: {}", e)))?;
         self.decode_promise(record)
     }
+
+    /// Check if a string is valid base64.
+    pub fn is_valid_base64(s: &str) -> bool {
+        BASE64.decode(s).is_ok()
+    }
 }
 
 /// Encode an error for durable storage.
@@ -121,15 +126,6 @@ pub fn encode_error(err: &Error) -> serde_json::Value {
         "__type": "error",
         "message": err.to_string(),
     })
-}
-
-/// Decode an entire PromiseRecord's param and value fields, returning decoded copies.
-/// (Public alias for testing convenience.)
-impl Codec {
-    /// Check if a string is valid base64.
-    pub fn is_valid_base64(s: &str) -> bool {
-        BASE64.decode(s).is_ok()
-    }
 }
 
 /// Deserialize an error value from a rejected promise.

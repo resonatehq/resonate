@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 use serde::Deserialize;
 
@@ -9,14 +9,8 @@ use crate::effects::Effects;
 use crate::error::{Error, Result};
 use crate::heartbeat::Heartbeat;
 use crate::registry::Registry;
-use crate::send::{Request, Response, SendFn};
+use crate::send::{Sender, SuspendResult};
 use crate::types::{PromiseRecord, PromiseState, SettleState, Status, TaskData};
-
-/// Internal result of a suspend attempt.
-enum SuspendResult {
-    Suspended,
-    Redirect { preloaded: Vec<PromiseRecord> },
-}
 
 /// Core is the top-level component that manages the full lifecycle of a task.
 /// It takes a `send` function and uses it for all server communication.
@@ -33,7 +27,7 @@ enum SuspendResult {
 ///    Called when an `execute` message arrives from the network.
 ///    Acquires the task first, then delegates to `execute_until_blocked`.
 pub struct Core {
-    send: SendFn,
+    sender: Sender,
     codec: Codec,
     registry: Arc<RwLock<Registry>>,
     match_fn: MatchFn,
@@ -42,14 +36,14 @@ pub struct Core {
 
 impl Core {
     pub fn new(
-        send: SendFn,
+        sender: Sender,
         codec: Codec,
         registry: Arc<RwLock<Registry>>,
         match_fn: MatchFn,
         heartbeat: Arc<dyn Heartbeat>,
     ) -> Self {
         Self {
-            send,
+            sender,
             codec,
             registry,
             match_fn,
@@ -73,31 +67,15 @@ impl Core {
 
     async fn on_message_inner(&self, task_id: &str) -> Result<Status> {
         // 1. ACQUIRE the task
-        let acquire_response = (self.send)(Request::TaskAcquire {
-            task_id: task_id.to_string(),
-        })
-        .await?;
+        let result = self.sender.task_acquire(task_id).await?;
 
         tracing::debug!(task_id = task_id, "task acquired");
 
-        let (root_promise_raw, preloaded_raw) = match acquire_response {
-            Response::TaskAcquireResult {
-                root_promise,
-                preloaded,
-            } => (root_promise, preloaded),
-            _ => {
-                return Err(Error::ServerError {
-                    code: 500,
-                    message: "unexpected response for task.acquire".into(),
-                })
-            }
-        };
-
         // 2. Decode root promise
-        let root_promise = self.codec.decode_promise(root_promise_raw)?;
+        let root_promise = self.codec.decode_promise(result.root_promise)?;
 
         // 3. Delegate to execute_until_blocked
-        self.execute_until_blocked(task_id, root_promise, Some(preloaded_raw))
+        self.execute_until_blocked(task_id, root_promise, Some(result.preloaded))
             .await
     }
 
@@ -180,7 +158,7 @@ impl Core {
         };
 
         // 3. SHORT-CIRCUIT: if root promise is already settled, fulfill the task
-        //    without executing the function (matching TS SDK behavior).
+        //    without executing the function.
         if root_promise.state != PromiseState::Pending {
             tracing::info!(
                 task_id = task_id,
@@ -208,12 +186,12 @@ impl Core {
             return Ok(Status::Done);
         }
 
-        // 4. EXECUTE in a loop — on redirect, re-execute with new preloaded promises
-        //    without re-acquiring the task (matching TS SDK behavior).
+        // 4. EXECUTE in a loop, on redirect, re-execute with new preloaded promises
+        //    without re-acquiring the task.
         let mut current_preload = preload;
         loop {
             let effects = Effects::new(
-                self.send.clone(),
+                self.sender.clone(),
                 self.codec.clone(),
                 current_preload.unwrap_or_default(),
             );
@@ -277,23 +255,6 @@ impl Core {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Legacy compat: on_execute (acquires then executes)
-    //  Used by existing tests. Delegates to on_message.
-    // ═══════════════════════════════════════════════════════════════
-
-    /// Legacy entry point that acquires then executes. Kept for backward
-    /// compatibility with existing tests.
-    pub fn on_execute<'a>(
-        &'a self,
-        task_id: &'a str,
-    ) -> futures::future::BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            self.on_message(task_id).await?;
-            Ok(())
-        })
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     //  Task lifecycle helpers
     // ═══════════════════════════════════════════════════════════════
 
@@ -311,17 +272,16 @@ impl Core {
 
         let encoded_value = self.codec.encode(&value_data)?;
 
-        let req = Request::TaskFulfill {
-            task_id: task_id.to_string(),
-            settle: crate::types::PromiseSettleReq {
-                id: promise_id.to_string(),
-                state,
-                value: encoded_value,
-            },
-        };
-
-        (self.send)(req).await?;
-        Ok(())
+        self.sender
+            .task_fulfill(
+                task_id,
+                crate::types::PromiseSettleReq {
+                    id: promise_id.to_string(),
+                    state,
+                    value: encoded_value,
+                },
+            )
+            .await
     }
 
     /// Suspend a task by registering callbacks for the unresolved remote
@@ -333,31 +293,13 @@ impl Core {
         task_id: &str,
         remote_todos: Vec<String>,
     ) -> Result<SuspendResult> {
-        let req = Request::TaskSuspend {
-            task_id: task_id.to_string(),
-            callbacks: remote_todos,
-        };
-
-        let response = (self.send)(req).await?;
-
-        match response {
-            Response::Suspended => Ok(SuspendResult::Suspended),
-            Response::Redirect { preloaded } => Ok(SuspendResult::Redirect { preloaded }),
-            _ => Err(Error::ServerError {
-                code: 500,
-                message: "unexpected response for task.suspend".into(),
-            }),
-        }
+        self.sender.task_suspend(task_id, remote_todos).await
     }
 
     /// Release a task so another worker can pick it up.
     /// Called when execution fails with an error.
     async fn release_task(&self, task_id: &str) -> Result<()> {
-        let req = Request::TaskRelease {
-            task_id: task_id.to_string(),
-        };
-        (self.send)(req).await?;
-        Ok(())
+        self.sender.task_release(task_id).await
     }
 }
 
@@ -370,19 +312,19 @@ mod tests {
     use crate::registry::Registry;
     use crate::test_utils::*;
     use crate::types::{PromiseRecord, PromiseState, Value};
+    use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    use parking_lot::RwLock;
 
     fn noop_codec() -> Codec {
         Codec::new(Arc::new(NoopEncryptor))
     }
 
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
-    fn test_core(send: SendFn, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
+    fn test_core(sender: Sender, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
         let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
         let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
-        Core::new(send, codec, registry, match_fn, heartbeat)
+        Core::new(sender, codec, registry, match_fn, heartbeat)
     }
 
     // ── Test functions ─────────────────────────────────────────────
@@ -488,20 +430,20 @@ mod tests {
         registry.register(Add).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let fulfill = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+            .find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
-        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
-            assert_eq!(settle.state, crate::types::SettleState::Resolved);
+        let fulfill = fulfill.unwrap(); {
+            assert_eq!(fulfill["settle"]["state"], "resolved");
         }
     }
 
@@ -515,20 +457,20 @@ mod tests {
         registry.register(Fail).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let fulfill = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+            .find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent task.fulfill");
 
-        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
-            assert_eq!(settle.state, crate::types::SettleState::Rejected);
+        let fulfill = fulfill.unwrap(); {
+            assert_eq!(fulfill["settle"]["state"], "rejected");
         }
     }
 
@@ -542,21 +484,21 @@ mod tests {
         registry.register(Obj).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let fulfill = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+            .find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some());
 
-        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
-            let data_val = settle.value.data_or_null();
-            let data_str = data_val.as_str().unwrap();
+        let fulfill = fulfill.unwrap();
+        {
+            let data_str = fulfill["settle"]["value"]["data"].as_str().unwrap();
             assert!(
                 Codec::is_valid_base64(data_str),
                 "value.data should be valid base64: {}",
@@ -573,12 +515,12 @@ mod tests {
         let harness = TestHarness::new();
         let registry = Registry::new();
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
 
-        let result = core.on_execute("nonexistent").await;
+        let result = core.on_message("nonexistent").await;
         assert!(result.is_err(), "should fail when task doesn't exist");
     }
 
@@ -594,21 +536,21 @@ mod tests {
         registry.register(SuspendingMulti).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let suspend = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskSuspend { .. }));
+            .find(|r| r["kind"] == "task.suspend");
         assert!(suspend.is_some(), "should have sent task.suspend");
 
-        if let Request::TaskSuspend { callbacks, .. } = suspend.unwrap() {
-            assert_eq!(callbacks.len(), 2, "should have 2 awaited IDs");
-        }
+        let suspend = suspend.unwrap();
+        let callbacks = suspend["callbacks"].as_array().unwrap();
+        assert_eq!(callbacks.len(), 2, "should have 2 awaited IDs");
     }
 
     #[tokio::test]
@@ -625,11 +567,11 @@ mod tests {
         registry.register(SuspendingThenDone).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
         assert_eq!(
             COMP_COUNT.load(AtomicOrdering::SeqCst),
@@ -665,16 +607,16 @@ mod tests {
         registry.register(RedirNoAcquire).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let acquire_count = requests
             .iter()
-            .filter(|r| matches!(r, Request::TaskAcquire { .. }))
+            .filter(|r| r["kind"] == "task.acquire")
             .count();
         assert_eq!(
             acquire_count, 1,
@@ -709,18 +651,18 @@ mod tests {
         registry.register(RedirPreload).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
         // After redirect + re-execution, task should complete with fulfill
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskFulfill { .. })),
+                .any(|r| r["kind"] == "task.fulfill"),
             "task should be fulfilled after redirect re-execution"
         );
     }
@@ -741,10 +683,7 @@ mod tests {
         let harness = TestHarness::new();
         harness.set_suspend_returns_redirect(true).await;
         // Allow up to 2 redirects
-        {
-            let mut net = harness.network.lock().await;
-            net.max_redirects = 2;
-        }
+        harness.set_max_redirects(2).await;
 
         MULTI_REDIR_COUNT.store(0, AtomicOrdering::SeqCst);
 
@@ -755,11 +694,11 @@ mod tests {
         registry.register(MultiRedirect).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
-        core.on_execute("task1").await.unwrap();
+        core.on_message("task1").await.unwrap();
 
         assert_eq!(
             MULTI_REDIR_COUNT.load(AtomicOrdering::SeqCst),
@@ -767,10 +706,10 @@ mod tests {
             "should have been called 3 times (initial + 2 redirects)"
         );
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let acquire_count = requests
             .iter()
-            .filter(|r| matches!(r, Request::TaskAcquire { .. }))
+            .filter(|r| r["kind"] == "task.acquire")
             .count();
         assert_eq!(
             acquire_count, 1,
@@ -790,23 +729,23 @@ mod tests {
         registry.register(Simple).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
         let status = core.on_message("task1").await.unwrap();
         assert_eq!(status, Status::Done);
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
 
         assert!(
-            matches!(&requests[0], Request::TaskAcquire { .. }),
+            requests[0]["kind"] == "task.acquire",
             "first request should be TaskAcquire"
         );
 
         let has_fulfill = requests
             .iter()
-            .any(|r| matches!(r, Request::TaskFulfill { .. }));
+            .any(|r| r["kind"] == "task.fulfill");
         assert!(has_fulfill, "should have sent TaskFulfill");
     }
 
@@ -815,7 +754,7 @@ mod tests {
         let harness = TestHarness::new();
         let registry = Registry::new();
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -834,7 +773,7 @@ mod tests {
         registry.register(SuspendingOnce).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -854,7 +793,7 @@ mod tests {
         registry.register(Add).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -865,17 +804,17 @@ mod tests {
             .unwrap();
         assert_eq!(status, Status::Done);
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             !requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskAcquire { .. })),
+                .any(|r| r["kind"] == "task.acquire"),
             "execute_until_blocked should NOT send TaskAcquire"
         );
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskFulfill { .. })),
+                .any(|r| r["kind"] == "task.fulfill"),
             "should have sent TaskFulfill"
         );
     }
@@ -892,7 +831,7 @@ mod tests {
         let preloaded = vec![resolved_promise("p1.0", serde_json::json!(99))];
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -913,7 +852,7 @@ mod tests {
         registry.register(RemoteDep).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -924,11 +863,11 @@ mod tests {
             .unwrap();
         assert_eq!(status, Status::Suspended);
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskSuspend { .. })),
+                .any(|r| r["kind"] == "task.suspend"),
             "should have sent TaskSuspend"
         );
     }
@@ -954,7 +893,7 @@ mod tests {
         registry.register(Noop).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -966,11 +905,11 @@ mod tests {
         assert_eq!(status, Status::Done);
 
         // Short-circuits before calling the factory but still sends TaskFulfill
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskFulfill { .. })),
+                .any(|r| r["kind"] == "task.fulfill"),
             "settled promise should still send TaskFulfill"
         );
     }
@@ -995,7 +934,7 @@ mod tests {
         registry.register(Noop).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -1004,13 +943,13 @@ mod tests {
             .await
             .unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let fulfill = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+            .find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent TaskFulfill");
-        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
-            assert_eq!(settle.state, SettleState::Resolved);
+        let fulfill = fulfill.unwrap(); {
+            assert_eq!(fulfill["settle"]["state"], "resolved");
         }
     }
 
@@ -1035,7 +974,7 @@ mod tests {
         registry.register(Noop).unwrap();
 
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -1044,13 +983,13 @@ mod tests {
             .await
             .unwrap();
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         let fulfill = requests
             .iter()
-            .find(|r| matches!(r, Request::TaskFulfill { .. }));
+            .find(|r| r["kind"] == "task.fulfill");
         assert!(fulfill.is_some(), "should have sent TaskFulfill");
-        if let Request::TaskFulfill { settle, .. } = fulfill.unwrap() {
-            assert_eq!(settle.state, SettleState::Rejected);
+        let fulfill = fulfill.unwrap(); {
+            assert_eq!(fulfill["settle"]["state"], "rejected");
         }
     }
 
@@ -1063,7 +1002,7 @@ mod tests {
 
         let registry = Registry::new(); // empty — function not registered
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -1074,44 +1013,12 @@ mod tests {
 
         assert!(result.is_err(), "should fail when function not found");
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskRelease { .. })),
+                .any(|r| r["kind"] == "task.release"),
             "should send TaskRelease when execution errors"
-        );
-    }
-
-    // ── Legacy on_execute still works ──────────────────────────────
-
-    #[tokio::test]
-    async fn on_execute_acquires_task_then_delegates_to_execute() {
-        let harness = TestHarness::new();
-        let root = make_root_promise("p1", "simple", serde_json::json!(null));
-        harness.add_task("task1", root, vec![]).await;
-
-        let mut registry = Registry::new();
-        registry.register(Simple).unwrap();
-
-        let core = test_core(
-            harness.build_send_fn(),
-            noop_codec(),
-            Arc::new(RwLock::new(registry)),
-        );
-        core.on_execute("task1").await.unwrap();
-
-        let requests = harness.sent_requests().await;
-
-        assert!(
-            matches!(&requests[0], Request::TaskAcquire { .. }),
-            "first request should be TaskAcquire"
-        );
-        assert!(
-            requests
-                .iter()
-                .any(|r| matches!(r, Request::TaskFulfill { .. })),
-            "should have sent TaskFulfill"
         );
     }
 
@@ -1128,7 +1035,7 @@ mod tests {
         registry1.register(Double).unwrap();
 
         let core1 = test_core(
-            harness1.build_send_fn(),
+            harness1.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry1)),
         );
@@ -1142,7 +1049,7 @@ mod tests {
         registry2.register(Double).unwrap();
 
         let core2 = test_core(
-            harness2.build_send_fn(),
+            harness2.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry2)),
         );
@@ -1156,22 +1063,22 @@ mod tests {
         assert_eq!(status2, Status::Done);
 
         // Path 1: Acquire + Fulfill
-        let reqs1 = harness1.sent_requests().await;
+        let reqs1 = harness1.sent_requests_json().await;
         assert!(reqs1
             .iter()
-            .any(|r| matches!(r, Request::TaskAcquire { .. })));
+            .any(|r| r["kind"] == "task.acquire"));
         assert!(reqs1
             .iter()
-            .any(|r| matches!(r, Request::TaskFulfill { .. })));
+            .any(|r| r["kind"] == "task.fulfill"));
 
         // Path 2: Fulfill only (no Acquire)
-        let reqs2 = harness2.sent_requests().await;
+        let reqs2 = harness2.sent_requests_json().await;
         assert!(!reqs2
             .iter()
-            .any(|r| matches!(r, Request::TaskAcquire { .. })));
+            .any(|r| r["kind"] == "task.acquire"));
         assert!(reqs2
             .iter()
-            .any(|r| matches!(r, Request::TaskFulfill { .. })));
+            .any(|r| r["kind"] == "task.fulfill"));
     }
 
     // ── Heartbeat tests ───────────────────────────────────────────
@@ -1212,13 +1119,13 @@ mod tests {
     }
 
     fn test_core_with_heartbeat(
-        send: SendFn,
+        sender: Sender,
         codec: Codec,
         registry: Arc<RwLock<Registry>>,
         heartbeat: Arc<dyn Heartbeat>,
     ) -> Core {
         let match_fn: MatchFn = std::sync::Arc::new(|target: &str| target.to_string());
-        Core::new(send, codec, registry, match_fn, heartbeat)
+        Core::new(sender, codec, registry, match_fn, heartbeat)
     }
 
     #[tokio::test]
@@ -1231,7 +1138,7 @@ mod tests {
 
         let hb = Arc::new(TrackingHeartbeat::new());
         let core = test_core_with_heartbeat(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
             hb.clone(),
@@ -1255,7 +1162,7 @@ mod tests {
         let registry = Registry::new(); // empty — function not registered
         let hb = Arc::new(TrackingHeartbeat::new());
         let core = test_core_with_heartbeat(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
             hb.clone(),
@@ -1284,7 +1191,7 @@ mod tests {
 
         // Use NoopHeartbeat (same as local mode)
         let core = test_core(
-            harness.build_send_fn(),
+            harness.build_sender(),
             noop_codec(),
             Arc::new(RwLock::new(registry)),
         );
@@ -1296,11 +1203,11 @@ mod tests {
 
         assert_eq!(status, Status::Done);
 
-        let requests = harness.sent_requests().await;
+        let requests = harness.sent_requests_json().await;
         assert!(
             requests
                 .iter()
-                .any(|r| matches!(r, Request::TaskFulfill { .. })),
+                .any(|r| r["kind"] == "task.fulfill"),
             "should complete normally with NoopHeartbeat"
         );
     }
