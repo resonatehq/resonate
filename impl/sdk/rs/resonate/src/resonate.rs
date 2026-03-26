@@ -226,6 +226,15 @@ impl Resonate {
             }
         });
 
+        // Cap TTL to i64::MAX to avoid overflow when casting u64 → i64.
+        // In local mode ttl is u64::MAX; a naive `as i64` wraps to -1,
+        // which makes the server set lease timeouts in the past and
+        // immediately release + retry tasks on every tick.
+        let core_ttl: i64 = if ttl >= i64::MAX as u64 {
+            i64::MAX
+        } else {
+            ttl as i64
+        };
         let core = Arc::new(Core::new(
             sender,
             codec.clone(),
@@ -233,7 +242,7 @@ impl Resonate {
             target_resolver,
             heartbeat.clone(),
             pid.clone(),
-            ttl as i64,
+            core_ttl,
         ));
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());

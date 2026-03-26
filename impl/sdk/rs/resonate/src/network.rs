@@ -718,7 +718,11 @@ impl ServerState {
     ) -> std::result::Result<serde_json::Value, Error> {
         let task_id = require_task_id(req)?;
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
-        let ttl = req.get("ttl").and_then(|v| v.as_i64()).unwrap_or(60_000);
+        let ttl = req
+            .get("ttl")
+            .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64)))
+            .unwrap_or(60_000)
+            .max(1); // Ensure TTL is always positive to prevent lease timeouts in the past
 
         match self.tasks.get(task_id) {
             None => Ok(serde_json::json!({

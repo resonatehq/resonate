@@ -289,10 +289,10 @@ impl Context {
     /// // Fire-and-start via .spawn()
     /// let handle = ctx.rpc::<i32>("func", &args).spawn().await?;
     /// ```
-    pub fn rpc<T>(&self, func: &str, args: &impl Serialize) -> RpcTask<'_, T> {
+    pub fn rpc<T>(&self, func: &str, args: impl Serialize) -> RpcTask<'_, T> {
         let child_id = self.next_id();
         let (req, serialization_error) =
-            match self.remote_create_req(&child_id, func, args, None, None) {
+            match self.remote_create_req(&child_id, func, &args, None, None) {
                 Ok(req) => (req, None),
                 Err(e) => (
                     PromiseCreateReq::default_with_id(&child_id),

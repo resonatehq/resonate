@@ -91,10 +91,14 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
     pub async fn result(&mut self) -> Result<T> {
         match std::mem::replace(&mut self.state, HandleState::Pending) {
             HandleState::Completed(v) => {
-                let decoded: T = serde_json::from_value(v)?;
-                Ok(decoded)
+                let decoded_val = self.decode_value(&v)?;
+                let result: T = serde_json::from_value(decoded_val)?;
+                Ok(result)
             }
-            HandleState::Failed(v) => Err(deserialize_error(v)),
+            HandleState::Failed(v) => {
+                let decoded_val = self.decode_value(&v)?;
+                Err(deserialize_error(decoded_val))
+            }
             HandleState::Pending => {
                 // Register listener and wait
                 let promise = self.register_listener().await?;
