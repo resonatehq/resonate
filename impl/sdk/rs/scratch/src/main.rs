@@ -28,12 +28,13 @@ async fn workflow1(ctx: &Context) -> Result<String> {
 
 #[resonate::function]
 async fn par_workflow(ctx: &Context) -> Result<String> {
-    let f = ctx.rpc::<()>("slow", 2).spawn().await?;
+    ctx.rpc::<()>("slow", 2).await?;
     let f1 = ctx.rpc::<()>("slow", 2).spawn().await?;
     let f2 = ctx.rpc::<()>("slow", 2).spawn().await?;
     let f3 = ctx.rpc::<()>("slow", 2).spawn().await?;
 
-    f.await?;
+    let _: () = ctx.run(slow, 5).await?;
+
     f1.await?;
     f2.await?;
     f3.await?;
@@ -54,11 +55,11 @@ async fn main() {
     resonate.register(par_workflow).unwrap();
     resonate.register(workflow1).unwrap();
 
-    // Call the shout function.
+    // Call the workflow function.
     let result: String = resonate
-        .run("workflow", par_workflow, (), None)
+        .run("workflow", par_workflow, ())
         .await
-        .expect("worflow failed");
+        .expect("workflow failed");
     println!("{}", result);
 
     println!("done!")

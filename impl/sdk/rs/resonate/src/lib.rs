@@ -44,10 +44,13 @@ pub mod prelude {
     pub use crate::heartbeat::Heartbeat;
     pub use crate::info::Info;
     pub use crate::network::Network;
-    pub use crate::options::{Options, PartialOptions};
+    pub use crate::options::Options;
     pub use crate::promises::{Promises, Schedules};
     pub use crate::registry::Registry;
-    pub use crate::resonate::{BasicAuth, Resonate, ResonateConfig, ResonateSchedule};
+    pub use crate::resonate::{
+        BasicAuth, ResRpcTask, ResRunTask, ResScheduleTask, Resonate, ResonateConfig,
+        ResonateSchedule,
+    };
     pub use crate::transport::Transport;
     pub use crate::types::{DurableKind, Outcome, PromiseState};
     pub use resonate_macros::function;

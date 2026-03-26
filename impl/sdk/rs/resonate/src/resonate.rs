@@ -1,5 +1,8 @@
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::{Future, IntoFuture};
+use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::handle::{PromiseResult, ResonateHandle};
 use crate::heartbeat::{AsyncHeartbeat, Heartbeat, NoopHeartbeat};
 use crate::network::{LocalNetwork, Network};
-use crate::options::{is_url, Options, OptionsBuilder, PartialOptions};
+use crate::options::{is_url, Options, OptionsBuilder};
 use crate::promises::{Promises, Schedules};
 use crate::registry::Registry;
 use crate::send::Sender;
@@ -209,7 +212,7 @@ impl Resonate {
         let codec = Codec::new(encryptor);
         let registry = Arc::new(RwLock::new(Registry::new()));
 
-        let opts_builder = OptionsBuilder::new(network.clone(), id_prefix.clone());
+        let opts_builder = OptionsBuilder::new(id_prefix.clone());
 
         // Build the Sender for Core from the transport
         let sender = Sender::new(transport.clone());
@@ -413,53 +416,80 @@ impl Resonate {
         reg.register(func)
     }
 
-    /// Execute a typed durable function and wait for its result.
-    pub async fn run<D, Args, T>(
-        &self,
-        id: &str,
-        _func: D,
+    /// Execute a typed durable function. Returns a builder that implements `IntoFuture`.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// // Simple — await directly
+    /// let result: T = resonate.run("id", my_func, args).await?;
+    ///
+    /// // With options
+    /// let result: T = resonate.run("id", my_func, args)
+    ///     .timeout(Duration::from_secs(30))
+    ///     .version(2)
+    ///     .await?;
+    ///
+    /// // Get a handle (like old begin_run)
+    /// let handle = resonate.run("id", my_func, args).spawn().await?;
+    /// let result = handle.result().await?;
+    /// ```
+    pub fn run<'a, D, Args, T>(
+        &'a self,
+        id: &'a str,
+        func: D,
         args: Args,
-        opts: Option<PartialOptions>,
-    ) -> Result<T>
+    ) -> ResRunTask<'a, D, Args, T>
     where
         D: Durable<Args, T>,
         Args: Serialize,
         T: DeserializeOwned,
     {
-        let json_args = serde_json::to_value(args)?;
-        self.run_by_name::<T>(id, D::NAME, json_args, opts).await
+        ResRunTask {
+            resonate: self,
+            id,
+            func,
+            args,
+            timeout: None,
+            version: None,
+            tags: None,
+            target: None,
+            _phantom: PhantomData,
+        }
     }
 
-    /// Execute a function by name and wait for its result.
-    pub async fn run_by_name<T: DeserializeOwned>(
-        &self,
-        id: &str,
-        func_name: &str,
+    /// Remote procedure call. Returns a builder that implements `IntoFuture`.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// // Simple
+    /// let result: T = resonate.rpc::<T>("id", "func", args).await?;
+    ///
+    /// // With options
+    /// let result: T = resonate.rpc::<T>("id", "func", args)
+    ///     .target("custom-worker")
+    ///     .timeout(Duration::from_secs(60))
+    ///     .await?;
+    ///
+    /// // Get a handle (like old begin_rpc)
+    /// let handle = resonate.rpc::<T>("id", "func", args).spawn().await?;
+    /// ```
+    pub fn rpc<'a, T: DeserializeOwned>(
+        &'a self,
+        id: &'a str,
+        func_name: &'a str,
         args: serde_json::Value,
-        opts: Option<PartialOptions>,
-    ) -> Result<T> {
-        let mut handle = self
-            .begin_run_by_name::<T>(id, func_name, args, opts)
-            .await?;
-        handle.result().await
-    }
-
-    /// Start a typed durable function and return a handle for later awaiting.
-    pub async fn begin_run<D, Args, T>(
-        &self,
-        id: &str,
-        _func: D,
-        args: Args,
-        opts: Option<PartialOptions>,
-    ) -> Result<ResonateHandle<T>>
-    where
-        D: Durable<Args, T>,
-        Args: Serialize,
-        T: DeserializeOwned,
-    {
-        let json_args = serde_json::to_value(args)?;
-        self.begin_run_by_name::<T>(id, D::NAME, json_args, opts)
-            .await
+    ) -> ResRpcTask<'a, T> {
+        ResRpcTask {
+            resonate: self,
+            id,
+            func_name,
+            args,
+            timeout: None,
+            version: None,
+            tags: None,
+            target: None,
+            _phantom: PhantomData,
+        }
     }
 
     /// Build root-level tags for a top-level run or rpc call.
@@ -471,15 +501,14 @@ impl Resonate {
         tags.insert("resonate:target".to_string(), target.to_string());
     }
 
-    /// Start a function execution by name and return a handle for later awaiting.
-    pub async fn begin_run_by_name<T: DeserializeOwned>(
+    /// Internal: execute a run by func name, returning a handle.
+    async fn do_run<T: DeserializeOwned>(
         &self,
         id: &str,
         func_name: &str,
         args: serde_json::Value,
-        opts: Option<PartialOptions>,
+        opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let opts = self.opts_builder.build(opts);
         let prefixed_id = self.opts_builder.prefix_id(id);
 
         // Verify function is registered
@@ -578,27 +607,14 @@ impl Resonate {
         self.create_handle(prefixed_id, &promise).await
     }
 
-    /// Remote procedure call (rpc = begin_rpc + await result).
-    pub async fn rpc<T: DeserializeOwned>(
+    /// Internal: execute an rpc, returning a handle.
+    async fn do_rpc<T: DeserializeOwned>(
         &self,
         id: &str,
         func_name: &str,
         args: serde_json::Value,
-        opts: Option<PartialOptions>,
-    ) -> Result<T> {
-        let mut handle = self.begin_rpc::<T>(id, func_name, args, opts).await?;
-        handle.result().await
-    }
-
-    /// Start a remote procedure call and return a handle.
-    pub async fn begin_rpc<T: DeserializeOwned>(
-        &self,
-        id: &str,
-        func_name: &str,
-        args: serde_json::Value,
-        opts: Option<PartialOptions>,
+        opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let opts = self.opts_builder.build(opts);
         let prefixed_id = self.opts_builder.prefix_id(id);
 
         let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
@@ -659,51 +675,42 @@ impl Resonate {
         self.create_handle(prefixed_id, &promise).await
     }
 
-    /// Create a schedule for periodic function execution.
-    pub async fn schedule(
-        &self,
-        name: &str,
-        cron: &str,
-        func_name: &str,
+    /// Create a schedule for periodic function execution. Returns a builder
+    /// that implements `IntoFuture`.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// // Simple
+    /// let schedule = resonate.schedule("name", "*/5 * * * *", "func", args).await?;
+    ///
+    /// // With options
+    /// let schedule = resonate.schedule("name", "*/5 * * * *", "func", args)
+    ///     .timeout(Duration::from_secs(300))
+    ///     .version(2)
+    ///     .await?;
+    /// ```
+    pub fn schedule<'a>(
+        &'a self,
+        name: &'a str,
+        cron: &'a str,
+        func_name: &'a str,
         args: serde_json::Value,
-        opts: Option<PartialOptions>,
-    ) -> Result<ResonateSchedule> {
-        let opts = self.opts_builder.build(opts);
-
-        let param_data = serde_json::json!({
-            "func": func_name,
-            "args": args,
-            "version": opts.version,
-        });
-        let encoded_param = self.codec.encode(&param_data)?;
-
-        let template = format!("{}{{{{.id}}}}.{{{{.timestamp}}}}", self.id_prefix);
-
-        self.schedules
-            .create(
-                name,
-                cron,
-                &template,
-                opts.timeout.as_millis() as i64,
-                serde_json::to_value(&encoded_param)?,
-            )
-            .await?;
-
-        Ok(ResonateSchedule {
-            name: name.to_string(),
-            schedules: self.schedules.clone(),
-        })
+    ) -> ResScheduleTask<'a> {
+        ResScheduleTask {
+            resonate: self,
+            name,
+            cron,
+            func_name,
+            args,
+            timeout: None,
+            version: None,
+        }
     }
 
     /// Set a named dependency that functions can access.
     pub async fn set_dependency(&self, name: &str, obj: Box<dyn Any + Send + Sync>) {
         let mut deps = self.dependencies.write();
         deps.insert(name.to_string(), obj);
-    }
-
-    /// Build options with defaults resolved.
-    pub fn options(&self, opts: Option<PartialOptions>) -> Options {
-        self.opts_builder.build(opts)
     }
 
     /// Stop the Resonate instance: network, heartbeat, background tasks.
@@ -834,13 +841,269 @@ impl Resonate {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  ResRunTask — builder returned by resonate.run()
+// ═══════════════════════════════════════════════════════════════
+
+/// A builder for local durable function execution. Created by `Resonate::run()`.
+///
+/// Implements `IntoFuture` so `.await` runs and returns `Result<T>`.
+/// Use `.spawn()` to get a `ResonateHandle<T>` instead.
+pub struct ResRunTask<'a, D, Args, T> {
+    resonate: &'a Resonate,
+    id: &'a str,
+    #[allow(dead_code)]
+    func: D,
+    args: Args,
+    timeout: Option<Duration>,
+    version: Option<u32>,
+    tags: Option<HashMap<String, String>>,
+    target: Option<String>,
+    _phantom: PhantomData<fn() -> T>,
+}
+
+impl<'a, D, Args, T> ResRunTask<'a, D, Args, T> {
+    /// Set the timeout for this execution.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set the function version.
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Set custom tags.
+    pub fn tags(mut self, tags: HashMap<String, String>) -> Self {
+        self.tags = Some(tags);
+        self
+    }
+
+    /// Set the target for routing.
+    pub fn target(mut self, target: &str) -> Self {
+        self.target = Some(target.to_string());
+        self
+    }
+
+    /// Build resolved `Options` from builder fields.
+    fn build_options(&self) -> Options {
+        let defaults = Options::default();
+        let raw_target = self.target.clone().unwrap_or_else(|| "default".to_string());
+        let resolved_target = if is_url(&raw_target) {
+            raw_target
+        } else {
+            self.resonate.network.r#match(&raw_target)
+        };
+        Options {
+            tags: self.tags.clone().unwrap_or(defaults.tags),
+            target: resolved_target,
+            timeout: self.timeout.unwrap_or(defaults.timeout),
+            version: self.version.unwrap_or(defaults.version),
+            retry_policy: defaults.retry_policy,
+        }
+    }
+}
+
+impl<'a, D, Args, T> ResRunTask<'a, D, Args, T>
+where
+    D: Durable<Args, T>,
+    Args: Serialize,
+    T: DeserializeOwned,
+{
+    /// Start the execution and return a handle for later awaiting (replaces `begin_run`).
+    pub async fn spawn(self) -> Result<ResonateHandle<T>> {
+        let opts = self.build_options();
+        let json_args = serde_json::to_value(self.args)?;
+        self.resonate
+            .do_run::<T>(self.id, D::NAME, json_args, opts)
+            .await
+    }
+}
+
+impl<'a, D, Args, T> IntoFuture for ResRunTask<'a, D, Args, T>
+where
+    D: Durable<Args, T> + Send + 'a,
+    Args: Serialize + Send + 'a,
+    T: DeserializeOwned + Send + Sync + 'static,
+{
+    type Output = Result<T>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let mut handle = self.spawn().await?;
+            handle.result().await
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ResRpcTask — builder returned by resonate.rpc()
+// ═══════════════════════════════════════════════════════════════
+
+/// A builder for remote procedure call execution. Created by `Resonate::rpc()`.
+///
+/// Implements `IntoFuture` so `.await` runs and returns `Result<T>`.
+/// Use `.spawn()` to get a `ResonateHandle<T>` instead.
+pub struct ResRpcTask<'a, T> {
+    resonate: &'a Resonate,
+    id: &'a str,
+    func_name: &'a str,
+    args: serde_json::Value,
+    timeout: Option<Duration>,
+    version: Option<u32>,
+    tags: Option<HashMap<String, String>>,
+    target: Option<String>,
+    _phantom: PhantomData<T>,
+}
+
+impl<'a, T> ResRpcTask<'a, T> {
+    /// Set the timeout for this execution.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set the function version.
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    /// Set custom tags.
+    pub fn tags(mut self, tags: HashMap<String, String>) -> Self {
+        self.tags = Some(tags);
+        self
+    }
+
+    /// Set the target for routing.
+    pub fn target(mut self, target: &str) -> Self {
+        self.target = Some(target.to_string());
+        self
+    }
+
+    /// Build resolved `Options` from builder fields.
+    fn build_options(&self) -> Options {
+        let defaults = Options::default();
+        let raw_target = self.target.clone().unwrap_or_else(|| "default".to_string());
+        let resolved_target = if is_url(&raw_target) {
+            raw_target
+        } else {
+            self.resonate.network.r#match(&raw_target)
+        };
+        Options {
+            tags: self.tags.clone().unwrap_or(defaults.tags),
+            target: resolved_target,
+            timeout: self.timeout.unwrap_or(defaults.timeout),
+            version: self.version.unwrap_or(defaults.version),
+            retry_policy: defaults.retry_policy,
+        }
+    }
+}
+
+impl<'a, T: DeserializeOwned> ResRpcTask<'a, T> {
+    /// Start the RPC and return a handle for later awaiting (replaces `begin_rpc`).
+    pub async fn spawn(self) -> Result<ResonateHandle<T>> {
+        let opts = self.build_options();
+        self.resonate
+            .do_rpc::<T>(self.id, self.func_name, self.args, opts)
+            .await
+    }
+}
+
+impl<'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture for ResRpcTask<'a, T> {
+    type Output = Result<T>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let mut handle = self.spawn().await?;
+            handle.result().await
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ResScheduleTask — builder returned by resonate.schedule()
+// ═══════════════════════════════════════════════════════════════
+
+/// A builder for schedule creation. Created by `Resonate::schedule()`.
+///
+/// Implements `IntoFuture` so `.await` creates the schedule and returns
+/// `Result<ResonateSchedule>`.
+pub struct ResScheduleTask<'a> {
+    resonate: &'a Resonate,
+    name: &'a str,
+    cron: &'a str,
+    func_name: &'a str,
+    args: serde_json::Value,
+    timeout: Option<Duration>,
+    version: Option<u32>,
+}
+
+impl<'a> ResScheduleTask<'a> {
+    /// Set the timeout for scheduled executions.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set the function version.
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = Some(version);
+        self
+    }
+}
+
+impl<'a> IntoFuture for ResScheduleTask<'a> {
+    type Output = Result<ResonateSchedule>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<ResonateSchedule>> + Send + 'a>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let defaults = Options::default();
+            let timeout = self.timeout.unwrap_or(defaults.timeout);
+            let version = self.version.unwrap_or(defaults.version);
+
+            let param_data = serde_json::json!({
+                "func": self.func_name,
+                "args": self.args,
+                "version": version,
+            });
+            let encoded_param = self.resonate.codec.encode(&param_data)?;
+
+            let template = format!(
+                "{}{{{{.id}}}}.{{{{.timestamp}}}}",
+                self.resonate.id_prefix
+            );
+
+            self.resonate
+                .schedules
+                .create(
+                    self.name,
+                    self.cron,
+                    &template,
+                    timeout.as_millis() as i64,
+                    serde_json::to_value(&encoded_param)?,
+                )
+                .await?;
+
+            Ok(ResonateSchedule {
+                name: self.name.to_string(),
+                schedules: self.resonate.schedules.clone(),
+            })
+        })
+    }
+}
+
 use crate::now_ms;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::Result;
-    use crate::options::PartialOptions;
     use std::time::Duration;
 
     // ── Test functions ─────────────────────────────────────────────
@@ -942,8 +1205,8 @@ mod tests {
         let r = Resonate::local(None);
         r.register(add).unwrap();
 
-        // Verify function is registered (begin_run won't fail with FunctionNotFound)
-        let result = r.begin_run("test-id", add, (1i64, 2i64), None).await;
+        // Verify function is registered (spawn won't fail with FunctionNotFound)
+        let result = r.run("test-id", add, (1i64, 2i64)).spawn().await;
         assert!(result.is_ok());
     }
 
@@ -957,34 +1220,33 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  begin_run / run Tests
+    //  run Tests (builder API)
     // ═══════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn begin_run_returns_handle_for_registered_function() {
+    async fn run_spawn_returns_handle_for_registered_function() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let handle = r.begin_run("greet-1", noop, (), None).await;
+        let handle = r.run("greet-1", noop, ()).spawn().await;
         assert!(handle.is_ok());
         assert_eq!(handle.unwrap().id, "greet-1");
     }
 
     #[tokio::test]
-    async fn begin_run_unregistered_function_returns_function_not_found() {
+    async fn run_unregistered_function_returns_function_not_found() {
         let r = Resonate::local(None);
-        let result = r
-            .begin_run_by_name::<()>("test-id", "nonexistent", serde_json::json!(null), None)
-            .await;
+        // Use a registered wrapper to test — noop is not registered here
+        let result: Result<()> = r.run("test-id", noop, ()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::FunctionNotFound(name) => assert_eq!(name, "nonexistent"),
+            Error::FunctionNotFound(name) => assert_eq!(name, "noop"),
             other => panic!("expected FunctionNotFound, got {:?}", other),
         }
     }
 
     #[tokio::test]
-    async fn begin_run_with_prefix_prepends_to_id() {
+    async fn run_spawn_with_prefix_prepends_to_id() {
         let r = Resonate::new(ResonateConfig {
             prefix: Some("app".into()),
             pid: Some("default".into()),
@@ -992,143 +1254,129 @@ mod tests {
         });
         r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
+        let handle = r.run("my-id", noop, ()).spawn().await.unwrap();
         assert_eq!(handle.id, "app:my-id");
     }
 
     #[tokio::test]
-    async fn begin_run_creates_task_and_promise() {
+    async fn run_spawn_creates_task_and_promise() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let _handle = r.begin_run("task-1", noop, (), None).await.unwrap();
+        let _handle = r.run("task-1", noop, ()).spawn().await.unwrap();
 
         // The promise should exist in the local network — we can verify via get
         let get_handle = r.get::<()>("task-1").await;
-        assert!(get_handle.is_ok(), "promise should exist after begin_run");
+        assert!(get_handle.is_ok(), "promise should exist after run().spawn()");
     }
 
     #[tokio::test]
-    async fn begin_run_idempotent_same_id_returns_existing_promise() {
+    async fn run_spawn_idempotent_same_id_returns_existing_promise() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let h1 = r.begin_run("same-id", noop, (), None).await;
+        let h1 = r.run("same-id", noop, ()).spawn().await;
         assert!(h1.is_ok());
 
         // Second call with same ID should not fail (idempotent: 409 handled)
-        let h2 = r.begin_run("same-id", noop, (), None).await;
+        let h2 = r.run("same-id", noop, ()).spawn().await;
         assert!(h2.is_ok());
         assert_eq!(h2.unwrap().id, "same-id");
     }
 
     #[tokio::test]
-    async fn begin_run_sets_correct_tags() {
+    async fn run_spawn_sets_correct_tags() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let custom_opts = PartialOptions {
-            tags: Some({
-                let mut m = std::collections::HashMap::new();
-                m.insert("user:tag".to_string(), "value".to_string());
-                m
-            }),
-            ..Default::default()
-        };
+        let mut m = std::collections::HashMap::new();
+        m.insert("user:tag".to_string(), "value".to_string());
 
-        let handle = r.begin_run("tag-test", noop, (), Some(custom_opts)).await;
+        let handle = r.run("tag-test", noop, ()).tags(m).spawn().await;
         assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn begin_run_with_custom_timeout() {
+    async fn run_spawn_with_custom_timeout() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let opts = PartialOptions {
-            timeout: Some(Duration::from_secs(300)),
-            ..Default::default()
-        };
-
-        let handle = r.begin_run("timeout-test", noop, (), Some(opts)).await;
+        let handle = r
+            .run("timeout-test", noop, ())
+            .timeout(Duration::from_secs(300))
+            .spawn()
+            .await;
         assert!(handle.is_ok());
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  begin_rpc / rpc Tests
+    //  rpc Tests (builder API)
     // ═══════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn begin_rpc_creates_promise_not_task() {
+    async fn rpc_spawn_creates_promise_not_task() {
         let r = Resonate::local(None);
         // RPC does NOT require function to be registered locally
         let handle = r
-            .begin_rpc::<serde_json::Value>(
-                "rpc-1",
-                "remote_func",
-                serde_json::json!({"x": 1}),
-                None,
-            )
+            .rpc::<serde_json::Value>("rpc-1", "remote_func", serde_json::json!({"x": 1}))
+            .spawn()
             .await;
         assert!(handle.is_ok());
         assert_eq!(handle.unwrap().id, "rpc-1");
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_prefix() {
+    async fn rpc_spawn_with_prefix() {
         let r = Resonate::new(ResonateConfig {
             prefix: Some("svc".into()),
             ..Default::default()
         });
 
         let handle = r
-            .begin_rpc::<serde_json::Value>("rpc-2", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("rpc-2", "remote", serde_json::json!(null))
+            .spawn()
             .await
             .unwrap();
         assert_eq!(handle.id, "svc:rpc-2");
     }
 
     #[tokio::test]
-    async fn begin_rpc_sets_scope_global() {
+    async fn rpc_spawn_sets_scope_global() {
         let r = Resonate::local(None);
         // Verifying RPC succeeds — tags (scope=global, target) are set internally
         let handle = r
-            .begin_rpc::<serde_json::Value>("rpc-scope", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("rpc-scope", "remote", serde_json::json!(null))
+            .spawn()
             .await;
         assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_custom_target() {
+    async fn rpc_spawn_with_custom_target() {
         let r = Resonate::local(None);
-        let opts = PartialOptions {
-            target: Some("custom-worker".to_string()),
-            ..Default::default()
-        };
 
         let handle = r
-            .begin_rpc::<serde_json::Value>(
-                "rpc-target",
-                "remote",
-                serde_json::json!(null),
-                Some(opts),
-            )
+            .rpc::<serde_json::Value>("rpc-target", "remote", serde_json::json!(null))
+            .target("custom-worker")
+            .spawn()
             .await;
         assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn begin_rpc_idempotent_same_id() {
+    async fn rpc_spawn_idempotent_same_id() {
         let r = Resonate::local(None);
 
         let h1 = r
-            .begin_rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null))
+            .spawn()
             .await;
         assert!(h1.is_ok());
 
         // Same ID should return existing promise
         let h2 = r
-            .begin_rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null))
+            .spawn()
             .await;
         assert!(h2.is_ok());
     }
@@ -1153,7 +1401,8 @@ mod tests {
         let r = Resonate::local(None);
 
         // Create a promise via RPC first
-        r.begin_rpc::<serde_json::Value>("get-test", "func", serde_json::json!(null), None)
+        r.rpc::<serde_json::Value>("get-test", "func", serde_json::json!(null))
+            .spawn()
             .await
             .unwrap();
 
@@ -1171,7 +1420,8 @@ mod tests {
         });
 
         // Create via RPC (which prepends prefix)
-        r.begin_rpc::<serde_json::Value>("p1", "func", serde_json::json!(null), None)
+        r.rpc::<serde_json::Value>("p1", "func", serde_json::json!(null))
+            .spawn()
             .await
             .unwrap();
 
@@ -1189,13 +1439,7 @@ mod tests {
     async fn schedule_creates_schedule() {
         let r = Resonate::local(None);
         let result = r
-            .schedule(
-                "my-schedule",
-                "*/5 * * * *",
-                "my-func",
-                serde_json::json!(null),
-                None,
-            )
+            .schedule("my-schedule", "*/5 * * * *", "my-func", serde_json::json!(null))
             .await;
         assert!(result.is_ok());
     }
@@ -1204,13 +1448,7 @@ mod tests {
     async fn schedule_returns_deletable_handle() {
         let r = Resonate::local(None);
         let schedule = r
-            .schedule(
-                "deletable",
-                "0 * * * *",
-                "func",
-                serde_json::json!(null),
-                None,
-            )
+            .schedule("deletable", "0 * * * *", "func", serde_json::json!(null))
             .await
             .unwrap();
         // Deleting should not fail
@@ -1239,82 +1477,113 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  options Tests
+    //  Builder Options Tests
     // ═══════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn options_returns_defaults_when_none() {
+    async fn run_builder_uses_defaults() {
         let r = Resonate::local(None);
-        let opts = r.options(None);
-        assert_eq!(opts.timeout, Duration::from_secs(86_400));
-        assert_eq!(opts.version, 0);
-        assert!(opts.tags.is_empty());
-        // Default target "default" is resolved through network.match
-        assert_eq!(opts.target, "local://any@default");
+        r.register(noop).unwrap();
+        // Default options should work — just spawn and check
+        let handle = r.run("defaults-test", noop, ()).spawn().await;
+        assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn options_passes_through_user_values() {
+    async fn run_builder_with_timeout_and_version() {
         let r = Resonate::local(None);
-        let custom = PartialOptions {
-            timeout: Some(Duration::from_secs(120)),
-            version: Some(3),
-            tags: Some({
-                let mut m = std::collections::HashMap::new();
-                m.insert("key".into(), "val".into());
-                m
-            }),
-            ..Default::default()
-        };
+        r.register(noop).unwrap();
 
-        let opts = r.options(Some(custom));
-        assert_eq!(opts.timeout, Duration::from_secs(120));
-        assert_eq!(opts.version, 3);
-        assert_eq!(opts.tags.get("key").unwrap(), "val");
+        let handle = r
+            .run("builder-opts", noop, ())
+            .timeout(Duration::from_secs(120))
+            .version(3)
+            .spawn()
+            .await;
+        assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn options_partial_merge_only_timeout_provided() {
+    async fn run_builder_with_tags() {
         let r = Resonate::local(None);
-        let partial = PartialOptions {
-            timeout: Some(Duration::from_secs(300)),
-            ..Default::default()
-        };
-        let opts = r.options(Some(partial));
-        assert_eq!(opts.timeout, Duration::from_secs(300));
-        assert_eq!(opts.version, 0); // default
-        assert!(opts.tags.is_empty()); // default
-        assert_eq!(opts.target, "local://any@default"); // default resolved
+        r.register(noop).unwrap();
+
+        let mut m = std::collections::HashMap::new();
+        m.insert("key".into(), "val".into());
+
+        let handle = r.run("builder-tags", noop, ()).tags(m).spawn().await;
+        assert!(handle.is_ok());
     }
 
     #[tokio::test]
-    async fn options_target_resolution_bare_name() {
+    async fn rpc_builder_target_resolution_bare_name() {
         let r = Resonate::local(None);
-        let partial = PartialOptions {
-            target: Some("my-worker".into()),
-            ..Default::default()
-        };
-        let opts = r.options(Some(partial));
-        assert_eq!(opts.target, "local://any@my-worker");
+
+        let handle = r
+            .rpc::<serde_json::Value>("target-bare", "func", serde_json::json!(null))
+            .target("my-worker")
+            .spawn()
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "target-bare",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(target, "local://any@my-worker");
+        drop(handle);
     }
 
     #[tokio::test]
-    async fn options_target_resolution_url_passthrough() {
+    async fn rpc_builder_target_resolution_url_passthrough() {
         let r = Resonate::local(None);
-        let partial = PartialOptions {
-            target: Some("https://remote:9000/workers/hello".into()),
-            ..Default::default()
-        };
-        let opts = r.options(Some(partial));
-        assert_eq!(opts.target, "https://remote:9000/workers/hello");
+
+        let handle = r
+            .rpc::<serde_json::Value>("target-url", "func", serde_json::json!(null))
+            .target("https://remote:9000/workers/hello")
+            .spawn()
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "target-url",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(target, "https://remote:9000/workers/hello");
+        drop(handle);
     }
 
     #[tokio::test]
-    async fn options_default_target_is_default() {
+    async fn rpc_builder_default_target() {
         let r = Resonate::local(None);
-        let opts = r.options(None);
+
+        let _handle = r
+            .rpc::<serde_json::Value>("target-default", "func", serde_json::json!(null))
+            .spawn()
+            .await
+            .unwrap();
+
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "corrId": "check",
+            "id": "target-default",
+        });
+        let resp = r.transport().send(get_req).await.unwrap();
+        let target = resp["data"]["promise"]["tags"]["resonate:target"]
+            .as_str()
+            .unwrap_or("");
         // "default" gets resolved through network.match → "local://any@default"
-        assert_eq!(opts.target, "local://any@default");
+        assert_eq!(target, "local://any@default");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1383,7 +1652,7 @@ mod tests {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
+        let handle = r.run("my-id", noop, ()).spawn().await.unwrap();
         assert_eq!(handle.id, "my-id");
     }
 
@@ -1395,7 +1664,7 @@ mod tests {
         });
         r.register(noop).unwrap();
 
-        let handle = r.begin_run("my-id", noop, (), None).await.unwrap();
+        let handle = r.run("my-id", noop, ()).spawn().await.unwrap();
         assert_eq!(handle.id, "prefix:my-id");
     }
 
@@ -1407,13 +1676,14 @@ mod tests {
         });
         r.register(noop).unwrap();
 
-        // begin_run with prefix
-        let h1 = r.begin_run("id1", noop, (), None).await.unwrap();
+        // run().spawn() with prefix
+        let h1 = r.run("id1", noop, ()).spawn().await.unwrap();
         assert_eq!(h1.id, "p:id1");
 
-        // begin_rpc with prefix
+        // rpc().spawn() with prefix
         let h2 = r
-            .begin_rpc::<serde_json::Value>("id2", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("id2", "remote", serde_json::json!(null))
+            .spawn()
             .await
             .unwrap();
         assert_eq!(h2.id, "p:id2");
@@ -1430,10 +1700,8 @@ mod tests {
     #[tokio::test]
     async fn run_requires_registered_function() {
         let r = Resonate::local(None);
-        // run_by_name fails because "unregistered" is not in the registry
-        let result = r
-            .begin_run_by_name::<()>("run-test", "unregistered", serde_json::json!(null), None)
-            .await;
+        // run fails because noop is not registered
+        let result: Result<()> = r.run("run-test", noop, ()).await;
         assert!(matches!(result.unwrap_err(), Error::FunctionNotFound(_)));
     }
 
@@ -1442,12 +1710,8 @@ mod tests {
         let r = Resonate::local(None);
         // rpc should succeed even without registration (remote worker will handle it)
         let result = r
-            .begin_rpc::<serde_json::Value>(
-                "rpc-test",
-                "any_remote_func",
-                serde_json::json!(null),
-                None,
-            )
+            .rpc::<serde_json::Value>("rpc-test", "any_remote_func", serde_json::json!(null))
+            .spawn()
             .await;
         assert!(result.is_ok());
     }
@@ -1461,7 +1725,7 @@ mod tests {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let handle = r.begin_run("handle-test", noop, (), None).await.unwrap();
+        let handle = r.run("handle-test", noop, ()).spawn().await.unwrap();
         assert_eq!(handle.id, "handle-test");
     }
 
@@ -1469,7 +1733,8 @@ mod tests {
     async fn rpc_handle_id_matches() {
         let r = Resonate::local(None);
         let handle = r
-            .begin_rpc::<serde_json::Value>("rpc-handle", "remote", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("rpc-handle", "remote", serde_json::json!(null))
+            .spawn()
             .await
             .unwrap();
         assert_eq!(handle.id, "rpc-handle");
@@ -1480,13 +1745,13 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn multiple_begin_runs_with_different_ids() {
+    async fn multiple_run_spawns_with_different_ids() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let h1 = r.begin_run("m1", noop, (), None).await;
-        let h2 = r.begin_run("m2", noop, (), None).await;
-        let h3 = r.begin_run("m3", noop, (), None).await;
+        let h1 = r.run("m1", noop, ()).spawn().await;
+        let h2 = r.run("m2", noop, ()).spawn().await;
+        let h3 = r.run("m3", noop, ()).spawn().await;
 
         assert!(h1.is_ok());
         assert!(h2.is_ok());
@@ -1501,9 +1766,10 @@ mod tests {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let local_h = r.begin_run("local-1", noop, (), None).await;
+        let local_h = r.run("local-1", noop, ()).spawn().await;
         let remote_h = r
-            .begin_rpc::<serde_json::Value>("remote-1", "remote-fn", serde_json::json!(null), None)
+            .rpc::<serde_json::Value>("remote-1", "remote-fn", serde_json::json!(null))
+            .spawn()
             .await;
 
         assert!(local_h.is_ok());
@@ -1599,23 +1865,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_url_target_passes_through_unchanged() {
+    async fn rpc_with_url_target_passes_through_unchanged() {
         let r = Resonate::local(None);
-        r.register(noop).unwrap();
 
         // Use a URL as the target option — should NOT be rewritten by network.match
-        let opts = PartialOptions {
-            target: Some("https://remote-host:9000/workers/noop".to_string()),
-            ..Default::default()
-        };
-
         let handle = r
-            .begin_rpc::<serde_json::Value>(
-                "url-target-test",
-                "noop",
-                serde_json::json!(null),
-                Some(opts),
-            )
+            .rpc::<serde_json::Value>("url-target-test", "noop", serde_json::json!(null))
+            .target("https://remote-host:9000/workers/noop")
+            .spawn()
             .await;
         assert!(handle.is_ok());
 
@@ -1630,27 +1887,18 @@ mod tests {
             .as_str()
             .unwrap_or("");
 
-        // OptionsBuilder resolves target: URLs pass through unchanged.
         assert_eq!(target, "https://remote-host:9000/workers/noop");
     }
 
     #[tokio::test]
-    async fn begin_run_by_name_with_custom_target() {
+    async fn run_with_custom_target() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let opts = PartialOptions {
-            target: Some("my-target".into()),
-            ..Default::default()
-        };
-
         let _handle = r
-            .begin_run_by_name::<serde_json::Value>(
-                "run-target-test",
-                "noop",
-                serde_json::json!(null),
-                Some(opts),
-            )
+            .run("run-target-test", noop, ())
+            .target("my-target")
+            .spawn()
             .await
             .unwrap();
 
@@ -1669,17 +1917,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_run_by_name_default_target_uses_network_match() {
+    async fn run_default_target_uses_network_match() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
         let _handle = r
-            .begin_run_by_name::<serde_json::Value>(
-                "run-default-target",
-                "noop",
-                serde_json::json!(null),
-                None,
-            )
+            .run("run-default-target", noop, ())
+            .spawn()
             .await
             .unwrap();
 
@@ -1697,22 +1941,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_run_by_name_url_target_passes_through() {
+    async fn run_url_target_passes_through() {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let opts = PartialOptions {
-            target: Some("https://remote:9000/workers/noop".into()),
-            ..Default::default()
-        };
-
         let _handle = r
-            .begin_run_by_name::<serde_json::Value>(
-                "run-url-target",
-                "noop",
-                serde_json::json!(null),
-                Some(opts),
-            )
+            .run("run-url-target", noop, ())
+            .target("https://remote:9000/workers/noop")
+            .spawn()
             .await
             .unwrap();
 
@@ -1730,17 +1966,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_no_target_uses_default() {
+    async fn rpc_with_no_target_uses_default() {
         let r = Resonate::local(None);
-        r.register(noop).unwrap();
 
         let handle = r
-            .begin_rpc::<serde_json::Value>(
-                "bare-target-test",
-                "noop",
-                serde_json::json!(null),
-                None, // no custom target — defaults to network.match("default")
-            )
+            .rpc::<serde_json::Value>("bare-target-test", "noop", serde_json::json!(null))
+            .spawn()
             .await;
         assert!(handle.is_ok());
 
@@ -1759,22 +1990,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_rpc_with_bare_name_target_gets_rewritten() {
+    async fn rpc_with_bare_name_target_gets_rewritten() {
         let r = Resonate::local(None);
-        r.register(noop).unwrap();
-
-        let opts = PartialOptions {
-            target: Some("noop".into()),
-            ..Default::default()
-        };
 
         let handle = r
-            .begin_rpc::<serde_json::Value>(
-                "bare-target-test2",
-                "noop",
-                serde_json::json!(null),
-                Some(opts),
-            )
+            .rpc::<serde_json::Value>("bare-target-test2", "noop", serde_json::json!(null))
+            .target("noop")
+            .spawn()
             .await;
         assert!(handle.is_ok());
 
