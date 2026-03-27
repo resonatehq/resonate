@@ -15,7 +15,7 @@ use crate::durable::Durable;
 use crate::error::{Error, Result};
 use crate::handle::{PromiseResult, ResonateHandle};
 use crate::heartbeat::{AsyncHeartbeat, Heartbeat, NoopHeartbeat};
-use crate::http_network::{HttpAuth, HttpNetwork};
+use crate::http_network::HttpNetwork;
 use crate::network::{LocalNetwork, Network};
 use crate::now_ms;
 use crate::options::{is_url, Options};
@@ -35,8 +35,8 @@ pub struct ResonateConfig {
     pub pid: Option<String>,
     /// Time-to-live in milliseconds (default: 60_000 = 1 min).
     pub ttl: Option<u64>,
-    /// Authentication (basic or bearer). Takes priority over env vars.
-    pub auth: Option<HttpAuth>,
+    /// JWT token for auth.
+    pub token: Option<String>,
     /// Custom encryption (default: no-op).
     pub encryptor: Option<Box<dyn Encryptor>>,
     /// Custom network implementation (overrides url).
@@ -103,12 +103,12 @@ impl Resonate {
 
     /// Local-only mode. No external dependencies. In-memory state.
     /// group="default", pid="default", ttl=MAX, no heartbeat.
-    pub fn local(encryptor: Option<Box<dyn Encryptor>>) -> Self {
+    pub fn local() -> Self {
         let config = ResonateConfig {
             pid: Some("default".to_string()),
             group: Some("default".to_string()),
             ttl: Some(u64::MAX),
-            encryptor,
+            encryptor: None,
             ..Default::default()
         };
         Self::new(config)
@@ -145,14 +145,9 @@ impl Resonate {
             });
 
         // Resolve auth: explicit config takes priority, then env vars
-        let http_auth = config.auth.or_else(|| {
-            if let Ok(token) = std::env::var("RESONATE_TOKEN") {
-                return Some(HttpAuth::Bearer(token));
-            }
-            let username = std::env::var("RESONATE_USERNAME").ok()?;
-            let password = std::env::var("RESONATE_PASSWORD").unwrap_or_default();
-            Some(HttpAuth::Basic { username, password })
-        });
+        let auth = config
+            .token
+            .or_else(|| std::env::var("RESONATE_TOKEN").ok());
 
         // Network selection
         let (network, heartbeat): (Arc<dyn Network>, Arc<dyn Heartbeat>) =
@@ -171,7 +166,7 @@ impl Resonate {
                     url,
                     config.pid.clone(),
                     config.group.clone(),
-                    http_auth,
+                    auth,
                 ));
                 let transport = Transport::new(net.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
@@ -209,7 +204,7 @@ impl Resonate {
             if is_url(target) {
                 target.to_string()
             } else {
-                network_for_match.r#match(target)
+                network_for_match.target_resolver(target)
             }
         });
 
@@ -850,7 +845,7 @@ fn build_options(
     let resolved_target = if is_url(raw_target) {
         raw_target.to_string()
     } else {
-        resonate.network.r#match(raw_target)
+        resonate.network.target_resolver(raw_target)
     };
     Options {
         tags: tags.unwrap_or(defaults.tags),
@@ -1112,7 +1107,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_constructor_sets_defaults() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         assert_eq!(r.pid(), "default");
         assert_eq!(r.ttl(), u64::MAX);
         assert_eq!(r.id_prefix(), "");
@@ -1170,7 +1165,7 @@ mod tests {
 
     #[tokio::test]
     async fn network_identity_local_mode() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         assert!(r.network().unicast().starts_with("local://uni@"));
         assert!(r.network().anycast().starts_with("local://any@"));
         assert_eq!(r.network().group(), "default");
@@ -1179,8 +1174,8 @@ mod tests {
 
     #[tokio::test]
     async fn network_match_returns_local_anycast() {
-        let r = Resonate::local(None);
-        let matched = r.network().r#match("my-target");
+        let r = Resonate::local();
+        let matched = r.network().target_resolver("my-target");
         assert_eq!(matched, "local://any@my-target");
     }
 
@@ -1190,7 +1185,7 @@ mod tests {
 
     #[tokio::test]
     async fn register_function_by_name() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(add).unwrap();
 
         // Verify function is registered (spawn won't fail with FunctionNotFound)
@@ -1200,7 +1195,7 @@ mod tests {
 
     #[tokio::test]
     async fn register_duplicate_function_returns_error() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
         let err = r.register(noop);
         assert!(err.is_err());
@@ -1213,7 +1208,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_returns_handle_for_registered_function() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let handle = r.run("greet-1", noop, ()).spawn().await;
@@ -1223,7 +1218,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_unregistered_function_returns_function_not_found() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // Use a registered wrapper to test — noop is not registered here
         let result: Result<()> = r.run("test-id", noop, ()).await;
         assert!(result.is_err());
@@ -1248,7 +1243,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_creates_task_and_promise() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let _handle = r.run("task-1", noop, ()).spawn().await.unwrap();
@@ -1263,7 +1258,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_idempotent_same_id_returns_existing_promise() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let h1 = r.run("same-id", noop, ()).spawn().await;
@@ -1277,7 +1272,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_sets_correct_tags() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let mut m = std::collections::HashMap::new();
@@ -1289,7 +1284,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_with_custom_timeout() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let handle = r
@@ -1306,7 +1301,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_spawn_creates_promise_not_task() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // RPC does NOT require function to be registered locally
         let handle = r
             .rpc::<serde_json::Value>("rpc-1", "remote_func", serde_json::json!({"x": 1}))
@@ -1333,7 +1328,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_spawn_sets_scope_global() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // Verifying RPC succeeds — tags (scope=global, target) are set internally
         let handle = r
             .rpc::<serde_json::Value>("rpc-scope", "remote", serde_json::json!(null))
@@ -1344,7 +1339,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_spawn_with_custom_target() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let handle = r
             .rpc::<serde_json::Value>("rpc-target", "remote", serde_json::json!(null))
@@ -1356,7 +1351,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_spawn_idempotent_same_id() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let h1 = r
             .rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null))
@@ -1378,7 +1373,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_nonexistent_promise_returns_error() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         let result = r.get::<serde_json::Value>("nonexistent").await;
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -1389,7 +1384,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_existing_promise_returns_handle() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         // Create a promise via RPC first
         r.rpc::<serde_json::Value>("get-test", "func", serde_json::json!(null))
@@ -1428,7 +1423,7 @@ mod tests {
 
     #[tokio::test]
     async fn schedule_creates_schedule() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         let result = r
             .schedule(
                 "my-schedule",
@@ -1442,7 +1437,7 @@ mod tests {
 
     #[tokio::test]
     async fn schedule_returns_deletable_handle() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         let schedule = r
             .schedule("deletable", "0 * * * *", "func", serde_json::json!(null))
             .await
@@ -1458,7 +1453,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_builder_uses_defaults() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
         // Default options should work — just spawn and check
         let handle = r.run("defaults-test", noop, ()).spawn().await;
@@ -1467,7 +1462,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_builder_with_timeout_and_version() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let handle = r
@@ -1481,7 +1476,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_builder_with_tags() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let mut m = std::collections::HashMap::new();
@@ -1493,7 +1488,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_builder_target_resolution_bare_name() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let handle = r
             .rpc::<serde_json::Value>("target-bare", "func", serde_json::json!(null))
@@ -1517,7 +1512,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_builder_target_resolution_url_passthrough() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let handle = r
             .rpc::<serde_json::Value>("target-url", "func", serde_json::json!(null))
@@ -1541,7 +1536,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_builder_default_target() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let _handle = r
             .rpc::<serde_json::Value>("target-default", "func", serde_json::json!(null))
@@ -1568,14 +1563,14 @@ mod tests {
 
     #[tokio::test]
     async fn stop_is_clean() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         let result = r.stop().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn stop_can_be_called_twice() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.stop().await.unwrap();
         // Second stop should also be fine (idempotent)
         let result = r.stop().await;
@@ -1584,7 +1579,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_aborts_subscription_refresh_handle() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // The refresh handle should be stored (not None)
         {
             let guard = r.subscription_refresh_handle.lock().await;
@@ -1603,7 +1598,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_aborts_refresh_task() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // Confirm the refresh task is running before stop
         {
             let guard = r.subscription_refresh_handle.lock().await;
@@ -1625,7 +1620,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_prefix_leaves_id_unchanged() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let handle = r.run("my-id", noop, ()).spawn().await.unwrap();
@@ -1675,7 +1670,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_requires_registered_function() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // run fails because noop is not registered
         let result: Result<()> = r.run("run-test", noop, ()).await;
         assert!(matches!(result.unwrap_err(), Error::FunctionNotFound(_)));
@@ -1683,7 +1678,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_does_not_require_registered_function() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // rpc should succeed even without registration (remote worker will handle it)
         let result = r
             .rpc::<serde_json::Value>("rpc-test", "any_remote_func", serde_json::json!(null))
@@ -1698,7 +1693,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_id_matches_requested_id() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let handle = r.run("handle-test", noop, ()).spawn().await.unwrap();
@@ -1707,7 +1702,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_handle_id_matches() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         let handle = r
             .rpc::<serde_json::Value>("rpc-handle", "remote", serde_json::json!(null))
             .spawn()
@@ -1722,7 +1717,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_run_spawns_with_different_ids() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let h1 = r.run("m1", noop, ()).spawn().await;
@@ -1739,7 +1734,7 @@ mod tests {
 
     #[tokio::test]
     async fn mixed_run_and_rpc_operations() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let local_h = r.run("local-1", noop, ()).spawn().await;
@@ -1758,7 +1753,7 @@ mod tests {
 
     #[tokio::test]
     async fn promises_sub_client_create_and_get() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         // Create a promise via the sub-client
         let created = r
@@ -1780,7 +1775,7 @@ mod tests {
 
     #[tokio::test]
     async fn promises_sub_client_settle() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         // Create then settle
         r.promises
@@ -1810,7 +1805,7 @@ mod tests {
 
     #[tokio::test]
     async fn transport_accessible_from_resonate() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         // Verify we can send a raw request through the transport
         let req = serde_json::json!({
             "kind": "promise.create",
@@ -1842,7 +1837,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_with_url_target_passes_through_unchanged() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         // Use a URL as the target option — should NOT be rewritten by network.match
         let handle = r
@@ -1868,7 +1863,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_with_custom_target() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let _handle = r
@@ -1894,7 +1889,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_default_target_uses_network_match() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let _handle = r.run("run-default-target", noop, ()).spawn().await.unwrap();
@@ -1914,7 +1909,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_url_target_passes_through() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
         r.register(noop).unwrap();
 
         let _handle = r
@@ -1939,7 +1934,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_with_no_target_uses_default() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let handle = r
             .rpc::<serde_json::Value>("bare-target-test", "noop", serde_json::json!(null))
@@ -1963,7 +1958,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_with_bare_name_target_gets_rewritten() {
-        let r = Resonate::local(None);
+        let r = Resonate::local();
 
         let handle = r
             .rpc::<serde_json::Value>("bare-target-test2", "noop", serde_json::json!(null))

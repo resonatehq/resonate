@@ -7,13 +7,6 @@ use crate::network::Network;
 
 type Subscribers = Arc<RwLock<Vec<Box<dyn Fn(String) + Send + Sync>>>>;
 
-/// Authentication for HTTP requests.
-#[derive(Clone)]
-pub enum HttpAuth {
-    Bearer(String),
-    Basic { username: String, password: String },
-}
-
 /// Network implementation that communicates with a Resonate server over HTTP.
 ///
 /// - Requests are sent via `POST /api` (JSON envelope format).
@@ -25,7 +18,7 @@ pub struct HttpNetwork {
     group: String,
     unicast: String,
     anycast: String,
-    auth: Option<HttpAuth>,
+    auth: Option<String>,
     client: reqwest::Client,
     subscribers: Subscribers,
     sse_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -42,7 +35,7 @@ impl HttpNetwork {
         url: String,
         pid: Option<String>,
         group: Option<String>,
-        auth: Option<HttpAuth>,
+        auth: Option<String>,
     ) -> Self {
         let pid = pid.unwrap_or_else(uuid_no_dashes);
         let group = group.unwrap_or_else(|| "default".to_string());
@@ -68,10 +61,7 @@ impl HttpNetwork {
     /// Build an authenticated request.
     fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         match &self.auth {
-            Some(HttpAuth::Bearer(token)) => builder.bearer_auth(token),
-            Some(HttpAuth::Basic { username, password }) => {
-                builder.basic_auth(username, Some(password))
-            }
+            Some(token) => builder.bearer_auth(token),
             None => builder,
         }
     }
@@ -108,10 +98,7 @@ impl Network for HttpNetwork {
 
                 let mut request = client.get(&url);
                 request = match &auth {
-                    Some(HttpAuth::Bearer(token)) => request.bearer_auth(token),
-                    Some(HttpAuth::Basic { username, password }) => {
-                        request.basic_auth(username, Some(password))
-                    }
+                    Some(token) => request.bearer_auth(token),
                     None => request,
                 };
 
@@ -222,7 +209,7 @@ impl Network for HttpNetwork {
     }
 
     /// Resolve a target name to a poll:// anycast address.
-    fn r#match(&self, target: &str) -> String {
+    fn target_resolver(&self, target: &str) -> String {
         format!("poll://any@{}", target)
     }
 }
@@ -257,7 +244,7 @@ mod tests {
     #[test]
     fn http_network_match_returns_poll_anycast() {
         let net = HttpNetwork::new("http://localhost:8001".to_string(), None, None, None);
-        assert_eq!(net.r#match("my-target"), "poll://any@my-target");
+        assert_eq!(net.target_resolver("my-target"), "poll://any@my-target");
     }
 
     #[test]

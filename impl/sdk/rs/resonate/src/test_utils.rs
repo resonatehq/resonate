@@ -347,7 +347,7 @@ impl crate::network::Network for StubNetworkAdapter {
         // No-op for tests
     }
 
-    fn r#match(&self, target: &str) -> String {
+    fn target_resolver(&self, target: &str) -> String {
         target.to_string()
     }
 }

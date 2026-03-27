@@ -17,7 +17,7 @@ pub trait Network: Send + Sync {
     async fn stop(&self) -> Result<()>;
     async fn send(&self, req: String) -> Result<String>;
     fn recv(&self, callback: Box<dyn Fn(String) + Send + Sync>);
-    fn r#match(&self, target: &str) -> String;
+    fn target_resolver(&self, target: &str) -> String;
 }
 
 type Subscribers = Arc<RwLock<Vec<Box<dyn Fn(String) + Send + Sync>>>>;
@@ -1448,7 +1448,7 @@ impl Network for LocalNetwork {
         });
     }
 
-    fn r#match(&self, target: &str) -> String {
+    fn target_resolver(&self, target: &str) -> String {
         format!("local://any@{}", target)
     }
 }
@@ -1626,7 +1626,7 @@ mod tests {
         assert_eq!(net.group(), "mygroup");
         assert_eq!(net.unicast(), "local://uni@mygroup/mypid");
         assert_eq!(net.anycast(), "local://any@mygroup/mypid");
-        assert_eq!(net.r#match("target"), "local://any@target");
+        assert_eq!(net.target_resolver("target"), "local://any@target");
     }
 
     #[tokio::test]
