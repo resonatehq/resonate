@@ -43,7 +43,7 @@ pub mod prelude {
     pub use crate::futures::{DurableFuture, RemoteFuture};
     pub use crate::handle::ResonateHandle;
     pub use crate::heartbeat::Heartbeat;
-    pub use crate::http_network::{HttpAuth, HttpNetwork};
+    pub use crate::http_network::HttpNetwork;
     pub use crate::info::Info;
     pub use crate::network::Network;
     pub use crate::options::Options;

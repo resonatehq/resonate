@@ -48,7 +48,7 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let resonate = Resonate::local(None);
+    let resonate = Resonate::local();
 
     // Register all functions.
     resonate.register(slow).unwrap();
