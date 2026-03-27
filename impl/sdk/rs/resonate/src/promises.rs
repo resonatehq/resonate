@@ -22,7 +22,7 @@ impl Promises {
 
         let resp = self.transport.send(req).await?;
         check_status(&resp)?;
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
@@ -46,7 +46,7 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
@@ -66,7 +66,7 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 
@@ -84,7 +84,7 @@ impl Promises {
         });
 
         let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 }
@@ -149,9 +149,9 @@ impl Schedules {
 }
 
 fn check_status(resp: &serde_json::Value) -> Result<()> {
-    let status = crate::transport::response_status(resp);
+    let status = crate::transport::response_status(resp)?;
     if status >= 400 {
-        let rdata = crate::transport::response_data(resp);
+        let rdata = crate::transport::response_data(resp)?;
         let error_msg = rdata
             .as_str()
             .or_else(|| rdata.get("error").and_then(|e| e.as_str()))

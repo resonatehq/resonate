@@ -15,141 +15,81 @@ pub struct Transport {
 ///
 /// Mirrors the TS types:
 /// ```ts
-/// type ExecuteMsg = { kind: "execute"; head: MessageHead; data: { task: { id: string; version: number } } };
-/// type UnblockMsg = { kind: "unblock"; head: MessageHead; data: { promise: PromiseRecord } };
+/// type ExecuteMsg = { kind: "execute"; data: { task: { id: string; version: number } } };
+/// type UnblockMsg = { kind: "unblock"; data: { promise: PromiseRecord } };
 /// ```
-///
-/// NOTE: The Rust LocalNetwork currently emits `"type"` as the tag key
-/// while the TS SDK uses `"kind"`. We accept both for compatibility.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind")]
 pub enum Message {
+    #[serde(rename = "execute")]
     Execute(ExecuteMsg),
+    #[serde(rename = "unblock")]
     Unblock(UnblockMsg),
-}
-
-impl<'de> serde::Deserialize<'de> for Message {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let v = serde_json::Value::deserialize(deserializer)?;
-        // Accept both "kind" (TS/server) and "type" (Rust LocalNetwork) as the tag
-        let tag = v
-            .get("kind")
-            .or_else(|| v.get("type"))
-            .and_then(|k| k.as_str())
-            .unwrap_or("");
-
-        match tag {
-            "execute" => {
-                let msg = ExecuteMsg::from_json(&v)
-                    .ok_or_else(|| serde::de::Error::custom("invalid execute message"))?;
-                Ok(Message::Execute(msg))
-            }
-            "unblock" => {
-                let msg = UnblockMsg::from_json(&v)
-                    .ok_or_else(|| serde::de::Error::custom("invalid unblock message"))?;
-                Ok(Message::Unblock(msg))
-            }
-            other => Err(serde::de::Error::custom(format!(
-                "unknown message kind: {}",
-                other
-            ))),
-        }
-    }
 }
 
 /// Execute message — server tells this worker to run a task.
 ///
-/// TS shape: `{ kind: "execute", head: { serverUrl? }, data: { task: { id, version } } }`
-/// Rust LocalNetwork shape: `{ type: "execute", taskId: "..." }`
-///
-/// We accept both formats.
+/// JSON shape: `{ kind: "execute", data: { task: { id, version } } }`
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExecuteMsg {
-    /// Task ID — extracted from `data.task.id` (TS) or `taskId` (Rust local).
-    #[serde(default)]
-    pub task_id: String,
-    /// Task version — from `data.task.version` (TS). Default 0 for local.
+    pub data: ExecuteData,
+}
+
+impl ExecuteMsg {
+    /// Task ID — shorthand for `data.task.id`.
+    pub fn task_id(&self) -> &str {
+        &self.data.task.id
+    }
+    /// Task version — shorthand for `data.task.version`.
+    pub fn version(&self) -> i64 {
+        self.data.task.version
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExecuteData {
+    pub task: TaskRef,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskRef {
+    pub id: String,
     #[serde(default)]
     pub version: i64,
 }
 
-impl ExecuteMsg {
-    /// Parse from a raw JSON value, handling both TS and local formats.
-    pub fn from_json(v: &serde_json::Value) -> Option<Self> {
-        // TS format: { data: { task: { id, version } } }
-        if let Some(data) = v.get("data") {
-            if let Some(task) = data.get("task") {
-                let id = task
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let version = task.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
-                return Some(ExecuteMsg {
-                    task_id: id,
-                    version,
-                });
-            }
-        }
-        // Local format: { taskId: "..." }
-        if let Some(id) = v.get("taskId").and_then(|v| v.as_str()) {
-            return Some(ExecuteMsg {
-                task_id: id.to_string(),
-                version: 0,
-            });
-        }
-        None
-    }
-}
-
 /// Unblock message — a promise this worker is waiting on has been settled.
 ///
-/// TS shape: `{ kind: "unblock", head: { serverUrl? }, data: { promise: PromiseRecord } }`
-/// Rust LocalNetwork shape: `{ type: "unblock", promise: { ... } }`
+/// JSON shape: `{ kind: "unblock", data: { promise: PromiseRecord } }`
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnblockMsg {
-    /// The settled promise — from `data.promise` (TS) or `promise` (Rust local).
-    #[serde(default)]
-    pub promise: serde_json::Value,
+    pub data: UnblockData,
 }
 
 impl UnblockMsg {
-    /// Parse from a raw JSON value, handling both TS and local formats.
-    pub fn from_json(v: &serde_json::Value) -> Option<Self> {
-        // TS format: { data: { promise: {...} } }
-        if let Some(data) = v.get("data") {
-            if let Some(promise) = data.get("promise") {
-                return Some(UnblockMsg {
-                    promise: promise.clone(),
-                });
-            }
-        }
-        // Local format: { promise: {...} }
-        if let Some(promise) = v.get("promise") {
-            return Some(UnblockMsg {
-                promise: promise.clone(),
-            });
-        }
-        None
+    /// The settled promise — shorthand for `data.promise`.
+    pub fn promise(&self) -> &serde_json::Value {
+        &self.data.promise
     }
 }
 
-/// Helper to extract the `data` portion from a protocol envelope response.
-/// Falls back to the full value if no envelope structure is found.
-pub fn response_data(resp: &serde_json::Value) -> &serde_json::Value {
-    resp.get("data").unwrap_or(resp)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnblockData {
+    pub promise: serde_json::Value,
 }
 
-/// Helper to extract the `head.status` from a protocol envelope response.
-/// Falls back to checking top-level `status`, then defaults to 200.
-pub fn response_status(resp: &serde_json::Value) -> u64 {
+/// Extract the `data` portion from a protocol envelope response.
+pub fn response_data(resp: &serde_json::Value) -> Result<&serde_json::Value> {
+    resp.get("data")
+        .ok_or_else(|| Error::DecodingError("response missing 'data' envelope field".into()))
+}
+
+/// Extract the `head.status` from a protocol envelope response.
+pub fn response_status(resp: &serde_json::Value) -> Result<u64> {
     resp.get("head")
         .and_then(|h| h.get("status"))
         .and_then(|s| s.as_u64())
-        .or_else(|| resp.get("status").and_then(|s| s.as_u64()))
-        .unwrap_or(200)
+        .ok_or_else(|| Error::DecodingError("response missing 'head.status' envelope field".into()))
 }
 
 impl Transport {
@@ -160,7 +100,7 @@ impl Transport {
 
     /// Send a typed request through the network, returning the parsed response.
     /// Validates that `response.kind == request.kind` and correlation IDs match.
-    /// Supports both protocol envelope format (`head.corrId`) and flat format (`corrId`).
+    /// Expects protocol envelope format: `{ kind, head: { corrId, ... }, data: { ... } }`.
     pub async fn send(&self, request: serde_json::Value) -> Result<serde_json::Value> {
         let req_kind = request
             .get("kind")
@@ -168,11 +108,9 @@ impl Transport {
             .unwrap_or("")
             .to_string();
 
-        // Support both envelope (head.corrId) and flat (corrId) formats
         let req_corr_id = request
             .get("head")
             .and_then(|h| h.get("corrId"))
-            .or_else(|| request.get("corrId"))
             .cloned();
 
         let req_str = serde_json::to_string(&request)?;
@@ -196,12 +134,11 @@ impl Transport {
             });
         }
 
-        // Validate corrId matches (support both envelope and flat formats)
+        // Validate corrId matches
         if let Some(ref expected_corr) = req_corr_id {
             let resp_corr = response
                 .get("head")
-                .and_then(|h| h.get("corrId"))
-                .or_else(|| response.get("corrId"));
+                .and_then(|h| h.get("corrId"));
             if resp_corr != Some(expected_corr) {
                 return Err(Error::ServerError {
                     code: 500,
@@ -242,28 +179,6 @@ impl Transport {
 mod tests {
     use super::*;
     use crate::network::LocalNetwork;
-
-    #[tokio::test]
-    async fn transport_send_and_validate_flat_format() {
-        let net = Arc::new(LocalNetwork::new(Some("test".into()), None));
-        let transport = Transport::new(net);
-
-        // Flat format request — LocalNetwork wraps response in envelope
-        let req = serde_json::json!({
-            "kind": "promise.create",
-            "corrId": "abc123",
-            "promise": {
-                "id": "p1",
-                "timeoutAt": i64::MAX,
-            },
-        });
-
-        let resp = transport.send(req).await.unwrap();
-        assert_eq!(resp["kind"], "promise.create");
-        // Response is now in envelope format
-        assert_eq!(resp["head"]["corrId"], "abc123");
-        assert_eq!(resp["data"]["promise"]["id"], "p1");
-    }
 
     #[tokio::test]
     async fn transport_send_and_validate_envelope_format() {

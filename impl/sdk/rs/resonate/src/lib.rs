@@ -7,6 +7,7 @@ pub mod error;
 pub mod futures;
 pub mod handle;
 pub mod heartbeat;
+pub mod http_network;
 pub mod info;
 pub mod network;
 pub mod options;
@@ -43,6 +44,7 @@ pub mod prelude {
     pub use crate::handle::ResonateHandle;
     pub use crate::heartbeat::Heartbeat;
     pub use crate::info::Info;
+    pub use crate::http_network::{HttpAuth, HttpNetwork};
     pub use crate::network::Network;
     pub use crate::options::Options;
     pub use crate::promises::{Promises, Schedules};

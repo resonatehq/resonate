@@ -16,6 +16,7 @@ use crate::durable::Durable;
 use crate::error::{Error, Result};
 use crate::handle::{PromiseResult, ResonateHandle};
 use crate::heartbeat::{AsyncHeartbeat, Heartbeat, NoopHeartbeat};
+use crate::http_network::{HttpAuth, HttpNetwork};
 use crate::network::{LocalNetwork, Network};
 use crate::options::{is_url, Options, OptionsBuilder};
 use crate::promises::{Promises, Schedules};
@@ -125,8 +126,11 @@ impl Resonate {
         Self::new(config)
     }
 
-    /// Remote mode. Connects to a Resonate Server via HTTP.
-    pub fn remote(config: ResonateConfig) -> Self {
+    /// Remote mode. Connects to a Resonate Server via HTTP + SSE.
+    ///
+    /// Requires a `url` in the config (or `RESONATE_URL` env var).
+    /// Uses `POST /api` for requests and `GET /poll/{group}/{id}` for SSE.
+    pub fn http(config: ResonateConfig) -> Self {
         Self::new(config)
     }
 
@@ -161,14 +165,26 @@ impl Resonate {
             });
 
         // Resolve auth
-        let _token = config
+        let token = config
             .token
             .or_else(|| std::env::var("RESONATE_TOKEN").ok());
-        let _auth = config.auth.or_else(|| {
+        let basic_auth = config.auth.or_else(|| {
             let username = std::env::var("RESONATE_USERNAME").ok()?;
             let password = std::env::var("RESONATE_PASSWORD").unwrap_or_default();
             Some(BasicAuth { username, password })
         });
+
+        // Build HttpAuth from resolved token / basic_auth
+        let http_auth = if let Some(tok) = token {
+            Some(HttpAuth::Bearer(tok))
+        } else if let Some(ba) = basic_auth {
+            Some(HttpAuth::Basic {
+                username: ba.username,
+                password: ba.password,
+            })
+        } else {
+            None
+        };
 
         // Network selection
         let (network, heartbeat): (Arc<dyn Network>, Arc<dyn Heartbeat>) =
@@ -181,12 +197,14 @@ impl Resonate {
                     transport.clone(),
                 ));
                 (net, hb)
-            } else if let Some(_url) = &resolved_url {
+            } else if let Some(url) = resolved_url {
                 // Remote mode: HTTP network
-                // TODO: Implement HttpNetwork
-                // For now, fall back to local with a warning
-                tracing::warn!("HttpNetwork not yet implemented, using LocalNetwork as fallback");
-                let net = Arc::new(LocalNetwork::new(config.pid.clone(), config.group.clone()));
+                let net = Arc::new(HttpNetwork::new(
+                    url,
+                    config.pid.clone(),
+                    config.group.clone(),
+                    http_auth,
+                ));
                 let transport = Transport::new(net.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
                     net.pid().to_string(),
@@ -277,7 +295,13 @@ impl Resonate {
                     });
                     match transport_for_refresh.send(req).await {
                         Ok(resp) => {
-                            let rdata = crate::transport::response_data(&resp);
+                            let rdata = match crate::transport::response_data(&resp) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    tracing::warn!(error = %e, promise_id = %id, "subscription refresh: invalid response");
+                                    continue;
+                                }
+                            };
                             let state = rdata
                                 .get("promise")
                                 .and_then(|p| p.get("state"))
@@ -336,9 +360,9 @@ impl Resonate {
             match msg {
                 Message::Execute(exec_msg) => {
                     // Path 1: execute message from network → core.on_message (acquires task)
-                    tracing::debug!(task_id = %exec_msg.task_id, version = exec_msg.version, "received execute message");
-                    let task_id = exec_msg.task_id.clone();
-                    let version = exec_msg.version;
+                    tracing::debug!(task_id = %exec_msg.task_id(), version = exec_msg.version(), "received execute message");
+                    let task_id = exec_msg.task_id().to_string();
+                    let version = exec_msg.version();
                     tokio::spawn(async move {
                         if let Err(e) = core.on_message(&task_id, version).await {
                             tracing::error!(
@@ -350,7 +374,7 @@ impl Resonate {
                     });
                 }
                 Message::Unblock(unblock_msg) => {
-                    let promise = &unblock_msg.promise;
+                    let promise = unblock_msg.promise();
                     let id = promise
                         .get("id")
                         .and_then(|v| v.as_str())
@@ -549,8 +573,8 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp);
-        let status = crate::transport::response_status(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
+        let status = crate::transport::response_status(&resp)?;
         let promise = rdata.get("promise").cloned().unwrap_or_default();
         let task = rdata.get("task").cloned();
 
@@ -645,7 +669,7 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         let promise = rdata.get("promise").cloned().unwrap_or_default();
 
         self.create_handle(prefixed_id, &promise).await
@@ -662,7 +686,7 @@ impl Resonate {
         });
 
         let resp = self.transport.send(req).await?;
-        let status = crate::transport::response_status(&resp);
+        let status = crate::transport::response_status(&resp)?;
         if status == 404 {
             return Err(Error::ServerError {
                 code: 404,
@@ -670,7 +694,7 @@ impl Resonate {
             });
         }
 
-        let rdata = crate::transport::response_data(&resp);
+        let rdata = crate::transport::response_data(&resp)?;
         let promise = rdata.get("promise").cloned().unwrap_or_default();
         self.create_handle(prefixed_id, &promise).await
     }
@@ -800,7 +824,7 @@ impl Resonate {
                 "address": self.network.unicast(),
             });
             let resp = self.transport.send(req).await?;
-            let rdata = crate::transport::response_data(&resp);
+            let rdata = crate::transport::response_data(&resp)?;
             let resp_promise = rdata.get("promise").cloned().unwrap_or_default();
             let resp_state = resp_promise
                 .get("state")
