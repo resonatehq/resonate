@@ -198,7 +198,7 @@ impl Network for HttpNetwork {
 
         let request = self
             .client
-            .post(&format!("{}/api", self.url))
+            .post(format!("{}/api", self.url))
             .header("Content-Type", "application/json")
             .body(req);
 
@@ -256,12 +256,7 @@ mod tests {
 
     #[test]
     fn http_network_match_returns_poll_anycast() {
-        let net = HttpNetwork::new(
-            "http://localhost:8001".to_string(),
-            None,
-            None,
-            None,
-        );
+        let net = HttpNetwork::new("http://localhost:8001".to_string(), None, None, None);
         assert_eq!(net.r#match("my-target"), "poll://any@my-target");
     }
 

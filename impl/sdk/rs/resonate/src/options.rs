@@ -12,8 +12,6 @@ pub struct Options {
     pub timeout: Duration,
     /// Function version.
     pub version: u32,
-    /// Retry policy.
-    pub retry_policy: Option<RetryPolicy>,
 }
 
 impl Default for Options {
@@ -23,36 +21,6 @@ impl Default for Options {
             target: "default".to_string(),
             timeout: Duration::from_secs(86_400), // 24 hours (24 * 60 * 60), matches TS SDK
             version: 0,
-            retry_policy: None,
-        }
-    }
-}
-
-/// Retry policy configuration.
-#[derive(Debug, Clone)]
-pub struct RetryPolicy {
-    pub max_retries: u32,
-    pub delay: Duration,
-    pub backoff_factor: f64,
-}
-
-/// Helper for ID prefixing.
-#[derive(Clone)]
-pub struct OptionsBuilder {
-    id_prefix: String,
-}
-
-impl OptionsBuilder {
-    pub fn new(id_prefix: String) -> Self {
-        Self { id_prefix }
-    }
-
-    /// Prepend the configured prefix to an ID.
-    pub fn prefix_id(&self, id: &str) -> String {
-        if self.id_prefix.is_empty() {
-            id.to_string()
-        } else {
-            format!("{}{}", self.id_prefix, id)
         }
     }
 }

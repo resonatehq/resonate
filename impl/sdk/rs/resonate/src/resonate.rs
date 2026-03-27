@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::future::{Future, IntoFuture};
 use std::marker::PhantomData;
@@ -18,7 +17,8 @@ use crate::handle::{PromiseResult, ResonateHandle};
 use crate::heartbeat::{AsyncHeartbeat, Heartbeat, NoopHeartbeat};
 use crate::http_network::{HttpAuth, HttpNetwork};
 use crate::network::{LocalNetwork, Network};
-use crate::options::{is_url, Options, OptionsBuilder};
+use crate::now_ms;
+use crate::options::{is_url, Options};
 use crate::promises::{Promises, Schedules};
 use crate::registry::Registry;
 use crate::send::Sender;
@@ -35,10 +35,8 @@ pub struct ResonateConfig {
     pub pid: Option<String>,
     /// Time-to-live in milliseconds (default: 60_000 = 1 min).
     pub ttl: Option<u64>,
-    /// Basic auth credentials.
-    pub auth: Option<BasicAuth>,
-    /// Bearer token (takes priority over auth).
-    pub token: Option<String>,
+    /// Authentication (basic or bearer). Takes priority over env vars.
+    pub auth: Option<HttpAuth>,
     /// Custom encryption (default: no-op).
     pub encryptor: Option<Box<dyn Encryptor>>,
     /// Custom network implementation (overrides url).
@@ -47,17 +45,9 @@ pub struct ResonateConfig {
     pub prefix: Option<String>,
 }
 
-/// Basic auth credentials.
-pub struct BasicAuth {
-    pub username: String,
-    pub password: String,
-}
-
 /// Subscription entry for awaiting remote promise completion.
 struct SubscriptionEntry {
     tx: Option<oneshot::Sender<PromiseResult>>,
-    #[allow(dead_code)]
-    rx: Option<oneshot::Receiver<PromiseResult>>,
     /// If already resolved before anyone subscribed.
     resolved: Option<PromiseResult>,
 }
@@ -94,8 +84,6 @@ pub struct Resonate {
     // Function management
     registry: Arc<RwLock<Registry>>,
     heartbeat: Arc<dyn Heartbeat>,
-    dependencies: Arc<RwLock<HashMap<String, Box<dyn Any + Send + Sync>>>>,
-    opts_builder: OptionsBuilder,
 
     // Subscriptions (for awaiting remote promise completion)
     subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>>,
@@ -123,14 +111,6 @@ impl Resonate {
             encryptor,
             ..Default::default()
         };
-        Self::new(config)
-    }
-
-    /// Remote mode. Connects to a Resonate Server via HTTP + SSE.
-    ///
-    /// Requires a `url` in the config (or `RESONATE_URL` env var).
-    /// Uses `POST /api` for requests and `GET /poll/{group}/{id}` for SSE.
-    pub fn http(config: ResonateConfig) -> Self {
         Self::new(config)
     }
 
@@ -164,27 +144,15 @@ impl Resonate {
                 Some(format!("{}://{}:{}", scheme, host, port))
             });
 
-        // Resolve auth
-        let token = config
-            .token
-            .or_else(|| std::env::var("RESONATE_TOKEN").ok());
-        let basic_auth = config.auth.or_else(|| {
+        // Resolve auth: explicit config takes priority, then env vars
+        let http_auth = config.auth.or_else(|| {
+            if let Ok(token) = std::env::var("RESONATE_TOKEN") {
+                return Some(HttpAuth::Bearer(token));
+            }
             let username = std::env::var("RESONATE_USERNAME").ok()?;
             let password = std::env::var("RESONATE_PASSWORD").unwrap_or_default();
-            Some(BasicAuth { username, password })
+            Some(HttpAuth::Basic { username, password })
         });
-
-        // Build HttpAuth from resolved token / basic_auth
-        let http_auth = if let Some(tok) = token {
-            Some(HttpAuth::Bearer(tok))
-        } else if let Some(ba) = basic_auth {
-            Some(HttpAuth::Basic {
-                username: ba.username,
-                password: ba.password,
-            })
-        } else {
-            None
-        };
 
         // Network selection
         let (network, heartbeat): (Arc<dyn Network>, Arc<dyn Heartbeat>) =
@@ -229,8 +197,6 @@ impl Resonate {
         };
         let codec = Codec::new(encryptor);
         let registry = Arc::new(RwLock::new(Registry::new()));
-
-        let opts_builder = OptionsBuilder::new(id_prefix.clone());
 
         // Build the Sender for Core from the transport
         let sender = Sender::new(transport.clone());
@@ -343,8 +309,6 @@ impl Resonate {
             core,
             registry,
             heartbeat,
-            dependencies: Arc::new(RwLock::new(HashMap::new())),
-            opts_builder,
             subscriptions: subscriptions.clone(),
             promises,
             schedules,
@@ -403,7 +367,6 @@ impl Resonate {
                                 id,
                                 SubscriptionEntry {
                                     tx: None,
-                                    rx: None,
                                     resolved: Some(result),
                                 },
                             );
@@ -460,7 +423,7 @@ impl Resonate {
     pub fn run<'a, D, Args, T>(
         &'a self,
         id: &'a str,
-        func: D,
+        _func: D,
         args: Args,
     ) -> ResRunTask<'a, D, Args, T>
     where
@@ -471,7 +434,6 @@ impl Resonate {
         ResRunTask {
             resonate: self,
             id,
-            func,
             args,
             timeout: None,
             version: None,
@@ -533,7 +495,7 @@ impl Resonate {
         args: serde_json::Value,
         opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let prefixed_id = self.opts_builder.prefix_id(id);
+        let prefixed_id = self.prefix_id(id);
 
         // Verify function is registered
         {
@@ -639,7 +601,7 @@ impl Resonate {
         args: serde_json::Value,
         opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let prefixed_id = self.opts_builder.prefix_id(id);
+        let prefixed_id = self.prefix_id(id);
 
         let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
 
@@ -677,7 +639,7 @@ impl Resonate {
 
     /// Get a handle to an existing promise.
     pub async fn get<T: DeserializeOwned>(&self, id: &str) -> Result<ResonateHandle<T>> {
-        let prefixed_id = self.opts_builder.prefix_id(id);
+        let prefixed_id = self.prefix_id(id);
 
         let req = serde_json::json!({
             "kind": "promise.get",
@@ -731,12 +693,6 @@ impl Resonate {
         }
     }
 
-    /// Set a named dependency that functions can access.
-    pub async fn set_dependency(&self, name: &str, obj: Box<dyn Any + Send + Sync>) {
-        let mut deps = self.dependencies.write();
-        deps.insert(name.to_string(), obj);
-    }
-
     /// Stop the Resonate instance: network, heartbeat, background tasks.
     pub async fn stop(&self) -> Result<()> {
         self.network.stop().await?;
@@ -747,27 +703,31 @@ impl Resonate {
         Ok(())
     }
 
-    /// Get the process ID.
+    // ═══════════════════════════════════════════════════════════════
+    //  Test-only accessors
+    // ═══════════════════════════════════════════════════════════════
+
+    #[cfg(test)]
     pub fn pid(&self) -> &str {
         &self.pid
     }
 
-    /// Get the TTL.
+    #[cfg(test)]
     pub fn ttl(&self) -> u64 {
         self.ttl
     }
 
-    /// Get the ID prefix.
+    #[cfg(test)]
     pub fn id_prefix(&self) -> &str {
         &self.id_prefix
     }
 
-    /// Access the transport (for sub-components).
+    #[cfg(test)]
     pub fn transport(&self) -> &Transport {
         &self.transport
     }
 
-    /// Access the network.
+    #[cfg(test)]
     pub fn network(&self) -> &Arc<dyn Network> {
         &self.network
     }
@@ -775,6 +735,15 @@ impl Resonate {
     // ═══════════════════════════════════════════════════════════════
     //  Internal Methods
     // ═══════════════════════════════════════════════════════════════
+
+    /// Prepend the configured prefix to an ID.
+    fn prefix_id(&self, id: &str) -> String {
+        if self.id_prefix.is_empty() {
+            id.to_string()
+        } else {
+            format!("{}{}", self.id_prefix, id)
+        }
+    }
 
     /// Create a handle from a promise JSON value.
     async fn create_handle<T: DeserializeOwned>(
@@ -810,7 +779,6 @@ impl Resonate {
                     id.clone(),
                     SubscriptionEntry {
                         tx: Some(tx),
-                        rx: None,
                         resolved: None,
                     },
                 );
@@ -866,6 +834,33 @@ impl Resonate {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  Shared builder helpers
+// ═══════════════════════════════════════════════════════════════
+
+/// Build resolved `Options` from builder fields (shared by ResRunTask and ResRpcTask).
+fn build_options(
+    resonate: &Resonate,
+    target: Option<&str>,
+    tags: Option<HashMap<String, String>>,
+    timeout: Option<Duration>,
+    version: Option<u32>,
+) -> Options {
+    let defaults = Options::default();
+    let raw_target = target.unwrap_or("default");
+    let resolved_target = if is_url(raw_target) {
+        raw_target.to_string()
+    } else {
+        resonate.network.r#match(raw_target)
+    };
+    Options {
+        tags: tags.unwrap_or(defaults.tags),
+        target: resolved_target,
+        timeout: timeout.unwrap_or(defaults.timeout),
+        version: version.unwrap_or(defaults.version),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ResRunTask — builder returned by resonate.run()
 // ═══════════════════════════════════════════════════════════════
 
@@ -876,14 +871,12 @@ impl Resonate {
 pub struct ResRunTask<'a, D, Args, T> {
     resonate: &'a Resonate,
     id: &'a str,
-    #[allow(dead_code)]
-    func: D,
     args: Args,
     timeout: Option<Duration>,
     version: Option<u32>,
     tags: Option<HashMap<String, String>>,
     target: Option<String>,
-    _phantom: PhantomData<fn() -> T>,
+    _phantom: PhantomData<fn(D) -> T>,
 }
 
 impl<'a, D, Args, T> ResRunTask<'a, D, Args, T> {
@@ -910,24 +903,6 @@ impl<'a, D, Args, T> ResRunTask<'a, D, Args, T> {
         self.target = Some(target.to_string());
         self
     }
-
-    /// Build resolved `Options` from builder fields.
-    fn build_options(&self) -> Options {
-        let defaults = Options::default();
-        let raw_target = self.target.clone().unwrap_or_else(|| "default".to_string());
-        let resolved_target = if is_url(&raw_target) {
-            raw_target
-        } else {
-            self.resonate.network.r#match(&raw_target)
-        };
-        Options {
-            tags: self.tags.clone().unwrap_or(defaults.tags),
-            target: resolved_target,
-            timeout: self.timeout.unwrap_or(defaults.timeout),
-            version: self.version.unwrap_or(defaults.version),
-            retry_policy: defaults.retry_policy,
-        }
-    }
 }
 
 impl<'a, D, Args, T> ResRunTask<'a, D, Args, T>
@@ -938,7 +913,13 @@ where
 {
     /// Start the execution and return a handle for later awaiting (replaces `begin_run`).
     pub async fn spawn(self) -> Result<ResonateHandle<T>> {
-        let opts = self.build_options();
+        let opts = build_options(
+            self.resonate,
+            self.target.as_deref(),
+            self.tags,
+            self.timeout,
+            self.version,
+        );
         let json_args = serde_json::to_value(self.args)?;
         self.resonate
             .do_run::<T>(self.id, D::NAME, json_args, opts)
@@ -1007,30 +988,18 @@ impl<'a, T> ResRpcTask<'a, T> {
         self.target = Some(target.to_string());
         self
     }
-
-    /// Build resolved `Options` from builder fields.
-    fn build_options(&self) -> Options {
-        let defaults = Options::default();
-        let raw_target = self.target.clone().unwrap_or_else(|| "default".to_string());
-        let resolved_target = if is_url(&raw_target) {
-            raw_target
-        } else {
-            self.resonate.network.r#match(&raw_target)
-        };
-        Options {
-            tags: self.tags.clone().unwrap_or(defaults.tags),
-            target: resolved_target,
-            timeout: self.timeout.unwrap_or(defaults.timeout),
-            version: self.version.unwrap_or(defaults.version),
-            retry_policy: defaults.retry_policy,
-        }
-    }
 }
 
 impl<'a, T: DeserializeOwned> ResRpcTask<'a, T> {
     /// Start the RPC and return a handle for later awaiting (replaces `begin_rpc`).
     pub async fn spawn(self) -> Result<ResonateHandle<T>> {
-        let opts = self.build_options();
+        let opts = build_options(
+            self.resonate,
+            self.target.as_deref(),
+            self.tags,
+            self.timeout,
+            self.version,
+        );
         self.resonate
             .do_rpc::<T>(self.id, self.func_name, self.args, opts)
             .await
@@ -1098,10 +1067,7 @@ impl<'a> IntoFuture for ResScheduleTask<'a> {
             });
             let encoded_param = self.resonate.codec.encode(&param_data)?;
 
-            let template = format!(
-                "{}{{{{.id}}}}.{{{{.timestamp}}}}",
-                self.resonate.id_prefix
-            );
+            let template = format!("{}{{{{.id}}}}.{{{{.timestamp}}}}", self.resonate.id_prefix);
 
             self.resonate
                 .schedules
@@ -1121,8 +1087,6 @@ impl<'a> IntoFuture for ResScheduleTask<'a> {
         })
     }
 }
-
-use crate::now_ms;
 
 #[cfg(test)]
 mod tests {
@@ -1291,7 +1255,10 @@ mod tests {
 
         // The promise should exist in the local network — we can verify via get
         let get_handle = r.get::<()>("task-1").await;
-        assert!(get_handle.is_ok(), "promise should exist after run().spawn()");
+        assert!(
+            get_handle.is_ok(),
+            "promise should exist after run().spawn()"
+        );
     }
 
     #[tokio::test]
@@ -1463,7 +1430,12 @@ mod tests {
     async fn schedule_creates_schedule() {
         let r = Resonate::local(None);
         let result = r
-            .schedule("my-schedule", "*/5 * * * *", "my-func", serde_json::json!(null))
+            .schedule(
+                "my-schedule",
+                "*/5 * * * *",
+                "my-func",
+                serde_json::json!(null),
+            )
             .await;
         assert!(result.is_ok());
     }
@@ -1478,26 +1450,6 @@ mod tests {
         // Deleting should not fail
         let result = schedule.delete().await;
         assert!(result.is_ok());
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  set_dependency Tests
-    // ═══════════════════════════════════════════════════════════════
-
-    #[tokio::test]
-    async fn set_dependency_stores_value() {
-        let r = Resonate::local(None);
-        r.set_dependency("db", Box::new("postgres://localhost".to_string()))
-            .await;
-        // No panic means it stored successfully
-    }
-
-    #[tokio::test]
-    async fn set_dependency_overwrites_existing() {
-        let r = Resonate::local(None);
-        r.set_dependency("key", Box::new(1i32)).await;
-        r.set_dependency("key", Box::new(2i32)).await;
-        // No panic means overwrite succeeded
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1945,11 +1897,7 @@ mod tests {
         let r = Resonate::local(None);
         r.register(noop).unwrap();
 
-        let _handle = r
-            .run("run-default-target", noop, ())
-            .spawn()
-            .await
-            .unwrap();
+        let _handle = r.run("run-default-target", noop, ()).spawn().await.unwrap();
 
         let get_req = serde_json::json!({
             "kind": "promise.get",

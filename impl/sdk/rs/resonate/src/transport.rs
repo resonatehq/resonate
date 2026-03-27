@@ -108,10 +108,7 @@ impl Transport {
             .unwrap_or("")
             .to_string();
 
-        let req_corr_id = request
-            .get("head")
-            .and_then(|h| h.get("corrId"))
-            .cloned();
+        let req_corr_id = request.get("head").and_then(|h| h.get("corrId")).cloned();
 
         let req_str = serde_json::to_string(&request)?;
         tracing::debug!(direction = "send_req", body = %req_str, "transport");
@@ -136,9 +133,7 @@ impl Transport {
 
         // Validate corrId matches
         if let Some(ref expected_corr) = req_corr_id {
-            let resp_corr = response
-                .get("head")
-                .and_then(|h| h.get("corrId"));
+            let resp_corr = response.get("head").and_then(|h| h.get("corrId"));
             if resp_corr != Some(expected_corr) {
                 return Err(Error::ServerError {
                     code: 500,
