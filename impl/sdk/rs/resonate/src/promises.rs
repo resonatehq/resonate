@@ -1,6 +1,8 @@
 use crate::error::{Error, Result};
 use crate::transport::Transport;
 
+const PROTOCOL_VERSION: &str = "2025-01-15";
+
 /// Sub-client for promise operations.
 #[derive(Clone)]
 pub struct Promises {
@@ -16,8 +18,13 @@ impl Promises {
     pub async fn get(&self, id: &str) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "promise.get",
-            "corrId": format!("pg-{}", now_ms()),
-            "id": id,
+            "head": {
+                "corrId": format!("pg-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": id,
+            },
         });
 
         let resp = self.transport.send(req).await?;
@@ -36,8 +43,11 @@ impl Promises {
     ) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "promise.create",
-            "corrId": format!("pc-{}", now_ms()),
-            "promise": {
+            "head": {
+                "corrId": format!("pc-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
                 "id": id,
                 "timeoutAt": timeout_at,
                 "param": param,
@@ -59,10 +69,15 @@ impl Promises {
     ) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "promise.settle",
-            "corrId": format!("ps-{}", now_ms()),
-            "id": id,
-            "state": state,
-            "value": value,
+            "head": {
+                "corrId": format!("ps-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": id,
+                "state": state,
+                "value": value,
+            },
         });
 
         let resp = self.transport.send(req).await?;
@@ -77,10 +92,15 @@ impl Promises {
         address: &str,
     ) -> Result<serde_json::Value> {
         let req = serde_json::json!({
-            "kind": "promise.registerListener",
-            "corrId": format!("prl-{}", now_ms()),
-            "awaited": awaited,
-            "address": address,
+            "kind": "promise.register_listener",
+            "head": {
+                "corrId": format!("prl-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "awaited": awaited,
+                "address": address,
+            },
         });
 
         let resp = self.transport.send(req).await?;
@@ -103,32 +123,43 @@ impl Schedules {
     /// Create a schedule.
     pub async fn create(
         &self,
-        name: &str,
+        id: &str,
         cron: &str,
-        promise_id_template: &str,
-        timeout: i64,
-        param: serde_json::Value,
+        promise_id: &str,
+        promise_timeout: i64,
+        promise_param: serde_json::Value,
     ) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "schedule.create",
-            "corrId": format!("sc-{}", now_ms()),
-            "name": name,
-            "cron": cron,
-            "promiseIdTemplate": promise_id_template,
-            "timeout": timeout,
-            "param": param,
+            "head": {
+                "corrId": format!("sc-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": id,
+                "cron": cron,
+                "promiseId": promise_id,
+                "promiseTimeout": promise_timeout,
+                "promiseParam": promise_param,
+                "promiseTags": {},
+            },
         });
 
         let resp = self.transport.send(req).await?;
         Ok(resp)
     }
 
-    /// Get a schedule by name.
-    pub async fn get(&self, name: &str) -> Result<serde_json::Value> {
+    /// Get a schedule by ID.
+    pub async fn get(&self, id: &str) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "schedule.get",
-            "corrId": format!("sg-{}", now_ms()),
-            "name": name,
+            "head": {
+                "corrId": format!("sg-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": id,
+            },
         });
 
         let resp = self.transport.send(req).await?;
@@ -136,11 +167,16 @@ impl Schedules {
     }
 
     /// Delete a schedule.
-    pub async fn delete(&self, name: &str) -> Result<serde_json::Value> {
+    pub async fn delete(&self, id: &str) -> Result<serde_json::Value> {
         let req = serde_json::json!({
             "kind": "schedule.delete",
-            "corrId": format!("sd-{}", now_ms()),
-            "name": name,
+            "head": {
+                "corrId": format!("sd-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": id,
+            },
         });
 
         let resp = self.transport.send(req).await?;

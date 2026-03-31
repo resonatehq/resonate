@@ -148,16 +148,9 @@ fn require_str<'a>(obj: &'a serde_json::Value, field: &str) -> std::result::Resu
     }
 }
 
-/// Extract task ID from request, supporting both protocol "id" and legacy "taskId" fields.
+/// Extract task ID from request.
 fn require_task_id(obj: &serde_json::Value) -> std::result::Result<&str, Error> {
-    obj.get("id")
-        .or_else(|| obj.get("taskId"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| Error::ServerError {
-            code: 400,
-            message: "missing or empty required field: id".to_string(),
-        })
+    require_str(obj, "id")
 }
 
 impl ServerState {
@@ -193,55 +186,40 @@ impl ServerState {
                 self.try_auto_timeout(now, id);
             }
             "promise.create" => {
-                let pd = req.get("promise").unwrap_or(req);
-                let id = pd.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "promise.settle" => {
                 let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
-            "promise.registerListener" => {
+            "promise.register_listener" => {
                 let id = req.get("awaited").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.create" => {
-                let pd = req.get("promise").unwrap_or(&serde_json::Value::Null);
+                let action = req.get("action").unwrap_or(&serde_json::Value::Null);
+                let pd = extract_action_data(action);
                 let id = pd.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.acquire" | "task.release" | "task.fulfill" => {
-                let id = req
-                    .get("id")
-                    .or_else(|| req.get("taskId"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.suspend" => {
-                let id = req
-                    .get("id")
-                    .or_else(|| req.get("taskId"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
-                // Support both "actions" (protocol) and "callbacks" (legacy)
+                // actions is an array of PromiseRegisterCallbackReq envelopes
                 if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
                     for action in actions {
-                        let awaited = action
-                            .get("data")
-                            .and_then(|d| d.get("awaited"))
-                            .or_else(|| action.get("awaited"))
+                        let action_data = extract_action_data(action);
+                        let awaited = action_data
+                            .get("awaited")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         if !awaited.is_empty() {
                             self.try_auto_timeout(now, awaited);
-                        }
-                    }
-                } else if let Some(cbs) = req.get("callbacks").and_then(|v| v.as_array()) {
-                    for cb in cbs {
-                        if let Some(cid) = cb.as_str() {
-                            self.try_auto_timeout(now, cid);
                         }
                     }
                 }
@@ -253,7 +231,7 @@ impl ServerState {
             "promise.get" => self.promise_get(&corr_id, req),
             "promise.create" => self.promise_create(now, &corr_id, req),
             "promise.settle" => self.promise_settle(now, &corr_id, req),
-            "promise.registerListener" => self.promise_register_listener(&corr_id, req),
+            "promise.register_listener" => self.promise_register_listener(&corr_id, req),
             "task.create" => self.task_create(now, &corr_id, req),
             "task.acquire" => self.task_acquire(now, &corr_id, req),
             "task.release" => self.task_release(now, &corr_id, req),
@@ -395,8 +373,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let promise_data = req.get("promise").unwrap_or(req);
-        let id = require_str(promise_data, "id")?;
+        let id = require_str(req, "id")?;
 
         if let Some(existing) = self.promises.get(id) {
             return Ok(serde_json::json!({
@@ -405,15 +382,15 @@ impl ServerState {
             }));
         }
 
-        let timeout_at = promise_data
+        let timeout_at = req
             .get("timeoutAt")
             .and_then(|v| v.as_i64())
             .unwrap_or(i64::MAX);
-        let param = promise_data
+        let param = req
             .get("param")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let tags = extract_tags(promise_data);
+        let tags = extract_tags(req);
 
         if now >= timeout_at {
             let state = self.timeout_state(&tags);
@@ -548,12 +525,12 @@ impl ServerState {
                     p.subscribers.insert(address.to_string());
                 }
                 Ok(serde_json::json!({
-                    "kind": "promise.registerListener", "corrId": corr_id, "status": 200,
+                    "kind": "promise.register_listener", "corrId": corr_id, "status": 200,
                     "promise": p.to_record(),
                 }))
             }
             None => Ok(serde_json::json!({
-                "kind": "promise.registerListener", "corrId": corr_id, "status": 404,
+                "kind": "promise.register_listener", "corrId": corr_id, "status": 404,
                 "error": format!("promise {} not found", awaited),
             })),
         }
@@ -577,7 +554,9 @@ impl ServerState {
                     .or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64))
             })
             .unwrap_or(60_000);
-        let promise_req = req.get("promise").unwrap_or(&serde_json::Value::Null);
+        // action is a PromiseCreateReq envelope
+        let action_raw = req.get("action").unwrap_or(&serde_json::Value::Null);
+        let promise_req = extract_action_data(action_raw);
         let promise_id = require_str(promise_req, "id")?;
 
         // Task already exists?
@@ -817,11 +796,11 @@ impl ServerState {
             _ => {}
         }
 
-        // Support both protocol "action" and legacy "settle" field names
-        let settle = req
+        // action is a PromiseSettleReq envelope
+        let action_raw = req
             .get("action")
-            .or_else(|| req.get("settle"))
             .unwrap_or(&serde_json::Value::Null);
+        let settle = extract_action_data(action_raw);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
         let settle_state = settle
             .get("state")
@@ -900,31 +879,23 @@ impl ServerState {
             }));
         }
 
-        // Parse callbacks — support both protocol "actions" (array of {awaited, awaiter})
-        // and legacy "callbacks" (array of promise ID strings)
-        let callbacks: Vec<String> =
-            if let Some(actions) = req.get("actions").and_then(|v| v.as_array()) {
+        // Parse actions — array of PromiseRegisterCallbackReq envelopes
+        let callbacks: Vec<String> = req
+            .get("actions")
+            .and_then(|v| v.as_array())
+            .map(|actions| {
                 actions
                     .iter()
                     .filter_map(|a| {
-                        // Actions may have nested data.awaited or flat awaited
-                        a.get("data")
-                            .and_then(|d| d.get("awaited"))
-                            .or_else(|| a.get("awaited"))
+                        let action_data = extract_action_data(a);
+                        action_data
+                            .get("awaited")
                             .and_then(|v| v.as_str())
                             .map(String::from)
                     })
                     .collect()
-            } else {
-                req.get("callbacks")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
+            })
+            .unwrap_or_default();
 
         // Register this task as an awaiter on each awaited promise.
         // If any awaited promise is already settled, redirect immediately.
@@ -972,7 +943,6 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        // Accept both single-task { taskId, pid } and multi-task { tasks: [...], pid }
         let pid = require_str(req, "pid")?;
 
         if let Some(tasks) = req.get("tasks").and_then(|v| v.as_array()) {
@@ -987,13 +957,6 @@ impl ServerState {
                         let ttl = t.ttl.unwrap_or(30_000);
                         self.set_t_timeout(id, 1, now.saturating_add(ttl));
                     }
-                }
-            }
-        } else if let Some(task_id) = req.get("taskId").and_then(|v| v.as_str()) {
-            if let Some(t) = self.tasks.get(task_id) {
-                if t.state == "acquired" {
-                    let ttl = t.ttl.unwrap_or(30_000);
-                    self.set_t_timeout(task_id, 1, now.saturating_add(ttl));
                 }
             }
         }
@@ -1013,15 +976,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req
-            .get("id")
-            .or_else(|| req.get("name"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| Error::ServerError {
-                code: 400,
-                message: "missing or empty required field: id".to_string(),
-            })?;
+        let id = require_str(req, "id")?;
         if self.schedules.contains_key(id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,
@@ -1032,7 +987,6 @@ impl ServerState {
             cron: require_str(req, "cron")?.to_string(),
             promise_id: req
                 .get("promiseId")
-                .or_else(|| req.get("promiseIdTemplate"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
@@ -1059,15 +1013,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req
-            .get("id")
-            .or_else(|| req.get("name"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| Error::ServerError {
-                code: 400,
-                message: "missing or empty required field: id".to_string(),
-            })?;
+        let id = require_str(req, "id")?;
         if self.schedules.contains_key(id) {
             Ok(serde_json::json!({
                 "kind": "schedule.get", "corrId": corr_id, "status": 200,
@@ -1084,15 +1030,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = req
-            .get("id")
-            .or_else(|| req.get("name"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| Error::ServerError {
-                code: 400,
-                message: "missing or empty required field: id".to_string(),
-            })?;
+        let id = require_str(req, "id")?;
         self.schedules.remove(id);
         Ok(serde_json::json!({
             "kind": "schedule.delete", "corrId": corr_id, "status": 200,
@@ -1487,6 +1425,17 @@ const PROTOCOL_VERSION: &str = "2025-01-15";
 
 /// Unwrap a protocol envelope request into the flat format expected by ServerState.
 /// If the request is already in flat format, return it as-is.
+/// Extract the data portion from a value that may be a protocol sub-envelope
+/// `{ kind, head, data }` or a flat data object. Returns the data portion either way.
+fn extract_action_data(val: &serde_json::Value) -> &serde_json::Value {
+    // If it looks like an envelope, return the data portion
+    if val.get("kind").is_some() && val.get("data").is_some() {
+        val.get("data").unwrap_or(val)
+    } else {
+        val
+    }
+}
+
 fn unwrap_request_envelope(req: &serde_json::Value) -> serde_json::Value {
     if req.get("head").is_some() && req.get("data").is_some() {
         // Envelope format: { kind, head: { corrId, ... }, data: { ... } }
@@ -1557,8 +1506,9 @@ mod tests {
     async fn local_network_creates_and_gets_promise() {
         let net = LocalNetwork::new(Some("test-pid".into()), Some("default".into()));
         let req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c1",
-            "promise": {
+            "kind": "promise.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
                 "id": "p1", "timeoutAt": i64::MAX,
                 "param": {"data": "test"}, "tags": {"resonate:scope": "global"},
             },
@@ -1569,7 +1519,11 @@ mod tests {
         assert_eq!(data(&resp)["promise"]["id"], "p1");
         assert_eq!(data(&resp)["promise"]["state"], "pending");
 
-        let get_req = serde_json::json!({ "kind": "promise.get", "corrId": "c2", "id": "p1" });
+        let get_req = serde_json::json!({
+            "kind": "promise.get",
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": { "id": "p1" },
+        });
         let get_resp: serde_json::Value =
             serde_json::from_str(&net.send(get_req.to_string()).await.unwrap()).unwrap();
         assert_eq!(status(&get_resp), 200);
@@ -1580,8 +1534,9 @@ mod tests {
     async fn local_network_idempotent_promise_create() {
         let net = LocalNetwork::new(None, None);
         let req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c1",
-            "promise": { "id": "p1", "timeoutAt": i64::MAX },
+            "kind": "promise.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": { "id": "p1", "timeoutAt": i64::MAX, "param": {}, "tags": {} },
         });
         let r1: serde_json::Value =
             serde_json::from_str(&net.send(req.to_string()).await.unwrap()).unwrap();
@@ -1597,10 +1552,18 @@ mod tests {
     async fn local_network_task_create_and_fulfill() {
         let net = LocalNetwork::new(Some("pid1".into()), None);
         let req = serde_json::json!({
-            "kind": "task.create", "corrId": "c1", "pid": "pid1", "ttl": 60000,
-            "promise": {
-                "id": "p1", "timeoutAt": i64::MAX,
-                "param": {"data": "test"}, "tags": {},
+            "kind": "task.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "p1", "timeoutAt": i64::MAX,
+                        "param": {"data": "test"}, "tags": {},
+                    },
+                },
             },
         });
         let resp: serde_json::Value =
@@ -1611,8 +1574,17 @@ mod tests {
 
         let task_id = data(&resp)["task"]["id"].as_str().unwrap();
         let fulfill = serde_json::json!({
-            "kind": "task.fulfill", "corrId": "c2", "taskId": task_id,
-            "settle": { "id": "p1", "state": "resolved", "value": {"data": "result"} },
+            "kind": "task.fulfill",
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": {
+                "id": task_id,
+                "version": 0,
+                "action": {
+                    "kind": "promise.settle",
+                    "head": { "corrId": "c2a", "version": "2025-01-15" },
+                    "data": { "id": "p1", "state": "resolved", "value": {"data": "result"} },
+                },
+            },
         });
         let f_resp: serde_json::Value =
             serde_json::from_str(&net.send(fulfill.to_string()).await.unwrap()).unwrap();
@@ -1633,8 +1605,9 @@ mod tests {
     async fn promise_create_with_target_creates_task_and_dispatches_execute() {
         let net = LocalNetwork::new(Some("pid1".into()), None);
         let req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c1",
-            "promise": {
+            "kind": "promise.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
                 "id": "rpc-1", "timeoutAt": i64::MAX,
                 "param": {"data": "test"},
                 "tags": { "resonate:target": "local://any@hello", "resonate:scope": "global" },
@@ -1657,17 +1630,27 @@ mod tests {
 
         // Create a task (acquired)
         let create_req = serde_json::json!({
-            "kind": "task.create", "corrId": "c1", "pid": "pid1", "ttl": 60000,
-            "promise": {
-                "id": "parent", "timeoutAt": i64::MAX, "tags": { "resonate:target": "local://any@wf" },
+            "kind": "task.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "parent", "timeoutAt": i64::MAX,
+                        "tags": { "resonate:target": "local://any@wf" },
+                    },
+                },
             },
         });
         net.send(create_req.to_string()).await.unwrap();
 
         // Create a child promise (pending, represents an RPC dependency)
         let child_req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c2",
-            "promise": {
+            "kind": "promise.create",
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": {
                 "id": "child-1", "timeoutAt": i64::MAX,
                 "tags": { "resonate:target": "local://any@hello" },
             },
@@ -1676,8 +1659,17 @@ mod tests {
 
         // Suspend the parent task waiting on child
         let suspend_req = serde_json::json!({
-            "kind": "task.suspend", "corrId": "c3",
-            "taskId": "parent", "callbacks": ["child-1"],
+            "kind": "task.suspend",
+            "head": { "corrId": "c3", "version": "2025-01-15" },
+            "data": {
+                "id": "parent",
+                "version": 0,
+                "actions": [{
+                    "kind": "promise.register_callback",
+                    "head": { "corrId": "c3a", "version": "2025-01-15" },
+                    "data": { "awaited": "child-1", "awaiter": "parent" },
+                }],
+            },
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(suspend_req.to_string()).await.unwrap()).unwrap();
@@ -1699,18 +1691,27 @@ mod tests {
 
         // Create parent task
         let create_req = serde_json::json!({
-            "kind": "task.create", "corrId": "c1", "pid": "pid1", "ttl": 60000,
-            "promise": {
-                "id": "parent", "timeoutAt": i64::MAX,
-                "tags": { "resonate:target": "local://any@wf" },
+            "kind": "task.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "parent", "timeoutAt": i64::MAX,
+                        "tags": { "resonate:target": "local://any@wf" },
+                    },
+                },
             },
         });
         net.send(create_req.to_string()).await.unwrap();
 
         // Create child promise
         let child_req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c2",
-            "promise": {
+            "kind": "promise.create",
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": {
                 "id": "child", "timeoutAt": i64::MAX,
                 "tags": { "resonate:target": "local://any@hello" },
             },
@@ -1719,20 +1720,40 @@ mod tests {
 
         // Suspend parent on child
         let suspend_req = serde_json::json!({
-            "kind": "task.suspend", "corrId": "c3",
-            "taskId": "parent", "callbacks": ["child"],
+            "kind": "task.suspend",
+            "head": { "corrId": "c3", "version": "2025-01-15" },
+            "data": {
+                "id": "parent",
+                "version": 0,
+                "actions": [{
+                    "kind": "promise.register_callback",
+                    "head": { "corrId": "c3a", "version": "2025-01-15" },
+                    "data": { "awaited": "child", "awaiter": "parent" },
+                }],
+            },
         });
         net.send(suspend_req.to_string()).await.unwrap();
 
         // Acquire child task then fulfill it
         let acquire_req = serde_json::json!({
-            "kind": "task.acquire", "corrId": "c4", "taskId": "child",
+            "kind": "task.acquire",
+            "head": { "corrId": "c4", "version": "2025-01-15" },
+            "data": { "id": "child", "version": 0, "pid": "pid1", "ttl": 60000 },
         });
         net.send(acquire_req.to_string()).await.unwrap();
 
         let fulfill_req = serde_json::json!({
-            "kind": "task.fulfill", "corrId": "c5", "taskId": "child",
-            "settle": { "id": "child", "state": "resolved", "value": {"data": "hello"} },
+            "kind": "task.fulfill",
+            "head": { "corrId": "c5", "version": "2025-01-15" },
+            "data": {
+                "id": "child",
+                "version": 0,
+                "action": {
+                    "kind": "promise.settle",
+                    "head": { "corrId": "c5a", "version": "2025-01-15" },
+                    "data": { "id": "child", "state": "resolved", "value": {"data": "hello"} },
+                },
+            },
         });
         net.send(fulfill_req.to_string()).await.unwrap();
 
@@ -1749,31 +1770,50 @@ mod tests {
 
         // Create parent task
         let create_req = serde_json::json!({
-            "kind": "task.create", "corrId": "c1", "pid": "pid1", "ttl": 60000,
-            "promise": {
-                "id": "parent", "timeoutAt": i64::MAX,
-                "tags": { "resonate:target": "local://any@wf" },
+            "kind": "task.create",
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "parent", "timeoutAt": i64::MAX,
+                        "tags": { "resonate:target": "local://any@wf" },
+                    },
+                },
             },
         });
         net.send(create_req.to_string()).await.unwrap();
 
         // Create and immediately settle child promise
         let child_req = serde_json::json!({
-            "kind": "promise.create", "corrId": "c2",
-            "id": "child", "timeoutAt": i64::MAX, "param": {}, "tags": {},
+            "kind": "promise.create",
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": { "id": "child", "timeoutAt": i64::MAX, "param": {}, "tags": {} },
         });
         net.send(child_req.to_string()).await.unwrap();
 
         let settle_req = serde_json::json!({
-            "kind": "promise.settle", "corrId": "c3",
-            "id": "child", "state": "resolved", "value": {"data": "ok"},
+            "kind": "promise.settle",
+            "head": { "corrId": "c3", "version": "2025-01-15" },
+            "data": { "id": "child", "state": "resolved", "value": {"data": "ok"} },
         });
         net.send(settle_req.to_string()).await.unwrap();
 
         // Suspend parent on already-settled child → should get redirect
         let suspend_req = serde_json::json!({
-            "kind": "task.suspend", "corrId": "c4",
-            "taskId": "parent", "callbacks": ["child"],
+            "kind": "task.suspend",
+            "head": { "corrId": "c4", "version": "2025-01-15" },
+            "data": {
+                "id": "parent",
+                "version": 0,
+                "actions": [{
+                    "kind": "promise.register_callback",
+                    "head": { "corrId": "c4a", "version": "2025-01-15" },
+                    "data": { "awaited": "child", "awaiter": "parent" },
+                }],
+            },
         });
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(suspend_req.to_string()).await.unwrap()).unwrap();

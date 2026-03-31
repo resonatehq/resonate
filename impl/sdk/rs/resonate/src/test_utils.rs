@@ -81,10 +81,8 @@ impl StubNetwork {
             "promise.create" => (200, self.handle_promise_create(&data)),
             "promise.settle" => (200, self.handle_promise_settle(&data)),
             "task.acquire" => {
-                // Support both new ("id") and old ("taskId") field names
                 let task_id = data
                     .get("id")
-                    .or_else(|| data.get("taskId"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 if !self.tasks.contains_key(task_id) {
@@ -231,17 +229,22 @@ impl StubNetwork {
     }
 
     fn handle_task_fulfill(&self, data: &serde_json::Value) -> serde_json::Value {
-        // Return the promise from the action
-        let action = data.get("action").or_else(|| data.get("settle"));
+        // Return the promise from the action.
+        // The action may be a full envelope { kind, head, data } or flat { id, state, value }.
+        let raw_action = data.get("action");
+        let action = raw_action.map(|a| unwrap_sub_envelope(a));
         let id = action
+            .as_ref()
             .and_then(|a| a.get("id"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let state = action
+            .as_ref()
             .and_then(|a| a.get("state"))
             .and_then(|v| v.as_str())
             .unwrap_or("resolved");
         let value = action
+            .as_ref()
             .and_then(|a| a.get("value"))
             .cloned()
             .unwrap_or_default();
@@ -272,6 +275,16 @@ impl StubNetwork {
 
     fn handle_task_release(&self, _data: &serde_json::Value) -> serde_json::Value {
         serde_json::json!({})
+    }
+}
+
+/// Unwrap a sub-envelope `{ kind, head, data }` into just its `data` portion.
+/// If it's not an envelope, return as-is.
+fn unwrap_sub_envelope(val: &serde_json::Value) -> serde_json::Value {
+    if val.get("kind").is_some() && val.get("head").is_some() && val.get("data").is_some() {
+        val.get("data").cloned().unwrap_or(val.clone())
+    } else {
+        val.clone()
     }
 }
 
@@ -424,6 +437,7 @@ impl TestHarness {
 
     /// Return the sent requests as flattened JSON (for test assertions).
     /// Unwraps envelope format: merges `data` fields and `kind` into a flat object.
+    /// Also unwraps nested sub-envelopes in `action`/`actions` fields.
     pub async fn sent_requests_json(&self) -> Vec<serde_json::Value> {
         self.sent_json
             .lock()
@@ -439,6 +453,17 @@ impl TestHarness {
                         .unwrap_or_default();
                     if let Some(kind) = req.get("kind") {
                         flat.insert("kind".to_string(), kind.clone());
+                    }
+                    // Also unwrap nested sub-envelopes in action/actions
+                    if let Some(action) = flat.get("action").cloned() {
+                        flat.insert("action".to_string(), unwrap_sub_envelope(&action));
+                    }
+                    if let Some(actions) = flat.get("actions").and_then(|v| v.as_array()).cloned() {
+                        let unwrapped: Vec<serde_json::Value> = actions
+                            .iter()
+                            .map(|a| unwrap_sub_envelope(a))
+                            .collect();
+                        flat.insert("actions".to_string(), serde_json::Value::Array(unwrapped));
                     }
                     serde_json::Value::Object(flat)
                 } else {

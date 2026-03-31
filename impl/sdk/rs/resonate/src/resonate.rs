@@ -24,6 +24,9 @@ use crate::registry::Registry;
 use crate::send::Sender;
 use crate::transport::{Message, Transport};
 
+/// Protocol version string sent in all requests.
+const PROTOCOL_VERSION: &str = "2025-01-15";
+
 /// Configuration for constructing a Resonate instance.
 #[derive(Default)]
 pub struct ResonateConfig {
@@ -402,18 +405,30 @@ impl Resonate {
         let mut tags = opts.tags.clone();
         Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
-        // Build task.create request
+        // Build task.create request (protocol envelope format)
         let corr_id = format!("tc-{}", now_ms());
         let req = serde_json::json!({
             "kind": "task.create",
-            "corrId": corr_id,
-            "pid": self.pid,
-            "ttl": self.ttl,
-            "promise": {
-                "id": prefixed_id,
-                "timeoutAt": timeout_at,
-                "param": encoded_param,
-                "tags": tags,
+            "head": {
+                "corrId": corr_id,
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "pid": self.pid,
+                "ttl": self.ttl,
+                "action": {
+                    "kind": "promise.create",
+                    "head": {
+                        "corrId": format!("tc-a-{}", now_ms()),
+                        "version": PROTOCOL_VERSION,
+                    },
+                    "data": {
+                        "id": prefixed_id,
+                        "timeoutAt": timeout_at,
+                        "param": encoded_param,
+                        "tags": tags,
+                    },
+                },
             },
         });
 
@@ -504,8 +519,11 @@ impl Resonate {
         let corr_id = format!("pc-{}", now_ms());
         let req = serde_json::json!({
             "kind": "promise.create",
-            "corrId": corr_id,
-            "promise": {
+            "head": {
+                "corrId": corr_id,
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
                 "id": prefixed_id,
                 "timeoutAt": timeout_at,
                 "param": encoded_param,
@@ -526,8 +544,13 @@ impl Resonate {
 
         let req = serde_json::json!({
             "kind": "promise.get",
-            "corrId": format!("pg-{}", now_ms()),
-            "id": prefixed_id,
+            "head": {
+                "corrId": format!("pg-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "id": prefixed_id,
+            },
         });
 
         let resp = self.transport.send(req).await?;
@@ -708,10 +731,15 @@ impl Resonate {
 
                 for id in pending_ids {
                     let req = serde_json::json!({
-                        "kind": "promise.registerListener",
-                        "corrId": format!("refresh-{}", now_ms()),
-                        "awaited": id,
-                        "address": unicast,
+                        "kind": "promise.register_listener",
+                        "head": {
+                            "corrId": format!("refresh-{}", now_ms()),
+                            "version": "2025-01-15",
+                        },
+                        "data": {
+                            "awaited": id,
+                            "address": unicast,
+                        },
                     });
                     match transport.send(req).await {
                         Ok(resp) => {
@@ -823,10 +851,15 @@ impl Resonate {
     /// Register a listener for a promise and return the current promise state.
     async fn register_listener(&self, id: &str) -> Result<serde_json::Value> {
         let req = serde_json::json!({
-            "kind": "promise.registerListener",
-            "corrId": format!("rl-{}", now_ms()),
-            "awaited": id,
-            "address": self.network.unicast(),
+            "kind": "promise.register_listener",
+            "head": {
+                "corrId": format!("rl-{}", now_ms()),
+                "version": PROTOCOL_VERSION,
+            },
+            "data": {
+                "awaited": id,
+                "address": self.network.unicast(),
+            },
         });
         let resp = self.transport.send(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
@@ -1112,6 +1145,24 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════
     //  Constructor / Configuration Tests
     // ═══════════════════════════════════════════════════════════════
+
+    /// Helper: build a protocol-compliant promise.get request.
+    fn promise_get_req(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "promise.get",
+            "head": { "corrId": format!("pg-{}", now_ms()), "version": PROTOCOL_VERSION },
+            "data": { "id": id },
+        })
+    }
+
+    /// Helper: build a protocol-compliant promise.create request.
+    fn promise_create_req(id: &str, timeout_at: i64) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "promise.create",
+            "head": { "corrId": format!("pc-{}", now_ms()), "version": PROTOCOL_VERSION },
+            "data": { "id": id, "timeoutAt": timeout_at, "param": {}, "tags": {} },
+        })
+    }
 
     #[tokio::test]
     async fn local_constructor_sets_defaults() {
@@ -1505,12 +1556,7 @@ mod tests {
             .await
             .unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "target-bare",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("target-bare")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1529,12 +1575,7 @@ mod tests {
             .await
             .unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "target-url",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("target-url")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1552,12 +1593,7 @@ mod tests {
             .await
             .unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "target-default",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("target-default")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1815,14 +1851,7 @@ mod tests {
     async fn transport_accessible_from_resonate() {
         let r = Resonate::local();
         // Verify we can send a raw request through the transport
-        let req = serde_json::json!({
-            "kind": "promise.create",
-            "corrId": "test-transport",
-            "promise": {
-                "id": "transport-test",
-                "timeoutAt": i64::MAX,
-            },
-        });
+        let req = promise_create_req("transport-test", i64::MAX);
         let resp = r.transport().send(req).await;
         assert!(resp.is_ok());
     }
@@ -1856,12 +1885,7 @@ mod tests {
         assert!(handle.is_ok());
 
         // Verify the promise was created with the URL target
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "url-target-test",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("url-target-test")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1881,12 +1905,7 @@ mod tests {
             .await
             .unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "run-target-test",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("run-target-test")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1902,12 +1921,7 @@ mod tests {
 
         let _handle = r.run("run-default-target", noop, ()).spawn().await.unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "run-default-target",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("run-default-target")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1927,12 +1941,7 @@ mod tests {
             .await
             .unwrap();
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "run-url-target",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("run-url-target")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1950,12 +1959,7 @@ mod tests {
             .await;
         assert!(handle.is_ok());
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "bare-target-test",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("bare-target-test")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1975,12 +1979,7 @@ mod tests {
             .await;
         assert!(handle.is_ok());
 
-        let get_req = serde_json::json!({
-            "kind": "promise.get",
-            "corrId": "check",
-            "id": "bare-target-test2",
-        });
-        let resp = r.transport().send(get_req).await.unwrap();
+        let resp = r.transport().send(promise_get_req("bare-target-test2")).await.unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");

@@ -221,7 +221,6 @@ impl Sender {
         let promise_val = action_resp
             .get("data")
             .and_then(|d| d.get("promise"))
-            .or_else(|| action_resp.get("promise"))
             .ok_or_else(|| {
                 Error::DecodingError("missing promise in fence action response".into())
             })?;
@@ -428,6 +427,10 @@ impl Sender {
             obj.remove("kind");
         }
 
+        // Wrap nested action/actions fields in protocol sub-envelopes.
+        // The protocol requires these to be full { kind, head, data } objects.
+        wrap_nested_actions(&kind, &mut req_json);
+
         // Build protocol envelope
         let corr_id = format!("sr-{}", crate::now_ms());
         let envelope = serde_json::json!({
@@ -468,6 +471,77 @@ impl Sender {
         }
 
         Ok((status, data))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Nested action envelope wrapping
+// ═══════════════════════════════════════════════════════════════════
+
+/// Wrap a flat data object into a protocol sub-envelope: `{ kind, head: { corrId, version }, data }`.
+fn make_sub_envelope(kind: &str, data: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "kind": kind,
+        "head": {
+            "corrId": format!("sr-{}", crate::now_ms()),
+            "version": PROTOCOL_VERSION,
+        },
+        "data": data,
+    })
+}
+
+/// Post-process the serialized request data to wrap nested `action`/`actions`
+/// fields in full protocol sub-envelopes, as required by the protocol spec.
+fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value) {
+    match kind {
+        // task.create: action is a PromiseCreateReq → wrap as "promise.create"
+        "task.create" => {
+            if let Some(action) = data.get("action").cloned() {
+                if action.get("kind").is_none() {
+                    data["action"] = make_sub_envelope("promise.create", action);
+                }
+            }
+        }
+        // task.fulfill: action is a PromiseSettleReq → wrap as "promise.settle"
+        "task.fulfill" => {
+            if let Some(action) = data.get("action").cloned() {
+                if action.get("kind").is_none() {
+                    data["action"] = make_sub_envelope("promise.settle", action);
+                }
+            }
+        }
+        // task.suspend: actions is an array of PromiseRegisterCallbackReq
+        //   → wrap each as "promise.register_callback"
+        "task.suspend" => {
+            if let Some(actions) = data.get("actions").and_then(|v| v.as_array()).cloned() {
+                let wrapped: Vec<serde_json::Value> = actions
+                    .into_iter()
+                    .map(|a| {
+                        if a.get("kind").is_none() {
+                            make_sub_envelope("promise.register_callback", a)
+                        } else {
+                            a
+                        }
+                    })
+                    .collect();
+                data["actions"] = serde_json::Value::Array(wrapped);
+            }
+        }
+        // task.fence: action can be PromiseCreateReq or PromiseSettleReq
+        //   → detect which one by checking for "state" field (settle has it, create doesn't)
+        "task.fence" => {
+            if let Some(action) = data.get("action").cloned() {
+                if action.get("kind").is_none() {
+                    let sub_kind = if action.get("state").is_some() {
+                        "promise.settle"
+                    } else {
+                        "promise.create"
+                    };
+                    data["action"] = make_sub_envelope(sub_kind, action);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -633,10 +707,9 @@ fn parse_suspend_result(status: u16, data: &serde_json::Value) -> Result<Suspend
     }
 }
 
-/// Extract preloaded promises from a response (accepts both "preload" and "preloaded" keys).
+/// Extract preloaded promises from a response.
 fn parse_preloaded(json: &serde_json::Value) -> Vec<PromiseRecord> {
     json.get("preload")
-        .or_else(|| json.get("preloaded"))
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
@@ -789,17 +862,20 @@ mod tests {
     async fn task_acquire_roundtrip() {
         let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
 
-        // First create a task via raw network
+        // First create a task via raw network (proper envelope format)
         let create_req = serde_json::json!({
             "kind": "task.create",
-            "corrId": "c1",
-            "pid": "pid1",
-            "ttl": 60000,
-            "promise": {
-                "id": "rt-p2",
-                "timeoutAt": i64::MAX,
-                "param": {"data": "test"},
-                "tags": {},
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "rt-p2", "timeoutAt": i64::MAX,
+                        "param": {"data": "test"}, "tags": {},
+                    },
+                },
             },
         });
         let resp_str = net.send(create_req.to_string()).await.unwrap();
@@ -809,8 +885,8 @@ mod tests {
         // Release the task so we can re-acquire
         let release_req = serde_json::json!({
             "kind": "task.release",
-            "corrId": "c2",
-            "taskId": task_id,
+            "head": { "corrId": "c2", "version": "2025-01-15" },
+            "data": { "id": task_id, "version": 0 },
         });
         net.send(release_req.to_string()).await.unwrap();
 
@@ -830,14 +906,17 @@ mod tests {
         // Create a task
         let create_req = serde_json::json!({
             "kind": "task.create",
-            "corrId": "c1",
-            "pid": "pid1",
-            "ttl": 60000,
-            "promise": {
-                "id": "rt-p3",
-                "timeoutAt": i64::MAX,
-                "param": {"data": "test"},
-                "tags": {},
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "rt-p3", "timeoutAt": i64::MAX,
+                        "param": {"data": "test"}, "tags": {},
+                    },
+                },
             },
         });
         let resp_str = net.send(create_req.to_string()).await.unwrap();
@@ -871,14 +950,17 @@ mod tests {
         // Create a task
         let create_req = serde_json::json!({
             "kind": "task.create",
-            "corrId": "c1",
-            "pid": "pid1",
-            "ttl": 60000,
-            "promise": {
-                "id": "rt-p4",
-                "timeoutAt": i64::MAX,
-                "param": {"data": "test"},
-                "tags": {},
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "rt-p4", "timeoutAt": i64::MAX,
+                        "param": {"data": "test"}, "tags": {},
+                    },
+                },
             },
         });
         let resp_str = net.send(create_req.to_string()).await.unwrap();
@@ -908,12 +990,16 @@ mod tests {
         // Create a task
         let create_req = serde_json::json!({
             "kind": "task.create",
-            "corrId": "c1",
-            "pid": "pid1",
-            "ttl": 60000,
-            "promise": {
-                "id": "rt-p5",
-                "timeoutAt": i64::MAX,
+            "head": { "corrId": "c1", "version": "2025-01-15" },
+            "data": {
+                "pid": "pid1", "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": { "corrId": "c1a", "version": "2025-01-15" },
+                    "data": {
+                        "id": "rt-p5", "timeoutAt": i64::MAX, "param": {}, "tags": {},
+                    },
+                },
             },
         });
         let resp_str = net.send(create_req.to_string()).await.unwrap();
