@@ -114,9 +114,7 @@ impl Core {
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
         // Start heartbeat before execution to keep the task lease alive
-        if let Err(e) = self.heartbeat.start().await {
-            tracing::warn!(error = %e, task_id = task_id, "failed to start heartbeat");
-        }
+        self.heartbeat.start(task_id, task_version);
 
         tracing::debug!(task_id = task_id, promise_id = %promise.id, "starting execution");
 
@@ -125,9 +123,7 @@ impl Core {
             .await;
 
         // Stop heartbeat after execution completes (both success and error)
-        if let Err(e) = self.heartbeat.stop().await {
-            tracing::warn!(error = %e, task_id = task_id, "failed to stop heartbeat");
-        }
+        self.heartbeat.stop(task_id);
 
         match result {
             Ok(status) => Ok(status),
@@ -1097,8 +1093,8 @@ mod tests {
 
     /// A tracking heartbeat that records start/stop calls.
     struct TrackingHeartbeat {
-        started: std::sync::atomic::AtomicUsize,
-        stopped: std::sync::atomic::AtomicUsize,
+        started: AtomicUsize,
+        stopped: AtomicUsize,
     }
 
     impl TrackingHeartbeat {
@@ -1118,16 +1114,14 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl Heartbeat for TrackingHeartbeat {
-        async fn start(&self) -> Result<()> {
+        fn start(&self, _task_id: &str, _task_version: i64) {
             self.started.fetch_add(1, AtomicOrdering::SeqCst);
-            Ok(())
         }
-        async fn stop(&self) -> Result<()> {
+        fn stop(&self, _task_id: &str) {
             self.stopped.fetch_add(1, AtomicOrdering::SeqCst);
-            Ok(())
         }
+        fn shutdown(&self) {}
     }
 
     fn test_core_with_heartbeat(

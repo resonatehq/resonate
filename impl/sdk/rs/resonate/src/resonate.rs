@@ -147,10 +147,11 @@ impl Resonate {
             if let Some(net) = config.network {
                 // Custom network provided
                 let transport = Transport::new(net.clone());
+                let sender_for_hb = Sender::new(transport.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
                     net.pid().to_string(),
                     ttl / 2,
-                    transport.clone(),
+                    sender_for_hb,
                 ));
                 (net, hb)
             } else if let Some(url) = resolved_url {
@@ -162,10 +163,11 @@ impl Resonate {
                     auth,
                 ));
                 let transport = Transport::new(net.clone());
+                let sender_for_hb = Sender::new(transport.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
                     net.pid().to_string(),
                     ttl / 2,
-                    transport.clone(),
+                    sender_for_hb,
                 ));
                 (net as Arc<dyn Network>, hb as Arc<dyn Heartbeat>)
             } else {
@@ -577,7 +579,7 @@ impl Resonate {
     /// Stop the Resonate instance: network, heartbeat, background tasks.
     pub async fn stop(&self) -> Result<()> {
         self.network.stop().await?;
-        self.heartbeat.stop().await?;
+        self.heartbeat.shutdown();
         if let Some(handle) = self.subscription_refresh_handle.lock().await.take() {
             handle.abort();
         }
