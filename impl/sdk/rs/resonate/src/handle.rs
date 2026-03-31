@@ -1,19 +1,16 @@
 use std::marker::PhantomData;
 
 use serde::de::DeserializeOwned;
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 use crate::codec::{deserialize_error, Codec};
 use crate::error::{Error, Result};
-use crate::transport::Transport;
 
 /// A handle to a durable promise, returned from `Resonate::run`, `Resonate::rpc`, and `get`.
 /// Allows non-blocking observation and eventual awaiting of a durable promise.
 pub struct ResonateHandle<T> {
     pub id: String,
-    state: HandleState,
-    transport: Transport,
-    unicast: String,
+    rx: watch::Receiver<Option<PromiseResult>>,
     codec: Codec,
     _phantom: PhantomData<T>,
 }
@@ -26,18 +23,7 @@ impl<T> std::fmt::Debug for ResonateHandle<T> {
     }
 }
 
-enum HandleState {
-    /// Promise is still pending — we need to wait for completion.
-    Pending,
-    /// Promise already completed with this value.
-    Completed(serde_json::Value),
-    /// Promise already failed/rejected with this value.
-    Failed(serde_json::Value),
-    /// Promise was resolved via a subscription channel.
-    Channel(Option<oneshot::Receiver<PromiseResult>>),
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PromiseResult {
     pub state: String,
     pub value: serde_json::Value,
@@ -46,42 +32,12 @@ pub(crate) struct PromiseResult {
 impl<T: DeserializeOwned> ResonateHandle<T> {
     pub(crate) fn new(
         id: String,
-        promise_state: &str,
-        promise_value: serde_json::Value,
-        transport: Transport,
-        unicast: String,
-        codec: Codec,
-    ) -> Self {
-        let state = match promise_state {
-            "resolved" => HandleState::Completed(promise_value),
-            "rejected" | "rejected_canceled" | "rejected_timedout" => {
-                HandleState::Failed(promise_value)
-            }
-            _ => HandleState::Pending,
-        };
-
-        Self {
-            id,
-            state,
-            transport,
-            unicast,
-            codec,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub(crate) fn from_channel(
-        id: String,
-        rx: oneshot::Receiver<PromiseResult>,
-        transport: Transport,
-        unicast: String,
+        rx: watch::Receiver<Option<PromiseResult>>,
         codec: Codec,
     ) -> Self {
         Self {
             id,
-            state: HandleState::Channel(Some(rx)),
-            transport,
-            unicast,
+            rx,
             codec,
             _phantom: PhantomData,
         }
@@ -89,119 +45,43 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
 
     /// Block until the promise completes, return the result or error.
     pub async fn result(&mut self) -> Result<T> {
-        match std::mem::replace(&mut self.state, HandleState::Pending) {
-            HandleState::Completed(v) => {
-                let decoded_val = self.decode_value(&v)?;
-                let result: T = serde_json::from_value(decoded_val)?;
-                Ok(result)
-            }
-            HandleState::Failed(v) => {
-                let decoded_val = self.decode_value(&v)?;
-                Err(deserialize_error(decoded_val))
-            }
-            HandleState::Pending => {
-                // Register listener and wait
-                let promise = self.register_listener().await?;
-                let state = promise
-                    .get("state")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("pending");
-
-                match state {
-                    "resolved" => {
-                        let value = promise.get("value").cloned().unwrap_or_default();
-                        let decoded_val = self.decode_value(&value)?;
-                        let result: T = serde_json::from_value(decoded_val)?;
-                        Ok(result)
-                    }
-                    "rejected" => {
-                        let value = promise.get("value").cloned().unwrap_or_default();
-                        let decoded_val = self.decode_value(&value)?;
-                        Err(deserialize_error(decoded_val))
-                    }
-                    "rejected_canceled" => Err(Error::Application {
-                        message: "Promise canceled".to_string(),
-                    }),
-                    "rejected_timedout" => Err(Error::Timeout),
-                    _ => Err(Error::Application {
-                        message: format!("unexpected promise state: {}", state),
-                    }),
-                }
-            }
-            HandleState::Channel(rx) => {
-                let rx = rx.ok_or_else(|| Error::Application {
-                    message: "handle already consumed".to_string(),
-                })?;
-                let result = rx.await.map_err(|_| Error::Application {
-                    message: "subscription channel dropped".to_string(),
-                })?;
-                match result.state.as_str() {
-                    "resolved" => {
-                        let decoded_val = self.decode_value(&result.value)?;
-                        let val: T = serde_json::from_value(decoded_val)?;
-                        Ok(val)
-                    }
-                    "rejected" => {
-                        let decoded_val = self.decode_value(&result.value)?;
-                        Err(deserialize_error(decoded_val))
-                    }
-                    "rejected_canceled" => Err(Error::Application {
-                        message: "Promise canceled".to_string(),
-                    }),
-                    "rejected_timedout" => Err(Error::Timeout),
-                    other => Err(Error::Application {
-                        message: format!("unexpected promise state: {}", other),
-                    }),
-                }
-            }
-        }
+        let guard = self
+            .rx
+            .wait_for(|v| v.is_some())
+            .await
+            .map_err(|_| Error::Application {
+                message: "promise channel closed".into(),
+            })?;
+        let result = guard.as_ref().unwrap().clone();
+        drop(guard);
+        self.decode_result(&result)
     }
 
     /// Check if the promise is done (non-blocking).
     pub async fn done(&self) -> Result<bool> {
-        match &self.state {
-            HandleState::Completed(_) | HandleState::Failed(_) => Ok(true),
-            HandleState::Pending => {
-                let promise = self.register_listener_once().await?;
-                let state = promise
-                    .get("state")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("pending");
-                Ok(state != "pending")
-            }
-            HandleState::Channel(_) => Ok(false),
-        }
+        Ok(self.rx.borrow().is_some())
     }
 
-    /// Register a listener for this promise and return the current state.
-    async fn register_listener(&self) -> Result<serde_json::Value> {
-        loop {
-            let resp = self.register_listener_once().await?;
-            let state = resp
-                .get("state")
-                .and_then(|s| s.as_str())
-                .unwrap_or("pending");
-            if state != "pending" {
-                return Ok(resp);
+    /// Decode a PromiseResult into the final T or error.
+    fn decode_result(&self, result: &PromiseResult) -> Result<T> {
+        match result.state.as_str() {
+            "resolved" => {
+                let decoded_val = self.decode_value(&result.value)?;
+                let val: T = serde_json::from_value(decoded_val)?;
+                Ok(val)
             }
-            // Wait before retrying
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            "rejected" => {
+                let decoded_val = self.decode_value(&result.value)?;
+                Err(deserialize_error(decoded_val))
+            }
+            "rejected_canceled" => Err(Error::Application {
+                message: "Promise canceled".to_string(),
+            }),
+            "rejected_timedout" => Err(Error::Timeout),
+            other => Err(Error::Application {
+                message: format!("unexpected promise state: {}", other),
+            }),
         }
-    }
-
-    /// Single attempt to register a listener.
-    async fn register_listener_once(&self) -> Result<serde_json::Value> {
-        let req = serde_json::json!({
-            "kind": "promise.registerListener",
-            "corrId": format!("rl-{}", now_ms()),
-            "awaited": self.id,
-            "address": self.unicast,
-        });
-
-        let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp)?;
-        let promise = rdata.get("promise").cloned().unwrap_or_default();
-        Ok(promise)
     }
 
     /// Decode value field from a promise (may be base64-encoded).
@@ -223,5 +103,3 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
         Ok(value.clone())
     }
 }
-
-use crate::now_ms;

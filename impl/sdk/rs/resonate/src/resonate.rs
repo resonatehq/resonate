@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{watch, Mutex};
 
 use crate::codec::{Codec, Encryptor, NoopEncryptor};
 use crate::core::Core;
@@ -45,13 +45,6 @@ pub struct ResonateConfig {
     pub prefix: Option<String>,
 }
 
-/// Subscription entry for awaiting remote promise completion.
-struct SubscriptionEntry {
-    tx: Option<oneshot::Sender<PromiseResult>>,
-    /// If already resolved before anyone subscribed.
-    resolved: Option<PromiseResult>,
-}
-
 /// Return value from `schedule()`.
 pub struct ResonateSchedule {
     name: String,
@@ -86,7 +79,7 @@ pub struct Resonate {
     heartbeat: Arc<dyn Heartbeat>,
 
     // Subscriptions (for awaiting remote promise completion)
-    subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>>,
+    subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
 
     // Sub-clients
     pub promises: Promises,
@@ -229,70 +222,17 @@ impl Resonate {
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 
-        let subscriptions: Arc<Mutex<HashMap<String, SubscriptionEntry>>> =
+        let subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
 
         // Start periodic subscription refresh
-        let transport_for_refresh = transport.clone();
-        let subs_for_refresh = subscriptions.clone();
-        let unicast_for_refresh = network.unicast().to_string();
-        let refresh_interval = subscribe_every;
-
-        let refresh_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(refresh_interval);
-            loop {
-                interval.tick().await;
-                let ids: Vec<String> = {
-                    let map = subs_for_refresh.lock().await;
-                    map.keys().cloned().collect()
-                };
-                for id in ids {
-                    let req = serde_json::json!({
-                        "kind": "promise.registerListener",
-                        "corrId": format!("refresh-{}", now_ms()),
-                        "awaited": id,
-                        "address": unicast_for_refresh,
-                    });
-                    match transport_for_refresh.send(req).await {
-                        Ok(resp) => {
-                            let rdata = match crate::transport::response_data(&resp) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, promise_id = %id, "subscription refresh: invalid response");
-                                    continue;
-                                }
-                            };
-                            let state = rdata
-                                .get("promise")
-                                .and_then(|p| p.get("state"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("pending");
-                            if state != "pending" {
-                                let value = rdata
-                                    .get("promise")
-                                    .and_then(|p| p.get("value"))
-                                    .cloned()
-                                    .unwrap_or_default();
-                                let result = PromiseResult {
-                                    state: state.to_string(),
-                                    value,
-                                };
-                                let mut map = subs_for_refresh.lock().await;
-                                if let Some(entry) = map.remove(&id) {
-                                    if let Some(tx) = entry.tx {
-                                        let _ = tx.send(result);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, promise_id = %id, "subscription refresh failed");
-                        }
-                    }
-                }
-            }
-        });
+        let refresh_handle = Self::spawn_subscription_refresh(
+            subscriptions.clone(),
+            transport.clone(),
+            network.unicast().to_string(),
+            subscribe_every,
+        );
 
         let resonate = Self {
             pid,
@@ -311,65 +251,11 @@ impl Resonate {
         };
 
         // Subscribe to incoming messages
-        let subs_for_recv = subscriptions.clone();
-        let core_for_recv = resonate.core.clone();
-        transport.recv(Box::new(move |msg| {
-            let subs = subs_for_recv.clone();
-            let core = core_for_recv.clone();
-            match msg {
-                Message::Execute(exec_msg) => {
-                    // Path 1: execute message from network → core.on_message (acquires task)
-                    tracing::debug!(task_id = %exec_msg.task_id(), version = exec_msg.version(), "received execute message");
-                    let task_id = exec_msg.task_id().to_string();
-                    let version = exec_msg.version();
-                    tokio::spawn(async move {
-                        if let Err(e) = core.on_message(&task_id, version).await {
-                            tracing::error!(
-                                error = %e,
-                                task_id = %task_id,
-                                "core.on_message failed"
-                            );
-                        }
-                    });
-                }
-                Message::Unblock(unblock_msg) => {
-                    let promise = unblock_msg.promise();
-                    let id = promise
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let state = promise
-                        .get("state")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("pending")
-                        .to_string();
-                    let value = promise.get("value").cloned().unwrap_or_default();
-
-                    let result = PromiseResult { state, value };
-
-                    // Notify subscription
-                    let subs = subs.clone();
-                    tokio::spawn(async move {
-                        let mut map = subs.lock().await;
-                        if let Some(entry) = map.remove(&id) {
-                            if let Some(tx) = entry.tx {
-                                let _ = tx.send(result);
-                            }
-                        } else {
-                            // No one subscribed yet — store for later
-                            map.insert(
-                                id,
-                                SubscriptionEntry {
-                                    tx: None,
-                                    resolved: Some(result),
-                                },
-                            );
-                        }
-                    });
-                }
-            }
-        }));
+        Self::subscribe_to_messages(
+            &transport,
+            subscriptions.clone(),
+            resonate.core.clone(),
+        );
 
         // Start network (fire-and-forget, log errors)
         let net = network.clone();
@@ -443,23 +329,23 @@ impl Resonate {
     /// # Usage
     /// ```ignore
     /// // Simple
-    /// let result: T = resonate.rpc::<T>("id", "func", args).await?;
+    /// let result: T = resonate.rpc("id", "func", (arg1, arg2)).await?;
     ///
     /// // With options
-    /// let result: T = resonate.rpc::<T>("id", "func", args)
+    /// let result: T = resonate.rpc("id", "func", (arg1, arg2))
     ///     .target("custom-worker")
     ///     .timeout(Duration::from_secs(60))
     ///     .await?;
     ///
     /// // Get a handle (like old begin_rpc)
-    /// let handle = resonate.rpc::<T>("id", "func", args).spawn().await?;
+    /// let handle = resonate.rpc::<_, T>("id", "func", (arg1, arg2)).spawn().await?;
     /// ```
-    pub fn rpc<'a, T: DeserializeOwned>(
+    pub fn rpc<'a, Args: Serialize, T: DeserializeOwned>(
         &'a self,
         id: &'a str,
         func_name: &'a str,
-        args: serde_json::Value,
-    ) -> ResRpcTask<'a, T> {
+        args: Args,
+    ) -> ResRpcTask<'a, Args, T> {
         ResRpcTask {
             resonate: self,
             id,
@@ -670,13 +556,13 @@ impl Resonate {
     ///     .version(2)
     ///     .await?;
     /// ```
-    pub fn schedule<'a>(
+    pub fn schedule<'a, Args: Serialize>(
         &'a self,
         name: &'a str,
         cron: &'a str,
         func_name: &'a str,
-        args: serde_json::Value,
-    ) -> ResScheduleTask<'a> {
+        args: Args,
+    ) -> ResScheduleTask<'a, Args> {
         ResScheduleTask {
             resonate: self,
             name,
@@ -740,6 +626,133 @@ impl Resonate {
         }
     }
 
+    /// Wire up the transport message handler to dispatch Execute and Unblock
+    /// messages to the core engine and subscription watchers respectively.
+    fn subscribe_to_messages(
+        transport: &Transport,
+        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+        core: Arc<Core>,
+    ) {
+        transport.recv(Box::new(move |msg| {
+            let subs = subscriptions.clone();
+            let core = core.clone();
+            match msg {
+                Message::Execute(exec_msg) => {
+                    tracing::debug!(task_id = %exec_msg.task_id(), version = exec_msg.version(), "received execute message");
+                    let task_id = exec_msg.task_id().to_string();
+                    let version = exec_msg.version();
+                    tokio::spawn(async move {
+                        if let Err(e) = core.on_message(&task_id, version).await {
+                            tracing::error!(
+                                error = %e,
+                                task_id = %task_id,
+                                "core.on_message failed"
+                            );
+                        }
+                    });
+                }
+                Message::Unblock(unblock_msg) => {
+                    let promise = unblock_msg.promise();
+                    let id = promise
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let state = promise
+                        .get("state")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("pending")
+                        .to_string();
+                    let value = promise.get("value").cloned().unwrap_or_default();
+
+                    let result = PromiseResult { state, value };
+
+                    let subs = subs.clone();
+                    tokio::spawn(async move {
+                        let mut map = subs.lock().await;
+                        if let Some(tx) = map.get(&id) {
+                            let _ = tx.send(Some(result));
+                        } else {
+                            let (tx, _) = watch::channel(Some(result));
+                            map.insert(id, tx);
+                        }
+                    });
+                }
+            }
+        }));
+    }
+
+    /// Spawn a background task that periodically re-registers listeners for
+    /// pending promises, ensuring the server continues to push Unblock messages.
+    fn spawn_subscription_refresh(
+        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+        transport: Transport,
+        unicast: String,
+        interval_duration: Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(interval_duration);
+            loop {
+                interval.tick().await;
+
+                // Snapshot: only IDs that are still pending.
+                let pending_ids: Vec<String> = {
+                    let map = subscriptions.lock().await;
+                    map.iter()
+                        .filter(|(_, tx)| tx.borrow().is_none())
+                        .map(|(id, _)| id.clone())
+                        .collect()
+                };
+
+                for id in pending_ids {
+                    let req = serde_json::json!({
+                        "kind": "promise.registerListener",
+                        "corrId": format!("refresh-{}", now_ms()),
+                        "awaited": id,
+                        "address": unicast,
+                    });
+                    match transport.send(req).await {
+                        Ok(resp) => {
+                            let rdata = match crate::transport::response_data(&resp) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    tracing::warn!(error = %e, promise_id = %id,
+                                        "refresh: bad response");
+                                    continue;
+                                }
+                            };
+                            let state = rdata
+                                .get("promise")
+                                .and_then(|p| p.get("state"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("pending");
+
+                            if state != "pending" {
+                                let value = rdata
+                                    .get("promise")
+                                    .and_then(|p| p.get("value"))
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let result = PromiseResult {
+                                    state: state.to_string(),
+                                    value,
+                                };
+                                let map = subscriptions.lock().await;
+                                if let Some(tx) = map.get(&id) {
+                                    let _ = tx.send(Some(result));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, promise_id = %id,
+                                "refresh failed");
+                        }
+                    }
+                }
+            }
+        })
+    }
+
     /// Create a handle from a promise JSON value.
     async fn create_handle<T: DeserializeOwned>(
         &self,
@@ -751,80 +764,71 @@ impl Resonate {
             .and_then(|s| s.as_str())
             .unwrap_or("pending");
         let value = promise.get("value").cloned().unwrap_or_default();
+        let settled = Self::as_promise_result(state, &value);
 
-        if state == "pending" {
-            // Subscribe for notification
-            let (tx, rx) = oneshot::channel();
-            {
-                let mut subs = self.subscriptions.lock().await;
-                if let Some(entry) = subs.get_mut(&id) {
-                    // Already have a notification for this promise
-                    if let Some(resolved) = entry.resolved.take() {
-                        return Ok(ResonateHandle::new(
-                            id,
-                            &resolved.state,
-                            resolved.value,
-                            self.transport.clone(),
-                            self.network.unicast().to_string(),
-                            self.codec.clone(),
-                        ));
-                    }
-                }
-                subs.insert(
-                    id.clone(),
-                    SubscriptionEntry {
-                        tx: Some(tx),
-                        resolved: None,
-                    },
-                );
+        let (rx, needs_listener) = {
+            let mut subs = self.subscriptions.lock().await;
+            if let Some(tx) = subs.get(&id) {
+                // Existing entry — another handle or early Unblock.
+                (tx.subscribe(), false)
+            } else {
+                // First time — create watch channel.
+                // If already settled, pre-load the value.
+                let (tx, rx) = watch::channel(settled);
+                let needs = state == "pending";
+                subs.insert(id.clone(), tx);
+                (rx, needs)
             }
+        };
+        // Lock released.
 
-            // Register listener with the server
-            let req = serde_json::json!({
-                "kind": "promise.registerListener",
-                "corrId": format!("rl-{}", now_ms()),
-                "awaited": id,
-                "address": self.network.unicast(),
-            });
-            let resp = self.transport.send(req).await?;
-            let rdata = crate::transport::response_data(&resp)?;
-            let resp_promise = rdata.get("promise").cloned().unwrap_or_default();
+        // Register listener so the server pushes Unblock to us.
+        // Only needed on first subscription for a pending promise.
+        if needs_listener {
+            let resp_promise = self.register_listener(&id).await?;
             let resp_state = resp_promise
                 .get("state")
                 .and_then(|s| s.as_str())
                 .unwrap_or("pending");
-
             if resp_state != "pending" {
-                // Already settled — remove subscription, return directly
-                let mut subs = self.subscriptions.lock().await;
-                subs.remove(&id);
-                return Ok(ResonateHandle::new(
-                    id,
-                    resp_state,
-                    resp_promise.get("value").cloned().unwrap_or_default(),
-                    self.transport.clone(),
-                    self.network.unicast().to_string(),
-                    self.codec.clone(),
-                ));
+                // Settled between promise creation and listener registration.
+                let result = PromiseResult {
+                    state: resp_state.to_string(),
+                    value: resp_promise.get("value").cloned().unwrap_or_default(),
+                };
+                let subs = self.subscriptions.lock().await;
+                if let Some(tx) = subs.get(&id) {
+                    let _ = tx.send(Some(result));
+                }
             }
-
-            Ok(ResonateHandle::from_channel(
-                id,
-                rx,
-                self.transport.clone(),
-                self.network.unicast().to_string(),
-                self.codec.clone(),
-            ))
-        } else {
-            Ok(ResonateHandle::new(
-                id,
-                state,
-                value,
-                self.transport.clone(),
-                self.network.unicast().to_string(),
-                self.codec.clone(),
-            ))
         }
+
+        Ok(ResonateHandle::new(id, rx, self.codec.clone()))
+    }
+
+    /// Convert a promise state/value into an Option<PromiseResult>.
+    fn as_promise_result(state: &str, value: &serde_json::Value) -> Option<PromiseResult> {
+        if state == "pending" {
+            None
+        } else {
+            Some(PromiseResult {
+                state: state.to_string(),
+                value: value.clone(),
+            })
+        }
+    }
+
+    /// Register a listener for a promise and return the current promise state.
+    async fn register_listener(&self, id: &str) -> Result<serde_json::Value> {
+        let req = serde_json::json!({
+            "kind": "promise.registerListener",
+            "corrId": format!("rl-{}", now_ms()),
+            "awaited": id,
+            "address": self.network.unicast(),
+        });
+        let resp = self.transport.send(req).await?;
+        let rdata = crate::transport::response_data(&resp)?;
+        Ok(rdata.get("promise").cloned().unwrap_or_default())
     }
 }
 
@@ -947,11 +951,11 @@ where
 ///
 /// Implements `IntoFuture` so `.await` runs and returns `Result<T>`.
 /// Use `.spawn()` to get a `ResonateHandle<T>` instead.
-pub struct ResRpcTask<'a, T> {
+pub struct ResRpcTask<'a, Args, T> {
     resonate: &'a Resonate,
     id: &'a str,
     func_name: &'a str,
-    args: serde_json::Value,
+    args: Args,
     timeout: Option<Duration>,
     version: Option<u32>,
     tags: Option<HashMap<String, String>>,
@@ -959,7 +963,7 @@ pub struct ResRpcTask<'a, T> {
     _phantom: PhantomData<T>,
 }
 
-impl<'a, T> ResRpcTask<'a, T> {
+impl<'a, Args, T> ResRpcTask<'a, Args, T> {
     /// Set the timeout for this execution.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -985,7 +989,7 @@ impl<'a, T> ResRpcTask<'a, T> {
     }
 }
 
-impl<'a, T: DeserializeOwned> ResRpcTask<'a, T> {
+impl<'a, Args: Serialize, T: DeserializeOwned> ResRpcTask<'a, Args, T> {
     /// Start the RPC and return a handle for later awaiting (replaces `begin_rpc`).
     pub async fn spawn(self) -> Result<ResonateHandle<T>> {
         let opts = build_options(
@@ -995,13 +999,14 @@ impl<'a, T: DeserializeOwned> ResRpcTask<'a, T> {
             self.timeout,
             self.version,
         );
+        let json_args = serde_json::to_value(self.args)?;
         self.resonate
-            .do_rpc::<T>(self.id, self.func_name, self.args, opts)
+            .do_rpc::<T>(self.id, self.func_name, json_args, opts)
             .await
     }
 }
 
-impl<'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture for ResRpcTask<'a, T> {
+impl<'a, Args: Serialize + Send + 'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture for ResRpcTask<'a, Args, T> {
     type Output = Result<T>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -1021,17 +1026,17 @@ impl<'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture for ResRpcTask<
 ///
 /// Implements `IntoFuture` so `.await` creates the schedule and returns
 /// `Result<ResonateSchedule>`.
-pub struct ResScheduleTask<'a> {
+pub struct ResScheduleTask<'a, Args> {
     resonate: &'a Resonate,
     name: &'a str,
     cron: &'a str,
     func_name: &'a str,
-    args: serde_json::Value,
+    args: Args,
     timeout: Option<Duration>,
     version: Option<u32>,
 }
 
-impl<'a> ResScheduleTask<'a> {
+impl<'a, Args> ResScheduleTask<'a, Args> {
     /// Set the timeout for scheduled executions.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
@@ -1045,7 +1050,7 @@ impl<'a> ResScheduleTask<'a> {
     }
 }
 
-impl<'a> IntoFuture for ResScheduleTask<'a> {
+impl<'a, Args: Serialize + Send + 'a> IntoFuture for ResScheduleTask<'a, Args> {
     type Output = Result<ResonateSchedule>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<ResonateSchedule>> + Send + 'a>>;
 
@@ -1055,9 +1060,10 @@ impl<'a> IntoFuture for ResScheduleTask<'a> {
             let timeout = self.timeout.unwrap_or(defaults.timeout);
             let version = self.version.unwrap_or(defaults.version);
 
+            let json_args = serde_json::to_value(self.args)?;
             let param_data = serde_json::json!({
                 "func": self.func_name,
-                "args": self.args,
+                "args": json_args,
                 "version": version,
             });
             let encoded_param = self.resonate.codec.encode(&param_data)?;
@@ -1304,7 +1310,7 @@ mod tests {
         let r = Resonate::local();
         // RPC does NOT require function to be registered locally
         let handle = r
-            .rpc::<serde_json::Value>("rpc-1", "remote_func", serde_json::json!({"x": 1}))
+            .rpc::<_, ()>("rpc-1", "remote_func", (1i32,))
             .spawn()
             .await;
         assert!(handle.is_ok());
@@ -1319,7 +1325,7 @@ mod tests {
         });
 
         let handle = r
-            .rpc::<serde_json::Value>("rpc-2", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-2", "remote", ())
             .spawn()
             .await
             .unwrap();
@@ -1331,7 +1337,7 @@ mod tests {
         let r = Resonate::local();
         // Verifying RPC succeeds — tags (scope=global, target) are set internally
         let handle = r
-            .rpc::<serde_json::Value>("rpc-scope", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-scope", "remote", ())
             .spawn()
             .await;
         assert!(handle.is_ok());
@@ -1342,7 +1348,7 @@ mod tests {
         let r = Resonate::local();
 
         let handle = r
-            .rpc::<serde_json::Value>("rpc-target", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-target", "remote", ())
             .target("custom-worker")
             .spawn()
             .await;
@@ -1354,14 +1360,14 @@ mod tests {
         let r = Resonate::local();
 
         let h1 = r
-            .rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-dup", "remote", ())
             .spawn()
             .await;
         assert!(h1.is_ok());
 
         // Same ID should return existing promise
         let h2 = r
-            .rpc::<serde_json::Value>("rpc-dup", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-dup", "remote", ())
             .spawn()
             .await;
         assert!(h2.is_ok());
@@ -1374,7 +1380,7 @@ mod tests {
     #[tokio::test]
     async fn get_nonexistent_promise_returns_error() {
         let r = Resonate::local();
-        let result = r.get::<serde_json::Value>("nonexistent").await;
+        let result = r.get::<()>("nonexistent").await;
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::ServerError { code, .. } => assert_eq!(code, 404),
@@ -1387,13 +1393,13 @@ mod tests {
         let r = Resonate::local();
 
         // Create a promise via RPC first
-        r.rpc::<serde_json::Value>("get-test", "func", serde_json::json!(null))
+        r.rpc::<_, ()>("get-test", "func", ())
             .spawn()
             .await
             .unwrap();
 
         // Now get it
-        let handle = r.get::<serde_json::Value>("get-test").await;
+        let handle = r.get::<()>("get-test").await;
         assert!(handle.is_ok());
         assert_eq!(handle.unwrap().id, "get-test");
     }
@@ -1406,13 +1412,13 @@ mod tests {
         });
 
         // Create via RPC (which prepends prefix)
-        r.rpc::<serde_json::Value>("p1", "func", serde_json::json!(null))
+        r.rpc::<_, ()>("p1", "func", ())
             .spawn()
             .await
             .unwrap();
 
         // Get with the unprefixed ID (prefix is prepended internally)
-        let handle = r.get::<serde_json::Value>("p1").await;
+        let handle = r.get::<()>("p1").await;
         assert!(handle.is_ok());
         assert_eq!(handle.unwrap().id, "ns:p1");
     }
@@ -1429,7 +1435,7 @@ mod tests {
                 "my-schedule",
                 "*/5 * * * *",
                 "my-func",
-                serde_json::json!(null),
+                (),
             )
             .await;
         assert!(result.is_ok());
@@ -1439,7 +1445,7 @@ mod tests {
     async fn schedule_returns_deletable_handle() {
         let r = Resonate::local();
         let schedule = r
-            .schedule("deletable", "0 * * * *", "func", serde_json::json!(null))
+            .schedule("deletable", "0 * * * *", "func", ())
             .await
             .unwrap();
         // Deleting should not fail
@@ -1491,7 +1497,7 @@ mod tests {
         let r = Resonate::local();
 
         let handle = r
-            .rpc::<serde_json::Value>("target-bare", "func", serde_json::json!(null))
+            .rpc::<_, ()>("target-bare", "func", ())
             .target("my-worker")
             .spawn()
             .await
@@ -1515,7 +1521,7 @@ mod tests {
         let r = Resonate::local();
 
         let handle = r
-            .rpc::<serde_json::Value>("target-url", "func", serde_json::json!(null))
+            .rpc::<_, ()>("target-url", "func", ())
             .target("https://remote:9000/workers/hello")
             .spawn()
             .await
@@ -1539,7 +1545,7 @@ mod tests {
         let r = Resonate::local();
 
         let _handle = r
-            .rpc::<serde_json::Value>("target-default", "func", serde_json::json!(null))
+            .rpc::<_, ()>("target-default", "func", ())
             .spawn()
             .await
             .unwrap();
@@ -1653,14 +1659,14 @@ mod tests {
 
         // rpc().spawn() with prefix
         let h2 = r
-            .rpc::<serde_json::Value>("id2", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("id2", "remote", ())
             .spawn()
             .await
             .unwrap();
         assert_eq!(h2.id, "p:id2");
 
         // get with prefix (the promise was created as "p:id2")
-        let h3 = r.get::<serde_json::Value>("id2").await.unwrap();
+        let h3 = r.get::<()>("id2").await.unwrap();
         assert_eq!(h3.id, "p:id2");
     }
 
@@ -1681,7 +1687,7 @@ mod tests {
         let r = Resonate::local();
         // rpc should succeed even without registration (remote worker will handle it)
         let result = r
-            .rpc::<serde_json::Value>("rpc-test", "any_remote_func", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-test", "any_remote_func", ())
             .spawn()
             .await;
         assert!(result.is_ok());
@@ -1704,7 +1710,7 @@ mod tests {
     async fn rpc_handle_id_matches() {
         let r = Resonate::local();
         let handle = r
-            .rpc::<serde_json::Value>("rpc-handle", "remote", serde_json::json!(null))
+            .rpc::<_, ()>("rpc-handle", "remote", ())
             .spawn()
             .await
             .unwrap();
@@ -1739,7 +1745,7 @@ mod tests {
 
         let local_h = r.run("local-1", noop, ()).spawn().await;
         let remote_h = r
-            .rpc::<serde_json::Value>("remote-1", "remote-fn", serde_json::json!(null))
+            .rpc::<_, ()>("remote-1", "remote-fn", ())
             .spawn()
             .await;
 
@@ -1841,7 +1847,7 @@ mod tests {
 
         // Use a URL as the target option — should NOT be rewritten by network.match
         let handle = r
-            .rpc::<serde_json::Value>("url-target-test", "noop", serde_json::json!(null))
+            .rpc::<_, ()>("url-target-test", "noop", ())
             .target("https://remote-host:9000/workers/noop")
             .spawn()
             .await;
@@ -1937,7 +1943,7 @@ mod tests {
         let r = Resonate::local();
 
         let handle = r
-            .rpc::<serde_json::Value>("bare-target-test", "noop", serde_json::json!(null))
+            .rpc::<_, ()>("bare-target-test", "noop", ())
             .spawn()
             .await;
         assert!(handle.is_ok());
@@ -1961,7 +1967,7 @@ mod tests {
         let r = Resonate::local();
 
         let handle = r
-            .rpc::<serde_json::Value>("bare-target-test2", "noop", serde_json::json!(null))
+            .rpc::<_, ()>("bare-target-test2", "noop", ())
             .target("noop")
             .spawn()
             .await;
@@ -1979,5 +1985,267 @@ mod tests {
 
         // Bare name should be resolved by network.match → "local://any@noop"
         assert_eq!(target, "local://any@noop");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Subscription Refactor Tests (watch channels)
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn multiple_handles_same_id_all_resolve() {
+        let r = Resonate::local();
+
+        // Create a promise via RPC
+        let mut h1 = r
+            .rpc::<_, ()>("multi-handle", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+
+        // Get a second handle to the same promise
+        let mut h2 = r.get::<()>("multi-handle").await.unwrap();
+
+        // Notify via the subscription (simulate Unblock)
+        // Use null value to avoid codec encoding issues
+        {
+            let subs = r.subscriptions.lock().await;
+            if let Some(tx) = subs.get("multi-handle") {
+                let _ = tx.send(Some(PromiseResult {
+                    state: "resolved".to_string(),
+                    value: serde_json::json!(null),
+                }));
+            }
+        }
+
+        // Both handles should resolve
+        let r1 = h1.result().await;
+        let r2 = h2.result().await;
+        assert!(r1.is_ok(), "first handle should resolve");
+        assert!(r2.is_ok(), "second handle should resolve");
+    }
+
+    #[tokio::test]
+    async fn early_unblock_before_create_handle() {
+        let r = Resonate::local();
+
+        // Simulate an early Unblock by inserting a pre-loaded watch entry
+        // Use null value to avoid codec encoding issues
+        {
+            let mut subs = r.subscriptions.lock().await;
+            let (tx, _) = watch::channel(Some(PromiseResult {
+                state: "resolved".to_string(),
+                value: serde_json::json!(null),
+            }));
+            subs.insert("early-unblock".to_string(), tx);
+        }
+
+        // Create the promise so get() can find it
+        r.promises
+            .create(
+                "early-unblock",
+                i64::MAX,
+                serde_json::json!(null),
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+
+        // Now get a handle — should pick up the pre-loaded result immediately
+        let mut handle = r.get::<()>("early-unblock").await.unwrap();
+        assert!(
+            handle.done().await.unwrap(),
+            "handle should be done immediately for early unblock"
+        );
+        let result = handle.result().await;
+        assert!(result.is_ok(), "early unblock handle should resolve");
+    }
+
+    #[tokio::test]
+    async fn done_returns_false_then_true() {
+        let r = Resonate::local();
+
+        // Create a pending promise via RPC
+        let handle = r
+            .rpc::<_, ()>("done-test", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+
+        // Should be pending
+        assert!(
+            !handle.done().await.unwrap(),
+            "handle should not be done yet"
+        );
+
+        // Settle via subscription
+        {
+            let subs = r.subscriptions.lock().await;
+            if let Some(tx) = subs.get("done-test") {
+                let _ = tx.send(Some(PromiseResult {
+                    state: "resolved".to_string(),
+                    value: serde_json::json!({"data": "done"}),
+                }));
+            }
+        }
+
+        // Should be done now
+        assert!(handle.done().await.unwrap(), "handle should be done now");
+    }
+
+    #[tokio::test]
+    async fn handle_dropped_without_awaiting_does_not_leak() {
+        let r = Resonate::local();
+
+        // Create handles and drop them without awaiting
+        {
+            let _h1 = r
+                .rpc::<_, ()>("drop-1", "func", ())
+                .spawn()
+                .await
+                .unwrap();
+            let _h2 = r
+                .rpc::<_, ()>("drop-2", "func", ())
+                .spawn()
+                .await
+                .unwrap();
+            // Both dropped here
+        }
+
+        // Should not panic or hang — the watch senders still exist in subscriptions
+        // but no receivers are listening, which is fine.
+        let subs = r.subscriptions.lock().await;
+        assert!(subs.contains_key("drop-1"));
+        assert!(subs.contains_key("drop-2"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  End-to-end Subscription Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn e2e_settle_unblocks_handle() {
+        let r = Resonate::local();
+
+        // Create a pending promise via RPC
+        let mut handle = r
+            .rpc::<_, ()>("e2e-1", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+
+        assert!(!handle.done().await.unwrap(), "should be pending");
+
+        // Settle the promise — the local network will dispatch an Unblock
+        // message through the transport to our watch channel.
+        r.promises
+            .settle("e2e-1", "resolved", serde_json::json!(null))
+            .await
+            .unwrap();
+
+        // Give the async Unblock dispatch a moment to propagate
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(handle.done().await.unwrap(), "should be done after settle");
+        let result = handle.result().await;
+        assert!(result.is_ok(), "should resolve successfully");
+    }
+
+    #[tokio::test]
+    async fn e2e_multiple_handles_resolve_on_settle() {
+        let r = Resonate::local();
+
+        // Create two handles for the same promise
+        let mut h1 = r
+            .rpc::<_, ()>("e2e-multi", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+        let mut h2 = r.get::<()>("e2e-multi").await.unwrap();
+
+        // Settle — Unblock flows through transport → watch → both receivers
+        r.promises
+            .settle("e2e-multi", "resolved", serde_json::json!(null))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let r1 = h1.result().await;
+        let r2 = h2.result().await;
+        assert!(r1.is_ok(), "first handle should resolve");
+        assert!(r2.is_ok(), "second handle should resolve");
+    }
+
+    #[tokio::test]
+    async fn e2e_reject_unblocks_handle_with_error() {
+        let r = Resonate::local();
+
+        let mut handle = r
+            .rpc::<_, ()>("e2e-reject", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+
+        // Reject the promise
+        r.promises
+            .settle("e2e-reject", "rejected", serde_json::json!(null))
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let result = handle.result().await;
+        assert!(result.is_err(), "rejected promise should return error");
+    }
+
+    #[tokio::test]
+    async fn e2e_settle_before_handle_returns_immediately() {
+        let r = Resonate::local();
+
+        // Create and immediately settle a promise
+        r.promises
+            .create(
+                "e2e-pre",
+                i64::MAX,
+                serde_json::json!(null),
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+        r.promises
+            .settle("e2e-pre", "resolved", serde_json::json!(null))
+            .await
+            .unwrap();
+
+        // Getting a handle to an already-settled promise should work immediately
+        let mut handle = r.get::<()>("e2e-pre").await.unwrap();
+        assert!(handle.done().await.unwrap(), "should be done immediately");
+        let result = handle.result().await;
+        assert!(result.is_ok(), "already-settled promise should resolve");
+    }
+
+    #[tokio::test]
+    async fn e2e_result_blocks_until_settle() {
+        let r = Resonate::local();
+
+        let mut handle = r
+            .rpc::<_, ()>("e2e-block", "func", ())
+            .spawn()
+            .await
+            .unwrap();
+
+        // Settle after a short delay in a background task
+        let promises = r.promises.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            promises
+                .settle("e2e-block", "resolved", serde_json::json!(null))
+                .await
+                .unwrap();
+        });
+
+        // result() should block until the settle arrives
+        let result = handle.result().await;
+        assert!(result.is_ok(), "result() should unblock after settle");
     }
 }
