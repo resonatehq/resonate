@@ -2249,4 +2249,135 @@ mod tests {
         let result = handle.result().await;
         assert!(result.is_ok(), "result() should unblock after settle");
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  End-to-end Function Execution Tests
+    //
+    //  These tests start a Resonate::local() instance, register
+    //  functions, run them, and verify the actual return values.
+    // ═══════════════════════════════════════════════════════════════
+
+    #[resonate_macros::function]
+    async fn greet(name: String) -> Result<String> {
+        Ok(format!("hello, {}!", name))
+    }
+
+    #[resonate_macros::function]
+    async fn fail_with_message(msg: String) -> Result<String> {
+        Err(Error::Application { message: msg })
+    }
+
+    #[resonate_macros::function]
+    async fn multiply(x: i64, y: i64) -> Result<i64> {
+        Ok(x * y)
+    }
+
+    #[tokio::test]
+    async fn e2e_run_simple_function_returns_result() {
+        let r = Resonate::local();
+        r.register(add).unwrap();
+
+        let result: i64 = r.run("e2e-add", add, (3_i64, 4_i64)).await.unwrap();
+        assert_eq!(result, 7);
+    }
+
+    #[tokio::test]
+    async fn e2e_run_noop_function_completes() {
+        let r = Resonate::local();
+        r.register(noop).unwrap();
+
+        // noop returns Ok(()) — use spawn + done to verify it completed
+        let handle = r.run("e2e-noop", noop, ()).spawn().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(handle.done().await.unwrap(), "noop should complete");
+    }
+
+    #[tokio::test]
+    async fn e2e_run_string_args_and_return() {
+        let r = Resonate::local();
+        r.register(greet).unwrap();
+
+        let result: String = r
+            .run("e2e-greet", greet, "world".to_string())
+            .await
+            .unwrap();
+        assert_eq!(result, "hello, world!");
+    }
+
+    #[tokio::test]
+    async fn e2e_run_failing_function_returns_error() {
+        let r = Resonate::local();
+        r.register(fail_with_message).unwrap();
+
+        let result: Result<String> = r
+            .run(
+                "e2e-fail",
+                fail_with_message,
+                "something broke".to_string(),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn e2e_run_via_handle_returns_result() {
+        let r = Resonate::local();
+        r.register(multiply).unwrap();
+
+        let mut handle = r
+            .run("e2e-mul", multiply, (6_i64, 7_i64))
+            .spawn()
+            .await
+            .unwrap();
+
+        // Give the async execution a moment to complete
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(handle.done().await.unwrap(), "should be done");
+        let result: i64 = handle.result().await.unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[tokio::test]
+    async fn e2e_run_idempotent_same_id_returns_same_result() {
+        let r = Resonate::local();
+        r.register(add).unwrap();
+
+        let r1: i64 = r.run("e2e-idem", add, (10_i64, 20_i64)).await.unwrap();
+        assert_eq!(r1, 30);
+
+        // Second call with same ID should return the same result (idempotent)
+        let r2: i64 = r.run("e2e-idem", add, (10_i64, 20_i64)).await.unwrap();
+        assert_eq!(r2, 30);
+    }
+
+    #[tokio::test]
+    async fn e2e_run_multiple_functions_concurrently() {
+        let r = Resonate::local();
+        r.register(add).unwrap();
+        r.register(multiply).unwrap();
+
+        let (r1, r2) = tokio::join!(
+            r.run("e2e-conc-add", add, (1_i64, 2_i64)),
+            r.run("e2e-conc-mul", multiply, (3_i64, 4_i64)),
+        );
+
+        assert_eq!(r1.unwrap(), 3_i64);
+        assert_eq!(r2.unwrap(), 12_i64);
+    }
+
+    #[tokio::test]
+    async fn e2e_get_handle_after_run_completes() {
+        let r = Resonate::local();
+        r.register(add).unwrap();
+
+        // Run to completion
+        let _: i64 = r.run("e2e-get-after", add, (5_i64, 5_i64)).await.unwrap();
+
+        // Get a handle to the already-completed promise
+        let mut handle = r.get::<i64>("e2e-get-after").await.unwrap();
+        assert!(handle.done().await.unwrap(), "should already be done");
+        let result = handle.result().await.unwrap();
+        assert_eq!(result, 10);
+    }
 }
