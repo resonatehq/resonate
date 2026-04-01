@@ -21,7 +21,7 @@ use crate::types::{DurableKind, Outcome, PromiseCreateReq, PromiseRecord, Promis
 /// into a routable address (e.g. a URL or network identifier).
 /// If the input is already a URL, it is returned unchanged.
 /// Mirrors `network.match()` — passed down from Resonate → Core → Context.
-pub type TargetResolver = Arc<dyn Fn(&str) -> String + Send + Sync>;
+pub type TargetResolver = Arc<dyn Fn(Option<&str>) -> String + Send + Sync>;
 
 /// Shared state between a spawned task and the context's flush mechanism.
 /// The DurableFuture also reads from this via a oneshot channel.
@@ -184,7 +184,7 @@ impl Context {
     /// Build a remote create request.
     ///
     /// If `target_override` is provided, it is resolved through `target_resolver`;
-    /// otherwise `func_name` is used as the default target input.
+    /// otherwise the group name is used as the default target input.
     fn remote_create_req(
         &self,
         id: &str,
@@ -193,8 +193,7 @@ impl Context {
         timeout: Option<Duration>,
         target_override: Option<&str>,
     ) -> Result<PromiseCreateReq> {
-        let target_input = target_override.unwrap_or(func_name);
-        let target = (self.target_resolver)(target_input);
+        let target = (self.target_resolver)(target_override);
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:target".to_string(), target);
@@ -270,6 +269,57 @@ impl Context {
             serialization_error,
             record: tokio::sync::OnceCell::new(),
             _phantom: PhantomData,
+        }
+    }
+
+    /// Build a sleep (timer) create request.
+    ///
+    /// Similar to `remote_create_req` but with `resonate:timer` tag and no target.
+    fn sleep_create_req(
+        &self,
+        id: &str,
+        duration: Duration,
+    ) -> PromiseCreateReq {
+        let mut tags = HashMap::new();
+        tags.insert("resonate:scope".to_string(), "global".to_string());
+        tags.insert("resonate:branch".to_string(), id.to_string());
+        tags.insert("resonate:parent".to_string(), self.id.clone());
+        tags.insert("resonate:origin".to_string(), self.origin_id.clone());
+        tags.insert("resonate:timer".to_string(), "true".to_string());
+
+        PromiseCreateReq {
+            id: id.to_string(),
+            timeout_at: self.child_timeout(Some(duration)),
+            param: Value {
+                headers: None,
+                data: None,
+            },
+            tags,
+        }
+    }
+
+    /// Sleep (timer). Returns a `SleepTask` builder that implements `IntoFuture`.
+    ///
+    /// Creates a durable timer promise that resolves after the given duration.
+    /// Behaves like an RPC: on `Pending`, the workflow suspends and the server
+    /// resolves the promise when the timer elapses.
+    ///
+    /// # Usage patterns
+    /// ```ignore
+    /// // Sequential (common case)
+    /// ctx.sleep(Duration::from_secs(60)).await?;
+    ///
+    /// // Fire-and-forget via .spawn()
+    /// let handle = ctx.sleep(Duration::from_secs(60)).spawn().await?;
+    /// ```
+    pub fn sleep(&self, duration: Duration) -> SleepTask<'_> {
+        let child_id = self.next_id();
+        let req = self.sleep_create_req(&child_id, duration);
+        SleepTask {
+            child_id,
+            ctx: self,
+            req,
+            record: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -657,7 +707,7 @@ impl<'ctx, T> RpcTask<'ctx, T> {
             self.record.get().is_none(),
             "cannot set target after promise creation"
         );
-        let resolved = (self.ctx.target_resolver)(target);
+        let resolved = (self.ctx.target_resolver)(Some(target));
         self.req
             .tags
             .insert("resonate:target".to_string(), resolved);
@@ -758,6 +808,85 @@ where
 
             match record.state {
                 PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
+                PromiseState::Rejected
+                | PromiseState::RejectedCanceled
+                | PromiseState::RejectedTimedout => {
+                    Err(deserialize_error(record.value.data_or_null()))
+                }
+                PromiseState::Pending => {
+                    ctx.spawned_remote.lock().await.push(child_id);
+                    Err(Error::Suspended)
+                }
+            }
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SleepTask — builder returned by ctx.sleep()
+// ═══════════════════════════════════════════════════════════════
+
+/// A lazy timer task. Created by `ctx.sleep()`.
+///
+/// Implements `IntoFuture` so `.await` works directly. On `Pending` state,
+/// awaiting pushes to `remote_todos` and returns `Err(Suspended)`, just like RPC.
+pub struct SleepTask<'ctx> {
+    child_id: String,
+    ctx: &'ctx Context,
+    req: PromiseCreateReq,
+    record: tokio::sync::OnceCell<PromiseRecord>,
+}
+
+impl<'ctx> SleepTask<'ctx> {
+    /// Eagerly create the promise and return a `RemoteFuture` handle.
+    pub async fn spawn(self) -> Result<RemoteFuture<()>> {
+        let SleepTask {
+            child_id,
+            ctx,
+            req,
+            record: cell,
+            ..
+        } = self;
+
+        cell.get_or_try_init(|| ctx.effects.create_promise(req))
+            .await?;
+        let record = cell.into_inner().unwrap();
+
+        match record.state {
+            PromiseState::Resolved => Ok(RemoteFuture::resolved(())),
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => {
+                Ok(RemoteFuture::rejected(record.value.data_or_null()))
+            }
+            PromiseState::Pending => {
+                ctx.spawned_remote.lock().await.push(child_id);
+                Ok(RemoteFuture::pending())
+            }
+        }
+    }
+}
+
+impl<'ctx> IntoFuture for SleepTask<'ctx> {
+    type Output = Result<()>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'ctx>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let SleepTask {
+                child_id,
+                ctx,
+                req,
+                record: cell,
+                ..
+            } = self;
+
+            cell.get_or_try_init(|| ctx.effects.create_promise(req))
+                .await?;
+            let record = cell.into_inner().unwrap();
+
+            match record.state {
+                PromiseState::Resolved => Ok(()),
                 PromiseState::Rejected
                 | PromiseState::RejectedCanceled
                 | PromiseState::RejectedTimedout => {
@@ -1505,9 +1634,10 @@ mod tests {
         assert!(create_req.is_some());
         let create = create_req.unwrap();
         assert_eq!(create["tags"]["resonate:scope"].as_str().unwrap(), "global");
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "remote"
+            "default"
         );
         assert_eq!(create["tags"]["resonate:parent"].as_str().unwrap(), "root");
         assert_eq!(create["tags"]["resonate:origin"].as_str().unwrap(), "root");
@@ -1559,7 +1689,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
@@ -1570,9 +1700,10 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "local://any@hello"
+            "local://any@default"
         );
     }
 
@@ -1581,7 +1712,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("http://server:8001/workers/{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("http://server:8001/workers/{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<String> = ctx.rpc("my_func", &42i32).await;
@@ -1592,9 +1723,10 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "http://server:8001/workers/my_func"
+            "http://server:8001/workers/default"
         );
     }
 
@@ -1603,7 +1735,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("remote://group/{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("remote://group/{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _future = ctx.rpc::<i32>("greet", &"world").spawn().await.unwrap();
@@ -1614,9 +1746,10 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "remote://group/greet"
+            "remote://group/default"
         );
     }
 
@@ -1626,7 +1759,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         // Identity resolver — no transformation
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| target.to_string());
+            std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string());
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc("bare_name", &()).await;
@@ -1637,9 +1770,10 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "bare_name"
+            "default"
         );
     }
 
@@ -1649,7 +1783,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
 
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("custom://{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("custom://{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // First rpc call
@@ -1663,36 +1797,39 @@ mod tests {
             .filter(|r| r["kind"] == "promise.create")
             .collect();
 
+        // Both use the group name ("default") as the default target, not func names
         assert_eq!(creates.len(), 2);
         assert_eq!(
             creates[0]["tags"]["resonate:target"].as_str().unwrap(),
-            "custom://func_a"
+            "custom://default"
         );
         assert_eq!(
             creates[1]["tags"]["resonate:target"].as_str().unwrap(),
-            "custom://func_b"
+            "custom://default"
         );
     }
 
     #[tokio::test]
-    async fn target_resolver_skips_rewrite_when_target_is_already_a_url() {
+    async fn rpc_target_override_with_url_passes_through_unchanged() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
-        // This resolver would prefix "local://any@" — but it should NOT
-        // be called when the target already looks like a URL.
+        // This resolver prefixes "local://any@" for bare names.
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") {
-                    target.to_string()
+            std::sync::Arc::new(|target: Option<&str>| {
+                let t = target.unwrap_or("default");
+                if t.contains("://") {
+                    t.to_string()
                 } else {
-                    format!("local://any@{}", target)
+                    format!("local://any@{}", t)
                 }
             });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
-        // Pass a full URL as the function name — should be kept as-is
-        let _: crate::error::Result<i32> =
-            ctx.rpc("http://other-host:8001/workers/hello", &()).await;
+        // Explicit .target() with a URL — should be kept as-is
+        let _: crate::error::Result<i32> = ctx
+            .rpc("some_func", &())
+            .target("http://other-host:8001/workers/hello")
+            .await;
 
         let requests = harness.sent_requests_json().await;
         let create = requests
@@ -1708,25 +1845,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn target_resolver_rewrites_bare_name_but_not_url() {
+    async fn rpc_target_override_bare_name_is_resolved_url_passes_through() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         // Simulates real behavior: bare names get rewritten, URLs don't
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") {
-                    target.to_string()
+            std::sync::Arc::new(|target: Option<&str>| {
+                let t = target.unwrap_or("default");
+                if t.contains("://") {
+                    t.to_string()
                 } else {
-                    format!("local://any@{}", target)
+                    format!("local://any@{}", t)
                 }
             });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
-        // Bare name — should be rewritten
-        let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
-        // URL — should NOT be rewritten
+        // Bare name target override — should be rewritten
+        let _: crate::error::Result<i32> = ctx.rpc("func_a", &()).target("workers").await;
+        // URL target override — should NOT be rewritten
         let _: crate::error::Result<i32> = ctx
-            .rpc("https://remote.example.com/workers/greet", &())
+            .rpc("func_b", &())
+            .target("https://remote.example.com/workers/greet")
             .await;
 
         let requests = harness.sent_requests_json().await;
@@ -1738,13 +1877,13 @@ mod tests {
         assert_eq!(creates.len(), 2);
         assert_eq!(
             creates[0]["tags"]["resonate:target"].as_str().unwrap(),
-            "local://any@hello",
-            "bare name should be rewritten by match"
+            "local://any@workers",
+            "bare name target override should be rewritten by resolver"
         );
         assert_eq!(
             creates[1]["tags"]["resonate:target"].as_str().unwrap(),
             "https://remote.example.com/workers/greet",
-            "URL should pass through unchanged"
+            "URL target override should pass through unchanged"
         );
     }
 
@@ -1753,7 +1892,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("SHOULD_NOT_APPEAR://{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("SHOULD_NOT_APPEAR://{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // ctx.run uses local_create_req, not remote_create_req
@@ -1780,7 +1919,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> =
@@ -1800,11 +1939,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpc_default_target_uses_func_name() {
+    async fn rpc_default_target_uses_group_name() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("local://any@{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc::<i32>("my_func", &()).await;
@@ -1815,10 +1954,11 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
+        // Default target uses the group name ("default"), not the function name
         assert_eq!(
             create["tags"]["resonate:target"].as_str().unwrap(),
-            "local://any@my_func",
-            "None target should fall back to func_name"
+            "local://any@default",
+            "default target should use group name, not func_name"
         );
     }
 
@@ -1827,11 +1967,12 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| {
-                if target.contains("://") {
-                    target.to_string()
+            std::sync::Arc::new(|target: Option<&str>| {
+                let t = target.unwrap_or("default");
+                if t.contains("://") {
+                    t.to_string()
                 } else {
-                    format!("local://any@{}", target)
+                    format!("local://any@{}", t)
                 }
             });
         let ctx = test_context_with_match("root", effects, target_resolver);
@@ -1859,7 +2000,7 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: &str| format!("remote://{}", target));
+            std::sync::Arc::new(|target: Option<&str>| format!("remote://{}", target.unwrap_or("default")));
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _ = ctx
@@ -2250,5 +2391,218 @@ mod tests {
             expected_24h,
             (create["timeoutAt"].as_i64().unwrap() - expected_24h).abs()
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Sleep Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn sleep_suspends_on_pending() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let result = ctx.sleep(Duration::from_secs(60)).await;
+        assert!(matches!(result, Err(Error::Suspended)));
+
+        let outcome = finalize_context(&ctx, Err(Error::Suspended)).await;
+        match &outcome {
+            Outcome::Suspended { remote_todos } => {
+                assert_eq!(remote_todos.len(), 1);
+            }
+            other => panic!("expected Suspended, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn sleep_creates_promise_with_timer_tags() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let _ = ctx.sleep(Duration::from_secs(60)).await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        let tags = create["tags"].as_object().expect("tags should be an object");
+        assert_eq!(tags["resonate:scope"].as_str().unwrap(), "global");
+        assert_eq!(tags["resonate:timer"].as_str().unwrap(), "true");
+        assert_eq!(tags["resonate:parent"].as_str().unwrap(), "root");
+        assert_eq!(tags["resonate:origin"].as_str().unwrap(), "root");
+        // branch should be the child id
+        assert!(tags.contains_key("resonate:branch"));
+        // should NOT have a target tag
+        assert!(!tags.contains_key("resonate:target"));
+    }
+
+    #[tokio::test]
+    async fn sleep_timeout_uses_duration() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 120_000; // 2 minutes
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _ = ctx.sleep(Duration::from_secs(60)).await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        let expected_approx = now + 60_000;
+        let tolerance = 1_000;
+        assert!(
+            create["timeoutAt"].as_i64().unwrap() >= expected_approx - tolerance
+                && create["timeoutAt"].as_i64().unwrap() <= expected_approx + tolerance,
+            "sleep timeout_at ({}) should be ~{} (now + 60s)",
+            create["timeoutAt"].as_i64().unwrap(),
+            expected_approx
+        );
+    }
+
+    #[tokio::test]
+    async fn sleep_timeout_capped_to_parent() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 5_000; // 5 seconds
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        // Request 60 seconds sleep, but parent only has 5s left
+        let _ = ctx.sleep(Duration::from_secs(60)).await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        assert_eq!(
+            create["timeoutAt"].as_i64().unwrap(),
+            parent_timeout,
+            "sleep timeout_at should be clamped to parent timeout_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn sleep_returns_ok_when_already_resolved() {
+        let harness = TestHarness::new();
+        let sleep_id = "root.0";
+        harness
+            .settle_promise_in_stub(sleep_id, serde_json::json!(null))
+            .await;
+
+        let effects = harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let ctx = test_context("root", effects);
+
+        let result = ctx.sleep(Duration::from_secs(60)).await;
+        assert!(result.is_ok(), "sleep should return Ok(()) when resolved");
+    }
+
+    #[tokio::test]
+    async fn sleep_spawn_returns_remote_future_pending() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let _handle = ctx.sleep(Duration::from_secs(30)).spawn().await.unwrap();
+
+        let outcome = finalize_context(&ctx, Ok(serde_json::json!("done"))).await;
+        match &outcome {
+            Outcome::Suspended { remote_todos } => {
+                assert_eq!(remote_todos.len(), 1);
+            }
+            other => panic!("expected Suspended, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn sleep_spawn_resolved_returns_ok() {
+        let harness = TestHarness::new();
+        let sleep_id = "root.0";
+        harness
+            .settle_promise_in_stub(sleep_id, serde_json::json!(null))
+            .await;
+
+        let effects = harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let ctx = test_context("root", effects);
+
+        let handle = ctx.sleep(Duration::from_secs(30)).spawn().await.unwrap();
+        let result = handle.await;
+        assert!(result.is_ok(), "sleep spawn should resolve to Ok(())");
+    }
+
+    #[tokio::test]
+    async fn sleep_has_empty_param() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let _ = ctx.sleep(Duration::from_secs(10)).await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        // param.data should be null or empty (no meaningful payload)
+        let param = &create["param"];
+        let data = &param["data"];
+        assert!(
+            data.is_null() || data.as_str().map_or(false, |s| s.is_empty()),
+            "sleep param data should be null or empty, got {:?}",
+            data
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_with_sleep_suspends_then_completes_after_settlement() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        // First execution: sleep suspends
+        let result = ctx.sleep(Duration::from_secs(30)).await;
+        let workflow_result = match result {
+            Ok(()) => Ok(serde_json::json!("awake")),
+            Err(Error::Suspended) => Err(Error::Suspended),
+            Err(e) => Err(e),
+        };
+        let outcome = finalize_context(&ctx, workflow_result).await;
+
+        let sleep_id = match &outcome {
+            Outcome::Suspended { remote_todos } => {
+                assert_eq!(remote_todos.len(), 1);
+                remote_todos[0].clone()
+            }
+            other => panic!("expected Suspended, got {:?}", other),
+        };
+
+        // Settle the timer promise (server resolves it after duration)
+        harness
+            .settle_promise_in_stub(&sleep_id, serde_json::json!(null))
+            .await;
+
+        // Second execution: timer resolved, sleep returns Ok
+        let effects2 =
+            harness.build_effects(vec![resolved_promise(&sleep_id, serde_json::json!(null))]);
+        let ctx2 = test_context("root", effects2);
+
+        let result2 = ctx2.sleep(Duration::from_secs(30)).await;
+        assert!(result2.is_ok());
+        let outcome2 = finalize_context(&ctx2, Ok(serde_json::json!("awake"))).await;
+
+        match outcome2 {
+            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!("awake")),
+            other => panic!("expected Done(\"awake\"), got {:?}", other),
+        }
     }
 }

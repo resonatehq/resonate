@@ -352,7 +352,7 @@ mod tests {
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(sender: Sender, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
         let target_resolver: TargetResolver =
-            std::sync::Arc::new(|target: &str| target.to_string());
+            std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string());
         let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
         Core::new(
             sender,
@@ -1131,7 +1131,7 @@ mod tests {
         heartbeat: Arc<dyn Heartbeat>,
     ) -> Core {
         let target_resolver: TargetResolver =
-            std::sync::Arc::new(|target: &str| target.to_string());
+            std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string());
         Core::new(
             sender,
             codec,

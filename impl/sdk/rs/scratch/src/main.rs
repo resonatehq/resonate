@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use resonate::prelude::*;
 
@@ -26,8 +26,20 @@ async fn workflow1(ctx: &Context) -> Result<String> {
     Ok("Done workflow1".to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MyType {
+    x: String,
+    y: String,
+}
+
+impl Display for MyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "x:{}, y:{}", self.x, self.y)
+    }
+}
+
 #[resonate::function]
-async fn par_workflow(ctx: &Context) -> Result<String> {
+async fn par_workflow(ctx: &Context) -> Result<MyType> {
     ctx.rpc::<()>("slow", 2).await?;
     let f1 = ctx.rpc::<()>("slow", 2).spawn().await?;
     let f2 = ctx.rpc::<()>("slow", 2).spawn().await?;
@@ -39,7 +51,10 @@ async fn par_workflow(ctx: &Context) -> Result<String> {
     f2.await?;
     f3.await?;
 
-    Ok("Done par_workflow.".to_string())
+    Ok(MyType {
+        x: "Hello".to_string(),
+        y: "World".to_string(),
+    })
 }
 
 #[tokio::main]
@@ -48,7 +63,10 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let resonate = Resonate::local();
+    let resonate = Resonate::new(ResonateConfig {
+        url: Some("http://localhost:8001".to_string()),
+        ..Default::default()
+    });
 
     // Register all functions.
     resonate.register(slow).unwrap();
@@ -56,10 +74,11 @@ async fn main() {
     resonate.register(workflow1).unwrap();
 
     // Call the workflow function.
-    let result: String = resonate
-        .run("workflow", par_workflow, ())
+    let result: MyType = resonate
+        .run("workflow-y", par_workflow, ())
         .await
         .expect("workflow failed");
+
     println!("{}", result);
 
     println!("done!")

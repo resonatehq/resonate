@@ -198,11 +198,12 @@ impl Resonate {
         // If the target already looks like a URL, pass it through unchanged
         // (mirrors TS: `util.isUrl(target) ? target : match(target)`).
         let network_for_match = network.clone();
-        let target_resolver: crate::context::TargetResolver = Arc::new(move |target: &str| {
-            if is_url(target) {
-                target.to_string()
+        let target_resolver: crate::context::TargetResolver = Arc::new(move |target: Option<&str>| {
+            let resolved = target.unwrap_or(network_for_match.group());
+            if is_url(resolved) {
+                resolved.to_string()
             } else {
-                network_for_match.target_resolver(target)
+                network_for_match.target_resolver(resolved)
             }
         });
 
@@ -880,7 +881,8 @@ fn build_options(
     version: Option<u32>,
 ) -> Options {
     let defaults = Options::default();
-    let raw_target = target.unwrap_or("default");
+    let group = resonate.network.group();
+    let raw_target = target.unwrap_or(group);
     let resolved_target = if is_url(raw_target) {
         raw_target.to_string()
     } else {

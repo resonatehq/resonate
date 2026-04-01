@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use parking_lot::RwLock;
+use tokio::sync::Mutex;
 
 use crate::error::Result;
 use crate::network::Network;
@@ -9,7 +10,7 @@ type Subscribers = Arc<RwLock<Vec<Box<dyn Fn(String) + Send + Sync>>>>;
 
 /// Network implementation that communicates with a Resonate server over HTTP.
 ///
-/// - Requests are sent via `POST /api` (JSON envelope format).
+/// - Requests are sent via `POST /` (JSON envelope format).
 /// - Incoming messages (execute/unblock) are received via SSE on `GET /poll/{group}/{id}`.
 /// - Addresses use the `poll://` scheme: `poll://uni@group/id` and `poll://any@group/id`.
 pub struct HttpNetwork {
@@ -147,7 +148,7 @@ impl Network for HttpNetwork {
                                             continue;
                                         }
                                         tracing::debug!(direction = "sse_recv", body = %data, "http_network");
-                                        let subs = subscribers.read().await;
+                                        let subs = subscribers.read();
                                         for cb in subs.iter() {
                                             cb(data.to_string());
                                         }
@@ -175,17 +176,17 @@ impl Network for HttpNetwork {
         if let Some(handle) = self.sse_handle.lock().await.take() {
             handle.abort();
         }
-        self.subscribers.write().await.clear();
+        self.subscribers.write().clear();
         Ok(())
     }
 
     /// Send a request to the Resonate server via POST /api.
     async fn send(&self, req: String) -> Result<String> {
-        tracing::debug!(direction = "http_send", body = %req, "http_network");
+        tracing::debug!(direction = "http_req", body = %req, "http_network");
 
         let request = self
             .client
-            .post(format!("{}/api", self.url))
+            .post(format!("{}/", self.url))
             .header("Content-Type", "application/json")
             .body(req);
 
@@ -195,7 +196,7 @@ impl Network for HttpNetwork {
 
         let resp_str = response.text().await?;
 
-        tracing::debug!(direction = "http_recv", body = %resp_str, "http_network");
+        tracing::debug!(direction = "http_res", body = %resp_str, "http_network");
 
         Ok(resp_str)
     }
@@ -203,9 +204,7 @@ impl Network for HttpNetwork {
     /// Register a callback for incoming SSE messages.
     fn recv(&self, callback: Box<dyn Fn(String) + Send + Sync>) {
         let subscribers = self.subscribers.clone();
-        tokio::spawn(async move {
-            subscribers.write().await.push(callback);
-        });
+        subscribers.write().push(callback);
     }
 
     /// Resolve a target name to a poll:// anycast address.

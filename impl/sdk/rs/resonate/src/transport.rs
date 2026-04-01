@@ -116,8 +116,9 @@ impl Transport {
         let resp_str = self.network.send(req_str).await?;
         tracing::debug!(direction = "send_res", body = %resp_str, "transport");
 
-        let response: serde_json::Value = serde_json::from_str(&resp_str)
-            .map_err(|e| Error::DecodingError(format!("invalid response JSON: {}", e)))?;
+        let response: serde_json::Value = serde_json::from_str(&resp_str).map_err(|e| {
+            Error::DecodingError(format!("invalid response JSON: {e}, resp: {resp_str}"))
+        })?;
 
         // Validate kind matches
         let resp_kind = response.get("kind").and_then(|k| k.as_str()).unwrap_or("");

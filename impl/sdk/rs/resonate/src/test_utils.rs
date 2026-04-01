@@ -566,7 +566,7 @@ pub fn rejected_promise(id: &str, message: &str) -> PromiseRecord {
 
 /// A no-op target resolver for tests (returns target unchanged).
 pub fn test_target_resolver() -> crate::context::TargetResolver {
-    std::sync::Arc::new(|target: &str| target.to_string())
+    std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string())
 }
 
 /// Build a root Context for testing with mock effects.
