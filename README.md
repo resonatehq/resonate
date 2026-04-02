@@ -2,4 +2,4 @@
 
 # Resonate Server
 
-Coming soon
+New version coming soon. For the previous version go to https://github.com/resonatehq/resonate-legacy-server
