@@ -1,11 +1,11 @@
 //! End-to-end integration tests that run against a real Resonate server.
 //!
-//! These tests are **skipped** when the `RESONATE_URL` environment variable
-//! is not set.  When the variable is present its value is used as the server
-//! URL (e.g. `http://localhost:8001`).
+//! These tests are **ignored** when the `RESONATE_URL` environment variable
+//! is not set (via [`test_with::env`]).  When the variable is present its
+//! value is used as the server URL (e.g. `http://localhost:8001`).
 //!
 //! ```bash
-//! # Skip e2e (default):
+//! # Tests are ignored (default):
 //! cargo test
 //!
 //! # Run e2e against a local server:
@@ -20,23 +20,9 @@ use resonate::prelude::*;
 //  Helpers
 // ═══════════════════════════════════════════════════════════════════
 
-/// Read the server URL from the environment. Returns `None` when unset.
-fn resonate_url() -> Option<String> {
-    std::env::var("RESONATE_URL").ok()
-}
-
-/// Early-return from a test when no server URL is configured.
-/// The test counts as passed but prints a notice on stderr.
-macro_rules! require_server {
-    () => {
-        match resonate_url() {
-            Some(url) => url,
-            None => {
-                eprintln!("RESONATE_URL not set — skipping e2e test");
-                return;
-            }
-        }
-    };
+/// Read the server URL from the environment.
+fn resonate_url() -> String {
+    std::env::var("RESONATE_URL").expect("RESONATE_URL must be set")
 }
 
 /// Generate a unique ID for a test run to avoid collisions on the server.
@@ -122,9 +108,10 @@ async fn run_sub_workflow(ctx: &Context) -> Result<i64> {
 //  Tests — Basic connectivity & simple functions
 // ═══════════════════════════════════════════════════════════════════
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn connectivity() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     let id = unique_id("connectivity");
 
@@ -143,9 +130,10 @@ async fn connectivity() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn simple_add() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
 
@@ -156,9 +144,10 @@ async fn simple_add() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn simple_greet() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(greet).unwrap();
 
@@ -171,9 +160,10 @@ async fn simple_greet() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn simple_noop() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(noop).unwrap();
 
@@ -188,9 +178,10 @@ async fn simple_noop() {
 //  Tests — RPC & idempotency
 // ═══════════════════════════════════════════════════════════════════
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn rpc_to_registered_function() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
 
@@ -201,9 +192,10 @@ async fn rpc_to_registered_function() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn idempotent_run() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
 
@@ -216,9 +208,10 @@ async fn idempotent_run() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn idempotent_rpc() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
 
@@ -235,9 +228,10 @@ async fn idempotent_rpc() {
 //  Tests — Workflows with sub-calls and parallelism
 // ═══════════════════════════════════════════════════════════════════
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn workflow_sequential_rpcs() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
     r.register(sequential_workflow).unwrap();
@@ -250,9 +244,10 @@ async fn workflow_sequential_rpcs() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn workflow_parallel_rpcs() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
     r.register(parallel_workflow).unwrap();
@@ -265,9 +260,10 @@ async fn workflow_parallel_rpcs() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn workflow_with_ctx_run() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
     r.register(run_sub_workflow).unwrap();
@@ -284,9 +280,10 @@ async fn workflow_with_ctx_run() {
 //  Tests — Error propagation, handles, schedules
 // ═══════════════════════════════════════════════════════════════════
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn error_propagation() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(fail_always).unwrap();
 
@@ -298,9 +295,10 @@ async fn error_propagation() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn handle_spawn_and_result() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
     r.register(add).unwrap();
 
@@ -315,9 +313,10 @@ async fn handle_spawn_and_result() {
     r.stop().await.unwrap();
 }
 
+#[test_with::env(RESONATE_URL)]
 #[tokio::test]
 async fn schedule_create_and_delete() {
-    let url = require_server!();
+    let url = resonate_url();
     let r = make_resonate(&url);
 
     let name = unique_id("schedule");
