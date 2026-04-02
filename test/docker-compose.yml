@@ -1,0 +1,265 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres, postgres-auth, postgres-perf]
+    environment:
+      POSTGRES_USER: resonate
+      POSTGRES_PASSWORD: resonate
+      POSTGRES_DB: resonate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resonate"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - resonate
+
+  resonate-server-sqlite:
+    build: ..
+    profiles: [sqlite, sqlite-perf]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_DEBUG=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - resonate
+
+  resonate-server-postgres:
+    build: ..
+    profiles: [postgres, postgres-perf]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_STORAGE__TYPE=postgres
+      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+      - RESONATE_DEBUG=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - resonate
+
+  resonate-server-sqlite-auth:
+    build: ..
+    profiles: [sqlite-auth]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_DEBUG=true
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+    volumes:
+      - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - resonate
+
+  resonate-server-postgres-auth:
+    build: ..
+    profiles: [postgres-auth]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_STORAGE__TYPE=postgres
+      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+      - RESONATE_DEBUG=true
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+    volumes:
+      - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - resonate
+
+  testbed-sqlite:
+    build: ./resonate-test
+    profiles: [sqlite]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-sqlite:8001"}'
+      - --advertise-host
+      - testbed-sqlite
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-sqlite:
+        condition: service_healthy
+    networks:
+      - resonate
+
+  testbed-postgres:
+    build: ./resonate-test
+    profiles: [postgres]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-postgres:8001"}'
+      - --advertise-host
+      - testbed-postgres
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-postgres:
+        condition: service_healthy
+    networks:
+      - resonate
+
+  testbed-sqlite-auth:
+    build: ./resonate-test
+    profiles: [sqlite-auth]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-sqlite-auth:8001"}'
+      - --advertise-host
+      - testbed-sqlite-auth
+    environment:
+      - RESONATE_AUTH_PRIVATE_KEY=/etc/resonate/auth/private.pem
+    volumes:
+      - ../config/auth/dev/private.pem:/etc/resonate/auth/private.pem:ro
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-sqlite-auth:
+        condition: service_healthy
+    networks:
+      - resonate
+
+  testbed-postgres-auth:
+    build: ./resonate-test
+    profiles: [postgres-auth]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-postgres-auth:8001"}'
+      - --advertise-host
+      - testbed-postgres-auth
+    environment:
+      - RESONATE_AUTH_PRIVATE_KEY=/etc/resonate/auth/private.pem
+    volumes:
+      - ../config/auth/dev/private.pem:/etc/resonate/auth/private.pem:ro
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-postgres-auth:
+        condition: service_healthy
+    networks:
+      - resonate
+
+  testbed-perf-sqlite:
+    build: ./resonate-perf
+    profiles: [sqlite-perf]
+    command:
+      - run
+      - --vus
+      - "5"
+      - --duration
+      - 3m
+      - --out
+      - json=/results/perf-sqlite.json
+      - /scripts/scenario.js
+    environment:
+      BASE_URL: http://resonate-server-sqlite:8001
+      TARGET_URL: http://resonate-server-sqlite:8001
+    volumes:
+      - ./results:/results
+    depends_on:
+      resonate-server-sqlite:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - resonate
+
+  testbed-perf-postgres:
+    build: ./resonate-perf
+    profiles: [postgres-perf]
+    command:
+      - run
+      - --vus
+      - "5"
+      - --duration
+      - 3m
+      - --out
+      - json=/results/perf-postgres.json
+      - /scripts/scenario.js
+    environment:
+      BASE_URL: http://resonate-server-postgres:8001
+      TARGET_URL: http://resonate-server-postgres:8001
+    volumes:
+      - ./results:/results
+    depends_on:
+      resonate-server-postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - resonate
+
+networks:
+  resonate:
+    driver: bridge

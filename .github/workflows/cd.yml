@@ -1,0 +1,446 @@
+# Unified CD Pipeline for Resonate Server (Rust)
+#
+# Triggered by:
+#   - GitHub Release published (production)
+#   - Manual workflow_dispatch (testing)
+#
+# Pipeline:
+#   1. check-version (ACTIVE) — Validates Cargo.toml matches release tag
+#   2. publish-dockerhub (DISABLED) — Multi-platform Docker images → DockerHub
+#   3. publish-github-image (DISABLED) — Multi-platform Docker images → GHCR
+#   4. publish-github-artifacts (DISABLED) — Cross-platform binary artifacts
+#   5. verify-artifacts (DISABLED) — Post-publication verification
+#
+# All publishing steps are disabled (commented out) and must be explicitly enabled.
+# See .github/CD_PIPELINE.md for full documentation.
+
+name: CD
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g., v0.2.0)"
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  DOCKERHUB_IMAGE: resonatehqio/resonate
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 1: VERSION VALIDATION (ACTIVE)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  check-version:
+    name: Check Release Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.cargo_version_tagged }}
+      tag: ${{ steps.version.outputs.tag_version }}
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
+          echo "value=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Checkout repository at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.value }}
+
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          # Extract version from Cargo.toml [package] section
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+          # Ensure tag starts with 'v'
+          TAG="${{ steps.tag.outputs.value }}"
+          if [[ ! "${TAG}" =~ ^v ]]; then
+            TAG_VERSION="v${TAG}"
+          else
+            TAG_VERSION="${TAG}"
+          fi
+
+          # Ensure Cargo version has 'v' prefix for comparison
+          CARGO_VERSION_TAGGED="v${CARGO_VERSION}"
+
+          echo "cargo_version=${CARGO_VERSION}" >> $GITHUB_OUTPUT
+          echo "cargo_version_tagged=${CARGO_VERSION_TAGGED}" >> $GITHUB_OUTPUT
+          echo "tag_version=${TAG_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Verify version match
+        run: |
+          CARGO_VERSION="${{ steps.version.outputs.cargo_version_tagged }}"
+          TAG_VERSION="${{ steps.version.outputs.tag_version }}"
+
+          echo "Cargo.toml version: ${CARGO_VERSION}"
+          echo "GitHub release tag: ${TAG_VERSION}"
+
+          if [ "${CARGO_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "❌ Version mismatch!"
+            echo "  Cargo.toml has: ${CARGO_VERSION}"
+            echo "  GitHub tag is:  ${TAG_VERSION}"
+            exit 1
+          fi
+
+          echo "✓ Version match confirmed: ${TAG_VERSION}"
+
+      - name: Display summary
+        run: |
+          echo "## Release Version Verification ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cargo.toml:** ${{ steps.version.outputs.cargo_version_tagged }}" >> $GITHUB_STEP_SUMMARY
+          echo "**GitHub Tag:** ${{ steps.version.outputs.tag_version }}" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 2: DOCKER IMAGE PUBLISHING (DISABLED)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing to DockerHub is commented out.
+  # To enable:
+  #   1. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
+
+  publish-dockerhub:
+    name: Publish DockerHub Image
+    needs: [check-version]
+    if: false # ← DISABLED: Uncomment to enable
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=${{ needs.check-version.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING (DISABLED)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing to GHCR is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
+
+  publish-github-image:
+    name: Publish GitHub Container Image
+    needs: [check-version]
+    if: false # ← DISABLED: Uncomment to enable
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.check-version.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 3: BINARY ARTIFACT PUBLISHING (DISABLED)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing binary artifacts is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
+  #
+  # Builds for:
+  #   - Linux x86_64 (ubuntu-latest)
+  #   - Linux aarch64/ARM (ubuntu-latest-arm)
+  #   - macOS x86_64 (macos-13)
+  #   - macOS aarch64/ARM64 (macos-14)
+  #
+  # Produces:
+  #   - resonate_<os>_<arch>.tar.gz
+  #   - resonate_<os>_<arch>.tar.gz.sha256
+
+  publish-github-artifacts:
+    name: Publish Binary Artifacts (${{ matrix.systems.os }} ${{ matrix.systems.arch }})
+    needs: [check-version]
+    if: false # ← DISABLED: Uncomment to enable
+
+    runs-on: ${{ matrix.systems.runner }}
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        systems:
+          - os: linux
+            arch: x86_64
+            arch_verify: x86-64
+            runner: ubuntu-latest
+
+          - os: linux
+            arch: aarch64
+            arch_verify: aarch64
+            runner: ubuntu-latest-arm
+
+          - os: darwin
+            arch: x86_64
+            arch_verify: x86_64
+            runner: macos-13
+
+          - os: darwin
+            arch: aarch64
+            arch_verify: arm64
+            runner: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+
+      - name: Build binary
+        run: |
+          cargo build --release
+
+          # Verify binary architecture
+          file target/release/resonate | grep -i "${{ matrix.systems.arch_verify }}" || \
+            (echo "Binary architecture mismatch"; exit 1)
+
+      - name: Create tarball and checksum
+        run: |
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+
+          # Copy binary
+          cp target/release/resonate ./resonate
+
+          # Create tarball
+          tar -czf "${TARBALL}" resonate
+
+          # Create checksum
+          if [[ "${{ matrix.systems.os }}" == "darwin" ]]; then
+            shasum -a 256 "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          else
+            sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          fi
+
+          echo "Created ${TARBALL}"
+          cat "${TARBALL_CHECKSUM}"
+
+      - name: Upload artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+        run: |
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+
+          gh release upload "${TAG}" "${TARBALL}" --clobber
+          gh release upload "${TAG}" "${TARBALL_CHECKSUM}" --clobber
+
+          echo "✓ Uploaded ${TARBALL} and checksum to release ${TAG}"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 4: POST-PUBLICATION VERIFICATION (DISABLED)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Artifact verification is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Ensure publish jobs are enabled (depends on them)
+  #
+  # Validates:
+  #   - All expected artifacts exist
+  #   - Checksum files are valid
+  #   - All platforms represented
+  #   - GitHub Release metadata
+
+  verify-artifacts:
+    name: Verify Release Artifacts
+    needs:
+      [
+        check-version,
+        publish-dockerhub,
+        publish-github-image,
+        publish-github-artifacts,
+      ]
+    if: false # ← DISABLED: Uncomment to enable
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify GitHub Release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+        run: |
+          echo "Verifying artifacts for release: ${TAG}"
+
+          # Expected artifact files
+          EXPECTED_ARTIFACTS=(
+            "resonate_linux_x86_64.tar.gz"
+            "resonate_linux_x86_64.tar.gz.sha256"
+            "resonate_linux_aarch64.tar.gz"
+            "resonate_linux_aarch64.tar.gz.sha256"
+            "resonate_darwin_x86_64.tar.gz"
+            "resonate_darwin_x86_64.tar.gz.sha256"
+            "resonate_darwin_aarch64.tar.gz"
+            "resonate_darwin_aarch64.tar.gz.sha256"
+          )
+
+          # Get list of release assets
+          RELEASE_ASSETS=$(gh release view "${TAG}" --json assets --query 'assets[*].name' -r ${{ github.repository }})
+
+          MISSING_ARTIFACTS=()
+          for artifact in "${EXPECTED_ARTIFACTS[@]}"; do
+            if ! echo "${RELEASE_ASSETS}" | grep -q "\"${artifact}\""; then
+              MISSING_ARTIFACTS+=("${artifact}")
+            fi
+          done
+
+          if [ ${#MISSING_ARTIFACTS[@]} -gt 0 ]; then
+            echo "❌ Missing artifacts:"
+            for artifact in "${MISSING_ARTIFACTS[@]}"; do
+              echo "  - ${artifact}"
+            done
+            exit 1
+          fi
+
+          echo "✓ All expected artifacts found"
+
+      - name: Verify checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check-version.outputs.tag }}
+        run: |
+          echo "Verifying checksums for release: ${TAG}"
+
+          # Create temporary directory
+          TEMP_DIR=$(mktemp -d)
+          cd "${TEMP_DIR}"
+
+          # Download checksums
+          gh release download "${TAG}" -p "*.sha256" -R ${{ github.repository }}
+
+          # Download binaries
+          gh release download "${TAG}" -p "*.tar.gz" -R ${{ github.repository }}
+
+          # Verify each checksum
+          for checksum_file in *.sha256; do
+            if [ -f "${checksum_file}" ]; then
+              echo "Verifying ${checksum_file}..."
+
+              if sha256sum -c "${checksum_file}" 2>/dev/null; then
+                echo "✓ ${checksum_file} valid"
+              else
+                echo "❌ ${checksum_file} invalid"
+                exit 1
+              fi
+            fi
+          done
+
+          echo "✓ All checksums verified"
+
+      - name: Publish verification summary
+        run: |
+          echo "## Release Verification ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ needs.check-version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:** All present and verified" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Binary Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Linux x86_64" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ Linux aarch64" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ macOS x86_64" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ macOS aarch64" >> $GITHUB_STEP_SUMMARY

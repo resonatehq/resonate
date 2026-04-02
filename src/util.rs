@@ -1,0 +1,69 @@
+//! Utility functions — time and cron helpers.
+
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+// =============================================================================
+// Time
+// =============================================================================
+
+/// Tracks the latest time value returned, ensuring monotonicity.
+static LAST_TIME_MS: AtomicI64 = AtomicI64::new(0);
+
+/// Returns current wall-clock time in Unix milliseconds.
+///
+/// Monotonic: if the system clock regresses (e.g. NTP adjustment),
+/// returns the last seen value instead of going backwards.
+pub fn system_time_ms() -> i64 {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    LAST_TIME_MS.fetch_max(now, Ordering::Relaxed).max(now)
+}
+
+/// Resolve the effective `now` for an operation.
+///
+/// If debug_time is provided (from `resonate:debug_time` header), use it.
+/// Otherwise, use the wall-clock time.
+pub fn resolve_time(debug_time: Option<i64>) -> i64 {
+    debug_time.unwrap_or_else(system_time_ms)
+}
+
+// =============================================================================
+// Cron
+// =============================================================================
+
+/// Validate a 5-field cron expression. Returns `true` if the expression is parseable.
+pub fn is_valid_cron(cron_expr: &str) -> bool {
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    let full_expr = format!("0 {}", cron_expr);
+    Schedule::from_str(&full_expr).is_ok()
+}
+
+/// Compute next cron occurrence after a given time (in ms).
+pub fn compute_next_cron(cron_expr: &str, after_ms: i64) -> i64 {
+    use cron::Schedule;
+    use std::str::FromStr;
+
+    // cron crate expects 7-field expressions; spec uses 5-field (standard cron)
+    let full_expr = format!("0 {}", cron_expr);
+
+    if let Ok(schedule) = Schedule::from_str(&full_expr) {
+        let after_secs = after_ms / 1000;
+        let after_dt = chrono::DateTime::from_timestamp(after_secs, 0)
+            .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
+
+        if let Some(next) = schedule.after(&after_dt).next() {
+            return next.timestamp() * 1000;
+        }
+    }
+
+    tracing::error!(
+        cron_expr = cron_expr,
+        "Failed to compute next cron occurrence, falling back to 60s retry"
+    );
+    after_ms + 60_000
+}

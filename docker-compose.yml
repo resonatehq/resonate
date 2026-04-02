@@ -1,0 +1,194 @@
+services:
+  resonate-server-sqlite:
+    build: .
+    profiles: [sqlite]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
+  resonate-server-postgres:
+    build: .
+    profiles: [postgres]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+      - RESONATE_STORAGE__TYPE=postgres
+      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
+  resonate-server-sqlite-auth:
+    build: .
+    profiles: [sqlite-auth]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+    volumes:
+      - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
+  resonate-server-postgres-auth:
+    build: .
+    profiles: [postgres-auth]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+      - RESONATE_STORAGE__TYPE=postgres
+      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+    volumes:
+      - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres, postgres-auth]
+    environment:
+      POSTGRES_USER: resonate
+      POSTGRES_PASSWORD: resonate
+      POSTGRES_DB: resonate
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resonate"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - resonate
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.108.1
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm-data:/victoria-metrics-data
+    command:
+      - "-retentionPeriod=1d"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
+      interval: 5s
+      retries: 3
+    networks:
+      - resonate
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.15.0-victorialogs
+    ports:
+      - "9428:9428"
+    volumes:
+      - vl-data:/victoria-logs-data
+    command:
+      - "-retentionPeriod=1d"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
+      interval: 5s
+      retries: 3
+    networks:
+      - resonate
+
+  vector:
+    image: timberio/vector:0.43.1-alpine
+    user: root
+    command: ["--config", "/etc/vector/vector.toml"]
+    ports:
+      - "8686:8686"
+    volumes:
+      - ./config/vector.toml:/etc/vector/vector.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+      victorialogs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8686/health"]
+      interval: 5s
+      retries: 3
+    networks:
+      - resonate
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_INSTALL_PLUGINS=https://github.com/VictoriaMetrics/victorialogs-datasource/releases/download/v0.16.0/victoriametrics-logs-datasource-v0.16.0.zip;victoriametrics-logs-datasource
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+      victorialogs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      retries: 3
+    networks:
+      - resonate
+
+volumes:
+  vm-data:
+  vl-data:
+
+networks:
+  resonate:
+    driver: bridge

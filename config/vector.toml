@@ -1,0 +1,38 @@
+[api]
+enabled = true
+address = "0.0.0.0:8686"
+
+# --- Sources ---
+
+[sources.metrics_scrape]
+type = "prometheus_scrape"
+endpoints = ["http://resonate-server:9090/metrics"]
+scrape_interval_secs = 5
+
+[sources.server_logs]
+type = "docker_logs"
+docker_host = "unix:///var/run/docker.sock"
+# No filter — collects from all containers in this compose project
+
+# --- Sinks ---
+
+[sinks.victoriametrics]
+type = "prometheus_remote_write"
+inputs = ["metrics_scrape"]
+endpoint = "http://victoriametrics:8428/api/v1/write"
+
+[transforms.format_logs]
+type = "remap"
+inputs = ["server_logs"]
+source = """
+._msg = del(.message)
+._time = del(.timestamp)
+"""
+
+[sinks.victorialogs]
+type = "http"
+inputs = ["format_logs"]
+uri = "http://victorialogs:9428/insert/jsonline?_stream_fields=container_name&_msg_field=_msg&_time_field=_time"
+encoding.codec = "json"
+framing.method = "newline_delimited"
+healthcheck.enabled = false

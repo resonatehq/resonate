@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Check
+        run: cargo check --all-features
+
+      # clippy fully compiles the crate, so a separate build step is redundant
+      - name: Clippy
+        run: cargo clippy --all-features -- -D warnings
+
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        STORAGE: [sqlite, postgres]
+        AUTH: [true, false]
+
+    steps:
+      - name: Checkout resonate-server-rs
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout resonate-testbed
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate-test
+          token: ${{ secrets.TESTBED_TOKEN }}
+          path: test/resonate-test
+
+      - name: Checkout resonate-perf
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate-perf
+          token: ${{ secrets.TESTBED_TOKEN }}
+          path: test/resonate-perf
+
+      - name: Run tests
+        run: |
+          make test STORAGE=${{ matrix.STORAGE }} AUTH=${{ matrix.AUTH }}
+        env:
+          DOCKER_BUILDKIT: 1
+
+      - name: Teardown
+        if: always()
+        run: make clean
