@@ -46,19 +46,37 @@ pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, 
     {
         Ok(msgs) => msgs,
         Err(e) => {
-            tracing::error!("Failed to take outgoing messages: {}", e);
+            tracing::error!(error = %e, "Failed to take outgoing messages: storage error");
             return;
         }
     };
 
+    let execute_count = execute_msgs.len();
+    let unblock_count = unblock_msgs.len();
+
+    if execute_count > 0 || unblock_count > 0 {
+        tracing::debug!(
+            execute_count = execute_count,
+            unblock_count = unblock_count,
+            "Claimed outgoing messages for delivery"
+        );
+    }
+
     metrics::MESSAGES_TOTAL
         .with_label_values(&["execute"])
-        .inc_by(execute_msgs.len() as f64);
+        .inc_by(execute_count as f64);
     metrics::MESSAGES_TOTAL
         .with_label_values(&["unblock"])
-        .inc_by(unblock_msgs.len() as f64);
+        .inc_by(unblock_count as f64);
 
     for msg in execute_msgs {
+        tracing::info!(
+            kind = "execute",
+            task_id = %msg.id,
+            version = msg.version,
+            address = %msg.address,
+            "Dispatching execute message"
+        );
         let payload = serde_json::json!({
             "kind": "execute",
             "head": {},
@@ -73,6 +91,13 @@ pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, 
     }
 
     for msg in unblock_msgs {
+        tracing::info!(
+            kind = "unblock",
+            promise_id = %msg.promise.id,
+            promise_state = %msg.promise.state,
+            address = %msg.address,
+            "Dispatching unblock message"
+        );
         let payload = serde_json::json!({
             "kind": "unblock",
             "head": {},

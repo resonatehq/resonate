@@ -41,17 +41,19 @@ impl GcpsPubSubTransport {
     pub async fn send(&self, address: &GcpsAddress, payload: &serde_json::Value) {
         let topic_fqn = format!("projects/{}/topics/{}", address.project, address.topic);
 
+        let address_str = format!("gcps://{}/{}", address.project, address.topic);
+
         let publisher = match self.get_publisher(&topic_fqn).await {
             Ok(p) => p,
             Err(e) => {
-                tracing::warn!(error = %e, "Failed to get GCP Pub/Sub publisher");
+                tracing::warn!(address = %address_str, error = %e, "Failed to get GCP Pub/Sub publisher");
                 metrics::DELIVERIES_TOTAL
                     .with_label_values(&["error"])
                     .inc();
                 return;
             }
         };
-
+        tracing::debug!(address = %address_str, project = %address.project, topic = %address.topic, "Publishing to GCP Pub/Sub");
         let data = serde_json::to_vec(payload).unwrap_or_default();
         let mut msg = <google_cloud_pubsub::model::Message as Default>::default();
         msg.data = data.into();
@@ -63,6 +65,7 @@ impl GcpsPubSubTransport {
         tokio::spawn(async move {
             match tokio::time::timeout(std::time::Duration::from_secs(10), fut).await {
                 Ok(Ok(_message_id)) => {
+                    tracing::debug!(project = %project, topic = %topic, "GCP Pub/Sub delivery succeeded");
                     metrics::DELIVERIES_TOTAL
                         .with_label_values(&["success"])
                         .inc();

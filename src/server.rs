@@ -113,7 +113,10 @@ async fn handle_health() -> StatusCode {
 async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
     match state.server.storage.query(|db| db.ping()).await {
         Ok(()) => StatusCode::OK,
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE,
+        Err(e) => {
+            tracing::error!(error = %e, "Readiness check failed: storage database unavailable");
+            StatusCode::SERVICE_UNAVAILABLE
+        }
     }
 }
 
@@ -165,6 +168,11 @@ async fn handle_api(
         Ok(r) => r,
         Err(e) => {
             let (kind, corr_id) = extract_error_context(&body);
+            tracing::warn!(
+                kind = %kind,
+                error = %e,
+                "Invalid request envelope: deserialization failed"
+            );
             return into_response(
                 ResponseEnvelope::error(
                     kind,
@@ -182,6 +190,7 @@ async fn handle_api(
 
     // Reject empty kind (serde accepts "" as a valid String)
     if kind.is_empty() {
+        tracing::warn!(corr_id = %corr_id, "Invalid request: empty 'kind' field");
         return into_response(
             ResponseEnvelope::error(
                 kind,
@@ -195,6 +204,7 @@ async fn handle_api(
 
     // Reject non-object data (serde deserializes any JSON value into Value)
     if !req.data.is_object() {
+        tracing::warn!(kind = %kind, corr_id = %corr_id, "Invalid request: 'data' is not an object");
         return into_response(
             ResponseEnvelope::error(
                 kind,
@@ -208,6 +218,7 @@ async fn handle_api(
 
     // Validate protocol version
     if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
+        tracing::warn!(kind = %kind, corr_id = %corr_id, version = %req.head.version, "Invalid request: unsupported protocol version");
         return into_response(
             ResponseEnvelope::error(
                 kind,
@@ -222,6 +233,13 @@ async fn handle_api(
         );
     }
 
+    // Log incoming request at the application protocol level
+    tracing::info!(
+        kind = %kind,
+        corr_id = %corr_id,
+        "Received request"
+    );
+
     // Gate debug_time behind config
     if !state.config.debug {
         req.head.debug_time = None;
@@ -230,6 +248,14 @@ async fn handle_api(
     if let Some(auth) = &state.auth {
         if let Err(err_response) = auth::auth_check(auth, &req) {
             let status = err_response.head.status.to_string();
+            let elapsed_ms = start.elapsed().as_millis();
+            tracing::warn!(
+                kind = %kind,
+                corr_id = %corr_id,
+                status = %status,
+                elapsed_ms = elapsed_ms,
+                "Request rejected by auth"
+            );
             metrics::REQUEST_TOTAL
                 .with_label_values(&[&kind, &status])
                 .inc();
@@ -244,6 +270,35 @@ async fn handle_api(
 
     let response = dispatch(state, &req, now).await;
     let status = response.head.status.to_string();
+    let elapsed_ms = start.elapsed().as_millis();
+
+    // Log response outcome — level depends on status
+    if response.head.status >= 500 {
+        tracing::error!(
+            kind = %kind,
+            corr_id = %corr_id,
+            status = response.head.status,
+            elapsed_ms = elapsed_ms,
+            "Request failed with internal error"
+        );
+    } else if response.head.status >= 400 {
+        tracing::warn!(
+            kind = %kind,
+            corr_id = %corr_id,
+            status = response.head.status,
+            elapsed_ms = elapsed_ms,
+            "Request rejected"
+        );
+    } else {
+        tracing::info!(
+            kind = %kind,
+            corr_id = %corr_id,
+            status = response.head.status,
+            elapsed_ms = elapsed_ms,
+            "Request completed"
+        );
+    }
+
     metrics::REQUEST_TOTAL
         .with_label_values(&[&kind, &status])
         .inc();
@@ -266,16 +321,24 @@ async fn handle_poll(
             .and_then(|v| v.strip_prefix("Bearer "));
 
         if auth::auth_check_token(auth, token).is_err() {
+            tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
             return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         }
     }
 
+    tracing::info!(group = %group, id = %id, "Poll SSE connection requested");
     let registry = &poll_state.poll_registry;
 
     let rx = registry.register(&group, &id).await;
 
     match rx {
         Some((conn, mut rx)) => {
+            tracing::info!(
+                group = %group,
+                id = %id,
+                conn_id = conn.conn_id,
+                "Poll SSE connection established"
+            );
             let stream = async_stream::stream! {
                 let _guard = PollGuard {
                     registry: poll_state.poll_registry.clone(),
@@ -289,11 +352,14 @@ async fn handle_poll(
 
             Sse::new(stream).into_response()
         }
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Poll registration at capacity",
-        )
-            .into_response(),
+        None => {
+            tracing::warn!(group = %group, id = %id, "Poll connection rejected: at capacity");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Poll registration at capacity",
+            )
+                .into_response()
+        }
     }
 }
 
@@ -358,6 +424,7 @@ async fn dispatch(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> Respo
         }
         "debug.start" => {
             state.debug_mode.store(true, Ordering::SeqCst);
+            tracing::info!("Debug mode started — background loops paused");
             ResponseEnvelope::new(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -367,6 +434,7 @@ async fn dispatch(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> Respo
         }
         "debug.stop" => {
             state.debug_mode.store(false, Ordering::SeqCst);
+            tracing::info!("Debug mode stopped — background loops resumed");
             ResponseEnvelope::new(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -378,12 +446,15 @@ async fn dispatch(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> Respo
         "debug.snap" => op_debug_snap(state, req).await,
         "debug.tick" => op_debug_tick(state, req).await,
 
-        _ => ResponseEnvelope::error(
-            req.kind.clone(),
-            req.head.corr_id.clone(),
-            400,
-            &format!("Unknown operation: {}", kind),
-        ),
+        _ => {
+            tracing::warn!(kind = %kind, "Invalid request: unknown operation");
+            ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format!("Unknown operation: {}", kind),
+            )
+        }
     }
 }
 
@@ -419,17 +490,27 @@ async fn op_promise_get(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             }
             db.try_timeout(&[&r.id], now)?;
             match db.promise_get(&r.id)? {
-                Some(promise) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &PromiseResponseData { promise },
-                )),
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Promise not found",
-                )),
+                Some(promise) => {
+                    tracing::debug!(
+                        promise_id = %r.id,
+                        state = %promise.state,
+                        "Promise found"
+                    );
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &PromiseResponseData { promise },
+                    ))
+                }
+                None => {
+                    tracing::debug!(promise_id = %r.id, "Promise not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Promise not found",
+                    ))
+                }
             }
         })
         .await
@@ -477,6 +558,11 @@ async fn op_promise_create(
             let address = r.tags.get("resonate:target").map(|s| s.as_str());
             if let Some(addr) = address {
                 if !crate::transport::is_valid_address(addr) {
+                    tracing::warn!(
+                        promise_id = %r.id,
+                        address = addr,
+                        "Promise create rejected: invalid resonate:target address"
+                    );
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -490,8 +576,10 @@ async fn op_promise_create(
             let already_timedout = now >= r.timeout_at;
             let (state, created_at, settled_at) = if already_timedout {
                 let state = if r.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true") {
+                    tracing::debug!(promise_id = %r.id, "Promise created already timedout (timer: resolved immediately)");
                     PromiseState::Resolved
                 } else {
+                    tracing::debug!(promise_id = %r.id, "Promise created already timedout");
                     PromiseState::RejectedTimedout
                 };
                 (state, r.timeout_at, Some(r.timeout_at))
@@ -515,6 +603,23 @@ async fn op_promise_create(
                 already_timedout,
                 address,
             })?;
+            let is_new = promise.created_at == created_at;
+            if is_new {
+                tracing::info!(
+                    promise_id = %promise.id,
+                    state = %promise.state,
+                    timeout_at = promise.timeout_at,
+                    target = address.unwrap_or("none"),
+                    already_timedout = already_timedout,
+                    "Promise created"
+                );
+            } else {
+                tracing::debug!(
+                    promise_id = %promise.id,
+                    state = %promise.state,
+                    "Promise create: already exists (idempotent)"
+                );
+            }
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -579,8 +684,7 @@ async fn op_promise_settle(
             match result.promise {
                 Some(promise) => {
                     if !result.was_settled && promise.state == PromiseState::Pending {
-                        // TOCTOU race: FOR UPDATE found no promise, but a concurrent insert
-                        // made it appear in the fallback SELECT. Treat as not found.
+                        tracing::debug!(promise_id = %r.id, "Promise settle: TOCTOU race detected, treating as not found");
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -588,18 +692,35 @@ async fn op_promise_settle(
                             "Promise not found",
                         ));
                     }
+                    if result.was_settled {
+                        tracing::info!(
+                            promise_id = %promise.id,
+                            state = %promise.state,
+                            "Promise settled"
+                        );
+                    } else {
+                        tracing::debug!(
+                            promise_id = %promise.id,
+                            current_state = %promise.state,
+                            requested_state = %r.state,
+                            "Promise settle: already settled (idempotent)"
+                        );
+                    }
                     Ok(ResponseEnvelope::success(
                         kind_str.clone(),
                         corr_id.clone(),
                         &PromiseResponseData { promise },
                     ))
                 }
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Promise not found",
-                )),
+                None => {
+                    tracing::debug!(promise_id = %r.id, "Promise settle: promise not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Promise not found",
+                    ))
+                }
             }
         })
         .await
@@ -649,6 +770,7 @@ async fn op_promise_register_callback(
             let p_awaited = match result.awaited {
                 Some(p) => p,
                 None => {
+                    tracing::debug!(promise_id = %r.awaited, "Callback registration: awaited promise not found");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -660,6 +782,7 @@ async fn op_promise_register_callback(
             let p_awaiter = match result.awaiter {
                 Some(p) => p,
                 None => {
+                    tracing::debug!(promise_id = %r.awaiter, "Callback registration: awaiter promise not found");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -669,6 +792,7 @@ async fn op_promise_register_callback(
                 }
             };
             if !p_awaiter.tags.contains_key("resonate:target") {
+                tracing::debug!(awaiter = %r.awaiter, "Callback registration rejected: awaiter has no resonate:target");
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -676,6 +800,12 @@ async fn op_promise_register_callback(
                     "Awaiter promise has no resonate:target tag",
                 ));
             }
+            tracing::info!(
+                awaited = %r.awaited,
+                awaiter = %r.awaiter,
+                awaited_state = %p_awaited.state,
+                "Callback registered"
+            );
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -725,6 +855,11 @@ async fn op_promise_register_listener(
                 ));
             }
             if !crate::transport::is_valid_address(&r.address) {
+                tracing::warn!(
+                    awaited = %r.awaited,
+                    address = %r.address,
+                    "Listener registration rejected: invalid address"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -734,17 +869,28 @@ async fn op_promise_register_listener(
             }
             db.try_timeout(&[&r.awaited], now)?;
             match db.promise_register_listener(&r.awaited, &r.address)? {
-                Some(promise) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &PromiseResponseData { promise },
-                )),
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Awaited promise not found",
-                )),
+                Some(promise) => {
+                    tracing::info!(
+                        awaited = %r.awaited,
+                        address = %r.address,
+                        promise_state = %promise.state,
+                        "Listener registered"
+                    );
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &PromiseResponseData { promise },
+                    ))
+                }
+                None => {
+                    tracing::debug!(awaited = %r.awaited, "Listener registration: awaited promise not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Awaited promise not found",
+                    ))
+                }
             }
         })
         .await
@@ -816,6 +962,11 @@ async fn op_promise_search(
             } else {
                 None
             };
+            tracing::debug!(
+                found = promises.len(),
+                has_more = has_more,
+                "Promise search completed"
+            );
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -869,17 +1020,28 @@ async fn op_task_get(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> Re
             }
             db.try_timeout(&[&r.id], now)?;
             match db.task_get(&r.id)? {
-                Some(task) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &TaskResponseData { task },
-                )),
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Task not found",
-                )),
+                Some(task) => {
+                    tracing::debug!(
+                        task_id = %r.id,
+                        state = %task.state,
+                        version = task.version,
+                        "Task found"
+                    );
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &TaskResponseData { task },
+                    ))
+                }
+                None => {
+                    tracing::debug!(task_id = %r.id, "Task not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                }
             }
         })
         .await
@@ -924,6 +1086,11 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             let action_id = &action_data.id;
             if let Some(addr) = action_data.tags.get("resonate:target") {
                 if !crate::transport::is_valid_address(addr) {
+                    tracing::warn!(
+                        task_id = %action_id,
+                        address = %addr,
+                        "Task create rejected: invalid resonate:target address"
+                    );
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -938,8 +1105,10 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             let (p_state, created_at, settled_at) = if already_timedout {
                 let p_state =
                     if action_data.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true") {
+                        tracing::debug!(task_id = %action_id, "Task create: already timedout (timer: resolved immediately)");
                         PromiseState::Resolved
                     } else {
+                        tracing::debug!(task_id = %action_id, "Task create: already timedout");
                         PromiseState::RejectedTimedout
                     };
                 (
@@ -969,6 +1138,7 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                 pid: &r.pid,
             })?;
             if result.is_none() {
+                tracing::debug!(task_id = %action_id, "Task create: underlying promise not found");
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -983,11 +1153,35 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             let task = db.task_get(action_id)?;
             let preload = db.compute_preload(action_id)?;
 
+            if res.task_created {
+                tracing::info!(
+                    task_id = %action_id,
+                    state = "acquired",
+                    pid = %r.pid,
+                    ttl = r.ttl,
+                    "Task created and acquired"
+                );
+            } else if res.task_acquired {
+                tracing::info!(
+                    task_id = %action_id,
+                    state = "acquired",
+                    pid = %r.pid,
+                    ttl = r.ttl,
+                    "Existing task acquired"
+                );
+            }
+
             match &task {
                 // Task fulfilled or acquired/created — success
                 Some(t)
                     if t.state == TaskState::Fulfilled || res.task_created || res.task_acquired =>
                 {
+                    if t.state == TaskState::Fulfilled && !res.task_created && !res.task_acquired {
+                        tracing::debug!(
+                            task_id = %action_id,
+                            "Task create: task already fulfilled, returning existing result"
+                        );
+                    }
                     Ok(ResponseEnvelope::success(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1009,6 +1203,13 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                     })?;
                     if acquire_result.was_acquired {
                         let task = db.task_get(action_id)?.unwrap();
+                        tracing::info!(
+                            task_id = %action_id,
+                            version = task.version,
+                            pid = %r.pid,
+                            ttl = r.ttl,
+                            "Task acquired (pending fallback)"
+                        );
                         Ok(ResponseEnvelope::success(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1019,6 +1220,10 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                             },
                         ))
                     } else {
+                        tracing::debug!(
+                            task_id = %action_id,
+                            "Task create conflict: pending task could not be acquired"
+                        );
                         Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1028,19 +1233,32 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                     }
                 }
                 // Task exists in incompatible state (acquired, suspended)
-                Some(_) => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Already exists",
-                )),
+                Some(t) => {
+                    tracing::debug!(
+                        task_id = %action_id,
+                        current_state = %t.state,
+                        "Task create conflict: task already exists in incompatible state"
+                    );
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        409,
+                        "Already exists",
+                    ))
+                }
                 // No task — promise exists without a target
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    422,
-                    "Promise exists without a target task",
-                )),
+                None => {
+                    tracing::debug!(
+                        task_id = %action_id,
+                        "Task create rejected: promise exists without a target task"
+                    );
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        422,
+                        "Promise exists without a target task",
+                    ))
+                }
             }
         })
         .await
@@ -1090,17 +1308,25 @@ async fn op_task_acquire(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 pid: &r.pid,
             })?;
             match result.promise {
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Task not found",
-                )),
+                None => {
+                    tracing::debug!(task_id = %r.id, "Task acquire: task not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                }
                 Some(promise) => {
                     if !result.was_acquired {
                         let task = db.task_get(&r.id)?;
                         if let Some(t) = task {
                             if t.state != TaskState::Pending {
+                                tracing::debug!(
+                                    task_id = %r.id,
+                                    current_state = %t.state,
+                                    "Task acquire rejected: not pending"
+                                );
                                 return Ok(ResponseEnvelope::error(
                                     kind_str.clone(),
                                     corr_id.clone(),
@@ -1109,6 +1335,12 @@ async fn op_task_acquire(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                                 ));
                             }
                             if t.version != r.version {
+                                tracing::debug!(
+                                    task_id = %r.id,
+                                    expected_version = r.version,
+                                    actual_version = t.version,
+                                    "Task acquire rejected: version mismatch"
+                                );
                                 return Ok(ResponseEnvelope::error(
                                     kind_str.clone(),
                                     corr_id.clone(),
@@ -1117,6 +1349,10 @@ async fn op_task_acquire(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                                 ));
                             }
                         }
+                        tracing::debug!(
+                            task_id = %r.id,
+                            "Task acquire rejected: could not acquire (concurrent modification)"
+                        );
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1125,6 +1361,13 @@ async fn op_task_acquire(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                         ));
                     }
                     let task = db.task_get(&r.id)?.unwrap();
+                    tracing::info!(
+                        task_id = %r.id,
+                        version = task.version,
+                        pid = %r.pid,
+                        ttl = r.ttl,
+                        "Task acquired"
+                    );
                     let preload = db.compute_preload(&r.id)?;
                     Ok(ResponseEnvelope::success(
                         kind_str.clone(),
@@ -1180,6 +1423,7 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             let task = match db.task_get(&r.id)? {
                 Some(t) => t,
                 None => {
+                    tracing::debug!(task_id = %r.id, "Task release: task not found");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1189,6 +1433,11 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 }
             };
             if task.state != TaskState::Acquired {
+                tracing::debug!(
+                    task_id = %r.id,
+                    current_state = %task.state,
+                    "Task release rejected: task is not acquired"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1197,6 +1446,12 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             if task.version != r.version {
+                tracing::debug!(
+                    task_id = %r.id,
+                    expected_version = r.version,
+                    actual_version = task.version,
+                    "Task release rejected: version mismatch"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1206,6 +1461,7 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             }
             let released = db.task_release(&r.id, r.version, now, db.task_retry_timeout())?;
             if !released {
+                tracing::debug!(task_id = %r.id, version = r.version, "Task release rejected: version mismatch or invalid state");
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1213,6 +1469,7 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                     "Task version mismatch or invalid state",
                 ));
             }
+            tracing::info!(task_id = %r.id, version = r.version, "Task released back to pending");
             Ok(ResponseEnvelope::new(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -1263,6 +1520,7 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             let task = match db.task_get(&r.id)? {
                 Some(t) => t,
                 None => {
+                    tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1272,6 +1530,11 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 }
             };
             if task.state != TaskState::Acquired {
+                tracing::debug!(
+                    task_id = %r.id,
+                    current_state = %task.state,
+                    "Task fulfill rejected: task is not acquired"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1280,6 +1543,12 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             if task.version != r.version {
+                tracing::debug!(
+                    task_id = %r.id,
+                    expected_version = r.version,
+                    actual_version = task.version,
+                    "Task fulfill rejected: version mismatch"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1302,6 +1571,7 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 settled_at: now,
             })?;
             if !result.task_fulfilled {
+                tracing::debug!(task_id = %r.id, version = r.version, "Task fulfill rejected: version mismatch or invalid state");
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1310,17 +1580,28 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             match result.promise {
-                Some(promise) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &TaskFulfillResponseData { promise },
-                )),
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Promise not found",
-                )),
+                Some(promise) => {
+                    tracing::info!(
+                        task_id = %r.id,
+                        version = r.version,
+                        promise_state = %promise.state,
+                        "Task fulfilled and promise settled"
+                    );
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &TaskFulfillResponseData { promise },
+                    ))
+                }
+                None => {
+                    tracing::warn!(task_id = %r.id, "Task fulfilled but promise not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Promise not found",
+                    ))
+                }
             }
         })
         .await
@@ -1378,6 +1659,7 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             if !result.task_matched {
                 let exists = db.task_get(&r.id)?.is_some();
                 if !exists {
+                    tracing::debug!(task_id = %r.id, "Task suspend: task not found");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1385,6 +1667,11 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                         "Task not found",
                     ));
                 }
+                tracing::debug!(
+                    task_id = %r.id,
+                    version = r.version,
+                    "Task suspend rejected: not acquired or version mismatch"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1393,6 +1680,11 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             if result.missing_count > 0 {
+                tracing::debug!(
+                    task_id = %r.id,
+                    missing_count = result.missing_count,
+                    "Task suspend rejected: awaited promise(s) not found"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1401,6 +1693,12 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             if result.was_suspended {
+                tracing::info!(
+                    task_id = %r.id,
+                    version = r.version,
+                    awaited_count = unique_awaited.len(),
+                    "Task suspended, waiting on promises"
+                );
                 return Ok(ResponseEnvelope::new(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1409,6 +1707,11 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             // Immediate resume (settled awaited promises)
+            tracing::info!(
+                task_id = %r.id,
+                version = r.version,
+                "Task suspend: immediate resume, awaited promises already settled"
+            );
             let preload = db.compute_preload(&r.id)?;
             Ok(ResponseEnvelope::new(
                 kind_str.clone(),
@@ -1487,6 +1790,11 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                     let address = create_data.tags.get("resonate:target").map(|s| s.as_str());
                     if let Some(addr) = address {
                         if !crate::transport::is_valid_address(addr) {
+                            tracing::warn!(
+                                task_id = %r.id,
+                                address = addr,
+                                "Task fence rejected: invalid resonate:target address in fenced promise.create"
+                            );
                             return Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
                                 corr_id.clone(),
@@ -1531,6 +1839,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                         address,
                     })?;
                     if !result.task_exists {
+                        tracing::debug!(task_id = %r.id, fenced_action = "promise.create", "Task fence rejected: task not found");
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1539,6 +1848,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                         ));
                     }
                     if !result.fence_ok {
+                        tracing::debug!(task_id = %r.id, version = r.version, fenced_action = "promise.create", "Task fence rejected: version mismatch");
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1546,6 +1856,13 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                             "Version mismatch",
                         ));
                     }
+                    tracing::info!(
+                        task_id = %r.id,
+                        version = r.version,
+                        fenced_action = "promise.create",
+                        promise_id = %create_data.id,
+                        "Task fence: promise.create executed"
+                    );
                     let inner_status = if result.promise.is_some() { 200 } else { 404 };
                     let inner_data = match &result.promise {
                         Some(p) => serde_json::json!({ "promise": p }),
@@ -1602,6 +1919,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                         settled_at: now,
                     })?;
                     if !result.task_exists {
+                        tracing::debug!(task_id = %r.id, fenced_action = "promise.settle", "Task fence rejected: task not found");
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1610,6 +1928,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                         ));
                     }
                     if !result.fence_ok {
+                        tracing::debug!(task_id = %r.id, version = r.version, fenced_action = "promise.settle", "Task fence rejected: version mismatch");
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1617,6 +1936,14 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                             "Version mismatch",
                         ));
                     }
+                    tracing::info!(
+                        task_id = %r.id,
+                        version = r.version,
+                        fenced_action = "promise.settle",
+                        promise_id = %settle_data.id,
+                        settle_state = %settle_data.state,
+                        "Task fence: promise.settle executed"
+                    );
                     let inner_status = if result.promise.is_some() { 200 } else { 404 };
                     let inner_data = match &result.promise {
                         Some(p) => serde_json::json!({ "promise": p }),
@@ -1637,12 +1964,19 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                         },
                     ))
                 }
-                _ => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    "Invalid fence action kind",
-                )),
+                _ => {
+                    tracing::warn!(
+                        task_id = %r.id,
+                        action_kind = %action_kind,
+                        "Task fence rejected: invalid fence action kind"
+                    );
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        400,
+                        "Invalid fence action kind",
+                    ))
+                }
             }
         })
         .await
@@ -1690,6 +2024,11 @@ async fn op_task_heartbeat(
             let task_pairs: Vec<(&str, i64)> =
                 r.tasks.iter().map(|t| (t.id.as_str(), t.version)).collect();
             db.task_heartbeat(&r.pid, &task_pairs, now)?;
+            tracing::debug!(
+                pid = %r.pid,
+                task_count = task_pairs.len(),
+                "Task heartbeat processed"
+            );
             Ok(ResponseEnvelope::new(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -1738,6 +2077,7 @@ async fn op_task_halt(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> R
             db.try_timeout(&[&r.id], now)?;
             let result = db.task_halt(&r.id)?;
             if !result.task_exists {
+                tracing::debug!(task_id = %r.id, "Task halt: not found");
                 Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1745,6 +2085,7 @@ async fn op_task_halt(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> R
                     "Task not found",
                 ))
             } else if result.task_fulfilled {
+                tracing::debug!(task_id = %r.id, "Task halt rejected: already fulfilled");
                 Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1752,6 +2093,7 @@ async fn op_task_halt(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> R
                     "Task is fulfilled",
                 ))
             } else {
+                tracing::info!(task_id = %r.id, "Task halted");
                 Ok(ResponseEnvelope::new(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1805,14 +2147,18 @@ async fn op_task_continue(
             db.try_timeout(&[&r.id], now)?;
             let result = db.task_continue(&r.id, now)?;
             match result.state {
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Task not found",
-                )),
+                None => {
+                    tracing::debug!(task_id = %r.id, "Task continue: not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                }
                 Some(_state) => {
                     if result.continued {
+                        tracing::info!(task_id = %r.id, "Task continued from halted state");
                         Ok(ResponseEnvelope::new(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1820,6 +2166,7 @@ async fn op_task_continue(
                             serde_json::json!({}),
                         ))
                     } else {
+                        tracing::debug!(task_id = %r.id, "Task continue rejected: not halted");
                         Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
@@ -1889,6 +2236,11 @@ async fn op_task_search(state: &Arc<Server>, req: &RequestEnvelope, _now: i64) -
             } else {
                 None
             };
+            tracing::debug!(
+                found = tasks.len(),
+                has_more = has_more,
+                "Task search completed"
+            );
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -1945,17 +2297,28 @@ async fn op_schedule_get(
                 ));
             }
             match db.schedule_get(&r.id)? {
-                Some(schedule) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &ScheduleResponseData { schedule },
-                )),
-                None => Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Schedule not found",
-                )),
+                Some(schedule) => {
+                    tracing::debug!(
+                        schedule_id = %r.id,
+                        cron = %schedule.cron,
+                        next_run_at = schedule.next_run_at,
+                        "Schedule found"
+                    );
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &ScheduleResponseData { schedule },
+                    ))
+                }
+                None => {
+                    tracing::debug!(schedule_id = %r.id, "Schedule not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Schedule not found",
+                    ))
+                }
             }
         })
         .await
@@ -2001,6 +2364,11 @@ async fn op_schedule_create(
                 ));
             }
             if !util::is_valid_cron(&r.cron) {
+                tracing::warn!(
+                    schedule_id = %r.id,
+                    cron = %r.cron,
+                    "Schedule create rejected: invalid cron expression"
+                );
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -2026,6 +2394,12 @@ async fn op_schedule_create(
                 created_at: now,
                 next_run_at,
             })?;
+            tracing::info!(
+                schedule_id = %schedule.id,
+                cron = %schedule.cron,
+                next_run_at = schedule.next_run_at,
+                "Schedule created"
+            );
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -2071,6 +2445,7 @@ async fn op_schedule_delete(state: &Arc<Server>, req: &RequestEnvelope) -> Respo
                 ));
             }
             if db.schedule_delete(&r.id)? {
+                tracing::info!(schedule_id = %r.id, "Schedule deleted");
                 Ok(ResponseEnvelope::new(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -2078,6 +2453,7 @@ async fn op_schedule_delete(state: &Arc<Server>, req: &RequestEnvelope) -> Respo
                     serde_json::json!({}),
                 ))
             } else {
+                tracing::debug!(schedule_id = %r.id, "Schedule delete: not found");
                 Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -2147,6 +2523,11 @@ async fn op_schedule_search(state: &Arc<Server>, req: &RequestEnvelope) -> Respo
             } else {
                 None
             };
+            tracing::debug!(
+                found = result_schedules.len(),
+                has_more = has_more,
+                "Schedule search completed"
+            );
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
@@ -2174,18 +2555,24 @@ async fn op_schedule_search(state: &Arc<Server>, req: &RequestEnvelope) -> Respo
 
 async fn op_debug_reset(state: &Arc<Server>, req: &RequestEnvelope) -> ResponseEnvelope {
     match state.storage.transact(move |db| db.debug_reset()).await {
-        Ok(()) => ResponseEnvelope::new(
-            req.kind.clone(),
-            req.head.corr_id.clone(),
-            200,
-            Value::Object(serde_json::Map::new()),
-        ),
-        Err(e) => ResponseEnvelope::error(
-            req.kind.clone(),
-            req.head.corr_id.clone(),
-            500,
-            &format!("Reset failed: {}", e),
-        ),
+        Ok(()) => {
+            tracing::warn!("Debug reset: all data cleared");
+            ResponseEnvelope::new(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                200,
+                Value::Object(serde_json::Map::new()),
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Debug reset failed");
+            ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                500,
+                &format!("Reset failed: {}", e),
+            )
+        }
     }
 }
 

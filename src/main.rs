@@ -86,7 +86,15 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
-    tracing::info!("Resonate Server starting on port {}", config.server.port);
+    tracing::info!(port = config.server.port, "Resonate Server starting");
+    tracing::info!(
+        timeout_poll_interval_ms = config.timeouts.poll_interval,
+        message_poll_interval_ms = config.messages.poll_interval,
+        message_batch_size = config.messages.batch_size,
+        task_retry_timeout_ms = config.tasks.retry_timeout,
+        task_lease_timeout_ms = config.tasks.lease_timeout,
+        "Operational config"
+    );
     if config.debug {
         tracing::info!("Debug mode enabled — debug operations allowed, background loops paused");
     }
@@ -112,14 +120,14 @@ async fn run_server(config: Config) -> Result<(), String> {
                 None
             } else {
                 let vk = auth::load_public_key(&auth_cfg.publickey).map_err(|e| e.to_string())?;
-                tracing::info!("Auth enabled — key={}", auth_cfg.publickey);
+                tracing::info!(key = %auth_cfg.publickey, "Auth enabled");
                 Some(vk)
             };
             if let Some(iss) = &auth_cfg.iss {
-                tracing::info!("Auth issuer: {}", iss);
+                tracing::info!(issuer = %iss, "Auth issuer configured");
             }
             if let Some(aud) = &auth_cfg.aud {
-                tracing::info!("Auth audience: {}", aud);
+                tracing::info!(audience = %aud, "Auth audience configured");
             }
             Some(auth::AuthConfig {
                 key,
@@ -139,7 +147,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             let url = config.storage.postgres.url.as_ref().unwrap();
             let pool_size = config.storage.postgres.pool_size;
             tracing::info!("Using PostgreSQL backend");
-            tracing::info!("PostgreSQL pool size: {}", pool_size);
+            tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
             let pg = persistence::persistence_postgres::PostgresStorage::connect(
                 url,
                 pool_size,
@@ -155,7 +163,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
         _ => {
             let path = &config.storage.sqlite.path;
-            tracing::info!("Using SQLite backend: {}", path);
+            tracing::info!(path = %path, "Using SQLite backend");
             let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
@@ -171,6 +179,13 @@ async fn run_server(config: Config) -> Result<(), String> {
     let state = Arc::new(Server::new(config, auth_config, storage));
 
     // Build transports
+    tracing::info!(
+        http_push_connect_timeout_ms = state.config.transports.http_push.connect_timeout,
+        http_push_request_timeout_ms = state.config.transports.http_push.request_timeout,
+        http_poll_max_connections = poll_max_connections,
+        http_poll_buffer_size = poll_buffer_size,
+        "Transport config"
+    );
     let poll_registry = Arc::new(PollRegistry::new(poll_max_connections, poll_buffer_size));
     let http_push = Arc::new(transport::transport_http_push::HttpPushTransport::new(
         std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout),
@@ -220,17 +235,18 @@ async fn run_server(config: Config) -> Result<(), String> {
             let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
             match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
                 Ok(listener) => {
-                    tracing::info!("Metrics server listening on 0.0.0.0:{}", metrics_port);
+                    tracing::info!(port = metrics_port, "Metrics server listening");
                     let _ = axum::serve(listener, metrics_app).await;
                 }
                 Err(e) => {
-                    tracing::error!("Failed to bind metrics port {}: {}", metrics_port, e);
+                    tracing::error!(port = metrics_port, error = %e, "Failed to bind metrics port");
                 }
             }
         }));
     }
 
     // Build HTTP router
+    let effective_url = state.config.server.url.clone().unwrap_or_default();
     let app_state = server::AppState {
         server: state,
         poll_registry,
@@ -254,7 +270,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to bind to {}:{}: {e}", bind, port))?;
 
-    tracing::info!("Server listening on {}:{}", bind, port);
+    tracing::info!(bind = %bind, port = port, server_url = %effective_url, "Server listening");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

@@ -30,17 +30,34 @@ impl HttpPushTransport {
             .json(payload);
 
         match request.send().await {
-            Ok(_) => {
-                metrics::DELIVERIES_TOTAL
-                    .with_label_values(&["success"])
-                    .inc();
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if resp.status().is_success() {
+                    tracing::debug!(
+                        address = %address.url,
+                        status = status,
+                        "HTTP push delivery succeeded"
+                    );
+                    metrics::DELIVERIES_TOTAL
+                        .with_label_values(&["success"])
+                        .inc();
+                } else {
+                    tracing::warn!(
+                        address = %address.url,
+                        status = status,
+                        "HTTP push delivery rejected by target"
+                    );
+                    metrics::DELIVERIES_TOTAL
+                        .with_label_values(&["error"])
+                        .inc();
+                }
             }
             Err(e) => {
                 tracing::warn!(
-                    url = %address.url,
+                    address = %address.url,
                     error = %e,
-                    kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
-                    "HTTP delivery failed"
+                    error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
+                    "HTTP push delivery failed"
                 );
                 metrics::DELIVERIES_TOTAL
                     .with_label_values(&["error"])

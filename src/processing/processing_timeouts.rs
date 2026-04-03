@@ -37,7 +37,7 @@ pub async fn timeout_processing_loop(
             .transact(move |db| process_all_timeouts(db, now))
             .await
         {
-            tracing::error!("Background timeout processing failed: {}", e);
+            tracing::error!(error = %e, "Background timeout processing failed: storage error");
         }
     }
 }
@@ -47,6 +47,7 @@ pub async fn timeout_processing_loop(
 /// Called by the background loop and `debug.tick`.
 pub fn process_all_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
     // Run the three tick CTE statements (promise timeouts, task retry, task lease)
+    tracing::debug!(time = time, "Processing expired timeouts");
     db.process_timeouts(time)?;
 
     // Process expired schedules (application-level cron computation)
@@ -81,6 +82,12 @@ fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
         }
 
         if !runs.is_empty() {
+            tracing::info!(
+                schedule_id = %schedule.id,
+                cron = %schedule.cron,
+                runs = runs.len(),
+                "Schedule triggered, creating promises"
+            );
             metrics::SCHEDULE_PROMISES_TOTAL.inc_by(runs.len() as f64);
             let last_run_at = runs.last().map(|r| r.created_at).unwrap();
             db.schedule_run(&schedule.id, last_run_at, cron_time, &runs)?;

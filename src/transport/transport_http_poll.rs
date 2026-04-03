@@ -67,6 +67,14 @@ impl PollRegistry {
             .or_default()
             .push(conn.clone());
 
+        tracing::info!(
+            group = %group,
+            id = %id,
+            conn_id = conn_id,
+            total_connections = total + 1,
+            "Poll connection registered"
+        );
+
         Some((conn, rx))
     }
 
@@ -79,6 +87,7 @@ impl PollRegistry {
                 conns.remove(group);
             }
         }
+        tracing::info!(group = %group, conn_id = conn_id, "Poll connection deregistered");
     }
 
     /// Send a message to the appropriate connection(s) based on the poll address.
@@ -88,16 +97,27 @@ impl PollRegistry {
 
         let group_conns = match conns.get(&address.group) {
             Some(c) if !c.is_empty() => c,
-            _ => return false,
+            _ => {
+                tracing::warn!(
+                    group = %address.group,
+                    "Poll send failed: no active connections for group"
+                );
+                return false;
+            }
         };
 
-        match address.cast {
+        let delivered = match address.cast {
             PollCast::Uni => {
                 // Must have an id, must match exactly
                 if let Some(target_id) = &address.id {
                     if let Some(conn) = group_conns.iter().find(|c| &c.id == target_id) {
                         conn.tx.try_send(payload.to_string()).is_ok()
                     } else {
+                        tracing::warn!(
+                            group = %address.group,
+                            target_id = %target_id,
+                            "Poll send failed: target connection not found in group"
+                        );
                         false
                     }
                 } else {
@@ -108,13 +128,36 @@ impl PollRegistry {
                 // Prefer specific id, fall back to random
                 if let Some(target_id) = &address.id {
                     if let Some(conn) = group_conns.iter().find(|c| &c.id == target_id) {
-                        return conn.tx.try_send(payload.to_string()).is_ok();
+                        let ok = conn.tx.try_send(payload.to_string()).is_ok();
+                        if ok {
+                            tracing::debug!(
+                                group = %address.group,
+                                target_id = %target_id,
+                                "Poll message delivered to preferred connection"
+                            );
+                        }
+                        return ok;
                     }
                 }
                 // Fall back to random selection to distribute work
                 let idx = fastrand::usize(..group_conns.len());
-                group_conns[idx].tx.try_send(payload.to_string()).is_ok()
+                let ok = group_conns[idx].tx.try_send(payload.to_string()).is_ok();
+                if ok {
+                    tracing::debug!(
+                        group = %address.group,
+                        selected_id = %group_conns[idx].id,
+                        "Poll message delivered to random connection"
+                    );
+                }
+                ok
             }
+        };
+        if !delivered {
+            tracing::warn!(
+                group = %address.group,
+                "Poll message delivery failed: channel full or closed"
+            );
         }
+        delivered
     }
 }

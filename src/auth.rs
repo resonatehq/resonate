@@ -52,7 +52,7 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
         .map_err(|e| format!("Failed to read public key file '{}': {}", path, e))?;
 
     if let Ok(key) = DecodingKey::from_rsa_pem(&pem) {
-        tracing::info!("Loaded RSA public key from '{}'", path);
+        tracing::info!(path = %path, key_type = "RSA", "Loaded public key");
         return Ok(VerificationKey {
             decoding_key: key,
             algorithms: vec![
@@ -67,7 +67,7 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
     }
 
     if let Ok(key) = DecodingKey::from_ec_pem(&pem) {
-        tracing::info!("Loaded EC public key from '{}'", path);
+        tracing::info!(path = %path, key_type = "EC", "Loaded public key");
         return Ok(VerificationKey {
             decoding_key: key,
             algorithms: vec![Algorithm::ES256, Algorithm::ES384],
@@ -75,7 +75,7 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
     }
 
     if let Ok(key) = DecodingKey::from_ed_pem(&pem) {
-        tracing::info!("Loaded Ed25519 public key from '{}'", path);
+        tracing::info!(path = %path, key_type = "Ed25519", "Loaded public key");
         return Ok(VerificationKey {
             decoding_key: key,
             algorithms: vec![Algorithm::EdDSA],
@@ -119,6 +119,7 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
     let token = match &req.head.auth {
         Some(t) => t,
         None => {
+            tracing::warn!(kind = %kind, "Auth rejected: no token provided");
             return Err(Box::new(ResponseEnvelope::error(
                 kind_str,
                 corr_id,
@@ -130,7 +131,8 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
 
     let claims = match verify_jwt(auth, token) {
         Ok(c) => c,
-        Err(_) => {
+        Err(e) => {
+            tracing::warn!(kind = %kind, error = %e, "Auth rejected: token verification failed");
             return Err(Box::new(ResponseEnvelope::error(
                 kind_str,
                 corr_id,
@@ -149,21 +151,29 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
         }
     }
 
+    tracing::debug!(kind = %kind, role = ?claims.role, "Auth verified successfully");
+
     // Non-admin: evaluate prefix claim.
     match &claims.prefix {
         // Absent or null → always forbidden
-        None => Err(Box::new(ResponseEnvelope::error(
-            kind_str,
-            corr_id,
-            403,
-            "Forbidden",
-        ))),
-        Some(Value::Null) => Err(Box::new(ResponseEnvelope::error(
-            kind_str,
-            corr_id,
-            403,
-            "Forbidden",
-        ))),
+        None => {
+            tracing::warn!(kind = %kind, "Auth forbidden: no prefix claim in token");
+            Err(Box::new(ResponseEnvelope::error(
+                kind_str,
+                corr_id,
+                403,
+                "Forbidden",
+            )))
+        }
+        Some(Value::Null) => {
+            tracing::warn!(kind = %kind, "Auth forbidden: null prefix claim");
+            Err(Box::new(ResponseEnvelope::error(
+                kind_str,
+                corr_id,
+                403,
+                "Forbidden",
+            )))
+        }
 
         Some(Value::String(prefix)) => {
             // Empty string → wildcard, access to all resources
@@ -177,6 +187,12 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
                     for task in tasks {
                         if let Some(task_id) = task.get("id").and_then(|v| v.as_str()) {
                             if !task_id.starts_with(prefix.as_str()) {
+                                tracing::warn!(
+                                    kind = %kind,
+                                    prefix = %prefix,
+                                    task_id = %task_id,
+                                    "Auth forbidden: heartbeat task ID does not match prefix"
+                                );
                                 return Err(Box::new(ResponseEnvelope::error(
                                     kind_str,
                                     corr_id,
@@ -198,6 +214,12 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
                     if resource_id.starts_with(prefix.as_str()) {
                         return Ok(());
                     }
+                    tracing::warn!(
+                        kind = %kind,
+                        prefix = %prefix,
+                        resource_id = %resource_id,
+                        "Auth forbidden: resource ID does not match prefix"
+                    );
                     Err(Box::new(ResponseEnvelope::error(
                         kind_str,
                         corr_id,
@@ -209,12 +231,15 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
         }
 
         // prefix is present but is not a string or null → forbidden
-        Some(_) => Err(Box::new(ResponseEnvelope::error(
-            kind_str,
-            corr_id,
-            403,
-            "Forbidden",
-        ))),
+        Some(_) => {
+            tracing::warn!(kind = %kind, "Auth forbidden: prefix claim has unexpected type");
+            Err(Box::new(ResponseEnvelope::error(
+                kind_str,
+                corr_id,
+                403,
+                "Forbidden",
+            )))
+        }
     }
 }
 

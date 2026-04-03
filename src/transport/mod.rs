@@ -27,20 +27,26 @@ impl TransportDispatcher {
 
     /// Parse the address, route to the correct transport, deliver.
     pub async fn send(&self, address: &str, payload: &serde_json::Value) {
+        let kind = payload.get("kind").and_then(|v| v.as_str()).unwrap_or("unknown");
         match parse_address(address) {
             Some(Address::Http(addr)) => {
+                tracing::debug!(transport = "http", address = %addr.url, kind = kind, "Dispatching message via HTTP push");
                 self.http.send(&addr, payload).await;
             }
             Some(Address::Poll(addr)) => {
+                tracing::debug!(transport = "poll", group = %addr.group, kind = kind, "Dispatching message via poll/SSE");
                 let sse_data = serde_json::to_string(payload).unwrap_or_default();
                 self.poll.send_poll(&addr, &sse_data).await;
             }
             Some(Address::Gcps(addr)) => match &self.gcps {
-                Some(gcps) => gcps.send(&addr, payload).await,
-                None => tracing::warn!(address, "GCP Pub/Sub transport not configured"),
+                Some(gcps) => {
+                    tracing::debug!(transport = "gcps", project = %addr.project, topic = %addr.topic, kind = kind, "Dispatching message via GCP Pub/Sub");
+                    gcps.send(&addr, payload).await;
+                }
+                None => tracing::warn!(address = %address, "GCP Pub/Sub transport not configured, message dropped"),
             },
             None => {
-                tracing::warn!(address, "Invalid address, cannot route");
+                tracing::warn!(address = %address, "Invalid address, message cannot be routed");
             }
         }
     }
