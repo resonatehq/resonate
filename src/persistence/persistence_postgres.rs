@@ -131,32 +131,29 @@ impl PostgresStorage {
         Ok(())
     }
 
-    pub async fn transact<F, T>(&self, f: F) -> StorageResult<T>
+    pub async fn transact<F, T>(&self, f: F, serializable: bool) -> StorageResult<T>
     where
         F: FnMut(&dyn Db) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        // Retry parameters for serialization failures (40001).
-        // Note: Under READ COMMITTED isolation (PostgreSQL's default), error 40001
-        // cannot actually occur — it is only raised under SERIALIZABLE isolation.
-        // This retry logic is kept as defense-in-depth in case the isolation level
-        // is ever changed.
-        const MAX_RETRIES: u32 = 5;
-        const BASE_BACKOFF_MS: u64 = 10;
+        // On serialization failure (40001), retry once immediately.
+        // If the retry also fails, return Serialization error (maps to 503).
+        let max_retries: u32 = if serializable { 1 } else { 0 };
 
         let mut f = f;
-        for attempt in 0..=MAX_RETRIES {
+        for attempt in 0..=max_retries {
             #[cfg(feature = "concurrency-stress")]
             tokio::task::yield_now().await;
 
-            let tx = self.pool.begin().await.map_err(StorageError::from)?;
-            // READ COMMITTED is PostgreSQL's default — no SET TRANSACTION needed
+            let mut tx = self.pool.begin().await.map_err(StorageError::from)?;
+            if serializable {
+                sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    .execute(tx.as_mut())
+                    .await
+                    .map_err(StorageError::from)?;
+            }
 
             let task_retry_timeout = self.task_retry_timeout;
-            // Run the closure and recover the transaction in a single block_in_place.
-            // PostgresDb wraps the transaction in UnsafeCell for interior mutability
-            // (Db trait methods take &self but sqlx requires &mut Transaction).
-            // The transaction is returned alongside the result so it can be committed.
             let (result, tx) = tokio::task::block_in_place(|| {
                 let db = PostgresDb {
                     tx: UnsafeCell::new(tx),
@@ -177,8 +174,26 @@ impl PostgresStorage {
                 (result, tx)
             });
 
-            // If business logic failed, tx is dropped here (auto-rollback)
-            let result = result?;
+            // If business logic failed with a serialization error, retry.
+            // Other errors propagate immediately (tx is dropped → auto-rollback).
+            let result = match result {
+                Ok(v) => v,
+                Err(StorageError::Serialization) => {
+                    if attempt < max_retries {
+                        tracing::warn!(
+                            attempt = attempt + 1,
+                            "Serialization failure (40001) in query, retrying"
+                        );
+                        continue;
+                    } else {
+                        tracing::warn!(
+                            "Serialization failure (40001) in query after retry, returning 503"
+                        );
+                        return Err(StorageError::Serialization);
+                    }
+                }
+                Err(e) => return Err(e),
+            };
 
             match tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(tx.commit())
@@ -188,31 +203,18 @@ impl PostgresStorage {
                     let pg_err = e
                         .as_database_error()
                         .and_then(|dbe| dbe.code().map(|c| c.to_string()));
-                    if pg_err.as_deref() == Some("40001") {
-                        if attempt < MAX_RETRIES {
-                            // Exponential backoff with jitter
-                            let backoff_ms = BASE_BACKOFF_MS * 2u64.pow(attempt);
-                            let jitter_ms = (std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .subsec_nanos()
-                                as u64)
-                                % backoff_ms.max(1);
-                            let delay = std::time::Duration::from_millis(backoff_ms + jitter_ms);
+                    if pg_err.as_deref() == Some("40001") || pg_err.as_deref() == Some("40P01") {
+                        if attempt < max_retries {
                             tracing::warn!(
                                 attempt = attempt + 1,
-                                max_retries = MAX_RETRIES,
-                                backoff_ms = delay.as_millis() as u64,
-                                "Serialization failure (40001), retrying transaction"
+                                "Serialization failure (40001) at commit, retrying"
                             );
-                            tokio::time::sleep(delay).await;
                             continue;
                         } else {
-                            tracing::error!(
-                                "Serialization failure (40001) after {} retries, giving up",
-                                MAX_RETRIES
+                            tracing::warn!(
+                                "Serialization failure (40001) at commit after retry, returning 503"
                             );
-                            return Err(StorageError::from(e));
+                            return Err(StorageError::Serialization);
                         }
                     }
                     return Err(StorageError::from(e));
@@ -220,8 +222,6 @@ impl PostgresStorage {
             }
         }
 
-        // This is unreachable because the loop either returns Ok or Err,
-        // but the compiler cannot prove the loop always executes at least once.
         unreachable!("transact loop completed without returning")
     }
 
@@ -230,7 +230,7 @@ impl PostgresStorage {
         F: FnMut(&dyn Db) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.transact(f).await
+        self.transact(f, false).await
     }
 }
 
@@ -394,7 +394,7 @@ impl Db for PostgresDb<'_> {
             ),
             -- @snippet resumed_tasks(source=marked_ready, exclusion=fulfilled_task)
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT awaiter_id FROM marked_ready)
                 AND state = 'suspended'
                 AND id NOT IN (SELECT id FROM fulfilled_task)
@@ -428,6 +428,58 @@ impl Db for PostgresDb<'_> {
             SELECT 1
         ")).bind(&ids).bind(time).fetch_optional(self.tx().as_mut()))?;
         Ok(())
+    }
+
+    // Process settlement chain for a promise ID.
+    // Fires any pending callbacks (marks ready, resumes suspended tasks).
+    // This is a separate statement so it gets a fresh READ COMMITTED
+    // snapshot, seeing all callbacks committed by concurrent transactions.
+    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
+        let trt = self.task_retry_timeout;
+        rt_block_on(sqlx::query(&format!("
+            WITH settled_promise AS (
+              SELECT id FROM promises WHERE id = $1 AND state != 'pending'
+            ),
+            marked_ready AS (
+              UPDATE callbacks SET ready = true
+              WHERE awaited_id = $1 AND EXISTS (SELECT 1 FROM settled_promise)
+              RETURNING awaiter_id
+            ),
+            resumed_tasks AS (
+              UPDATE tasks SET state = 'pending'
+              WHERE id IN (SELECT awaiter_id FROM marked_ready)
+                AND state = 'suspended'
+              RETURNING id, version
+            ),
+            inserted_or_updated_ttimeout_resumed AS (
+              INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
+              SELECT ($2 + {trt}), id, 0, {trt} FROM resumed_tasks
+              ON CONFLICT (id) DO UPDATE SET timeout_at = EXCLUDED.timeout_at, timeout_type = 0, process_id = NULL, ttl = {trt}
+              RETURNING id
+            ),
+            inserted_or_updated_outgoing_resumed AS (
+              INSERT INTO outgoing_execute (id, version, address)
+              SELECT t.id, t.version, p.target FROM resumed_tasks t JOIN promises p ON p.id = t.id
+              ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address
+              RETURNING id
+            )
+            SELECT 1
+        ")).bind(promise_id).bind(time).fetch_optional(self.tx().as_mut()))?;
+        Ok(())
+    }
+
+    // Lock preamble: acquire FOR UPDATE locks on promise and task rows.
+    // Returns (promise_exists, task_exists).
+    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
+        let p = rt_block_on(
+            sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
+                .bind(id).fetch_optional(self.tx().as_mut())
+        )?;
+        let t = rt_block_on(
+            sqlx::query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE")
+                .bind(id).fetch_optional(self.tx().as_mut())
+        )?;
+        Ok((p.is_some(), t.is_some()))
     }
 
     // P-01: promise.get
@@ -573,7 +625,7 @@ impl Db for PostgresDb<'_> {
             ),
             -- @snippet resumed_tasks(source=marked_ready)
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT awaiter_id FROM marked_ready) AND state = 'suspended'
               RETURNING id, version
             ),
@@ -652,7 +704,7 @@ impl Db for PostgresDb<'_> {
             -- @cluster ResumptionEnqueued (variant: direct resume, no marked_ready)
             -- @snippet resumed_tasks(source=direct, condition=awaited.state != 'pending')
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id = $2 AND state = 'suspended'
                 AND EXISTS (SELECT 1 FROM awaited WHERE state != 'pending')
               RETURNING id, version
@@ -788,15 +840,18 @@ impl Db for PostgresDb<'_> {
             "acquired"
         };
 
-        let rows = rt_block_on(sqlx::query("
-            -- @snippet inserted_or_skipped_promise(id=$promise_id)
+        let trt = self.task_retry_timeout;
+
+        // Statement 1: Promise creation CTE — inserts promise + task (if new).
+        // NO acquired_task — task acquire is done as a separate statement
+        // so it gets a fresh READ COMMITTED snapshot.
+        let rows = rt_block_on(sqlx::query(&format!("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
               VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8)
               ON CONFLICT (id) DO NOTHING
               RETURNING *
             ),
-            -- @snippet inserted_or_skipped_ptimeout(id=$promise_id, guard=inserted_or_skipped_promise)
             inserted_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
               SELECT $6, $1
@@ -804,65 +859,36 @@ impl Db for PostgresDb<'_> {
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
-            -- @snippet inserted_or_skipped_task_acquired(id=$promise_id, guard=inserted_or_skipped_promise)
             inserted_task AS (
-              INSERT INTO tasks (id, state)
-              SELECT $1, $12
+              INSERT INTO tasks (id, state, version)
+              SELECT $1, $12, CASE WHEN $12 = 'acquired' THEN 1 ELSE 0 END
               WHERE EXISTS (SELECT 1 FROM inserted_promise)
               ON CONFLICT (id) DO NOTHING
               RETURNING *
             ),
-            acquired_task AS (
-              UPDATE tasks SET state = 'acquired'
-              WHERE id = $1 AND state = 'pending'
-                AND NOT EXISTS (SELECT 1 FROM inserted_task)
-              RETURNING *
-            ),
-            -- @snippet inserted_or_skipped_ttimeout_lease(time_base=$created_at, id=$promise_id, pid=$pid, ttl=$ttl)
-            upserted_ttimeout AS (
-              INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
-              SELECT ($7 + $10), $1, 1, $11, $10
-              WHERE (NOT $9 AND EXISTS (SELECT 1 FROM inserted_task))
-                 OR EXISTS (SELECT 1 FROM acquired_task)
-              ON CONFLICT (id) DO UPDATE SET
-                timeout_at = ($7 + $10), timeout_type = 1, process_id = $11, ttl = $10
+            inserted_ttimeout AS (
+              INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
+              SELECT ($7 + {trt}), $1, 0, {trt}
+              WHERE NOT $9 AND EXISTS (SELECT 1 FROM inserted_task)
+              ON CONFLICT (id) DO NOTHING
               RETURNING id
-            ),
-            deleted_ready_callbacks AS (
-              DELETE FROM callbacks
-              WHERE awaiter_id = $1 AND ready = true
-                AND EXISTS (SELECT 1 FROM acquired_task)
-              RETURNING *
             ),
             promise AS (
               SELECT * FROM inserted_promise
               UNION ALL
               SELECT * FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_promise)
-            ),
-            task AS (
-              SELECT * FROM inserted_task
-              UNION ALL
-              SELECT * FROM acquired_task WHERE NOT EXISTS (SELECT 1 FROM inserted_task)
-              UNION ALL
-              SELECT * FROM tasks WHERE id = $1
-                AND NOT EXISTS (SELECT 1 FROM inserted_task)
-                AND NOT EXISTS (SELECT 1 FROM acquired_task)
             )
             SELECT
               p.id, p.state, p.param_headers::text, p.param_data, p.value_headers::text, p.value_data, p.tags::text, p.timeout_at, p.created_at, p.settled_at,
-              EXISTS (SELECT 1 FROM inserted_task) AS task_created,
-              EXISTS (SELECT 1 FROM acquired_task) AS task_acquired
+              EXISTS (SELECT 1 FROM inserted_task) AS task_created
             FROM promise p
-            LEFT JOIN task t ON t.id = p.id
-        ")
+        "))
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                             // $6-$8
             .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)             // $9-$12
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
-            // CTE snapshot race: a concurrent INSERT committed after our snapshot.
-            // The UNION ALL didn't see the promise. Fall back to a fresh read.
             let promise = match self.promise_get(promise_id)? {
                 Some(p) => p,
                 None => return Ok(None),
@@ -871,17 +897,42 @@ impl Db for PostgresDb<'_> {
                 promise,
                 task_created: false,
                 task_acquired: false,
+                task_state: None,
+                task_version: None,
             }));
         }
         let row = &rows[0];
         let promise = row_to_promise(row);
         let task_created: bool = row.get("task_created");
-        let task_acquired: bool = row.get("task_acquired");
 
+        if task_created {
+            // New task created — set up lease timeout
+            if !already_timedout {
+                rt_block_on(sqlx::query(
+                    "INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
+                     VALUES ($1, $2, 1, $3, $4)
+                     ON CONFLICT (id) DO UPDATE SET timeout_at = $1, timeout_type = 1, process_id = $3, ttl = $4")
+                    .bind(created_at + ttl).bind(promise_id).bind(pid).bind(ttl)
+                    .fetch_optional(self.tx().as_mut()))?;
+            }
+            return Ok(Some(TaskCreateResult {
+                promise,
+                task_created: true,
+                task_acquired: false,
+                task_state: Some(task_initial_state.to_string()),
+                task_version: Some(0),
+            }));
+        }
+
+        // Promise already existed, task not created.
+        // task_acquired is always false here — acquire is done by the handler
+        // as a separate statement (fresh snapshot).
         Ok(Some(TaskCreateResult {
             promise,
-            task_created,
-            task_acquired,
+            task_created: false,
+            task_acquired: false,
+            task_state: None,
+            task_version: None,
         }))
     }
 
@@ -896,7 +947,7 @@ impl Db for PostgresDb<'_> {
         } = *params;
         let rows = rt_block_on(sqlx::query("
             WITH acquired_task AS (
-              UPDATE tasks SET state = 'acquired'
+              UPDATE tasks SET state = 'acquired', version = version + 1
               WHERE id = $1 AND version = $2 AND state = 'pending'
               RETURNING *
             ),
@@ -1103,7 +1154,7 @@ impl Db for PostgresDb<'_> {
             ),
             -- @snippet resumed_tasks(source=marked_ready)
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT awaiter_id FROM marked_ready) AND state = 'suspended'
               RETURNING id, version
             ),
@@ -1365,7 +1416,7 @@ impl Db for PostgresDb<'_> {
             ),
             -- @snippet resumed_tasks(source=marked_ready)
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT awaiter_id FROM marked_ready) AND state = 'suspended'
               RETURNING id, version
             ),
@@ -1431,7 +1482,7 @@ impl Db for PostgresDb<'_> {
             sqlx::query(
                 "
             WITH released_task AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id = $1 AND version = $2 AND state = 'acquired'
               RETURNING *
             ),
@@ -1505,7 +1556,7 @@ impl Db for PostgresDb<'_> {
               SELECT * FROM tasks WHERE id = $1 FOR UPDATE
             ),
             continued_task AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id = $1 AND state = 'halted'
               RETURNING *
             ),
@@ -1820,7 +1871,7 @@ impl Db for PostgresDb<'_> {
               RETURNING awaiter_id
             ),
             resumed_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT awaiter_id FROM marked_ready)
                 AND state = 'suspended'
                 AND id NOT IN (SELECT id FROM fulfilled_task)
@@ -1883,7 +1934,7 @@ impl Db for PostgresDb<'_> {
               WHERE tt.timeout_type = 1 AND tt.timeout_at <= $1 AND t.state = 'acquired'
             ),
             released_tasks AS (
-              UPDATE tasks SET state = 'pending', version = version + 1
+              UPDATE tasks SET state = 'pending'
               WHERE id IN (SELECT id FROM expired_lease)
               RETURNING id, version
             ),

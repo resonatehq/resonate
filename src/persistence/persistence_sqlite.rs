@@ -260,13 +260,13 @@ fn resumption_enqueued(
     };
 
     for awaiter_id in &awaiter_ids {
-        // Resume: set to pending, increment version
+        // Resume: set to pending (version unchanged — only claim bumps version)
         let updated = tx.execute(
-            "UPDATE tasks SET state = 'pending', version = version + 1 WHERE id = ?1 AND state = 'suspended'",
+            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'suspended'",
             params![awaiter_id],
         )?;
         if updated > 0 {
-            // Get new version
+            // Get current version
             let version: i64 = tx.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![awaiter_id],
@@ -344,6 +344,24 @@ fn settle_promise(
 impl<'a> Db for SqliteDb<'a> {
     fn task_retry_timeout(&self) -> i64 {
         self.task_retry_timeout
+    }
+
+    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
+        let promise_exists = self.conn.query_row(
+            "SELECT COUNT(*) FROM promises WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        let task_exists = self.conn.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        Ok((promise_exists, task_exists))
+    }
+
+    fn process_callbacks(&self, _promise_id: &str, _time: i64) -> StorageResult<()> {
+        Ok(())
     }
 
     fn try_timeout(&self, ids: &[&str], time: i64) -> StorageResult<()> {
@@ -530,9 +548,9 @@ impl<'a> Db for SqliteDb<'a> {
         // Direct resume if awaited is already settled
         if let Some(ref pa) = awaited {
             if pa.state != PromiseState::Pending {
-                // Resume awaiter if suspended
+                // Resume awaiter if suspended (version unchanged — only claim bumps version)
                 let updated = self.conn.execute(
-                    "UPDATE tasks SET state = 'pending', version = version + 1 WHERE id = ?1 AND state = 'suspended'",
+                    "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'suspended'",
                     params![awaiter_id],
                 )?;
                 if updated > 0 {
@@ -679,9 +697,10 @@ impl<'a> Db for SqliteDb<'a> {
             } else {
                 "acquired"
             };
+            let task_version: i64 = if task_state == "acquired" { 1 } else { 0 };
             let inserted = self.conn.execute(
-                "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, ?2)",
-                params![promise_id, task_state],
+                "INSERT OR IGNORE INTO tasks (id, state, version) VALUES (?1, ?2, ?3)",
+                params![promise_id, task_state, task_version],
             )? > 0;
             if inserted {
                 task_created = true;
@@ -693,28 +712,19 @@ impl<'a> Db for SqliteDb<'a> {
                 }
             }
         } else {
-            // Promise already existed — try to acquire pending task
-            let acquired = self.conn.execute(
-                "UPDATE tasks SET state = 'acquired' WHERE id = ?1 AND state = 'pending'",
-                params![promise_id],
-            )? > 0;
-            if acquired {
-                task_acquired = true;
-                self.conn.execute(
-                    "INSERT OR REPLACE INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl) VALUES (?1, ?2, 1, ?3, ?4)",
-                    params![created_at + ttl, promise_id, pid, ttl],
-                )?;
-                self.conn.execute(
-                    "DELETE FROM callbacks WHERE awaiter_id = ?1 AND ready = 1",
-                    params![promise_id],
-                )?;
-            }
+            // Promise already existed — do NOT acquire here.
+            // The server handler will try to acquire as a separate step,
+            // consistent with the PostgreSQL path.
         }
 
+        // SQLite: read task state for the result
+        let task_row = self.task_get(promise_id)?;
         Ok(Some(TaskCreateResult {
             promise,
             task_created,
             task_acquired,
+            task_state: task_row.as_ref().map(|t| t.state.to_string()),
+            task_version: task_row.as_ref().map(|t| t.version),
         }))
     }
 
@@ -727,7 +737,7 @@ impl<'a> Db for SqliteDb<'a> {
             pid,
         } = *params;
         let updated = self.conn.execute(
-            "UPDATE tasks SET state = 'acquired' WHERE id = ?1 AND version = ?2 AND state = 'pending'",
+            "UPDATE tasks SET state = 'acquired', version = version + 1 WHERE id = ?1 AND version = ?2 AND state = 'pending'",
             params![task_id, version],
         )?;
 
@@ -998,7 +1008,7 @@ impl<'a> Db for SqliteDb<'a> {
         ttl: i64,
     ) -> StorageResult<bool> {
         let released = self.conn.execute(
-            "UPDATE tasks SET state = 'pending', version = version + 1 WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
+            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
             params![task_id, version],
         )? > 0;
 
@@ -1057,7 +1067,7 @@ impl<'a> Db for SqliteDb<'a> {
 
     fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
         let continued = self.conn.execute(
-            "UPDATE tasks SET state = 'pending', version = version + 1 WHERE id = ?1 AND state = 'halted'",
+            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'halted'",
             params![task_id],
         )? > 0;
 
@@ -1447,7 +1457,7 @@ impl<'a> Db for SqliteDb<'a> {
 
         for id in &lease_ids {
             self.conn.execute(
-                "UPDATE tasks SET state = 'pending', version = version + 1 WHERE id = ?1",
+                "UPDATE tasks SET state = 'pending' WHERE id = ?1",
                 params![id],
             )?;
             let version: i64 = self
