@@ -144,13 +144,14 @@ impl Resonate {
         let auth = config
             .token
             .or_else(|| std::env::var("RESONATE_TOKEN").ok());
+        let auth_for_envelope = auth.clone();
 
         // Network selection
         let (network, heartbeat): (Arc<dyn Network>, Arc<dyn Heartbeat>) =
             if let Some(net) = config.network {
                 // Custom network provided
                 let transport = Transport::new(net.clone());
-                let sender_for_hb = Sender::new(transport.clone());
+                let sender_for_hb = Sender::new(transport.clone(), auth_for_envelope.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
                     net.pid().to_string(),
                     ttl / 2,
@@ -166,7 +167,7 @@ impl Resonate {
                     auth,
                 ));
                 let transport = Transport::new(net.clone());
-                let sender_for_hb = Sender::new(transport.clone());
+                let sender_for_hb = Sender::new(transport.clone(), auth_for_envelope.clone());
                 let hb = Arc::new(AsyncHeartbeat::new(
                     net.pid().to_string(),
                     ttl / 2,
@@ -192,7 +193,7 @@ impl Resonate {
         let registry = Arc::new(RwLock::new(Registry::new()));
 
         // Build the Sender for Core from the transport
-        let sender = Sender::new(transport.clone());
+        let sender = Sender::new(transport.clone(), auth_for_envelope);
 
         // Build target_resolver from the network for target resolution.
         // If the target already looks like a URL, pass it through unchanged

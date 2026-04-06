@@ -421,13 +421,23 @@ impl TestHarness {
 
     /// Build a Sender backed by the StubNetwork.
     pub fn build_sender(&self) -> Sender {
+        self.build_sender_with_auth(None)
+    }
+
+    /// Build a Sender backed by the StubNetwork with an optional auth token.
+    pub fn build_sender_with_auth(&self, auth: Option<String>) -> Sender {
         let adapter = StubNetworkAdapter {
             network: self.network.clone(),
             send_count: self.send_count.clone(),
             sent_json: self.sent_json.clone(),
         };
         let transport = Transport::new(Arc::new(adapter));
-        Sender::new(transport)
+        Sender::new(transport, auth)
+    }
+
+    /// Return raw (un-flattened) envelope JSON for all sent requests.
+    pub async fn raw_sent_json(&self) -> Vec<serde_json::Value> {
+        self.sent_json.lock().await.clone()
     }
 
     /// Build Effects from the stub, with optional preloaded promises.

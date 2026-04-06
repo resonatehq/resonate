@@ -91,11 +91,12 @@ pub struct ScheduleCreateReq {
 #[derive(Clone)]
 pub struct Sender {
     transport: Transport,
+    auth: Option<String>,
 }
 
 impl Sender {
-    pub fn new(transport: Transport) -> Self {
-        Self { transport }
+    pub fn new(transport: Transport, auth: Option<String>) -> Self {
+        Self { transport, auth }
     }
 
     /// Acquire a task, returning the task, root promise, and any preloaded promises.
@@ -429,16 +430,19 @@ impl Sender {
 
         // Wrap nested action/actions fields in protocol sub-envelopes.
         // The protocol requires these to be full { kind, head, data } objects.
-        wrap_nested_actions(&kind, &mut req_json);
+        wrap_nested_actions(&kind, &mut req_json, &self.auth);
 
         // Build protocol envelope
         let corr_id = format!("sr-{}", crate::now_ms());
+        let mut head = serde_json::Map::new();
+        head.insert("corrId".into(), serde_json::Value::String(corr_id));
+        head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+        if let Some(ref token) = self.auth {
+            head.insert("auth".into(), serde_json::Value::String(token.clone()));
+        }
         let envelope = serde_json::json!({
             "kind": kind,
-            "head": {
-                "corrId": corr_id,
-                "version": PROTOCOL_VERSION,
-            },
+            "head": head,
             "data": req_json,
         });
 
@@ -478,27 +482,30 @@ impl Sender {
 //  Nested action envelope wrapping
 // ═══════════════════════════════════════════════════════════════════
 
-/// Wrap a flat data object into a protocol sub-envelope: `{ kind, head: { corrId, version }, data }`.
-fn make_sub_envelope(kind: &str, data: serde_json::Value) -> serde_json::Value {
+/// Wrap a flat data object into a protocol sub-envelope: `{ kind, head: { corrId, version[, auth] }, data }`.
+fn make_sub_envelope(kind: &str, data: serde_json::Value, auth: &Option<String>) -> serde_json::Value {
+    let mut head = serde_json::Map::new();
+    head.insert("corrId".into(), serde_json::Value::String(format!("sr-{}", crate::now_ms())));
+    head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+    if let Some(token) = auth {
+        head.insert("auth".into(), serde_json::Value::String(token.clone()));
+    }
     serde_json::json!({
         "kind": kind,
-        "head": {
-            "corrId": format!("sr-{}", crate::now_ms()),
-            "version": PROTOCOL_VERSION,
-        },
+        "head": head,
         "data": data,
     })
 }
 
 /// Post-process the serialized request data to wrap nested `action`/`actions`
 /// fields in full protocol sub-envelopes, as required by the protocol spec.
-fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value) {
+fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value, auth: &Option<String>) {
     match kind {
         // task.create: action is a PromiseCreateReq → wrap as "promise.create"
         "task.create" => {
             if let Some(action) = data.get("action").cloned() {
                 if action.get("kind").is_none() {
-                    data["action"] = make_sub_envelope("promise.create", action);
+                    data["action"] = make_sub_envelope("promise.create", action, auth);
                 }
             }
         }
@@ -506,7 +513,7 @@ fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value) {
         "task.fulfill" => {
             if let Some(action) = data.get("action").cloned() {
                 if action.get("kind").is_none() {
-                    data["action"] = make_sub_envelope("promise.settle", action);
+                    data["action"] = make_sub_envelope("promise.settle", action, auth);
                 }
             }
         }
@@ -518,7 +525,7 @@ fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value) {
                     .into_iter()
                     .map(|a| {
                         if a.get("kind").is_none() {
-                            make_sub_envelope("promise.register_callback", a)
+                            make_sub_envelope("promise.register_callback", a, auth)
                         } else {
                             a
                         }
@@ -537,7 +544,7 @@ fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value) {
                     } else {
                         "promise.create"
                     };
-                    data["action"] = make_sub_envelope(sub_kind, action);
+                    data["action"] = make_sub_envelope(sub_kind, action, auth);
                 }
             }
         }
@@ -730,7 +737,7 @@ mod tests {
     use std::sync::Arc;
 
     fn test_sender(net: Arc<LocalNetwork>) -> Sender {
-        Sender::new(Transport::new(net))
+        Sender::new(Transport::new(net), None)
     }
 
     // ── Serialization: verify "kind" uses "subject.verb" format ─────
@@ -1009,5 +1016,88 @@ mod tests {
         // Release via Sender
         let sender = test_sender(net);
         sender.task_release(&task_id, 0).await.unwrap();
+    }
+
+    // ── Auth token in envelope head ──────────────────────────────────
+
+    #[tokio::test]
+    async fn envelope_head_contains_auth_when_token_provided() {
+        use crate::test_utils::TestHarness;
+
+        let harness = TestHarness::new();
+        let sender = harness.build_sender_with_auth(Some("my-secret-token".into()));
+
+        let req = PromiseCreateReq {
+            id: "auth-p1".into(),
+            timeout_at: i64::MAX,
+            param: Value::default(),
+            tags: HashMap::new(),
+        };
+        sender.promise_create(req).await.unwrap();
+
+        let envelopes = harness.raw_sent_json().await;
+        assert_eq!(envelopes.len(), 1);
+        let head = &envelopes[0]["head"];
+        assert_eq!(head["auth"], "my-secret-token");
+        assert!(head.get("corrId").is_some());
+        assert!(head.get("version").is_some());
+    }
+
+    #[tokio::test]
+    async fn envelope_head_omits_auth_when_no_token() {
+        use crate::test_utils::TestHarness;
+
+        let harness = TestHarness::new();
+        let sender = harness.build_sender_with_auth(None);
+
+        let req = PromiseCreateReq {
+            id: "no-auth-p1".into(),
+            timeout_at: i64::MAX,
+            param: Value::default(),
+            tags: HashMap::new(),
+        };
+        sender.promise_create(req).await.unwrap();
+
+        let envelopes = harness.raw_sent_json().await;
+        assert_eq!(envelopes.len(), 1);
+        let head = &envelopes[0]["head"];
+        assert!(head.get("auth").is_none());
+    }
+
+    #[tokio::test]
+    async fn sub_envelope_head_contains_auth_when_token_provided() {
+        use crate::test_utils::TestHarness;
+
+        let harness = TestHarness::new();
+
+        // Pre-create the promise that the task action references
+        harness
+            .add_promise(crate::types::PromiseRecord {
+                id: "sub-p1".into(),
+                state: crate::types::PromiseState::Pending,
+                timeout_at: i64::MAX,
+                param: Value::default(),
+                value: Value::default(),
+                tags: HashMap::new(),
+                created_at: 0,
+                settled_at: None,
+            })
+            .await;
+
+        let sender = harness.build_sender_with_auth(Some("sub-token".into()));
+
+        // task.create wraps action in a sub-envelope
+        let action = PromiseCreateReq {
+            id: "sub-p1".into(),
+            timeout_at: i64::MAX,
+            param: Value::default(),
+            tags: HashMap::new(),
+        };
+        let _ = sender.task_create("test-pid", 60000, action).await;
+
+        let envelopes = harness.raw_sent_json().await;
+        assert!(!envelopes.is_empty());
+        let sub_head = &envelopes[0]["data"]["action"]["head"];
+        assert_eq!(sub_head["auth"], "sub-token");
     }
 }
