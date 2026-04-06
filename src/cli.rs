@@ -897,14 +897,14 @@ pub async fn run_invoke(args: InvokeArgs) {
             .collect()
     };
 
-    let invoke_data = json!({
+    let param = json!({
         "func": args.func_name,
         "args": invoke_args,
         "version": args.version,
     });
     let param = json!({
         "headers": {},
-        "data": invoke_data.to_string(),
+        "data": param.to_string(),
     });
 
     let mut tags = serde_json::Map::new();

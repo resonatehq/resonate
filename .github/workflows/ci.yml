@@ -32,6 +32,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-features -- -D warnings
 
+      - name: Test
+        run: cargo test --all-features
+
   test:
     name: Run tests
     runs-on: ubuntu-latest

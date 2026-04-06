@@ -8,7 +8,7 @@ use axum::{
         sse::{Event, Sse},
         IntoResponse, Response,
     },
-    routing::{get, post},
+    routing::{any, get, post},
     Json, Router,
 };
 use serde_json::Value;
@@ -99,6 +99,25 @@ pub fn api_routes() -> Router<AppState> {
         .route("/", post(handle_api))
         .route("/health", get(handle_health))
         .route("/ready", get(handle_ready))
+        .route("/promises", any(handle_legacy))
+        .route("/promises/*path", any(handle_legacy))
+        .route("/schedules", any(handle_legacy))
+        .route("/schedules/*path", any(handle_legacy))
+        .route("/tasks", any(handle_legacy))
+        .route("/tasks/*path", any(handle_legacy))
+}
+
+async fn handle_legacy() -> impl IntoResponse {
+    tracing::warn!(
+        "Legacy endpoint hit — this path is no longer supported. \
+        Please update to the latest SDK."
+    );
+    (
+        StatusCode::GONE,
+        Json(serde_json::json!({
+            "error": "This endpoint is no longer supported. Please update to the latest SDK."
+        })),
+    )
 }
 
 /// Poll transport routes: SSE endpoint for workers.
