@@ -312,7 +312,7 @@ fn now_ms() -> i64 {
 /// Build a protocol request envelope from parts.
 /// Returns the complete JSON body ready to send to the server.
 fn build_envelope(kind: &str, corr_id: &str, token: Option<&str>, data: Value) -> Value {
-    let mut head = json!({ "corrId": corr_id, "version": "1.0.0" });
+    let mut head = json!({ "corrId": corr_id, "version": "2026-04-01" });
     if let Some(t) = token {
         head["auth"] = json!(t);
     }
@@ -1124,7 +1124,7 @@ mod tests {
 
         assert_eq!(envelope["kind"], "promise.get");
         assert_eq!(envelope["head"]["corrId"], "corr-123");
-        assert_eq!(envelope["head"]["version"], "1.0.0");
+        assert_eq!(envelope["head"]["version"], "2026-04-01");
         assert!(envelope["head"]["auth"].is_null());
         assert_eq!(envelope["data"]["id"], "test-promise");
     }
