@@ -5,13 +5,13 @@
 #   - Manual workflow_dispatch (testing)
 #
 # Pipeline:
-#   1. check-version (ACTIVE) — Validates Cargo.toml matches release tag
-#   2. publish-dockerhub (DISABLED) — Multi-platform Docker images → DockerHub
-#   3. publish-github-image (DISABLED) — Multi-platform Docker images → GHCR
-#   4. publish-github-artifacts (DISABLED) — Cross-platform binary artifacts
-#   5. verify-artifacts (DISABLED) — Post-publication verification
+#   1. check-version — Validates Cargo.toml matches release tag
+#   2. publish-dockerhub — Multi-platform Docker images → DockerHub
+#   3. publish-github-image — Multi-platform Docker images → GHCR
+#   4. publish-github-artifacts — Cross-platform binary artifacts
+#   5. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
+#   6. verify-artifacts — Post-publication verification
 #
-# All publishing steps are disabled (commented out) and must be explicitly enabled.
 # See .github/CD_PIPELINE.md for full documentation.
 
 name: CD
@@ -114,7 +114,6 @@ jobs:
   publish-dockerhub:
     name: Publish DockerHub Image
     needs: [check-version]
-    if: false # ← DISABLED: Uncomment to enable
 
     runs-on: ubuntu-latest
     permissions:
@@ -172,7 +171,6 @@ jobs:
   publish-github-image:
     name: Publish GitHub Container Image
     needs: [check-version]
-    if: false # ← DISABLED: Uncomment to enable
 
     runs-on: ubuntu-latest
     permissions:
@@ -242,7 +240,6 @@ jobs:
   publish-github-artifacts:
     name: Publish Binary Artifacts (${{ matrix.systems.os }} ${{ matrix.systems.arch }})
     needs: [check-version]
-    if: false # ← DISABLED: Uncomment to enable
 
     runs-on: ${{ matrix.systems.runner }}
     permissions:
@@ -336,7 +333,6 @@ jobs:
   update-homebrew:
     name: Update Homebrew Formula
     needs: [check-version, publish-github-artifacts]
-    if: false # ← DISABLED: Remove to enable
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -524,7 +520,6 @@ jobs:
         publish-github-image,
         publish-github-artifacts,
       ]
-    if: false # ← DISABLED: Uncomment to enable
 
     runs-on: ubuntu-latest
     permissions:
