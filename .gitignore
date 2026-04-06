@@ -24,7 +24,7 @@
 .env
 
 # sqlite
-*.db
+*.db*
 
 # Added by cargo
 

@@ -1870,7 +1870,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                     };
                     let inner_envelope = serde_json::json!({
                         "kind": action_kind,
-                        "head": { "corrId": corr_id, "status": inner_status, "version": "1.0.0" },
+                        "head": { "corrId": corr_id, "status": inner_status, "version": "2026-04-01" },
                         "data": inner_data,
                     });
                     let preload = db.compute_preload(&r.id)?;
@@ -1951,7 +1951,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                     };
                     let inner_envelope = serde_json::json!({
                         "kind": action_kind,
-                        "head": { "corrId": corr_id, "status": inner_status, "version": "1.0.0" },
+                        "head": { "corrId": corr_id, "status": inner_status, "version": "2026-04-01" },
                         "data": inner_data,
                     });
                     let preload = db.compute_preload(&r.id)?;
