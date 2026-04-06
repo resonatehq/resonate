@@ -125,7 +125,7 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
                 corr_id,
                 401,
                 "Unauthorized",
-            )))
+            )));
         }
     };
 
@@ -138,7 +138,7 @@ pub fn auth_check(auth: &AuthConfig, req: &RequestEnvelope) -> Result<(), Box<Re
                 corr_id,
                 401,
                 "Unauthorized",
-            )))
+            )));
         }
     };
 
