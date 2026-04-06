@@ -43,6 +43,8 @@ enum Commands {
     /// Schedule operations
     #[command(alias = "schedule")]
     Schedules(cli::ScheduleArgs),
+    /// Invoke a function via a durable promise
+    Invoke(cli::InvokeArgs),
 }
 
 #[tokio::main]
@@ -57,6 +59,9 @@ async fn main() -> std::process::ExitCode {
         }
         Commands::Schedules(args) => {
             cli::run_schedules(args).await;
+        }
+        Commands::Invoke(args) => {
+            cli::run_invoke(args).await;
         }
         Commands::Serve(args) => {
             let config = match Config::load() {

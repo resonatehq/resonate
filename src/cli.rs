@@ -830,6 +830,107 @@ pub async fn run_tasks(args: TaskArgs) {
     }
 }
 
+// ---- Invoke command ----
+
+#[derive(Args, Debug)]
+pub struct InvokeArgs {
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Promise ID
+    pub id: String,
+
+    /// Function to invoke
+    #[arg(short = 'f', long = "func")]
+    pub func_name: String,
+
+    /// Function argument; can be specified multiple times (JSON value or plain string)
+    #[arg(long = "arg")]
+    pub args: Vec<String>,
+
+    /// Function arguments as a JSON array (alternative to --arg)
+    #[arg(long = "json-args")]
+    pub json_args: Option<String>,
+
+    /// Function version [default: 1]
+    #[arg(long, default_value_t = 1)]
+    pub version: i64,
+
+    /// Promise timeout duration (e.g. 1h, 30s) [default: 1h]
+    #[arg(short = 't', long, default_value = "1h")]
+    pub timeout: String,
+
+    /// Invoke target [default: poll://any@default]
+    #[arg(long, default_value = "poll://any@default")]
+    pub target: String,
+
+    /// Promise delivery delay (e.g. 5s, 1m); omit for no delay
+    #[arg(long)]
+    pub delay: Option<String>,
+}
+
+pub async fn run_invoke(args: InvokeArgs) {
+    let server = &args.global.server;
+    let token = args.global.token.as_deref();
+
+    if args.version <= 0 {
+        error_exit("version must be greater than 0");
+    }
+
+    let delay_ms: i64 = match &args.delay {
+        Some(d) => parse_duration(d).unwrap_or_else(|e| error_exit(&e)),
+        None => 0,
+    };
+    let timeout_ms = parse_duration(&args.timeout).unwrap_or_else(|e| error_exit(&e));
+
+    let invoke_args: Vec<Value> = if let Some(json_str) = &args.json_args {
+        match serde_json::from_str::<Vec<Value>>(json_str) {
+            Ok(v) => v,
+            Err(e) => error_exit(&format!("Failed to parse --json-args: {}", e)),
+        }
+    } else {
+        args.args
+            .iter()
+            .map(|arg| {
+                serde_json::from_str::<Value>(arg).unwrap_or_else(|_| Value::String(arg.clone()))
+            })
+            .collect()
+    };
+
+    let param = json!({
+        "func": args.func_name,
+        "args": invoke_args,
+        "version": args.version,
+    });
+
+    let mut tags = serde_json::Map::new();
+    tags.insert(
+        "resonate:invoke".to_string(),
+        Value::String(args.target.clone()),
+    );
+    if delay_ms > 0 {
+        let deliver_at = now_ms() + delay_ms;
+        tags.insert(
+            "resonate:delay".to_string(),
+            Value::String(deliver_at.to_string()),
+        );
+    }
+
+    let timeout_at = now_ms() + timeout_ms + delay_ms;
+    let data = json!({
+        "id": args.id,
+        "timeoutAt": timeout_at,
+        "param": param,
+        "tags": Value::Object(tags),
+    });
+
+    let result = post(server, "promise.create", token, data).await;
+    match result {
+        Ok(data) => print_data(&data),
+        Err(e) => error_exit(&e),
+    }
+}
+
 // ---- Schedule commands ----
 
 #[derive(Args, Debug)]
