@@ -715,7 +715,7 @@ pub async fn run_tasks(args: TaskArgs) {
             let data = json!({
                 "pid": pid,
                 "ttl": ttl_ms,
-                "action": { "kind": "promise.create", "data": action_data }
+                "action": { "kind": "promise.create", "head": {}, "data": action_data }
             });
             post(server, "task.create", token, data).await
         }
