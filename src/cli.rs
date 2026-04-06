@@ -902,6 +902,10 @@ pub async fn run_invoke(args: InvokeArgs) {
         "args": invoke_args,
         "version": args.version,
     });
+    let param = json!({
+        "headers": {},
+        "data": param.to_string(),
+    });
 
     let mut tags = serde_json::Map::new();
     tags.insert(
