@@ -506,6 +506,11 @@ where
                 let info = ctx.child_info(&child_id, D::NAME, record.timeout_at);
                 let child_ctx = ctx.child(&child_id, D::NAME, record.timeout_at);
 
+                tracing::info!(
+                    target: "resonate::validation",
+                    promise_id = %child_id,
+                    "promise_execution_spawn"
+                );
                 let handle = tokio::spawn(async move {
                     let env = match D::KIND {
                         DurableKind::Function => ExecutionEnv::Function(&info),
@@ -624,6 +629,11 @@ where
                     Err(deserialize_error(record.value.data_or_null()))
                 }
                 PromiseState::Pending => {
+                    tracing::info!(
+                        target: "resonate::validation",
+                        promise_id = %child_id,
+                        "promise_execution_spawn"
+                    );
                     let timeout_at = record.timeout_at;
                     let info = ctx.child_info(&child_id, D::NAME, timeout_at);
                     let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
@@ -632,6 +642,11 @@ where
                         DurableKind::Function => ExecutionEnv::Function(&info),
                         DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
                     };
+                    tracing::info!(
+                        target: "resonate::validation",
+                        promise_id = %child_id,
+                        "promise_execution_await"
+                    );
                     let result = func.execute(env, args).await;
 
                     // Collect remote work (workflows only)
@@ -771,6 +786,11 @@ impl<'ctx, T> RpcTask<'ctx, T> {
                 Ok(RemoteFuture::rejected(record.value.data_or_null()))
             }
             PromiseState::Pending => {
+                tracing::info!(
+                    target: "resonate::validation",
+                    promise_id = %child_id,
+                    "promise_execution_block"
+                );
                 ctx.spawned_remote.lock().await.push(child_id.clone());
                 Ok(RemoteFuture::pending())
             }
@@ -814,6 +834,11 @@ where
                     Err(deserialize_error(record.value.data_or_null()))
                 }
                 PromiseState::Pending => {
+                    tracing::info!(
+                        target: "resonate::validation",
+                        promise_id = %child_id,
+                        "promise_execution_block"
+                    );
                     ctx.spawned_remote.lock().await.push(child_id);
                     Err(Error::Suspended)
                 }

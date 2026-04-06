@@ -50,10 +50,28 @@ impl Effects {
         };
 
         // 3. Send request
+        let invocation = match encoded_req.tags.get("resonate:scope").map(String::as_str) {
+            Some("local") => "run",
+            Some("global") => "rpc",
+            _ => "unknown",
+        };
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %encoded_req.id,
+            invocation,
+            "promise_create_request"
+        );
         let record = self.sender.promise_create(encoded_req).await?;
 
         // 4. Decode response, cache, return
         let decoded = self.codec.decode_promise(record)?;
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %decoded.id,
+            invocation,
+            state = ?decoded.state,
+            "promise_create_response"
+        );
         self.cache.insert(decoded.id.clone(), decoded.clone());
         Ok(decoded)
     }
@@ -87,10 +105,22 @@ impl Effects {
         };
 
         // 4. Send request
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %req.id,
+            state = ?req.state,
+            "promise_settle_request"
+        );
         let record = self.sender.promise_settle(req).await?;
 
         // 5. Decode response, cache, return
         let decoded = self.codec.decode_promise(record)?;
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %decoded.id,
+            state = ?decoded.state,
+            "promise_settle_response"
+        );
         self.cache.insert(decoded.id.clone(), decoded.clone());
         Ok(decoded)
     }

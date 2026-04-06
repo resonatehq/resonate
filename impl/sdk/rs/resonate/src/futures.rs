@@ -53,9 +53,16 @@ impl<T: 'static> IntoFuture for DurableFuture<T> {
             match self.inner {
                 DurableFutureInner::Resolved(value) => Ok(value),
                 DurableFutureInner::Rejected(value) => Err(deserialize_error(value)),
-                DurableFutureInner::Pending { id, receiver } => receiver
-                    .await
-                    .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?,
+                DurableFutureInner::Pending { id, receiver } => {
+                    tracing::info!(
+                        target: "resonate::validation",
+                        promise_id = %id,
+                        "promise_execution_await"
+                    );
+                    receiver
+                        .await
+                        .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?
+                },
             }
         })
     }
