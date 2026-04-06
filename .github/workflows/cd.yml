@@ -53,7 +53,7 @@ jobs:
           echo "value=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Checkout repository at tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.tag.outputs.value }}
 
@@ -121,25 +121,25 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to DockerHub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
@@ -147,7 +147,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -179,18 +179,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -206,7 +206,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -262,16 +262,16 @@ jobs:
           - os: darwin
             arch: x86_64
             arch_verify: x86_64
-            runner: macos-13
+            runner: macos-15-intel
 
           - os: darwin
             arch: aarch64
             arch_verify: arm64
-            runner: macos-14
+            runner: macos-15
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
@@ -344,14 +344,14 @@ jobs:
           TAG: ${{ needs.check-version.outputs.tag }}
         run: |
           echo "Downloading checksums for release: ${TAG}"
-          
+
           # Create temp directory
           mkdir -p checksums
           cd checksums
-          
+
           # Download all sha256 files
           gh release download "${TAG}" -p "*.sha256" -R ${{ github.repository }}
-          
+
           # Display downloaded files
           ls -la
           echo "Downloaded checksums:"
@@ -361,19 +361,19 @@ jobs:
         id: checksums
         run: |
           cd checksums
-          
+
           # Extract sha256 for each platform (first field of each file)
           DARWIN_ARM64=$(grep "resonate_darwin_aarch64.tar.gz" resonate_darwin_aarch64.tar.gz.sha256 | awk '{print $1}')
           DARWIN_X86_64=$(grep "resonate_darwin_x86_64.tar.gz" resonate_darwin_x86_64.tar.gz.sha256 | awk '{print $1}')
           LINUX_ARM64=$(grep "resonate_linux_aarch64.tar.gz" resonate_linux_aarch64.tar.gz.sha256 | awk '{print $1}')
           LINUX_X86_64=$(grep "resonate_linux_x86_64.tar.gz" resonate_linux_x86_64.tar.gz.sha256 | awk '{print $1}')
-          
+
           # Output to GitHub Actions
           echo "darwin_arm64=${DARWIN_ARM64}" >> $GITHUB_OUTPUT
           echo "darwin_x86_64=${DARWIN_X86_64}" >> $GITHUB_OUTPUT
           echo "linux_arm64=${LINUX_ARM64}" >> $GITHUB_OUTPUT
           echo "linux_x86_64=${LINUX_X86_64}" >> $GITHUB_OUTPUT
-          
+
           # Display values
           echo "Extracted checksums:"
           echo "  darwin_aarch64: ${DARWIN_ARM64}"
@@ -382,7 +382,7 @@ jobs:
           echo "  linux_x86_64:   ${LINUX_X86_64}"
 
       - name: Checkout homebrew-tap repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: resonatehq/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -397,24 +397,24 @@ jobs:
           LINUX_X86_64_SHA: ${{ steps.checksums.outputs.linux_x86_64 }}
         run: |
           cd homebrew-tap/Formula
-          
+
           echo "Updating resonate.rb with version ${VERSION}"
-          
+
           # Update version (line 2)
           sed -i "s/version '[0-9.]\+'/version '${VERSION}'/" resonate.rb
-          
+
           # Update darwin aarch64 sha256 (after darwin_aarch64.tar.gz URL)
           sed -i "/resonate_darwin_aarch64\.tar\.gz/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${DARWIN_ARM64_SHA}\"/;}" resonate.rb
-          
+
           # Update darwin x86_64 sha256 (after darwin_x86_64.tar.gz URL)
           sed -i "/resonate_darwin_x86_64\.tar\.gz/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${DARWIN_X86_64_SHA}\"/;}" resonate.rb
-          
+
           # Update linux aarch64 sha256 (after linux_aarch64.tar.gz URL)
           sed -i "/resonate_linux_aarch64\.tar\.gz/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${LINUX_ARM64_SHA}\"/;}" resonate.rb
-          
+
           # Update linux x86_64 sha256 (after linux_x86_64.tar.gz URL)
           sed -i "/resonate_linux_x86_64\.tar\.gz/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${LINUX_X86_64_SHA}\"/;}" resonate.rb
-          
+
           echo "Updated formula:"
           cat resonate.rb
 
@@ -423,27 +423,27 @@ jobs:
           TAG: ${{ needs.check-version.outputs.tag }}
         run: |
           cd homebrew-tap
-          
+
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Create feature branch
           BRANCH="update-resonate-${TAG}"
           git checkout -b "${BRANCH}"
-          
+
           # Commit changes
           git add Formula/resonate.rb
           git commit -m "chore: update resonate to ${TAG}
-          
+
           Automated update from resonatehq/resonate release workflow.
-          
+
           - Version: ${TAG}
           - Release: https://github.com/resonatehq/resonate/releases/tag/${TAG}"
-          
+
           # Push branch
           git push origin "${BRANCH}"
-          
+
           echo "✓ Pushed branch ${BRANCH} to homebrew-tap"
           echo "branch=${BRANCH}" >> $GITHUB_ENV
 
@@ -454,9 +454,9 @@ jobs:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
           cd homebrew-tap
-          
+
           BRANCH="update-resonate-${TAG}"
-          
+
           # Create PR
           gh pr create \
             --repo resonatehq/homebrew-tap \
@@ -464,21 +464,21 @@ jobs:
             --head "${BRANCH}" \
             --title "chore: update resonate to ${TAG}" \
             --body "## Automated Formula Update
-          
+
           Updates Resonate formula to version **${VERSION}** from [release ${TAG}](https://github.com/resonatehq/resonate/releases/tag/${TAG}).
-          
+
           ### Changes
           - Updated version to \`${VERSION}\`
           - Updated sha256 checksums for all platforms (darwin/linux × x86_64/aarch64)
-          
+
           ### Verification
           - [ ] Checksums match published release artifacts
           - [ ] Version matches Cargo.toml in resonate repository
-          
+
           ---
-          
+
           🤖 Generated by [CD workflow](https://github.com/resonatehq/resonate/actions/workflows/cd.yml)"
-          
+
           echo "✓ Created PR for ${TAG}"
 
       - name: Display summary
@@ -527,7 +527,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Verify GitHub Release artifacts
         env:
