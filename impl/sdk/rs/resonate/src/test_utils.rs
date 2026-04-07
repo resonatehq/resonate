@@ -554,23 +554,6 @@ pub fn resolved_promise<T: serde::Serialize>(id: &str, value: T) -> PromiseRecor
     }
 }
 
-/// Helper to create a rejected PromiseRecord (with encoded error value).
-#[allow(dead_code)]
-pub fn rejected_promise(id: &str, message: &str) -> PromiseRecord {
-    let codec = test_codec();
-    let err_val = serde_json::json!({"__type": "error", "message": message});
-    PromiseRecord {
-        id: id.to_string(),
-        state: PromiseState::Rejected,
-        timeout_at: i64::MAX,
-        param: Value::default(),
-        value: codec.encode(&err_val).unwrap(),
-        tags: HashMap::new(),
-        created_at: 0,
-        settled_at: Some(1),
-    }
-}
-
 /// A no-op target resolver for tests (returns target unchanged).
 pub fn test_target_resolver() -> crate::context::TargetResolver {
     std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string())
@@ -587,20 +570,7 @@ pub fn test_context(id: &str, effects: Effects) -> Context {
     )
 }
 
-/// Build a root Context for testing with a specific function name.
-#[allow(dead_code)]
-pub fn test_context_with_func(id: &str, func_name: &str, effects: Effects) -> Context {
-    Context::root(
-        id.to_string(),
-        i64::MAX,
-        func_name.to_string(),
-        effects,
-        test_target_resolver(),
-    )
-}
-
 /// Build a root Context for testing with a custom target resolver.
-#[allow(dead_code)]
 pub fn test_context_with_match(
     id: &str,
     effects: Effects,
@@ -616,7 +586,6 @@ pub fn test_context_with_match(
 }
 
 /// Build a root Context for testing with a specific timeout_at.
-#[allow(dead_code)]
 pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) -> Context {
     Context::root(
         id.to_string(),

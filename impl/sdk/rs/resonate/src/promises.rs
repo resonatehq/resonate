@@ -1,7 +1,6 @@
 use crate::error::{Error, Result};
 use crate::transport::Transport;
-
-const PROTOCOL_VERSION: &str = "2025-01-15";
+use crate::PROTOCOL_VERSION;
 
 /// Sub-client for promise operations.
 #[derive(Clone)]
@@ -30,7 +29,10 @@ impl Promises {
         let resp = self.transport.send(req).await?;
         check_status(&resp)?;
         let rdata = crate::transport::response_data(&resp)?;
-        Ok(rdata.get("promise").cloned().unwrap_or_default())
+        rdata
+            .get("promise")
+            .cloned()
+            .ok_or_else(|| Error::DecodingError("missing 'promise' field in response".into()))
     }
 
     /// Create a promise.
@@ -57,7 +59,10 @@ impl Promises {
 
         let resp = self.transport.send(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
-        Ok(rdata.get("promise").cloned().unwrap_or_default())
+        rdata
+            .get("promise")
+            .cloned()
+            .ok_or_else(|| Error::DecodingError("missing 'promise' field in response".into()))
     }
 
     /// Settle (resolve or reject) a promise.
@@ -82,7 +87,10 @@ impl Promises {
 
         let resp = self.transport.send(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
-        Ok(rdata.get("promise").cloned().unwrap_or_default())
+        rdata
+            .get("promise")
+            .cloned()
+            .ok_or_else(|| Error::DecodingError("missing 'promise' field in response".into()))
     }
 
     /// Register a listener on a promise.
@@ -105,7 +113,10 @@ impl Promises {
 
         let resp = self.transport.send(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
-        Ok(rdata.get("promise").cloned().unwrap_or_default())
+        rdata
+            .get("promise")
+            .cloned()
+            .ok_or_else(|| Error::DecodingError("missing 'promise' field in response".into()))
     }
 }
 

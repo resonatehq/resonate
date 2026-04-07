@@ -22,7 +22,6 @@ pub type Func = Arc<
 
 /// An entry in the function registry.
 pub struct RegistryEntry {
-    pub name: String,
     pub kind: DurableKind,
     pub func: Func,
 }
@@ -51,14 +50,8 @@ impl Registry {
         if self.by_name.contains_key(name) {
             return Err(Error::AlreadyRegistered(name.to_string()));
         }
-        self.by_name.insert(
-            name.to_string(),
-            RegistryEntry {
-                name: name.to_string(),
-                kind,
-                func,
-            },
-        );
+        self.by_name
+            .insert(name.to_string(), RegistryEntry { kind, func });
         Ok(())
     }
 
@@ -121,7 +114,6 @@ mod tests {
             .unwrap();
         let entry = registry.get("foo");
         assert!(entry.is_some());
-        assert_eq!(entry.unwrap().name, "foo");
     }
 
     #[test]
@@ -132,7 +124,6 @@ mod tests {
             .unwrap();
         let entry = registry.get("bar*");
         assert!(entry.is_some());
-        assert_eq!(entry.unwrap().name, "bar*");
     }
 
     #[test]

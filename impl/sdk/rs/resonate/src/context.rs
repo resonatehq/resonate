@@ -108,7 +108,7 @@ impl Context {
 
     /// Generate the next deterministic child ID.
     fn next_id(&self) -> String {
-        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
         format!("{}.{}", self.id, seq)
     }
 
@@ -166,7 +166,7 @@ impl Context {
         args: &impl Serialize,
         timeout: Option<Duration>,
     ) -> Result<PromiseCreateReq> {
-        let mut tags = HashMap::new();
+        let mut tags = HashMap::with_capacity(4);
         tags.insert("resonate:scope".to_string(), "local".to_string());
         tags.insert("resonate:branch".to_string(), self.branch_id.clone());
         tags.insert("resonate:parent".to_string(), self.id.clone());
@@ -193,7 +193,7 @@ impl Context {
         target_override: Option<&str>,
     ) -> Result<PromiseCreateReq> {
         let target = (self.target_resolver)(target_override);
-        let mut tags = HashMap::new();
+        let mut tags = HashMap::with_capacity(5);
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:target".to_string(), target);
         tags.insert("resonate:branch".to_string(), id.to_string());
@@ -251,7 +251,7 @@ impl Context {
     ///
     /// Similar to `remote_create_req` but with `resonate:timer` tag and no target.
     fn sleep_create_req(&self, id: &str, duration: Duration) -> PromiseCreateReq {
-        let mut tags = HashMap::new();
+        let mut tags = HashMap::with_capacity(5);
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:branch".to_string(), id.to_string());
         tags.insert("resonate:parent".to_string(), self.id.clone());
@@ -383,7 +383,7 @@ impl Context {
 impl PromiseRecord {
     /// Map an already-settled record into `Result<T>` (for `IntoFuture` paths).
     /// Returns `None` for `Pending` state — the caller must handle suspension.
-    fn into_result<T: DeserializeOwned>(&self) -> Option<Result<T>> {
+    fn as_result<T: DeserializeOwned>(&self) -> Option<Result<T>> {
         match self.state {
             PromiseState::Resolved => Some(self.value.decode::<T>()),
             PromiseState::Rejected
@@ -397,7 +397,7 @@ impl PromiseRecord {
 
     /// Map an already-settled record into `RemoteFuture<T>` (for `spawn()` paths).
     /// Returns `None` for `Pending` state — the caller must handle suspension.
-    fn into_remote_future<T: DeserializeOwned>(&self) -> Option<Result<RemoteFuture<T>>> {
+    fn as_remote_future<T: DeserializeOwned>(&self) -> Option<Result<RemoteFuture<T>>> {
         match self.state {
             PromiseState::Resolved => Some(self.value.decode::<T>().map(RemoteFuture::resolved)),
             PromiseState::Rejected
@@ -614,7 +614,7 @@ where
             let req = ctx.local_create_req(&child_id, &args, timeout_override)?;
             let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            if let Some(result) = record.into_result::<T>() {
+            if let Some(result) = record.as_result::<T>() {
                 return result;
             }
 
@@ -746,7 +746,7 @@ impl<'ctx, T> RpcTask<'ctx, T> {
 
         let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-        if let Some(result) = record.into_remote_future::<T>() {
+        if let Some(result) = record.as_remote_future::<T>() {
             return result;
         }
 
@@ -781,7 +781,7 @@ where
 
             let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            if let Some(result) = record.into_result::<T>() {
+            if let Some(result) = record.as_result::<T>() {
                 return result;
             }
 
@@ -825,7 +825,7 @@ impl<'ctx> SleepTask<'ctx> {
 
         let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-        if let Some(result) = record.into_remote_future::<()>() {
+        if let Some(result) = record.as_remote_future::<()>() {
             return result;
         }
 
@@ -851,7 +851,7 @@ impl<'ctx> IntoFuture for SleepTask<'ctx> {
 
             let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            if let Some(result) = record.into_result::<()>() {
+            if let Some(result) = record.as_result::<()>() {
                 return result;
             }
 

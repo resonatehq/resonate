@@ -138,7 +138,7 @@ impl Network for HttpNetwork {
                             // SSE format: "data: <json>\n\n"
                             while let Some(pos) = buffer.find("\n\n") {
                                 let event_block = buffer[..pos].to_string();
-                                buffer = buffer[pos + 2..].to_string();
+                                buffer.drain(..pos + 2);
 
                                 // Extract data lines
                                 for line in event_block.lines() {

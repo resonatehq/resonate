@@ -7,8 +7,7 @@ use crate::types::{
     TaskRecord,
 };
 
-/// Protocol version string sent in all requests.
-const PROTOCOL_VERSION: &str = "2025-01-15";
+use crate::PROTOCOL_VERSION;
 
 // ═══════════════════════════════════════════════════════════════════
 //  Public result types

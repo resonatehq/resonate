@@ -18,6 +18,9 @@ pub mod send;
 pub mod transport;
 pub mod types;
 
+/// Protocol version string sent in all requests.
+pub(crate) const PROTOCOL_VERSION: &str = "2025-01-15";
+
 /// Current time in milliseconds since UNIX epoch.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()

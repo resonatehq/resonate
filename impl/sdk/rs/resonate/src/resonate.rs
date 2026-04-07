@@ -25,8 +25,7 @@ use crate::send::{Sender, TaskCreateOutcome};
 use crate::transport::{Message, Transport};
 use crate::types::PromiseState;
 
-/// Protocol version string sent in all requests.
-const PROTOCOL_VERSION: &str = "2025-01-15";
+type Subscriptions = Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>;
 
 /// Configuration for constructing a Resonate instance.
 #[derive(Default)]
@@ -73,7 +72,6 @@ pub struct Resonate {
     // Infrastructure
     codec: Codec,
     network: Arc<dyn Network>,
-    transport: Transport,
 
     // Core execution engine
     core: Arc<Core>,
@@ -83,7 +81,7 @@ pub struct Resonate {
     heartbeat: Arc<dyn Heartbeat>,
 
     // Subscriptions (for awaiting remote promise completion)
-    subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
+    subscriptions: Subscriptions,
 
     // Typed sender for all protocol requests
     sender: Sender,
@@ -225,8 +223,7 @@ impl Resonate {
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 
-        let subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let subscriptions: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
 
         // Start periodic subscription refresh
@@ -243,7 +240,6 @@ impl Resonate {
             id_prefix,
             codec,
             network: network.clone(),
-            transport: transport.clone(),
             core,
             registry,
             heartbeat,
@@ -392,12 +388,12 @@ impl Resonate {
         let param_data = serde_json::json!({
             "func": func_name,
             "args": args,
-            "version": opts.version,
         });
         let encoded_param = self.codec.encode(&param_data)?;
 
         // Build tags
         let mut tags = opts.tags.clone();
+        tags.reserve(5);
         Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
         let action = crate::types::PromiseCreateReq {
@@ -479,7 +475,6 @@ impl Resonate {
         let param_data = serde_json::json!({
             "func": func_name,
             "args": args,
-            "version": opts.version,
         });
         let encoded_param = self.codec.encode(&param_data)?;
 
@@ -567,8 +562,8 @@ impl Resonate {
     }
 
     #[cfg(test)]
-    pub fn transport(&self) -> &Transport {
-        &self.transport
+    pub fn transport(&self) -> Transport {
+        Transport::new(self.network.clone())
     }
 
     #[cfg(test)]
@@ -600,11 +595,7 @@ impl Resonate {
 
     /// Wire up the transport message handler to dispatch Execute and Unblock
     /// messages to the core engine and subscription watchers respectively.
-    fn subscribe_to_messages(
-        transport: &Transport,
-        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
-        core: Arc<Core>,
-    ) {
+    fn subscribe_to_messages(transport: &Transport, subscriptions: Subscriptions, core: Arc<Core>) {
         transport.recv(Box::new(move |msg| {
             let subs = subscriptions.clone();
             let core = core.clone();
@@ -659,7 +650,7 @@ impl Resonate {
     /// Spawn a background task that periodically re-registers listeners for
     /// pending promises, ensuring the server continues to push Unblock messages.
     fn spawn_subscription_refresh(
-        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
+        subscriptions: Subscriptions,
         sender: Sender,
         unicast: String,
         interval_duration: Duration,
@@ -1056,6 +1047,7 @@ impl<'a, Args: Serialize + Send + 'a> IntoFuture for ResScheduleTask<'a, Args> {
 mod tests {
     use super::*;
     use crate::error::Result;
+    use crate::PROTOCOL_VERSION;
     use std::time::Duration;
 
     // ── Test functions ─────────────────────────────────────────────

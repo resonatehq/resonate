@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::error::{Error, Result};
+use crate::types::{PromiseState, TaskState};
 
 /// The Network trait is the transport abstraction. All communication between
 /// Resonate and the server (local or remote) flows through it as JSON strings.
@@ -34,7 +35,7 @@ const PENDING_RETRY_TTL: i64 = 30_000;
 
 struct DurablePromise {
     id: String,
-    state: String,
+    state: PromiseState,
     param: serde_json::Value,
     value: serde_json::Value,
     tags: HashMap<String, String>,
@@ -65,7 +66,7 @@ impl DurablePromise {
 
 struct Task {
     id: String,
-    state: String,
+    state: TaskState,
     version: i64,
     pid: Option<String>,
     ttl: Option<i64>,
@@ -90,18 +91,6 @@ impl Task {
     }
 }
 
-#[allow(dead_code)]
-struct Schedule {
-    id: String,
-    cron: String,
-    promise_id: String,
-    promise_timeout: i64,
-    promise_param: serde_json::Value,
-    promise_tags: HashMap<String, String>,
-    created_at: i64,
-    last_run_at: Option<i64>,
-}
-
 struct PTimeout {
     id: String,
     timeout: i64,
@@ -109,11 +98,6 @@ struct PTimeout {
 struct TTimeout {
     id: String,
     typ: u8,
-    timeout: i64,
-}
-#[allow(dead_code)]
-struct STimeout {
-    id: String,
     timeout: i64,
 }
 
@@ -129,11 +113,9 @@ struct OutgoingMessage {
 struct ServerState {
     promises: HashMap<String, DurablePromise>,
     tasks: HashMap<String, Task>,
-    schedules: HashMap<String, Schedule>,
+    schedules: HashSet<String>,
     p_timeouts: Vec<PTimeout>,
     t_timeouts: Vec<TTimeout>,
-    #[allow(dead_code)]
-    s_timeouts: Vec<STimeout>,
     outgoing: Vec<OutgoingMessage>,
 }
 
@@ -158,10 +140,9 @@ impl ServerState {
         Self {
             promises: HashMap::new(),
             tasks: HashMap::new(),
-            schedules: HashMap::new(),
+            schedules: HashSet::new(),
             p_timeouts: Vec::new(),
             t_timeouts: Vec::new(),
-            s_timeouts: Vec::new(),
             outgoing: Vec::new(),
         }
     }
@@ -238,7 +219,7 @@ impl ServerState {
             "task.fulfill" => self.task_fulfill(now, &corr_id, req),
             "task.suspend" => self.task_suspend(now, &corr_id, req),
             "task.heartbeat" => self.task_heartbeat(now, &corr_id, req),
-            "schedule.create" => self.schedule_create(now, &corr_id, req),
+            "schedule.create" => self.schedule_create(&corr_id, req),
             "schedule.get" => self.schedule_get(&corr_id, req),
             "schedule.delete" => self.schedule_delete(&corr_id, req),
             _ => Err(Error::ServerError {
@@ -257,7 +238,7 @@ impl ServerState {
         for pt in &self.p_timeouts {
             if now >= pt.timeout {
                 if let Some(p) = self.promises.get(&pt.id) {
-                    if p.state == "pending" {
+                    if p.state == PromiseState::Pending {
                         promise_settles.push(pt.id.clone());
                     }
                 }
@@ -269,13 +250,13 @@ impl ServerState {
             }
             if tt.typ == 1 {
                 if let Some(t) = self.tasks.get(&tt.id) {
-                    if t.state == "acquired" {
+                    if t.state == TaskState::Acquired {
                         task_releases.push((tt.id.clone(), t.version));
                     }
                 }
             } else if tt.typ == 0 {
                 if let Some(t) = self.tasks.get(&tt.id) {
-                    if t.state == "pending" {
+                    if t.state == TaskState::Pending {
                         task_retries.push((tt.id.clone(), t.version));
                     }
                 }
@@ -285,7 +266,7 @@ impl ServerState {
         // Phase 1: Settle promises
         for id in &promise_settles {
             if let Some(p) = self.promises.get(id) {
-                if p.state != "pending" {
+                if p.state != PromiseState::Pending {
                     continue;
                 }
                 let state = self.timeout_state(&p.tags.clone());
@@ -311,10 +292,10 @@ impl ServerState {
         // Phase 4: Release expired leases
         for (id, version) in &task_releases {
             if let Some(t) = self.tasks.get(id) {
-                if t.state == "acquired" && t.version == *version {
+                if t.state == TaskState::Acquired && t.version == *version {
                     let new_version = t.version + 1;
                     if let Some(t) = self.tasks.get_mut(id) {
-                        t.state = "pending".to_string();
+                        t.state = TaskState::Pending;
                         t.version = new_version;
                         t.pid = None;
                         t.ttl = None;
@@ -332,7 +313,7 @@ impl ServerState {
         // Phase 5: Retry pending tasks
         for (id, _version) in &task_retries {
             if let Some(t) = self.tasks.get(id) {
-                if t.state == "pending" {
+                if t.state == TaskState::Pending {
                     let v = t.version;
                     self.set_t_timeout(id, 0, now + PENDING_RETRY_TTL);
                     if let Some(p) = self.promises.get(id) {
@@ -416,7 +397,7 @@ impl ServerState {
 
         let promise = DurablePromise {
             id: id.to_string(),
-            state: "pending".to_string(),
+            state: PromiseState::Pending,
             param,
             value: serde_json::Value::Null,
             tags: tags.clone(),
@@ -439,7 +420,7 @@ impl ServerState {
 
             let task = Task {
                 id: id.to_string(),
-                state: "pending".to_string(),
+                state: TaskState::Pending,
                 version: 0,
                 pid: None,
                 ttl: None,
@@ -474,10 +455,10 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?;
-        let settle_state = req
+        let settle_state: PromiseState = req
             .get("state")
-            .and_then(|v| v.as_str())
-            .unwrap_or("resolved");
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(PromiseState::Resolved);
         let value = req.get("value").cloned().unwrap_or(serde_json::Value::Null);
 
         match self.promises.get(id) {
@@ -485,13 +466,13 @@ impl ServerState {
                 "kind": "promise.settle", "corrId": corr_id, "status": 404,
                 "error": format!("promise {} not found", id),
             })),
-            Some(p) if p.state != "pending" => Ok(serde_json::json!({
+            Some(p) if p.state != PromiseState::Pending => Ok(serde_json::json!({
                 "kind": "promise.settle", "corrId": corr_id, "status": 200,
                 "promise": p.to_record(),
             })),
             Some(_) => {
                 if let Some(p) = self.promises.get_mut(id) {
-                    p.state = settle_state.to_string();
+                    p.state = settle_state;
                     p.value = value;
                     p.settled_at = Some(now);
                 }
@@ -518,7 +499,7 @@ impl ServerState {
 
         match self.promises.get_mut(awaited) {
             Some(p) => {
-                if p.state == "pending" {
+                if p.state == PromiseState::Pending {
                     p.subscribers.insert(address.to_string());
                 }
                 Ok(serde_json::json!({
@@ -565,11 +546,11 @@ impl ServerState {
                 .map(|p| p.to_record())
                 .unwrap_or(serde_json::Value::Null);
 
-            match task_state.as_str() {
-                "pending" => {
+            match task_state {
+                TaskState::Pending => {
                     let preload = self.preload(promise_id);
                     if let Some(t) = self.tasks.get_mut(promise_id) {
-                        t.state = "acquired".to_string();
+                        t.state = TaskState::Acquired;
                         t.pid = Some(pid.to_string());
                         t.ttl = Some(ttl);
                         t.resumes.clear();
@@ -581,7 +562,7 @@ impl ServerState {
                         "task": task_record, "promise": promise_record, "preload": preload,
                     }));
                 }
-                "fulfilled" => {
+                TaskState::Fulfilled => {
                     let task_record = existing_task.to_record();
                     let preload = self.preload(promise_id);
                     return Ok(serde_json::json!({
@@ -635,7 +616,7 @@ impl ServerState {
             self.promises.insert(promise_id.to_string(), promise);
             let task = Task {
                 id: promise_id.to_string(),
-                state: "fulfilled".to_string(),
+                state: TaskState::Fulfilled,
                 version: 0,
                 pid: None,
                 ttl: None,
@@ -652,7 +633,7 @@ impl ServerState {
         // Create promise + task (acquired)
         let promise = DurablePromise {
             id: promise_id.to_string(),
-            state: "pending".to_string(),
+            state: PromiseState::Pending,
             param,
             value: serde_json::Value::Null,
             tags,
@@ -668,7 +649,7 @@ impl ServerState {
 
         let task = Task {
             id: promise_id.to_string(),
-            state: "acquired".to_string(),
+            state: TaskState::Acquired,
             version: 0,
             pid: Some(pid.to_string()),
             ttl: Some(ttl),
@@ -708,14 +689,14 @@ impl ServerState {
                 "kind": "task.acquire", "corrId": corr_id, "status": 404,
                 "error": format!("task {} not found", task_id),
             })),
-            Some(t) if t.state != "pending" => Ok(serde_json::json!({
+            Some(t) if t.state != TaskState::Pending => Ok(serde_json::json!({
                 "kind": "task.acquire", "corrId": corr_id, "status": 409,
-                "error": format!("task not in pending state (state: {})", t.state),
+                "error": format!("task not in pending state (state: {:?})", t.state),
             })),
             Some(_) => {
                 let preload = self.preload(task_id);
                 if let Some(t) = self.tasks.get_mut(task_id) {
-                    t.state = "acquired".to_string();
+                    t.state = TaskState::Acquired;
                     t.pid = Some(pid.to_string());
                     t.ttl = Some(ttl);
                     t.resumes.clear();
@@ -747,13 +728,13 @@ impl ServerState {
             None => Ok(serde_json::json!({
                 "kind": "task.release", "corrId": corr_id, "status": 404,
             })),
-            Some(t) if t.state != "acquired" => Ok(serde_json::json!({
+            Some(t) if t.state != TaskState::Acquired => Ok(serde_json::json!({
                 "kind": "task.release", "corrId": corr_id, "status": 409,
             })),
             Some(t) => {
                 let new_version = t.version + 1;
                 if let Some(t) = self.tasks.get_mut(task_id) {
-                    t.state = "pending".to_string();
+                    t.state = TaskState::Pending;
                     t.version = new_version;
                     t.pid = None;
                     t.ttl = None;
@@ -785,7 +766,7 @@ impl ServerState {
                     "kind": "task.fulfill", "corrId": corr_id, "status": 404,
                 }))
             }
-            Some(t) if t.state != "acquired" => {
+            Some(t) if t.state != TaskState::Acquired => {
                 return Ok(serde_json::json!({
                     "kind": "task.fulfill", "corrId": corr_id, "status": 409,
                 }))
@@ -797,10 +778,10 @@ impl ServerState {
         let action_raw = req.get("action").unwrap_or(&serde_json::Value::Null);
         let settle = extract_action_data(action_raw);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
-        let settle_state = settle
+        let settle_state: PromiseState = settle
             .get("state")
-            .and_then(|v| v.as_str())
-            .unwrap_or("resolved");
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or(PromiseState::Resolved);
         let value = settle
             .get("value")
             .cloned()
@@ -810,10 +791,10 @@ impl ServerState {
         let was_pending = self
             .promises
             .get(promise_id)
-            .is_some_and(|p| p.state == "pending");
+            .is_some_and(|p| p.state == PromiseState::Pending);
         if was_pending {
             if let Some(p) = self.promises.get_mut(promise_id) {
-                p.state = settle_state.to_string();
+                p.state = settle_state;
                 p.value = value;
                 p.settled_at = Some(now);
             }
@@ -850,7 +831,7 @@ impl ServerState {
                     "kind": "task.suspend", "corrId": corr_id, "status": 404,
                 }))
             }
-            Some(t) if t.state != "acquired" => {
+            Some(t) if t.state != TaskState::Acquired => {
                 return Ok(serde_json::json!({
                     "kind": "task.suspend", "corrId": corr_id, "status": 409,
                 }))
@@ -897,7 +878,7 @@ impl ServerState {
         let mut any_settled = false;
         for awaited_id in &callbacks {
             match self.promises.get_mut(awaited_id) {
-                Some(p) if p.state == "pending" => {
+                Some(p) if p.state == PromiseState::Pending => {
                     p.awaiters.insert(task_id.to_string());
                 }
                 Some(_) => {
@@ -920,7 +901,7 @@ impl ServerState {
 
         // Actually suspend
         if let Some(t) = self.tasks.get_mut(task_id) {
-            t.state = "suspended".to_string();
+            t.state = TaskState::Suspended;
             t.pid = None;
             t.ttl = None;
             t.resumes.clear();
@@ -945,7 +926,7 @@ impl ServerState {
                 let id = require_str(task_ref, "id")?;
                 let version = task_ref.get("version").and_then(|v| v.as_i64());
                 if let Some(t) = self.tasks.get(id) {
-                    if t.state == "acquired"
+                    if t.state == TaskState::Acquired
                         && t.pid.as_deref() == Some(pid)
                         && version.is_none_or(|v| v == t.version)
                     {
@@ -967,37 +948,16 @@ impl ServerState {
 
     fn schedule_create(
         &mut self,
-        now: i64,
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?;
-        if self.schedules.contains_key(id) {
+        if self.schedules.contains(id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,
             }));
         }
-        let schedule = Schedule {
-            id: id.to_string(),
-            cron: require_str(req, "cron")?.to_string(),
-            promise_id: req
-                .get("promiseId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            promise_timeout: req
-                .get("promiseTimeout")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(60_000),
-            promise_param: req
-                .get("promiseParam")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-            promise_tags: extract_tags(req),
-            created_at: now,
-            last_run_at: None,
-        };
-        self.schedules.insert(id.to_string(), schedule);
+        self.schedules.insert(id.to_string());
         Ok(serde_json::json!({
             "kind": "schedule.create", "corrId": corr_id, "status": 201,
         }))
@@ -1009,7 +969,7 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?;
-        if self.schedules.contains_key(id) {
+        if self.schedules.contains(id) {
             Ok(serde_json::json!({
                 "kind": "schedule.get", "corrId": corr_id, "status": 200,
             }))
@@ -1041,7 +1001,7 @@ impl ServerState {
         let should_timeout = self
             .promises
             .get(id)
-            .is_some_and(|p| p.state == "pending" && now >= p.timeout_at);
+            .is_some_and(|p| p.state == PromiseState::Pending && now >= p.timeout_at);
         if !should_timeout {
             return;
         }
@@ -1074,7 +1034,7 @@ impl ServerState {
                         promise_id.to_string(),
                         Task {
                             id: promise_id.to_string(),
-                            state: "fulfilled".to_string(),
+                            state: TaskState::Fulfilled,
                             version: 0,
                             pid: None,
                             ttl: None,
@@ -1083,11 +1043,11 @@ impl ServerState {
                     );
                 }
             }
-            Some(t) if t.state == "fulfilled" => {}
+            Some(t) if t.state == TaskState::Fulfilled => {}
             Some(_) => {
                 // Fulfill the task and remove it as an awaiter from all promises
                 if let Some(t) = self.tasks.get_mut(promise_id) {
-                    t.state = "fulfilled".to_string();
+                    t.state = TaskState::Fulfilled;
                     t.pid = None;
                     t.ttl = None;
                     t.resumes.clear();
@@ -1113,11 +1073,11 @@ impl ServerState {
 
         for awaiter_id in &awaiter_ids {
             if let Some(task) = self.tasks.get(awaiter_id) {
-                match task.state.as_str() {
-                    "suspended" => {
+                match task.state {
+                    TaskState::Suspended => {
                         let new_version = task.version + 1;
                         if let Some(t) = self.tasks.get_mut(awaiter_id) {
-                            t.state = "pending".to_string();
+                            t.state = TaskState::Pending;
                             t.version = new_version;
                             t.resumes = HashSet::from([promise_id.to_string()]);
                         }
@@ -1129,7 +1089,7 @@ impl ServerState {
                             }
                         }
                     }
-                    "pending" | "acquired" | "halted" => {
+                    TaskState::Pending | TaskState::Acquired | TaskState::Halted => {
                         if let Some(t) = self.tasks.get_mut(awaiter_id) {
                             t.resumes.insert(promise_id.to_string());
                         }
@@ -1188,11 +1148,11 @@ impl ServerState {
             .collect()
     }
 
-    fn timeout_state(&self, tags: &HashMap<String, String>) -> String {
+    fn timeout_state(&self, tags: &HashMap<String, String>) -> PromiseState {
         if tags.get("resonate:timer").is_some_and(|v| v == "true") {
-            "resolved".to_string()
+            PromiseState::Resolved
         } else {
-            "rejected_timedout".to_string()
+            PromiseState::RejectedTimedout
         }
     }
 
@@ -1416,7 +1376,7 @@ fn extract_tags(v: &serde_json::Value) -> HashMap<String, String> {
 // PROTOCOL ENVELOPE HELPERS
 // =============================================================================
 
-const PROTOCOL_VERSION: &str = "2025-01-15";
+use crate::PROTOCOL_VERSION;
 
 /// Unwrap a protocol envelope request into the flat format expected by ServerState.
 /// If the request is already in flat format, return it as-is.
@@ -1615,7 +1575,7 @@ mod tests {
         // The task should exist in pending state
         let state = net.state.lock().await;
         let task = state.tasks.get("rpc-1").expect("task should exist");
-        assert_eq!(task.state, "pending");
+        assert_eq!(task.state, TaskState::Pending);
         assert_eq!(task.id, "rpc-1");
     }
 
@@ -1671,7 +1631,10 @@ mod tests {
         assert_eq!(status(&resp), 200);
 
         let state = net.state.lock().await;
-        assert_eq!(state.tasks.get("parent").unwrap().state, "suspended");
+        assert_eq!(
+            state.tasks.get("parent").unwrap().state,
+            TaskState::Suspended
+        );
         assert!(state
             .promises
             .get("child-1")
@@ -1755,7 +1718,7 @@ mod tests {
         // Parent should be resumed (pending, version incremented)
         let state = net.state.lock().await;
         let parent_task = state.tasks.get("parent").unwrap();
-        assert_eq!(parent_task.state, "pending");
+        assert_eq!(parent_task.state, TaskState::Pending);
         assert_eq!(parent_task.version, 1);
     }
 
