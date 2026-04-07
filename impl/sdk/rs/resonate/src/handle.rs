@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 use tokio::sync::watch;
@@ -11,7 +12,7 @@ use crate::types::PromiseState;
 /// Allows non-blocking observation and eventual awaiting of a durable promise.
 pub struct ResonateHandle<T> {
     pub id: String,
-    rx: watch::Receiver<Option<PromiseResult>>,
+    rx: watch::Receiver<Option<Arc<PromiseResult>>>,
     codec: Codec,
     _phantom: PhantomData<T>,
 }
@@ -33,7 +34,7 @@ pub(crate) struct PromiseResult {
 impl<T: DeserializeOwned> ResonateHandle<T> {
     pub(crate) fn new(
         id: String,
-        rx: watch::Receiver<Option<PromiseResult>>,
+        rx: watch::Receiver<Option<Arc<PromiseResult>>>,
         codec: Codec,
     ) -> Self {
         Self {
@@ -53,7 +54,7 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
             .map_err(|_| Error::Application {
                 message: "promise channel closed".into(),
             })?;
-        let result = guard.as_ref().unwrap().clone();
+        let result = Arc::clone(guard.as_ref().unwrap());
         drop(guard);
         self.decode_result(&result)
     }

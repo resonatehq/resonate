@@ -83,7 +83,7 @@ pub struct Resonate {
     heartbeat: Arc<dyn Heartbeat>,
 
     // Subscriptions (for awaiting remote promise completion)
-    subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+    subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
 
     // Typed sender for all protocol requests
     sender: Sender,
@@ -234,7 +234,7 @@ impl Resonate {
         let promises = Promises::new(transport.clone());
         let schedules = Schedules::new(transport.clone());
 
-        let subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>> =
+        let subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
 
@@ -611,7 +611,7 @@ impl Resonate {
     /// messages to the core engine and subscription watchers respectively.
     fn subscribe_to_messages(
         transport: &Transport,
-        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
         core: Arc<Core>,
     ) {
         transport.recv(Box::new(move |msg| {
@@ -645,10 +645,10 @@ impl Resonate {
                         .unwrap_or("pending");
                     let value = promise.get("value").cloned().unwrap_or_default();
 
-                    let result = PromiseResult {
+                    let result = Arc::new(PromiseResult {
                         state: Resonate::parse_promise_state(state_str),
                         value,
-                    };
+                    });
 
                     let subs = subs.clone();
                     tokio::spawn(async move {
@@ -668,7 +668,7 @@ impl Resonate {
     /// Spawn a background task that periodically re-registers listeners for
     /// pending promises, ensuring the server continues to push Unblock messages.
     fn spawn_subscription_refresh(
-        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+        subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<Arc<PromiseResult>>>>>>,
         sender: Sender,
         unicast: String,
         interval_duration: Duration,
@@ -691,10 +691,10 @@ impl Resonate {
                     match sender.promise_register_listener(&id, &unicast).await {
                         Ok(promise) => {
                             if promise.state != PromiseState::Pending {
-                                let result = PromiseResult {
+                                let result = Arc::new(PromiseResult {
                                     state: promise.state,
                                     value: Resonate::value_to_wire_json(&promise.value),
-                                };
+                                });
                                 let map = subscriptions.lock().await;
                                 if let Some(tx) = map.get(&id) {
                                     let _ = tx.send(Some(result));
@@ -740,10 +740,10 @@ impl Resonate {
         let settled = if promise.state == PromiseState::Pending {
             None
         } else {
-            Some(PromiseResult {
+            Some(Arc::new(PromiseResult {
                 state: promise.state.clone(),
                 value: wire_value,
-            })
+            }))
         };
         let is_pending = promise.state == PromiseState::Pending;
 
@@ -768,10 +768,10 @@ impl Resonate {
             let resp_promise = self.register_listener(&id).await?;
             if resp_promise.state != PromiseState::Pending {
                 // Settled between promise creation and listener registration.
-                let result = PromiseResult {
+                let result = Arc::new(PromiseResult {
                     state: resp_promise.state,
                     value: Self::value_to_wire_json(&resp_promise.value),
-                };
+                });
                 let subs = self.subscriptions.lock().await;
                 if let Some(tx) = subs.get(&id) {
                     let _ = tx.send(Some(result));
@@ -1953,10 +1953,10 @@ mod tests {
         {
             let subs = r.subscriptions.lock().await;
             if let Some(tx) = subs.get("multi-handle") {
-                let _ = tx.send(Some(PromiseResult {
+                let _ = tx.send(Some(Arc::new(PromiseResult {
                     state: PromiseState::Resolved,
                     value: serde_json::json!(null),
-                }));
+                })));
             }
         }
 
@@ -1975,10 +1975,10 @@ mod tests {
         // Use null value to avoid codec encoding issues
         {
             let mut subs = r.subscriptions.lock().await;
-            let (tx, _) = watch::channel(Some(PromiseResult {
+            let (tx, _) = watch::channel(Some(Arc::new(PromiseResult {
                 state: PromiseState::Resolved,
                 value: serde_json::json!(null),
-            }));
+            })));
             subs.insert("early-unblock".to_string(), tx);
         }
 
@@ -2024,10 +2024,10 @@ mod tests {
         {
             let subs = r.subscriptions.lock().await;
             if let Some(tx) = subs.get("done-test") {
-                let _ = tx.send(Some(PromiseResult {
+                let _ = tx.send(Some(Arc::new(PromiseResult {
                     state: PromiseState::Resolved,
                     value: serde_json::json!({"data": "done"}),
-                }));
+                })));
             }
         }
 
