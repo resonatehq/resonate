@@ -1,5 +1,4 @@
 use dashmap::DashMap;
-use std::sync::Arc;
 
 use crate::codec::Codec;
 use crate::error::Result;
@@ -12,7 +11,7 @@ use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseSta
 pub struct Effects {
     sender: Sender,
     codec: Codec,
-    cache: Arc<DashMap<String, PromiseRecord>>,
+    cache: DashMap<String, PromiseRecord>,
 }
 
 impl Effects {
@@ -28,7 +27,7 @@ impl Effects {
         Self {
             sender,
             codec,
-            cache: Arc::new(map),
+            cache: map,
         }
     }
 
@@ -49,7 +48,7 @@ impl Effects {
             tags: req.tags.clone(),
         };
 
-        // 3. Send request
+        // validation tracing
         let invocation = match encoded_req.tags.get("resonate:scope").map(String::as_str) {
             Some("local") => "run",
             Some("global") => "rpc",
@@ -61,10 +60,14 @@ impl Effects {
             invocation,
             "promise_create_request"
         );
+
+        // 3. Send request
         let record = self.sender.promise_create(encoded_req).await?;
 
         // 4. Decode response, cache, return
         let decoded = self.codec.decode_promise(record)?;
+        self.cache.insert(decoded.id.clone(), decoded.clone());
+
         tracing::info!(
             target: "resonate::validation",
             promise_id = %decoded.id,
@@ -72,7 +75,6 @@ impl Effects {
             state = ?decoded.state,
             "promise_create_response"
         );
-        self.cache.insert(decoded.id.clone(), decoded.clone());
         Ok(decoded)
     }
 
