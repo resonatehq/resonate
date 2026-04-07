@@ -230,13 +230,13 @@ impl Context {
     /// # Usage patterns
     /// ```ignore
     /// // Sequential (common case)
-    /// let result: i32 = ctx.run(MyFunc, args).await?;
+    /// let result: i32 = ctx.run(my_func, args).await?;
     ///
     /// // With timeout
-    /// let result: i32 = ctx.run(MyFunc, args).timeout(Duration::from_secs(30)).await?;
+    /// let result: i32 = ctx.run(my_func, args).timeout(Duration::from_secs(30)).await?;
     ///
     /// // Access promise ID before execution
-    /// let task = ctx.run(MyFunc, args);
+    /// let task = ctx.run(my_func, args);
     /// let id = task.id().await?;
     /// let result = task.await?;
     ///
@@ -275,11 +275,7 @@ impl Context {
     /// Build a sleep (timer) create request.
     ///
     /// Similar to `remote_create_req` but with `resonate:timer` tag and no target.
-    fn sleep_create_req(
-        &self,
-        id: &str,
-        duration: Duration,
-    ) -> PromiseCreateReq {
+    fn sleep_create_req(&self, id: &str, duration: Duration) -> PromiseCreateReq {
         let mut tags = HashMap::new();
         tags.insert("resonate:scope".to_string(), "global".to_string());
         tags.insert("resonate:branch".to_string(), id.to_string());
@@ -365,6 +361,19 @@ impl Context {
         std::mem::take(&mut *todos)
     }
 
+    // ── Shared helpers for task state-machine logic ─────────────────
+
+    /// Check a deferred serialization error, returning `Err` if present.
+    fn check_serialization_error(err: &Option<String>) -> Result<()> {
+        if let Some(ref e) = err {
+            return Err(Error::EncodingError(format!(
+                "failed to serialize args: {}",
+                e
+            )));
+        }
+        Ok(())
+    }
+
     /// Flush all eagerly spawned local tasks.
     /// Awaits every spawned task's JoinHandle, collects remote_todos from
     /// any that suspended.
@@ -394,6 +403,53 @@ impl Context {
 
         remote_todos
     }
+}
+
+impl PromiseRecord {
+    /// Map an already-settled record into `Result<T>` (for `IntoFuture` paths).
+    /// Returns `None` for `Pending` state — the caller must handle suspension.
+    fn into_result<T: DeserializeOwned>(&self) -> Option<Result<T>> {
+        match self.state {
+            PromiseState::Resolved => {
+                Some(serde_json::from_value(self.value.data_or_null()).map_err(Into::into))
+            }
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => {
+                Some(Err(deserialize_error(self.value.data_or_null())))
+            }
+            PromiseState::Pending => None,
+        }
+    }
+
+    /// Map an already-settled record into `RemoteFuture<T>` (for `spawn()` paths).
+    /// Returns `None` for `Pending` state — the caller must handle suspension.
+    fn into_remote_future<T: DeserializeOwned>(&self) -> Option<Result<RemoteFuture<T>>> {
+        match self.state {
+            PromiseState::Resolved => {
+                let val: std::result::Result<T, _> =
+                    serde_json::from_value(self.value.data_or_null());
+                Some(val.map(RemoteFuture::resolved).map_err(Into::into))
+            }
+            PromiseState::Rejected
+            | PromiseState::RejectedCanceled
+            | PromiseState::RejectedTimedout => {
+                Some(Ok(RemoteFuture::rejected(self.value.data_or_null())))
+            }
+            PromiseState::Pending => None,
+        }
+    }
+}
+
+/// Consume a `OnceCell<PromiseRecord>`, ensuring the promise has been
+/// created first. Returns the owned record.
+async fn consume_promise_record(
+    cell: tokio::sync::OnceCell<PromiseRecord>,
+    req: PromiseCreateReq,
+    effects: &Effects,
+) -> Result<PromiseRecord> {
+    cell.get_or_try_init(|| effects.create_promise(req)).await?;
+    Ok(cell.into_inner().unwrap())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -441,15 +497,7 @@ where
 
     /// Ensure the durable promise exists (lazy creation via OnceCell).
     async fn ensure_created(&self) -> Result<&PromiseRecord> {
-        if let Some(record) = self.record.get() {
-            return Ok(record);
-        }
-        if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!(
-                "failed to serialize args: {}",
-                err
-            )));
-        }
+        Context::check_serialization_error(&self.serialization_error)?;
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
             .await
@@ -466,12 +514,7 @@ where
         Args: Serialize + DeserializeOwned + Send + 'static,
         T: Serialize + DeserializeOwned + Send + 'static,
     {
-        if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!(
-                "failed to serialize args: {}",
-                err
-            )));
-        }
+        Context::check_serialization_error(&self.serialization_error)?;
         let RunTask {
             child_id,
             ctx,
@@ -482,10 +525,7 @@ where
             ..
         } = self;
 
-        // Eagerly create the promise
-        cell.get_or_try_init(|| ctx.effects.create_promise(req))
-            .await?;
-        let record = cell.into_inner().unwrap();
+        let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
         match record.state {
             PromiseState::Resolved => {
@@ -600,12 +640,7 @@ where
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
-            if let Some(ref err) = self.serialization_error {
-                return Err(Error::EncodingError(format!(
-                    "failed to serialize args: {}",
-                    err
-                )));
-            }
+            Context::check_serialization_error(&self.serialization_error)?;
             let RunTask {
                 child_id,
                 ctx,
@@ -616,69 +651,61 @@ where
                 ..
             } = self;
 
-            // Ensure promise is created, then take ownership
-            cell.get_or_try_init(|| ctx.effects.create_promise(req))
-                .await?;
-            let record = cell.into_inner().unwrap();
+            let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            match record.state {
-                PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-                PromiseState::Rejected
-                | PromiseState::RejectedCanceled
-                | PromiseState::RejectedTimedout => {
-                    Err(deserialize_error(record.value.data_or_null()))
-                }
-                PromiseState::Pending => {
-                    tracing::info!(
-                        target: "resonate::validation",
-                        promise_id = %child_id,
-                        "promise_execution_spawn"
-                    );
-                    let timeout_at = record.timeout_at;
-                    let info = ctx.child_info(&child_id, D::NAME, timeout_at);
-                    let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
-
-                    let env = match D::KIND {
-                        DurableKind::Function => ExecutionEnv::Function(&info),
-                        DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
-                    };
-                    tracing::info!(
-                        target: "resonate::validation",
-                        promise_id = %child_id,
-                        "promise_execution_await"
-                    );
-                    let result = func.execute(env, args).await;
-
-                    // Collect remote work (workflows only)
-                    let mut child_remote = Vec::new();
-                    if D::KIND == DurableKind::Workflow {
-                        let flush_remote = child_ctx.flush_local_work().await;
-                        child_remote = child_ctx.take_remote_todos().await;
-                        child_remote.extend(flush_remote);
-                    }
-
-                    // Explicit suspension handling: propagate Suspended directly
-                    // instead of letting it fall through as an application error.
-                    if matches!(&result, Err(Error::Suspended)) {
-                        debug_assert!(
-                            !child_remote.is_empty(),
-                            "Suspended error but no remote todos — this is a bug"
-                        );
-                        ctx.spawned_remote.lock().await.extend(child_remote);
-                        return Err(Error::Suspended);
-                    }
-
-                    // Spawned sub-workflows may have remote todos even if the
-                    // main function completed successfully.
-                    if child_remote.is_empty() {
-                        let json_result = Context::to_json_result(&result);
-                        ctx.effects.settle_promise(&child_id, &json_result).await?;
-                    } else {
-                        ctx.spawned_remote.lock().await.extend(child_remote);
-                    }
-                    result
-                }
+            if let Some(result) = record.into_result::<T>() {
+                return result;
             }
+
+            // Pending — execute locally
+            tracing::info!(
+                target: "resonate::validation",
+                promise_id = %child_id,
+                "promise_execution_spawn"
+            );
+            let timeout_at = record.timeout_at;
+            let info = ctx.child_info(&child_id, D::NAME, timeout_at);
+            let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
+
+            let env = match D::KIND {
+                DurableKind::Function => ExecutionEnv::Function(&info),
+                DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
+            };
+            tracing::info!(
+                target: "resonate::validation",
+                promise_id = %child_id,
+                "promise_execution_await"
+            );
+            let result = func.execute(env, args).await;
+
+            // Collect remote work (workflows only)
+            let mut child_remote = Vec::new();
+            if D::KIND == DurableKind::Workflow {
+                let flush_remote = child_ctx.flush_local_work().await;
+                child_remote = child_ctx.take_remote_todos().await;
+                child_remote.extend(flush_remote);
+            }
+
+            // Explicit suspension handling: propagate Suspended directly
+            // instead of letting it fall through as an application error.
+            if matches!(&result, Err(Error::Suspended)) {
+                debug_assert!(
+                    !child_remote.is_empty(),
+                    "Suspended error but no remote todos — this is a bug"
+                );
+                ctx.spawned_remote.lock().await.extend(child_remote);
+                return Err(Error::Suspended);
+            }
+
+            // Spawned sub-workflows may have remote todos even if the
+            // main function completed successfully.
+            if child_remote.is_empty() {
+                let json_result = Context::to_json_result(&result);
+                ctx.effects.settle_promise(&child_id, &json_result).await?;
+            } else {
+                ctx.spawned_remote.lock().await.extend(child_remote);
+            }
+            result
         })
     }
 }
@@ -737,15 +764,7 @@ impl<'ctx, T> RpcTask<'ctx, T> {
 
     /// Ensure the durable promise exists (lazy creation via OnceCell).
     async fn ensure_created(&self) -> Result<&PromiseRecord> {
-        if let Some(record) = self.record.get() {
-            return Ok(record);
-        }
-        if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!(
-                "failed to serialize args: {}",
-                err
-            )));
-        }
+        Context::check_serialization_error(&self.serialization_error)?;
         self.record
             .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
             .await
@@ -756,12 +775,7 @@ impl<'ctx, T> RpcTask<'ctx, T> {
     where
         T: DeserializeOwned,
     {
-        if let Some(ref err) = self.serialization_error {
-            return Err(Error::EncodingError(format!(
-                "failed to serialize args: {}",
-                err
-            )));
-        }
+        Context::check_serialization_error(&self.serialization_error)?;
         let RpcTask {
             child_id,
             ctx,
@@ -770,31 +784,20 @@ impl<'ctx, T> RpcTask<'ctx, T> {
             ..
         } = self;
 
-        // Eagerly create the promise
-        cell.get_or_try_init(|| ctx.effects.create_promise(req))
-            .await?;
-        let record = cell.into_inner().unwrap();
+        let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-        match record.state {
-            PromiseState::Resolved => {
-                let val: T = serde_json::from_value(record.value.data_or_null())?;
-                Ok(RemoteFuture::resolved(val))
-            }
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => {
-                Ok(RemoteFuture::rejected(record.value.data_or_null()))
-            }
-            PromiseState::Pending => {
-                tracing::info!(
-                    target: "resonate::validation",
-                    promise_id = %child_id,
-                    "promise_execution_block"
-                );
-                ctx.spawned_remote.lock().await.push(child_id.clone());
-                Ok(RemoteFuture::pending())
-            }
+        if let Some(result) = record.into_remote_future::<T>() {
+            return result;
         }
+
+        // Pending
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %child_id,
+            "promise_execution_block"
+        );
+        ctx.spawned_remote.lock().await.push(child_id.clone());
+        Ok(RemoteFuture::pending())
     }
 }
 
@@ -807,12 +810,7 @@ where
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
-            if let Some(ref err) = self.serialization_error {
-                return Err(Error::EncodingError(format!(
-                    "failed to serialize args: {}",
-                    err
-                )));
-            }
+            Context::check_serialization_error(&self.serialization_error)?;
             let RpcTask {
                 child_id,
                 ctx,
@@ -821,28 +819,20 @@ where
                 ..
             } = self;
 
-            // Ensure promise is created, then take ownership
-            cell.get_or_try_init(|| ctx.effects.create_promise(req))
-                .await?;
-            let record = cell.into_inner().unwrap();
+            let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            match record.state {
-                PromiseState::Resolved => Ok(serde_json::from_value(record.value.data_or_null())?),
-                PromiseState::Rejected
-                | PromiseState::RejectedCanceled
-                | PromiseState::RejectedTimedout => {
-                    Err(deserialize_error(record.value.data_or_null()))
-                }
-                PromiseState::Pending => {
-                    tracing::info!(
-                        target: "resonate::validation",
-                        promise_id = %child_id,
-                        "promise_execution_block"
-                    );
-                    ctx.spawned_remote.lock().await.push(child_id);
-                    Err(Error::Suspended)
-                }
+            if let Some(result) = record.into_result::<T>() {
+                return result;
             }
+
+            // Pending
+            tracing::info!(
+                target: "resonate::validation",
+                promise_id = %child_id,
+                "promise_execution_block"
+            );
+            ctx.spawned_remote.lock().await.push(child_id);
+            Err(Error::Suspended)
         })
     }
 }
@@ -873,22 +863,15 @@ impl<'ctx> SleepTask<'ctx> {
             ..
         } = self;
 
-        cell.get_or_try_init(|| ctx.effects.create_promise(req))
-            .await?;
-        let record = cell.into_inner().unwrap();
+        let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-        match record.state {
-            PromiseState::Resolved => Ok(RemoteFuture::resolved(())),
-            PromiseState::Rejected
-            | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => {
-                Ok(RemoteFuture::rejected(record.value.data_or_null()))
-            }
-            PromiseState::Pending => {
-                ctx.spawned_remote.lock().await.push(child_id);
-                Ok(RemoteFuture::pending())
-            }
+        if let Some(result) = record.into_remote_future::<()>() {
+            return result;
         }
+
+        // Pending
+        ctx.spawned_remote.lock().await.push(child_id);
+        Ok(RemoteFuture::pending())
     }
 }
 
@@ -906,22 +889,15 @@ impl<'ctx> IntoFuture for SleepTask<'ctx> {
                 ..
             } = self;
 
-            cell.get_or_try_init(|| ctx.effects.create_promise(req))
-                .await?;
-            let record = cell.into_inner().unwrap();
+            let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
-            match record.state {
-                PromiseState::Resolved => Ok(()),
-                PromiseState::Rejected
-                | PromiseState::RejectedCanceled
-                | PromiseState::RejectedTimedout => {
-                    Err(deserialize_error(record.value.data_or_null()))
-                }
-                PromiseState::Pending => {
-                    ctx.spawned_remote.lock().await.push(child_id);
-                    Err(Error::Suspended)
-                }
+            if let Some(result) = record.into_result::<()>() {
+                return result;
             }
+
+            // Pending
+            ctx.spawned_remote.lock().await.push(child_id);
+            Err(Error::Suspended)
         })
     }
 }
@@ -1714,7 +1690,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("local://any@{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
@@ -1737,7 +1715,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("http://server:8001/workers/{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("http://server:8001/workers/{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<String> = ctx.rpc("my_func", &42i32).await;
@@ -1760,7 +1740,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("remote://group/{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("remote://group/{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _future = ctx.rpc::<i32>("greet", &"world").spawn().await.unwrap();
@@ -1808,7 +1790,9 @@ mod tests {
         let effects = harness.build_effects(vec![]);
 
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("custom://{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("custom://{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // First rpc call
@@ -1917,7 +1901,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("SHOULD_NOT_APPEAR://{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("SHOULD_NOT_APPEAR://{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // ctx.run uses local_create_req, not remote_create_req
@@ -1944,7 +1930,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("local://any@{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> =
@@ -1968,7 +1956,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("local://any@{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("local://any@{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _: crate::error::Result<i32> = ctx.rpc::<i32>("my_func", &()).await;
@@ -2025,7 +2015,9 @@ mod tests {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let target_resolver: crate::context::TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| format!("remote://{}", target.unwrap_or("default")));
+            std::sync::Arc::new(|target: Option<&str>| {
+                format!("remote://{}", target.unwrap_or("default"))
+            });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         let _ = ctx
@@ -2454,7 +2446,9 @@ mod tests {
             .find(|r| r["kind"] == "promise.create")
             .expect("should have sent promise.create");
 
-        let tags = create["tags"].as_object().expect("tags should be an object");
+        let tags = create["tags"]
+            .as_object()
+            .expect("tags should be an object");
         assert_eq!(tags["resonate:scope"].as_str().unwrap(), "global");
         assert_eq!(tags["resonate:timer"].as_str().unwrap(), "true");
         assert_eq!(tags["resonate:parent"].as_str().unwrap(), "root");
@@ -2524,7 +2518,8 @@ mod tests {
             .settle_promise_in_stub(sleep_id, serde_json::json!(null))
             .await;
 
-        let effects = harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let effects =
+            harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
         let ctx = test_context("root", effects);
 
         let result = ctx.sleep(Duration::from_secs(60)).await;
@@ -2556,7 +2551,8 @@ mod tests {
             .settle_promise_in_stub(sleep_id, serde_json::json!(null))
             .await;
 
-        let effects = harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let effects =
+            harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
         let ctx = test_context("root", effects);
 
         let handle = ctx.sleep(Duration::from_secs(30)).spawn().await.unwrap();

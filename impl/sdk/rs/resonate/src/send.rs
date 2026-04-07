@@ -471,7 +471,10 @@ impl Sender {
         let corr_id = format!("sr-{}", crate::now_ms());
         let mut head = serde_json::Map::new();
         head.insert("corrId".into(), serde_json::Value::String(corr_id));
-        head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+        head.insert(
+            "version".into(),
+            serde_json::Value::String(PROTOCOL_VERSION.into()),
+        );
         if let Some(ref token) = self.auth {
             head.insert("auth".into(), serde_json::Value::String(token.clone()));
         }
@@ -530,7 +533,10 @@ impl Sender {
         let corr_id = format!("sr-{}", crate::now_ms());
         let mut head = serde_json::Map::new();
         head.insert("corrId".into(), serde_json::Value::String(corr_id));
-        head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+        head.insert(
+            "version".into(),
+            serde_json::Value::String(PROTOCOL_VERSION.into()),
+        );
         if let Some(ref token) = self.auth {
             head.insert("auth".into(), serde_json::Value::String(token.clone()));
         }
@@ -572,10 +578,20 @@ impl Sender {
 // ═══════════════════════════════════════════════════════════════════
 
 /// Wrap a flat data object into a protocol sub-envelope: `{ kind, head: { corrId, version[, auth] }, data }`.
-fn make_sub_envelope(kind: &str, data: serde_json::Value, auth: &Option<String>) -> serde_json::Value {
+fn make_sub_envelope(
+    kind: &str,
+    data: serde_json::Value,
+    auth: &Option<String>,
+) -> serde_json::Value {
     let mut head = serde_json::Map::new();
-    head.insert("corrId".into(), serde_json::Value::String(format!("sr-{}", crate::now_ms())));
-    head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+    head.insert(
+        "corrId".into(),
+        serde_json::Value::String(format!("sr-{}", crate::now_ms())),
+    );
+    head.insert(
+        "version".into(),
+        serde_json::Value::String(PROTOCOL_VERSION.into()),
+    );
     if let Some(token) = auth {
         head.insert("auth".into(), serde_json::Value::String(token.clone()));
     }

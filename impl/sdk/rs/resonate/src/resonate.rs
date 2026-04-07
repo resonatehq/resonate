@@ -203,14 +203,15 @@ impl Resonate {
         // If the target already looks like a URL, pass it through unchanged
         // (mirrors TS: `util.isUrl(target) ? target : match(target)`).
         let network_for_match = network.clone();
-        let target_resolver: crate::context::TargetResolver = Arc::new(move |target: Option<&str>| {
-            let resolved = target.unwrap_or(network_for_match.group());
-            if is_url(resolved) {
-                resolved.to_string()
-            } else {
-                network_for_match.target_resolver(resolved)
-            }
-        });
+        let target_resolver: crate::context::TargetResolver =
+            Arc::new(move |target: Option<&str>| {
+                let resolved = target.unwrap_or(network_for_match.group());
+                if is_url(resolved) {
+                    resolved.to_string()
+                } else {
+                    network_for_match.target_resolver(resolved)
+                }
+            });
 
         // Cap TTL to i64::MAX to avoid overflow when casting u64 → i64.
         // In local mode ttl is u64::MAX; a naive `as i64` wraps to -1,
@@ -263,11 +264,7 @@ impl Resonate {
         };
 
         // Subscribe to incoming messages
-        Self::subscribe_to_messages(
-            &transport,
-            subscriptions.clone(),
-            resonate.core.clone(),
-        );
+        Self::subscribe_to_messages(&transport, subscriptions.clone(), resonate.core.clone());
 
         // Start network (fire-and-forget, log errors)
         let net = network.clone();
@@ -420,7 +417,10 @@ impl Resonate {
         };
 
         let ttl = self.safe_ttl();
-        let outcome = self.sender.task_create_or_conflict(&self.pid, ttl, action).await?;
+        let outcome = self
+            .sender
+            .task_create_or_conflict(&self.pid, ttl, action)
+            .await?;
 
         match outcome {
             TaskCreateOutcome::Conflict(promise) => {
@@ -441,7 +441,12 @@ impl Resonate {
                         match decoded {
                             Ok(rp) => {
                                 if let Err(e) = core
-                                    .execute_until_blocked(&task_id, task_version, rp, Some(preload))
+                                    .execute_until_blocked(
+                                        &task_id,
+                                        task_version,
+                                        rp,
+                                        Some(preload),
+                                    )
                                     .await
                                 {
                                     tracing::error!(
@@ -790,7 +795,9 @@ impl Resonate {
 
     /// Register a listener for a promise and return the current promise record.
     async fn register_listener(&self, id: &str) -> Result<crate::types::PromiseRecord> {
-        self.sender.promise_register_listener(id, self.network.unicast()).await
+        self.sender
+            .promise_register_listener(id, self.network.unicast())
+            .await
     }
 }
 
@@ -969,7 +976,9 @@ impl<'a, Args: Serialize, T: DeserializeOwned> ResRpcTask<'a, Args, T> {
     }
 }
 
-impl<'a, Args: Serialize + Send + 'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture for ResRpcTask<'a, Args, T> {
+impl<'a, Args: Serialize + Send + 'a, T: DeserializeOwned + Send + Sync + 'static> IntoFuture
+    for ResRpcTask<'a, Args, T>
+{
     type Output = Result<T>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -1305,11 +1314,7 @@ mod tests {
             ..Default::default()
         });
 
-        let handle = r
-            .rpc::<_, ()>("rpc-2", "remote", ())
-            .spawn()
-            .await
-            .unwrap();
+        let handle = r.rpc::<_, ()>("rpc-2", "remote", ()).spawn().await.unwrap();
         assert_eq!(handle.id, "svc:rpc-2");
     }
 
@@ -1317,10 +1322,7 @@ mod tests {
     async fn rpc_spawn_sets_scope_global() {
         let r = Resonate::local();
         // Verifying RPC succeeds — tags (scope=global, target) are set internally
-        let handle = r
-            .rpc::<_, ()>("rpc-scope", "remote", ())
-            .spawn()
-            .await;
+        let handle = r.rpc::<_, ()>("rpc-scope", "remote", ()).spawn().await;
         assert!(handle.is_ok());
     }
 
@@ -1340,17 +1342,11 @@ mod tests {
     async fn rpc_spawn_idempotent_same_id() {
         let r = Resonate::local();
 
-        let h1 = r
-            .rpc::<_, ()>("rpc-dup", "remote", ())
-            .spawn()
-            .await;
+        let h1 = r.rpc::<_, ()>("rpc-dup", "remote", ()).spawn().await;
         assert!(h1.is_ok());
 
         // Same ID should return existing promise
-        let h2 = r
-            .rpc::<_, ()>("rpc-dup", "remote", ())
-            .spawn()
-            .await;
+        let h2 = r.rpc::<_, ()>("rpc-dup", "remote", ()).spawn().await;
         assert!(h2.is_ok());
     }
 
@@ -1393,10 +1389,7 @@ mod tests {
         });
 
         // Create via RPC (which prepends prefix)
-        r.rpc::<_, ()>("p1", "func", ())
-            .spawn()
-            .await
-            .unwrap();
+        r.rpc::<_, ()>("p1", "func", ()).spawn().await.unwrap();
 
         // Get with the unprefixed ID (prefix is prepended internally)
         let handle = r.get::<()>("p1").await;
@@ -1412,12 +1405,7 @@ mod tests {
     async fn schedule_creates_schedule() {
         let r = Resonate::local();
         let result = r
-            .schedule(
-                "my-schedule",
-                "*/5 * * * *",
-                "my-func",
-                (),
-            )
+            .schedule("my-schedule", "*/5 * * * *", "my-func", ())
             .await;
         assert!(result.is_ok());
     }
@@ -1484,7 +1472,11 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = r.transport().send(promise_get_req("target-bare")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("target-bare"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1503,7 +1495,11 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = r.transport().send(promise_get_req("target-url")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("target-url"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1521,7 +1517,11 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = r.transport().send(promise_get_req("target-default")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("target-default"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1624,11 +1624,7 @@ mod tests {
         assert_eq!(h1.id, "p:id1");
 
         // rpc().spawn() with prefix
-        let h2 = r
-            .rpc::<_, ()>("id2", "remote", ())
-            .spawn()
-            .await
-            .unwrap();
+        let h2 = r.rpc::<_, ()>("id2", "remote", ()).spawn().await.unwrap();
         assert_eq!(h2.id, "p:id2");
 
         // get with prefix (the promise was created as "p:id2")
@@ -1710,10 +1706,7 @@ mod tests {
         r.register(noop).unwrap();
 
         let local_h = r.run("local-1", noop, ()).spawn().await;
-        let remote_h = r
-            .rpc::<_, ()>("remote-1", "remote-fn", ())
-            .spawn()
-            .await;
+        let remote_h = r.rpc::<_, ()>("remote-1", "remote-fn", ()).spawn().await;
 
         assert!(local_h.is_ok());
         assert!(remote_h.is_ok());
@@ -1813,7 +1806,11 @@ mod tests {
         assert!(handle.is_ok());
 
         // Verify the promise was created with the URL target
-        let resp = r.transport().send(promise_get_req("url-target-test")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("url-target-test"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1833,7 +1830,11 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = r.transport().send(promise_get_req("run-target-test")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("run-target-test"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1849,7 +1850,11 @@ mod tests {
 
         let _handle = r.run("run-default-target", noop, ()).spawn().await.unwrap();
 
-        let resp = r.transport().send(promise_get_req("run-default-target")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("run-default-target"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1869,7 +1874,11 @@ mod tests {
             .await
             .unwrap();
 
-        let resp = r.transport().send(promise_get_req("run-url-target")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("run-url-target"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1881,13 +1890,14 @@ mod tests {
     async fn rpc_with_no_target_uses_default() {
         let r = Resonate::local();
 
-        let handle = r
-            .rpc::<_, ()>("bare-target-test", "noop", ())
-            .spawn()
-            .await;
+        let handle = r.rpc::<_, ()>("bare-target-test", "noop", ()).spawn().await;
         assert!(handle.is_ok());
 
-        let resp = r.transport().send(promise_get_req("bare-target-test")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("bare-target-test"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -1907,7 +1917,11 @@ mod tests {
             .await;
         assert!(handle.is_ok());
 
-        let resp = r.transport().send(promise_get_req("bare-target-test2")).await.unwrap();
+        let resp = r
+            .transport()
+            .send(promise_get_req("bare-target-test2"))
+            .await
+            .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
             .as_str()
             .unwrap_or("");
@@ -2027,16 +2041,8 @@ mod tests {
 
         // Create handles and drop them without awaiting
         {
-            let _h1 = r
-                .rpc::<_, ()>("drop-1", "func", ())
-                .spawn()
-                .await
-                .unwrap();
-            let _h2 = r
-                .rpc::<_, ()>("drop-2", "func", ())
-                .spawn()
-                .await
-                .unwrap();
+            let _h1 = r.rpc::<_, ()>("drop-1", "func", ()).spawn().await.unwrap();
+            let _h2 = r.rpc::<_, ()>("drop-2", "func", ()).spawn().await.unwrap();
             // Both dropped here
         }
 
@@ -2056,11 +2062,7 @@ mod tests {
         let r = Resonate::local();
 
         // Create a pending promise via RPC
-        let mut handle = r
-            .rpc::<_, ()>("e2e-1", "func", ())
-            .spawn()
-            .await
-            .unwrap();
+        let mut handle = r.rpc::<_, ()>("e2e-1", "func", ()).spawn().await.unwrap();
 
         assert!(!handle.done().await.unwrap(), "should be pending");
 
@@ -2238,11 +2240,7 @@ mod tests {
         r.register(fail_with_message).unwrap();
 
         let result: Result<String> = r
-            .run(
-                "e2e-fail",
-                fail_with_message,
-                "something broke".to_string(),
-            )
+            .run("e2e-fail", fail_with_message, "something broke".to_string())
             .await;
         assert!(result.is_err());
     }

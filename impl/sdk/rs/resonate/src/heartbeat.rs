@@ -259,7 +259,10 @@ mod tests {
         assert!(hb.is_running());
 
         hb.stop("task-1");
-        assert!(hb.is_running(), "loop should stay running with task-2 still active");
+        assert!(
+            hb.is_running(),
+            "loop should stay running with task-2 still active"
+        );
 
         hb.shutdown();
     }
@@ -356,7 +359,10 @@ mod tests {
             .filter(|r| r["kind"] == "task.heartbeat")
             .collect();
 
-        assert!(!heartbeats.is_empty(), "should have sent at least one heartbeat");
+        assert!(
+            !heartbeats.is_empty(),
+            "should have sent at least one heartbeat"
+        );
 
         // Check the last heartbeat contains both tasks
         let last_hb = heartbeats.last().unwrap();

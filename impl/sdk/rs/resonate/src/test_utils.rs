@@ -81,10 +81,7 @@ impl StubNetwork {
             "promise.create" => (200, self.handle_promise_create(&data)),
             "promise.settle" => (200, self.handle_promise_settle(&data)),
             "task.acquire" => {
-                let task_id = data
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let task_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 if !self.tasks.contains_key(task_id) {
                     (
                         404,
@@ -469,10 +466,8 @@ impl TestHarness {
                         flat.insert("action".to_string(), unwrap_sub_envelope(&action));
                     }
                     if let Some(actions) = flat.get("actions").and_then(|v| v.as_array()).cloned() {
-                        let unwrapped: Vec<serde_json::Value> = actions
-                            .iter()
-                            .map(|a| unwrap_sub_envelope(a))
-                            .collect();
+                        let unwrapped: Vec<serde_json::Value> =
+                            actions.iter().map(|a| unwrap_sub_envelope(a)).collect();
                         flat.insert("actions".to_string(), serde_json::Value::Array(unwrapped));
                     }
                     serde_json::Value::Object(flat)

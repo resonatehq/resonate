@@ -62,7 +62,7 @@ impl<T: 'static> IntoFuture for DurableFuture<T> {
                     receiver
                         .await
                         .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?
-                },
+                }
             }
         })
     }

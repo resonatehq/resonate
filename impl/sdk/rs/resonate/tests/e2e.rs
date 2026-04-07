@@ -116,12 +116,18 @@ async fn connectivity() {
     let id = unique_id("connectivity");
 
     // Create and fetch a promise via the sub-client
-    let created = with_timeout(
-        r.promises
-            .create(&id, i64::MAX, serde_json::json!(null), serde_json::json!({})),
-    )
+    let created = with_timeout(r.promises.create(
+        &id,
+        i64::MAX,
+        serde_json::json!(null),
+        serde_json::json!({}),
+    ))
     .await;
-    assert!(created.is_ok(), "should create promise: {:?}", created.err());
+    assert!(
+        created.is_ok(),
+        "should create promise: {:?}",
+        created.err()
+    );
 
     let fetched = with_timeout(r.promises.get(&id)).await;
     assert!(fetched.is_ok(), "should get promise: {:?}", fetched.err());
@@ -186,7 +192,9 @@ async fn rpc_to_registered_function() {
     r.register(add).unwrap();
 
     let id = unique_id("rpc-add");
-    let result: i64 = with_timeout(r.rpc(&id, "add", (10_i64, 20_i64))).await.unwrap();
+    let result: i64 = with_timeout(r.rpc(&id, "add", (10_i64, 20_i64)))
+        .await
+        .unwrap();
     assert_eq!(result, 30);
 
     r.stop().await.unwrap();
@@ -216,8 +224,12 @@ async fn idempotent_rpc() {
     r.register(add).unwrap();
 
     let id = unique_id("idempotent-rpc");
-    let r1: i64 = with_timeout(r.rpc(&id, "add", (7_i64, 8_i64))).await.unwrap();
-    let r2: i64 = with_timeout(r.rpc(&id, "add", (7_i64, 8_i64))).await.unwrap();
+    let r1: i64 = with_timeout(r.rpc(&id, "add", (7_i64, 8_i64)))
+        .await
+        .unwrap();
+    let r2: i64 = with_timeout(r.rpc(&id, "add", (7_i64, 8_i64)))
+        .await
+        .unwrap();
     assert_eq!(r1, 15);
     assert_eq!(r2, 15);
 
@@ -237,7 +249,9 @@ async fn workflow_sequential_rpcs() {
     r.register(sequential_workflow).unwrap();
 
     let id = unique_id("seq-workflow");
-    let result: i64 = with_timeout(r.run(&id, sequential_workflow, ())).await.unwrap();
+    let result: i64 = with_timeout(r.run(&id, sequential_workflow, ()))
+        .await
+        .unwrap();
     // 1+2=3, 3+3=6
     assert_eq!(result, 6);
 
@@ -253,7 +267,9 @@ async fn workflow_parallel_rpcs() {
     r.register(parallel_workflow).unwrap();
 
     let id = unique_id("par-workflow");
-    let result: i64 = with_timeout(r.run(&id, parallel_workflow, ())).await.unwrap();
+    let result: i64 = with_timeout(r.run(&id, parallel_workflow, ()))
+        .await
+        .unwrap();
     // (10+20) + (30+40) = 100
     assert_eq!(result, 100);
 
@@ -269,7 +285,9 @@ async fn workflow_with_ctx_run() {
     r.register(run_sub_workflow).unwrap();
 
     let id = unique_id("run-sub-workflow");
-    let result: i64 = with_timeout(r.run(&id, run_sub_workflow, ())).await.unwrap();
+    let result: i64 = with_timeout(r.run(&id, run_sub_workflow, ()))
+        .await
+        .unwrap();
     // 5+5=10, 10+10=20
     assert_eq!(result, 20);
 
@@ -288,8 +306,7 @@ async fn error_propagation() {
     r.register(fail_always).unwrap();
 
     let id = unique_id("error-prop");
-    let result: Result<String> =
-        with_timeout(r.run(&id, fail_always, "boom".to_string())).await;
+    let result: Result<String> = with_timeout(r.run(&id, fail_always, "boom".to_string())).await;
     assert!(result.is_err(), "should propagate error");
 
     r.stop().await.unwrap();

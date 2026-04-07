@@ -386,10 +386,7 @@ impl ServerState {
             .get("timeoutAt")
             .and_then(|v| v.as_i64())
             .unwrap_or(i64::MAX);
-        let param = req
-            .get("param")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+        let param = req.get("param").cloned().unwrap_or(serde_json::Value::Null);
         let tags = extract_tags(req);
 
         if now >= timeout_at {
@@ -797,9 +794,7 @@ impl ServerState {
         }
 
         // action is a PromiseSettleReq envelope
-        let action_raw = req
-            .get("action")
-            .unwrap_or(&serde_json::Value::Null);
+        let action_raw = req.get("action").unwrap_or(&serde_json::Value::Null);
         let settle = extract_action_data(action_raw);
         let promise_id = settle.get("id").and_then(|v| v.as_str()).unwrap_or(task_id);
         let settle_state = settle
