@@ -1,16 +1,16 @@
-import type { Value } from "./types";
+import type { Value } from "./network/types.js";
 
 export interface Encryptor {
-  encrypt(plaintext: Value<string>): Value<string>;
-  decrypt(ciphertext: Value<string> | undefined): Value<string> | undefined;
+  encrypt(plaintext: Value): Value;
+  decrypt(ciphertext: Value): Value;
 }
 
 export class NoopEncryptor implements Encryptor {
-  encrypt(plaintext: Value<string>): Value<string> {
+  encrypt(plaintext: Value): Value {
     return plaintext;
   }
 
-  decrypt(ciphertext: Value<string> | undefined): Value<string> | undefined {
+  decrypt(ciphertext: Value): Value {
     return ciphertext;
   }
 }

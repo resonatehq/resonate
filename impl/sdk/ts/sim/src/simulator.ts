@@ -1,3 +1,5 @@
+import type { Request } from "../../src/network/types.js";
+
 declare const document: any;
 
 export class Random {
@@ -73,7 +75,7 @@ export class Process {
   }
 
   log(tick: number, ...args: any[]): void {
-    const message = `[tick: ${tick}] [proc: ${this.iaddr}] ${args.map(JSON.stringify as any)}`;
+    const message = `[tick: ${tick}] [proc: ${this.iaddr}] ${args.map((a) => JSON.stringify(a))}`;
 
     // Always log to console
     console.log(message);
@@ -100,8 +102,8 @@ export class Simulator {
   public step = 0;
   private init = false;
   private process: Process[] = [];
-  private network: Message<any>[] = [];
-  public outbox: Message<any>[] = [];
+  private network: Message<string>[] = [];
+  public outbox: Message<string>[] = [];
   public deliveryOptions: Required<DeliveryOptions>;
   private scheduledRepeat: { interval: number; fn: () => void }[] = [];
   private scheduledDelay: { runAt: number; fn: () => void }[] = [];
@@ -113,10 +115,6 @@ export class Simulator {
     process.env.QUEUE_MICROTASK_EVERY_N = Number.MAX_SAFE_INTEGER.toString();
     this.prng = prng;
     this.deliveryOptions = { dropProb, randomDelay, duplProb, deactivateProb, activateProb };
-  }
-
-  addMessage(message: Message<any>): void {
-    this.network.push(message);
   }
 
   assertAlways(cond: boolean, msg: string): void {
@@ -139,8 +137,8 @@ export class Simulator {
     return !this.init || this.network.length > 0;
   }
 
-  send(message: Message<any>): void {
-    this.network.push(message);
+  send(message: Message<Request>): void {
+    this.network.push(new Message(message.source, message.target, JSON.stringify(message.data), message.head));
   }
 
   tick(): void {
@@ -165,8 +163,8 @@ export class Simulator {
       }
     }
 
-    const retained: Message<any>[] = [];
-    const consumed: Message<any>[] = [];
+    const retained: Message<string>[] = [];
+    const consumed: Message<string>[] = [];
 
     for (const message of this.network) {
       // Drop?
@@ -186,7 +184,7 @@ export class Simulator {
       }
     }
 
-    const inboxes: Record<string, Message<any>[]> = {};
+    const inboxes: Record<string, Message<string>[]> = {};
     for (const process of this.process) {
       inboxes[process.iaddr] = [];
     }
@@ -210,7 +208,7 @@ export class Simulator {
         throw new Error("unknown target.kind");
       }
     }
-    const newMessages: Message<any>[] = [];
+    const newMessages: Message<string>[] = [];
     for (const process of this.process) {
       if (!process.active) {
         continue;
@@ -227,36 +225,54 @@ export class Simulator {
     this.network = retained.concat(newMessages);
   }
 
-  exec(steps: number): void {
+  async exec(steps: number): Promise<void> {
     let i = 0;
     while (i < steps) {
-      for (const task of this.scheduledRepeat) {
-        if (this.step % task.interval === 0) {
-          task.fn();
-        }
-      }
-
-      if (this.scheduledDelay.length > 0) {
-        const remaining: { runAt: number; fn: () => void }[] = [];
-        for (const task of this.scheduledDelay) {
-          if (task.runAt === this.step) {
-            task.fn();
-          } else if (task.runAt > this.step) {
-            remaining.push(task);
-          }
-        }
-        this.scheduledDelay = remaining;
-      }
-
+      this.runScheduled();
       this.tick();
-
+      await Promise.resolve();
       i++;
+    }
+  }
+
+  async execUntil(steps: number, condition: () => boolean): Promise<boolean> {
+    let i = 0;
+    while (i < steps) {
+      this.runScheduled();
+      this.tick();
+      await Promise.resolve();
+      if (condition()) {
+        return true;
+      }
+      i++;
+    }
+    return false;
+  }
+
+  private runScheduled(): void {
+    for (const task of this.scheduledRepeat) {
+      if (this.step % task.interval === 0) {
+        task.fn();
+      }
+    }
+
+    if (this.scheduledDelay.length > 0) {
+      const remaining: { runAt: number; fn: () => void }[] = [];
+      for (const task of this.scheduledDelay) {
+        if (task.runAt === this.step) {
+          task.fn();
+        } else if (task.runAt > this.step) {
+          remaining.push(task);
+        }
+      }
+      this.scheduledDelay = remaining;
     }
   }
 
   repeat(interval: number, fn: () => void): void {
     this.scheduledRepeat.push({ interval, fn });
   }
+
   delay(runAt: number, fn: () => void): void {
     this.scheduledDelay.push({ runAt, fn });
   }

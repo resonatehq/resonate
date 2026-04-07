@@ -4,9 +4,17 @@
   "description": "TypeScript SDK for Resonate",
   "author": "Resonate Developers",
   "license": "Apache-2.0",
-  "type": "commonjs",
-  "main": "./dist/src/index.js",
-  "types": "./dist/src/index.d.ts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
@@ -26,7 +34,7 @@
     "dst": "npx tsx sim/main.ts",
     "fmt": "npx @biomejs/biome format ./ --write",
     "prepare": "npm run build",
-    "test": "npx jest --config jest.config.js",
+    "test": "npx jest --config jest.config.cjs",
     "type-check": "npx tsc --noEmit"
   },
   "dependencies": {

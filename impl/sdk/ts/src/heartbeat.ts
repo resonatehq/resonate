@@ -1,4 +1,7 @@
-import type { Network } from "./network/network";
+import { randomUUID } from "node:crypto";
+import type { Logger } from "./logger.js";
+import type { Send } from "./types.js";
+import { VERSION } from "./util.js";
 
 export interface Heartbeat {
   start(): void;
@@ -6,16 +9,18 @@ export interface Heartbeat {
 }
 
 export class AsyncHeartbeat implements Heartbeat {
-  private network: Network;
   private intervalId: ReturnType<typeof setInterval> | undefined;
+  private send: Send;
   private pid: string;
   private counter = 0;
   private delay: number;
+  private logger: Logger;
 
-  constructor(pid: string, delay: number, network: Network) {
+  constructor(pid: string, delay: number, send: Send, logger: Logger) {
     this.pid = pid;
     this.delay = delay;
-    this.network = network;
+    this.send = send;
+    this.logger = logger;
   }
 
   start(): void {
@@ -27,21 +32,19 @@ export class AsyncHeartbeat implements Heartbeat {
 
   private heartbeat(): void {
     this.intervalId = setInterval(() => {
-      const counter = this.counter;
-
-      this.network.send(
-        {
-          kind: "heartbeatTasks",
-          processId: this.pid,
+      this.send({
+        kind: "task.heartbeat",
+        head: { corrId: randomUUID(), version: VERSION },
+        data: {
+          pid: this.pid,
+          tasks: [],
         },
-        (res) => {
-          if (res.kind === "error") return;
-
-          if (res.value.tasksAffected === 0) {
-            this.clearIntervalIfMatch(counter);
-          }
-        },
-      );
+      }).catch((err) => {
+        this.logger.warn(
+          { component: "heartbeat", pid: this.pid, error: err instanceof Error ? err.message : String(err) },
+          "Failed to send heartbeat",
+        );
+      });
     }, this.delay);
   }
 

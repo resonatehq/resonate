@@ -1,5 +1,14 @@
-import type { DurablePromiseRecord, MessageSource, TaskRecord } from "./network/network";
-import { type Options, RESONATE_OPTIONS } from "./options";
+import type { Codec } from "./codec.js";
+import type { InnerContext } from "./context.js";
+import exceptions from "./exceptions.js";
+import type { Logger } from "./logger.js";
+import { isSuccess, type PromiseRecord } from "./network/types.js";
+import { type Options, RESONATE_OPTIONS } from "./options.js";
+import type { Effects, Func, Result, Send } from "./types.js";
+
+// version
+
+export const VERSION = "2026-04-01";
 
 // time
 
@@ -33,44 +42,8 @@ export function isGeneratorFunction(func: Function): boolean {
 
 // guards
 
-export function isTaskRecord(obj: any): obj is TaskRecord {
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    typeof obj.id === "string" &&
-    typeof obj.rootPromiseId === "string" &&
-    typeof obj.counter === "number" &&
-    typeof obj.timeout === "number" &&
-    (obj.processId === undefined || typeof obj.processId === "string") &&
-    (obj.createdOn === undefined || typeof obj.createdOn === "number") &&
-    (obj.completedOn === undefined || typeof obj.completedOn === "number")
-  );
-}
-
-export function isDurablePromiseRecord(obj: unknown): obj is DurablePromiseRecord {
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    typeof (obj as any).id === "string" &&
-    typeof (obj as any).timeout === "number" &&
-    typeof (obj as any).param !== "undefined" && // allow any type
-    typeof (obj as any).value !== "undefined" && // allow any type
-    typeof (obj as any).tags === "object" &&
-    (obj as any).tags !== null &&
-    !Array.isArray((obj as any).tags) &&
-    Object.values((obj as any).tags).every((v) => typeof v === "string") &&
-    ["PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes((obj as any).state) &&
-    (typeof (obj as any).createdOn === "undefined" || typeof (obj as any).createdOn === "number") &&
-    (typeof (obj as any).completedOn === "undefined" || typeof (obj as any).completedOn === "number")
-  );
-}
-
 export function isOptions(obj: unknown): obj is Options {
   return typeof obj === "object" && obj !== null && RESONATE_OPTIONS in obj;
-}
-
-export function isMessageSource(v: unknown): v is MessageSource {
-  return typeof v === "object" && v !== null && "recv" in v && typeof (v as any).recv === "function";
 }
 
 // helpers
@@ -122,4 +95,100 @@ export function getCallerInfo(): string {
   const callerLine = stack?.[3];
 
   return callerLine.trim();
+}
+
+// retry
+export async function executeWithRetry(
+  ctx: InnerContext,
+  func: Func,
+  args: any[],
+  logger: Logger,
+): Promise<Result<any, any>> {
+  while (true) {
+    try {
+      const data = await func(ctx, ...args);
+      return { kind: "value", value: data };
+    } catch (error) {
+      const retryIn = ctx.retryPolicy.next(ctx.info.attempt);
+      if (retryIn === null || ctx.clock.now() + retryIn >= ctx.info.timeout) {
+        return { kind: "error", error };
+      }
+      logger.warn(
+        { component: "runtime", func: ctx.func, attempt: ctx.info.attempt, retryIn },
+        `Function '${ctx.func}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`,
+      );
+      logger.debug(
+        { component: "runtime", func: ctx.func, error: error instanceof Error ? error.stack : String(error) },
+        `Retry error details for '${ctx.func}'`,
+      );
+      ctx.info.attempt++;
+      await new Promise((resolve) => setTimeout(resolve, retryIn));
+    }
+  }
+}
+
+// effects
+export function buildEffects(send: Send, codec: Codec, preload: PromiseRecord[] = []): Effects {
+  // Decode preloaded promises, skipping any that fail to decode
+  const cache = new Map<string, PromiseRecord>();
+  for (const p of preload) {
+    try {
+      const decoded = codec.decodePromise(p);
+      cache.set(p.id, decoded);
+    } catch {
+      // skip promises that fail to decode
+    }
+  }
+
+  return {
+    promiseCreate: async (req, func = "unknown") => {
+      const cached = cache.get(req.data.id);
+      if (cached) {
+        return cached;
+      }
+
+      try {
+        req.data.param = codec.encode(req.data.param.data);
+      } catch (e) {
+        throw exceptions.ENCODING_ARGS_UNENCODEABLE(func, e);
+      }
+
+      const res = await send(req);
+      if (!isSuccess(res)) {
+        throw exceptions.SERVER_ERROR(res.data, true, {
+          code: res.head.status,
+          message: res.data,
+        });
+      }
+
+      const decoded = codec.decodePromise(res.data.promise);
+      cache.set(decoded.id, decoded);
+      return decoded;
+    },
+
+    promiseSettle: async (req, func = "unknown") => {
+      const cached = cache.get(req.data.id);
+      if (cached && cached.state !== "pending") {
+        return cached;
+      }
+
+      try {
+        req.data.value = codec.encode(req.data.value.data);
+      } catch (e) {
+        throw exceptions.ENCODING_RETV_UNENCODEABLE(func, e);
+      }
+
+      const res = await send(req);
+      if (!isSuccess(res)) {
+        throw exceptions.SERVER_ERROR(res.data, true, {
+          code: res.head.status,
+          message: res.data,
+        });
+      }
+
+      const decoded = codec.decodePromise(res.data.promise);
+      cache.set(decoded.id, decoded);
+      return decoded;
+    },
+  };
 }

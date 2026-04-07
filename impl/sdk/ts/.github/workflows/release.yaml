@@ -4,6 +4,20 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to release from"
+        required: true
+        type: string
+      tag:
+        description: "Git tag (e.g. v1.0.0)"
+        required: true
+        type: string
+      version:
+        description: "Package version (e.g. 1.0.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,8 +35,11 @@ jobs:
 
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Verify tag matches package.json version
+        if: github.event_name == 'release'
         run: |
           RELEASE_VERSION=${{ github.ref_name }}
           PACKAGE_VERSION=$(npm pkg get version | sed 's/"//g')
@@ -31,6 +48,10 @@ jobs:
             echo "Error: GitHub release tag ($RELEASE_VERSION) does not match package.json version ($PACKAGE_VERSION)"
             exit 1
           fi
+
+      - name: Override package.json version
+        if: github.event_name == 'workflow_dispatch'
+        run: npm pkg set version=${{ github.event.inputs.version }}
 
       # Ensure npm 11.5.1 or later is installed
       - name: Update npm
@@ -44,7 +65,8 @@ jobs:
 
       - name: Publish
         run: |
-          npm publish --provenance --access public --tag latest
+          NPM_TAG=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || 'latest' }}
+          npm publish --provenance --access public --tag ${NPM_TAG}
 
   verify:
     needs: publish
@@ -61,4 +83,5 @@ jobs:
 
       - name: Verify can install package
         run: |
-          npm install @resonatehq/sdk@${{ github.ref_name }}
+          INSTALL_VERSION=${{ github.event.inputs.tag || github.ref_name }}
+          npm install @resonatehq/sdk@${INSTALL_VERSION}

@@ -1,8 +1,17 @@
-import { Server } from "../../dev/server";
-import type { StepClock } from "../../src/clock";
-import type { Message as NetworkMessage, Request, Response } from "../../src/network/network";
-import * as util from "../../src/util";
-import { type Address, anycast, Message, Process, unicast } from "./simulator";
+import type { StepClock } from "../../src/clock.js";
+import { type Change, Server } from "../../src/network/local.js";
+import * as util from "../../src/util.js";
+import { type Address, anycast, Message, Process, unicast } from "./simulator.js";
+
+function extractOutgoing(changes: Change[]): Array<{ address: string; message: string }> {
+  const out: Array<{ address: string; message: string }> = [];
+  for (const c of changes) {
+    if (c.kind === "message.send") {
+      out.push({ address: c.address, message: JSON.stringify(c.message) });
+    }
+  }
+  return out;
+}
 
 export class ServerProcess extends Process {
   private clock: StepClock;
@@ -16,27 +25,37 @@ export class ServerProcess extends Process {
     this.clock = clock;
   }
 
-  tick(tick: number, messages: Message<Request>[]): Message<{ err?: any; res?: Response } | NetworkMessage>[] {
+  tick(tick: number, messages: Message<string>[]): Message<string>[] {
     this.log(tick, "[recv]", messages);
 
-    const responses: Message<{ err?: any; res?: Response } | NetworkMessage>[] = [];
+    // Advance the clock so that server-side timeouts (e.g. PENDING_RETRY_TTL = 30000) can fire.
+    this.clock.time += 100;
+
+    const responses: Message<string>[] = [];
+    const outgoing: Array<{ address: string; message: string }> = [];
 
     for (const message of messages) {
       util.assert(message.target.iaddr === this.iaddr);
+      util.assert(typeof message.data === "string");
       if (message.isRequest()) {
-        let res: { err?: any; res?: Response };
-        try {
-          res = { res: this.server.process(message.data, this.clock.time) };
-        } catch (err: any) {
-          res = { err: err };
-        }
-
-        responses.push(message.resp(res));
+        const data = JSON.parse(message.data);
+        const result = this.server.apply(this.clock.time, data);
+        outgoing.push(...extractOutgoing(result.changes));
+        const response = result.response;
+        responses.push(
+          message.resp(
+            JSON.stringify({
+              kind: response.kind,
+              head: { corrId: data.head.corrId, status: response.head.status, version: data.head.version },
+              data: response.data,
+            }),
+          ),
+        );
       }
     }
 
-    for (const message of this.server.step(this.clock.time)) {
-      const url = new URL(message.recv);
+    for (const msg of outgoing) {
+      const url = new URL(msg.address);
       let target: Address;
       if (url.username === "any") {
         target = url.pathname === "" ? anycast(url.hostname) : anycast(url.hostname, url.pathname.slice(1));
@@ -46,8 +65,7 @@ export class ServerProcess extends Process {
         throw new Error(`not handled ${url}`);
       }
 
-      const msg = new Message<NetworkMessage>(unicast(this.iaddr), target, message.msg, { requ: true });
-      responses.push(msg);
+      responses.push(new Message<string>(unicast(this.iaddr), target, msg.message, { requ: true }));
     }
 
     this.log(tick, "[send]", responses);

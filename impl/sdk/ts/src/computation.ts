@@ -1,30 +1,32 @@
-import type { Clock } from "./clock";
-import { InnerContext } from "./context";
-import type { ClaimedTask, Task } from "./core";
-import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
-import exceptions from "./exceptions";
-import type { Handler } from "./handler";
-import type { Heartbeat } from "./heartbeat";
-import type { CallbackRecord, DurablePromiseRecord, Network, TaskRecord } from "./network/network";
-import { Nursery } from "./nursery";
-import type { OptionsBuilder } from "./options";
-import { AsyncProcessor, type Processor } from "./processor/processor";
-import type { Registry } from "./registry";
-import { Exponential, Never, type RetryPolicyConstructor } from "./retries";
-import type { Span, Tracer } from "./tracer";
-import type { Func, Result } from "./types";
-import * as util from "./util";
+import type { Clock } from "./clock.js";
+import { InnerContext } from "./context.js";
+import { Coroutine } from "./coroutine.js";
+import exceptions from "./exceptions.js";
+import type { Heartbeat } from "./heartbeat.js";
+import type { Logger } from "./logger.js";
+import type { PromiseRecord } from "./network/types.js";
+import type { OptionsBuilder } from "./options.js";
+import type { Registry } from "./registry.js";
+import { Exponential, Never, type RetryPolicyConstructor } from "./retries.js";
+import { type Trace, TraceCollector } from "./trace.js";
 
-export type Status = Completed | Suspended;
+import type { Effects, Func } from "./types.js";
+import * as util from "./util.js";
 
-export type Completed = {
-  kind: "completed";
-  promise: DurablePromiseRecord;
+export type Status = Done | Suspended;
+
+export type Done = {
+  kind: "done";
+  id: string;
+  state: "resolved" | "rejected";
+  value: any;
+  trace: Trace;
 };
 
 export type Suspended = {
   kind: "suspended";
-  callbacks: CallbackRecord[];
+  awaited: string[];
+  trace: Trace;
 };
 
 interface Data {
@@ -36,121 +38,52 @@ interface Data {
 
 export class Computation {
   private id: string;
-  private pid: string;
-  private ttl: number;
   private clock: Clock;
-  private unicast: string;
-  private anycast: string;
-  private network: Network;
-  private handler: Handler;
+  private effects: Effects;
   private retries: Map<string, RetryPolicyConstructor>;
   private registry: Registry;
   private dependencies: Map<string, any>;
   private optsBuilder: OptionsBuilder;
-  private verbose: boolean;
+  private logger: Logger;
   private heartbeat: Heartbeat;
-  private processor: Processor;
-  private span: Span;
-  private spans: Map<string, Span>;
-
-  private seen: Set<string> = new Set();
   private processing = false;
 
   constructor(
     id: string,
-    unicast: string,
-    anycast: string,
-    pid: string,
-    ttl: number,
     clock: Clock,
-    network: Network,
-    handler: Handler,
+    effects: Effects,
     retries: Map<string, RetryPolicyConstructor>,
     registry: Registry,
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
     optsBuilder: OptionsBuilder,
-    verbose: boolean,
-    tracer: Tracer,
-    span: Span,
-    processor?: Processor,
+    logger: Logger,
   ) {
     this.id = id;
-    this.unicast = unicast;
-    this.anycast = anycast;
-    this.pid = pid;
-    this.ttl = ttl;
     this.clock = clock;
-    this.network = network;
-    this.handler = handler;
+    this.effects = effects;
     this.retries = retries;
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
     this.optsBuilder = optsBuilder;
-    this.verbose = verbose;
-    this.processor = processor ?? new AsyncProcessor();
-    this.span = span;
-    this.spans = new Map();
+    this.logger = logger;
   }
 
-  public executeUntilBlocked(task: Task, done: (res: Result<Status, undefined>) => void) {
-    // If we are already processing there is nothing to do, the
-    // caller will be notified via the promise handler
-    if (this.processing) return done({ kind: "error", error: undefined });
+  public async executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {
+    if (this.processing) throw exceptions.PANIC("computation", "already processing");
+
     this.processing = true;
-
-    const doneProcessing = (res: Result<Status, undefined>) => {
+    try {
+      return await this.processAcquired(rootPromise);
+    } finally {
       this.processing = false;
-      done(res);
-    };
-
-    switch (task.kind) {
-      case "claimed":
-        this.processClaimed(task, doneProcessing);
-        break;
-
-      case "unclaimed":
-        this.handler.claimTask(
-          {
-            kind: "claimTask",
-            id: task.task.id,
-            counter: task.task.counter,
-            processId: this.pid,
-            ttl: this.ttl,
-          },
-          (res) => {
-            if (res.kind === "error") {
-              res.error.log(this.verbose);
-              return doneProcessing({ kind: "error", error: undefined });
-            }
-            this.processClaimed(
-              { kind: "claimed", task: task.task, rootPromise: res.value.root, leafPromise: res.value.leaf },
-              doneProcessing,
-            );
-          },
-        );
-        break;
     }
   }
 
-  private processClaimed({ task, rootPromise }: ClaimedTask, done: (res: Result<Status, undefined>) => void) {
-    util.assert(task.rootPromiseId === this.id, "task root promise id must match computation id");
-
-    const doneAndDropTaskIfErr = (res: Result<Status, undefined>) => {
-      if (res.kind === "error") {
-        return this.network.send({ kind: "dropTask", id: task.id, counter: task.counter }, () => {
-          // ignore the drop task response, if the request failed the
-          // task will eventually expire anyways
-          done(res);
-        });
-      }
-
-      done(res);
-    };
-
+  private async processAcquired(rootPromise: PromiseRecord): Promise<Status> {
     if (!isValidData(rootPromise.param?.data)) {
-      return doneAndDropTaskIfErr({ kind: "error", error: undefined });
+      throw exceptions.PANIC("computation", "invalid promise data");
     }
 
     const { func, args, retry, version = 1 } = rootPromise.param.data;
@@ -158,8 +91,7 @@ export class Computation {
 
     // function must be registered
     if (!registered) {
-      exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(func, version).log(this.verbose);
-      return doneAndDropTaskIfErr({ kind: "error", error: undefined });
+      throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(func, version);
     }
 
     if (version !== 0) util.assert(version === registered.version, "versions must match");
@@ -168,215 +100,99 @@ export class Computation {
     // start heartbeat
     this.heartbeat.start();
 
-    return new Nursery<Status>((nursery) => {
-      const done = (res: Result<Status, undefined>) => {
-        if (res.kind === "error") {
-          return nursery.done(res);
-        }
+    const retryCtor = retry ? this.retries.get(retry.type) : undefined;
+    const retryPolicy = retryCtor
+      ? new retryCtor(retry?.data)
+      : util.isGeneratorFunction(registered.func)
+        ? new Never()
+        : new Exponential();
 
-        this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (r) => {
-          if (r.kind === "error") {
-            nursery.done(r);
-          } else {
-            nursery.done(res);
-          }
-        });
-      };
-
-      const retryCtor = retry ? this.retries.get(retry.type) : undefined;
-      const retryPolicy = retryCtor
-        ? new retryCtor(retry?.data)
-        : util.isGeneratorFunction(registered.func)
-          ? new Never()
-          : new Exponential();
-
-      if (retry && !retryCtor) {
-        console.warn(`Options. Retry policy '${retry.type}' not found. Will ignore.`);
-      }
-
-      const ctx = new InnerContext({
-        id: this.id,
-        oId: rootPromise.tags["resonate:origin"] ?? this.id,
-        func: registered.func.name,
-        clock: this.clock,
-        registry: this.registry,
-        dependencies: this.dependencies,
-        optsBuilder: this.optsBuilder,
-        timeout: rootPromise.timeout,
-        version: registered.version,
-        retryPolicy: retryPolicy,
-        span: this.span,
-      });
-
-      if (util.isGeneratorFunction(registered.func)) {
-        this.processGenerator(nursery, ctx, registered.func, args, task, done);
-      } else {
-        this.processFunction(this.id, ctx, registered.func, args, (res) => {
-          if (res.kind === "error") return done({ kind: "error", error: undefined });
-
-          done({ kind: "value", value: { kind: "completed", promise: res.value } });
-        });
-      }
-    }, doneAndDropTaskIfErr);
-  }
-
-  private processGenerator(
-    nursery: Nursery<Status>,
-    ctx: InnerContext,
-    func: Func,
-    args: any[],
-    task: TaskRecord,
-    done: (res: Result<Status, undefined>) => void,
-  ) {
-    Coroutine.exec(this.id, this.verbose, ctx, func, args, task, this.handler, this.spans, (res) => {
-      if (res.kind === "error") {
-        return done(res);
-      }
-      const status = res.value;
-
-      switch (status.type) {
-        case "completed":
-          done({ kind: "value", value: { kind: "completed", promise: status.promise } });
-          break;
-
-        case "suspended":
-          util.assert(status.todo.local.length > 0 || status.todo.remote.length > 0, "must be at least one todo");
-
-          if (status.todo.local.length > 0) {
-            this.processLocalTodo(nursery, status.todo.local, done);
-          } else if (status.todo.remote.length > 0) {
-            this.processRemoteTodo(nursery, status.todo.remote, status.spans, ctx.info.timeout, done);
-          }
-
-          break;
-      }
-    });
-  }
-
-  private processFunction(
-    id: string,
-    ctx: InnerContext,
-    func: Func,
-    args: any[],
-    done: (res: Result<DurablePromiseRecord, undefined>) => void,
-  ) {
-    this.processor.process(
-      id,
-      ctx,
-      async () => await func(ctx, ...args),
-      (res) =>
-        this.handler.completePromise(
-          {
-            kind: "completePromise",
-            id: id,
-            state: res.kind === "value" ? "resolved" : "rejected",
-            value: {
-              data: res.kind === "value" ? res.value : res.error,
-            },
-          },
-          (res) => {
-            if (res.kind === "error") {
-              res.error.log(this.verbose);
-              return done({ kind: "error", error: undefined });
-            }
-            done(res);
-          },
-          func.name,
-        ),
-      this.verbose,
-      ctx.span,
-    );
-  }
-
-  private processLocalTodo(
-    nursery: Nursery<Status>,
-    todo: LocalTodo[],
-    done: (res: Result<Status, undefined>) => void,
-  ) {
-    for (const { id, ctx, span, func, args } of todo) {
-      if (this.seen.has(id)) {
-        continue;
-      }
-
-      this.seen.add(id);
-
-      nursery.hold((next) => {
-        this.processFunction(id, ctx, func, args, (res) => {
-          span.end(this.clock.now());
-          next();
-
-          if (res.kind === "error") {
-            this.seen.delete(id);
-            done(res);
-          }
-        });
-      });
+    if (retry && !retryCtor) {
+      this.logger.warn(
+        { component: "computation", retryType: retry.type },
+        `Retry policy '${retry.type}' not found. Will ignore.`,
+      );
     }
 
-    // once all local todos are submitted we can call continue
-    return nursery.cont();
+    const ctxConfig = {
+      id: this.id,
+      oId: rootPromise.tags["resonate:origin"] ?? this.id,
+      func: registered.func.name,
+      clock: this.clock,
+      registry: this.registry,
+      dependencies: this.dependencies,
+      optsBuilder: this.optsBuilder,
+      timeout: rootPromise.timeoutAt,
+      version: registered.version,
+      retryPolicy: retryPolicy,
+    };
+
+    if (util.isGeneratorFunction(registered.func)) {
+      return this.processGenerator(registered.func, ctxConfig, args, rootPromise);
+    }
+
+    return this.processFunction(this.id, registered.func, new InnerContext(ctxConfig), args);
   }
 
-  private processRemoteTodo(
-    nursery: Nursery<Status>,
-    todo: RemoteTodo[],
-    spans: Span[],
-    timeout: number,
-    done: (res: Result<Status, undefined>) => void,
-  ) {
-    nursery.all<
-      RemoteTodo,
-      { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
-    >(
-      todo,
-      ({ id }, done) =>
-        this.handler.createCallback(
-          {
-            kind: "createCallback",
-            promiseId: id,
-            rootPromiseId: this.id,
-            timeout: timeout,
-            recv: this.anycast,
-          },
-          (res) => {
-            if (res.kind === "error") {
-              res.error.log(this.verbose);
-              return done({ kind: "error", error: undefined });
-            }
-            done(res);
-          },
-          this.span.encode(),
-        ),
-      (res) => {
-        if (res.kind === "error") {
-          for (const span of spans) {
-            span.end(this.clock.now());
-          }
-          return done(res);
-        }
+  private async processGenerator(
+    func: Func,
+    ctxConfig: ConstructorParameters<typeof InnerContext>[0],
+    args: any[],
+    rootPromise: PromiseRecord,
+  ): Promise<Status> {
+    const collector = new TraceCollector();
 
-        const callbacks: CallbackRecord[] = [];
+    // If boundary promise is done, short-circuit (dedup the root)
+    if (rootPromise.state !== "pending") {
+      const state = rootPromise.state === "resolved" ? "resolved" : "rejected";
+      collector.emit({ kind: "dedup", id: rootPromise.id, state, value: rootPromise.value });
+      this.logger.debug({ component: "trace", kind: "dedup", id: rootPromise.id }, "trace: dedup");
+      return {
+        kind: "done",
+        id: rootPromise.id,
+        state,
+        value: rootPromise.value,
+        trace: collector.getTrace(),
+      };
+    }
 
-        for (const r of res.value) {
-          switch (r.kind) {
-            case "promise":
-              nursery.hold((next) => next());
-              return nursery.cont();
+    const ctx = new InnerContext(ctxConfig);
+    const status = await Coroutine.exec(this.logger, ctx, func, args, this.effects, collector);
+    const trace = collector.getTrace();
 
-            case "callback":
-              callbacks.push(r.callback);
-              break;
-          }
-        }
+    if (status.type === "done") {
+      return {
+        kind: "done",
+        id: this.id,
+        state: status.result.kind === "value" ? "resolved" : "rejected",
+        value: status.result.kind === "value" ? status.result.value : status.result.error,
+        trace,
+      };
+    }
 
-        for (const span of spans) {
-          span.end(this.clock.now());
-        }
+    // Only remote todos remain — locals are handled inline by the coroutine
+    return { kind: "suspended", awaited: status.todo.remote.map((t) => t.id), trace };
+  }
 
-        // once all callbacks are created we can call done
-        return done({ kind: "value", value: { kind: "suspended", callbacks } });
-      },
-    );
+  private async processFunction(id: string, func: Func, ctx: InnerContext, args: any[]): Promise<Status> {
+    const collector = new TraceCollector();
+    collector.emit({ kind: "spawn", id });
+    this.logger.debug({ component: "trace", kind: "spawn", id }, "trace: spawn");
+
+    const result = await util.executeWithRetry(ctx, func, args, this.logger);
+    const state = result.kind === "value" ? "resolved" : "rejected";
+    const value = result.kind === "value" ? result.value : result.error;
+
+    collector.emit({ kind: "return", id, state, value });
+    this.logger.debug({ component: "trace", kind: "return", id }, "trace: return");
+
+    return {
+      kind: "done",
+      id,
+      state,
+      value,
+      trace: collector.getTrace(),
+    };
   }
 }
 

@@ -1,263 +1,166 @@
-import { LocalNetwork } from "../dev/network";
-import type { CallbackRecord, DurablePromiseRecord, Network, TaskRecord } from "./network/network";
+import { randomUUID } from "node:crypto";
+import exceptions from "./exceptions.js";
+import { LocalNetwork } from "./network/local.js";
+import { isSuccess, type PromiseRecord, type TaskRecord } from "./network/types.js";
+import type { Send } from "./types.js";
+import { VERSION } from "./util.js";
 
 export class Promises {
-  private network: Network;
-  constructor(network: Network = new LocalNetwork()) {
-    this.network = network;
+  private send: Send;
+  constructor(send: Send = new LocalNetwork().send) {
+    this.send = send;
   }
 
-  get(id: string): Promise<DurablePromiseRecord> {
-    return new Promise((resolve, reject) => {
-      this.network.send({ kind: "readPromise", id }, (res) => {
-        if (res.kind === "error") {
-          reject(res.error);
-          return;
-        }
-
-        resolve(res.value.promise);
+  async get(id: string): Promise<PromiseRecord> {
+    const res = await this.send({
+      kind: "promise.get",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: { id },
+    });
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
       });
-    });
+    }
+    return res.data.promise;
   }
 
-  create(
+  async create(
     id: string,
-    timeout: number,
+    timeoutAt: number,
     {
-      headers = undefined,
-      data = undefined,
-      tags = undefined,
+      headers = {},
+      data = "",
+      tags = {},
     }: {
-      headers?: Record<string, string>;
+      headers?: { [key: string]: string };
       data?: string;
-      tags?: Record<string, string>;
+      tags?: { [key: string]: string };
     } = {},
-  ): Promise<DurablePromiseRecord> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "createPromise",
-          id: id,
-          timeout: timeout,
-          param: { headers, data },
-          tags: tags,
-        },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve(res.value.promise);
-        },
-      );
+  ): Promise<PromiseRecord> {
+    const res = await this.send({
+      kind: "promise.create",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: {
+        id,
+        timeoutAt,
+        param: { headers, data },
+        tags,
+      },
     });
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+    return res.data.promise;
   }
 
-  createWithTask(
+  async createWithTask(
     id: string,
-    timeout: number,
+    timeoutAt: number,
     pid: string,
     ttl: number,
     {
-      headers = undefined,
-      data = undefined,
-      tags = undefined,
+      headers = {},
+      data = "",
+      tags = {},
     }: {
-      headers?: Record<string, string>;
+      headers?: { [key: string]: string };
       data?: string;
-      tags?: Record<string, string>;
+      tags?: { [key: string]: string };
     } = {},
-  ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "createPromiseAndTask",
-          promise: {
-            id: id,
-            timeout: timeout,
-            param: { headers, data },
-            tags: tags,
-          },
-          task: {
-            processId: pid,
-            ttl: ttl,
-          },
+  ): Promise<{ promise: PromiseRecord; task?: TaskRecord }> {
+    const res = await this.send({
+      kind: "task.create",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: {
+        pid,
+        ttl,
+        action: {
+          kind: "promise.create",
+          head: { corrId: randomUUID(), version: VERSION },
+          data: { id, timeoutAt, param: { headers, data }, tags },
         },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve({ promise: res.value.promise, task: res.value.task });
-        },
-      );
+      },
     });
-  }
-
-  resolve(
-    id: string,
-    {
-      headers = undefined,
-      data = undefined,
-    }: {
-      headers?: Record<string, string>;
-      data?: string;
-    } = {},
-  ): Promise<DurablePromiseRecord> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "completePromise",
-          id: id,
-          state: "resolved",
-          value: { headers, data },
-        },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve(res.value.promise);
-        },
-      );
-    });
-  }
-  reject(
-    id: string,
-    {
-      headers = undefined,
-      data = undefined,
-    }: {
-      headers?: Record<string, string>;
-      data?: string;
-    } = {},
-  ): Promise<DurablePromiseRecord> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "completePromise",
-          id: id,
-          state: "rejected",
-          value: { headers, data },
-        },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve(res.value.promise);
-        },
-      );
-    });
-  }
-  cancel(
-    id: string,
-    {
-      headers = undefined,
-      data = undefined,
-    }: {
-      headers?: Record<string, string>;
-      data?: string;
-    } = {},
-  ): Promise<DurablePromiseRecord> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "completePromise",
-          id: id,
-          state: "rejected_canceled",
-          value: { headers, data },
-        },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve(res.value.promise);
-        },
-      );
-    });
-  }
-  async *search(
-    id: string,
-    { state = undefined, limit = undefined }: { state?: "pending" | "resolved" | "rejected"; limit?: number } = {},
-  ): AsyncGenerator<DurablePromiseRecord[], void> {
-    let cursor: string | undefined;
-
-    do {
-      const res = await new Promise<{ promises: DurablePromiseRecord[]; cursor?: string }>((resolve, reject) => {
-        this.network.send(
-          {
-            kind: "searchPromises",
-            id,
-            state,
-            limit,
-            cursor,
-          },
-          (res) => {
-            if (res.kind === "error") return reject(res.error);
-            resolve(res.value);
-          },
-        );
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
       });
-
-      cursor = res.cursor;
-      yield res.promises;
-    } while (cursor !== null && cursor !== undefined);
-  }
-  callback(
-    promiseId: string,
-    rootPromiseId: string,
-    recv: string,
-    timeout: number,
-  ): Promise<{
-    promise: DurablePromiseRecord;
-    callback: CallbackRecord | undefined;
-  }> {
-    return new Promise((resolve, reject) => {
-      this.network.send(
-        {
-          kind: "createCallback",
-          promiseId: promiseId,
-          rootPromiseId: rootPromiseId,
-          timeout: timeout,
-          recv: recv,
-        },
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-            return;
-          }
-
-          resolve({ promise: res.value.promise, callback: res.value.callback });
-        },
-      );
-    });
+    }
+    return { promise: res.data.promise, task: res.data.task };
   }
 
-  subscribe(
+  async settle(
     id: string,
-    promiseId: string,
-    timeout: number,
-    recv: string,
-  ): Promise<{
-    promise: DurablePromiseRecord;
-    callback: CallbackRecord | undefined;
-  }> {
-    return new Promise((resolve, reject) => {
-      this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (res) => {
-        if (res.kind === "error") {
-          reject(res.error);
-          return;
-        }
-
-        resolve({ promise: res.value.promise, callback: res.value.callback });
-      });
+    state: "resolved" | "rejected" | "rejected_canceled",
+    {
+      headers = {},
+      data = "",
+    }: {
+      headers?: { [key: string]: string };
+      data?: string;
+    } = {},
+  ): Promise<PromiseRecord> {
+    const res = await this.send({
+      kind: "promise.settle",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: {
+        id,
+        state,
+        value: { headers, data },
+      },
     });
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+    return res.data.promise;
+  }
+
+  async registerCallback(
+    awaited: string,
+    awaiter: string,
+  ): Promise<{
+    promise: PromiseRecord;
+  }> {
+    const res = await this.send({
+      kind: "promise.register_callback",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: { awaited, awaiter },
+    });
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+    return { promise: res.data.promise };
+  }
+
+  async registerListener(
+    awaited: string,
+    address: string,
+  ): Promise<{
+    promise: PromiseRecord;
+  }> {
+    const res = await this.send({
+      kind: "promise.register_listener",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: { awaited, address },
+    });
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+    return { promise: res.data.promise };
   }
 }

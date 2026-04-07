@@ -1,81 +1,39 @@
-import type { StepClock } from "../../src/clock";
-import { Core } from "../../src/core";
-import type { Encoder } from "../../src/encoder";
-import { NoopEncryptor } from "../../src/encryptor";
-import type { ResonateError } from "../../src/exceptions";
-import exceptions from "../../src/exceptions";
-import { Handler } from "../../src/handler";
-import { NoopHeartbeat } from "../../src/heartbeat";
-import type {
-  MessageSource,
-  Network,
-  Message as NetworkMessage,
-  Request,
-  Response,
-  ResponseFor,
-} from "../../src/network/network";
-import { OptionsBuilder } from "../../src/options";
-import type { Registry } from "../../src/registry";
-import { NoopTracer } from "../../src/tracer";
-import type { Result } from "../../src/types";
-import * as util from "../../src/util";
-import { type Address, Message, Process, type Random, unicast } from "./simulator";
+import type { StepClock } from "../../src/clock.js";
+import { Codec } from "../../src/codec.js";
+import { Core } from "../../src/core.js";
+import { NoopHeartbeat } from "../../src/heartbeat.js";
+import { ConsoleLogger } from "../../src/logger.js";
+import type { Network } from "../../src/network/network.js";
+import { isResponse, type Message, type Request, type Response } from "../../src/network/types.js";
+
+import { OptionsBuilder } from "../../src/options.js";
+import type { Registry } from "../../src/registry.js";
+import * as util from "../../src/util.js";
+import { type Address, Process, type Random, Message as SimMessage, unicast } from "./simulator.js";
 
 interface DeliveryOptions {
   charFlipProb?: number;
 }
 
-class SimulatedMessageSource implements MessageSource {
-  readonly pid: string;
-  readonly group: string;
+class SimulatedNetwork implements Network {
   readonly unicast: string;
   readonly anycast: string;
 
-  private subscriptions: {
-    invoke: Array<(msg: NetworkMessage) => void>;
-    resume: Array<(msg: NetworkMessage) => void>;
-    notify: Array<(msg: NetworkMessage) => void>;
-  } = { invoke: [], resume: [], notify: [] };
-
-  constructor(
-    iaddr: string,
-    gaddr: string,
-    private maybeCorruptData: (data: NetworkMessage) => any,
-  ) {
-    this.pid = iaddr;
-    this.group = gaddr;
-    this.unicast = `sim://uni@${gaddr}/${iaddr}`;
-    this.anycast = `sim://any@${gaddr}/${iaddr}`;
-  }
-
-  start(): void {}
-
-  recv(msg: NetworkMessage): void {
-    for (const callback of this.subscriptions[msg.type]) {
-      callback(this.maybeCorruptData(msg));
-    }
-  }
-
-  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: NetworkMessage) => void): void {
-    this.subscriptions[type].push(callback);
-  }
-
-  stop(): void {}
-
-  match(target: string): string {
-    return `sim://any@${target}`;
-  }
-}
-
-class SimulatedNetwork implements Network {
+  private subscribers: Array<(msg: Message) => void> = [];
   private correlationId = 1;
   private currentTime = 0;
 
   private prng: Random;
   private deliveryOptions: Required<DeliveryOptions>;
-  private buffer: Message<Request>[] = [];
-  private callbacks: Record<number, { callback: (res: Result<Response, any>) => void; timeout: number }> = {};
-  private messageSource: SimulatedMessageSource;
+  private buffer: SimMessage<string>[] = [];
+  private callbacks: Record<
+    number,
+    {
+      req: Request;
+      resolve: (res: Response) => void;
+      timeout: number;
+    }
+  > = {};
 
   constructor(
     iaddr: string,
@@ -85,36 +43,37 @@ class SimulatedNetwork implements Network {
     public readonly source: Address,
     public readonly target: Address,
   ) {
+    this.unicast = `sim://uni@${gaddr}/${iaddr}`;
+    this.anycast = `sim://any@${gaddr}/${iaddr}`;
     this.prng = prng;
     this.deliveryOptions = { charFlipProb };
-    this.messageSource = new SimulatedMessageSource(iaddr, gaddr, (data) => this.maybeCorruptData(data));
   }
 
-  start(): void {}
-  getMessageSource(): MessageSource {
-    return this.messageSource;
+  async init(): Promise<void> {}
+  async stop(): Promise<void> {}
+
+  recv(callback: (msg: Message) => void): void {
+    this.subscribers.push(callback);
   }
 
-  send<T extends Request>(req: T, cb: (res: Result<ResponseFor<T>, ResonateError>) => void): void {
-    const message = new Message<Request>(this.source, this.target, req, {
+  send = async <K extends Request["kind"]>(
+    req: Extract<Request, { kind: K }>,
+  ): Promise<Extract<Response, { kind: K }>> => {
+    const serialized = JSON.stringify(req);
+    const message = new SimMessage<string>(this.source, this.target, serialized, {
       requ: true,
       correlationId: this.correlationId++,
     });
 
-    const callback = (res: Result<Response, any>) => {
-      if (res.kind === "error") {
-        cb({ kind: "error", error: res.error as ResonateError });
-      } else {
-        util.assert(res.value.kind === req.kind, "res kind must match req kind");
-        cb({ kind: "value", value: res.value as ResponseFor<T> });
-      }
-    };
-
-    this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 50000 };
-    this.buffer.push(message);
-  }
-
-  stop(): void {}
+    return new Promise<Extract<Response, { kind: K }>>((resolve) => {
+      this.callbacks[message.head!.correlationId] = {
+        req,
+        resolve: resolve as (res: Response) => void,
+        timeout: this.currentTime + 2000,
+      };
+      this.buffer.push(message);
+    });
+  };
 
   time(time: number): void {
     this.currentTime = time;
@@ -124,101 +83,126 @@ class SimulatedNetwork implements Network {
       const cb = this.callbacks[key];
       const hasTimedOut = cb.timeout < this.currentTime;
       if (hasTimedOut) {
-        cb.callback({ kind: "error", error: exceptions.SERVER_ERROR("Request timed out", true) });
+        const req = cb.req;
+        const res = {
+          kind: req.kind,
+          head: { corrId: req.head.corrId, version: req.head.version, status: 500 },
+          data: "req timed out",
+        } as Response;
+        cb.resolve(res);
         delete this.callbacks[key];
       }
     }
   }
 
-  process(message: Message<{ err?: any; res?: Response } | NetworkMessage>): void {
+  process(message: SimMessage<string>): void {
     if (message.isResponse()) {
       util.assert(message.source === this.target);
       util.assert(message.target === this.source);
       const correlationId = message.head?.correlationId;
-      const entry: { callback: (res: Result<Response, any>) => void; timeout: number } =
-        correlationId && this.callbacks[correlationId];
+      const entry = correlationId && this.callbacks[correlationId];
       if (entry) {
-        const msg = message as Message<{ err?: any; res?: Response }>;
-        if (msg.data.err) {
-          util.assert(msg.data.res === undefined);
-          entry.callback({ kind: "error", error: msg.data.err });
-        } else {
-          util.assertDefined(msg.data.res);
-          entry.callback({ kind: "value", value: this.maybeCorruptData(msg.data.res) });
+        util.assertDefined(message.data);
+        const dataStr = this.maybeCorruptData(message.data);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(dataStr);
+        } catch {
+          // Corrupted data - return a synthetic error response
+          const res = {
+            kind: entry.req.kind,
+            head: { corrId: entry.req.head.corrId, version: entry.req.head.version, status: 500 },
+            data: "corrupted response",
+          } as Response;
+          entry.resolve(res);
+          delete this.callbacks[correlationId];
+          return;
         }
+        if (!isResponse(parsed)) {
+          const res = {
+            kind: entry.req.kind,
+            head: { corrId: entry.req.head.corrId, version: entry.req.head.version, status: 500 },
+            data: "invalid response",
+          } as Response;
+          entry.resolve(res);
+          delete this.callbacks[correlationId];
+          return;
+        }
+        entry.resolve(parsed);
         delete this.callbacks[correlationId];
       }
     } else {
       util.assert(message.source.kind === this.target.kind && message.source.iaddr === this.target.iaddr);
-      this.messageSource.recv((message as Message<NetworkMessage>).data);
+      const dataStr = this.maybeCorruptData(message.data);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(dataStr);
+      } catch {
+        return; // discard corrupted messages
+      }
+      // Validate it's a proper Message
+      if (typeof parsed === "object" && parsed !== null && "kind" in parsed) {
+        for (const callback of this.subscribers) {
+          callback(parsed as Message);
+        }
+      }
     }
   }
 
-  flush(): Message<any>[] {
+  flush(): SimMessage<any>[] {
     // Finally, flush the buffer
     const flushed = this.buffer;
     this.buffer = [];
     return flushed;
   }
 
-  private maybeCorruptData(data: Response | NetworkMessage): any {
-    // Serialize the data to a string
-    let jsonStr = JSON.stringify(data);
-
+  private maybeCorruptData(data: string): string {
     // Randomly decide whether to corrupt
     const shouldCorrupt = this.prng.next() < this.deliveryOptions.charFlipProb;
     if (!shouldCorrupt) return data;
 
     // Pick a random index to corrupt
-    const idx = Math.floor(this.prng.next() * jsonStr.length);
+    const idx = Math.floor(this.prng.next() * data.length);
 
     // Corrupt that character
-    jsonStr = `${jsonStr.slice(0, idx)}X${jsonStr.slice(idx + 1)}`;
-
-    // Return corrupted string, even if it's invalid JSON
-    return jsonStr;
+    return `${data.slice(0, idx)}X${data.slice(idx + 1)}`;
   }
 }
 
 export class WorkerProcess extends Process {
   private clock: StepClock;
   private network: SimulatedNetwork;
-  private registry: Registry;
-  private core: Core;
 
   constructor(
     prng: Random,
     clock: StepClock,
-    encoder: Encoder,
     registry: Registry,
-    { charFlipProb = 0 }: DeliveryOptions,
+    { charFlipProb }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
     this.clock = clock;
-    this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
-    this.registry = registry;
-    const messageSource = this.network.getMessageSource();
-    this.core = new Core({
-      unicast: messageSource.unicast,
-      anycast: messageSource.anycast,
+    this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb }, unicast(iaddr), unicast("server"));
+    const logger = new ConsoleLogger("error");
+    const core = new Core({
       pid: iaddr,
-      ttl: 5000,
+      ttl: 10000,
       clock: this.clock,
-      network: this.network,
-      handler: new Handler(this.network, encoder, new NoopEncryptor()),
-      messageSource: this.network.getMessageSource(),
-      registry: registry,
+      send: this.network.send,
+      codec: new Codec(),
+      registry,
       heartbeat: new NoopHeartbeat(),
       dependencies: new Map(),
-      optsBuilder: new OptionsBuilder({ match: messageSource.match, idPrefix: "" }),
-      verbose: false,
-      tracer: new NoopTracer(),
+      optsBuilder: new OptionsBuilder({ match: (target: string) => `sim://any@${target}`, idPrefix: "" }),
+      logger,
+    });
+    this.network.recv((msg) => {
+      core.onMessage(msg).catch(() => {});
     });
   }
 
-  tick(tick: number, messages: Message<{ err?: any; res?: Response } | NetworkMessage>[]): Message<Request>[] {
+  tick(tick: number, messages: SimMessage<string>[]): SimMessage<string>[] {
     this.log(tick, "[recv]", messages);
 
     this.network.time(this.clock.time);

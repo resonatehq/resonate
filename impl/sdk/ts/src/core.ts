@@ -1,95 +1,68 @@
-import type { Clock } from "./clock";
-import { Computation, type Status } from "./computation";
-import type { Handler } from "./handler";
-import type { Heartbeat } from "./heartbeat";
-import type { DurablePromiseRecord, Message, MessageSource, Network, TaskRecord } from "./network/network";
-import type { OptionsBuilder } from "./options";
-import type { Registry } from "./registry";
-import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries";
-import type { Span, Tracer } from "./tracer";
-import type { Result } from "./types";
-import * as util from "./util";
+import { randomUUID } from "node:crypto";
+import type { Clock } from "./clock.js";
+import type { Codec } from "./codec.js";
+import { Computation, type Done, type Status } from "./computation.js";
+import exceptions, { ResonateError } from "./exceptions.js";
+import type { Heartbeat } from "./heartbeat.js";
+import type { Logger } from "./logger.js";
+import { isRedirect, isSuccess, type Message, type PromiseRecord, type TaskRecord } from "./network/types.js";
+import type { OptionsBuilder } from "./options.js";
+import type { Registry } from "./registry.js";
+import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries.js";
+import type { Effects, Send } from "./types.js";
+import * as util from "./util.js";
 
 export type PromiseHandler = {
-  addEventListener: (event: "created" | "completed", callback: (p: DurablePromiseRecord) => void) => void;
+  addEventListener: (event: "created" | "completed", callback: (p: PromiseRecord) => void) => void;
   subscribe: () => Promise<void>;
 };
 
-export type Task = ClaimedTask | UnclaimedTask;
-
-export type ClaimedTask = {
-  kind: "claimed";
-  task: TaskRecord;
-  rootPromise: DurablePromiseRecord<any>;
-  leafPromise?: DurablePromiseRecord<any>;
-};
-
-export type UnclaimedTask = {
-  kind: "unclaimed";
-  task: TaskRecord;
-};
-
 export class Core {
-  private unicast: string;
-  private anycast: string;
   private pid: string;
   private ttl: number;
   private clock: Clock;
-  private network: Network;
-  private handler: Handler;
-  private tracer: Tracer;
+  private send: Send;
+  private codec: Codec;
   private retries: Map<string, RetryPolicyConstructor>;
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
   private optsBuilder: OptionsBuilder;
-  private verbose: boolean;
-  private computations: Map<string, Computation> = new Map();
+  private logger: Logger;
 
   constructor({
-    unicast,
-    anycast,
     pid,
     ttl,
     clock,
-    network,
-    handler,
-    tracer,
+    send,
+    codec,
     registry,
     heartbeat,
     dependencies,
     optsBuilder,
-    verbose,
-    messageSource = undefined,
+    logger,
   }: {
-    unicast: string;
-    anycast: string;
     pid: string;
     ttl: number;
     clock: Clock;
-    network: Network;
-    handler: Handler;
-    tracer: Tracer;
+    send: Send;
+    codec: Codec;
     registry: Registry;
     heartbeat: Heartbeat;
     dependencies: Map<string, any>;
     optsBuilder: OptionsBuilder;
-    verbose: boolean;
-    messageSource?: MessageSource;
+    logger: Logger;
   }) {
-    this.unicast = unicast;
-    this.anycast = anycast;
     this.pid = pid;
     this.ttl = ttl;
     this.clock = clock;
-    this.network = network;
-    this.handler = handler;
-    this.tracer = tracer;
+    this.send = send;
+    this.codec = codec;
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
     this.optsBuilder = optsBuilder;
-    this.verbose = verbose;
+    this.logger = logger;
 
     // default retry policies
     this.retries = new Map<string, RetryPolicyConstructor>([
@@ -98,44 +71,136 @@ export class Core {
       [Linear.type, Linear],
       [Never.type, Never],
     ]);
-
-    // subscribe to invoke and resume
-    messageSource?.subscribe("invoke", this.onMessage.bind(this));
-    messageSource?.subscribe("resume", this.onMessage.bind(this));
   }
 
-  public executeUntilBlocked(span: Span, task: Task, done: (res: Result<Status, undefined>) => void) {
-    let computation = this.computations.get(task.task.rootPromiseId);
-    if (!computation) {
-      computation = new Computation(
-        task.task.rootPromiseId,
-        this.unicast,
-        this.anycast,
-        this.pid,
-        this.ttl,
-        this.clock,
-        this.network,
-        this.handler,
-        this.retries,
-        this.registry,
-        this.heartbeat,
-        this.dependencies,
-        this.optsBuilder,
-        this.verbose,
-        this.tracer,
-        span,
-      );
-      this.computations.set(task.task.rootPromiseId, computation);
-    }
+  public async executeUntilBlocked(
+    task: TaskRecord,
+    rootPromise: PromiseRecord,
+    preload?: PromiseRecord[],
+  ): Promise<Status> {
+    util.assert(task.state === "acquired", `expected task state to be 'acquired', got '${task.state}'`);
+    const computation = this.createComputation(rootPromise.id, util.buildEffects(this.send, this.codec, preload));
 
-    computation.executeUntilBlocked(task, done);
+    try {
+      const status = await computation.executeUntilBlocked(rootPromise);
+      if (status.kind === "suspended") {
+        const suspendResult = await this.suspendTask(task, rootPromise, status.awaited);
+        if (suspendResult.continue) {
+          return this.executeUntilBlocked(task, rootPromise, suspendResult.preload);
+        }
+      }
+      if (status.kind === "done") {
+        await this.fulfillTask(task, status);
+      }
+      return status;
+    } catch (err) {
+      // TODO: Some kinds of error must releaseTask, others must haltTask, figure out when to halt and when to release
+      if (err instanceof ResonateError) {
+        err.log(this.logger);
+      } else {
+        this.logger.warn(
+          { component: "core", error: err instanceof Error ? err.message : String(err) },
+          "executeUntilBlocked failed unexpectedly",
+        );
+      }
+      await this.releaseTask(task).catch(() => {});
+      throw err;
+    }
   }
 
-  private onMessage(msg: Message): void {
-    util.assert(msg.type === "invoke" || msg.type === "resume");
+  // Extracted to allow tests to spy on computation creation.
+  private createComputation(id: string, effects: Effects): Computation {
+    return new Computation(
+      id,
+      this.clock,
+      effects,
+      this.retries,
+      this.registry,
+      this.heartbeat,
+      this.dependencies,
+      this.optsBuilder,
+      this.logger,
+    );
+  }
 
-    if (msg.type === "invoke" || msg.type === "resume") {
-      this.executeUntilBlocked(this.tracer.decode(msg.headers), { kind: "unclaimed", task: msg.task }, () => {});
+  private async releaseTask(task: TaskRecord): Promise<void> {
+    await this.send({
+      kind: "task.release",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: { id: task.id, version: task.version },
+    });
+  }
+
+  private async suspendTask(
+    task: TaskRecord,
+    rootPromise: PromiseRecord,
+    awaited: string[],
+  ): Promise<{ continue: true; preload: PromiseRecord[] } | { continue: false }> {
+    const res = await this.send({
+      kind: "task.suspend",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        id: task.id,
+        version: task.version,
+        actions: awaited.map((a) => ({
+          kind: "promise.register_callback",
+          head: { corrId: randomUUID(), version: util.VERSION },
+          data: { awaiter: rootPromise.id, awaited: a },
+        })),
+      },
+    });
+    if (isSuccess(res)) {
+      return { continue: false };
     }
+    if (isRedirect(res)) {
+      return { continue: true, preload: res.data.preload };
+    }
+    throw exceptions.SERVER_ERROR(res.data, true, {
+      code: res.head.status,
+      message: res.data,
+    });
+  }
+
+  private async fulfillTask(task: TaskRecord, doneValue: Done): Promise<void> {
+    const encoded = this.codec.encode(doneValue.value);
+
+    await this.send({
+      kind: "task.fulfill",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        id: task.id,
+        version: task.version,
+        action: {
+          kind: "promise.settle",
+          head: { corrId: randomUUID(), version: util.VERSION },
+          data: {
+            id: doneValue.id,
+            state: doneValue.state,
+            value: encoded,
+          },
+        },
+      },
+    });
+  }
+
+  public async onMessage(msg: Message): Promise<Status> {
+    util.assert(msg.kind === "execute");
+
+    const task = msg.data.task;
+    const res = await this.send({
+      kind: "task.acquire",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: { id: task.id, version: task.version, pid: this.pid, ttl: this.ttl },
+    });
+
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    const rootPromise = this.codec.decodePromise(res.data.promise);
+    return this.executeUntilBlocked(res.data.task, rootPromise, res.data.preload);
   }
 }

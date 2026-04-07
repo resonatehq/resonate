@@ -1,4 +1,4 @@
-import { Registry } from "../src/registry";
+import { Registry } from "../src/registry.js";
 
 describe("Registry", () => {
   let registry: Registry;

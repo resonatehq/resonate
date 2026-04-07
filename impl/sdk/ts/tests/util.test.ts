@@ -1,4 +1,4 @@
-import { base64Decode, base64Encode, isGeneratorFunction } from "../src/util";
+import { base64Decode, base64Encode, isGeneratorFunction } from "../src/util.js";
 
 describe("isGeneratorFunction", () => {
   // Basic generator functions

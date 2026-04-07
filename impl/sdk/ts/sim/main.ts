@@ -1,20 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { Command } from "commander";
-import { StepClock } from "../src/clock";
-import type { Context } from "../src/context";
-import { JsonEncoder } from "../src/encoder";
-import type { Request } from "../src/network/network";
-import { Registry } from "../src/registry";
-import { ServerProcess } from "./src/server";
-import { Message, Random, Simulator, unicast } from "./src/simulator";
-import { WorkerProcess } from "./src/worker";
+import { StepClock } from "../src/clock.js";
+import { Codec } from "../src/codec.js";
+import type { Context } from "../src/context.js";
+import type { Request } from "../src/network/types.js";
+import { Registry } from "../src/registry.js";
+import { VERSION } from "../src/util.js";
+import { ServerProcess } from "./src/server.js";
+import { Message, Random, Simulator, unicast } from "./src/simulator.js";
+import { WorkerProcess } from "./src/worker.js";
 
 // Function definition
 function* fibLfi(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const p1 = yield ctx.beginRun(fibLfi, n - 1, ctx.options({ id: `fibLfi-${n - 1}` }));
-  const p2 = yield ctx.beginRun(fibLfi, n - 2, ctx.options({ id: `fibLfi-${n - 2}` }));
+  const p1 = yield ctx.beginRun(fibLfi, n - 1);
+  const p2 = yield ctx.beginRun("fibLfi", n - 2);
 
   return (yield p1) + (yield p2);
 }
@@ -23,8 +25,8 @@ function* fibRfi(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const p1 = yield ctx.beginRpc("fibRfi", n - 1, ctx.options({ id: `fibRfi-${n - 1}` }));
-  const p2 = yield ctx.beginRpc("fibRfi", n - 2, ctx.options({ id: `fibRfi-${n - 2}` }));
+  const p1 = yield ctx.beginRpc(fibRfi, n - 1);
+  const p2 = yield ctx.beginRpc("fibRfi", n - 2);
 
   return (yield p1) + (yield p2);
 }
@@ -33,8 +35,8 @@ function* fibLfc(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const v1 = yield ctx.run(fibLfc, n - 1, ctx.options({ id: `fibLfc-${n - 1}` }));
-  const v2 = yield ctx.run(fibLfc, n - 2, ctx.options({ id: `fibLfc-${n - 2}` }));
+  const v1 = yield ctx.run(fibLfc, n - 1);
+  const v2 = yield ctx.run("fibLfc", n - 2);
   return v1 + v2;
 }
 
@@ -42,8 +44,8 @@ function* fibRfc(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const v1 = yield ctx.rpc("fibRfc", n - 1, ctx.options({ id: `fibRfc-${n - 1}` }));
-  const v2 = yield ctx.rpc("fibRfc", n - 2, ctx.options({ id: `fibRfc-${n - 2}` }));
+  const v1 = yield ctx.rpc(fibRfc, n - 1);
+  const v2 = yield ctx.rpc("fibRfc", n - 2);
   return v1 + v2;
 }
 
@@ -69,7 +71,7 @@ function* bar(ctx: Context): Generator<any, any, any> {
   return [yield p1, yield p2];
 }
 
-function* baz(ctx: Context): Generator<any, any, any> {
+function baz(_: Context): string {
   return "baz";
 }
 
@@ -174,7 +176,7 @@ type Options = {
 
 const options = program.opts<Options>();
 
-export function run(options: Options) {
+export async function run(options: Options) {
   // effectively disable queueMicrotask
 
   const rnd = new Random(options.seed);
@@ -188,7 +190,7 @@ export function run(options: Options) {
   });
 
   const clock = new StepClock();
-  const encoder = new JsonEncoder();
+  const codec = new Codec();
   const registry = new Registry();
 
   for (const [name, func] of Object.entries(availableFuncs)) {
@@ -198,15 +200,29 @@ export function run(options: Options) {
   // server
   sim.register(new ServerProcess(clock, "server"));
 
+  sim.repeat(1, () => {
+    sim.send(
+      new Message(
+        unicast("environment"),
+        unicast("server"),
+        {
+          kind: "debug.tick",
+          head: { corrId: randomUUID(), version: VERSION },
+          data: { time: clock.time },
+        },
+        { requ: true },
+      ),
+    );
+  });
+
   // workers
   for (let i = 1; i <= 3; i++) {
     sim.register(
       new WorkerProcess(
         rnd,
         clock,
-        encoder,
         registry,
-        { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+        { charFlipProb: options.charFlipProb ?? rnd.random(0.15) },
         `worker-${i}`,
         "default",
       ),
@@ -223,7 +239,7 @@ export function run(options: Options) {
 
     if (!options.func || i === 0) {
       const id = `${funcName}-${i}`;
-      const timeout = rnd.randint(0, options.steps);
+      const timeoutAt = rnd.randint(0, options.steps);
       let msg: Message<Request>;
       switch (funcName) {
         case "fibLfi":
@@ -234,13 +250,16 @@ export function run(options: Options) {
             unicast("environment"),
             unicast("server"),
             {
-              kind: "createPromise",
-              id,
-              timeout,
-              tags: { "resonate:invoke": "local://any@default" },
-              param: encoder.encode({ func: funcName, args: [rnd.randint(0, 20)], version: 1 }),
+              kind: "promise.create",
+              head: { corrId: randomUUID(), version: VERSION },
+              data: {
+                id,
+                timeoutAt,
+                tags: { "resonate:target": "sim://any@default" },
+                param: codec.encode({ func: funcName, args: [rnd.randint(0, 20)], version: 1 }),
+              },
             },
-            { requ: true, correlationId: i },
+            { requ: true },
           );
           break;
         }
@@ -251,13 +270,16 @@ export function run(options: Options) {
             unicast("environment"),
             unicast("server"),
             {
-              kind: "createPromise",
-              id,
-              timeout,
-              tags: { "resonate:invoke": "local://any@default" },
-              param: encoder.encode({ func: funcName, args: [], version: 1 }),
+              kind: "promise.create",
+              head: { corrId: randomUUID(), version: VERSION },
+              data: {
+                id,
+                timeoutAt,
+                tags: { "resonate:target": "sim://any@default" },
+                param: codec.encode({ func: funcName, args: [], version: 1 }),
+              },
             },
-            { requ: true, correlationId: i },
+            { requ: true },
           );
           break;
         }
@@ -269,10 +291,11 @@ export function run(options: Options) {
     }
   });
 
-  sim.exec(options.steps);
+  await sim.exec(options.steps);
   console.log("[outbox]: ", sim.outbox);
 }
 
-if (require.main === module) {
-  run(options);
-}
+run(options).catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,9 +1,9 @@
-import { DIE, Future, LFC, LFI, RFC, RFI } from "./context";
-import type { ResonateError } from "./exceptions";
-import type { CreatePromiseReq } from "./network/network";
-import type { RetryPolicy } from "./retries";
-import type { Func, Result, Yieldable } from "./types";
-import * as util from "./util";
+import { DIE, Future, LFC, LFI, RFC, RFI } from "./context.js";
+import type { ResonateError } from "./exceptions.js";
+import type { PromiseCreateReq } from "./network/types.js";
+import type { RetryPolicy } from "./retries.js";
+import type { Func, Result, Yieldable } from "./types.js";
+import * as util from "./util.js";
 
 // Expr
 
@@ -21,7 +21,7 @@ export type InternalAsyncR = {
   mode: "attached" | "detached";
   func: string;
   version: number;
-  createReq: CreatePromiseReq<any>;
+  createReq: PromiseCreateReq;
 };
 
 export type InternalAsyncL = {
@@ -31,7 +31,7 @@ export type InternalAsyncL = {
   args: any[];
   version: number;
   retryPolicy: RetryPolicy;
-  createReq: CreatePromiseReq<any>;
+  createReq: PromiseCreateReq;
 };
 export type InternalAwait<T> = {
   type: "internal.await";
@@ -72,54 +72,40 @@ export type PromiseCompleted<T> = {
 };
 
 export class Decorator<TRet> {
-  private invokes: { kind: "call" | "invoke"; id: string }[];
   private generator: Generator<Yieldable, TRet, any>;
+
+  // Tracks the id of a pending "call" (LFC/RFC) that needs auto-await.
+  // Because `yield*` on LFC/RFC iterators produces two yields, the decorator
+  // intercepts the promise response and auto-emits an `internal.await` before
+  // feeding the resolved value back to the generator.
+  // null = not mid-call, non-null = waiting for the promise for this call id.
+  private pendingCall: string | null = null;
+
   private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
 
   constructor(generator: Generator<Yieldable, TRet, any>) {
     this.generator = generator;
-    this.invokes = [];
   }
 
   public next(value: Value<any>): InternalExpr<any> {
-    // If nextState was set to over, is becasue we shouldn't have been called
     util.assert(
       value.type === this.nextState,
-      `Generator called wit type "${value.type}" expected "${this.nextState}"`,
+      `Generator called with type "${value.type}" expected "${this.nextState}"`,
     );
 
-    // Handle rfc/lfc by returning an await if the previous invocation was a call
-    // if we await an rpc/rfc promise that is not completed the corotine is done and the decorator shouldn't be called again
-    if (value.type === "internal.promise" && this.invokes.length > 0) {
-      const prevInvoke = this.invokes.at(-1)!;
-      if (prevInvoke.kind === "call") {
-        this.invokes.pop();
-        this.nextState = value.state === "completed" ? "internal.literal" : "over";
-        return {
-          type: "internal.await",
-          id: prevInvoke.id,
-          promise: value,
-        };
-      }
+    // Auto-await for calls (LFC/RFC): intercept the promise response and
+    // emit an `internal.await` so the coroutine resolves the value before
+    // feeding it back to the generator.
+    if (value.type === "internal.promise" && this.pendingCall !== null) {
+      const callId = this.pendingCall;
+      this.pendingCall = null;
+      this.nextState = "internal.literal";
+      return { type: "internal.await", id: callId, promise: value };
     }
 
     const result = this.safeGeneratorNext(this.toExternal(value));
     if (result.done) {
       this.nextState = "over";
-      if (this.invokes.length > 0) {
-        // Handles structured concurrency
-        const val = this.invokes.pop()!;
-        return {
-          type: "internal.await",
-          id: val.id,
-          promise: {
-            type: "internal.promise",
-            state: "pending",
-            mode: "attached",
-            id: val.id,
-          },
-        };
-      }
       return {
         type: "internal.return",
         value: this.toLiteral(result.value),
@@ -139,9 +125,6 @@ export class Decorator<TRet> {
         if (value.state === "pending") {
           return { kind: "value", value: new Future<T>(value.id, "pending", undefined, value.mode) };
         }
-        // promise === "complete"
-        // We know for sure this promise relates to the last invoke inserted
-        this.invokes.pop();
         return { kind: "value", value: new Future<T>(value.id, "completed", value.value.value) };
       case "internal.literal":
         return value.value;
@@ -153,10 +136,7 @@ export class Decorator<TRet> {
     event: LFI<T> | RFI<T> | LFC<T> | RFC<T> | Future<T> | DIE,
   ): InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalDie {
     if (event instanceof LFI || event instanceof LFC) {
-      this.invokes.push({
-        kind: event instanceof LFI ? "invoke" : "call",
-        id: event.id,
-      });
+      if (event instanceof LFC) this.pendingCall = event.id;
       this.nextState = "internal.promise";
       return {
         type: "internal.async.l",
@@ -169,12 +149,7 @@ export class Decorator<TRet> {
       };
     }
     if (event instanceof RFI || event instanceof RFC) {
-      if (event.mode === "attached") {
-        this.invokes.push({
-          kind: event instanceof RFI ? "invoke" : "call",
-          id: event.id,
-        });
-      }
+      if (event instanceof RFC) this.pendingCall = event.id;
 
       this.nextState = "internal.promise";
       return {
@@ -195,9 +170,10 @@ export class Decorator<TRet> {
       };
     }
     if (event instanceof Future) {
-      // Map Future to InternalPromise union
+      this.nextState = "internal.literal";
+
       if (event.state === "completed") {
-        this.nextState = "internal.literal";
+        util.assertDefined(event.value);
         return {
           type: "internal.await",
           id: event.id,
@@ -205,18 +181,11 @@ export class Decorator<TRet> {
             type: "internal.promise",
             state: "completed",
             id: event.id,
-            value: {
-              type: "internal.literal",
-              // biome-ignore lint/complexity/useLiteralKeys: We need to access this private member, it is only private to the user
-              value: event["value"]!,
-            },
+            value: { type: "internal.literal", value: event.value },
           },
         };
       }
-      // If the Future was completed (the promise was completed) we already poped the related invoke,
-      // when the user awaits the future we remove it from the invokes
-      this.invokes = this.invokes.filter(({ id }) => id !== event.id);
-      this.nextState = "over";
+
       return {
         type: "internal.await",
         id: event.id,

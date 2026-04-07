@@ -1,30 +1,32 @@
-import { LocalNetwork } from "../dev/network";
-import { WallClock } from "./clock";
-import { Core } from "./core";
-import { type Encoder, JsonEncoder } from "./encoder";
-import { type Encryptor, NoopEncryptor } from "./encryptor";
-import exceptions from "./exceptions";
-import { Handler } from "./handler";
-import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat";
-import type {
-  CreatePromiseAndTaskReq,
-  CreatePromiseReq,
-  CreateSubscriptionReq,
-  DurablePromiseRecord,
-  Message,
-  MessageSource,
-  Network,
-  ReadPromiseReq,
-  TaskRecord,
-} from "./network/network";
-import { HttpNetwork, PollMessageSource } from "./network/remote";
-import { type Options, OptionsBuilder } from "./options";
-import { Promises } from "./promises";
-import { Registry } from "./registry";
-import { Schedules } from "./schedules";
-import { NoopTracer, type Tracer } from "./tracer";
-import type { Func, ParamsWithOptions, Return } from "./types";
-import * as util from "./util";
+import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import { WallClock } from "./clock.js";
+import { Codec } from "./codec.js";
+import { Core } from "./core.js";
+import { type Encryptor, NoopEncryptor } from "./encryptor.js";
+import exceptions, { ResonateTimeoutException } from "./exceptions.js";
+import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat.js";
+import { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
+import { HttpNetwork, PollMessageSource } from "./network/http.js";
+import { LocalNetwork } from "./network/local.js";
+import type { Network } from "./network/network.js";
+import {
+  isConflict,
+  isSuccess,
+  type Message,
+  type PromiseCreateReq,
+  type PromiseGetReq,
+  type PromiseRecord,
+  type PromiseRegisterListenerReq,
+  type TaskCreateReq,
+  type TaskRecord,
+} from "./network/types.js";
+import { type Options, OptionsBuilder } from "./options.js";
+import { Promises } from "./promises.js";
+import { Registry } from "./registry.js";
+import { Schedules } from "./schedules.js";
+import type { Func, ParamsWithOptions, Return, Send } from "./types.js";
+import * as util from "./util.js";
 
 export interface ResonateHandle<T> {
   id: string;
@@ -45,8 +47,8 @@ export interface ResonateSchedule {
 }
 
 type SubscriptionEntry = {
-  promise: Promise<DurablePromiseRecord<any>>;
-  resolve: (r: DurablePromiseRecord<any>) => void;
+  promise: Promise<PromiseRecord>;
+  resolve: (r: PromiseRecord) => void;
   reject: (e: any) => void;
   timeout: number;
 };
@@ -58,19 +60,12 @@ export class Resonate {
   private ttl: number;
   private idPrefix;
 
-  private unicast: string;
-  private anycast: string;
-  private match: (target: string) => string;
-
   private core: Core;
+  private codec: Codec;
   private network: Network;
-  private encoder: Encoder;
-  private encryptor: Encryptor;
-  private verbose: boolean;
-  private messageSource: MessageSource;
+  private send: Send;
+  private logger: Logger;
 
-  private tracer: Tracer;
-  private handler: Handler;
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
@@ -86,21 +81,20 @@ export class Resonate {
    * Creates a new Resonate client instance.
    *
    * @param options - Configuration options for the client.
-   * @param options.url - Resonate server URL. Defaults to `process.env.RESONATE_URL`,
-   *   otherwise builds from `process.env.RESONATE_SCHEME` (defaults to `"http"`),
-   *   `process.env.RESONATE_HOST`, and `process.env.RESONATE_PORT` (defaults to `"8001"`).
+   * @param options.url - Resonate server URL. Falls back to `process.env.RESONATE_URL`.
    *   If no URL is resolved, a local in-memory network is used.
    * @param options.group - Worker group name. Defaults to `"default"`.
-   * @param options.pid - Process identifier for the client. Defaults to the
-   *   message source's generated PID.
+   * @param options.pid - Process identifier for the client. Defaults to a random UUID.
    * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
-   * @param options.auth - Basic authentication credentials. Defaults to
-   *   `process.env.RESONATE_USERNAME` and `process.env.RESONATE_PASSWORD` when set.
-   * @param options.token - Bearer token for authentication. Defaults to `process.env.RESONATE_TOKEN`.
-   * @param options.verbose - Enables verbose logging. Defaults to `false`.
+   * @param options.token - Bearer token for authentication. Passed through to HttpNetwork
+   *   which falls back to `RESONATE_TOKEN` env var.
+   * @param options.timeout - Network request timeout. Passed through to HttpNetwork
+   *   which falls back to `RESONATE_TIMEOUT` env var (default: 10s).
+   * @param options.verbose - Enables verbose logging (shorthand for `logLevel: "debug"`). Defaults to `false`.
+   * @param options.logLevel - Log level for the default ConsoleLogger. Defaults to `"warn"`. Takes precedence over `verbose`.
+   * @param options.logger - Custom logger implementation. Defaults to {@link ConsoleLogger}.
    * @param options.encryptor - Payload encryptor. Defaults to {@link NoopEncryptor}.
-   * @param options.tracer - Tracing implementation. Defaults to {@link NoopTracer}.
-   * @param options.transport - Custom network transport implementation. Defaults to `undefined`.
+   * @param options.network - Custom network implementation. Defaults to `undefined`.
    * @param options.prefix - ID prefix applied to generated IDs. Defaults to
    *   `process.env.RESONATE_PREFIX` when set.
    */
@@ -109,156 +103,139 @@ export class Resonate {
     group = "default",
     pid = undefined,
     ttl = 1 * util.MIN,
-    auth = undefined,
     token = undefined,
+    timeout = undefined,
     verbose = false,
+    logLevel = undefined,
+    logger = undefined,
     encryptor = undefined,
-    tracer = undefined,
-    transport = undefined,
+    network = undefined,
     prefix = undefined,
   }: {
     url?: string;
     group?: string;
     pid?: string;
     ttl?: number;
-    auth?: { username: string; password: string };
     token?: string;
+    timeout?: number;
     verbose?: boolean;
+    logLevel?: LogLevel;
+    logger?: Logger;
     encryptor?: Encryptor;
-    tracer?: Tracer;
-    transport?: Network | (Network & MessageSource);
+    network?: Network;
     prefix?: string;
   } = {}) {
     this.clock = new WallClock();
     this.ttl = ttl;
-    this.tracer = tracer ?? new NoopTracer();
-    this.encryptor = encryptor ?? new NoopEncryptor();
-    this.encoder = new JsonEncoder();
+    this.codec = new Codec(encryptor ?? new NoopEncryptor());
 
     const resolvedPrefix = prefix ?? process.env.RESONATE_PREFIX;
     this.idPrefix = resolvedPrefix ? `${resolvedPrefix}:` : "";
 
-    this.verbose = verbose;
+    // Resolve logger: explicit logger > ConsoleLogger with resolved level
+    // logLevel takes precedence over verbose; verbose: true -> "debug"
+    const resolvedLogLevel: LogLevel = logLevel ?? (verbose ? "debug" : "warn");
+    this.logger = logger ?? new ConsoleLogger(resolvedLogLevel);
+
     this.subscribeEvery = 60 * 1000; // make this configurable
 
-    // Determine the URL based on priority: url arg > RESONATE_URL > RESONATE_HOST+PORT
-    let resolvedUrl = url;
-    if (!resolvedUrl) {
-      if (process.env.RESONATE_URL) {
-        resolvedUrl = process.env.RESONATE_URL;
-      } else {
-        const resonateScheme = process.env.RESONATE_SCHEME ?? "http";
-        const resonateHost = process.env.RESONATE_HOST;
-        const resonatePort = process.env.RESONATE_PORT ?? "8001";
+    // Determine the URL: url arg > RESONATE_URL env var
+    // Only used to decide between LocalNetwork and HttpNetwork.
+    // Full URL/bun fmt
+    // bun check
+    // /token/timeout env var resolution is HttpNetwork's responsibility (3.7).
+    const resolvedUrl = url ?? (process.env.RESONATE_URL || undefined);
 
-        if (resonateHost) {
-          resolvedUrl = `${resonateScheme}://${resonateHost}:${resonatePort}`;
-        }
-      }
-    }
+    this.pid = pid ?? crypto.randomUUID().replace(/-/g, "");
 
-    // Determine the token based on priority: token arg > RESONATE_TOKEN
-    const resolvedToken = token ?? process.env.RESONATE_TOKEN;
-
-    // Determine the auth based on priority: auth arg > RESONATE_USERNAME+RESONATE_PASSWORD
-    let resolvedAuth = auth;
-    if (!resolvedAuth) {
-      const resonateUsername = process.env.RESONATE_USERNAME;
-      const resonatePassword = process.env.RESONATE_PASSWORD ?? "";
-
-      if (resonateUsername) {
-        resolvedAuth = { username: resonateUsername, password: resonatePassword };
-      }
-    }
-
-    if (transport) {
-      this.network = transport;
-
-      if (util.isMessageSource(transport)) {
-        this.messageSource = transport;
-      } else if (transport.getMessageSource) {
-        this.messageSource = transport.getMessageSource();
-      } else {
-        // TODO: instantiate default message source instead
-        throw new Error("transport must implement both network and message source");
-      }
-
-      this.pid = pid ?? this.messageSource.pid;
-      this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
+    let heartbeat: boolean;
+    if (network) {
+      this.network = network;
+      heartbeat = true;
+    } else if (resolvedUrl) {
+      const adapter = new PollMessageSource({
+        url: `${resolvedUrl}/poll/${encodeURIComponent(group)}/${encodeURIComponent(this.pid)}`,
+        token,
+        logger: this.logger,
+      });
+      this.network = new HttpNetwork({
+        url: resolvedUrl,
+        token,
+        timeout,
+        headers: {},
+        adapter,
+        logger: this.logger,
+      });
+      heartbeat = true;
     } else {
-      if (!resolvedUrl) {
-        const localNetwork = new LocalNetwork({ pid, group });
-        this.network = localNetwork;
-        this.messageSource = localNetwork.getMessageSource();
-        this.pid = pid ?? this.messageSource.pid;
-        this.heartbeat = new NoopHeartbeat();
-      } else {
-        this.network = new HttpNetwork({
-          verbose: this.verbose,
-          url: resolvedUrl,
-          auth: resolvedAuth,
-          token: resolvedToken,
-          timeout: 1 * util.MIN,
-          headers: {},
-        });
-        this.messageSource = new PollMessageSource({
-          url: resolvedUrl,
-          pid,
-          group,
-          auth: resolvedAuth,
-          token: resolvedToken,
-        });
-        this.pid = pid ?? this.messageSource.pid;
-        this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.network);
-      }
+      this.network = new LocalNetwork({ pid: this.pid, group });
+      heartbeat = false;
     }
 
-    this.handler = new Handler(this.network, this.encoder, this.encryptor);
+    this.send = this.network.send;
+
+    if (heartbeat) {
+      this.heartbeat = new AsyncHeartbeat(this.pid, ttl / 2, this.send, this.logger);
+    } else {
+      this.heartbeat = new NoopHeartbeat();
+    }
+
     this.registry = new Registry();
     this.dependencies = new Map();
 
-    this.unicast = this.messageSource.unicast;
-    this.anycast = this.messageSource.anycast;
-    this.match = this.messageSource.match;
+    // match function: resolve target to an anycast address
+    const matchFn = (target: string): string => {
+      if (util.isUrl(target)) return target;
+      // For local network, derive from the anycast scheme
+      const anycast = this.network.anycast;
+      const schemeEnd = anycast.indexOf("://");
+      if (schemeEnd >= 0) {
+        const scheme = anycast.slice(0, schemeEnd);
+        return `${scheme}://any@${target}`;
+      }
+      return target;
+    };
 
-    this.optsBuilder = new OptionsBuilder({ match: this.match, idPrefix: this.idPrefix });
+    this.optsBuilder = new OptionsBuilder({ match: matchFn, idPrefix: this.idPrefix });
 
     this.core = new Core({
-      unicast: this.unicast,
-      anycast: this.anycast,
       pid: this.pid,
       ttl: this.ttl,
       clock: this.clock,
-      network: this.network,
-      messageSource: this.messageSource,
-      handler: this.handler,
+      send: this.send,
+      codec: this.codec,
       registry: this.registry,
       heartbeat: this.heartbeat,
       dependencies: this.dependencies,
       optsBuilder: this.optsBuilder,
-      verbose: this.verbose,
-      tracer: this.tracer,
+      logger: this.logger,
     });
 
-    this.promises = new Promises(this.network);
-    this.schedules = new Schedules(this.network);
+    this.promises = new Promises(this.send);
+    this.schedules = new Schedules(this.send);
 
-    // subscribe to notify
-    this.messageSource.subscribe("notify", this.onMessage.bind(this));
-
+    // subscribe to network
+    this.network.recv(this.onMessage.bind(this));
+    this.network.init().catch((err) => {
+      this.logger.error(
+        { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+        "Failed to start network",
+      );
+    });
     // periodically refresh subscriptions
     this.intervalId = setInterval(async () => {
       for (const [id, sub] of this.subscriptions.entries()) {
         try {
-          const createSubscriptionReq: CreateSubscriptionReq = {
-            kind: "createSubscription",
-            id: this.pid,
-            promiseId: id,
-            timeout: sub.timeout + 1 * util.MIN, // add a buffer
-            recv: this.unicast,
+          const registerListenerReq: PromiseRegisterListenerReq = {
+            kind: "promise.register_listener",
+            head: { corrId: randomUUID(), version: util.VERSION },
+            data: {
+              awaited: id,
+              address: this.network.unicast,
+            },
           };
 
-          const res = await this.createSubscription(createSubscriptionReq);
+          const res = await this.promiseRegisterListener(registerListenerReq);
           if (res.state !== "pending") {
             sub.resolve(res);
             this.subscriptions.delete(id);
@@ -271,136 +248,7 @@ export class Resonate {
   }
 
   /**
-   * Initializes a Resonate client instance for local development.
-   *
-   * Creates and returns a Resonate client configured for **local-only execution**
-   * with zero external dependencies. All state is stored in local memory — no
-   * network or external persistence is required. This mode is ideal for rapid
-   * testing, debugging, and experimentation before connecting to a Resonate server.
-   *
-   * The client runs with a `"default"` worker group, a `"default"` process ID,
-   * and an effectively infinite TTL (`Number.MAX_SAFE_INTEGER`) for tasks.
-   *
-   * @returns A {@link Resonate} client instance configured for local development.
-   *
-   * @example
-   * ```ts
-   * const resonate = Resonate.local();
-   * resonate.register(foo);
-   * const result = await resonate.run("foo.1", foo, { data: "test" });
-   * console.log(result);
-   * ```
-   */
-  static local({
-    verbose = false,
-    encryptor = undefined,
-    tracer = undefined,
-  }: {
-    verbose?: boolean;
-    encryptor?: Encryptor;
-    tracer?: Tracer;
-  } = {}): Resonate {
-    return new Resonate({
-      group: "default",
-      pid: "default",
-      ttl: Number.MAX_SAFE_INTEGER,
-      verbose,
-      encryptor,
-      tracer,
-    });
-  }
-
-  /**
-   * Initializes a Resonate client instance with remote configuration.
-   *
-   * Creates and returns a Resonate client that connects to a **Resonate Server**
-   * and optional remote message sources. This configuration enables distributed,
-   * durable workers to cooperate and execute functions via **durable RPCs**.
-   *
-   * By default, the client connects to a Resonate Server running locally
-   * (`http://localhost:8001`) and joins the `"default"` worker group.
-   *
-   * The client is identified by a unique process ID (`pid`) and maintains
-   * claimed task leases for the duration specified by `ttl`.
-   *
-   * @param options - Configuration options for the remote client.
-   * @param options.url - The base URL of the remote Resonate Server. Defaults to `"http://localhost:8001"`.
-   * @param options.group - The worker group name. Defaults to `"default"`.
-   * @param options.pid - Optional process identifier for the client. Defaults to a randomly generated UUID.
-   * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
-   * @param options.auth - Optional authentication credentials for connecting to the remote server.
-   * @param options.token - Optional bearer token for authentication. Takes priority over basic auth.
-   *
-   * @returns A {@link Resonate} client instance configured for remote operation.
-   *
-   * @example
-   * ```ts
-   * const resonate = Resonate.remote({
-   *   url: "https://resonate.example.com",
-   *   group: "analytics",
-   *   ttl: 30,
-   *   token: "bearer-token-here",
-   * });
-   *
-   * const result = await resonate.run("task-42", "processData", { input: "dataset.csv" });
-   * console.log(result);
-   * ```
-   */
-  static remote({
-    url = "http://localhost:8001",
-    group = "default",
-    pid = crypto.randomUUID().replace(/-/g, ""),
-    ttl = 1 * util.MIN,
-    auth = undefined,
-    token = undefined,
-    verbose = false,
-    encryptor = undefined,
-    tracer = undefined,
-    prefix = undefined,
-  }: {
-    url?: string;
-    group?: string;
-    pid?: string;
-    ttl?: number;
-    auth?: { username: string; password: string };
-    token?: string;
-    verbose?: boolean;
-    encryptor?: Encryptor;
-    tracer?: Tracer;
-    prefix?: string;
-  } = {}): Resonate {
-    return new Resonate({ url, group, pid, ttl, auth, token, verbose, encryptor, tracer, prefix });
-  }
-
-  /**
    * Registers a function with Resonate for execution and version control.
-   *
-   * This method makes a function available for distributed or top-level execution
-   * under a specific name and version.
-   *
-   * Providing explicit `name` or `version` options allows precise control over
-   * function identification and versioning, enabling repeatable, distributed
-   * invocation and backward-compatible deployments.
-   *
-   * @param nameOrFunc - Either the function name (string) or the function itself.
-   *   When passing a name, provide the function and optional options as additional parameters.
-   * @param funcOrOptions - The function to register, or an optional configuration object
-   *   with versioning information when the first argument is a name.
-   * @param maybeOptions - Optional configuration object when both name and function are provided.
-   *   Supports a `version` field to specify the registered function version.
-   *
-   * @returns A {@link ResonateFunc} wrapper for the registered function.
-   *   When used as a decorator, returns a decorator that registers the target function
-   *   upon definition.
-   *
-   * @example
-   * ```ts
-   * function greet(ctx: Context, name: string): string {
-   *   return `Hello, ${name}!`;
-   * }
-   *
-   * resonate.register("greet_user", greet, { version: 2 });
-   * ```
    */
   public register<F extends Func>(
     name: string,
@@ -445,33 +293,6 @@ export class Resonate {
     };
   }
 
-  /**
-   * Runs a registered function with Resonate and waits for the result.
-   *
-   * This method executes the specified function under a **durable promise**
-   * identified by the provided `id`. If a promise with the same `id` already exists,
-   * Resonate subscribes to its result or returns it immediately if it has already completed.
-   *
-   * Duplicate executions for the same `id` are automatically prevented, ensuring
-   * idempotent and consistent behavior across distributed runs.
-   *
-   * This is a **blocking operation** — execution will not continue until the
-   * function result is available.
-   *
-   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
-   *   idempotent execution.
-   * @param funcOrName - Either the registered function reference or its string name
-   *   to execute.
-   * @param args - Positional arguments passed to the function.
-   *
-   * @returns A promise resolving to the final result returned from the function execution.
-   *
-   * @example
-   * ```ts
-   * const result = await client.run("job-123", "processData", { input: "records.csv" });
-   * console.log("Result:", result);
-   * ```
-   */
   public async run<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
   public async run<T>(id: string, name: string, ...args: any[]): Promise<T>;
   public async run<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
@@ -479,37 +300,6 @@ export class Resonate {
     return (await this.beginRun(id, funcOrName, ...args)).result();
   }
 
-  /**
-   * Runs a registered function asynchronously with Resonate.
-   *
-   * This method schedules the specified function for execution under a **durable promise**
-   * identified by the provided `id`. If a promise with the same `id` already exists,
-   * Resonate subscribes to its result or returns it immediately if it has already completed.
-   *
-   * Unlike {@link run}, this method is **non-blocking** and immediately returns a
-   * {@link ResonateHandle} that can be awaited or queried later to retrieve the final result
-   * once execution completes.
-   *
-   * Duplicate executions for the same `id` are automatically prevented, ensuring idempotent
-   * and consistent behavior across distributed runs.
-   *
-   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
-   *   idempotent execution.
-   * @param funcOrName - Either the registered function reference or its string name
-   *   to execute.
-   * @param argsWithOpts - Positional arguments and optional configuration parameters
-   *   passed to the function.
-   *
-   * @returns A {@link ResonateHandle} representing the asynchronous execution.
-   *   The handle can be awaited or inspected for status and results.
-   *
-   * @example
-   * ```ts
-   * const handle = await client.beginRun("run-001", "generateReport", { period: "Q3" });
-   * const result = await handle.getResult();
-   * console.log(result);
-   * ```
-   */
   public async beginRun<F extends Func>(
     id: string,
     func: F,
@@ -532,19 +322,18 @@ export class Resonate {
     id = `${this.idPrefix}${id}`;
 
     util.assert(registered.version > 0, "function version must be greater than zero");
-
-    const span = this.tracer.startSpan(id, this.clock.now());
-    span.setAttribute("type", "run");
-    span.setAttribute("func", registered.name);
-    span.setAttribute("version", registered.version);
-
-    try {
-      const { promise, task } = await this.createPromiseAndTask(
-        {
-          kind: "createPromiseAndTask",
-          promise: {
+    const { promise, task } = await this.taskCreate({
+      kind: "task.create",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        pid: this.pid,
+        ttl: this.ttl,
+        action: {
+          kind: "promise.create",
+          head: { corrId: randomUUID(), version: util.VERSION },
+          data: {
             id: id,
-            timeout: Date.now() + opts.timeout,
+            timeoutAt: Date.now() + opts.timeout,
             param: {
               data: {
                 func: registered.name,
@@ -552,6 +341,7 @@ export class Resonate {
                 retry: opts.retryPolicy?.encode(),
                 version: registered.version,
               },
+              headers: {},
             },
             tags: {
               ...opts.tags,
@@ -559,65 +349,27 @@ export class Resonate {
               "resonate:branch": id,
               "resonate:parent": id,
               "resonate:scope": "global",
-              "resonate:invoke": this.anycast,
+              "resonate:target": this.network.anycast,
             },
           },
-          task: {
-            processId: this.pid,
-            ttl: this.ttl,
-          },
         },
-        span.encode(),
-      );
+      },
+    });
 
-      // if the promise is created, the span is considered successful
-      span.setStatus(true);
-
-      if (task) {
-        this.core.executeUntilBlocked(span, { kind: "claimed", task: task, rootPromise: promise }, () => {
-          span.end(this.clock.now());
-        });
-      } else {
-        span.end(this.clock.now());
-      }
-
-      return this.createHandle(promise);
-    } catch (e) {
-      span.setStatus(false, String(e));
-      span.end(this.clock.now());
-      throw e;
+    if (task && task.state === "acquired") {
+      this.core
+        .executeUntilBlocked(task, promise)
+        .catch((err) =>
+          this.logger.warn(
+            { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+            "executeUntilBlocked failed",
+          ),
+        );
     }
+
+    return this.createHandle(promise);
   }
 
-  /**
-   * Executes a registered function remotely with Resonate and waits for the result.
-   *
-   * This method runs the specified function on a remote worker or process under a
-   * **durable promise** identified by the provided `id`. If a promise with the same
-   * `id` already exists, Resonate subscribes to its result or returns it immediately
-   * if it has already completed.
-   *
-   * Unlike {@link beginRpc}, this method is **blocking** — it waits for the remote
-   * function to complete and returns the final result before continuing execution.
-   *
-   * Duplicate executions for the same `id` are automatically prevented, ensuring
-   * idempotent and consistent behavior across distributed runs.
-   *
-   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
-   *   idempotent remote execution.
-   * @param funcOrName - Either the registered function reference or its string name
-   *   to execute remotely.
-   * @param args - Positional arguments passed to the remote function.
-   *
-   * @returns A promise resolving to the final result returned from the remote
-   *   function execution.
-   *
-   * @example
-   * ```ts
-   * const result = await client.rpc("job-42", "analyzeData", { file: "input.csv" });
-   * console.log("Remote result:", result);
-   * ```
-   */
   public async rpc<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
   public async rpc<T>(id: string, name: string, ...args: any[]): Promise<T>;
   public async rpc<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
@@ -625,37 +377,6 @@ export class Resonate {
     return (await this.beginRpc(id, funcOrName, ...args)).result();
   }
 
-  /**
-   * Initiates a remote procedure call (RPC) with Resonate and returns a handle to the execution.
-   *
-   * This method schedules a registered function for **remote execution** under a durable promise
-   * identified by the provided `id`. The function runs on a remote worker or process as part of
-   * Resonate's distributed execution environment.
-   *
-   * Unlike {@link rpc}, this method is **non-blocking** and immediately returns a
-   * {@link ResonateHandle} that can be awaited or queried later to retrieve the final result once
-   * remote execution completes.
-   *
-   * If a durable promise with the same `id` already exists, Resonate subscribes to its result or
-   * returns it immediately if it has already completed. Duplicate executions for the same `id`
-   * are automatically prevented, ensuring idempotent and consistent behavior.
-   *
-   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
-   *   idempotent remote execution.
-   * @param funcOrName - Either the registered function reference or its string name to execute remotely.
-   * @param argsWithOpts - Positional arguments and optional configuration parameters
-   *   passed to the remote function.
-   *
-   * @returns A {@link ResonateHandle} representing the asynchronous remote execution.
-   *   The handle can be awaited or inspected for completion and results.
-   *
-   * @example
-   * ```ts
-   * const handle = await client.beginRpc("task-123", "processData", { input: "hello" });
-   * const result = await handle.getResult();
-   * console.log(result);
-   * ```
-   */
   public async beginRpc<F extends Func>(
     id: string,
     func: F,
@@ -676,50 +397,59 @@ export class Resonate {
 
     const func = registered ? registered.name : (funcOrName as string);
     const version = registered ? registered.version : opts.version || 1;
-
-    const span = this.tracer.startSpan(id, this.clock.now());
-    span.setAttribute("type", "rpc");
-    span.setAttribute("func", func);
-    span.setAttribute("version", version);
-
-    try {
-      const promise = await this.createPromise(
-        {
-          kind: "createPromise",
-          id: id,
-          timeout: Date.now() + opts.timeout,
-          param: {
-            data: {
-              func: func,
-              args: args,
-              retry: opts.retryPolicy?.encode(),
-              version: version,
-            },
+    const promise = await this.promiseCreate({
+      kind: "promise.create",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        id: id,
+        timeoutAt: Date.now() + opts.timeout,
+        param: {
+          data: {
+            func,
+            args,
+            retry: opts.retryPolicy?.encode(),
+            version,
           },
-          tags: {
-            ...opts.tags,
-            "resonate:origin": id,
-            "resonate:branch": id,
-            "resonate:parent": id,
-            "resonate:scope": "global",
-            "resonate:invoke": opts.target,
-          },
+          headers: {},
         },
-        span.encode(),
-      );
+        tags: {
+          ...opts.tags,
+          "resonate:origin": id,
+          "resonate:branch": id,
+          "resonate:parent": id,
+          "resonate:scope": "global",
+          "resonate:target": opts.target,
+        },
+      },
+    });
 
-      // if the promise is created, the span is considered successful
-      span.setStatus(true);
-      span.end(this.clock.now());
-
-      return this.createHandle(promise);
-    } catch (e) {
-      span.setStatus(false, String(e));
-      span.end(this.clock.now());
-      throw e;
-    }
+    return this.createHandle(promise);
   }
 
+  /**
+   * Creates a recurring schedule that invokes a registered function on a cron interval.
+   *
+   * The schedule is persisted on the Resonate Server and triggers a new durable promise
+   * for each cron tick. The generated promise IDs include the schedule name and timestamp
+   * to ensure uniqueness across invocations.
+   *
+   * If a function reference is provided, it must already be registered via {@link register}.
+   * Alternatively, a function name (string) can be used for remote dispatch.
+   *
+   * @param name - A unique name identifying this schedule.
+   * @param cron - A cron expression defining the recurrence interval (e.g., `"* * * * *"` for every minute).
+   * @param funcOrName - Either the registered function reference or its string name to invoke on each tick.
+   * @param args - Positional arguments and optional configuration parameters passed to the function.
+   *
+   * @returns A {@link ResonateSchedule} handle with a `delete()` method to remove the schedule.
+   *
+   * @example
+   * ```ts
+   * const schedule = await resonate.schedule("daily-report", "0 0 * * *", generateReport);
+   * // Later, to remove:
+   * await schedule.delete();
+   * ```
+   */
   public async schedule<F extends Func>(
     name: string,
     cron: string,
@@ -742,18 +472,16 @@ export class Resonate {
     }
 
     // TODO: move this into the handler?
-    const { headers, data } = this.encryptor.encrypt(
-      this.encoder.encode({
-        func: registered ? registered.name : (funcOrName as string),
-        args: args,
-        version: registered ? registered.version : opts.version || 1,
-      }),
-    );
+    const { headers, data } = this.codec.encode({
+      func: registered ? registered.name : (funcOrName as string),
+      args: args,
+      version: registered ? registered.version : opts.version || 1,
+    });
 
     await this.schedules.create(name, cron, `${this.idPrefix}{{.id}}.{{.timestamp}}`, opts.timeout, {
       promiseHeaders: headers,
       promiseData: data,
-      promiseTags: { ...opts.tags, "resonate:invoke": opts.target },
+      promiseTags: { ...opts.tags, "resonate:target": opts.target },
     });
 
     return {
@@ -761,34 +489,32 @@ export class Resonate {
     };
   }
 
-  /**
-   * Retrieves or subscribes to an existing execution by its unique ID.
-   *
-   * This method attaches to an existing **durable promise** identified by `id`.
-   * If the associated execution is still in progress, it returns a {@link ResonateHandle}
-   * that can be awaited or observed until completion. If the execution has already
-   * finished, the handle is immediately resolved with the stored result.
-   *
-   * Notes:
-   * - A durable promise with the given `id` must already exist.
-   * - This operation is **non-blocking**; awaiting the returned handle will block
-   *   only if the execution is still running.
-   *
-   * @param id - Unique identifier of the target execution or durable promise.
-   *
-   * @returns A {@link ResonateHandle} representing the existing execution.
-   *   The handle can be awaited or queried to retrieve the final result.
-   */
   public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
     id = `${this.idPrefix}${id}`;
-    const promise = await this.readPromise({
-      kind: "readPromise",
-      id: id,
+    const promise = await this.promiseGet({
+      kind: "promise.get",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        id,
+      },
     });
 
     return this.createHandle(promise);
   }
 
+  /**
+   * Builds a resolved {@link Options} object by merging the provided partial options
+   * with the client's defaults.
+   *
+   * This is useful for inspecting the effective configuration that would be applied
+   * to a `run`, `rpc`, or `schedule` call, or for passing explicit options to the
+   * convenience methods on a {@link ResonateFunc} handle.
+   *
+   * @param opts - Partial options to merge. Supports `tags`, `target`, `timeout`,
+   *   `version`, and `retryPolicy`.
+   *
+   * @returns A fully resolved {@link Options} object.
+   */
   public options(
     opts: Partial<Pick<Options, "tags" | "target" | "timeout" | "version" | "retryPolicy">> = {},
   ): Options {
@@ -799,139 +525,153 @@ export class Resonate {
     return util.splitArgsAndOpts(args, this.options({ version }));
   }
 
+  /**
+   * Registers a named dependency that will be available to all Resonate functions
+   * via `context.getDependency(name)`.
+   *
+   * Use this to inject services, clients, or configuration objects into Resonate
+   * functions without tight coupling.
+   *
+   * @param name - A unique key identifying the dependency.
+   * @param obj - The dependency value (any object or primitive).
+   */
   public setDependency(name: string, obj: any): void {
     this.dependencies.set(name, obj);
   }
 
-  public stop() {
-    this.network.stop();
-    this.messageSource.stop();
+  /**
+   * Stops the Resonate client, releasing all resources.
+   *
+   * This shuts down the underlying network transport and message source, stops the
+   * heartbeat loop, and clears the subscription refresh interval. After calling
+   * `stop()`, the client should not be used for further operations.
+   */
+  public async stop(): Promise<void> {
+    await this.network.stop();
     this.heartbeat.stop();
     clearInterval(this.intervalId);
   }
 
-  private createPromiseAndTask(
-    req: CreatePromiseAndTaskReq<any>,
-    headers: Record<string, string>,
-  ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
-    return new Promise((resolve, reject) =>
-      this.handler.createPromiseAndTask(
-        req,
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-          } else {
-            resolve({ promise: res.value.promise, task: res.value.task });
-          }
+  private async taskCreate(req: TaskCreateReq): Promise<{ promise: PromiseRecord; task?: TaskRecord }> {
+    req.data.action.data.param = this.codec.encode(req.data.action.data.param.data);
+
+    const res = await this.send(req);
+
+    if (!isSuccess(res) && !isConflict(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    if (isConflict(res)) {
+      const promise = await this.promiseRegisterListener({
+        kind: "promise.register_listener",
+        head: { corrId: randomUUID(), version: util.VERSION },
+        data: {
+          awaited: req.data.action.data.id,
+          address: this.network.unicast,
         },
-        undefined,
-        headers,
-        true,
-      ),
-    );
+      });
+      return { promise, task: undefined };
+    }
+
+    const promise = this.codec.decodePromise(res.data.promise);
+    return { promise, task: res.data.task };
   }
 
-  private createPromise(
-    req: CreatePromiseReq<any>,
-    headers: Record<string, string>,
-  ): Promise<DurablePromiseRecord<any>> {
-    return new Promise((resolve, reject) =>
-      this.handler.createPromise(
-        req,
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-          } else {
-            resolve(res.value);
-          }
-        },
-        undefined,
-        headers,
-        true,
-      ),
-    );
+  private async promiseCreate(req: PromiseCreateReq): Promise<PromiseRecord> {
+    req.data.param = this.codec.encode(req.data.param.data);
+
+    const res = await this.send(req);
+
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    return this.codec.decodePromise(res.data.promise);
   }
 
-  private createSubscription(req: CreateSubscriptionReq): Promise<DurablePromiseRecord<any>> {
-    return new Promise((resolve, reject) =>
-      this.handler.createSubscription(
-        req,
-        (res) => {
-          if (res.kind === "error") {
-            reject(res.error);
-          } else {
-            resolve(res.value);
-          }
-        },
-        true,
-      ),
-    );
-  }
-
-  private readPromise(req: ReadPromiseReq): Promise<DurablePromiseRecord<any>> {
-    return new Promise((resolve, reject) =>
-      this.handler.readPromise(req, (res) => {
-        if (res.kind === "error") {
-          reject(res.error);
-        } else {
-          resolve(res.value);
+  private async promiseRegisterListener(req: PromiseRegisterListenerReq): Promise<PromiseRecord> {
+    const retryDelay = 5000;
+    while (true) {
+      try {
+        const res = await this.send(req);
+        if (!isSuccess(res)) {
+          await delay(retryDelay);
+          continue;
         }
-      }),
-    );
+        return this.codec.decodePromise(res.data.promise);
+      } catch (e) {
+        if (e instanceof ResonateTimeoutException) {
+          await delay(retryDelay);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
-  private createHandle(promise: DurablePromiseRecord<any>): ResonateHandle<any> {
-    const createSubscriptionReq: CreateSubscriptionReq = {
-      kind: "createSubscription",
-      id: this.pid,
-      promiseId: promise.id,
-      timeout: promise.timeout + 1 * util.MIN, // add a buffer
-      recv: this.unicast,
+  private async promiseGet(req: PromiseGetReq): Promise<PromiseRecord> {
+    const res = await this.send(req);
+
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    return this.codec.decodePromise(res.data.promise);
+  }
+
+  private createHandle(promise: PromiseRecord): ResonateHandle<any> {
+    const registerListenerReq: PromiseRegisterListenerReq = {
+      kind: "promise.register_listener",
+      head: { corrId: randomUUID(), version: util.VERSION },
+      data: {
+        awaited: promise.id,
+        address: this.network.unicast,
+      },
     };
 
     return {
       id: promise.id,
-      done: () => this.createSubscription(createSubscriptionReq).then((res) => res.state !== "pending"),
-      result: () => this.createSubscription(createSubscriptionReq).then((res) => this.subscribe(promise.id, res)),
+      done: () => this.promiseRegisterListener(registerListenerReq).then((res) => res.state !== "pending"),
+      result: () => this.promiseRegisterListener(registerListenerReq).then((res) => this.subscribe(promise.id, res)),
     };
   }
 
   private onMessage(msg: Message): void {
-    util.assert(msg.type === "notify");
-    if (msg.type === "notify") {
-      let paramData: any;
-      let valueData: any;
+    if (msg.kind === "execute") {
+      this.core
+        .onMessage(msg)
+        .catch((err) =>
+          this.logger.warn(
+            { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+            "onMessage failed",
+          ),
+        );
+      return;
+    }
+    util.assert(msg.kind === "unblock");
 
-      try {
-        paramData = this.encoder.decode(this.encryptor.decrypt(msg.promise.param));
-      } catch (e) {
-        // TODO: improve this message
-        this.notify(msg.promise.id, new Error("Failed to decode promise param"));
-        return;
-      }
-
-      try {
-        valueData = this.encoder.decode(this.encryptor.decrypt(msg.promise.value));
-      } catch (e) {
-        // TODO: improve this message
-        this.notify(msg.promise.id, new Error("Failed to decode promise value"));
-        return;
-      }
-
-      this.notify(msg.promise.id, undefined, {
-        ...msg.promise,
-        param: { headers: msg.promise.param?.headers, data: paramData },
-        value: { headers: msg.promise.value?.headers, data: valueData },
-      });
+    try {
+      const decoded = this.codec.decodePromise(msg.data.promise);
+      this.notify(msg.data.promise.id, undefined, decoded);
+    } catch {
+      this.notify(msg.data.promise.id, new Error("Failed to decode promise"));
     }
   }
 
-  private async subscribe(id: string, res: DurablePromiseRecord) {
-    const { promise, resolve, reject } =
-      this.subscriptions.get(id) ?? Promise.withResolvers<DurablePromiseRecord<any>>();
+  private async subscribe(id: string, res: PromiseRecord) {
+    const { promise, resolve, reject } = this.subscriptions.get(id) ?? Promise.withResolvers<PromiseRecord>();
 
     if (res.state === "pending") {
-      this.subscriptions.set(id, { promise, resolve, reject, timeout: res.timeout });
+      this.subscriptions.set(id, { promise, resolve, reject, timeout: res.timeoutAt });
     } else {
       resolve(res);
       this.subscriptions.delete(id);
@@ -954,18 +694,21 @@ export class Resonate {
     }
   }
 
-  private notify(id: string, err: any, res?: DurablePromiseRecord<any>) {
-    const subscription = this.subscriptions.get(id);
-
-    // notify subscribers
+  private notify(id: string, err: any, res?: PromiseRecord) {
+    let subscription = this.subscriptions.get(id);
+    if (!subscription) {
+      const { promise, resolve, reject } = Promise.withResolvers<PromiseRecord>();
+      // if no res, we cannot extract timeoutAt information. So we fallback to a large number
+      subscription = { promise, resolve, reject, timeout: res ? res.timeoutAt : 100000000 };
+      this.subscriptions.set(id, subscription);
+    } else {
+      this.subscriptions.delete(id);
+    }
     if (res) {
       util.assert(res.state !== "pending", "promise must be completed");
-      subscription?.resolve(res);
+      subscription.resolve(res);
     } else {
-      subscription?.reject(err);
+      subscription.reject(err);
     }
-
-    // remove subscription
-    this.subscriptions.delete(id);
   }
 }

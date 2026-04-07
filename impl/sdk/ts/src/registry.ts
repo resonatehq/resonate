@@ -1,5 +1,5 @@
-import exceptions from "./exceptions";
-import type { Func } from "./types";
+import exceptions from "./exceptions.js";
+import type { Func } from "./types.js";
 
 export type RegistryItem = {
   name: string;

@@ -1,5 +1,5 @@
-import type { RetryPolicy } from "./retries";
-import * as util from "./util";
+import type { RetryPolicy } from "./retries.js";
+import * as util from "./util.js";
 
 export const RESONATE_OPTIONS: unique symbol = Symbol("ResonateOptions");
 
@@ -21,7 +21,7 @@ export class OptionsBuilder {
   }: {
     id?: string;
     retryPolicy?: RetryPolicy;
-    tags?: Record<string, string>;
+    tags?: { [key: string]: string };
     target?: string;
     timeout?: number;
     version?: number;
@@ -33,7 +33,7 @@ export class OptionsBuilder {
 
 export class Options {
   public readonly id: string | undefined;
-  public readonly tags: Record<string, string>;
+  public readonly tags: { [key: string]: string };
   public readonly target: string;
   public readonly timeout: number;
   public readonly version: number;
@@ -51,7 +51,7 @@ export class Options {
   }: {
     id?: string;
     retryPolicy?: RetryPolicy;
-    tags?: Record<string, string>;
+    tags?: { [key: string]: string };
     target?: string;
     timeout?: number;
     version?: number;
