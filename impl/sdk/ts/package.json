@@ -1,6 +1,6 @@
 {
   "name": "@resonatehq/sdk",
-  "version": "0.9.6",
+  "version": "0.10.0",
   "description": "TypeScript SDK for Resonate",
   "author": "Resonate Developers",
   "license": "Apache-2.0",
@@ -48,9 +48,9 @@
     "@types/node": "^25.0.3",
     "commander": "^14.0.0",
     "esbuild": "^0.28.0",
-    "ts-jest": "^29.3.4",
+    "ts-jest": "^29.4.9",
     "tsx": "^4.20.5",
-    "typedoc": "^0.28.0",
+    "typedoc": "^0.28.18",
     "typedoc-material-theme": "^1.4.0",
     "typescript": "^6.0.2"
   },
