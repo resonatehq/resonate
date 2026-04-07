@@ -1,7 +1,6 @@
 use std::future::IntoFuture;
 use std::pin::Pin;
 
-use crate::codec::deserialize_error;
 use crate::error::{Error, Result};
 
 /// A handle to an eagerly spawned local durable task.
@@ -16,7 +15,7 @@ enum DurableFutureInner<T> {
     /// The promise was already resolved — return the typed value directly.
     Resolved(T),
     /// The promise was already rejected — return the cached error.
-    Rejected(serde_json::Value),
+    Rejected(Error),
     /// The task is running — await the oneshot receiver for the typed result.
     Pending {
         id: String,
@@ -31,9 +30,9 @@ impl<T> DurableFuture<T> {
         }
     }
 
-    pub(crate) fn rejected(value: serde_json::Value) -> Self {
+    pub(crate) fn rejected(err: Error) -> Self {
         Self {
-            inner: DurableFutureInner::Rejected(value),
+            inner: DurableFutureInner::Rejected(err),
         }
     }
 
@@ -52,7 +51,7 @@ impl<T: 'static> IntoFuture for DurableFuture<T> {
         Box::pin(async move {
             match self.inner {
                 DurableFutureInner::Resolved(value) => Ok(value),
-                DurableFutureInner::Rejected(value) => Err(deserialize_error(value)),
+                DurableFutureInner::Rejected(err) => Err(err),
                 DurableFutureInner::Pending { id, receiver } => {
                     tracing::info!(
                         target: "resonate::validation",
@@ -80,7 +79,7 @@ enum RemoteFutureInner<T> {
     /// The promise was already resolved — return the typed value directly.
     Resolved(T),
     /// The promise was already rejected — return the cached error.
-    Rejected(serde_json::Value),
+    Rejected(Error),
     /// The task is pending — only another worker can resolve it.
     Pending,
 }
@@ -92,9 +91,9 @@ impl<T> RemoteFuture<T> {
         }
     }
 
-    pub(crate) fn rejected(value: serde_json::Value) -> Self {
+    pub(crate) fn rejected(err: Error) -> Self {
         Self {
-            inner: RemoteFutureInner::Rejected(value),
+            inner: RemoteFutureInner::Rejected(err),
         }
     }
 
@@ -113,7 +112,7 @@ impl<T: Send + 'static> IntoFuture for RemoteFuture<T> {
         Box::pin(async move {
             match self.inner {
                 RemoteFutureInner::Resolved(value) => Ok(value),
-                RemoteFutureInner::Rejected(value) => Err(deserialize_error(value)),
+                RemoteFutureInner::Rejected(err) => Err(err),
                 RemoteFutureInner::Pending => Err(Error::Suspended),
             }
         })
@@ -134,10 +133,9 @@ mod tests {
 
     #[tokio::test]
     async fn durable_future_failed_via_await() {
-        let future: DurableFuture<i32> = DurableFuture::rejected(serde_json::json!({
-            "type": "application",
-            "message": "boom"
-        }));
+        let future: DurableFuture<i32> = DurableFuture::rejected(Error::Application {
+            message: "boom".into(),
+        });
         let err = future.await.unwrap_err();
         assert!(matches!(err, Error::Application { .. }));
     }
@@ -186,10 +184,9 @@ mod tests {
 
     #[tokio::test]
     async fn remote_future_failed_via_await() {
-        let future: RemoteFuture<i32> = RemoteFuture::rejected(serde_json::json!({
-            "type": "application",
-            "message": "remote error"
-        }));
+        let future: RemoteFuture<i32> = RemoteFuture::rejected(Error::Application {
+            message: "remote error".into(),
+        });
         let err = future.await.unwrap_err();
         assert!(matches!(err, Error::Application { .. }));
     }

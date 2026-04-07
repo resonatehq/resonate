@@ -15,7 +15,9 @@ use crate::effects::Effects;
 use crate::error::{Error, Result};
 use crate::futures::{DurableFuture, RemoteFuture};
 use crate::info::Info;
-use crate::types::{DurableKind, Outcome, PromiseCreateReq, PromiseRecord, PromiseState, Value};
+use crate::types::{
+    DurableKind, Outcome, PromiseCreateReq, PromiseRecord, PromiseState, TaskData, Value,
+};
 
 /// Resolves a logical target name (e.g. a function name like `"payments"`)
 /// into a routable address (e.g. a URL or network identifier).
@@ -27,7 +29,7 @@ pub type TargetResolver = Arc<dyn Fn(Option<&str>) -> String + Send + Sync>;
 /// The DurableFuture also reads from this via a oneshot channel.
 pub(crate) struct SpawnedLocal {
     pub id: String,
-    pub handle: tokio::task::JoinHandle<Outcome>,
+    pub handle: tokio::task::JoinHandle<Outcome<()>>,
 }
 
 /// The primary interface for workflow functions.
@@ -173,10 +175,7 @@ impl Context {
         Ok(PromiseCreateReq {
             id: id.to_string(),
             timeout_at: self.child_timeout(timeout),
-            param: Value {
-                headers: None,
-                data: Some(serde_json::to_value(args)?),
-            },
+            param: Value::from_serializable(args)?,
             tags,
         })
     }
@@ -204,25 +203,9 @@ impl Context {
         Ok(PromiseCreateReq {
             id: id.to_string(),
             timeout_at: self.child_timeout(timeout),
-            param: Value {
-                headers: None,
-                data: Some(serde_json::json!({
-                    "func": func_name,
-                    "args": serde_json::to_value(args)?,
-                })),
-            },
+            param: TaskData::into_value(func_name, args)?,
             tags,
         })
-    }
-
-    /// Convert a typed Result<T> into a Result<serde_json::Value>.
-    fn to_json_result<T: Serialize>(result: &Result<T>) -> Result<serde_json::Value> {
-        match result {
-            Ok(val) => serde_json::to_value(val).map_err(|e| e.into()),
-            Err(e) => Err(Error::Application {
-                message: e.to_string(),
-            }),
-        }
     }
 
     /// Local execution. Returns a `RunTask` builder that implements `IntoFuture`.
@@ -402,9 +385,7 @@ impl PromiseRecord {
     /// Returns `None` for `Pending` state — the caller must handle suspension.
     fn into_result<T: DeserializeOwned>(&self) -> Option<Result<T>> {
         match self.state {
-            PromiseState::Resolved => {
-                Some(serde_json::from_value(self.value.data_or_null()).map_err(Into::into))
-            }
+            PromiseState::Resolved => Some(self.value.decode::<T>()),
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
@@ -418,16 +399,12 @@ impl PromiseRecord {
     /// Returns `None` for `Pending` state — the caller must handle suspension.
     fn into_remote_future<T: DeserializeOwned>(&self) -> Option<Result<RemoteFuture<T>>> {
         match self.state {
-            PromiseState::Resolved => {
-                let val: std::result::Result<T, _> =
-                    serde_json::from_value(self.value.data_or_null());
-                Some(val.map(RemoteFuture::resolved).map_err(Into::into))
-            }
+            PromiseState::Resolved => Some(self.value.decode::<T>().map(RemoteFuture::resolved)),
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => {
-                Some(Ok(RemoteFuture::rejected(self.value.data_or_null())))
-            }
+            | PromiseState::RejectedTimedout => Some(Ok(RemoteFuture::rejected(
+                deserialize_error(self.value.data_or_null()),
+            ))),
             PromiseState::Pending => None,
         }
     }
@@ -490,9 +467,9 @@ where
     async fn ensure_created(&self) -> Result<&PromiseRecord> {
         self.record
             .get_or_try_init(|| async {
-                let req = self
-                    .ctx
-                    .local_create_req(&self.child_id, &self.args, self.timeout_override)?;
+                let req =
+                    self.ctx
+                        .local_create_req(&self.child_id, &self.args, self.timeout_override)?;
                 self.ctx.effects.create_promise(req).await
             })
             .await
@@ -524,14 +501,14 @@ where
 
         match record.state {
             PromiseState::Resolved => {
-                let val: T = serde_json::from_value(record.value.into_data_or_null())?;
+                let val: T = record.value.into_decoded()?;
                 Ok(DurableFuture::resolved(val))
             }
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
-            | PromiseState::RejectedTimedout => {
-                Ok(DurableFuture::rejected(record.value.into_data_or_null()))
-            }
+            | PromiseState::RejectedTimedout => Ok(DurableFuture::rejected(deserialize_error(
+                record.value.into_data_or_null(),
+            ))),
             PromiseState::Pending => {
                 let effects = ctx.effects.clone();
                 let child_id_for_task = child_id.clone();
@@ -582,13 +559,9 @@ where
                     // Spawned sub-workflows may have remote todos even if the
                     // main function completed successfully.
                     let outcome = if child_remote.is_empty() {
-                        let _ = effects
-                            .settle_promise(&child_id_for_task, &result)
-                            .await;
-                        let json_result = Context::to_json_result(&result);
-                        // Send the original typed result — no JSON roundtrip
+                        let _ = effects.settle_promise(&child_id_for_task, &result).await;
                         let _ = tx.send(result);
-                        Outcome::Done(json_result)
+                        Outcome::Done(Ok(()))
                     } else {
                         parent_remote_todos
                             .lock()
@@ -1078,10 +1051,10 @@ mod tests {
         let ctx = test_context("root", effects);
 
         let val: i32 = ctx.run(Bar, ()).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(val))).await;
+        let outcome = finalize_context(&ctx, Ok(val)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(42)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 42),
             other => panic!("expected Done(Ok(42)), got {:?}", other),
         }
     }
@@ -1094,10 +1067,10 @@ mod tests {
 
         let a: i32 = ctx.run(Bar, ()).await.unwrap();
         let b: i32 = ctx.run(Baz, ()).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
+        let outcome = finalize_context(&ctx, Ok(a + b)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(31458)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 31458),
             other => panic!("expected Done(Ok(31458)), got {:?}", other),
         }
     }
@@ -1114,7 +1087,7 @@ mod tests {
         let local_future = ctx.run(Bar, ()).spawn().await.unwrap();
         let _remote_future: RemoteFuture<i32> = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let local_val: i32 = local_future.await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(local_val))).await;
+        let outcome = finalize_context(&ctx, Ok(local_val)).await;
 
         let remote_id = match &outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1125,24 +1098,20 @@ mod tests {
         };
 
         // Settle the remote promise in the stub
-        harness
-            .settle_promise_in_stub(&remote_id, serde_json::json!(100))
-            .await;
+        harness.settle_promise_in_stub(&remote_id, 100_i32).await;
 
         // Second execution: remote promise is now resolved via preload
-        let effects2 =
-            harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(100))]);
+        let effects2 = harness.build_effects(vec![resolved_promise(&remote_id, 100_i32)]);
         let ctx2 = test_context("root", effects2);
 
         let local_future2 = ctx2.run(Bar, ()).spawn().await.unwrap();
         let remote_future2: RemoteFuture<i32> = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let local_val2: i32 = local_future2.await.unwrap();
         let remote_val2: i32 = remote_future2.await.unwrap();
-        let outcome2 =
-            finalize_context(&ctx2, Ok(serde_json::json!(local_val2 + remote_val2))).await;
+        let outcome2 = finalize_context(&ctx2, Ok(local_val2 + remote_val2)).await;
 
         match outcome2 {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(142)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 142),
             other => panic!("expected Done after settlement, got {:?}", other),
         }
     }
@@ -1156,7 +1125,7 @@ mod tests {
         let ctx = test_context("root", effects);
         let _r1 = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let _r2 = ctx.rpc::<i32>("bar", &()).spawn().await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(99))).await;
+        let outcome = finalize_context(&ctx, Ok(99)).await;
 
         let todos = match &outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1167,17 +1136,14 @@ mod tests {
         };
 
         // Settle first remote
-        harness
-            .settle_promise_in_stub(&todos[0], serde_json::json!(10))
-            .await;
+        harness.settle_promise_in_stub(&todos[0], 10_i32).await;
 
         // Second execution: one resolved, one still pending
-        let effects2 =
-            harness.build_effects(vec![resolved_promise(&todos[0], serde_json::json!(10))]);
+        let effects2 = harness.build_effects(vec![resolved_promise(&todos[0], 10_i32)]);
         let ctx2 = test_context("root", effects2);
         let _r1 = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let _r2 = ctx2.rpc::<i32>("bar", &()).spawn().await.unwrap();
-        let outcome2 = finalize_context(&ctx2, Ok(serde_json::json!(99))).await;
+        let outcome2 = finalize_context(&ctx2, Ok(99)).await;
 
         match &outcome2 {
             Outcome::Suspended { remote_todos } => {
@@ -1187,22 +1153,20 @@ mod tests {
         }
 
         // Settle second remote
-        harness
-            .settle_promise_in_stub(&todos[1], serde_json::json!(20))
-            .await;
+        harness.settle_promise_in_stub(&todos[1], 20_i32).await;
 
         // Third execution: both resolved
         let effects3 = harness.build_effects(vec![
-            resolved_promise(&todos[0], serde_json::json!(10)),
-            resolved_promise(&todos[1], serde_json::json!(20)),
+            resolved_promise(&todos[0], 10_i32),
+            resolved_promise(&todos[1], 20_i32),
         ]);
         let ctx3 = test_context("root", effects3);
         let _r1 = ctx3.rpc::<i32>("bar", &()).spawn().await.unwrap();
         let _r2 = ctx3.rpc::<i32>("bar", &()).spawn().await.unwrap();
-        let outcome3 = finalize_context(&ctx3, Ok(serde_json::json!(99))).await;
+        let outcome3 = finalize_context(&ctx3, Ok(99)).await;
 
         match outcome3 {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(99)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 99),
             other => panic!("expected Done(99), got {:?}", other),
         }
     }
@@ -1217,10 +1181,10 @@ mod tests {
 
         let _f1 = ctx.run(Bar, ()).spawn().await.unwrap();
         let _f2 = ctx.run(Baz, ()).spawn().await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(99))).await;
+        let outcome = finalize_context(&ctx, Ok(99)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(99)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 99),
             other => panic!("expected Done(99), got {:?}", other),
         }
     }
@@ -1233,7 +1197,7 @@ mod tests {
 
         let _local = ctx.run(Bar, ()).spawn().await.unwrap();
         let _remote = ctx.rpc::<i32>("someRemote", &()).spawn().await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(77))).await;
+        let outcome = finalize_context(&ctx, Ok(77)).await;
 
         match &outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1256,13 +1220,12 @@ mod tests {
             Err(e) => format!("caught: {}", e),
             Ok(_) => "should not happen".to_string(),
         };
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(msg))).await;
+        let outcome = finalize_context(&ctx, Ok(msg)).await;
 
         match outcome {
             Outcome::Done(Ok(v)) => {
-                let s = v.as_str().unwrap();
-                assert!(s.contains("caught:"), "got: {}", s);
-                assert!(s.contains("boom"), "got: {}", s);
+                assert!(v.contains("caught:"), "got: {}", v);
+                assert!(v.contains("boom"), "got: {}", v);
             }
             other => panic!("expected Done(Ok(caught: boom)), got {:?}", other),
         }
@@ -1280,10 +1243,10 @@ mod tests {
         let f_fast = ctx.run(Fast, ()).spawn().await.unwrap();
         let a: i32 = f_slow.await.unwrap();
         let b: i32 = f_fast.await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
+        let outcome = finalize_context(&ctx, Ok(a + b)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(3)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 3),
             other => panic!("expected Done(3), got {:?}", other),
         }
     }
@@ -1299,7 +1262,7 @@ mod tests {
         // First execution: child suspends on rpc("remoteFunc")
         let result: crate::error::Result<i32> = ctx.run(ChildWorkflow, ()).await;
         let workflow_result = match result {
-            Ok(v) => Ok(serde_json::json!(v + 1)),
+            Ok(v) => Ok(v + 1),
             Err(Error::Suspended) => Err(Error::Suspended),
             Err(e) => Err(e),
         };
@@ -1314,24 +1277,21 @@ mod tests {
         };
 
         // Settle the remote promise
-        harness
-            .settle_promise_in_stub(&remote_id, serde_json::json!(21))
-            .await;
+        harness.settle_promise_in_stub(&remote_id, 21_i32).await;
 
         // Second execution: remote resolved, child completes, parent completes
-        let effects2 =
-            harness.build_effects(vec![resolved_promise(&remote_id, serde_json::json!(21))]);
+        let effects2 = harness.build_effects(vec![resolved_promise(&remote_id, 21_i32)]);
         let ctx2 = test_context("foo", effects2);
 
         let result2: crate::error::Result<i32> = ctx2.run(ChildWorkflow, ()).await;
         let workflow_result2 = match result2 {
-            Ok(v) => Ok(serde_json::json!(v + 1)),
+            Ok(v) => Ok(v + 1),
             Err(e) => Err(e),
         };
         let outcome2 = finalize_context(&ctx2, workflow_result2).await;
 
         match outcome2 {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(43)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 43),
             other => panic!("expected Done(43), got {:?}", other),
         }
     }
@@ -1349,10 +1309,10 @@ mod tests {
 
         let future = ctx.run(Bar, ()).spawn().await.unwrap();
         let v: i32 = future.await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(v))).await;
+        let outcome = finalize_context(&ctx, Ok(v)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(42)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 42),
             other => panic!("expected Done(42), got {:?}", other),
         }
     }
@@ -1368,10 +1328,10 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let result: i32 = ctx.run(Add, (3, 4)).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(result))).await;
+        let outcome = finalize_context(&ctx, Ok(result)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(7)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 7),
             other => panic!("expected Done(7), got {:?}", other),
         }
     }
@@ -1384,10 +1344,10 @@ mod tests {
 
         let a: i32 = ctx.run(Double, 5).await.unwrap();
         let b: i32 = ctx.run(Square, 3).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
+        let outcome = finalize_context(&ctx, Ok(a + b)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(19)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 19),
             other => panic!("expected Done(19), got {:?}", other),
         }
     }
@@ -1401,12 +1361,7 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let result: crate::error::Result<i32> = ctx.rpc("remoteFunc", &()).await;
-        let workflow_result = match result {
-            Ok(v) => Ok(serde_json::json!(v)),
-            Err(Error::Suspended) => Err(Error::Suspended),
-            Err(e) => Err(e),
-        };
-        let outcome = finalize_context(&ctx, workflow_result).await;
+        let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1424,7 +1379,7 @@ mod tests {
 
         let _a = ctx.rpc::<i32>("a", &()).spawn().await.unwrap();
         let _b = ctx.rpc::<i32>("b", &()).spawn().await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(0))).await;
+        let outcome = finalize_context(&ctx, Ok(0)).await;
 
         match outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1445,7 +1400,7 @@ mod tests {
         let local_val: i32 = ctx.run(Add, (1, 2)).await.unwrap();
         let remote_result: crate::error::Result<i32> = ctx.rpc("remoteFunc", &()).await;
         let workflow_result = match remote_result {
-            Ok(v) => Ok(serde_json::json!(local_val + v)),
+            Ok(v) => Ok(local_val + v),
             Err(Error::Suspended) => Err(Error::Suspended),
             Err(e) => Err(e),
         };
@@ -1468,7 +1423,7 @@ mod tests {
         let local_future = ctx.run(Multiply, (3, 7)).spawn().await.unwrap();
         let _remote_future = ctx.rpc::<i32>("remote", &()).spawn().await.unwrap();
         let local_val: i32 = local_future.await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(local_val))).await;
+        let outcome = finalize_context(&ctx, Ok(local_val)).await;
 
         match outcome {
             Outcome::Suspended { remote_todos } => {
@@ -1487,10 +1442,10 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let v: i32 = ctx.run(Add, (3, 4)).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(v))).await;
+        let outcome = finalize_context(&ctx, Ok(v)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(7)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 7),
             other => panic!("expected Done(7), got {:?}", other),
         }
     }
@@ -1502,8 +1457,7 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let result: crate::error::Result<i32> = ctx.run(Failing, ()).await;
-        let workflow_result = result.map(|v| serde_json::json!(v));
-        let outcome = finalize_context(&ctx, workflow_result).await;
+        let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
             Outcome::Done(Err(e)) => {
@@ -1520,11 +1474,11 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let _: () = ctx.run(Noop, ()).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::Value::Null)).await;
+        let outcome = finalize_context(&ctx, Ok(())).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::Value::Null),
-            other => panic!("expected Done(null), got {:?}", other),
+            Outcome::Done(Ok(())) => {}
+            other => panic!("expected Done(()), got {:?}", other),
         }
     }
 
@@ -1538,10 +1492,10 @@ mod tests {
             .run(Concat, ("x".to_string(), "y".to_string(), "z".to_string()))
             .await
             .unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(v))).await;
+        let outcome = finalize_context(&ctx, Ok(v)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!("x-y-z")),
+            Outcome::Done(Ok(v)) => assert_eq!(v, "x-y-z"),
             other => panic!("expected Done(x-y-z), got {:?}", other),
         }
     }
@@ -1554,7 +1508,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("main", effects);
 
-        let result = ctx.run(Failing, ()).await.map(|v| serde_json::json!(v));
+        let result: crate::error::Result<i32> = ctx.run(Failing, ()).await;
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -1574,10 +1528,10 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let v: i32 = ctx.run(Counter, ()).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(v))).await;
+        let outcome = finalize_context(&ctx, Ok(v)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(1)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 1),
             other => panic!("expected Done(1), got {:?}", other),
         }
         assert_eq!(
@@ -2084,10 +2038,10 @@ mod tests {
         let a: i32 = f1.await.unwrap();
         let b: i32 = f2.await.unwrap();
         let elapsed = start.elapsed();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
+        let outcome = finalize_context(&ctx, Ok(a + b)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(3)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 3),
             other => panic!("expected Done(3), got {:?}", other),
         }
         assert!(elapsed.as_millis() < 200, "took too long: {:?}", elapsed);
@@ -2101,10 +2055,10 @@ mod tests {
 
         let a: i32 = ctx.run(Bar, ()).await.unwrap();
         let b: i32 = ctx.run(Baz, ()).await.unwrap();
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!(a + b))).await;
+        let outcome = finalize_context(&ctx, Ok(a + b)).await;
 
         match outcome {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!(31458)),
+            Outcome::Done(Ok(v)) => assert_eq!(v, 31458),
             other => panic!("expected Done(31458), got {:?}", other),
         }
     }
@@ -2117,10 +2071,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let result = ctx
-            .run(Failing, ())
-            .await
-            .map(|v: i32| serde_json::json!(v));
+        let result: crate::error::Result<i32> = ctx.run(Failing, ()).await;
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -2137,10 +2088,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let result = ctx
-            .run(InnerFailing, ())
-            .await
-            .map(|v: i32| serde_json::json!(v));
+        let result: crate::error::Result<i32> = ctx.run(InnerFailing, ()).await;
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -2410,7 +2358,7 @@ mod tests {
         let result = ctx.sleep(Duration::from_secs(60)).await;
         assert!(matches!(result, Err(Error::Suspended)));
 
-        let outcome = finalize_context(&ctx, Err(Error::Suspended)).await;
+        let outcome = finalize_context::<()>(&ctx, Err(Error::Suspended)).await;
         match &outcome {
             Outcome::Suspended { remote_todos } => {
                 assert_eq!(remote_todos.len(), 1);
@@ -2501,12 +2449,9 @@ mod tests {
     async fn sleep_returns_ok_when_already_resolved() {
         let harness = TestHarness::new();
         let sleep_id = "root.0";
-        harness
-            .settle_promise_in_stub(sleep_id, serde_json::json!(null))
-            .await;
+        harness.settle_promise_in_stub(sleep_id, ()).await;
 
-        let effects =
-            harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let effects = harness.build_effects(vec![resolved_promise(sleep_id, ())]);
         let ctx = test_context("root", effects);
 
         let result = ctx.sleep(Duration::from_secs(60)).await;
@@ -2521,7 +2466,7 @@ mod tests {
 
         let _handle = ctx.sleep(Duration::from_secs(30)).spawn().await.unwrap();
 
-        let outcome = finalize_context(&ctx, Ok(serde_json::json!("done"))).await;
+        let outcome = finalize_context(&ctx, Ok("done")).await;
         match &outcome {
             Outcome::Suspended { remote_todos } => {
                 assert_eq!(remote_todos.len(), 1);
@@ -2534,12 +2479,9 @@ mod tests {
     async fn sleep_spawn_resolved_returns_ok() {
         let harness = TestHarness::new();
         let sleep_id = "root.0";
-        harness
-            .settle_promise_in_stub(sleep_id, serde_json::json!(null))
-            .await;
+        harness.settle_promise_in_stub(sleep_id, ()).await;
 
-        let effects =
-            harness.build_effects(vec![resolved_promise(sleep_id, serde_json::json!(null))]);
+        let effects = harness.build_effects(vec![resolved_promise(sleep_id, ())]);
         let ctx = test_context("root", effects);
 
         let handle = ctx.sleep(Duration::from_secs(30)).spawn().await.unwrap();
@@ -2579,12 +2521,7 @@ mod tests {
 
         // First execution: sleep suspends
         let result = ctx.sleep(Duration::from_secs(30)).await;
-        let workflow_result = match result {
-            Ok(()) => Ok(serde_json::json!("awake")),
-            Err(Error::Suspended) => Err(Error::Suspended),
-            Err(e) => Err(e),
-        };
-        let outcome = finalize_context(&ctx, workflow_result).await;
+        let outcome = finalize_context(&ctx, result).await;
 
         let sleep_id = match &outcome {
             Outcome::Suspended { remote_todos } => {
@@ -2595,21 +2532,18 @@ mod tests {
         };
 
         // Settle the timer promise (server resolves it after duration)
-        harness
-            .settle_promise_in_stub(&sleep_id, serde_json::json!(null))
-            .await;
+        harness.settle_promise_in_stub(&sleep_id, ()).await;
 
         // Second execution: timer resolved, sleep returns Ok
-        let effects2 =
-            harness.build_effects(vec![resolved_promise(&sleep_id, serde_json::json!(null))]);
+        let effects2 = harness.build_effects(vec![resolved_promise(&sleep_id, ())]);
         let ctx2 = test_context("root", effects2);
 
         let result2 = ctx2.sleep(Duration::from_secs(30)).await;
         assert!(result2.is_ok());
-        let outcome2 = finalize_context(&ctx2, Ok(serde_json::json!("awake"))).await;
+        let outcome2 = finalize_context(&ctx2, Ok(())).await;
 
         match outcome2 {
-            Outcome::Done(Ok(v)) => assert_eq!(v, serde_json::json!("awake")),
+            Outcome::Done(Ok(())) => {}
             other => panic!("expected Done(\"awake\"), got {:?}", other),
         }
     }

@@ -479,9 +479,10 @@ impl TestHarness {
     }
 
     /// Settle a promise in the stub directly (simulating remote completion).
-    pub async fn settle_promise_in_stub(&self, id: &str, value: serde_json::Value) {
+    pub async fn settle_promise_in_stub<T: serde::Serialize>(&self, id: &str, value: T) {
         let codec = test_codec();
-        let encoded = codec.encode(&value).unwrap();
+        let json_val = serde_json::to_value(value).unwrap();
+        let encoded = codec.encode(&json_val).unwrap();
         let mut net = self.network.lock().await;
         if let Some(p) = net.promises.get_mut(id) {
             p.state = PromiseState::Resolved;
@@ -538,14 +539,15 @@ pub fn pending_promise_with_param(id: &str, param: serde_json::Value) -> Promise
 }
 
 /// Helper to create a resolved PromiseRecord (with encoded value).
-pub fn resolved_promise(id: &str, value: serde_json::Value) -> PromiseRecord {
+pub fn resolved_promise<T: serde::Serialize>(id: &str, value: T) -> PromiseRecord {
     let codec = test_codec();
+    let json_val = serde_json::to_value(value).unwrap();
     PromiseRecord {
         id: id.to_string(),
         state: PromiseState::Resolved,
         timeout_at: i64::MAX,
         param: Value::default(),
-        value: codec.encode(&value).unwrap(),
+        value: codec.encode(&json_val).unwrap(),
         tags: HashMap::new(),
         created_at: 0,
         settled_at: Some(1),
@@ -627,10 +629,10 @@ pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) ->
 
 /// Finalize a context into an Outcome after a workflow function has been called.
 /// Call this after running operations on the context to determine Done vs Suspended.
-pub async fn finalize_context(
+pub async fn finalize_context<T>(
     ctx: &Context,
-    result: error::Result<serde_json::Value>,
-) -> crate::types::Outcome {
+    result: error::Result<T>,
+) -> crate::types::Outcome<T> {
     let flush_remote = ctx.flush_local_work().await;
     let mut remote_todos = ctx.take_remote_todos().await;
     remote_todos.extend(flush_remote);

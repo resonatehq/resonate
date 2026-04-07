@@ -1,3 +1,4 @@
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -42,6 +43,24 @@ impl Value {
     /// Get headers, defaulting to empty map if absent.
     pub fn headers_or_empty(&self) -> HashMap<String, String> {
         self.headers.clone().unwrap_or_default()
+    }
+
+    /// Serialize any value into a `Value`.
+    pub fn from_serializable<T: Serialize>(val: T) -> crate::error::Result<Self> {
+        Ok(Self {
+            headers: None,
+            data: Some(serde_json::to_value(val)?),
+        })
+    }
+
+    /// Deserialize the data field into `T`.
+    pub fn decode<T: DeserializeOwned>(&self) -> crate::error::Result<T> {
+        serde_json::from_value(self.data_or_null()).map_err(Into::into)
+    }
+
+    /// Consume self and deserialize data into `T`.
+    pub fn into_decoded<T: DeserializeOwned>(self) -> crate::error::Result<T> {
+        serde_json::from_value(self.into_data_or_null()).map_err(Into::into)
     }
 }
 
@@ -267,9 +286,9 @@ pub struct PromiseRegisterCallbackData {
 
 /// The result of executing a durable function.
 #[derive(Debug)]
-pub enum Outcome {
+pub enum Outcome<T> {
     /// Function completed successfully or with an error.
-    Done(crate::error::Result<serde_json::Value>),
+    Done(crate::error::Result<T>),
     /// Function cannot proceed — it has unresolved remote dependencies.
     Suspended { remote_todos: Vec<String> },
 }
@@ -289,6 +308,16 @@ pub struct TaskData {
     pub func: String,
     #[serde(default)]
     pub args: serde_json::Value,
+}
+
+impl TaskData {
+    /// Build a `Value` encoding `{"func": ..., "args": ...}` for remote dispatch.
+    pub fn into_value<A: Serialize>(func: &str, args: A) -> crate::error::Result<Value> {
+        Value::from_serializable(serde_json::json!({
+            "func": func,
+            "args": serde_json::to_value(args)?,
+        }))
+    }
 }
 
 /// Execution status returned from Core methods.
