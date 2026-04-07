@@ -43,6 +43,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.cargo_version_tagged }}
+      version_bare: ${{ steps.version.outputs.cargo_version }}
       tag: ${{ steps.version.outputs.tag_version }}
 
     steps:
@@ -390,7 +391,7 @@ jobs:
 
       - name: Update Formula with new version and checksums
         env:
-          VERSION: ${{ needs.check-version.outputs.version }}
+          VERSION: ${{ needs.check-version.outputs.version_bare }}
           DARWIN_ARM64_SHA: ${{ steps.checksums.outputs.darwin_arm64 }}
           DARWIN_X86_64_SHA: ${{ steps.checksums.outputs.darwin_x86_64 }}
           LINUX_ARM64_SHA: ${{ steps.checksums.outputs.linux_arm64 }}
@@ -401,7 +402,7 @@ jobs:
           echo "Updating resonate.rb with version ${VERSION}"
 
           # Update version (line 2)
-          sed -i "s/version '[0-9.]\+'/version '${VERSION}'/" resonate.rb
+          sed -i "s/version '[v0-9.]\+'/version '${VERSION}'/" resonate.rb
 
           # Update darwin aarch64 sha256 (after darwin_aarch64.tar.gz URL)
           sed -i "/resonate_darwin_aarch64\.tar\.gz/{n;s/sha256 \"[a-f0-9]\+\"/sha256 \"${DARWIN_ARM64_SHA}\"/;}" resonate.rb
