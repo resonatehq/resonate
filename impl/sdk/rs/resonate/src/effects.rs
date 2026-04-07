@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use serde::Serialize;
 
 use crate::codec::Codec;
 use crate::error::Result;
@@ -79,10 +80,10 @@ impl Effects {
     }
 
     /// Settle a durable promise with a result.
-    pub async fn settle_promise(
+    pub async fn settle_promise<T: Serialize>(
         &self,
         id: &str,
-        result: &Result<serde_json::Value>,
+        result: &Result<T>,
     ) -> Result<PromiseRecord> {
         // 1. Check cache — if already settled, return cached
         if let Some(cached) = self.cache.get(id) {
@@ -93,7 +94,7 @@ impl Effects {
 
         // 2. Build settle request
         let (state, value_data) = match result {
-            Ok(val) => (SettleState::Resolved, val.clone()),
+            Ok(val) => (SettleState::Resolved, serde_json::to_value(val)?),
             Err(err) => (SettleState::Rejected, crate::codec::encode_error(err)),
         };
 

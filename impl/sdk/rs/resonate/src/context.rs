@@ -507,7 +507,7 @@ where
     where
         D: Durable<Args, T> + Send + 'static,
         Args: Serialize + DeserializeOwned + Send + 'static,
-        T: Serialize + DeserializeOwned + Send + 'static,
+        T: Serialize + DeserializeOwned + Send + Sync + 'static,
     {
         let RunTask {
             child_id,
@@ -579,20 +579,13 @@ where
                         };
                     }
 
-                    // Serialize by reference for promise settling
-                    let json_result = match &result {
-                        Ok(val) => serde_json::to_value(val).map_err(Error::SerializationError),
-                        Err(e) => Err(Error::Application {
-                            message: e.to_string(),
-                        }),
-                    };
-
                     // Spawned sub-workflows may have remote todos even if the
                     // main function completed successfully.
                     let outcome = if child_remote.is_empty() {
                         let _ = effects
-                            .settle_promise(&child_id_for_task, &json_result)
+                            .settle_promise(&child_id_for_task, &result)
                             .await;
+                        let json_result = Context::to_json_result(&result);
                         // Send the original typed result — no JSON roundtrip
                         let _ = tx.send(result);
                         Outcome::Done(json_result)
@@ -628,7 +621,7 @@ impl<'ctx, D, Args, T> IntoFuture for RunTask<'ctx, D, Args, T>
 where
     D: Durable<Args, T>,
     Args: Serialize + DeserializeOwned + Send + 'static,
-    T: Serialize + DeserializeOwned + Send + 'static,
+    T: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     type Output = Result<T>;
     type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
@@ -695,8 +688,7 @@ where
             // Spawned sub-workflows may have remote todos even if the
             // main function completed successfully.
             if child_remote.is_empty() {
-                let json_result = Context::to_json_result(&result);
-                ctx.effects.settle_promise(&child_id, &json_result).await?;
+                ctx.effects.settle_promise(&child_id, &result).await?;
             } else {
                 ctx.spawned_remote.lock().await.extend(child_remote);
             }
