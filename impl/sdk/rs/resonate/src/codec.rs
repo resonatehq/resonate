@@ -72,6 +72,15 @@ impl Codec {
             serde_json::Value::Null => return Ok(None),
             _ => return Err(Error::DecodingError("expected string or null data".into())),
         };
+        self.decode_base64_str(s)
+    }
+
+    /// Decode a base64-encoded, encrypted JSON string directly into a Rust type,
+    /// without constructing an intermediate `Value` wrapper.
+    pub fn decode_base64_str<T: DeserializeOwned>(&self, s: &str) -> Result<Option<T>> {
+        if s.is_empty() {
+            return Ok(None);
+        }
         let bytes = BASE64.decode(s)?;
         let decrypted = self.encryptor.decrypt(&bytes)?;
         let json_str = String::from_utf8(decrypted)?;
@@ -168,6 +177,23 @@ mod tests {
         let encoded = c.encode(&"hello").unwrap();
         let decoded: Option<String> = c.decode(&encoded).unwrap();
         assert_eq!(decoded, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn decode_base64_str_roundtrip() {
+        let c = codec();
+        let encoded = c.encode(&serde_json::json!({"x": 1})).unwrap();
+        let b64 = encoded.data_or_null();
+        let b64_str = b64.as_str().unwrap();
+        let decoded: Option<serde_json::Value> = c.decode_base64_str(b64_str).unwrap();
+        assert_eq!(decoded, Some(serde_json::json!({"x": 1})));
+    }
+
+    #[test]
+    fn decode_base64_str_empty_returns_none() {
+        let c = codec();
+        let decoded: Option<serde_json::Value> = c.decode_base64_str("").unwrap();
+        assert!(decoded.is_none());
     }
 
     #[test]

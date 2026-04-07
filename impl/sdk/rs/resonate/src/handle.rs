@@ -92,10 +92,7 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
             if let Some(s) = data.as_str() {
                 if !s.is_empty() {
                     let decoded: Option<serde_json::Value> =
-                        self.codec.decode(&crate::types::Value {
-                            headers: None,
-                            data: Some(serde_json::Value::String(s.to_string())),
-                        })?;
+                        self.codec.decode_base64_str(s)?;
                     return Ok(decoded.unwrap_or(serde_json::Value::Null));
                 }
             }

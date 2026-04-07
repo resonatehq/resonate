@@ -169,7 +169,7 @@ Always 4–5 entries. **Fix:** `HashMap::with_capacity(5)`.
 | 🟡 | 7. Simplify `Resonate::new` | Fewer intermediate clones |
 | 🟡 | 8. Lazy `PromiseCreateReq` in `RunTask` | Halves memory for large args |
 | ✅ | 9. `Core::on_message` → plain async fn | Removes unnecessary Box allocation |
-| 🟡 | 10. `Codec::decode_base64_str` | Removes `String` alloc in handle decode |
+| ✅ | 10. `Codec::decode_base64_str` | Removes `String` alloc in handle decode |
 | 🟢 | 11. Remove `RegistryEntry.name` | Removes redundant `String` |
 | 🟢 | 12. Enums in local server state | Removes string allocs + comparisons |
 | 🟢 | 13. Error on missing required fields | Correctness fix |
