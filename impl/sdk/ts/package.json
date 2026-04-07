@@ -52,7 +52,7 @@
     "tsx": "^4.20.5",
     "typedoc": "^0.28.0",
     "typedoc-material-theme": "^1.4.0",
-    "typescript": "^5.8.3"
+    "typescript": "^6.0.2"
   },
   "engines": {
     "node": ">= 22"
