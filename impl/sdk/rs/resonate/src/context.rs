@@ -253,20 +253,12 @@ impl Context {
         Args: Serialize,
     {
         let child_id = self.next_id();
-        let (req, serialization_error) = match self.local_create_req(&child_id, &args, None) {
-            Ok(req) => (req, None),
-            Err(e) => (
-                PromiseCreateReq::default_with_id(&child_id),
-                Some(e.to_string()),
-            ),
-        };
         RunTask {
             child_id,
             ctx: self,
             func,
             args,
-            req,
-            serialization_error,
+            timeout_override: None,
             record: tokio::sync::OnceCell::new(),
             _phantom: PhantomData,
         }
@@ -466,9 +458,8 @@ pub struct RunTask<'ctx, D, Args, T> {
     ctx: &'ctx Context,
     func: D,
     args: Args,
-    req: PromiseCreateReq,
-    /// Serialization error deferred from construction (if args failed to serialize).
-    serialization_error: Option<String>,
+    /// Optional timeout override set via `.timeout()`. `None` uses the parent's default.
+    timeout_override: Option<Duration>,
     record: tokio::sync::OnceCell<PromiseRecord>,
     _phantom: PhantomData<fn() -> T>,
 }
@@ -485,7 +476,7 @@ where
             self.record.get().is_none(),
             "cannot set timeout after promise creation"
         );
-        self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
+        self.timeout_override = Some(timeout);
         self
     }
 
@@ -497,9 +488,13 @@ where
 
     /// Ensure the durable promise exists (lazy creation via OnceCell).
     async fn ensure_created(&self) -> Result<&PromiseRecord> {
-        Context::check_serialization_error(&self.serialization_error)?;
         self.record
-            .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
+            .get_or_try_init(|| async {
+                let req = self
+                    .ctx
+                    .local_create_req(&self.child_id, &self.args, self.timeout_override)?;
+                self.ctx.effects.create_promise(req).await
+            })
             .await
     }
 
@@ -514,17 +509,17 @@ where
         Args: Serialize + DeserializeOwned + Send + 'static,
         T: Serialize + DeserializeOwned + Send + 'static,
     {
-        Context::check_serialization_error(&self.serialization_error)?;
         let RunTask {
             child_id,
             ctx,
             func,
             args,
-            req,
+            timeout_override,
             record: cell,
             ..
         } = self;
 
+        let req = ctx.local_create_req(&child_id, &args, timeout_override)?;
         let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
         match record.state {
@@ -640,17 +635,17 @@ where
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
-            Context::check_serialization_error(&self.serialization_error)?;
             let RunTask {
                 child_id,
                 ctx,
                 func,
                 args,
-                req,
+                timeout_override,
                 record: cell,
                 ..
             } = self;
 
+            let req = ctx.local_create_req(&child_id, &args, timeout_override)?;
             let record = consume_promise_record(cell, req, &ctx.effects).await?;
 
             if let Some(result) = record.into_result::<T>() {
