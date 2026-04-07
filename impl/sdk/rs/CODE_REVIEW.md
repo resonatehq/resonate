@@ -166,7 +166,7 @@ Always 4–5 entries. **Fix:** `HashMap::with_capacity(5)`.
 | ✅ | 4. `Value::into_data_or_null` | Eliminates deep clones on hot path |
 | ✅ | 5. `Arc<PromiseResult>` in watch | Eliminates deep clones in `handle.result()` |
 | 🟡 | 6. Typed envelope structs in `send.rs` | ~6 allocs → 1 per request |
-| 🟡 | 7. Simplify `Resonate::new` | Fewer intermediate clones |
+| ✅ | 7. Simplify `Resonate::new` | Fewer intermediate clones |
 | 🟡 | 8. Lazy `PromiseCreateReq` in `RunTask` | Halves memory for large args |
 | ✅ | 9. `Core::on_message` → plain async fn | Removes unnecessary Box allocation |
 | ✅ | 10. `Codec::decode_base64_str` | Removes `String` alloc in handle decode |

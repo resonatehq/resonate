@@ -119,11 +119,21 @@ impl Resonate {
     // ═══════════════════════════════════════════════════════════════
 
     pub fn new(config: ResonateConfig) -> Self {
-        let ttl = config.ttl.unwrap_or(60_000);
+        let ResonateConfig {
+            url,
+            group,
+            pid: config_pid,
+            ttl: config_ttl,
+            token,
+            encryptor: config_encryptor,
+            network: config_network,
+            prefix: config_prefix,
+        } = config;
+
+        let ttl = config_ttl.unwrap_or(60_000);
 
         // Resolve prefix
-        let prefix = config
-            .prefix
+        let prefix = config_prefix
             .or_else(|| std::env::var("RESONATE_PREFIX").ok())
             .unwrap_or_default();
         let id_prefix = if prefix.is_empty() {
@@ -133,9 +143,7 @@ impl Resonate {
         };
 
         // Resolve URL
-        let resolved_url = config
-            .url
-            .clone()
+        let resolved_url = url
             .or_else(|| std::env::var("RESONATE_URL").ok())
             .or_else(|| {
                 let host = std::env::var("RESONATE_HOST").ok()?;
@@ -144,57 +152,40 @@ impl Resonate {
                 Some(format!("{}://{}:{}", scheme, host, port))
             });
 
-        // Resolve auth: explicit config takes priority, then env vars
-        let auth = config
-            .token
-            .or_else(|| std::env::var("RESONATE_TOKEN").ok());
+        // Resolve auth: explicit config takes priority, then env vars.
+        // Clone before auth is potentially moved into HttpNetwork.
+        let auth = token.or_else(|| std::env::var("RESONATE_TOKEN").ok());
         let auth_for_envelope = auth.clone();
 
-        // Network selection
-        let (network, heartbeat): (Arc<dyn Network>, Arc<dyn Heartbeat>) =
-            if let Some(net) = config.network {
-                // Custom network provided
-                let transport = Transport::new(net.clone());
-                let sender_for_hb = Sender::new(transport.clone(), auth_for_envelope.clone());
-                let hb = Arc::new(AsyncHeartbeat::new(
-                    net.pid().to_string(),
-                    ttl / 2,
-                    sender_for_hb,
-                ));
-                (net, hb)
+        // Network selection — only the Arc<dyn Network> is selected here.
+        // Transport and heartbeat are built once below from the single network.
+        let (network, needs_async_heartbeat): (Arc<dyn Network>, bool) =
+            if let Some(net) = config_network {
+                (net, true)
             } else if let Some(url) = resolved_url {
-                // Remote mode: HTTP network
-                let net = Arc::new(HttpNetwork::new(
-                    url,
-                    config.pid.clone(),
-                    config.group.clone(),
-                    auth,
-                ));
-                let transport = Transport::new(net.clone());
-                let sender_for_hb = Sender::new(transport.clone(), auth_for_envelope.clone());
-                let hb = Arc::new(AsyncHeartbeat::new(
-                    net.pid().to_string(),
-                    ttl / 2,
-                    sender_for_hb,
-                ));
-                (net as Arc<dyn Network>, hb as Arc<dyn Heartbeat>)
+                let net = Arc::new(HttpNetwork::new(url, config_pid, group, auth));
+                (net as Arc<dyn Network>, true)
             } else {
-                // Local mode
-                let net = Arc::new(LocalNetwork::new(config.pid.clone(), config.group.clone()));
-                (
-                    net as Arc<dyn Network>,
-                    Arc::new(NoopHeartbeat) as Arc<dyn Heartbeat>,
-                )
+                let net = Arc::new(LocalNetwork::new(config_pid, group));
+                (net as Arc<dyn Network>, false)
             };
 
         let pid = network.pid().to_string();
         let transport = Transport::new(network.clone());
-        let encryptor: Arc<dyn Encryptor> = match config.encryptor {
+        let encryptor: Arc<dyn Encryptor> = match config_encryptor {
             Some(e) => Arc::from(e),
             None => Arc::new(NoopEncryptor),
         };
         let codec = Codec::new(encryptor);
         let registry = Arc::new(RwLock::new(Registry::new()));
+
+        // Build heartbeat after transport so we share a single Transport instance.
+        let heartbeat: Arc<dyn Heartbeat> = if needs_async_heartbeat {
+            let sender_for_hb = Sender::new(transport.clone(), auth_for_envelope.clone());
+            Arc::new(AsyncHeartbeat::new(pid.clone(), ttl / 2, sender_for_hb))
+        } else {
+            Arc::new(NoopHeartbeat)
+        };
 
         // Build the Sender for all protocol requests
         let sender = Sender::new(transport.clone(), auth_for_envelope);
