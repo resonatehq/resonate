@@ -65,15 +65,7 @@ impl Core {
     /// Called when an `execute` message arrives from the network.
     /// Acquires the task, decodes the promise, then runs
     /// `execute_until_blocked`.
-    pub fn on_message<'a>(
-        &'a self,
-        task_id: &'a str,
-        version: i64,
-    ) -> futures::future::BoxFuture<'a, Result<Status>> {
-        Box::pin(self.on_message_inner(task_id, version))
-    }
-
-    async fn on_message_inner(&self, task_id: &str, version: i64) -> Result<Status> {
+    pub async fn on_message(&self, task_id: &str, version: i64) -> Result<Status> {
         // 1. ACQUIRE the task
         let result = self
             .sender
@@ -336,7 +328,7 @@ impl Core {
 mod tests {
     use super::*;
     use crate::codec::{Codec, NoopEncryptor};
-    use crate::error::{Error, Result};
+    use crate::error::Error;
     use crate::heartbeat::NoopHeartbeat;
     use crate::registry::Registry;
     use crate::test_utils::*;
