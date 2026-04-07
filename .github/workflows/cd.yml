@@ -252,22 +252,22 @@ jobs:
           - os: linux
             arch: x86_64
             arch_verify: x86-64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
 
           - os: linux
             arch: aarch64
             arch_verify: aarch64
-            runner: ubuntu-latest-arm
+            runner: ubuntu-24.04-arm
 
           - os: darwin
             arch: x86_64
             arch_verify: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
 
           - os: darwin
             arch: aarch64
             arch_verify: arm64
-            runner: macos-15
+            runner: macos-26
 
     steps:
       - name: Checkout repository
