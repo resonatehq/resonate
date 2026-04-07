@@ -60,6 +60,15 @@ pub struct PromiseSearchResult {
     pub cursor: Option<String>,
 }
 
+/// Result of task creation when conflict is expected.
+#[derive(Debug, Clone)]
+pub enum TaskCreateOutcome {
+    /// Task was successfully created and acquired.
+    Created(TaskCreateResult),
+    /// Promise already exists (409 conflict). Contains the existing promise.
+    Conflict(PromiseRecord),
+}
+
 /// Result of a schedule search.
 #[derive(Debug, Clone)]
 pub struct ScheduleSearchResult {
@@ -186,6 +195,32 @@ impl Sender {
         };
         let (_, data) = self.send_request(&req).await?;
         parse_task_acquire(&data)
+    }
+
+    /// Create a task and its associated promise, returning `Conflict` on 409.
+    ///
+    /// Unlike `task_create`, this method does not fail on 409 (promise already exists).
+    /// Instead, it returns the existing promise data so the caller can build a handle.
+    pub async fn task_create_or_conflict(
+        &self,
+        pid: &str,
+        ttl: i64,
+        action: PromiseCreateReq,
+    ) -> Result<TaskCreateOutcome> {
+        let req = Request::TaskCreate {
+            pid: pid.to_string(),
+            ttl,
+            action,
+        };
+        // Use send_request_with_status to get the raw status even on 409
+        let (status, data) = self.send_request_with_conflict(&req).await?;
+        if status == 409 {
+            let promise = parse_promise(&data)?;
+            Ok(TaskCreateOutcome::Conflict(promise))
+        } else {
+            let result = parse_task_acquire(&data)?;
+            Ok(TaskCreateOutcome::Created(result))
+        }
     }
 
     /// Halt a task, preventing it from being acquired or making progress.
@@ -461,6 +496,60 @@ impl Sender {
 
         // Check for error status codes
         if status >= 400 {
+            let message = if let Some(s) = data.as_str() {
+                s.to_string()
+            } else if let Some(err) = data.get("error").and_then(|e| e.as_str()) {
+                err.to_string()
+            } else {
+                format!("server error (status {})", status)
+            };
+            return Err(Error::ServerError {
+                code: status,
+                message,
+            });
+        }
+
+        Ok((status, data))
+    }
+
+    /// Like `send_request` but treats 409 as a non-error status code.
+    /// Returns `Ok((409, data))` instead of `Err(ServerError)` for conflict responses.
+    async fn send_request_with_conflict(&self, req: &Request) -> Result<(u16, serde_json::Value)> {
+        let mut req_json = serde_json::to_value(req)?;
+        let kind = req_json
+            .as_object()
+            .and_then(|o| o.get("kind"))
+            .and_then(|k| k.as_str())
+            .unwrap_or("")
+            .to_string();
+        if let Some(obj) = req_json.as_object_mut() {
+            obj.remove("kind");
+        }
+        wrap_nested_actions(&kind, &mut req_json, &self.auth);
+
+        let corr_id = format!("sr-{}", crate::now_ms());
+        let mut head = serde_json::Map::new();
+        head.insert("corrId".into(), serde_json::Value::String(corr_id));
+        head.insert("version".into(), serde_json::Value::String(PROTOCOL_VERSION.into()));
+        if let Some(ref token) = self.auth {
+            head.insert("auth".into(), serde_json::Value::String(token.clone()));
+        }
+        let envelope = serde_json::json!({
+            "kind": kind,
+            "head": head,
+            "data": req_json,
+        });
+
+        let resp = self.transport.send(envelope).await?;
+        let status = resp
+            .get("head")
+            .and_then(|h| h.get("status"))
+            .and_then(|s| s.as_u64())
+            .unwrap_or(200) as u16;
+        let data = resp.get("data").cloned().unwrap_or(serde_json::json!({}));
+
+        // Allow 409 through; error on everything else >= 400
+        if status >= 400 && status != 409 {
             let message = if let Some(s) = data.as_str() {
                 s.to_string()
             } else if let Some(err) = data.get("error").and_then(|e| e.as_str()) {

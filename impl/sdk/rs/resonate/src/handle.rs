@@ -5,6 +5,7 @@ use tokio::sync::watch;
 
 use crate::codec::{deserialize_error, Codec};
 use crate::error::{Error, Result};
+use crate::types::PromiseState;
 
 /// A handle to a durable promise, returned from `Resonate::run`, `Resonate::rpc`, and `get`.
 /// Allows non-blocking observation and eventual awaiting of a durable promise.
@@ -25,7 +26,7 @@ impl<T> std::fmt::Debug for ResonateHandle<T> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PromiseResult {
-    pub state: String,
+    pub state: PromiseState,
     pub value: serde_json::Value,
 }
 
@@ -64,22 +65,22 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
 
     /// Decode a PromiseResult into the final T or error.
     fn decode_result(&self, result: &PromiseResult) -> Result<T> {
-        match result.state.as_str() {
-            "resolved" => {
+        match result.state {
+            PromiseState::Resolved => {
                 let decoded_val = self.decode_value(&result.value)?;
                 let val: T = serde_json::from_value(decoded_val)?;
                 Ok(val)
             }
-            "rejected" => {
+            PromiseState::Rejected => {
                 let decoded_val = self.decode_value(&result.value)?;
                 Err(deserialize_error(decoded_val))
             }
-            "rejected_canceled" => Err(Error::Application {
+            PromiseState::RejectedCanceled => Err(Error::Application {
                 message: "Promise canceled".to_string(),
             }),
-            "rejected_timedout" => Err(Error::Timeout),
-            other => Err(Error::Application {
-                message: format!("unexpected promise state: {}", other),
+            PromiseState::RejectedTimedout => Err(Error::Timeout),
+            PromiseState::Pending => Err(Error::Application {
+                message: "promise still pending".to_string(),
             }),
         }
     }

@@ -21,8 +21,9 @@ use crate::now_ms;
 use crate::options::{is_url, Options};
 use crate::promises::{Promises, Schedules};
 use crate::registry::Registry;
-use crate::send::Sender;
+use crate::send::{Sender, TaskCreateOutcome};
 use crate::transport::{Message, Transport};
+use crate::types::PromiseState;
 
 /// Protocol version string sent in all requests.
 const PROTOCOL_VERSION: &str = "2025-01-15";
@@ -83,6 +84,9 @@ pub struct Resonate {
 
     // Subscriptions (for awaiting remote promise completion)
     subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
+
+    // Typed sender for all protocol requests
+    sender: Sender,
 
     // Sub-clients
     pub promises: Promises,
@@ -192,7 +196,7 @@ impl Resonate {
         let codec = Codec::new(encryptor);
         let registry = Arc::new(RwLock::new(Registry::new()));
 
-        // Build the Sender for Core from the transport
+        // Build the Sender for all protocol requests
         let sender = Sender::new(transport.clone(), auth_for_envelope);
 
         // Build target_resolver from the network for target resolution.
@@ -218,7 +222,7 @@ impl Resonate {
             ttl as i64
         };
         let core = Arc::new(Core::new(
-            sender,
+            sender.clone(),
             codec.clone(),
             registry.clone(),
             target_resolver,
@@ -236,7 +240,7 @@ impl Resonate {
         // Start periodic subscription refresh
         let refresh_handle = Self::spawn_subscription_refresh(
             subscriptions.clone(),
-            transport.clone(),
+            sender.clone(),
             network.unicast().to_string(),
             subscribe_every,
         );
@@ -252,6 +256,7 @@ impl Resonate {
             registry,
             heartbeat,
             subscriptions: subscriptions.clone(),
+            sender,
             promises,
             schedules,
             subscription_refresh_handle: Mutex::new(Some(refresh_handle)),
@@ -407,90 +412,59 @@ impl Resonate {
         let mut tags = opts.tags.clone();
         Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
-        // Build task.create request (protocol envelope format)
-        let corr_id = format!("tc-{}", now_ms());
-        let req = serde_json::json!({
-            "kind": "task.create",
-            "head": {
-                "corrId": corr_id,
-                "version": PROTOCOL_VERSION,
-            },
-            "data": {
-                "pid": self.pid,
-                "ttl": self.ttl,
-                "action": {
-                    "kind": "promise.create",
-                    "head": {
-                        "corrId": format!("tc-a-{}", now_ms()),
-                        "version": PROTOCOL_VERSION,
-                    },
-                    "data": {
-                        "id": prefixed_id,
-                        "timeoutAt": timeout_at,
-                        "param": encoded_param,
-                        "tags": tags,
-                    },
-                },
-            },
-        });
+        let action = crate::types::PromiseCreateReq {
+            id: prefixed_id.clone(),
+            timeout_at,
+            param: encoded_param,
+            tags,
+        };
 
-        let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp)?;
-        let status = crate::transport::response_status(&resp)?;
-        let promise = rdata.get("promise").cloned().unwrap_or_default();
-        let task = rdata.get("task").cloned();
+        let ttl = self.safe_ttl();
+        let outcome = self.sender.task_create_or_conflict(&self.pid, ttl, action).await?;
 
-        if status == 409 {
-            // Promise already exists — register listener and return handle
-            return self.create_handle(prefixed_id, &promise).await;
-        }
+        match outcome {
+            TaskCreateOutcome::Conflict(promise) => {
+                // Promise already exists — register listener and return handle
+                self.create_handle_from_record(prefixed_id, &promise).await
+            }
+            TaskCreateOutcome::Created(result) => {
+                let promise = &result.promise;
 
-        // If task is acquired, fire-and-forget core execution via
-        // execute_until_blocked (Path 2: task already acquired, no re-acquire)
-        if let Some(ref task_val) = task {
-            let task_state = task_val.get("state").and_then(|s| s.as_str()).unwrap_or("");
-            if task_state == "acquired" {
-                let task_id = task_val
-                    .get("id")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let task_version = task_val
-                    .get("version")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-
-                // Decode the promise for execute_until_blocked
-                let root_promise = self.codec.decode_promise_from_json(&promise);
-
-                let core = self.core.clone();
-                tokio::spawn(async move {
-                    match root_promise {
-                        Ok(rp) => {
-                            if let Err(e) = core
-                                .execute_until_blocked(&task_id, task_version, rp, None)
-                                .await
-                            {
+                // If task is acquired, fire-and-forget core execution
+                if result.task.state == crate::types::TaskState::Acquired {
+                    let task_id = result.task.id.clone();
+                    let task_version = result.task.version;
+                    let decoded = self.codec.decode_promise(result.promise.clone());
+                    let preload = result.preload;
+                    let core = self.core.clone();
+                    tokio::spawn(async move {
+                        match decoded {
+                            Ok(rp) => {
+                                if let Err(e) = core
+                                    .execute_until_blocked(&task_id, task_version, rp, Some(preload))
+                                    .await
+                                {
+                                    tracing::error!(
+                                        error = %e,
+                                        task_id = %task_id,
+                                        "core execute_until_blocked failed"
+                                    );
+                                }
+                            }
+                            Err(e) => {
                                 tracing::error!(
                                     error = %e,
                                     task_id = %task_id,
-                                    "core execute_until_blocked failed"
+                                    "failed to decode root promise for execution"
                                 );
                             }
                         }
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                task_id = %task_id,
-                                "failed to decode root promise for execution"
-                            );
-                        }
-                    }
-                });
+                    });
+                }
+
+                self.create_handle_from_record(prefixed_id, promise).await
             }
         }
-
-        self.create_handle(prefixed_id, &promise).await
     }
 
     /// Internal: execute an rpc, returning a handle.
@@ -517,56 +491,22 @@ impl Resonate {
         let mut tags = opts.tags.clone();
         Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
 
-        // Build promise.create request (NOT task.create — key difference from run)
-        let corr_id = format!("pc-{}", now_ms());
-        let req = serde_json::json!({
-            "kind": "promise.create",
-            "head": {
-                "corrId": corr_id,
-                "version": PROTOCOL_VERSION,
-            },
-            "data": {
-                "id": prefixed_id,
-                "timeoutAt": timeout_at,
-                "param": encoded_param,
-                "tags": tags,
-            },
-        });
+        let req = crate::types::PromiseCreateReq {
+            id: prefixed_id.clone(),
+            timeout_at,
+            param: encoded_param,
+            tags,
+        };
 
-        let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp)?;
-        let promise = rdata.get("promise").cloned().unwrap_or_default();
-
-        self.create_handle(prefixed_id, &promise).await
+        let promise = self.sender.promise_create(req).await?;
+        self.create_handle_from_record(prefixed_id, &promise).await
     }
 
     /// Get a handle to an existing promise.
     pub async fn get<T: DeserializeOwned>(&self, id: &str) -> Result<ResonateHandle<T>> {
         let prefixed_id = self.prefix_id(id);
-
-        let req = serde_json::json!({
-            "kind": "promise.get",
-            "head": {
-                "corrId": format!("pg-{}", now_ms()),
-                "version": PROTOCOL_VERSION,
-            },
-            "data": {
-                "id": prefixed_id,
-            },
-        });
-
-        let resp = self.transport.send(req).await?;
-        let status = crate::transport::response_status(&resp)?;
-        if status == 404 {
-            return Err(Error::ServerError {
-                code: 404,
-                message: format!("promise {} not found", prefixed_id),
-            });
-        }
-
-        let rdata = crate::transport::response_data(&resp)?;
-        let promise = rdata.get("promise").cloned().unwrap_or_default();
-        self.create_handle(prefixed_id, &promise).await
+        let promise = self.sender.promise_get(&prefixed_id).await?;
+        self.create_handle_from_record(prefixed_id, &promise).await
     }
 
     /// Create a schedule for periodic function execution. Returns a builder
@@ -644,6 +584,15 @@ impl Resonate {
     //  Internal Methods
     // ═══════════════════════════════════════════════════════════════
 
+    /// TTL capped to i64::MAX for Sender methods that take i64.
+    fn safe_ttl(&self) -> i64 {
+        if self.ttl >= i64::MAX as u64 {
+            i64::MAX
+        } else {
+            self.ttl as i64
+        }
+    }
+
     /// Prepend the configured prefix to an ID.
     fn prefix_id(&self, id: &str) -> String {
         if self.id_prefix.is_empty() {
@@ -685,14 +634,16 @@ impl Resonate {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let state = promise
+                    let state_str = promise
                         .get("state")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("pending")
-                        .to_string();
+                        .unwrap_or("pending");
                     let value = promise.get("value").cloned().unwrap_or_default();
 
-                    let result = PromiseResult { state, value };
+                    let result = PromiseResult {
+                        state: Resonate::parse_promise_state(state_str),
+                        value,
+                    };
 
                     let subs = subs.clone();
                     tokio::spawn(async move {
@@ -713,7 +664,7 @@ impl Resonate {
     /// pending promises, ensuring the server continues to push Unblock messages.
     fn spawn_subscription_refresh(
         subscriptions: Arc<Mutex<HashMap<String, watch::Sender<Option<PromiseResult>>>>>,
-        transport: Transport,
+        sender: Sender,
         unicast: String,
         interval_duration: Duration,
     ) -> tokio::task::JoinHandle<()> {
@@ -732,42 +683,12 @@ impl Resonate {
                 };
 
                 for id in pending_ids {
-                    let req = serde_json::json!({
-                        "kind": "promise.register_listener",
-                        "head": {
-                            "corrId": format!("refresh-{}", now_ms()),
-                            "version": "2025-01-15",
-                        },
-                        "data": {
-                            "awaited": id,
-                            "address": unicast,
-                        },
-                    });
-                    match transport.send(req).await {
-                        Ok(resp) => {
-                            let rdata = match crate::transport::response_data(&resp) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, promise_id = %id,
-                                        "refresh: bad response");
-                                    continue;
-                                }
-                            };
-                            let state = rdata
-                                .get("promise")
-                                .and_then(|p| p.get("state"))
-                                .and_then(|s| s.as_str())
-                                .unwrap_or("pending");
-
-                            if state != "pending" {
-                                let value = rdata
-                                    .get("promise")
-                                    .and_then(|p| p.get("value"))
-                                    .cloned()
-                                    .unwrap_or_default();
+                    match sender.promise_register_listener(&id, &unicast).await {
+                        Ok(promise) => {
+                            if promise.state != PromiseState::Pending {
                                 let result = PromiseResult {
-                                    state: state.to_string(),
-                                    value,
+                                    state: promise.state,
+                                    value: Resonate::value_to_wire_json(&promise.value),
                                 };
                                 let map = subscriptions.lock().await;
                                 if let Some(tx) = map.get(&id) {
@@ -785,18 +706,41 @@ impl Resonate {
         })
     }
 
-    /// Create a handle from a promise JSON value.
-    async fn create_handle<T: DeserializeOwned>(
+    /// Convert a `types::Value` to the raw wire-format JSON expected by `ResonateHandle`.
+    ///
+    /// The handle's `decode_value` works on raw wire JSON, so we must produce the
+    /// same shape as the Unblock message path (which passes `promise.get("value")`).
+    fn value_to_wire_json(value: &crate::types::Value) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        if let Some(ref headers) = value.headers {
+            map.insert(
+                "headers".into(),
+                serde_json::to_value(headers).unwrap_or_default(),
+            );
+        }
+        match &value.data {
+            Some(d) => map.insert("data".into(), d.clone()),
+            None => map.insert("data".into(), serde_json::Value::Null),
+        };
+        serde_json::Value::Object(map)
+    }
+
+    /// Create a handle from a typed PromiseRecord.
+    async fn create_handle_from_record<T: DeserializeOwned>(
         &self,
         id: String,
-        promise: &serde_json::Value,
+        promise: &crate::types::PromiseRecord,
     ) -> Result<ResonateHandle<T>> {
-        let state = promise
-            .get("state")
-            .and_then(|s| s.as_str())
-            .unwrap_or("pending");
-        let value = promise.get("value").cloned().unwrap_or_default();
-        let settled = Self::as_promise_result(state, &value);
+        let wire_value = Self::value_to_wire_json(&promise.value);
+        let settled = if promise.state == PromiseState::Pending {
+            None
+        } else {
+            Some(PromiseResult {
+                state: promise.state.clone(),
+                value: wire_value,
+            })
+        };
+        let is_pending = promise.state == PromiseState::Pending;
 
         let (rx, needs_listener) = {
             let mut subs = self.subscriptions.lock().await;
@@ -807,9 +751,8 @@ impl Resonate {
                 // First time — create watch channel.
                 // If already settled, pre-load the value.
                 let (tx, rx) = watch::channel(settled);
-                let needs = state == "pending";
                 subs.insert(id.clone(), tx);
-                (rx, needs)
+                (rx, is_pending)
             }
         };
         // Lock released.
@@ -818,15 +761,11 @@ impl Resonate {
         // Only needed on first subscription for a pending promise.
         if needs_listener {
             let resp_promise = self.register_listener(&id).await?;
-            let resp_state = resp_promise
-                .get("state")
-                .and_then(|s| s.as_str())
-                .unwrap_or("pending");
-            if resp_state != "pending" {
+            if resp_promise.state != PromiseState::Pending {
                 // Settled between promise creation and listener registration.
                 let result = PromiseResult {
-                    state: resp_state.to_string(),
-                    value: resp_promise.get("value").cloned().unwrap_or_default(),
+                    state: resp_promise.state,
+                    value: Self::value_to_wire_json(&resp_promise.value),
                 };
                 let subs = self.subscriptions.lock().await;
                 if let Some(tx) = subs.get(&id) {
@@ -838,34 +777,20 @@ impl Resonate {
         Ok(ResonateHandle::new(id, rx, self.codec.clone()))
     }
 
-    /// Convert a promise state/value into an Option<PromiseResult>.
-    fn as_promise_result(state: &str, value: &serde_json::Value) -> Option<PromiseResult> {
-        if state == "pending" {
-            None
-        } else {
-            Some(PromiseResult {
-                state: state.to_string(),
-                value: value.clone(),
-            })
+    /// Parse a wire-format state string into a PromiseState.
+    fn parse_promise_state(state: &str) -> PromiseState {
+        match state {
+            "resolved" => PromiseState::Resolved,
+            "rejected" => PromiseState::Rejected,
+            "rejected_canceled" => PromiseState::RejectedCanceled,
+            "rejected_timedout" => PromiseState::RejectedTimedout,
+            _ => PromiseState::Pending,
         }
     }
 
-    /// Register a listener for a promise and return the current promise state.
-    async fn register_listener(&self, id: &str) -> Result<serde_json::Value> {
-        let req = serde_json::json!({
-            "kind": "promise.register_listener",
-            "head": {
-                "corrId": format!("rl-{}", now_ms()),
-                "version": PROTOCOL_VERSION,
-            },
-            "data": {
-                "awaited": id,
-                "address": self.network.unicast(),
-            },
-        });
-        let resp = self.transport.send(req).await?;
-        let rdata = crate::transport::response_data(&resp)?;
-        Ok(rdata.get("promise").cloned().unwrap_or_default())
+    /// Register a listener for a promise and return the current promise record.
+    async fn register_listener(&self, id: &str) -> Result<crate::types::PromiseRecord> {
+        self.sender.promise_register_listener(id, self.network.unicast()).await
     }
 }
 
@@ -2015,7 +1940,7 @@ mod tests {
             let subs = r.subscriptions.lock().await;
             if let Some(tx) = subs.get("multi-handle") {
                 let _ = tx.send(Some(PromiseResult {
-                    state: "resolved".to_string(),
+                    state: PromiseState::Resolved,
                     value: serde_json::json!(null),
                 }));
             }
@@ -2037,7 +1962,7 @@ mod tests {
         {
             let mut subs = r.subscriptions.lock().await;
             let (tx, _) = watch::channel(Some(PromiseResult {
-                state: "resolved".to_string(),
+                state: PromiseState::Resolved,
                 value: serde_json::json!(null),
             }));
             subs.insert("early-unblock".to_string(), tx);
@@ -2086,7 +2011,7 @@ mod tests {
             let subs = r.subscriptions.lock().await;
             if let Some(tx) = subs.get("done-test") {
                 let _ = tx.send(Some(PromiseResult {
-                    state: "resolved".to_string(),
+                    state: PromiseState::Resolved,
                     value: serde_json::json!({"data": "done"}),
                 }));
             }
