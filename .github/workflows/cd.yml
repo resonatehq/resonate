@@ -549,7 +549,7 @@ jobs:
           )
 
           # Get list of release assets
-          RELEASE_ASSETS=$(gh release view "${TAG}" --json assets --query 'assets[*].name' -r ${{ github.repository }})
+          RELEASE_ASSETS=$(gh release view "${TAG}" --json assets --jq '[.assets[].name]' -R ${{ github.repository }})
 
           MISSING_ARTIFACTS=()
           for artifact in "${EXPECTED_ARTIFACTS[@]}"; do
