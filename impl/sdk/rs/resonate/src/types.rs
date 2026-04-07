@@ -29,9 +29,14 @@ impl Value {
         self.data.as_ref().unwrap_or(&NULL)
     }
 
-    /// Get the data field, defaulting to `serde_json::Value::Null` if absent.
+    /// Get a clone of the data field, defaulting to `serde_json::Value::Null` if absent.
     pub fn data_or_null(&self) -> serde_json::Value {
         self.data.clone().unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Consume self and return the data field, defaulting to `serde_json::Value::Null` if absent.
+    pub fn into_data_or_null(self) -> serde_json::Value {
+        self.data.unwrap_or(serde_json::Value::Null)
     }
 
     /// Get headers, defaulting to empty map if absent.

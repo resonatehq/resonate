@@ -163,7 +163,7 @@ Always 4–5 entries. **Fix:** `HashMap::with_capacity(5)`.
 | ✅ | 1. Route all requests through `Sender` | Removes ~60% of raw JSON construction |
 | 🔴 | 2. Factor builder state machines | Eliminates ~300 lines of repetition |
 | ✅ | 3. `PromiseResult.state` → enum | Removes per-event `String` allocs |
-| 🟡 | 4. `Value::into_data_or_null` | Eliminates deep clones on hot path |
+| ✅ | 4. `Value::into_data_or_null` | Eliminates deep clones on hot path |
 | 🟡 | 5. `Arc<PromiseResult>` in watch | Eliminates deep clones in `handle.result()` |
 | 🟡 | 6. Typed envelope structs in `send.rs` | ~6 allocs → 1 per request |
 | 🟡 | 7. Simplify `Resonate::new` | Fewer intermediate clones |

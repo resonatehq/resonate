@@ -529,13 +529,13 @@ where
 
         match record.state {
             PromiseState::Resolved => {
-                let val: T = serde_json::from_value(record.value.data_or_null())?;
+                let val: T = serde_json::from_value(record.value.into_data_or_null())?;
                 Ok(DurableFuture::resolved(val))
             }
             PromiseState::Rejected
             | PromiseState::RejectedCanceled
             | PromiseState::RejectedTimedout => {
-                Ok(DurableFuture::rejected(record.value.data_or_null()))
+                Ok(DurableFuture::rejected(record.value.into_data_or_null()))
             }
             PromiseState::Pending => {
                 let effects = ctx.effects.clone();
