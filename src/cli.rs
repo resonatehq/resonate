@@ -1,18 +1,18 @@
 //! CLI client commands: promises, tasks, schedules
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
 // ---- Serve args ----
 
-/// CLI flags for the `serve` subcommand.
+/// Common CLI flags shared between `serve` and `dev`.
 ///
 /// All fields are `Option<T>` (or plain `bool` for flags) so that only
 /// explicitly-provided values override the loaded configuration. Precedence:
 /// defaults < resonate.toml < env vars < these flags.
-#[derive(Parser, Default)]
-pub struct ServeArgs {
+#[derive(Args, Default)]
+pub struct CommonArgs {
     // --- Top-level ---
     /// Log level: debug, info, warn, error [default: info]
     #[arg(long)]
@@ -47,10 +47,6 @@ pub struct ServeArgs {
     /// Storage backend: sqlite or postgres [default: sqlite]
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
-
-    /// SQLite database file path [default: resonate.db]
-    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
-    pub sqlite_path: Option<String>,
 
     /// PostgreSQL connection URL
     #[arg(long = "storage-postgres-url", value_name = "URL")]
@@ -133,9 +129,8 @@ pub struct ServeArgs {
     pub observability_otlp_endpoint: Option<String>,
 }
 
-impl ServeArgs {
-    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`.
-    pub fn apply(self, mut config: crate::config::Config) -> crate::config::Config {
+impl CommonArgs {
+    fn apply(self, mut config: crate::config::Config) -> crate::config::Config {
         if let Some(v) = self.level {
             config.level = v;
         }
@@ -167,9 +162,6 @@ impl ServeArgs {
 
         if let Some(v) = self.storage_type {
             config.storage.storage_type = v;
-        }
-        if let Some(v) = self.sqlite_path {
-            config.storage.sqlite.path = v;
         }
         if let Some(v) = self.postgres_url {
             config.storage.postgres.url = Some(v);
@@ -245,6 +237,49 @@ impl ServeArgs {
             config.observability.otlp_endpoint = v;
         }
 
+        config
+    }
+}
+
+/// CLI flags for the `serve` subcommand.
+#[derive(Args, Default)]
+pub struct ServeArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
+    /// SQLite database file path [default: resonate.db]
+    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
+    pub sqlite_path: Option<String>,
+}
+
+impl ServeArgs {
+    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`.
+    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
+        let mut config = self.common.apply(config);
+        if let Some(v) = self.sqlite_path {
+            config.storage.sqlite.path = v;
+        }
+        config
+    }
+}
+
+/// CLI flags for the `dev` subcommand (same as `serve` but defaults SQLite to `:memory:`).
+#[derive(Args, Default)]
+pub struct DevArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
+    /// SQLite database file path [default: :memory:]
+    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
+    pub sqlite_path: Option<String>,
+}
+
+impl DevArgs {
+    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`,
+    /// defaulting SQLite storage to `:memory:` if no path was given.
+    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
+        let mut config = self.common.apply(config);
+        config.storage.sqlite.path = self.sqlite_path.unwrap_or_else(|| ":memory:".to_string());
         config
     }
 }

@@ -34,6 +34,8 @@ struct Cli {
 enum Commands {
     /// Start the Resonate server
     Serve(Box<cli::ServeArgs>),
+    /// Start the Resonate server with in-memory storage (ephemeral, for development)
+    Dev(Box<cli::DevArgs>),
     /// Promise operations
     #[command(alias = "promise")]
     Promises(cli::PromiseArgs),
@@ -75,6 +77,21 @@ async fn main() -> std::process::ExitCode {
             if let Err(e) = run_server(config).await {
                 // Tracing may not be initialized if the error occurred
                 // before tracing setup, so also write to stderr.
+                tracing::error!("{e}");
+                eprintln!("Fatal: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Commands::Dev(args) => {
+            let config = match Config::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Fatal: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            let config = args.apply(config);
+            if let Err(e) = run_server(config).await {
                 tracing::error!("{e}");
                 eprintln!("Fatal: {e}");
                 return std::process::ExitCode::FAILURE;
