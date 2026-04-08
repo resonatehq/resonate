@@ -1,7 +1,7 @@
 export { WallClock } from "./clock.js";
 export { Codec } from "./codec.js";
-export { Status } from "./computation.js";
-export { Context } from "./context.js";
+export type { Status } from "./computation.js";
+export type { Context } from "./context.js";
 export { Core } from "./core.js";
 export { type Encryptor, NoopEncryptor } from "./encryptor.js";
 export { ResonateTimeoutException } from "./exceptions.js";
@@ -11,10 +11,9 @@ export { type HttpAdapter, HttpNetwork, PollMessageSource, PushMessageSource } f
 export { LocalNetwork } from "./network/local.js";
 export type { Network, Recv, Send } from "./network/network.js";
 export * from "./network/types.js";
-export { Message } from "./network/types.js";
 export { OptionsBuilder } from "./options.js";
 export { Registry } from "./registry.js";
-export { Resonate, ResonateFunc, ResonateHandle } from "./resonate.js";
+export { Resonate, type ResonateFunc, type ResonateHandle } from "./resonate.js";
 export {
   awaitThenResumeOrSuspend,
   blockIsSole,
@@ -32,5 +31,4 @@ export {
   uniqueSpawn,
   uniqueTerminal,
 } from "./trace.js";
-export type { Effects } from "./types.js";
-export { Func } from "./types.js";
+export type { Effects, Func } from "./types.js";
