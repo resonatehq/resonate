@@ -1,17 +1,18 @@
 //! CLI client commands: promises, tasks, schedules
 
-use clap::{Args, Parser, Subcommand};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
 // ---- Serve args ----
 
-/// CLI flags for the `serve` subcommand.
+/// Common CLI flags shared between `serve` and `dev`.
 ///
 /// All fields are `Option<T>` (or plain `bool` for flags) so that only
 /// explicitly-provided values override the loaded configuration. Precedence:
 /// defaults < resonate.toml < env vars < these flags.
-#[derive(Parser, Default)]
-pub struct ServeArgs {
+#[derive(Args, Default)]
+pub struct CommonArgs {
     // --- Top-level ---
     /// Log level: debug, info, warn, error [default: info]
     #[arg(long)]
@@ -46,10 +47,6 @@ pub struct ServeArgs {
     /// Storage backend: sqlite or postgres [default: sqlite]
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
-
-    /// SQLite database file path [default: resonate.db]
-    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
-    pub sqlite_path: Option<String>,
 
     /// PostgreSQL connection URL
     #[arg(long = "storage-postgres-url", value_name = "URL")]
@@ -132,9 +129,8 @@ pub struct ServeArgs {
     pub observability_otlp_endpoint: Option<String>,
 }
 
-impl ServeArgs {
-    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`.
-    pub fn apply(self, mut config: crate::config::Config) -> crate::config::Config {
+impl CommonArgs {
+    fn apply(self, mut config: crate::config::Config) -> crate::config::Config {
         if let Some(v) = self.level {
             config.level = v;
         }
@@ -166,9 +162,6 @@ impl ServeArgs {
 
         if let Some(v) = self.storage_type {
             config.storage.storage_type = v;
-        }
-        if let Some(v) = self.sqlite_path {
-            config.storage.sqlite.path = v;
         }
         if let Some(v) = self.postgres_url {
             config.storage.postgres.url = Some(v);
@@ -244,6 +237,49 @@ impl ServeArgs {
             config.observability.otlp_endpoint = v;
         }
 
+        config
+    }
+}
+
+/// CLI flags for the `serve` subcommand.
+#[derive(Args, Default)]
+pub struct ServeArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
+    /// SQLite database file path [default: resonate.db]
+    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
+    pub sqlite_path: Option<String>,
+}
+
+impl ServeArgs {
+    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`.
+    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
+        let mut config = self.common.apply(config);
+        if let Some(v) = self.sqlite_path {
+            config.storage.sqlite.path = v;
+        }
+        config
+    }
+}
+
+/// CLI flags for the `dev` subcommand (same as `serve` but defaults SQLite to `:memory:`).
+#[derive(Args, Default)]
+pub struct DevArgs {
+    #[command(flatten)]
+    pub common: CommonArgs,
+
+    /// SQLite database file path [default: :memory:]
+    #[arg(long = "storage-sqlite-path", value_name = "PATH")]
+    pub sqlite_path: Option<String>,
+}
+
+impl DevArgs {
+    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`,
+    /// defaulting SQLite storage to `:memory:` if no path was given.
+    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
+        let mut config = self.common.apply(config);
+        config.storage.sqlite.path = self.sqlite_path.unwrap_or_else(|| ":memory:".to_string());
         config
     }
 }
@@ -357,6 +393,16 @@ fn error_exit(msg: &str) -> ! {
 fn parse_json_flag(flag: &str, name: &str) -> Value {
     serde_json::from_str(flag)
         .unwrap_or_else(|e| error_exit(&format!("Invalid {} JSON: {}", name, e)))
+}
+
+fn b64_encode_data_field(v: &mut Value) {
+    if let Some(data) = v.get("data") {
+        let raw = match data {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        v["data"] = Value::String(STANDARD.encode(raw));
+    }
 }
 
 // ---- Global args ----
@@ -481,7 +527,9 @@ pub async fn run_promises(args: PromiseArgs) {
             let timeout_at = now_ms() + dur;
             let mut data = json!({ "id": id, "timeoutAt": timeout_at });
             if let Some(p) = param {
-                data["param"] = parse_json_flag(p, "--param");
+                let mut param_val = parse_json_flag(p, "--param");
+                b64_encode_data_field(&mut param_val);
+                data["param"] = param_val;
             }
             if let Some(t) = tags {
                 data["tags"] = parse_json_flag(t, "--tags");
@@ -556,7 +604,9 @@ async fn settle(
 ) -> Result<Value, String> {
     let mut data = json!({ "id": id, "state": state });
     if let Some(v) = value {
-        data["value"] = parse_json_flag(v, "--value");
+        let mut value_val = parse_json_flag(v, "--value");
+        b64_encode_data_field(&mut value_val);
+        data["value"] = value_val;
     }
     post(server, "promise.settle", token, data).await
 }
@@ -904,12 +954,12 @@ pub async fn run_invoke(args: InvokeArgs) {
     });
     let param = json!({
         "headers": {},
-        "data": param.to_string(),
+        "data": STANDARD.encode(param.to_string()),
     });
 
     let mut tags = serde_json::Map::new();
     tags.insert(
-        "resonate:invoke".to_string(),
+        "resonate:target".to_string(),
         Value::String(args.target.clone()),
     );
     if delay_ms > 0 {
@@ -1017,7 +1067,9 @@ pub async fn run_schedules(args: ScheduleArgs) {
                 "promiseTimeout": timeout_ms,
             });
             if let Some(p) = promise_param {
-                data["promiseParam"] = parse_json_flag(p, "--promise-param");
+                let mut param_val = parse_json_flag(p, "--promise-param");
+                b64_encode_data_field(&mut param_val);
+                data["promiseParam"] = param_val;
             }
             if let Some(t) = promise_tags {
                 data["promiseTags"] = parse_json_flag(t, "--promise-tags");
@@ -1427,5 +1479,60 @@ mod tests {
     fn test_timeout_computation_compound() {
         let dur = parse_duration("1h30m").unwrap();
         assert_eq!(dur, 5_400_000); // 90 minutes
+    }
+
+    // ---- base64 encoding tests ----
+
+    #[test]
+    fn test_b64_encode_data_field_string() {
+        let mut v = json!({ "headers": {}, "data": "hello world" });
+        b64_encode_data_field(&mut v);
+        assert_eq!(v["data"], STANDARD.encode("hello world"));
+        assert_eq!(v["headers"], json!({}));
+    }
+
+    #[test]
+    fn test_b64_encode_data_field_json_object() {
+        let mut v = json!({ "headers": {}, "data": { "key": "value" } });
+        b64_encode_data_field(&mut v);
+        let expected = STANDARD.encode(r#"{"key":"value"}"#);
+        assert_eq!(v["data"], expected);
+    }
+
+    #[test]
+    fn test_b64_encode_data_field_no_data() {
+        let mut v = json!({ "headers": {} });
+        b64_encode_data_field(&mut v);
+        assert!(v.get("data").is_none());
+    }
+
+    #[test]
+    fn test_b64_encode_data_field_leaves_headers_untouched() {
+        let mut v = json!({ "headers": { "content-type": "application/json" }, "data": "raw" });
+        b64_encode_data_field(&mut v);
+        assert_eq!(v["headers"]["content-type"], "application/json");
+        assert_eq!(v["data"], STANDARD.encode("raw"));
+    }
+
+    #[test]
+    fn test_invoke_param_data_is_base64() {
+        let inner = json!({
+            "func": "myFunc",
+            "args": [1, "two"],
+            "version": 1,
+        });
+        let encoded = STANDARD.encode(inner.to_string());
+        let param = json!({ "headers": {}, "data": encoded });
+        // Verify the data field decodes back to the original JSON
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(param["data"].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let decoded_val: Value = serde_json::from_str(&decoded).unwrap();
+        assert_eq!(decoded_val["func"], "myFunc");
+        assert_eq!(decoded_val["args"][0], 1);
+        assert_eq!(decoded_val["version"], 1);
     }
 }

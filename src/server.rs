@@ -61,6 +61,7 @@ impl Server {
 pub struct AppState {
     pub server: Arc<Server>,
     pub poll_registry: Arc<PollRegistry>,
+    pub sse_shutdown_rx: tokio::sync::watch::Receiver<bool>,
 }
 
 // Sub-state for API handlers — only needs the server.
@@ -82,6 +83,7 @@ impl axum::extract::FromRef<AppState> for ApiState {
 pub struct PollState {
     pub server: Arc<Server>,
     pub poll_registry: Arc<PollRegistry>,
+    pub sse_shutdown_rx: tokio::sync::watch::Receiver<bool>,
 }
 
 impl axum::extract::FromRef<AppState> for PollState {
@@ -89,6 +91,7 @@ impl axum::extract::FromRef<AppState> for PollState {
         PollState {
             server: state.server.clone(),
             poll_registry: state.poll_registry.clone(),
+            sse_shutdown_rx: state.sse_shutdown_rx.clone(),
         }
     }
 }
@@ -358,14 +361,33 @@ async fn handle_poll(
                 conn_id = conn.conn_id,
                 "Poll SSE connection established"
             );
+            let mut sse_shutdown = poll_state.sse_shutdown_rx.clone();
             let stream = async_stream::stream! {
                 let _guard = PollGuard {
                     registry: poll_state.poll_registry.clone(),
                     group: group.clone(),
                     conn_id: conn.conn_id,
                 };
-                while let Some(msg) = rx.recv().await {
-                    yield Ok::<_, std::convert::Infallible>(Event::default().data(msg));
+                loop {
+                    // Check synchronously first (no await — Ref is not held across a yield).
+                    if *sse_shutdown.borrow() {
+                        break;
+                    }
+                    tokio::select! {
+                        biased;
+                        result = sse_shutdown.changed() => {
+                            // Sender dropped or value changed; check if shutdown fired.
+                            if result.is_err() || *sse_shutdown.borrow() {
+                                break;
+                            }
+                        }
+                        msg = rx.recv() => {
+                            match msg {
+                                Some(msg) => yield Ok::<_, std::convert::Infallible>(Event::default().data(msg)),
+                                None => break,
+                            }
+                        }
+                    }
                 }
             };
 

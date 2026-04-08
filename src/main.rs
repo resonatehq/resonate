@@ -34,6 +34,8 @@ struct Cli {
 enum Commands {
     /// Start the Resonate server
     Serve(Box<cli::ServeArgs>),
+    /// Start the Resonate server with in-memory storage (ephemeral, for development)
+    Dev(Box<cli::DevArgs>),
     /// Promise operations
     #[command(alias = "promise")]
     Promises(cli::PromiseArgs),
@@ -75,6 +77,21 @@ async fn main() -> std::process::ExitCode {
             if let Err(e) = run_server(config).await {
                 // Tracing may not be initialized if the error occurred
                 // before tracing setup, so also write to stderr.
+                tracing::error!("{e}");
+                eprintln!("Fatal: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Commands::Dev(args) => {
+            let config = match Config::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Fatal: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            let config = args.apply(config);
+            if let Err(e) = run_server(config).await {
                 tracing::error!("{e}");
                 eprintln!("Fatal: {e}");
                 return std::process::ExitCode::FAILURE;
@@ -236,12 +253,18 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     let metrics_port = state.config.observability.metrics_port;
     if metrics_port > 0 {
+        let metrics_shutdown = shutdown_rx.clone();
         handles.push(tokio::spawn(async move {
             let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
             match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
                 Ok(listener) => {
                     tracing::info!(port = metrics_port, "Metrics server listening");
-                    let _ = axum::serve(listener, metrics_app).await;
+                    let _ = axum::serve(listener, metrics_app)
+                        .with_graceful_shutdown(async move {
+                            let mut rx = metrics_shutdown;
+                            let _ = rx.wait_for(|v| *v).await;
+                        })
+                        .await;
                 }
                 Err(e) => {
                     tracing::error!(port = metrics_port, error = %e, "Failed to bind metrics port");
@@ -252,9 +275,11 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     // Build HTTP router
     let effective_url = state.config.server.url.clone().unwrap_or_default();
+    let (sse_shutdown_tx, sse_shutdown_rx) = tokio::sync::watch::channel(false);
     let app_state = server::AppState {
         server: state,
         poll_registry,
+        sse_shutdown_rx,
     };
     let app = server::api_routes()
         .merge(server::poll_routes())
@@ -278,7 +303,10 @@ async fn run_server(config: Config) -> Result<(), String> {
     tracing::info!(bind = %bind, port = port, server_url = %effective_url, "Server listening");
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            let _ = sse_shutdown_tx.send(true);
+        })
         .await
         .map_err(|e| format!("Server error: {e}"))?;
 
