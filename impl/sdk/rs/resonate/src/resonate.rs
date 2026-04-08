@@ -1457,7 +1457,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("target-bare"))
+            .send_json(promise_get_req("target-bare"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1480,7 +1480,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("target-url"))
+            .send_json(promise_get_req("target-url"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1502,7 +1502,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("target-default"))
+            .send_json(promise_get_req("target-default"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1756,7 +1756,7 @@ mod tests {
         let r = Resonate::local();
         // Verify we can send a raw request through the transport
         let req = promise_create_req("transport-test", i64::MAX);
-        let resp = r.transport().send(req).await;
+        let resp = r.transport().send_json(req).await;
         assert!(resp.is_ok());
     }
 
@@ -1791,7 +1791,7 @@ mod tests {
         // Verify the promise was created with the URL target
         let resp = r
             .transport()
-            .send(promise_get_req("url-target-test"))
+            .send_json(promise_get_req("url-target-test"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1815,7 +1815,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("run-target-test"))
+            .send_json(promise_get_req("run-target-test"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1835,7 +1835,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("run-default-target"))
+            .send_json(promise_get_req("run-default-target"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1859,7 +1859,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("run-url-target"))
+            .send_json(promise_get_req("run-url-target"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1878,7 +1878,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("bare-target-test"))
+            .send_json(promise_get_req("bare-target-test"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]
@@ -1902,7 +1902,7 @@ mod tests {
 
         let resp = r
             .transport()
-            .send(promise_get_req("bare-target-test2"))
+            .send_json(promise_get_req("bare-target-test2"))
             .await
             .unwrap();
         let target = resp["data"]["promise"]["tags"]["resonate:target"]

@@ -26,7 +26,7 @@ impl Promises {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         check_status(&resp)?;
         let rdata = crate::transport::response_data(&resp)?;
         rdata
@@ -57,7 +57,7 @@ impl Promises {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
         rdata
             .get("promise")
@@ -85,7 +85,7 @@ impl Promises {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
         rdata
             .get("promise")
@@ -111,7 +111,7 @@ impl Promises {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         let rdata = crate::transport::response_data(&resp)?;
         rdata
             .get("promise")
@@ -156,7 +156,7 @@ impl Schedules {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         Ok(resp)
     }
 
@@ -173,7 +173,7 @@ impl Schedules {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         Ok(resp)
     }
 
@@ -190,7 +190,7 @@ impl Schedules {
             },
         });
 
-        let resp = self.transport.send(req).await?;
+        let resp = self.transport.send_json(req).await?;
         Ok(resp)
     }
 }

@@ -98,22 +98,17 @@ impl Transport {
         Self { network }
     }
 
-    /// Send a typed request through the network, returning the parsed response.
-    /// Validates that `response.kind == request.kind` and correlation IDs match.
-    /// Expects protocol envelope format: `{ kind, head: { corrId, ... }, data: { ... } }`.
-    pub async fn send(&self, request: serde_json::Value) -> Result<serde_json::Value> {
-        let req_kind = request
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .unwrap_or("")
-            .to_string();
+    /// Send an already-serialized request through the network, returning the parsed response.
+    /// Validates that `response.kind == kind` and `response.head.corrId == corr_id`.
+    pub async fn send(
+        &self,
+        kind: &str,
+        corr_id: &str,
+        body: &str,
+    ) -> Result<serde_json::Value> {
+        tracing::debug!(direction = "send_req", body = %body, "transport");
 
-        let req_corr_id = request.get("head").and_then(|h| h.get("corrId")).cloned();
-
-        let req_str = serde_json::to_string(&request)?;
-        tracing::debug!(direction = "send_req", body = %req_str, "transport");
-
-        let resp_str = self.network.send(req_str).await?;
+        let resp_str = self.network.send(body.to_owned()).await?;
         tracing::debug!(direction = "send_res", body = %resp_str, "transport");
 
         let response: serde_json::Value = serde_json::from_str(&resp_str).map_err(|e| {
@@ -121,32 +116,53 @@ impl Transport {
         })?;
 
         // Validate kind matches
-        let resp_kind = response.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-        if resp_kind != req_kind {
+        let resp_kind = response
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .unwrap_or("");
+        if resp_kind != kind {
             return Err(Error::ServerError {
                 code: 500,
                 message: format!(
                     "response kind mismatch: expected '{}', got '{}'",
-                    req_kind, resp_kind
+                    kind, resp_kind
                 ),
             });
         }
 
         // Validate corrId matches
-        if let Some(ref expected_corr) = req_corr_id {
-            let resp_corr = response.get("head").and_then(|h| h.get("corrId"));
-            if resp_corr != Some(expected_corr) {
-                return Err(Error::ServerError {
-                    code: 500,
-                    message: format!(
-                        "response corrId mismatch: expected {:?}, got {:?}",
-                        expected_corr, resp_corr
-                    ),
-                });
-            }
+        let resp_corr = response
+            .get("head")
+            .and_then(|h| h.get("corrId"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+        if resp_corr != corr_id {
+            return Err(Error::ServerError {
+                code: 500,
+                message: format!(
+                    "response corrId mismatch: expected '{}', got '{}'",
+                    corr_id, resp_corr
+                ),
+            });
         }
 
         Ok(response)
+    }
+
+    /// Convenience: serialize a `serde_json::Value` envelope and send it.
+    /// Extracts `kind` and `head.corrId` from the value before delegating to [`send`].
+    pub async fn send_json(&self, request: serde_json::Value) -> Result<serde_json::Value> {
+        let kind = request
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .unwrap_or("");
+        let corr_id = request
+            .get("head")
+            .and_then(|h| h.get("corrId"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+        let body = serde_json::to_string(&request)?;
+        self.send(kind, corr_id, &body).await
     }
 
     /// Register a callback for incoming messages. Parses JSON → Message,
@@ -181,8 +197,8 @@ mod tests {
         let net = Arc::new(LocalNetwork::new(Some("test".into()), None));
         let transport = Transport::new(net);
 
-        // Envelope format request
-        let req = serde_json::json!({
+        // Envelope format request — pre-serialized
+        let body = serde_json::json!({
             "kind": "promise.create",
             "head": {
                 "corrId": "env123",
@@ -195,8 +211,12 @@ mod tests {
                 "tags": {},
             },
         });
+        let body_str = serde_json::to_string(&body).unwrap();
 
-        let resp = transport.send(req).await.unwrap();
+        let resp = transport
+            .send("promise.create", "env123", &body_str)
+            .await
+            .unwrap();
         assert_eq!(resp["kind"], "promise.create");
         assert_eq!(resp["head"]["corrId"], "env123");
         assert_eq!(resp["data"]["promise"]["id"], "p2");

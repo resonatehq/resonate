@@ -115,13 +115,16 @@ impl Sender {
         pid: &str,
         ttl: i64,
     ) -> Result<TaskAcquireResult> {
-        let req = Request::TaskAcquire {
-            id: id.to_string(),
-            version,
-            pid: pid.to_string(),
-            ttl,
-        };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+            version: i64,
+            pid: &'a str,
+            ttl: i64,
+        }
+        let (_, data) = self
+            .send_envelope("task.acquire", &Data { id, version, pid, ttl }, false)
+            .await?;
         parse_task_acquire(&data)
     }
 
@@ -133,12 +136,22 @@ impl Sender {
         version: i64,
         action: PromiseSettleReq,
     ) -> Result<PromiseRecord> {
-        let req = Request::TaskFulfill {
-            id: id.to_string(),
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+            version: i64,
+            action: SubEnvelope<'a, &'a PromiseSettleReq>,
+        }
+        let data_payload = Data {
+            id,
             version,
-            action,
+            action: SubEnvelope {
+                kind: "promise.settle",
+                head: self.make_head(),
+                data: &action,
+            },
         };
-        let (_, data) = self.send_request(&req).await?;
+        let (_, data) = self.send_envelope("task.fulfill", &data_payload, false).await?;
         parse_promise(&data)
     }
 
@@ -150,29 +163,50 @@ impl Sender {
         version: i64,
         actions: Vec<PromiseRegisterCallbackData>,
     ) -> Result<SuspendResult> {
-        let req = Request::TaskSuspend {
-            id: id.to_string(),
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+            version: i64,
+            actions: Vec<SubEnvelope<'a, &'a PromiseRegisterCallbackData>>,
+        }
+        let wrapped: Vec<_> = actions
+            .iter()
+            .map(|a| SubEnvelope {
+                kind: "promise.register_callback",
+                head: self.make_head(),
+                data: a,
+            })
+            .collect();
+        let data_payload = Data {
+            id,
             version,
-            actions,
+            actions: wrapped,
         };
-        let (status, data) = self.send_request(&req).await?;
+        let (status, data) = self.send_envelope("task.suspend", &data_payload, false).await?;
         parse_suspend_result(status, &data)
     }
 
     /// Release a task (give up the lock without fulfilling).
     pub async fn task_release(&self, id: &str, version: i64) -> Result<()> {
-        let req = Request::TaskRelease {
-            id: id.to_string(),
-            version,
-        };
-        self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+            version: i64,
+        }
+        self.send_envelope("task.release", &Data { id, version }, false)
+            .await?;
         Ok(())
     }
 
     /// Get a task by ID.
     pub async fn task_get(&self, id: &str) -> Result<TaskRecord> {
-        let req = Request::TaskGet { id: id.to_string() };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        let (_, data) = self
+            .send_envelope("task.get", &Data { id }, false)
+            .await?;
         let task = data
             .get("task")
             .ok_or_else(|| Error::DecodingError("missing 'task' in response".into()))?;
@@ -187,12 +221,9 @@ impl Sender {
         ttl: i64,
         action: PromiseCreateReq,
     ) -> Result<TaskCreateResult> {
-        let req = Request::TaskCreate {
-            pid: pid.to_string(),
-            ttl,
-            action,
-        };
-        let (_, data) = self.send_request(&req).await?;
+        let (_, data) = self
+            .send_task_create(pid, ttl, &action, false)
+            .await?;
         parse_task_acquire(&data)
     }
 
@@ -206,13 +237,9 @@ impl Sender {
         ttl: i64,
         action: PromiseCreateReq,
     ) -> Result<TaskCreateOutcome> {
-        let req = Request::TaskCreate {
-            pid: pid.to_string(),
-            ttl,
-            action,
-        };
-        // Use send_request_with_status to get the raw status even on 409
-        let (status, data) = self.send_request_with_conflict(&req).await?;
+        let (status, data) = self
+            .send_task_create(pid, ttl, &action, true)
+            .await?;
         if status == 409 {
             let promise = parse_promise(&data)?;
             Ok(TaskCreateOutcome::Conflict(promise))
@@ -224,15 +251,22 @@ impl Sender {
 
     /// Halt a task, preventing it from being acquired or making progress.
     pub async fn task_halt(&self, id: &str) -> Result<()> {
-        let req = Request::TaskHalt { id: id.to_string() };
-        self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        self.send_envelope("task.halt", &Data { id }, false).await?;
         Ok(())
     }
 
     /// Continue a halted task, transitioning it back to pending.
     pub async fn task_continue(&self, id: &str) -> Result<()> {
-        let req = Request::TaskContinue { id: id.to_string() };
-        self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        self.send_envelope("task.continue", &Data { id }, false)
+            .await?;
         Ok(())
     }
 
@@ -243,14 +277,28 @@ impl Sender {
         version: i64,
         action: serde_json::Value,
     ) -> Result<TaskFenceResult> {
-        let req = Request::TaskFence {
-            id: id.to_string(),
-            version,
-            action,
+        // Detect sub-kind: if "state" field present → settle, otherwise → create
+        let sub_kind = if action.get("state").is_some() {
+            "promise.settle"
+        } else {
+            "promise.create"
         };
-        let (_, data) = self.send_request(&req).await?;
-        // The response data.action contains a nested response with its own kind/head/data
-        // We extract the promise from the action response
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+            version: i64,
+            action: SubEnvelope<'a, &'a serde_json::Value>,
+        }
+        let data_payload = Data {
+            id,
+            version,
+            action: SubEnvelope {
+                kind: sub_kind,
+                head: self.make_head(),
+                data: &action,
+            },
+        };
+        let (_, data) = self.send_envelope("task.fence", &data_payload, false).await?;
         let empty = serde_json::json!({});
         let action_resp = data.get("action").unwrap_or(&empty);
         let promise_val = action_resp
@@ -268,11 +316,13 @@ impl Sender {
 
     /// Extend the lease for one or more tasks.
     pub async fn task_heartbeat(&self, pid: &str, tasks: Vec<TaskRef>) -> Result<()> {
-        let req = Request::TaskHeartbeat {
-            pid: pid.to_string(),
-            tasks,
-        };
-        self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            pid: &'a str,
+            tasks: &'a [TaskRef],
+        }
+        self.send_envelope("task.heartbeat", &Data { pid, tasks: &tasks }, false)
+            .await?;
         Ok(())
     }
 
@@ -283,12 +333,18 @@ impl Sender {
         limit: Option<u32>,
         cursor: Option<&str>,
     ) -> Result<TaskSearchResult> {
-        let req = Request::TaskSearch {
-            state: state.map(|s| s.to_string()),
-            limit,
-            cursor: cursor.map(|c| c.to_string()),
-        };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            state: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            limit: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cursor: Option<&'a str>,
+        }
+        let (_, data) = self
+            .send_envelope("task.search", &Data { state, limit, cursor }, false)
+            .await?;
         let tasks_val = data.get("tasks").and_then(|v| v.as_array());
         let tasks = tasks_val
             .map(|arr| {
@@ -306,22 +362,29 @@ impl Sender {
 
     /// Get a promise by ID.
     pub async fn promise_get(&self, id: &str) -> Result<PromiseRecord> {
-        let req = Request::PromiseGet { id: id.to_string() };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        let (_, data) = self
+            .send_envelope("promise.get", &Data { id }, false)
+            .await?;
         parse_promise(&data)
     }
 
     /// Create a durable promise.
     pub async fn promise_create(&self, req: PromiseCreateReq) -> Result<PromiseRecord> {
-        let request = Request::PromiseCreate(req);
-        let (_, data) = self.send_request(&request).await?;
+        let (_, data) = self
+            .send_envelope("promise.create", &req, false)
+            .await?;
         parse_promise(&data)
     }
 
     /// Settle (resolve/reject) a durable promise.
     pub async fn promise_settle(&self, req: PromiseSettleReq) -> Result<PromiseRecord> {
-        let request = Request::PromiseSettle(req);
-        let (_, data) = self.send_request(&request).await?;
+        let (_, data) = self
+            .send_envelope("promise.settle", &req, false)
+            .await?;
         parse_promise(&data)
     }
 
@@ -331,11 +394,18 @@ impl Sender {
         awaited: &str,
         awaiter: &str,
     ) -> Result<PromiseRecord> {
-        let req = Request::PromiseRegisterCallback(PromiseRegisterCallbackData {
-            awaited: awaited.to_string(),
-            awaiter: awaiter.to_string(),
-        });
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            awaited: &'a str,
+            awaiter: &'a str,
+        }
+        let (_, data) = self
+            .send_envelope(
+                "promise.register_callback",
+                &Data { awaited, awaiter },
+                false,
+            )
+            .await?;
         parse_promise(&data)
     }
 
@@ -345,11 +415,18 @@ impl Sender {
         awaited: &str,
         address: &str,
     ) -> Result<PromiseRecord> {
-        let req = Request::PromiseRegisterListener {
-            awaited: awaited.to_string(),
-            address: address.to_string(),
-        };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            awaited: &'a str,
+            address: &'a str,
+        }
+        let (_, data) = self
+            .send_envelope(
+                "promise.register_listener",
+                &Data { awaited, address },
+                false,
+            )
+            .await?;
         parse_promise(&data)
     }
 
@@ -361,13 +438,29 @@ impl Sender {
         limit: Option<u32>,
         cursor: Option<&str>,
     ) -> Result<PromiseSearchResult> {
-        let req = Request::PromiseSearch {
-            state: state.map(|s| s.to_string()),
-            tags,
-            limit,
-            cursor: cursor.map(|c| c.to_string()),
-        };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            state: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tags: Option<&'a std::collections::HashMap<String, String>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            limit: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cursor: Option<&'a str>,
+        }
+        let (_, data) = self
+            .send_envelope(
+                "promise.search",
+                &Data {
+                    state,
+                    tags: tags.as_ref(),
+                    limit,
+                    cursor,
+                },
+                false,
+            )
+            .await?;
         let promises_val = data.get("promises").and_then(|v| v.as_array());
         let promises = promises_val
             .map(|arr| {
@@ -385,8 +478,13 @@ impl Sender {
 
     /// Get a schedule by ID.
     pub async fn schedule_get(&self, id: &str) -> Result<ScheduleRecord> {
-        let req = Request::ScheduleGet { id: id.to_string() };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        let (_, data) = self
+            .send_envelope("schedule.get", &Data { id }, false)
+            .await?;
         let schedule = data
             .get("schedule")
             .ok_or_else(|| Error::DecodingError("missing 'schedule' in response".into()))?;
@@ -396,8 +494,9 @@ impl Sender {
 
     /// Create a schedule.
     pub async fn schedule_create(&self, req: ScheduleCreateReq) -> Result<ScheduleRecord> {
-        let request = Request::ScheduleCreate(req);
-        let (_, data) = self.send_request(&request).await?;
+        let (_, data) = self
+            .send_envelope("schedule.create", &req, false)
+            .await?;
         let schedule = data
             .get("schedule")
             .ok_or_else(|| Error::DecodingError("missing 'schedule' in response".into()))?;
@@ -407,8 +506,12 @@ impl Sender {
 
     /// Delete a schedule.
     pub async fn schedule_delete(&self, id: &str) -> Result<()> {
-        let req = Request::ScheduleDelete { id: id.to_string() };
-        self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            id: &'a str,
+        }
+        self.send_envelope("schedule.delete", &Data { id }, false)
+            .await?;
         Ok(())
     }
 
@@ -419,12 +522,26 @@ impl Sender {
         limit: Option<u32>,
         cursor: Option<&str>,
     ) -> Result<ScheduleSearchResult> {
-        let req = Request::ScheduleSearch {
-            tags,
-            limit,
-            cursor: cursor.map(|c| c.to_string()),
-        };
-        let (_, data) = self.send_request(&req).await?;
+        #[derive(Serialize)]
+        struct Data<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tags: Option<&'a std::collections::HashMap<String, String>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            limit: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cursor: Option<&'a str>,
+        }
+        let (_, data) = self
+            .send_envelope(
+                "schedule.search",
+                &Data {
+                    tags: tags.as_ref(),
+                    limit,
+                    cursor,
+                },
+                false,
+            )
+            .await?;
         let schedules_val = data.get("schedules").and_then(|v| v.as_array());
         let schedules = schedules_val
             .map(|arr| {
@@ -440,121 +557,71 @@ impl Sender {
         Ok(ScheduleSearchResult { schedules, cursor })
     }
 
-    /// Internal: serialize a Request, wrap in protocol envelope, send via transport,
-    /// validate the response envelope, and return (status, data).
-    ///
-    /// Returns `Err` for HTTP error status codes (≥400).
-    /// Returns `Ok((status, data))` for success/redirect (200, 201, 300).
-    async fn send_request(&self, req: &Request) -> Result<(u16, serde_json::Value)> {
-        // Serialize the Request enum (includes "kind" tag and data fields)
-        let mut req_json = serde_json::to_value(req)?;
+    // ═══════════════════════════════════════════════════════════════
+    //  Internal helpers
+    // ═══════════════════════════════════════════════════════════════
 
-        // Extract "kind" from the serialized value
-        let kind = req_json
-            .as_object()
-            .and_then(|o| o.get("kind"))
-            .and_then(|k| k.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        // Remove "kind" — remaining fields become the "data" payload
-        if let Some(obj) = req_json.as_object_mut() {
-            obj.remove("kind");
+    fn make_head(&self) -> Head<'_> {
+        Head {
+            corr_id: format!("sr-{}", crate::now_ms()),
+            version: PROTOCOL_VERSION,
+            auth: self.auth.as_deref(),
         }
-
-        // Wrap nested action/actions fields in protocol sub-envelopes.
-        // The protocol requires these to be full { kind, head, data } objects.
-        wrap_nested_actions(&kind, &mut req_json, &self.auth);
-
-        // Build protocol envelope
-        let corr_id = format!("sr-{}", crate::now_ms());
-        let mut head = serde_json::Map::new();
-        head.insert("corrId".into(), serde_json::Value::String(corr_id));
-        head.insert(
-            "version".into(),
-            serde_json::Value::String(PROTOCOL_VERSION.into()),
-        );
-        if let Some(ref token) = self.auth {
-            head.insert("auth".into(), serde_json::Value::String(token.clone()));
-        }
-        let envelope = serde_json::json!({
-            "kind": kind,
-            "head": head,
-            "data": req_json,
-        });
-
-        // Send through transport (validates kind + corrId match)
-        let resp = self.transport.send(envelope).await?;
-
-        // Extract status from response head
-        let status = resp
-            .get("head")
-            .and_then(|h| h.get("status"))
-            .and_then(|s| s.as_u64())
-            .unwrap_or(200) as u16;
-
-        // Extract data from response
-        let data = resp.get("data").cloned().unwrap_or(serde_json::json!({}));
-
-        // Check for error status codes
-        if status >= 400 {
-            let message = if let Some(s) = data.as_str() {
-                s.to_string()
-            } else if let Some(err) = data.get("error").and_then(|e| e.as_str()) {
-                err.to_string()
-            } else {
-                format!("server error (status {})", status)
-            };
-            return Err(Error::ServerError {
-                code: status,
-                message,
-            });
-        }
-
-        Ok((status, data))
     }
 
-    /// Like `send_request` but treats 409 as a non-error status code.
-    /// Returns `Ok((409, data))` instead of `Err(ServerError)` for conflict responses.
-    async fn send_request_with_conflict(&self, req: &Request) -> Result<(u16, serde_json::Value)> {
-        let mut req_json = serde_json::to_value(req)?;
-        let kind = req_json
-            .as_object()
-            .and_then(|o| o.get("kind"))
-            .and_then(|k| k.as_str())
-            .unwrap_or("")
-            .to_string();
-        if let Some(obj) = req_json.as_object_mut() {
-            obj.remove("kind");
+    /// Shared helper for task_create and task_create_or_conflict.
+    async fn send_task_create(
+        &self,
+        pid: &str,
+        ttl: i64,
+        action: &PromiseCreateReq,
+        allow_409: bool,
+    ) -> Result<(u16, serde_json::Value)> {
+        #[derive(Serialize)]
+        struct Data<'a> {
+            pid: &'a str,
+            ttl: i64,
+            action: SubEnvelope<'a, &'a PromiseCreateReq>,
         }
-        wrap_nested_actions(&kind, &mut req_json, &self.auth);
+        let data_payload = Data {
+            pid,
+            ttl,
+            action: SubEnvelope {
+                kind: "promise.create",
+                head: self.make_head(),
+                data: action,
+            },
+        };
+        self.send_envelope("task.create", &data_payload, allow_409).await
+    }
 
-        let corr_id = format!("sr-{}", crate::now_ms());
-        let mut head = serde_json::Map::new();
-        head.insert("corrId".into(), serde_json::Value::String(corr_id));
-        head.insert(
-            "version".into(),
-            serde_json::Value::String(PROTOCOL_VERSION.into()),
-        );
-        if let Some(ref token) = self.auth {
-            head.insert("auth".into(), serde_json::Value::String(token.clone()));
-        }
-        let envelope = serde_json::json!({
-            "kind": kind,
-            "head": head,
-            "data": req_json,
-        });
+    /// Serialize an envelope directly to a JSON string and send it.
+    /// One allocation (the final String) — no intermediate Value tree.
+    async fn send_envelope<D: Serialize>(
+        &self,
+        kind: &str,
+        data: &D,
+        allow_409: bool,
+    ) -> Result<(u16, serde_json::Value)> {
+        let head = self.make_head();
+        let corr_id = head.corr_id.clone();
+        let envelope = Envelope {
+            kind,
+            head,
+            data,
+        };
+        let body = serde_json::to_string(&envelope)?;
+        let resp = self.transport.send(kind, &corr_id, &body).await?;
 
-        let resp = self.transport.send(envelope).await?;
         let status = resp
             .get("head")
             .and_then(|h| h.get("status"))
             .and_then(|s| s.as_u64())
             .unwrap_or(200) as u16;
+
         let data = resp.get("data").cloned().unwrap_or(serde_json::json!({}));
 
-        // Allow 409 through; error on everything else >= 400
-        if status >= 400 && status != 409 {
+        if status >= 400 && !(allow_409 && status == 409) {
             let message = if let Some(s) = data.as_str() {
                 s.to_string()
             } else if let Some(err) = data.get("error").and_then(|e| e.as_str()) {
@@ -573,203 +640,30 @@ impl Sender {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Nested action envelope wrapping
+//  Typed envelope structs — serialize directly to wire format
 // ═══════════════════════════════════════════════════════════════════
 
-/// Wrap a flat data object into a protocol sub-envelope: `{ kind, head: { corrId, version[, auth] }, data }`.
-fn make_sub_envelope(
-    kind: &str,
-    data: serde_json::Value,
-    auth: &Option<String>,
-) -> serde_json::Value {
-    let mut head = serde_json::Map::new();
-    head.insert(
-        "corrId".into(),
-        serde_json::Value::String(format!("sr-{}", crate::now_ms())),
-    );
-    head.insert(
-        "version".into(),
-        serde_json::Value::String(PROTOCOL_VERSION.into()),
-    );
-    if let Some(token) = auth {
-        head.insert("auth".into(), serde_json::Value::String(token.clone()));
-    }
-    serde_json::json!({
-        "kind": kind,
-        "head": head,
-        "data": data,
-    })
+#[derive(Serialize)]
+struct Envelope<'a, D: Serialize> {
+    kind: &'a str,
+    head: Head<'a>,
+    data: &'a D,
 }
 
-/// Post-process the serialized request data to wrap nested `action`/`actions`
-/// fields in full protocol sub-envelopes, as required by the protocol spec.
-fn wrap_nested_actions(kind: &str, data: &mut serde_json::Value, auth: &Option<String>) {
-    match kind {
-        // task.create: action is a PromiseCreateReq → wrap as "promise.create"
-        "task.create" => {
-            if let Some(action) = data.get("action").cloned() {
-                if action.get("kind").is_none() {
-                    data["action"] = make_sub_envelope("promise.create", action, auth);
-                }
-            }
-        }
-        // task.fulfill: action is a PromiseSettleReq → wrap as "promise.settle"
-        "task.fulfill" => {
-            if let Some(action) = data.get("action").cloned() {
-                if action.get("kind").is_none() {
-                    data["action"] = make_sub_envelope("promise.settle", action, auth);
-                }
-            }
-        }
-        // task.suspend: actions is an array of PromiseRegisterCallbackReq
-        //   → wrap each as "promise.register_callback"
-        "task.suspend" => {
-            if let Some(actions) = data.get("actions").and_then(|v| v.as_array()).cloned() {
-                let wrapped: Vec<serde_json::Value> = actions
-                    .into_iter()
-                    .map(|a| {
-                        if a.get("kind").is_none() {
-                            make_sub_envelope("promise.register_callback", a, auth)
-                        } else {
-                            a
-                        }
-                    })
-                    .collect();
-                data["actions"] = serde_json::Value::Array(wrapped);
-            }
-        }
-        // task.fence: action can be PromiseCreateReq or PromiseSettleReq
-        //   → detect which one by checking for "state" field (settle has it, create doesn't)
-        "task.fence" => {
-            if let Some(action) = data.get("action").cloned() {
-                if action.get("kind").is_none() {
-                    let sub_kind = if action.get("state").is_some() {
-                        "promise.settle"
-                    } else {
-                        "promise.create"
-                    };
-                    data["action"] = make_sub_envelope(sub_kind, action, auth);
-                }
-            }
-        }
-        _ => {}
-    }
+#[derive(Serialize)]
+struct Head<'a> {
+    #[serde(rename = "corrId")]
+    corr_id: String,
+    version: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth: Option<&'a str>,
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  Request enum (internal serialization format)
-// ═══════════════════════════════════════════════════════════════════
-
-/// Request types sent to the Resonate server.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "kind")]
-pub(crate) enum Request {
-    #[serde(rename = "promise.get")]
-    PromiseGet { id: String },
-
-    #[serde(rename = "promise.create")]
-    PromiseCreate(PromiseCreateReq),
-
-    #[serde(rename = "promise.settle")]
-    PromiseSettle(PromiseSettleReq),
-
-    #[serde(rename = "promise.register_callback")]
-    PromiseRegisterCallback(PromiseRegisterCallbackData),
-
-    #[serde(rename = "promise.register_listener")]
-    PromiseRegisterListener { awaited: String, address: String },
-
-    #[serde(rename = "promise.search")]
-    PromiseSearch {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        state: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tags: Option<std::collections::HashMap<String, String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        limit: Option<u32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        cursor: Option<String>,
-    },
-
-    #[serde(rename = "task.get")]
-    TaskGet { id: String },
-
-    #[serde(rename = "task.create")]
-    TaskCreate {
-        pid: String,
-        ttl: i64,
-        action: PromiseCreateReq,
-    },
-
-    #[serde(rename = "task.acquire")]
-    TaskAcquire {
-        id: String,
-        version: i64,
-        pid: String,
-        ttl: i64,
-    },
-
-    #[serde(rename = "task.fulfill")]
-    TaskFulfill {
-        id: String,
-        version: i64,
-        action: PromiseSettleReq,
-    },
-
-    #[serde(rename = "task.suspend")]
-    TaskSuspend {
-        id: String,
-        version: i64,
-        actions: Vec<PromiseRegisterCallbackData>,
-    },
-
-    #[serde(rename = "task.release")]
-    TaskRelease { id: String, version: i64 },
-
-    #[serde(rename = "task.halt")]
-    TaskHalt { id: String },
-
-    #[serde(rename = "task.continue")]
-    TaskContinue { id: String },
-
-    #[serde(rename = "task.fence")]
-    TaskFence {
-        id: String,
-        version: i64,
-        action: serde_json::Value,
-    },
-
-    #[serde(rename = "task.heartbeat")]
-    TaskHeartbeat { pid: String, tasks: Vec<TaskRef> },
-
-    #[serde(rename = "task.search")]
-    TaskSearch {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        state: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        limit: Option<u32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        cursor: Option<String>,
-    },
-
-    #[serde(rename = "schedule.get")]
-    ScheduleGet { id: String },
-
-    #[serde(rename = "schedule.create")]
-    ScheduleCreate(ScheduleCreateReq),
-
-    #[serde(rename = "schedule.delete")]
-    ScheduleDelete { id: String },
-
-    #[serde(rename = "schedule.search")]
-    ScheduleSearch {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tags: Option<std::collections::HashMap<String, String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        limit: Option<u32>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        cursor: Option<String>,
-    },
+#[derive(Serialize)]
+struct SubEnvelope<'a, D: Serialize> {
+    kind: &'a str,
+    head: Head<'a>,
+    data: D,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -844,105 +738,57 @@ mod tests {
         Sender::new(Transport::new(net), None)
     }
 
-    // ── Serialization: verify "kind" uses "subject.verb" format ─────
+    // ── Serialization: verify envelope wire format ─────
 
     #[test]
-    fn promise_create_serializes_with_dot_kind() {
-        let req = Request::PromiseCreate(PromiseCreateReq {
+    fn envelope_serializes_correct_wire_format() {
+        let data = PromiseCreateReq {
             id: "p1".into(),
             timeout_at: 999,
             param: Value::default(),
             tags: HashMap::new(),
-        });
-        let json = serde_json::to_value(&req).unwrap();
+        };
+        let envelope = Envelope {
+            kind: "promise.create",
+            head: Head {
+                corr_id: "test-corr".into(),
+                version: "2025-01-15",
+                auth: None,
+            },
+            data: &data,
+        };
+        let json: serde_json::Value = serde_json::to_value(&envelope).unwrap();
         assert_eq!(json["kind"], "promise.create");
-        assert_eq!(json["id"], "p1");
-        assert_eq!(json["timeoutAt"], 999);
+        assert_eq!(json["head"]["corrId"], "test-corr");
+        assert_eq!(json["head"]["version"], "2025-01-15");
+        assert_eq!(json["data"]["id"], "p1");
+        assert_eq!(json["data"]["timeoutAt"], 999);
+        // auth should be absent when None
+        assert!(json["head"].get("auth").is_none());
     }
 
     #[test]
-    fn promise_settle_serializes_with_dot_kind() {
-        let req = Request::PromiseSettle(PromiseSettleReq {
+    fn sub_envelope_serializes_nested_action() {
+        let action = PromiseSettleReq {
             id: "p1".into(),
             state: SettleState::Resolved,
             value: Value::default(),
-        });
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["kind"], "promise.settle");
-        assert_eq!(json["id"], "p1");
-        assert_eq!(json["state"], "resolved");
-    }
-
-    #[test]
-    fn task_acquire_serializes_with_dot_kind() {
-        let req = Request::TaskAcquire {
-            id: "t1".into(),
-            version: 2,
-            pid: "p1".into(),
-            ttl: 60000,
         };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["kind"], "task.acquire");
-        assert_eq!(json["id"], "t1");
-        assert_eq!(json["version"], 2);
-        assert_eq!(json["pid"], "p1");
-        assert_eq!(json["ttl"], 60000);
-    }
-
-    #[test]
-    fn task_fulfill_serializes_with_dot_kind_and_nested_action() {
-        let req = Request::TaskFulfill {
-            id: "t1".into(),
-            version: 2,
-            action: PromiseSettleReq {
-                id: "p1".into(),
-                state: SettleState::Resolved,
-                value: Value::default(),
+        let sub = SubEnvelope {
+            kind: "promise.settle",
+            head: Head {
+                corr_id: "sub-corr".into(),
+                version: "2025-01-15",
+                auth: Some("token123"),
             },
+            data: &action,
         };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["kind"], "task.fulfill");
-        assert_eq!(json["id"], "t1");
-        assert_eq!(json["version"], 2);
-        assert_eq!(json["action"]["id"], "p1");
-        assert_eq!(json["action"]["state"], "resolved");
-    }
-
-    #[test]
-    fn task_suspend_serializes_with_dot_kind() {
-        let req = Request::TaskSuspend {
-            id: "t1".into(),
-            version: 1,
-            actions: vec![
-                PromiseRegisterCallbackData {
-                    awaited: "dep-a".into(),
-                    awaiter: "t1".into(),
-                },
-                PromiseRegisterCallbackData {
-                    awaited: "dep-b".into(),
-                    awaiter: "t1".into(),
-                },
-            ],
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["kind"], "task.suspend");
-        assert_eq!(json["id"], "t1");
-        assert_eq!(json["version"], 1);
-        assert_eq!(json["actions"].as_array().unwrap().len(), 2);
-        assert_eq!(json["actions"][0]["awaited"], "dep-a");
-        assert_eq!(json["actions"][0]["awaiter"], "t1");
-    }
-
-    #[test]
-    fn task_release_serializes_with_dot_kind() {
-        let req = Request::TaskRelease {
-            id: "t1".into(),
-            version: 3,
-        };
-        let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["kind"], "task.release");
-        assert_eq!(json["id"], "t1");
-        assert_eq!(json["version"], 3);
+        let json: serde_json::Value = serde_json::to_value(&sub).unwrap();
+        assert_eq!(json["kind"], "promise.settle");
+        assert_eq!(json["head"]["corrId"], "sub-corr");
+        assert_eq!(json["head"]["auth"], "token123");
+        assert_eq!(json["data"]["id"], "p1");
+        assert_eq!(json["data"]["state"], "resolved");
     }
 
     // ── Round-trip: Sender methods through LocalNetwork ─────────────

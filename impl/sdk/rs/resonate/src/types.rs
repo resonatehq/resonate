@@ -55,7 +55,7 @@ impl Value {
 
     /// Deserialize the data field into `T`.
     pub fn decode<T: DeserializeOwned>(&self) -> crate::error::Result<T> {
-        serde_json::from_value(self.data_or_null()).map_err(Into::into)
+        T::deserialize(self.data_as_ref()).map_err(Into::into)
     }
 
     /// Consume self and deserialize data into `T`.
