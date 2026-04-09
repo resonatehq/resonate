@@ -174,6 +174,32 @@ pub struct ResponseHead {
     pub server_url: String,
 }
 
+// --- Outgoing Message Types ---
+
+#[derive(Debug, Serialize)]
+pub struct MessageHead {
+    #[serde(rename = "serverUrl")]
+    pub server_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsg {
+    pub kind: String,
+    pub head: MessageHead,
+    pub data: ExecuteMsgData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsgData {
+    pub task: ExecuteMsgTask,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsgTask {
+    pub id: String,
+    pub version: i64,
+}
+
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

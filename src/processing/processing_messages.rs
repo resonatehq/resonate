@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::metrics;
 use crate::persistence::Storage;
 use crate::transport::TransportDispatcher;
+use crate::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
@@ -83,17 +84,21 @@ pub async fn process_batch(
             address = %msg.address,
             "Dispatching execute message"
         );
-        let payload = serde_json::json!({
-            "kind": "execute",
-            "head": { "serverUrl": server_url },
-            "data": {
-                "task": {
-                    "id": msg.id,
-                    "version": msg.version
-                }
-            }
-        });
-        dispatcher.send(&msg.address, &payload).await;
+        let payload = ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: server_url.to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: msg.id,
+                    version: msg.version,
+                },
+            },
+        };
+        dispatcher
+            .send(&msg.address, &serde_json::to_value(&payload).unwrap())
+            .await;
     }
 
     for msg in unblock_msgs {
