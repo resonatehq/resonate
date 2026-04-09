@@ -244,7 +244,7 @@ pub struct PromiseCreateReq {
     pub id: String,
     pub timeout_at: i64,
     pub param: Value,
-    #[serde(default)]
+    // #[serde(default)]
     pub tags: HashMap<String, String>,
 }
 

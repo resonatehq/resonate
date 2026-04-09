@@ -100,12 +100,7 @@ impl Transport {
 
     /// Send an already-serialized request through the network, returning the parsed response.
     /// Validates that `response.kind == kind` and `response.head.corrId == corr_id`.
-    pub async fn send(
-        &self,
-        kind: &str,
-        corr_id: &str,
-        body: &str,
-    ) -> Result<serde_json::Value> {
+    pub async fn send(&self, kind: &str, corr_id: &str, body: &str) -> Result<serde_json::Value> {
         tracing::debug!(direction = "send_req", body = %body, "transport");
 
         let resp_str = self.network.send(body.to_owned()).await?;
@@ -116,10 +111,7 @@ impl Transport {
         })?;
 
         // Validate kind matches
-        let resp_kind = response
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .unwrap_or("");
+        let resp_kind = response.get("kind").and_then(|k| k.as_str()).unwrap_or("");
         if resp_kind != kind {
             return Err(Error::ServerError {
                 code: 500,
@@ -152,10 +144,7 @@ impl Transport {
     /// Convenience: serialize a `serde_json::Value` envelope and send it.
     /// Extracts `kind` and `head.corrId` from the value before delegating to [`send`].
     pub async fn send_json(&self, request: serde_json::Value) -> Result<serde_json::Value> {
-        let kind = request
-            .get("kind")
-            .and_then(|k| k.as_str())
-            .unwrap_or("");
+        let kind = request.get("kind").and_then(|k| k.as_str()).unwrap_or("");
         let corr_id = request
             .get("head")
             .and_then(|h| h.get("corrId"))

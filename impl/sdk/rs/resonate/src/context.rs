@@ -46,7 +46,7 @@ pub struct Context {
     func_name: String,
     timeout_at: i64,
     seq: AtomicU32,
-    effects: Effects,
+    effects: Arc<Effects>,
     target_resolver: TargetResolver,
     spawned_remote: Arc<Mutex<Vec<String>>>,
     spawned_locals: Arc<Mutex<Vec<SpawnedLocal>>>,
@@ -69,7 +69,7 @@ impl Context {
             func_name,
             timeout_at,
             seq: AtomicU32::new(0),
-            effects,
+            effects: Arc::new(effects),
             target_resolver,
             spawned_remote: Arc::new(Mutex::new(Vec::new())),
             spawned_locals: Arc::new(Mutex::new(Vec::new())),
@@ -86,7 +86,7 @@ impl Context {
             func_name: func_name.to_string(),
             timeout_at,
             seq: AtomicU32::new(0),
-            effects: self.effects.clone(),
+            effects: Arc::clone(&self.effects),
             target_resolver: self.target_resolver.clone(),
             spawned_remote: Arc::new(Mutex::new(Vec::new())),
             spawned_locals: Arc::new(Mutex::new(Vec::new())),
@@ -510,7 +510,7 @@ where
                 record.value.into_data_or_null(),
             ))),
             PromiseState::Pending => {
-                let effects = ctx.effects.clone();
+                let effects = Arc::clone(&ctx.effects);
                 let child_id_for_task = child_id.clone();
                 let parent_remote_todos = ctx.spawned_remote.clone();
                 let (tx, rx) = tokio::sync::oneshot::channel();

@@ -8,7 +8,7 @@ use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseSta
 
 /// The two durable operations the SDK needs. Built from Sender + Codec.
 /// Maintains an internal cache of decoded PromiseRecords.
-#[derive(Clone)]
+/// Shared via Arc — all contexts in an execution tree use the same instance.
 pub struct Effects {
     sender: Sender,
     codec: Codec,

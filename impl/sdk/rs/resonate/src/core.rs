@@ -202,7 +202,7 @@ impl Core {
                 promise.id.clone(),
                 promise.timeout_at,
                 task_data.func.clone(),
-                effects.clone(),
+                effects,
                 self.target_resolver.clone(),
             );
 

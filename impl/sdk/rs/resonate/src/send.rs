@@ -123,7 +123,16 @@ impl Sender {
             ttl: i64,
         }
         let (_, data) = self
-            .send_envelope("task.acquire", &Data { id, version, pid, ttl }, false)
+            .send_envelope(
+                "task.acquire",
+                &Data {
+                    id,
+                    version,
+                    pid,
+                    ttl,
+                },
+                false,
+            )
             .await?;
         parse_task_acquire(&data)
     }
@@ -151,7 +160,9 @@ impl Sender {
                 data: &action,
             },
         };
-        let (_, data) = self.send_envelope("task.fulfill", &data_payload, false).await?;
+        let (_, data) = self
+            .send_envelope("task.fulfill", &data_payload, false)
+            .await?;
         parse_promise(&data)
     }
 
@@ -182,7 +193,9 @@ impl Sender {
             version,
             actions: wrapped,
         };
-        let (status, data) = self.send_envelope("task.suspend", &data_payload, false).await?;
+        let (status, data) = self
+            .send_envelope("task.suspend", &data_payload, false)
+            .await?;
         parse_suspend_result(status, &data)
     }
 
@@ -204,9 +217,7 @@ impl Sender {
         struct Data<'a> {
             id: &'a str,
         }
-        let (_, data) = self
-            .send_envelope("task.get", &Data { id }, false)
-            .await?;
+        let (_, data) = self.send_envelope("task.get", &Data { id }, false).await?;
         let task = data
             .get("task")
             .ok_or_else(|| Error::DecodingError("missing 'task' in response".into()))?;
@@ -221,9 +232,7 @@ impl Sender {
         ttl: i64,
         action: PromiseCreateReq,
     ) -> Result<TaskCreateResult> {
-        let (_, data) = self
-            .send_task_create(pid, ttl, &action, false)
-            .await?;
+        let (_, data) = self.send_task_create(pid, ttl, &action, false).await?;
         parse_task_acquire(&data)
     }
 
@@ -237,9 +246,7 @@ impl Sender {
         ttl: i64,
         action: PromiseCreateReq,
     ) -> Result<TaskCreateOutcome> {
-        let (status, data) = self
-            .send_task_create(pid, ttl, &action, true)
-            .await?;
+        let (status, data) = self.send_task_create(pid, ttl, &action, true).await?;
         if status == 409 {
             let promise = parse_promise(&data)?;
             Ok(TaskCreateOutcome::Conflict(promise))
@@ -298,7 +305,9 @@ impl Sender {
                 data: &action,
             },
         };
-        let (_, data) = self.send_envelope("task.fence", &data_payload, false).await?;
+        let (_, data) = self
+            .send_envelope("task.fence", &data_payload, false)
+            .await?;
         let empty = serde_json::json!({});
         let action_resp = data.get("action").unwrap_or(&empty);
         let promise_val = action_resp
@@ -343,7 +352,15 @@ impl Sender {
             cursor: Option<&'a str>,
         }
         let (_, data) = self
-            .send_envelope("task.search", &Data { state, limit, cursor }, false)
+            .send_envelope(
+                "task.search",
+                &Data {
+                    state,
+                    limit,
+                    cursor,
+                },
+                false,
+            )
             .await?;
         let tasks_val = data.get("tasks").and_then(|v| v.as_array());
         let tasks = tasks_val
@@ -374,17 +391,13 @@ impl Sender {
 
     /// Create a durable promise.
     pub async fn promise_create(&self, req: PromiseCreateReq) -> Result<PromiseRecord> {
-        let (_, data) = self
-            .send_envelope("promise.create", &req, false)
-            .await?;
+        let (_, data) = self.send_envelope("promise.create", &req, false).await?;
         parse_promise(&data)
     }
 
     /// Settle (resolve/reject) a durable promise.
     pub async fn promise_settle(&self, req: PromiseSettleReq) -> Result<PromiseRecord> {
-        let (_, data) = self
-            .send_envelope("promise.settle", &req, false)
-            .await?;
+        let (_, data) = self.send_envelope("promise.settle", &req, false).await?;
         parse_promise(&data)
     }
 
@@ -494,9 +507,7 @@ impl Sender {
 
     /// Create a schedule.
     pub async fn schedule_create(&self, req: ScheduleCreateReq) -> Result<ScheduleRecord> {
-        let (_, data) = self
-            .send_envelope("schedule.create", &req, false)
-            .await?;
+        let (_, data) = self.send_envelope("schedule.create", &req, false).await?;
         let schedule = data
             .get("schedule")
             .ok_or_else(|| Error::DecodingError("missing 'schedule' in response".into()))?;
@@ -592,7 +603,8 @@ impl Sender {
                 data: action,
             },
         };
-        self.send_envelope("task.create", &data_payload, allow_409).await
+        self.send_envelope("task.create", &data_payload, allow_409)
+            .await
     }
 
     /// Serialize an envelope directly to a JSON string and send it.
@@ -605,11 +617,7 @@ impl Sender {
     ) -> Result<(u16, serde_json::Value)> {
         let head = self.make_head();
         let corr_id = head.corr_id.clone();
-        let envelope = Envelope {
-            kind,
-            head,
-            data,
-        };
+        let envelope = Envelope { kind, head, data };
         let body = serde_json::to_string(&envelope)?;
         let resp = self.transport.send(kind, &corr_id, &body).await?;
 
