@@ -97,13 +97,6 @@ pub struct OutgoingUnblock {
     pub promise: PromiseRecord,
 }
 
-/// A single schedule run to be created as a promise.
-pub struct ScheduleRun {
-    pub id: String,
-    pub timeout_at: i64,
-    pub created_at: i64,
-}
-
 // === Parameter structs for Db trait methods ===
 
 pub struct PromiseCreateParams<'a> {
@@ -285,15 +278,14 @@ pub trait Db {
         limit: i64,
     ) -> StorageResult<Vec<ScheduleRecord>>;
 
-    fn schedule_run(
+    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>>;
+
+    fn process_schedule_timeout(
         &self,
         schedule_id: &str,
-        last_run_at: i64,
+        fired_at: i64,
         next_run_at: i64,
-        runs: &[ScheduleRun],
     ) -> StorageResult<Option<ScheduleRecord>>;
-
-    fn get_expired_schedules(&self, time: i64) -> StorageResult<Vec<ScheduleRecord>>;
 
     // === Timeout processing ===
     fn process_timeouts(&self, time: i64) -> StorageResult<()>;
