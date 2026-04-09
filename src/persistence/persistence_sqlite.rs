@@ -124,6 +124,12 @@ fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
           next_run_at BIGINT NOT NULL,
           last_run_at BIGINT
         );
+
+        CREATE TABLE IF NOT EXISTS schedule_timeouts (
+          timeout_at BIGINT NOT NULL,
+          id TEXT PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_schedule_timeouts_timeout_at_id ON schedule_timeouts (timeout_at ASC, id ASC);
         ",
     )?;
     Ok(())
@@ -1179,6 +1185,10 @@ impl<'a> Db for SqliteDb<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at],
         )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO schedule_timeouts (timeout_at, id) VALUES (?1, ?2)",
+            params![next_run_at, id],
+        )?;
         Ok(self.schedule_get(id)?.unwrap())
     }
 
@@ -1209,61 +1219,107 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(results)
     }
 
-    fn schedule_run(
+    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, timeout_at FROM schedule_timeouts WHERE timeout_at <= ?1")?;
+        let mut rows = stmt.query(params![time])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let timeout_at: i64 = row.get(1)?;
+            results.push((id, timeout_at));
+        }
+        Ok(results)
+    }
+
+    fn process_schedule_timeout(
         &self,
         schedule_id: &str,
-        last_run_at: i64,
+        fired_at: i64,
         next_run_at: i64,
-        runs: &[super::ScheduleRun],
     ) -> StorageResult<Option<ScheduleRecord>> {
+        // Step 1: Guard check — idempotency
+        let guard_exists: bool = self.conn.query_row(
+            "SELECT COUNT(*) FROM schedule_timeouts WHERE id = ?1 AND timeout_at = ?2",
+            params![schedule_id, fired_at],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if !guard_exists {
+            return Ok(None);
+        }
+
+        // Step 2: Fetch schedule
         let schedule = match self.schedule_get(schedule_id)? {
             Some(s) => s,
             None => return Ok(None),
         };
 
-        for run in runs {
-            let id = run.id.as_str();
-            let timeout_at = run.timeout_at;
-            let created_at = run.created_at;
+        // Step 3: Extract resonate:target address
+        let address = schedule.promise_tags.get("resonate:target").cloned();
 
-            let ph = schedule
-                .promise_param
-                .headers
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap());
-            let tags_json = serde_json::to_string(&schedule.promise_tags).unwrap();
+        // Step 4: Build promise ID and timeout
+        let promise_id = schedule
+            .promise_id
+            .replace("{{.id}}", &schedule.id)
+            .replace("{{.timestamp}}", &fired_at.to_string());
+        let promise_timeout_at = fired_at + schedule.promise_timeout;
 
+        // Step 5: Create promise
+        let ph = schedule
+            .promise_param
+            .headers
+            .as_ref()
+            .map(|h| serde_json::to_string(h).unwrap());
+        let tags_json = serde_json::to_string(&schedule.promise_tags).unwrap();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
+             VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6)",
+            params![promise_id, ph, schedule.promise_param.data, tags_json, promise_timeout_at, fired_at],
+        )?;
+        let promise_inserted = self.conn.changes() > 0;
+
+        if promise_inserted {
+            // Step 6: Create promise_timeout
             self.conn.execute(
-                "INSERT OR IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
-                 VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6)",
-                params![id, ph, schedule.promise_param.data, tags_json, timeout_at, created_at],
+                "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
+                params![promise_timeout_at, promise_id],
             )?;
-            if self.conn.changes() > 0 {
+
+            // Step 7: Create task infrastructure if resonate:target is set
+            if let Some(addr) = &address {
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                    params![timeout_at, id],
+                    "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'pending')",
+                    params![promise_id],
                 )?;
+                if self.conn.changes() > 0 {
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
+                        params![fired_at + self.task_retry_timeout, promise_id, self.task_retry_timeout],
+                    )?;
+                    self.conn.execute(
+                        "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
+                         ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
+                        params![promise_id, addr],
+                    )?;
+                }
             }
         }
 
+        // Step 8: Advance schedule
         self.conn.execute(
-            "UPDATE schedules SET last_run_at = ?2, next_run_at = ?3 WHERE id = ?1",
-            params![schedule_id, last_run_at, next_run_at],
+            "UPDATE schedules SET last_run_at = ?1, next_run_at = ?2 WHERE id = ?3",
+            params![fired_at, next_run_at, schedule_id],
         )?;
 
+        // Step 9: Advance schedule_timeout
+        self.conn.execute(
+            "UPDATE schedule_timeouts SET timeout_at = ?1 WHERE id = ?2",
+            params![next_run_at, schedule_id],
+        )?;
+
+        // Step 10: Return updated schedule
         self.schedule_get(schedule_id)
-    }
-
-    fn get_expired_schedules(&self, time: i64) -> StorageResult<Vec<ScheduleRecord>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at, last_run_at FROM schedules WHERE next_run_at <= ?1",
-        )?;
-        let mut rows = stmt.query(params![time])?;
-        let mut results = Vec::new();
-        while let Some(row) = rows.next()? {
-            results.push(row_to_schedule(row)?);
-        }
-        Ok(results)
     }
 
     fn ping(&self) -> StorageResult<()> {

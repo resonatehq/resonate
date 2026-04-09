@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::metrics;
-use crate::persistence::{Db, ScheduleRun, StorageResult};
+use crate::persistence::{Db, StorageResult};
 use crate::server::Server;
 use crate::util;
 
@@ -58,40 +58,31 @@ pub fn process_all_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
 
 /// Process expired schedule timeouts.
 fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
-    let expired = db.get_expired_schedules(time)?;
-    for schedule in expired {
-        let mut cron_time = schedule.next_run_at;
-        let mut runs = Vec::new();
+    let expired = db.get_expired_schedule_timeouts(time)?;
 
-        while cron_time <= time {
-            let promise_id = schedule
-                .promise_id
-                .replace("{{.id}}", &schedule.id)
-                .replace("{{.timestamp}}", &cron_time.to_string());
+    for (schedule_id, fired_at) in &expired {
+        let schedule = match db.schedule_get(schedule_id)? {
+            Some(s) => s,
+            None => continue,
+        };
 
-            let timeout_at = cron_time + schedule.promise_timeout;
+        let next_run_at = util::compute_next_cron(&schedule.cron, *fired_at);
 
-            runs.push(ScheduleRun {
-                id: promise_id,
-                timeout_at,
-                created_at: cron_time,
-            });
-
-            let next = util::compute_next_cron(&schedule.cron, cron_time);
-            cron_time = next;
-        }
-
-        if !runs.is_empty() {
-            tracing::info!(
-                schedule_id = %schedule.id,
-                cron = %schedule.cron,
-                runs = runs.len(),
-                "Schedule triggered, creating promises"
-            );
-            metrics::SCHEDULE_PROMISES_TOTAL.inc_by(runs.len() as f64);
-            let last_run_at = runs.last().map(|r| r.created_at).unwrap();
-            db.schedule_run(&schedule.id, last_run_at, cron_time, &runs)?;
+        match db.process_schedule_timeout(schedule_id, *fired_at, next_run_at)? {
+            Some(_) => {
+                tracing::info!(
+                    schedule_id = %schedule_id,
+                    fired_at = fired_at,
+                    next_run_at = next_run_at,
+                    "Schedule fired"
+                );
+                metrics::SCHEDULE_PROMISES_TOTAL.inc();
+            }
+            None => {
+                // Idempotency guard fired or schedule was deleted — skip.
+            }
         }
     }
+
     Ok(())
 }

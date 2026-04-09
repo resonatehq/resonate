@@ -102,6 +102,12 @@ CREATE TABLE IF NOT EXISTS schedules (
   next_run_at BIGINT NOT NULL,
   last_run_at BIGINT
 );
+
+CREATE TABLE IF NOT EXISTS schedule_timeouts (
+  timeout_at BIGINT NOT NULL,
+  id TEXT PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_timeouts_timeout_at_id ON schedule_timeouts (timeout_at ASC, id ASC);
 ";
 
 impl PostgresStorage {
@@ -1623,6 +1629,13 @@ impl Db for PostgresDb<'_> {
               ON CONFLICT (id) DO NOTHING
               RETURNING *
             ),
+            inserted_or_skipped_stimeout AS (
+              INSERT INTO schedule_timeouts (timeout_at, id)
+              SELECT $9, $1
+              WHERE EXISTS (SELECT 1 FROM inserted_or_skipped_schedule)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING id
+            ),
             result AS (
               SELECT * FROM inserted_or_skipped_schedule
               UNION ALL
@@ -1662,81 +1675,103 @@ impl Db for PostgresDb<'_> {
         Ok(rows.iter().map(row_to_schedule).collect())
     }
 
-    // S-02: schedule.run — single CTE with unnest
-    fn schedule_run(
+    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
+        let rows = rt_block_on(
+            sqlx::query("SELECT id, timeout_at FROM schedule_timeouts WHERE timeout_at <= $1")
+                .bind(time)
+                .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<String, _>("id"), r.get::<i64, _>("timeout_at")))
+            .collect())
+    }
+
+    fn process_schedule_timeout(
         &self,
         schedule_id: &str,
-        last_run_at: i64,
+        fired_at: i64,
         next_run_at: i64,
-        runs: &[super::ScheduleRun],
     ) -> StorageResult<Option<ScheduleRecord>> {
-        if runs.is_empty() {
-            // just update schedule timestamps
-            rt_block_on(
-                sqlx::query(
-                    "UPDATE schedules SET last_run_at = $2, next_run_at = $3 WHERE id = $1",
-                )
-                .bind(schedule_id)
-                .bind(last_run_at)
-                .bind(next_run_at)
-                .execute(self.tx().as_mut()),
-            )?;
-            return self.schedule_get(schedule_id);
-        }
-
-        // Extract arrays for unnest
-        let mut promise_ids: Vec<String> = Vec::new();
-        let mut timeout_ats: Vec<i64> = Vec::new();
-        let mut created_ats: Vec<i64> = Vec::new();
-        for run in runs {
-            promise_ids.push(run.id.clone());
-            timeout_ats.push(run.timeout_at);
-            created_ats.push(run.created_at);
-        }
-
-        let rows = rt_block_on(sqlx::query("
-            WITH
+        let trt = self.task_retry_timeout;
+        // Template substitution and address extraction happen inside the CTE.
+        // $1=schedule_id, $2=fired_at, $3=next_run_at
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH fired_stimeout AS (
+              SELECT st.id
+              FROM schedule_timeouts st
+              WHERE st.id = $1 AND st.timeout_at = $2
+            ),
             schedule AS (
-              SELECT * FROM schedules WHERE id = $1
+              SELECT *,
+                REPLACE(REPLACE(promise_id, '{{{{.id}}}}', id), '{{{{.timestamp}}}}', CAST($2 AS TEXT)) AS computed_promise_id,
+                ($2 + promise_timeout) AS computed_timeout_at,
+                (promise_tags->>'resonate:target') AS address
+              FROM schedules
+              WHERE id = $1
+                AND EXISTS (SELECT 1 FROM fired_stimeout)
             ),
-            runs AS (
-              SELECT * FROM unnest($4::text[], $5::bigint[], $6::bigint[])
-                AS t(id TEXT, timeout_at BIGINT, created_at BIGINT)
-            ),
-            inserted_or_skipped_promises AS (
+            inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
-              SELECT r.id, 'pending', s.promise_param_headers, s.promise_param_data, s.promise_tags, r.timeout_at, r.created_at
-              FROM runs r, schedule s
+              SELECT s.computed_promise_id, 'pending',
+                s.promise_param_headers, s.promise_param_data, s.promise_tags,
+                s.computed_timeout_at, $2
+              FROM schedule s
               ON CONFLICT (id) DO NOTHING
               RETURNING *
             ),
-            inserted_ptimeouts AS (
+            inserted_or_skipped_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
-              SELECT timeout_at, id FROM inserted_or_skipped_promises
+              SELECT p.timeout_at, p.id FROM inserted_or_skipped_promise p
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
+            inserted_or_skipped_task AS (
+              INSERT INTO tasks (id, state)
+              SELECT p.id, 'pending'
+              FROM inserted_or_skipped_promise p
+              WHERE EXISTS (SELECT 1 FROM schedule s WHERE s.address IS NOT NULL)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING id
+            ),
+            inserted_or_skipped_ttimeout AS (
+              INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
+              SELECT ($2 + {trt}), t.id, 0, {trt}
+              FROM inserted_or_skipped_task t
+              ON CONFLICT (id) DO NOTHING
+              RETURNING id
+            ),
+            inserted_or_updated_outgoing AS (
+              INSERT INTO outgoing_execute (id, version, address)
+              SELECT t.id, 0, s.address
+              FROM inserted_or_skipped_task t, schedule s
+              ON CONFLICT (id) DO UPDATE
+                SET version = EXCLUDED.version, address = EXCLUDED.address
+              RETURNING id
+            ),
             updated_schedule AS (
-              UPDATE schedules SET last_run_at = $2, next_run_at = $3 WHERE id = $1
+              UPDATE schedules SET last_run_at = $2, next_run_at = $3
+              WHERE id = $1
+                AND EXISTS (SELECT 1 FROM fired_stimeout)
               RETURNING *
+            ),
+            updated_stimeout AS (
+              UPDATE schedule_timeouts SET timeout_at = $3
+              WHERE id = $1
+                AND EXISTS (SELECT 1 FROM fired_stimeout)
+              RETURNING id
             )
             SELECT id, cron, promise_id, promise_timeout, promise_param_headers::text, promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at FROM updated_schedule
-        ")
-            .bind(schedule_id).bind(last_run_at).bind(next_run_at)        // $1-$3
-            .bind(&promise_ids).bind(&timeout_ats).bind(&created_ats)     // $4-$6
+        ", trt = trt))
+            .bind(schedule_id)  // $1
+            .bind(fired_at)     // $2
+            .bind(next_run_at)  // $3
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
             return Ok(None);
         }
         Ok(Some(row_to_schedule(&rows[0])))
-    }
-
-    fn get_expired_schedules(&self, time: i64) -> StorageResult<Vec<ScheduleRecord>> {
-        let rows = rt_block_on(sqlx::query(
-            "SELECT id, cron, promise_id, promise_timeout, promise_param_headers::text, promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at FROM schedules WHERE next_run_at <= $1")
-            .bind(time).fetch_all(self.tx().as_mut()))?;
-        Ok(rows.iter().map(row_to_schedule).collect())
     }
 
     fn ping(&self) -> StorageResult<()> {
