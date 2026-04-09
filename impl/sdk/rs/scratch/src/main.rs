@@ -45,7 +45,8 @@ async fn par_workflow(ctx: &Context) -> Result<MyType> {
     let f2 = ctx.rpc::<()>("slow", 2).spawn().await?;
     let f3 = ctx.rpc::<()>("slow", 2).spawn().await?;
 
-    let _: () = ctx.run(slow, 5).await?;
+    let h = ctx.run(slow, 5).spawn().await?;
+    h.await?;
 
     f1.await?;
     f2.await?;

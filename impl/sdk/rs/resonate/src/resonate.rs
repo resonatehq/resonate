@@ -2275,6 +2275,23 @@ mod tests {
         assert_eq!(r2.unwrap(), 12_i64);
     }
 
+    #[resonate_macros::function]
+    async fn spawn_child(ctx: &Context) -> Result<i64> {
+        let h = ctx.run(multiply, (3_i64, 5_i64)).spawn().await?;
+        let result = h.await?;
+        Ok(result)
+    }
+
+    #[tokio::test]
+    async fn e2e_workflow_spawn_durable_future_is_send() {
+        let r = Resonate::local();
+        r.register(multiply).unwrap();
+        r.register(spawn_child).unwrap();
+
+        let result: i64 = r.run("e2e-spawn-child", spawn_child, ()).await.unwrap();
+        assert_eq!(result, 15);
+    }
+
     #[tokio::test]
     async fn e2e_get_handle_after_run_completes() {
         let r = Resonate::local();

@@ -43,9 +43,9 @@ impl<T> DurableFuture<T> {
     }
 }
 
-impl<T: 'static> IntoFuture for DurableFuture<T> {
+impl<T: Send + 'static> IntoFuture for DurableFuture<T> {
     type Output = Result<T>;
-    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>>>>;
+    type IntoFuture = Pin<Box<dyn std::future::Future<Output = Result<T>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
