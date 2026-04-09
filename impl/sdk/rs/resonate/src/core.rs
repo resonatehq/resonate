@@ -1,4 +1,6 @@
+use futures::FutureExt;
 use parking_lot::RwLock;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -221,7 +223,46 @@ impl Core {
                 DurableKind::Function => ExecutionEnv::Function(&info),
                 DurableKind::Workflow => ExecutionEnv::Workflow(&ctx),
             };
-            let result = (func)(env, task_data.args.clone()).await;
+            // Catch panics from user-defined functions. This is necessary because
+            // Error::Suspended is a control-flow mechanism (not a real error) and
+            // users may accidentally call .unwrap() on it, causing a panic that
+            // would silently kill the spawned task and leave it in a zombie state.
+            //
+            // AssertUnwindSafe is sound here because on panic we skip all
+            // post-execution logic (flush, suspend, fulfill) and return an error
+            // immediately, so we never observe partially-mutated Context state.
+            let result =
+                match AssertUnwindSafe((func)(env, task_data.args.clone()))
+                    .catch_unwind()
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(panic_payload) => {
+                        let msg = panic_payload
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+
+                        if msg.contains("execution suspended") {
+                            tracing::error!(
+                                task_id = task_id,
+                                "user function panicked by unwrapping Error::Suspended — \
+                                 use `?` to propagate suspension errors instead of `.unwrap()`"
+                            );
+                        } else {
+                            tracing::error!(
+                                task_id = task_id,
+                                panic = msg,
+                                "user function panicked"
+                            );
+                        }
+
+                        return Err(Error::Application {
+                            message: format!("user function panicked: {}", msg),
+                        });
+                    }
+                };
 
             // Flush remaining local work
             let flush_remote = ctx.flush_local_work().await;
@@ -1185,6 +1226,113 @@ mod tests {
             hb.stop_count(),
             1,
             "heartbeat should be stopped even on error"
+        );
+    }
+
+    // ── Panic handling (catch_unwind) ─────────────────────────────
+
+    #[resonate_macros::function]
+    async fn unwrap_suspend(ctx: &Context) -> Result<i32> {
+        // Simulates a user accidentally calling .unwrap() on a suspended rpc
+        let handle = ctx.rpc::<i32>("dep", &()).spawn().await?;
+        let val: i32 = handle.await.unwrap();
+        Ok(val)
+    }
+
+    #[tokio::test]
+    async fn panic_from_unwrap_suspend_is_caught_and_task_released() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "unwrap_suspend", serde_json::json!(null));
+
+        let mut registry = Registry::new();
+        registry.register(unwrap_suspend).unwrap();
+
+        let core = test_core(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(registry)),
+        );
+        let decoded = noop_codec().decode_promise(root).unwrap();
+        let result = core
+            .execute_until_blocked("task-panic-suspend", 0, decoded, None)
+            .await;
+
+        assert!(result.is_err(), "should return an error, not panic");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("panicked"),
+            "error should mention panic: {err_msg}"
+        );
+
+        let requests = harness.sent_requests_json().await;
+        assert!(
+            requests.iter().any(|r| r["kind"] == "task.release"),
+            "task should be released after panic"
+        );
+    }
+
+    #[resonate_macros::function]
+    async fn plain_panic(_ctx: &Context) -> Result<i32> {
+        panic!("something went wrong");
+    }
+
+    #[tokio::test]
+    async fn panic_from_user_function_is_caught_and_task_released() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "plain_panic", serde_json::json!(null));
+
+        let mut registry = Registry::new();
+        registry.register(plain_panic).unwrap();
+
+        let core = test_core(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(registry)),
+        );
+        let decoded = noop_codec().decode_promise(root).unwrap();
+        let result = core
+            .execute_until_blocked("task-panic-plain", 0, decoded, None)
+            .await;
+
+        assert!(result.is_err(), "should return an error, not panic");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("something went wrong"),
+            "error should contain the panic message: {err_msg}"
+        );
+
+        let requests = harness.sent_requests_json().await;
+        assert!(
+            requests.iter().any(|r| r["kind"] == "task.release"),
+            "task should be released after panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn panic_from_unwrap_suspend_stops_heartbeat() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "unwrap_suspend", serde_json::json!(null));
+
+        let mut registry = Registry::new();
+        registry.register(unwrap_suspend).unwrap();
+
+        let hb = Arc::new(TrackingHeartbeat::new());
+        let core = test_core_with_heartbeat(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(registry)),
+            hb.clone(),
+        );
+        let decoded = noop_codec().decode_promise(root).unwrap();
+        let _ = core
+            .execute_until_blocked("task-panic-hb", 0, decoded, None)
+            .await;
+
+        assert_eq!(hb.start_count(), 1, "heartbeat should be started once");
+        assert_eq!(
+            hb.stop_count(),
+            1,
+            "heartbeat should be stopped even after panic"
         );
     }
 
