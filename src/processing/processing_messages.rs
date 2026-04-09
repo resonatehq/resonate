@@ -32,14 +32,20 @@ pub async fn message_processing_loop(
             continue;
         }
 
-        process_batch(&state.storage, &dispatcher, batch_size).await;
+        let server_url = state.config.server.url.clone().unwrap_or_default();
+        process_batch(&state.storage, &dispatcher, batch_size, &server_url).await;
     }
 }
 
 /// Process one batch of outgoing messages.
 ///
 /// Called by the background loop and `debug.tick`.
-pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, batch_size: i64) {
+pub async fn process_batch(
+    storage: &Storage,
+    dispatcher: &TransportDispatcher,
+    batch_size: i64,
+    server_url: &str,
+) {
     let (execute_msgs, unblock_msgs) = match storage
         .transact(move |db| db.take_outgoing(batch_size))
         .await
@@ -79,7 +85,7 @@ pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, 
         );
         let payload = serde_json::json!({
             "kind": "execute",
-            "head": {},
+            "head": { "serverUrl": server_url },
             "data": {
                 "task": {
                     "id": msg.id,
