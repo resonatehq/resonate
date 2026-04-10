@@ -170,8 +170,6 @@ pub struct ResponseHead {
     pub corr_id: String,
     pub status: i32,
     pub version: String,
-    #[serde(rename = "serverUrl")]
-    pub server_url: String,
 }
 
 // --- Outgoing Message Types ---
@@ -722,7 +720,6 @@ impl ResponseEnvelope {
                 corr_id,
                 status,
                 version: PROTOCOL_VERSION.to_string(),
-                server_url: String::new(),
             },
             data,
         }
