@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "resonate"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "async-stream",
  "async-trait",
