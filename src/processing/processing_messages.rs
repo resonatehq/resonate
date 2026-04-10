@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::metrics;
 use crate::persistence::Storage;
 use crate::transport::TransportDispatcher;
+use crate::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
@@ -32,14 +33,20 @@ pub async fn message_processing_loop(
             continue;
         }
 
-        process_batch(&state.storage, &dispatcher, batch_size).await;
+        let server_url = state.config.server.url.clone().unwrap_or_default();
+        process_batch(&state.storage, &dispatcher, batch_size, &server_url).await;
     }
 }
 
 /// Process one batch of outgoing messages.
 ///
 /// Called by the background loop and `debug.tick`.
-pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, batch_size: i64) {
+pub async fn process_batch(
+    storage: &Storage,
+    dispatcher: &TransportDispatcher,
+    batch_size: i64,
+    server_url: &str,
+) {
     let (execute_msgs, unblock_msgs) = match storage
         .transact(move |db| db.take_outgoing(batch_size))
         .await
@@ -77,17 +84,21 @@ pub async fn process_batch(storage: &Storage, dispatcher: &TransportDispatcher, 
             address = %msg.address,
             "Dispatching execute message"
         );
-        let payload = serde_json::json!({
-            "kind": "execute",
-            "head": {},
-            "data": {
-                "task": {
-                    "id": msg.id,
-                    "version": msg.version
-                }
-            }
-        });
-        dispatcher.send(&msg.address, &payload).await;
+        let payload = ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: server_url.to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: msg.id,
+                    version: msg.version,
+                },
+            },
+        };
+        dispatcher
+            .send(&msg.address, &serde_json::to_value(&payload).unwrap())
+            .await;
     }
 
     for msg in unblock_msgs {

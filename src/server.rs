@@ -142,11 +142,7 @@ async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
     }
 }
 
-fn into_response(
-    mut resp: ResponseEnvelope,
-    server_url: &str,
-) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
-    resp.head.server_url = server_url.to_string();
+fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let code = axum::http::StatusCode::from_u16(resp.head.status as u16)
         .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     (code, Json(resp))
@@ -182,8 +178,6 @@ async fn handle_api(
 ) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let state = &api_state.server;
     let start = std::time::Instant::now();
-    let server_url = state.config.server.url.as_deref().unwrap_or("");
-
     // Deserialize the envelope using serde. On failure, attempt to extract
     // kind from the raw JSON so the error response can include it.
     let mut req: RequestEnvelope = match serde_json::from_slice(&body) {
@@ -195,15 +189,12 @@ async fn handle_api(
                 error = %e,
                 "Invalid request envelope: deserialization failed"
             );
-            return into_response(
-                ResponseEnvelope::error(
-                    kind,
-                    corr_id,
-                    400,
-                    &format!("Invalid request envelope: {}", e),
-                ),
-                server_url,
-            );
+            return into_response(ResponseEnvelope::error(
+                kind,
+                corr_id,
+                400,
+                &format!("Invalid request envelope: {}", e),
+            ));
         }
     };
 
@@ -213,46 +204,37 @@ async fn handle_api(
     // Reject empty kind (serde accepts "" as a valid String)
     if kind.is_empty() {
         tracing::warn!(corr_id = %corr_id, "Invalid request: empty 'kind' field");
-        return into_response(
-            ResponseEnvelope::error(
-                kind,
-                corr_id,
-                400,
-                "Missing or invalid 'kind' field — must be a non-empty string",
-            ),
-            server_url,
-        );
+        return into_response(ResponseEnvelope::error(
+            kind,
+            corr_id,
+            400,
+            "Missing or invalid 'kind' field — must be a non-empty string",
+        ));
     }
 
     // Reject non-object data (serde deserializes any JSON value into Value)
     if !req.data.is_object() {
         tracing::warn!(kind = %kind, corr_id = %corr_id, "Invalid request: 'data' is not an object");
-        return into_response(
-            ResponseEnvelope::error(
-                kind,
-                corr_id,
-                400,
-                "Invalid 'data' field — must be an object",
-            ),
-            server_url,
-        );
+        return into_response(ResponseEnvelope::error(
+            kind,
+            corr_id,
+            400,
+            "Invalid 'data' field — must be an object",
+        ));
     }
 
     // Validate protocol version
     if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
         tracing::warn!(kind = %kind, corr_id = %corr_id, version = %req.head.version, "Invalid request: unsupported protocol version");
-        return into_response(
-            ResponseEnvelope::error(
-                kind,
-                corr_id,
-                400,
-                &format!(
-                    "Unsupported protocol version '{}', supported versions: {:?}",
-                    req.head.version, SUPPORTED_VERSIONS
-                ),
+        return into_response(ResponseEnvelope::error(
+            kind,
+            corr_id,
+            400,
+            &format!(
+                "Unsupported protocol version '{}', supported versions: {:?}",
+                req.head.version, SUPPORTED_VERSIONS
             ),
-            server_url,
-        );
+        ));
     }
 
     // Log incoming request at the application protocol level
@@ -284,7 +266,7 @@ async fn handle_api(
             metrics::REQUEST_DURATION
                 .with_label_values(&[&kind])
                 .observe(start.elapsed().as_secs_f64());
-            return into_response(*err_response, server_url);
+            return into_response(*err_response);
         }
     }
 
@@ -327,7 +309,7 @@ async fn handle_api(
     metrics::REQUEST_DURATION
         .with_label_values(&[&kind])
         .observe(start.elapsed().as_secs_f64());
-    into_response(response, server_url)
+    into_response(response)
 }
 
 async fn handle_poll(

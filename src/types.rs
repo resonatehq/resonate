@@ -170,8 +170,32 @@ pub struct ResponseHead {
     pub corr_id: String,
     pub status: i32,
     pub version: String,
+}
+
+// --- Outgoing Message Types ---
+
+#[derive(Debug, Serialize)]
+pub struct MessageHead {
     #[serde(rename = "serverUrl")]
     pub server_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsg {
+    pub kind: String,
+    pub head: MessageHead,
+    pub data: ExecuteMsgData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsgData {
+    pub task: ExecuteMsgTask,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecuteMsgTask {
+    pub id: String,
+    pub version: i64,
 }
 
 // --- Record Types ---
@@ -696,7 +720,6 @@ impl ResponseEnvelope {
                 corr_id,
                 status,
                 version: PROTOCOL_VERSION.to_string(),
-                server_url: String::new(),
             },
             data,
         }
