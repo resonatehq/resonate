@@ -189,28 +189,15 @@ impl Resonate {
         let sender = Sender::new(transport.clone(), auth_for_envelope);
 
         // Build target_resolver from the network for target resolution.
-        // If the target already looks like a URL, pass it through unchanged
-        // (mirrors TS: `util.isUrl(target) ? target : match(target)`).
         let network_for_match = network.clone();
         let target_resolver: crate::context::TargetResolver =
             Arc::new(move |target: Option<&str>| {
                 let resolved = target.unwrap_or(network_for_match.group());
-                if is_url(resolved) {
-                    resolved.to_string()
-                } else {
-                    network_for_match.target_resolver(resolved)
-                }
+                resolve_target(&*network_for_match, resolved)
             });
 
         // Cap TTL to i64::MAX to avoid overflow when casting u64 → i64.
-        // In local mode ttl is u64::MAX; a naive `as i64` wraps to -1,
-        // which makes the server set lease timeouts in the past and
-        // immediately release + retry tasks on every tick.
-        let core_ttl: i64 = if ttl >= i64::MAX as u64 {
-            i64::MAX
-        } else {
-            ttl as i64
-        };
+        let core_ttl = ttl.min(i64::MAX as u64) as i64;
         let core = Arc::new(Core::new(
             sender.clone(),
             codec.clone(),
@@ -364,6 +351,36 @@ impl Resonate {
         tags.insert("resonate:target".to_string(), target.to_string());
     }
 
+    /// Build a `PromiseCreateReq` with encoded params, tags, and prefixed ID.
+    fn build_promise_create_req(
+        &self,
+        id: &str,
+        func_name: &str,
+        args: serde_json::Value,
+        opts: &Options,
+    ) -> Result<(String, crate::types::PromiseCreateReq)> {
+        let prefixed_id = self.prefix_id(id);
+        let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
+        // NOTE: function versioning is not yet supported by this SDK.
+        let param_data = serde_json::json!({
+            "func": func_name,
+            "args": args,
+        });
+        let encoded_param = self.codec.encode(&param_data)?;
+        let mut tags = opts.tags.clone();
+        tags.reserve(5);
+        Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
+        Ok((
+            prefixed_id.clone(),
+            crate::types::PromiseCreateReq {
+                id: prefixed_id,
+                timeout_at,
+                param: encoded_param,
+                tags,
+            },
+        ))
+    }
+
     /// Internal: execute a run by func name, returning a handle.
     async fn do_run<T: DeserializeOwned>(
         &self,
@@ -372,8 +389,6 @@ impl Resonate {
         args: serde_json::Value,
         opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let prefixed_id = self.prefix_id(id);
-
         // Verify function is registered
         {
             let reg = self.registry.read();
@@ -382,27 +397,7 @@ impl Resonate {
             }
         }
 
-        let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
-
-        // Encode param data
-        let param_data = serde_json::json!({
-            "func": func_name,
-            "args": args,
-        });
-        let encoded_param = self.codec.encode(&param_data)?;
-
-        // Build tags
-        let mut tags = opts.tags.clone();
-        tags.reserve(5);
-        Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
-
-        let action = crate::types::PromiseCreateReq {
-            id: prefixed_id.clone(),
-            timeout_at,
-            param: encoded_param,
-            tags,
-        };
-
+        let (prefixed_id, action) = self.build_promise_create_req(id, func_name, args, &opts)?;
         let ttl = self.safe_ttl();
         let outcome = self
             .sender
@@ -467,28 +462,7 @@ impl Resonate {
         args: serde_json::Value,
         opts: Options,
     ) -> Result<ResonateHandle<T>> {
-        let prefixed_id = self.prefix_id(id);
-
-        let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
-
-        // Encode param data
-        let param_data = serde_json::json!({
-            "func": func_name,
-            "args": args,
-        });
-        let encoded_param = self.codec.encode(&param_data)?;
-
-        // Build tags
-        let mut tags = opts.tags.clone();
-        Self::build_root_tags(&prefixed_id, &opts.target, &mut tags);
-
-        let req = crate::types::PromiseCreateReq {
-            id: prefixed_id.clone(),
-            timeout_at,
-            param: encoded_param,
-            tags,
-        };
-
+        let (prefixed_id, req) = self.build_promise_create_req(id, func_name, args, &opts)?;
         let promise = self.sender.promise_create(req).await?;
         self.create_handle_from_record(prefixed_id, &promise).await
     }
@@ -577,11 +551,7 @@ impl Resonate {
 
     /// TTL capped to i64::MAX for Sender methods that take i64.
     fn safe_ttl(&self) -> i64 {
-        if self.ttl >= i64::MAX as u64 {
-            i64::MAX
-        } else {
-            self.ttl as i64
-        }
+        self.ttl.min(i64::MAX as u64) as i64
     }
 
     /// Prepend the configured prefix to an ID.
@@ -787,6 +757,16 @@ impl Resonate {
 //  Shared builder helpers
 // ═══════════════════════════════════════════════════════════════
 
+/// Resolve a target string: URLs pass through unchanged, bare names go through
+/// `network.target_resolver`.
+fn resolve_target(network: &dyn Network, target: &str) -> String {
+    if is_url(target) {
+        target.to_string()
+    } else {
+        network.target_resolver(target)
+    }
+}
+
 /// Build resolved `Options` from builder fields (shared by ResRunTask and ResRpcTask).
 fn build_options(
     resonate: &Resonate,
@@ -798,11 +778,7 @@ fn build_options(
     let defaults = Options::default();
     let group = resonate.network.group();
     let raw_target = target.unwrap_or(group);
-    let resolved_target = if is_url(raw_target) {
-        raw_target.to_string()
-    } else {
-        resonate.network.target_resolver(raw_target)
-    };
+    let resolved_target = resolve_target(&*resonate.network, raw_target);
     Options {
         tags: tags.unwrap_or(defaults.tags),
         target: resolved_target,

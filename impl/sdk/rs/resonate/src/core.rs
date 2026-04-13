@@ -172,20 +172,14 @@ impl Core {
             );
             // Value is already decoded (decode_promise was called before this point)
             let settled_value = promise.value.data_as_ref().clone();
-            let result: Result<serde_json::Value> = match promise.state {
-                PromiseState::Resolved => Ok(settled_value),
+            let state = match promise.state {
+                PromiseState::Resolved => SettleState::Resolved,
                 PromiseState::Rejected
                 | PromiseState::RejectedCanceled
-                | PromiseState::RejectedTimedout => Err(Error::Application {
-                    message: settled_value
-                        .get("message")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("rejected")
-                        .to_string(),
-                }),
+                | PromiseState::RejectedTimedout => SettleState::Rejected,
                 PromiseState::Pending => unreachable!(),
             };
-            self.fulfill_task(task_id, task_version, &promise.id, &result)
+            self.fulfill_task(task_id, task_version, &promise.id, state, settled_value)
                 .await?;
             return Ok(Status::Done);
         }
@@ -271,7 +265,11 @@ impl Core {
 
             // 5. FINALIZE: determine outcome
             if remote_todos.is_empty() {
-                self.fulfill_task(task_id, task_version, &promise.id, &result)
+                let (state, value) = match &result {
+                    Ok(val) => (SettleState::Resolved, val.clone()),
+                    Err(err) => (SettleState::Rejected, crate::codec::encode_error(err)),
+                };
+                self.fulfill_task(task_id, task_version, &promise.id, state, value)
                     .await?;
                 tracing::debug!(task_id = task_id, promise_id = %promise.id, "task fulfilled");
                 return Ok(Status::Done);
@@ -314,14 +312,10 @@ impl Core {
         task_id: &str,
         task_version: i64,
         promise_id: &str,
-        result: &Result<serde_json::Value>,
+        state: SettleState,
+        value: serde_json::Value,
     ) -> Result<PromiseRecord> {
-        let (state, value_data) = match result {
-            Ok(val) => (SettleState::Resolved, val.clone()),
-            Err(err) => (SettleState::Rejected, crate::codec::encode_error(err)),
-        };
-
-        let encoded_value = self.codec.encode(&value_data)?;
+        let encoded_value = self.codec.encode(&value)?;
 
         self.sender
             .task_fulfill(
@@ -384,18 +378,7 @@ mod tests {
 
     /// Build a Core for testing with a no-op match function and no-op heartbeat.
     fn test_core(sender: Sender, codec: Codec, registry: Arc<RwLock<Registry>>) -> Core {
-        let target_resolver: TargetResolver =
-            std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string());
-        let heartbeat: Arc<dyn Heartbeat> = Arc::new(NoopHeartbeat);
-        Core::new(
-            sender,
-            codec,
-            registry,
-            target_resolver,
-            heartbeat,
-            "test-pid".to_string(),
-            60_000,
-        )
+        test_core_with_heartbeat(sender, codec, registry, Arc::new(NoopHeartbeat))
     }
 
     // ── Test functions ─────────────────────────────────────────────
