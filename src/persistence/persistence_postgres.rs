@@ -473,11 +473,13 @@ impl Db for PostgresDb<'_> {
     fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
         let p = rt_block_on(
             sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
-                .bind(id).fetch_optional(self.tx().as_mut())
+                .bind(id)
+                .fetch_optional(self.tx().as_mut()),
         )?;
         let t = rt_block_on(
             sqlx::query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE")
-                .bind(id).fetch_optional(self.tx().as_mut())
+                .bind(id)
+                .fetch_optional(self.tx().as_mut()),
         )?;
         Ok((p.is_some(), t.is_some()))
     }
@@ -896,9 +898,7 @@ impl Db for PostgresDb<'_> {
             return Ok(Some(TaskCreateResult {
                 promise,
                 task_created: false,
-                task_acquired: false,
                 task_state: None,
-                task_version: None,
             }));
         }
         let row = &rows[0];
@@ -918,21 +918,16 @@ impl Db for PostgresDb<'_> {
             return Ok(Some(TaskCreateResult {
                 promise,
                 task_created: true,
-                task_acquired: false,
                 task_state: Some(task_initial_state.to_string()),
-                task_version: Some(0),
             }));
         }
 
         // Promise already existed, task not created.
-        // task_acquired is always false here — acquire is done by the handler
-        // as a separate statement (fresh snapshot).
+        // Acquire is done by the handler as a separate statement (fresh snapshot).
         Ok(Some(TaskCreateResult {
             promise,
             task_created: false,
-            task_acquired: false,
             task_state: None,
-            task_version: None,
         }))
     }
 

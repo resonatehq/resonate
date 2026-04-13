@@ -683,7 +683,6 @@ impl<'a> Db for SqliteDb<'a> {
         };
 
         let mut task_created = false;
-        let mut task_acquired = false;
 
         if promise_inserted {
             if !already_timedout {
@@ -722,9 +721,7 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(Some(TaskCreateResult {
             promise,
             task_created,
-            task_acquired,
             task_state: task_row.as_ref().map(|t| t.state.to_string()),
-            task_version: task_row.as_ref().map(|t| t.version),
         }))
     }
 

@@ -61,9 +61,7 @@ pub struct RegisterCallbackResult {
 pub struct TaskCreateResult {
     pub promise: PromiseRecord,
     pub task_created: bool,
-    pub task_acquired: bool,
     pub task_state: Option<String>,
-    pub task_version: Option<i64>,
 }
 
 pub struct TaskAcquireResult {
@@ -338,17 +336,6 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.transact(f).await,
             Storage::Postgres(p) => p.transact(f, false).await,
-        }
-    }
-
-    pub async fn transact_serializable<F, T>(&self, f: F) -> StorageResult<T>
-    where
-        F: FnMut(&dyn Db) -> StorageResult<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        match self {
-            Storage::Sqlite(s) => s.transact(f).await,
-            Storage::Postgres(p) => p.transact(f, true).await,
         }
     }
 

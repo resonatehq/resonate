@@ -29,9 +29,9 @@ use crate::types::{
     ScheduleDeleteData, ScheduleGetData, ScheduleResponseData, ScheduleSearchData,
     ScheduleSearchResponseData, TaskAcquireData, TaskAcquireResponseData, TaskContinueData,
     TaskCreateData, TaskCreateResponseData, TaskFenceData, TaskFenceResponseData, TaskFulfillData,
-    TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData, TaskReleaseData,
-    TaskRecord, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState, TaskSuspendData,
-    TaskSuspendPreloadData, SUPPORTED_VERSIONS,
+    TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData, TaskRecord,
+    TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
+    TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
 use crate::util;
 use validator::Validate;
