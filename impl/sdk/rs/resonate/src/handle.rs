@@ -12,7 +12,7 @@ use crate::types::PromiseState;
 /// Allows non-blocking observation and eventual awaiting of a durable promise.
 pub struct ResonateHandle<T> {
     pub id: String,
-    rx: watch::Receiver<Option<Arc<PromiseResult>>>,
+    rx: tokio::sync::Mutex<watch::Receiver<Option<Arc<PromiseResult>>>>,
     codec: Codec,
     _phantom: PhantomData<T>,
 }
@@ -39,16 +39,16 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
     ) -> Self {
         Self {
             id,
-            rx,
+            rx: tokio::sync::Mutex::new(rx),
             codec,
             _phantom: PhantomData,
         }
     }
 
     /// Block until the promise completes, return the result or error.
-    pub async fn result(&mut self) -> Result<T> {
-        let guard = self
-            .rx
+    pub async fn result(&self) -> Result<T> {
+        let mut rx = self.rx.lock().await;
+        let guard = rx
             .wait_for(|v| v.is_some())
             .await
             .map_err(|_| Error::Application {
@@ -61,7 +61,9 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
 
     /// Check if the promise is done (non-blocking).
     pub async fn done(&self) -> Result<bool> {
-        Ok(self.rx.borrow().is_some())
+        let rx = self.rx.lock().await;
+        let is_done = rx.borrow().is_some();
+        Ok(is_done)
     }
 
     /// Decode a PromiseResult into the final T or error.

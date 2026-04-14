@@ -50,6 +50,7 @@ pub struct Context {
     target_resolver: TargetResolver,
     spawned_remote: Arc<Mutex<Vec<String>>>,
     spawned_locals: Arc<Mutex<Vec<SpawnedLocal>>>,
+    deps: Arc<crate::DependencyMap>,
 }
 
 impl Context {
@@ -60,6 +61,7 @@ impl Context {
         func_name: String,
         effects: Effects,
         target_resolver: TargetResolver,
+        deps: Arc<crate::DependencyMap>,
     ) -> Self {
         Self {
             origin_id: id.clone(),
@@ -73,6 +75,7 @@ impl Context {
             target_resolver,
             spawned_remote: Arc::new(Mutex::new(Vec::new())),
             spawned_locals: Arc::new(Mutex::new(Vec::new())),
+            deps,
         }
     }
 
@@ -90,6 +93,7 @@ impl Context {
             target_resolver: self.target_resolver.clone(),
             spawned_remote: Arc::new(Mutex::new(Vec::new())),
             spawned_locals: Arc::new(Mutex::new(Vec::new())),
+            deps: Arc::clone(&self.deps),
         }
     }
 
@@ -103,7 +107,13 @@ impl Context {
             timeout_at,
             func_name.to_string(),
             HashMap::new(),
+            self.deps.clone(),
         )
+    }
+
+    /// Retrieve a dependency by type. Panics if not found.
+    pub fn get_dependency<T: Send + Sync + 'static>(&self) -> Arc<T> {
+        self.deps.get::<T>()
     }
 
     /// Generate the next deterministic child ID.
@@ -136,6 +146,7 @@ impl Context {
             self.timeout_at,
             self.func_name.clone(),
             HashMap::new(),
+            self.deps.clone(),
         )
     }
 

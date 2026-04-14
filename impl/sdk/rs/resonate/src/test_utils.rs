@@ -559,6 +559,11 @@ pub fn test_target_resolver() -> crate::context::TargetResolver {
     std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string())
 }
 
+/// Empty dependency map for tests that don't use DI.
+pub fn empty_deps() -> std::sync::Arc<crate::DependencyMap> {
+    std::sync::Arc::new(crate::DependencyMap::new())
+}
+
 /// Build a root Context for testing with mock effects.
 pub fn test_context(id: &str, effects: Effects) -> Context {
     Context::root(
@@ -567,6 +572,7 @@ pub fn test_context(id: &str, effects: Effects) -> Context {
         "test".to_string(),
         effects,
         test_target_resolver(),
+        empty_deps(),
     )
 }
 
@@ -582,6 +588,7 @@ pub fn test_context_with_match(
         "test".to_string(),
         effects,
         target_resolver,
+        empty_deps(),
     )
 }
 
@@ -593,6 +600,7 @@ pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) ->
         "test".to_string(),
         effects,
         test_target_resolver(),
+        empty_deps(),
     )
 }
 

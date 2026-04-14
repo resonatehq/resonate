@@ -37,10 +37,11 @@ pub struct Core {
     heartbeat: Arc<dyn Heartbeat>,
     pid: String,
     ttl: i64,
+    deps: Arc<crate::DependencyMap>,
 }
 
 impl Core {
-    pub fn new(
+    pub(crate) fn new(
         sender: Sender,
         codec: Codec,
         registry: Arc<RwLock<Registry>>,
@@ -48,6 +49,7 @@ impl Core {
         heartbeat: Arc<dyn Heartbeat>,
         pid: String,
         ttl: i64,
+        deps: Arc<crate::DependencyMap>,
     ) -> Self {
         Self {
             sender,
@@ -57,6 +59,7 @@ impl Core {
             heartbeat,
             pid,
             ttl,
+            deps,
         }
     }
 
@@ -200,6 +203,7 @@ impl Core {
                 task_data.func.clone(),
                 effects,
                 self.target_resolver.clone(),
+                self.deps.clone(),
             );
 
             let info = crate::info::Info::new(
@@ -210,6 +214,7 @@ impl Core {
                 promise.timeout_at,
                 task_data.func.clone(),
                 promise.tags.clone(),
+                self.deps.clone(),
             );
 
             // Execute via the func
@@ -1156,6 +1161,7 @@ mod tests {
             heartbeat,
             "test-pid".to_string(),
             60_000,
+            crate::test_utils::empty_deps(),
         )
     }
 

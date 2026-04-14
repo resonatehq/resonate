@@ -320,7 +320,7 @@ async fn handle_spawn_and_result() {
     r.register(add).unwrap();
 
     let id = unique_id("handle-spawn");
-    let mut handle = with_timeout(r.run(&id, add, (100_i64, 200_i64)).spawn())
+    let handle = with_timeout(r.run(&id, add, (100_i64, 200_i64)).spawn())
         .await
         .unwrap();
 

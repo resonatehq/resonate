@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Read-only execution metadata for leaf functions.
 /// Cannot spawn durable sub-tasks — no run/rpc methods.
@@ -11,6 +12,7 @@ pub struct Info {
     timeout_at: i64,
     func_name: String,
     tags: HashMap<String, String>,
+    deps: Arc<crate::DependencyMap>,
 }
 
 impl Info {
@@ -22,6 +24,7 @@ impl Info {
         timeout_at: i64,
         func_name: String,
         tags: HashMap<String, String>,
+        deps: Arc<crate::DependencyMap>,
     ) -> Self {
         Self {
             id,
@@ -31,7 +34,13 @@ impl Info {
             timeout_at,
             func_name,
             tags,
+            deps,
         }
+    }
+
+    /// Retrieve a dependency by type. Panics if not found.
+    pub fn get_dependency<T: Send + Sync + 'static>(&self) -> Arc<T> {
+        self.deps.get::<T>()
     }
 
     pub fn id(&self) -> &str {
