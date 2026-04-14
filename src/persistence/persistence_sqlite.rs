@@ -1339,7 +1339,7 @@ impl<'a> Db for SqliteDb<'a> {
             "DELETE FROM outgoing_unblock; DELETE FROM outgoing_execute;
              DELETE FROM task_timeouts; DELETE FROM listeners; DELETE FROM callbacks;
              DELETE FROM promise_timeouts; DELETE FROM tasks; DELETE FROM promises;
-             DELETE FROM schedules;",
+             DELETE FROM schedule_timeouts; DELETE FROM schedules;",
         )?;
         Ok(())
     }

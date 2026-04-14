@@ -1828,7 +1828,7 @@ impl Db for PostgresDb<'_> {
     // D-02: debug.reset
     fn debug_reset(&self) -> StorageResult<()> {
         rt_block_on(sqlx::raw_sql(
-            "TRUNCATE outgoing_unblock, outgoing_execute, task_timeouts, listeners, callbacks, promise_timeouts, tasks, promises, schedules CASCADE"
+            "TRUNCATE outgoing_unblock, outgoing_execute, task_timeouts, listeners, callbacks, promise_timeouts, tasks, promises, schedule_timeouts, schedules CASCADE"
         ).execute(self.tx().as_mut()))?;
         Ok(())
     }
