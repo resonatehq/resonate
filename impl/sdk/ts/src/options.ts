@@ -18,6 +18,7 @@ export class OptionsBuilder {
     target = "default",
     timeout = 24 * util.HOUR,
     version = 0,
+    nonRetryableErrors = [],
   }: {
     id?: string;
     retryPolicy?: RetryPolicy;
@@ -25,9 +26,10 @@ export class OptionsBuilder {
     target?: string;
     timeout?: number;
     version?: number;
+    nonRetryableErrors?: Array<new (...args: any[]) => Error>;
   } = {}): Options {
     id = id ? `${this.idPrefix}${id}` : id;
-    return new Options({ id, retryPolicy, tags, target: this.match(target), timeout, version });
+    return new Options({ id, retryPolicy, tags, target: this.match(target), timeout, version, nonRetryableErrors });
   }
 }
 
@@ -38,6 +40,7 @@ export class Options {
   public readonly timeout: number;
   public readonly version: number;
   public readonly retryPolicy: RetryPolicy | undefined;
+  public readonly nonRetryableErrors: Array<new (...args: any[]) => Error>;
 
   [RESONATE_OPTIONS] = true;
 
@@ -48,6 +51,7 @@ export class Options {
     target = "default",
     timeout = 24 * util.HOUR,
     version = 0,
+    nonRetryableErrors = [],
   }: {
     id?: string;
     retryPolicy?: RetryPolicy;
@@ -55,6 +59,7 @@ export class Options {
     target?: string;
     timeout?: number;
     version?: number;
+    nonRetryableErrors?: Array<new (...args: any[]) => Error>;
   }) {
     this.id = id;
     this.tags = tags;
@@ -62,5 +67,6 @@ export class Options {
     this.timeout = timeout;
     this.version = version;
     this.retryPolicy = retryPolicy;
+    this.nonRetryableErrors = nonRetryableErrors;
   }
 }

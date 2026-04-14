@@ -1383,3 +1383,111 @@ describe("Bearer token authentication", () => {
     await resonate.stop();
   });
 });
+
+describe("nonRetryableErrors", () => {
+  it("ctx.run: stops retrying when a non-retryable error is thrown in a child function", async () => {
+    class FatalError extends Error {}
+    let attempts = 0;
+
+    async function alwaysFatal(_ctx: Context): Promise<never> {
+      attempts++;
+      throw new FatalError("fatal");
+    }
+
+    function* workflow(ctx: Context): Generator {
+      yield* ctx.run(alwaysFatal, ctx.options({ nonRetryableErrors: [FatalError] }));
+    }
+
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    resonate.register(workflow);
+
+    await expect(resonate.run(crypto.randomUUID().replace(/-/g, ""), workflow)).rejects.toThrow("fatal");
+
+    expect(attempts).toBe(1);
+  });
+
+  it("ctx.run: nonRetryableErrors apply to unregistered local helper functions", async () => {
+    class ValidationError extends Error {}
+    let attempts = 0;
+
+    async function helper(_ctx: Context): Promise<never> {
+      attempts++;
+      throw new ValidationError("bad input");
+    }
+
+    function* workflow(ctx: Context): Generator {
+      yield* ctx.run(helper, ctx.options({ nonRetryableErrors: [ValidationError] }));
+    }
+
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    resonate.register(workflow);
+
+    await expect(resonate.run(crypto.randomUUID().replace(/-/g, ""), workflow)).rejects.toThrow("bad input");
+
+    expect(attempts).toBe(1);
+  });
+
+  it("ctx.run: non-retryable error propagates through nested ctx.run() calls", async () => {
+    class DomainError extends Error {}
+    let childAttempts = 0;
+
+    async function child(_ctx: Context): Promise<never> {
+      childAttempts++;
+      throw new DomainError("domain error");
+    }
+
+    function* parent(ctx: Context): Generator {
+      yield* ctx.run(child, ctx.options({ nonRetryableErrors: [DomainError] }));
+    }
+
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    resonate.register(parent);
+
+    await expect(resonate.run(crypto.randomUUID().replace(/-/g, ""), parent)).rejects.toThrow("domain error");
+
+    expect(childAttempts).toBe(1);
+  });
+
+  it("ctx.run: subclass of a non-retryable class is also non-retryable", async () => {
+    class BaseError extends Error {}
+    class SubError extends BaseError {}
+    let attempts = 0;
+
+    async function thrower(_ctx: Context): Promise<never> {
+      attempts++;
+      throw new SubError("sub error");
+    }
+
+    function* workflow(ctx: Context): Generator {
+      yield* ctx.run(thrower, ctx.options({ nonRetryableErrors: [BaseError] }));
+    }
+
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    resonate.register(workflow);
+
+    await expect(resonate.run(crypto.randomUUID().replace(/-/g, ""), workflow)).rejects.toThrow("sub error");
+
+    expect(attempts).toBe(1);
+  });
+
+  it("ctx.run: empty nonRetryableErrors falls back to normal retry behavior", async () => {
+    let attempts = 0;
+
+    async function failTwice(_ctx: Context): Promise<string> {
+      attempts++;
+      if (attempts < 3) throw new Error("transient");
+      return "success";
+    }
+
+    function* workflow(ctx: Context): Generator<any, string, any> {
+      return yield* ctx.run(failTwice, ctx.options({ retryPolicy: new Constant({ delay: 0 }) }));
+    }
+
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    resonate.register(workflow);
+
+    const result = await resonate.run(crypto.randomUUID().replace(/-/g, ""), workflow);
+    expect(result).toBe("success");
+    expect(attempts).toBe(3);
+  });
+});

@@ -31,6 +31,7 @@ export type InternalAsyncL = {
   args: any[];
   version: number;
   retryPolicy: RetryPolicy;
+  nonRetryableErrors: Array<new (...args: any[]) => Error>;
   createReq: PromiseCreateReq;
 };
 export type InternalAwait<T> = {
@@ -145,6 +146,7 @@ export class Decorator<TRet> {
         args: event.args ?? [],
         version: event.version,
         retryPolicy: event.retryPolicy,
+        nonRetryableErrors: event.nonRetryableErrors,
         createReq: event.createReq,
       };
     }

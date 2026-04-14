@@ -109,6 +109,11 @@ export async function executeWithRetry(
       const data = await func(ctx, ...args);
       return { kind: "value", value: data };
     } catch (error) {
+      const isNonRetryable = ctx.nonRetryableErrors.some((Ctor) => error instanceof Ctor);
+      if (isNonRetryable) {
+        return { kind: "error", error };
+      }
+
       const retryIn = ctx.retryPolicy.next(ctx.info.attempt);
       if (retryIn === null || ctx.clock.now() + retryIn >= ctx.info.timeout) {
         return { kind: "error", error };

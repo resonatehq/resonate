@@ -98,6 +98,7 @@ export class Coroutine<T> {
           timeout: res.timeoutAt,
           version: action.version,
           retryPolicy: action.retryPolicy,
+          nonRetryableErrors: action.nonRetryableErrors,
         });
 
         if (res.state === "pending") {

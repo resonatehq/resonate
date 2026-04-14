@@ -14,6 +14,7 @@ export class LFI<T> implements Iterable<LFI<T>> {
   public args: any[];
   public version: number;
   public retryPolicy: RetryPolicy;
+  public nonRetryableErrors: Array<new (...args: any[]) => Error>;
   public createReq: PromiseCreateReq;
 
   constructor(
@@ -23,12 +24,14 @@ export class LFI<T> implements Iterable<LFI<T>> {
     version: number,
     retryPolicy: RetryPolicy,
     createReq: PromiseCreateReq,
+    nonRetryableErrors: Array<new (...args: any[]) => Error> = [],
   ) {
     this.id = id;
     this.func = func;
     this.args = args;
     this.version = version;
     this.retryPolicy = retryPolicy;
+    this.nonRetryableErrors = nonRetryableErrors;
     this.createReq = createReq;
   }
 
@@ -45,6 +48,7 @@ export class LFC<T> implements Iterable<LFC<T>> {
   public args: any[];
   public version: number;
   public retryPolicy: RetryPolicy;
+  public nonRetryableErrors: Array<new (...args: any[]) => Error>;
   public createReq: PromiseCreateReq;
 
   constructor(
@@ -54,12 +58,14 @@ export class LFC<T> implements Iterable<LFC<T>> {
     version: number,
     retryPolicy: RetryPolicy,
     createReq: PromiseCreateReq,
+    nonRetryableErrors: Array<new (...args: any[]) => Error> = [],
   ) {
     this.id = id;
     this.func = func;
     this.args = args;
     this.version = version;
     this.retryPolicy = retryPolicy;
+    this.nonRetryableErrors = nonRetryableErrors;
     this.createReq = createReq;
   }
 
@@ -263,6 +269,7 @@ export class InnerContext implements Context {
   readonly info: { attempt: number; readonly timeout: number; readonly version: number };
   readonly func: string;
   readonly retryPolicy: RetryPolicy;
+  readonly nonRetryableErrors: Array<new (...args: any[]) => Error>;
 
   readonly originId: string;
   readonly branchId: string;
@@ -291,6 +298,7 @@ export class InnerContext implements Context {
     timeout,
     version,
     retryPolicy,
+    nonRetryableErrors = [],
   }: {
     id: string;
     oId?: string;
@@ -304,6 +312,7 @@ export class InnerContext implements Context {
     timeout: number;
     version: number;
     retryPolicy: RetryPolicy;
+    nonRetryableErrors?: Array<new (...args: any[]) => Error>;
   }) {
     this.id = id;
     this.originId = oId;
@@ -315,6 +324,7 @@ export class InnerContext implements Context {
     this.dependencies = dependencies;
     this.optsBuilder = optsBuilder;
     this.retryPolicy = retryPolicy;
+    this.nonRetryableErrors = nonRetryableErrors;
 
     this.info = {
       attempt: 1,
@@ -329,12 +339,14 @@ export class InnerContext implements Context {
     timeout,
     version,
     retryPolicy,
+    nonRetryableErrors = [],
   }: {
     id: string;
     func: string;
     timeout: number;
     version: number;
     retryPolicy: RetryPolicy;
+    nonRetryableErrors?: Array<new (...args: any[]) => Error>;
   }) {
     return new InnerContext({
       id,
@@ -349,6 +361,7 @@ export class InnerContext implements Context {
       timeout,
       version,
       retryPolicy,
+      nonRetryableErrors,
     });
   }
 
@@ -383,6 +396,7 @@ export class InnerContext implements Context {
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
       this.localCreateReq({ id, data: { func: func.name, version }, opts, breaksLineage: idChanged }),
+      opts.nonRetryableErrors ?? [],
     );
   }
 
@@ -417,6 +431,7 @@ export class InnerContext implements Context {
       version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
       this.localCreateReq({ id, data: { func: func.name, version }, opts, breaksLineage: idChanged }),
+      opts.nonRetryableErrors ?? [],
     );
   }
 
@@ -567,7 +582,9 @@ export class InnerContext implements Context {
     return this.dependencies.get(name);
   }
 
-  options(opts: Partial<Pick<Options, "tags" | "target" | "timeout" | "version" | "retryPolicy">> = {}): Options {
+  options(
+    opts: Partial<Pick<Options, "tags" | "target" | "timeout" | "version" | "retryPolicy" | "nonRetryableErrors">> = {},
+  ): Options {
     return this.optsBuilder.build(opts);
   }
 

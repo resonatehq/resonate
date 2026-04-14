@@ -1,4 +1,34 @@
-import { base64Decode, base64Encode, isGeneratorFunction } from "../src/util.js";
+import { WallClock } from "../src/clock.js";
+import { InnerContext } from "../src/context.js";
+import { ConsoleLogger } from "../src/logger.js";
+import { OptionsBuilder } from "../src/options.js";
+import { Registry } from "../src/registry.js";
+import { Constant, Exponential, type RetryPolicy } from "../src/retries.js";
+import { base64Decode, base64Encode, executeWithRetry, isGeneratorFunction } from "../src/util.js";
+
+// Helper to create a minimal InnerContext for executeWithRetry tests
+function makeCtx({
+  nonRetryableErrors = [] as Array<new (...args: any[]) => Error>,
+  retryPolicy = new Exponential() as RetryPolicy,
+  timeout = Number.MAX_SAFE_INTEGER,
+} = {}) {
+  const registry = new Registry();
+  const optsBuilder = new OptionsBuilder({ match: (t) => t, idPrefix: "" });
+  return new InnerContext({
+    id: "test",
+    func: "testFunc",
+    clock: new WallClock(),
+    registry,
+    dependencies: new Map(),
+    optsBuilder,
+    timeout,
+    version: 1,
+    retryPolicy,
+    nonRetryableErrors,
+  });
+}
+
+const testLogger = new ConsoleLogger("error");
 
 describe("isGeneratorFunction", () => {
   // Basic generator functions
@@ -136,5 +166,77 @@ describe("base64 encoder", () => {
 
   test.each(cases.map((str) => [str]))("encodes and decodes correctly: %s", (string) => {
     expect(base64Decode(base64Encode(string))).toEqual(string);
+  });
+});
+
+describe("executeWithRetry — nonRetryableErrors", () => {
+  it("does not retry when error matches a non-retryable class", async () => {
+    class ValidationError extends Error {}
+    let calls = 0;
+    const func = async (_ctx: any) => {
+      calls++;
+      throw new ValidationError("invalid");
+    };
+    const ctx = makeCtx({
+      nonRetryableErrors: [ValidationError],
+      retryPolicy: new Exponential(),
+    });
+    const result = await executeWithRetry(ctx, func, [], testLogger);
+    expect(result.kind).toBe("error");
+    if (result.kind === "error") expect(result.error).toBeInstanceOf(ValidationError);
+    expect(calls).toBe(1);
+  });
+
+  it("retries normally when error does not match any non-retryable class", async () => {
+    class ValidationError extends Error {}
+    class NetworkError extends Error {}
+    let calls = 0;
+    const func = async (_ctx: any) => {
+      calls++;
+      if (calls === 1) throw new NetworkError("transient");
+      return "ok";
+    };
+    const ctx = makeCtx({
+      nonRetryableErrors: [ValidationError],
+      retryPolicy: new Constant({ delay: 0 }), // immediate retry
+    });
+    const result = await executeWithRetry(ctx, func, [], testLogger);
+    expect(result.kind).toBe("value");
+    if (result.kind === "value") expect(result.value).toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  it("respects instanceof — subclass of a non-retryable class is also non-retryable", async () => {
+    class BaseError extends Error {}
+    class SubError extends BaseError {}
+    let calls = 0;
+    const func = async (_ctx: any) => {
+      calls++;
+      throw new SubError("sub");
+    };
+    const ctx = makeCtx({
+      nonRetryableErrors: [BaseError],
+      retryPolicy: new Exponential(),
+    });
+    const result = await executeWithRetry(ctx, func, [], testLogger);
+    expect(result.kind).toBe("error");
+    if (result.kind === "error") expect(result.error).toBeInstanceOf(SubError);
+    expect(calls).toBe(1);
+  });
+
+  it("empty nonRetryableErrors list falls back to normal retry behavior", async () => {
+    let calls = 0;
+    const func = async (_ctx: any) => {
+      calls++;
+      if (calls < 3) throw new Error("transient");
+      return "done";
+    };
+    const ctx = makeCtx({
+      nonRetryableErrors: [],
+      retryPolicy: new Constant({ delay: 0 }),
+    });
+    const result = await executeWithRetry(ctx, func, [], testLogger);
+    expect(result.kind).toBe("value");
+    expect(calls).toBe(3);
   });
 });
