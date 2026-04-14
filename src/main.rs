@@ -47,6 +47,8 @@ enum Commands {
     Schedules(cli::ScheduleArgs),
     /// Invoke a function via a durable promise
     Invoke(cli::InvokeArgs),
+    /// Display the call-graph tree rooted at a promise ID
+    Tree(cli::TreeArgs),
 }
 
 #[tokio::main]
@@ -64,6 +66,9 @@ async fn main() -> std::process::ExitCode {
         }
         Commands::Invoke(args) => {
             cli::run_invoke(args).await;
+        }
+        Commands::Tree(args) => {
+            cli::run_tree(args).await;
         }
         Commands::Serve(args) => {
             let config = match Config::load() {
