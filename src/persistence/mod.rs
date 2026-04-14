@@ -1,6 +1,8 @@
 pub mod persistence_postgres;
 pub mod persistence_sqlite;
 
+use std::collections::HashMap;
+
 use crate::types::{PromiseRecord, ScheduleRecord, Snapshot, TaskRecord, TaskState};
 
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -299,6 +301,7 @@ pub trait Db {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        promise_tags: &HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>>;
 
     // === Timeout processing ===

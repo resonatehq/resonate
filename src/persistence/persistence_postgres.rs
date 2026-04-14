@@ -1738,10 +1738,12 @@ impl Db for PostgresDb<'_> {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        promise_tags: &std::collections::HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>> {
         let trt = self.task_retry_timeout;
+        let promise_tags_json = serde_json::to_string(promise_tags).unwrap();
         // Template substitution and address extraction happen inside the CTE.
-        // $1=schedule_id, $2=fired_at, $3=next_run_at
+        // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags
         let rows = rt_block_on(sqlx::query(&format!("
             WITH fired_stimeout AS (
               SELECT st.id
@@ -1760,7 +1762,7 @@ impl Db for PostgresDb<'_> {
             inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
               SELECT s.computed_promise_id, 'pending',
-                s.promise_param_headers, s.promise_param_data, s.promise_tags,
+                s.promise_param_headers, s.promise_param_data, $4::jsonb,
                 s.computed_timeout_at, $2
               FROM schedule s
               ON CONFLICT (id) DO NOTHING
@@ -1809,9 +1811,10 @@ impl Db for PostgresDb<'_> {
             )
             SELECT id, cron, promise_id, promise_timeout, promise_param_headers::text, promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at FROM updated_schedule
         ", trt = trt))
-            .bind(schedule_id)  // $1
-            .bind(fired_at)     // $2
-            .bind(next_run_at)  // $3
+            .bind(schedule_id)       // $1
+            .bind(fired_at)          // $2
+            .bind(next_run_at)       // $3
+            .bind(promise_tags_json) // $4
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {

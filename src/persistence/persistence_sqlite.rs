@@ -1245,6 +1245,7 @@ impl<'a> Db for SqliteDb<'a> {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        promise_tags: &std::collections::HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>> {
         // Step 1: Guard check — idempotency
         let guard_exists: bool = self.conn.query_row(
@@ -1278,7 +1279,7 @@ impl<'a> Db for SqliteDb<'a> {
             .headers
             .as_ref()
             .map(|h| serde_json::to_string(h).unwrap());
-        let tags_json = serde_json::to_string(&schedule.promise_tags).unwrap();
+        let tags_json = serde_json::to_string(promise_tags).unwrap();
         self.conn.execute(
             "INSERT OR IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
              VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6)",
