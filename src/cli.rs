@@ -1230,7 +1230,10 @@ fn promise_detail(p: &Value) -> String {
         .and_then(|v| v["func"].as_str().map(|s| format!(" {}", s)));
     let func_suffix = func_name.as_deref().unwrap_or("");
 
-    if tags["resonate:timeout"].as_str().is_some_and(|v| !v.is_empty()) {
+    if tags["resonate:timeout"]
+        .as_str()
+        .is_some_and(|v| !v.is_empty())
+    {
         "(sleep)".to_string()
     } else if tags["resonate:scope"].as_str() == Some("global") {
         format!("(rpc{})", func_suffix)
