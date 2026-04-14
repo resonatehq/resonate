@@ -28,7 +28,7 @@ test/resonate-test:
 	@if [ -d test/resonate-test ]; then \
 		echo "test/resonate-test already exists, skipping clone"; \
 	else \
-		git clone git@github.com:resonatehq/resonate-test.git test/resonate-test; \
+		git clone -b protocol-changes git@github.com:resonatehq/resonate-test.git test/resonate-test; \
 	fi
 
 test/resonate-perf:
