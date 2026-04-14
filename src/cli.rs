@@ -1230,7 +1230,7 @@ fn promise_detail(p: &Value) -> String {
         .and_then(|v| v["func"].as_str().map(|s| format!(" {}", s)));
     let func_suffix = func_name.as_deref().unwrap_or("");
 
-    if tags["resonate:timeout"]
+    if tags["resonate:timer"]
         .as_str()
         .is_some_and(|v| !v.is_empty())
     {
