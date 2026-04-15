@@ -132,7 +132,7 @@ impl Context {
     fn child_timeout(&self, requested: Option<Duration>) -> i64 {
         let timeout = requested.unwrap_or(Self::DEFAULT_TIMEOUT);
         let now = now_ms();
-        let child_deadline = now + timeout.as_millis() as i64;
+        let child_deadline = now.saturating_add(timeout.as_millis() as i64);
         std::cmp::min(child_deadline, self.timeout_at)
     }
 
@@ -258,6 +258,28 @@ impl Context {
         }
     }
 
+    /// Build a latent promise create request.
+    ///
+    /// Similar to `sleep_create_req` but without `resonate:timer` — the promise
+    /// is expected to be resolved externally (webhook, human, another process).
+    fn promise_create_req(&self, id: &str, timeout: Option<Duration>) -> PromiseCreateReq {
+        let mut tags = HashMap::with_capacity(4);
+        tags.insert("resonate:scope".to_string(), "global".to_string());
+        tags.insert("resonate:branch".to_string(), id.to_string());
+        tags.insert("resonate:parent".to_string(), self.id.clone());
+        tags.insert("resonate:origin".to_string(), self.origin_id.clone());
+
+        PromiseCreateReq {
+            id: id.to_string(),
+            timeout_at: self.child_timeout(timeout),
+            param: Value {
+                headers: None,
+                data: None,
+            },
+            tags,
+        }
+    }
+
     /// Build a sleep (timer) create request.
     ///
     /// Similar to `remote_create_req` but with `resonate:timer` tag and no target.
@@ -302,6 +324,40 @@ impl Context {
             ctx: self,
             req,
             record: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    /// Latent durable promise. Returns a `PromiseTask` builder that implements `IntoFuture`.
+    ///
+    /// Creates a promise on the Resonate server with no function backing it.
+    /// The promise is expected to be resolved externally (webhook, human approval,
+    /// cross-process signal, etc.).
+    ///
+    /// # Usage patterns
+    /// ```ignore
+    /// // Sequential — wait for external resolution
+    /// let result: String = ctx.promise().await?;
+    ///
+    /// // With timeout
+    /// let result: String = ctx.promise().timeout(Duration::from_secs(300)).await?;
+    ///
+    /// // Get promise ID to hand to external system
+    /// let task = ctx.promise::<String>();
+    /// let id = task.id().await?;
+    /// let result = task.await?;
+    ///
+    /// // Create and get handle (to await later)
+    /// let handle: RemoteFuture<String> = ctx.promise::<String>().create().await?;
+    /// ```
+    pub fn promise<T>(&self) -> PromiseTask<'_, T> {
+        let child_id = self.next_id();
+        let req = self.promise_create_req(&child_id, None);
+        PromiseTask {
+            child_id,
+            ctx: self,
+            req,
+            record: tokio::sync::OnceCell::new(),
+            _phantom: PhantomData,
         }
     }
 
@@ -783,6 +839,128 @@ where
         Box::pin(async move {
             Context::check_serialization_error(&self.serialization_error)?;
             let RpcTask {
+                child_id,
+                ctx,
+                req,
+                record: cell,
+                ..
+            } = self;
+
+            let record = consume_promise_record(cell, req, &ctx.effects).await?;
+
+            if let Some(result) = record.as_result::<T>() {
+                return result;
+            }
+
+            // Pending
+            tracing::info!(
+                target: "resonate::validation",
+                promise_id = %child_id,
+                "promise_execution_block"
+            );
+            ctx.spawned_remote.lock().await.push(child_id);
+            Err(Error::Suspended)
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PromiseTask — builder returned by ctx.promise()
+// ═══════════════════════════════════════════════════════════════
+
+/// A lazy latent promise task. Created by `ctx.promise()`.
+///
+/// Creates a durable promise with no function backing it — resolved externally
+/// (webhook, human approval, cross-process signal, etc.).
+///
+/// Implements `IntoFuture` so `.await` works directly. On `Pending` state,
+/// awaiting pushes to `remote_todos` and returns `Err(Suspended)`, just like RPC.
+pub struct PromiseTask<'ctx, T> {
+    child_id: String,
+    ctx: &'ctx Context,
+    req: PromiseCreateReq,
+    record: tokio::sync::OnceCell<PromiseRecord>,
+    _phantom: PhantomData<T>,
+}
+
+impl<'ctx, T> PromiseTask<'ctx, T> {
+    /// Set an explicit timeout for the promise (capped to parent's timeout).
+    ///
+    /// Must be called before `.id()`, `.await`, or `.create()`.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        debug_assert!(
+            self.record.get().is_none(),
+            "cannot set timeout after promise creation"
+        );
+        self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
+        self
+    }
+
+    /// Attach data to the promise param (visible to external resolvers).
+    ///
+    /// Must be called before `.id()`, `.await`, or `.create()`.
+    pub fn data(mut self, data: &impl Serialize) -> Result<Self> {
+        debug_assert!(
+            self.record.get().is_none(),
+            "cannot set data after promise creation"
+        );
+        self.req.param = Value::from_serializable(data)?;
+        Ok(self)
+    }
+
+    /// Returns the promise ID, creating the durable promise if it hasn't been yet.
+    pub async fn id(&self) -> Result<String> {
+        self.ensure_created().await?;
+        Ok(self.child_id.clone())
+    }
+
+    /// Ensure the durable promise exists (lazy creation via OnceCell).
+    async fn ensure_created(&self) -> Result<&PromiseRecord> {
+        self.record
+            .get_or_try_init(|| self.ctx.effects.create_promise(self.req.clone()))
+            .await
+    }
+
+    /// Create the promise on the server and return a `RemoteFuture` handle.
+    pub async fn create(self) -> Result<RemoteFuture<T>>
+    where
+        T: DeserializeOwned,
+    {
+        let PromiseTask {
+            child_id,
+            ctx,
+            req,
+            record: cell,
+            ..
+        } = self;
+
+        let record = consume_promise_record(cell, req, &ctx.effects).await?;
+
+        if let Some(result) = record.as_remote_future::<T>() {
+            return result;
+        }
+
+        // Pending
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %child_id,
+            "promise_execution_block"
+        );
+        ctx.spawned_remote.lock().await.push(child_id);
+        Ok(RemoteFuture::pending())
+    }
+}
+
+impl<'ctx, T> IntoFuture for PromiseTask<'ctx, T>
+where
+    T: DeserializeOwned + Send + 'static,
+{
+    type Output = Result<T>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        Box::pin(async move {
+            let PromiseTask {
                 child_id,
                 ctx,
                 req,
@@ -2557,5 +2735,134 @@ mod tests {
             Outcome::Done(Ok(())) => {}
             other => panic!("expected Done(\"awake\"), got {:?}", other),
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Promise Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn promise_suspends_on_pending() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let result = ctx.promise::<String>().await;
+        assert!(matches!(result, Err(Error::Suspended)));
+
+        let outcome = finalize_context::<()>(&ctx, Err(Error::Suspended)).await;
+        match &outcome {
+            Outcome::Suspended { remote_todos } => {
+                assert_eq!(remote_todos.len(), 1);
+            }
+            other => panic!("expected Suspended, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn promise_creates_with_correct_tags() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let _ = ctx.promise::<String>().await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        let tags = create["tags"]
+            .as_object()
+            .expect("tags should be an object");
+        assert_eq!(tags["resonate:scope"].as_str().unwrap(), "global");
+        assert_eq!(tags["resonate:parent"].as_str().unwrap(), "root");
+        assert_eq!(tags["resonate:origin"].as_str().unwrap(), "root");
+        assert!(tags.contains_key("resonate:branch"));
+        // should NOT have target or timer tags
+        assert!(!tags.contains_key("resonate:target"));
+        assert!(!tags.contains_key("resonate:timer"));
+    }
+
+    #[tokio::test]
+    async fn promise_has_empty_param() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let _ = ctx.promise::<String>().await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        let param = &create["param"];
+        let data = &param["data"];
+        assert!(
+            data.is_null() || data.as_str().map_or(false, |s| s.is_empty()),
+            "promise param data should be null or empty, got {:?}",
+            data
+        );
+    }
+
+    #[tokio::test]
+    async fn promise_with_timeout() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let now = super::now_ms();
+        let parent_timeout = now + 300_000; // 5 minutes
+        let ctx = test_context_with_timeout("root", parent_timeout, effects);
+
+        let _ = ctx
+            .promise::<String>()
+            .timeout(Duration::from_secs(120))
+            .await;
+
+        let requests = harness.sent_requests_json().await;
+        let create = requests
+            .iter()
+            .find(|r| r["kind"] == "promise.create")
+            .expect("should have sent promise.create");
+
+        let expected_approx = now + 120_000;
+        let tolerance = 1_000;
+        assert!(
+            create["timeoutAt"].as_i64().unwrap() >= expected_approx - tolerance
+                && create["timeoutAt"].as_i64().unwrap() <= expected_approx + tolerance,
+            "promise timeout_at ({}) should be ~{} (now + 120s)",
+            create["timeoutAt"].as_i64().unwrap(),
+            expected_approx
+        );
+    }
+
+    #[tokio::test]
+    async fn promise_create_pending_returns_remote_future() {
+        let harness = TestHarness::new();
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context("root", effects);
+
+        let handle = ctx.promise::<String>().create().await.unwrap();
+        // Pending promise should suspend when awaited
+        let err = handle.await.unwrap_err();
+        assert!(matches!(err, Error::Suspended));
+    }
+
+    #[tokio::test]
+    async fn promise_resolved_returns_value() {
+        let harness = TestHarness::new();
+        let promise_id = "root.0";
+        harness
+            .settle_promise_in_stub(promise_id, "hello".to_string())
+            .await;
+
+        let effects =
+            harness.build_effects(vec![resolved_promise(promise_id, "hello".to_string())]);
+        let ctx = test_context("root", effects);
+
+        let result: String = ctx.promise().await.unwrap();
+        assert_eq!(result, "hello");
     }
 }

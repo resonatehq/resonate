@@ -378,7 +378,8 @@ impl Resonate {
         opts: &Options,
     ) -> Result<(String, crate::types::PromiseCreateReq)> {
         let prefixed_id = self.prefix_id(id);
-        let timeout_at = now_ms() + opts.timeout.as_millis() as i64;
+        let timeout_at = now_ms()
+            .saturating_add(opts.timeout.as_millis() as i64);
         // NOTE: function versioning is not yet supported by this SDK.
         let param_data = serde_json::json!({
             "func": func_name,

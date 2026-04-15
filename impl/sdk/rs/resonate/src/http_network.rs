@@ -94,6 +94,9 @@ impl Network for HttpNetwork {
         let auth = self.auth.clone();
 
         let handle = tokio::spawn(async move {
+            let mut backoff_secs = 1u64;
+            const MAX_BACKOFF_SECS: u64 = 60;
+
             loop {
                 tracing::debug!(url = %url, "connecting to SSE endpoint");
 
@@ -106,18 +109,22 @@ impl Network for HttpNetwork {
                 let response = match request.send().await {
                     Ok(resp) => resp,
                     Err(e) => {
-                        tracing::warn!(error = %e, "SSE connection failed, retrying in 5s");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        tracing::warn!(error = %e, backoff = backoff_secs, "SSE connection failed, retrying");
+                        tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                         continue;
                     }
                 };
 
                 if !response.status().is_success() {
-                    tracing::warn!(status = %response.status(), "SSE endpoint returned error, retrying in 5s");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    tracing::warn!(status = %response.status(), backoff = backoff_secs, "SSE endpoint returned error, retrying");
+                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
                     continue;
                 }
 
+                // Connection succeeded, reset backoff.
+                backoff_secs = 1;
                 tracing::info!(url = %url, "SSE connection established");
 
                 // Read SSE stream
@@ -163,8 +170,9 @@ impl Network for HttpNetwork {
                     }
                 }
 
-                tracing::info!("SSE connection closed, reconnecting in 1s");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tracing::info!(backoff = backoff_secs, "SSE connection closed, reconnecting");
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
         });
 

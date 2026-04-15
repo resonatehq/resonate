@@ -230,38 +230,33 @@ impl Core {
             // AssertUnwindSafe is sound here because on panic we skip all
             // post-execution logic (flush, suspend, fulfill) and return an error
             // immediately, so we never observe partially-mutated Context state.
-            let result =
-                match AssertUnwindSafe((func)(env, task_data.args.clone()))
-                    .catch_unwind()
-                    .await
-                {
-                    Ok(result) => result,
-                    Err(panic_payload) => {
-                        let msg = panic_payload
-                            .downcast_ref::<String>()
-                            .map(|s| s.as_str())
-                            .or_else(|| panic_payload.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown panic");
+            let result = match AssertUnwindSafe((func)(env, task_data.args.clone()))
+                .catch_unwind()
+                .await
+            {
+                Ok(result) => result,
+                Err(panic_payload) => {
+                    let msg = panic_payload
+                        .downcast_ref::<String>()
+                        .map(|s| s.as_str())
+                        .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("unknown panic");
 
-                        if msg.contains("execution suspended") {
-                            tracing::error!(
-                                task_id = task_id,
-                                "user function panicked by unwrapping Error::Suspended — \
+                    if msg.contains("execution suspended") {
+                        tracing::error!(
+                            task_id = task_id,
+                            "user function panicked by unwrapping Error::Suspended — \
                                  use `?` to propagate suspension errors instead of `.unwrap()`"
-                            );
-                        } else {
-                            tracing::error!(
-                                task_id = task_id,
-                                panic = msg,
-                                "user function panicked"
-                            );
-                        }
-
-                        return Err(Error::Application {
-                            message: format!("user function panicked: {}", msg),
-                        });
+                        );
+                    } else {
+                        tracing::error!(task_id = task_id, panic = msg, "user function panicked");
                     }
-                };
+
+                    return Err(Error::Application {
+                        message: format!("user function panicked: {}", msg),
+                    });
+                }
+            };
 
             // Flush remaining local work
             let flush_remote = ctx.flush_local_work().await;
