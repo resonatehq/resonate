@@ -51,9 +51,11 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Checkout resonate-testbed
+        # TODO(temp): remove ref once protocol-changes is merged into main
         uses: actions/checkout@v5
         with:
           repository: resonatehq/resonate-test
+          ref: protocol-changes
           token: ${{ secrets.TESTBED_TOKEN }}
           path: test/resonate-test
 
