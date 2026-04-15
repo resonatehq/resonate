@@ -1103,6 +1103,147 @@ pub async fn run_schedules(args: ScheduleArgs) {
     }
 }
 
+// ---- Tree command ----
+
+#[derive(Args, Debug)]
+pub struct TreeArgs {
+    #[command(flatten)]
+    pub global: GlobalArgs,
+
+    /// Root promise ID to display as a call-graph tree
+    pub id: String,
+}
+
+pub async fn run_tree(args: TreeArgs) {
+    let server = &args.global.server;
+    let token = args.global.token.as_deref();
+    let root_id = &args.id;
+
+    // Collect all promises tagged with resonate:origin = root_id
+    let mut all_promises: Vec<Value> = Vec::new();
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let mut data = json!({ "limit": 100, "tags": { "resonate:origin": root_id } });
+        if let Some(ref c) = cursor {
+            data["cursor"] = json!(c);
+        }
+
+        let resp = post(server, "promise.search", token, data).await;
+        let page = match resp {
+            Ok(v) => v,
+            Err(e) => error_exit(&e),
+        };
+
+        if let Some(arr) = page["promises"].as_array() {
+            all_promises.extend(arr.iter().cloned());
+        }
+
+        cursor = page["cursor"].as_str().map(|s| s.to_string());
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    // Build parent → children map and locate root promise
+    let mut root_promise: Option<Value> = None;
+    let mut children_map: std::collections::HashMap<String, Vec<Value>> =
+        std::collections::HashMap::new();
+
+    for p in &all_promises {
+        let id = p["id"].as_str().unwrap_or("").to_string();
+        if id == *root_id {
+            root_promise = Some(p.clone());
+        }
+        if let Some(parent) = p["tags"]["resonate:parent"].as_str() {
+            if parent != id {
+                children_map
+                    .entry(parent.to_string())
+                    .or_default()
+                    .push(p.clone());
+            }
+        }
+    }
+
+    // Sort each child list by createdAt ascending
+    for children in children_map.values_mut() {
+        children.sort_by_key(|p| p["createdAt"].as_i64().unwrap_or(0));
+    }
+
+    // Recursive printer
+    fn print_tree(
+        promise: &Value,
+        children_map: &std::collections::HashMap<String, Vec<Value>>,
+        prefix: &str,
+        is_last: bool,
+        is_root: bool,
+    ) {
+        let id = promise["id"].as_str().unwrap_or("<unknown>");
+        let state = promise["state"].as_str().unwrap_or("");
+
+        let status = match state {
+            "pending" => " 🟡",
+            "resolved" => " 🟢",
+            "rejected" | "rejected_canceled" | "rejected_timedout" => " 🔴",
+            _ => "",
+        };
+
+        let connector = if is_root {
+            ""
+        } else if !is_last {
+            "├── "
+        } else {
+            "└── "
+        };
+
+        let detail = promise_detail(promise);
+        println!("{}{}{}{} {}", prefix, connector, id, status, detail);
+
+        let empty = vec![];
+        let kids = children_map.get(id).unwrap_or(&empty);
+        for (i, child) in kids.iter().enumerate() {
+            let new_prefix = if is_root {
+                prefix.to_string()
+            } else if !is_last {
+                format!("{}{}", prefix, "│   ")
+            } else {
+                format!("{}{}", prefix, "    ")
+            };
+            print_tree(child, children_map, &new_prefix, i == kids.len() - 1, false);
+        }
+    }
+
+    let placeholder = json!({ "id": root_id });
+    let root = root_promise.as_ref().unwrap_or(&placeholder);
+    print_tree(root, &children_map, "", true, true);
+}
+
+/// Decode the promise param and extract display details (scope / func name).
+fn promise_detail(p: &Value) -> String {
+    let tags = &p["tags"];
+
+    // Extract function name from base64-encoded param.data if present
+    let func_name = p["param"]["data"]
+        .as_str()
+        .and_then(|enc| STANDARD.decode(enc).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|v| v["func"].as_str().map(|s| format!(" {}", s)));
+    let func_suffix = func_name.as_deref().unwrap_or("");
+
+    if tags["resonate:timer"]
+        .as_str()
+        .is_some_and(|v| !v.is_empty())
+    {
+        "(sleep)".to_string()
+    } else if tags["resonate:scope"].as_str() == Some("global") {
+        format!("(rpc{})", func_suffix)
+    } else if tags["resonate:scope"].as_str() == Some("local") {
+        format!("(run{})", func_suffix)
+    } else {
+        String::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
