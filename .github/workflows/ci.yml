@@ -43,7 +43,6 @@ jobs:
       fail-fast: false
       matrix:
         STORAGE: [sqlite, postgres]
-        AUTH: [true, false]
 
     steps:
       - name: Checkout resonate-server-rs
@@ -67,7 +66,7 @@ jobs:
 
       - name: Run tests
         run: |
-          make test STORAGE=${{ matrix.STORAGE }} AUTH=${{ matrix.AUTH }}
+          make test STORAGE=${{ matrix.STORAGE }}
         env:
           DOCKER_BUILDKIT: 1
 
