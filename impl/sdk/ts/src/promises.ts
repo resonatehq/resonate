@@ -95,7 +95,44 @@ export class Promises {
     return { promise: res.data.promise, task: res.data.task };
   }
 
-  async settle(
+  async resolve(
+    id: string,
+    {
+      headers = {},
+      data = "",
+    }: {
+      headers?: { [key: string]: string };
+      data?: string;
+    } = {},
+  ): Promise<PromiseRecord> {
+    return this.settle(id, "resolved", { headers, data });
+  }
+  async reject(
+    id: string,
+    {
+      headers = {},
+      data = "",
+    }: {
+      headers?: { [key: string]: string };
+      data?: string;
+    } = {},
+  ): Promise<PromiseRecord> {
+    return this.settle(id, "rejected", { headers, data });
+  }
+  async cancel(
+    id: string,
+    {
+      headers = {},
+      data = "",
+    }: {
+      headers?: { [key: string]: string };
+      data?: string;
+    } = {},
+  ): Promise<PromiseRecord> {
+    return this.settle(id, "rejected_canceled", { headers, data });
+  }
+
+  private async settle(
     id: string,
     state: "resolved" | "rejected" | "rejected_canceled",
     {

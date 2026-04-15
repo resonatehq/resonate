@@ -494,7 +494,7 @@ describe("Resonate usage tests", () => {
     const p = await f.beginRun("f");
     await setTimeout(100); // Ensure f.0 promise is created
 
-    await resonate.promises.settle("f.0", "resolved", { data: encodeValue(codec, "myValue").data });
+    await resonate.promises.resolve("f.0", { data: encodeValue(codec, "myValue").data });
     const v = await p.result();
     expect(v).toBe("myValue");
     await resonate.stop();
@@ -518,7 +518,7 @@ describe("Resonate usage tests", () => {
     const p = await f.beginRun("f");
     await setTimeout(100); // Ensure myId promise is created
 
-    await resonate.promises.settle("f.0", "resolved", { data: encodeValue(codec, "myValue").data });
+    await resonate.promises.resolve("f.0", { data: encodeValue(codec, "myValue").data });
     const v = await p.result();
     expect(v).toBe("myValue");
     await resonate.stop();
@@ -554,7 +554,7 @@ describe("Resonate usage tests", () => {
       "resonate:parent": "f",
       "resonate:scope": "global",
     });
-    await resonate.promises.settle("f.0", "resolved", { data: encodeValue(codec, "myValue").data });
+    await resonate.promises.resolve("f.0", { data: encodeValue(codec, "myValue").data });
     const v = await p.result();
     expect(v).toBe("myValue");
     await resonate.stop();
@@ -637,7 +637,7 @@ describe("Resonate usage tests", () => {
 
     // get returns the promise value
     await resonate.promises.create("foo", Number.MAX_SAFE_INTEGER);
-    await resonate.promises.settle("foo", "resolved", { data: encodeValue(codec, "foo").data });
+    await resonate.promises.resolve("foo", { data: encodeValue(codec, "foo").data });
 
     const handle = await resonate.get("foo");
     expect(await handle.result()).toBe("foo");
