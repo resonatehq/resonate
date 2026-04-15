@@ -1733,7 +1733,7 @@ mod tests {
 
         let settled = r
             .promises
-            .settle("sub-p2", "resolved", serde_json::json!({"data": "result"}))
+            .resolve("sub-p2", serde_json::json!({"data": "result"}))
             .await;
         assert!(settled.is_ok());
 
@@ -2047,7 +2047,7 @@ mod tests {
         // Settle the promise — the local network will dispatch an Unblock
         // message through the transport to our watch channel.
         r.promises
-            .settle("e2e-1", "resolved", serde_json::json!(null))
+            .resolve("e2e-1", serde_json::json!(null))
             .await
             .unwrap();
 
@@ -2073,7 +2073,7 @@ mod tests {
 
         // Settle — Unblock flows through transport → watch → both receivers
         r.promises
-            .settle("e2e-multi", "resolved", serde_json::json!(null))
+            .resolve("e2e-multi", serde_json::json!(null))
             .await
             .unwrap();
 
@@ -2097,7 +2097,7 @@ mod tests {
 
         // Reject the promise
         r.promises
-            .settle("e2e-reject", "rejected", serde_json::json!(null))
+            .reject("e2e-reject", serde_json::json!(null))
             .await
             .unwrap();
 
@@ -2122,7 +2122,7 @@ mod tests {
             .await
             .unwrap();
         r.promises
-            .settle("e2e-pre", "resolved", serde_json::json!(null))
+            .resolve("e2e-pre", serde_json::json!(null))
             .await
             .unwrap();
 
@@ -2148,7 +2148,7 @@ mod tests {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             promises
-                .settle("e2e-block", "resolved", serde_json::json!(null))
+                .resolve("e2e-block", serde_json::json!(null))
                 .await
                 .unwrap();
         });

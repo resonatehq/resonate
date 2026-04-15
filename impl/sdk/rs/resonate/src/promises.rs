@@ -65,8 +65,24 @@ impl Promises {
             .ok_or_else(|| Error::DecodingError("missing 'promise' field in response".into()))
     }
 
-    /// Settle (resolve or reject) a promise.
-    pub async fn settle(
+    /// Resolve a promise (state: `"resolved"`).
+    pub async fn resolve(&self, id: &str, value: serde_json::Value) -> Result<serde_json::Value> {
+        self.settle(id, "resolved", value).await
+    }
+
+    /// Reject a promise (state: `"rejected"`).
+    pub async fn reject(&self, id: &str, value: serde_json::Value) -> Result<serde_json::Value> {
+        self.settle(id, "rejected", value).await
+    }
+
+    /// Cancel a promise (state: `"rejected_canceled"`).
+    pub async fn cancel(&self, id: &str, value: serde_json::Value) -> Result<serde_json::Value> {
+        self.settle(id, "rejected_canceled", value).await
+    }
+
+    /// Settle a promise with an explicit state string and typed value fields.
+    /// Prefer [`resolve`], [`reject`], or [`cancel`] for normal use.
+    async fn settle(
         &self,
         id: &str,
         state: &str,
