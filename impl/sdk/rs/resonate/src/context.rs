@@ -1200,7 +1200,7 @@ mod tests {
         const KIND: DurableKind = DurableKind::Workflow;
         async fn execute(&self, env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
             let ctx = env.into_context();
-            let v: i32 = ctx.rpc("remoteFunc", &()).await?;
+            let v: i32 = ctx.rpc("remoteFunc", ()).await?;
             Ok(v * 2)
         }
     }
@@ -1549,7 +1549,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("main", effects);
 
-        let result: crate::error::Result<i32> = ctx.rpc("remoteFunc", &()).await;
+        let result: crate::error::Result<i32> = ctx.rpc("remoteFunc", ()).await;
         let outcome = finalize_context(&ctx, result).await;
 
         match outcome {
@@ -1587,7 +1587,7 @@ mod tests {
         let ctx = test_context("main", effects);
 
         let local_val: i32 = ctx.run(Add, (1, 2)).await.unwrap();
-        let remote_result: crate::error::Result<i32> = ctx.rpc("remoteFunc", &()).await;
+        let remote_result: crate::error::Result<i32> = ctx.rpc("remoteFunc", ()).await;
         let workflow_result = match remote_result {
             Ok(v) => Ok(local_val + v),
             Err(Error::Suspended) => Err(Error::Suspended),
@@ -1758,7 +1758,7 @@ mod tests {
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
-        let _: crate::error::Result<i32> = ctx.rpc("remote", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("remote", ()).await;
 
         let requests = harness.sent_requests_json().await;
         let create_req = requests.iter().find(|r| r["kind"] == "promise.create");
@@ -1825,7 +1825,7 @@ mod tests {
             });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
-        let _: crate::error::Result<i32> = ctx.rpc("hello", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("hello", ()).await;
 
         let requests = harness.sent_requests_json().await;
         let create = requests
@@ -1850,7 +1850,7 @@ mod tests {
             });
         let ctx = test_context_with_match("root", effects, target_resolver);
 
-        let _: crate::error::Result<String> = ctx.rpc("my_func", &42i32).await;
+        let _: crate::error::Result<String> = ctx.rpc("my_func", 42i32).await;
 
         let requests = harness.sent_requests_json().await;
         let create = requests
@@ -1899,7 +1899,7 @@ mod tests {
             std::sync::Arc::new(|target: Option<&str>| target.unwrap_or("default").to_string());
         let ctx = test_context_with_match("root", effects, target_resolver);
 
-        let _: crate::error::Result<i32> = ctx.rpc("bare_name", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("bare_name", ()).await;
 
         let requests = harness.sent_requests_json().await;
         let create = requests
@@ -1926,9 +1926,9 @@ mod tests {
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // First rpc call
-        let _: crate::error::Result<i32> = ctx.rpc("func_a", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("func_a", ()).await;
         // Second rpc call — same context, target_resolver should still work
-        let _: crate::error::Result<i32> = ctx.rpc("func_b", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("func_b", ()).await;
 
         let requests = harness.sent_requests_json().await;
         let creates: Vec<_> = requests
@@ -1966,7 +1966,7 @@ mod tests {
 
         // Explicit .target() with a URL — should be kept as-is
         let _: crate::error::Result<i32> = ctx
-            .rpc("some_func", &())
+            .rpc("some_func", ())
             .target("http://other-host:8001/workers/hello")
             .await;
 
@@ -2000,10 +2000,10 @@ mod tests {
         let ctx = test_context_with_match("root", effects, target_resolver);
 
         // Bare name target override — should be rewritten
-        let _: crate::error::Result<i32> = ctx.rpc("func_a", &()).target("workers").await;
+        let _: crate::error::Result<i32> = ctx.rpc("func_a", ()).target("workers").await;
         // URL target override — should NOT be rewritten
         let _: crate::error::Result<i32> = ctx
-            .rpc("func_b", &())
+            .rpc("func_b", ())
             .target("https://remote.example.com/workers/greet")
             .await;
 
@@ -2326,7 +2326,7 @@ mod tests {
         let parent_timeout = now + 5_000;
         let ctx = test_context_with_timeout("root", parent_timeout, effects);
 
-        let _: crate::error::Result<i32> = ctx.rpc("remote_func", &()).await;
+        let _: crate::error::Result<i32> = ctx.rpc("remote_func", ()).await;
 
         let requests = harness.sent_requests_json().await;
         let create = requests
@@ -2696,7 +2696,7 @@ mod tests {
         let param = &create["param"];
         let data = &param["data"];
         assert!(
-            data.is_null() || data.as_str().map_or(false, |s| s.is_empty()),
+            data.is_null() || data.as_str().is_some_and(|s| s.is_empty()),
             "sleep param data should be null or empty, got {:?}",
             data
         );
@@ -2802,7 +2802,7 @@ mod tests {
         let param = &create["param"];
         let data = &param["data"];
         assert!(
-            data.is_null() || data.as_str().map_or(false, |s| s.is_empty()),
+            data.is_null() || data.as_str().is_some_and(|s| s.is_empty()),
             "promise param data should be null or empty, got {:?}",
             data
         );

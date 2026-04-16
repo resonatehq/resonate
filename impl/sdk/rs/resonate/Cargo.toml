@@ -1,11 +1,16 @@
 [package]
-name = "resonate"
+name = "resonate-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
 
 [dependencies]
-resonate-macros = { path = "../resonate-macros" }
+resonate-sdk-macros = { path = "../resonate-macros", version = "0.1.0" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

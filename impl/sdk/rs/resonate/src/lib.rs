@@ -84,7 +84,7 @@ pub(crate) fn now_ms() -> i64 {
 mod test_utils;
 
 /// Re-export the proc macro.
-pub use resonate_macros::function;
+pub use resonate_sdk_macros::function;
 
 /// Prelude module for convenient imports.
 pub mod prelude {
@@ -108,5 +108,5 @@ pub mod prelude {
     };
     pub use crate::transport::Transport;
     pub use crate::types::{DurableKind, Outcome, PromiseState};
-    pub use resonate_macros::function;
+    pub use resonate_sdk_macros::function;
 }

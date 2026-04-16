@@ -170,7 +170,10 @@ impl Network for HttpNetwork {
                     }
                 }
 
-                tracing::info!(backoff = backoff_secs, "SSE connection closed, reconnecting");
+                tracing::info!(
+                    backoff = backoff_secs,
+                    "SSE connection closed, reconnecting"
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }

@@ -16,6 +16,7 @@ pub struct Info {
 }
 
 impl Info {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: String,
         parent_id: String,

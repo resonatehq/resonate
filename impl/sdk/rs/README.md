@@ -6,7 +6,7 @@ The Resonate Rust SDK lets you build reliable, distributed applications using Ru
 Built on [tokio](https://tokio.rs), it gives you durable execution with automatic recovery, idempotency, and distributed coordination — without the infrastructure headache.
 
 **Resonate** is a durable execution engine.
-Write your business logic as normal async Rust functions, annotate them with `#[resonate::function]`, and Resonate handles retries, recovery, and replay.
+Write your business logic as normal async Rust functions, annotate them with `#[resonate_sdk::function]`, and Resonate handles retries, recovery, and replay.
 If your process crashes mid-workflow, execution resumes from the last checkpoint — not from the beginning.
 
 ## Links
@@ -18,31 +18,42 @@ If your process crashes mid-workflow, execution resumes from the last checkpoint
 
 ## Installation
 
-The Rust SDK is not yet published on crates.io.
-Add it as a git dependency in your `Cargo.toml`:
+```bash
+cargo add resonate-sdk tokio --features tokio/full
+cargo add serde --features derive
+```
+
+Or add to your `Cargo.toml` directly:
 
 ```toml
 [dependencies]
-resonate = { git = "https://github.com/resonatehq/resonate-sdk-rs", branch = "master" }
+resonate-sdk = "0.1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
+```
+
+To track the latest development version, use a git dependency:
+
+```toml
+[dependencies]
+resonate-sdk = { git = "https://github.com/resonatehq/resonate-sdk-rust", branch = "main" }
 ```
 
 ## Quick example
 
 ```rust
-use resonate::prelude::*;
+use resonate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 
 // A workflow function — receives &Context for durable sub-task orchestration.
-#[resonate::function]
+#[resonate_sdk::function]
 async fn greet(ctx: &Context, name: String) -> Result<String> {
     let greeting = ctx.run(format_greeting, name).await?;
     Ok(greeting)
 }
 
 // A leaf function — pure computation, no Context needed.
-#[resonate::function]
+#[resonate_sdk::function]
 async fn format_greeting(name: String) -> Result<String> {
     Ok(format!("Hello, {}!", name))
 }
@@ -73,7 +84,7 @@ Run a server with `resonate dev` (install via `brew install resonatehq/tap/reson
 Use `.spawn()` to fan out durable tasks in parallel:
 
 ```rust
-#[resonate::function]
+#[resonate_sdk::function]
 async fn fan_out(ctx: &Context) -> Result<Vec<String>> {
     // Spawn tasks in parallel
     let h1 = ctx.run(process, "alpha".into()).spawn().await?;
@@ -137,7 +148,7 @@ Client-side builders (`resonate.run()`, `resonate.rpc()`) additionally support:
 
 ### Function annotation
 
-`#[resonate::function]` detects the function kind from the first parameter:
+`#[resonate_sdk::function]` detects the function kind from the first parameter:
 
 | First parameter | Kind | Description |
 |---|---|---|

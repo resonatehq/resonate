@@ -36,7 +36,7 @@ impl<'a> ExecutionEnv<'a> {
     }
 }
 
-/// Trait implemented by all `#[resonate::function]`-annotated functions.
+/// Trait implemented by all `#[resonate_sdk::function]`-annotated functions.
 /// Provides name/kind metadata and a uniform execution interface.
 ///
 /// Type parameters:

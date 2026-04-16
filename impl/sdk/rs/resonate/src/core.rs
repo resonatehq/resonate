@@ -41,6 +41,7 @@ pub struct Core {
 }
 
 impl Core {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sender: Sender,
         codec: Codec,
@@ -383,47 +384,47 @@ mod tests {
 
     // ── Test functions ─────────────────────────────────────────────
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn noop() -> Result<()> {
         Ok(())
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn simple() -> Result<i64> {
         Ok(1)
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn fail() -> Result<i64> {
         Err(Error::Application {
             message: "err".to_string(),
         })
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn obj() -> Result<serde_json::Value> {
         Ok(serde_json::json!({"x": 1}))
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn add(x: i64, y: i64) -> Result<i64> {
         Ok(x + y)
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn double(x: i64) -> Result<i64> {
         Ok(x * 2)
     }
 
     /// Workflow that suspends on a single remote dependency.
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn suspending_once(ctx: &Context) -> Result<i64> {
         let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
         Ok(0)
     }
 
     /// Workflow that suspends on two remote dependencies.
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn suspending_multi(ctx: &Context) -> Result<i64> {
         let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
         let _ = ctx.rpc::<i32>("dep-b", &()).spawn().await?;
@@ -433,7 +434,7 @@ mod tests {
     static COMP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     /// Workflow that suspends on first call and completes on second (redirect test).
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn suspending_then_done(ctx: &Context) -> Result<i64> {
         let count = COMP_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
@@ -444,13 +445,13 @@ mod tests {
         }
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn use_preload(ctx: &Context) -> Result<i32> {
-        let v: i32 = ctx.rpc("remote", &()).await?;
+        let v: i32 = ctx.rpc("remote", ()).await?;
         Ok(v)
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn remote_dep(ctx: &Context) -> Result<i32> {
         let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
         Ok(0)
@@ -630,7 +631,7 @@ mod tests {
 
     static REDIR_NO_ACQUIRE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn redir_no_acquire(ctx: &Context) -> Result<i64> {
         let count = REDIR_NO_ACQUIRE_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
@@ -674,7 +675,7 @@ mod tests {
 
     static REDIR_PRELOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn redir_preload(ctx: &Context) -> Result<i64> {
         let count = REDIR_PRELOAD_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
@@ -715,7 +716,7 @@ mod tests {
 
     static MULTI_REDIR_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn multi_redirect(ctx: &Context) -> Result<i64> {
         let count = MULTI_REDIR_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count < 2 {
@@ -1215,7 +1216,7 @@ mod tests {
 
     // ── Panic handling (catch_unwind) ─────────────────────────────
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn unwrap_suspend(ctx: &Context) -> Result<i32> {
         // Simulates a user accidentally calling .unwrap() on a suspended rpc
         let handle = ctx.rpc::<i32>("dep", &()).spawn().await?;
@@ -1255,7 +1256,7 @@ mod tests {
         );
     }
 
-    #[resonate_macros::function]
+    #[resonate_sdk_macros::function]
     async fn plain_panic(_ctx: &Context) -> Result<i32> {
         panic!("something went wrong");
     }

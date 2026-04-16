@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use resonate::prelude::*;
+use resonate_sdk::prelude::*;
 
 // ═══════════════════════════════════════════════════════════════════
 //  Helpers
@@ -57,22 +57,22 @@ fn make_resonate(url: &str) -> Resonate {
 //  Test functions (leaf)
 // ═══════════════════════════════════════════════════════════════════
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn add(x: i64, y: i64) -> Result<i64> {
     Ok(x + y)
 }
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn greet(name: String) -> Result<String> {
     Ok(format!("hello, {}!", name))
 }
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn noop() -> Result<()> {
     Ok(())
 }
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn fail_always(msg: String) -> Result<String> {
     Err(Error::Application { message: msg })
 }
@@ -81,14 +81,14 @@ async fn fail_always(msg: String) -> Result<String> {
 //  Test functions (workflows)
 // ═══════════════════════════════════════════════════════════════════
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn sequential_workflow(ctx: &Context) -> Result<i64> {
     let a: i64 = ctx.rpc::<i64>("add", (1_i64, 2_i64)).await?;
     let b: i64 = ctx.rpc::<i64>("add", (a, 3_i64)).await?;
     Ok(b)
 }
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn parallel_workflow(ctx: &Context) -> Result<i64> {
     let h1 = ctx.rpc::<i64>("add", (10_i64, 20_i64)).spawn().await?;
     let h2 = ctx.rpc::<i64>("add", (30_i64, 40_i64)).spawn().await?;
@@ -97,7 +97,7 @@ async fn parallel_workflow(ctx: &Context) -> Result<i64> {
     Ok(r1 + r2)
 }
 
-#[resonate::function]
+#[resonate_sdk::function]
 async fn run_sub_workflow(ctx: &Context) -> Result<i64> {
     let a: i64 = ctx.run(add, (5_i64, 5_i64)).await?;
     let b: i64 = ctx.run(add, (a, 10_i64)).await?;
@@ -174,8 +174,7 @@ async fn simple_noop() {
     r.register(noop).unwrap();
 
     let id = unique_id("simple-noop");
-    let result: () = with_timeout(r.run(&id, noop, ())).await.unwrap();
-    assert_eq!(result, ());
+    let _: () = with_timeout(r.run(&id, noop, ())).await.unwrap();
 
     r.stop().await.unwrap();
 }

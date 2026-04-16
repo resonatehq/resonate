@@ -1,0 +1,60 @@
+name: Publish to crates.io
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check whether resonate-sdk-macros needs publishing
+        id: macros
+        run: |
+          version=$(cargo metadata --format-version=1 --no-deps \
+            | jq -r '.packages[] | select(.name=="resonate-sdk-macros") | .version')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if cargo search resonate-sdk-macros --limit 1 2>/dev/null \
+              | grep -q "^resonate-sdk-macros = \"${version}\""; then
+            echo "resonate-sdk-macros@${version} already on crates.io — skipping publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish resonate-sdk-macros
+        if: steps.macros.outputs.publish == 'true'
+        run: cargo publish --locked -p resonate-sdk-macros
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io to index resonate-sdk-macros
+        if: steps.macros.outputs.publish == 'true'
+        run: |
+          version="${{ steps.macros.outputs.version }}"
+          echo "Waiting for resonate-sdk-macros@${version} to appear on crates.io..."
+          for i in $(seq 1 60); do
+            if cargo search resonate-sdk-macros --limit 1 2>/dev/null \
+                | grep -q "^resonate-sdk-macros = \"${version}\""; then
+              echo "Indexed."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Timed out waiting for crates.io indexing." >&2
+          exit 1
+
+      - name: Publish resonate-sdk
+        run: cargo publish --locked -p resonate-sdk
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

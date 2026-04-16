@@ -4,18 +4,18 @@ use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, FnArg, ItemFn, Pat, Type};
 
-/// Returns the token path to the `resonate` crate root.
-/// - When compiled inside the `resonate` crate itself → `crate`
-/// - When compiled by an external consumer          → `resonate` (or the renamed alias)
+/// Returns the token path to the `resonate-sdk` crate root.
+/// - When compiled inside the `resonate-sdk` crate itself → `crate`
+/// - When compiled by an external consumer               → `resonate_sdk` (or the renamed alias)
 fn resonate_crate() -> TokenStream2 {
-    match crate_name("resonate") {
+    match crate_name("resonate-sdk") {
         Ok(FoundCrate::Itself) => quote! { crate },
         Ok(FoundCrate::Name(name)) => {
             let ident = format_ident!("{}", name);
             quote! { #ident }
         }
         // Fallback: assume external usage
-        Err(_) => quote! { resonate },
+        Err(_) => quote! { resonate_sdk },
     }
 }
 
@@ -33,10 +33,10 @@ fn resonate_crate() -> TokenStream2 {
 /// # Examples
 ///
 /// ```ignore
-/// #[resonate::function]
+/// #[resonate_sdk::function]
 /// async fn my_leaf(x: i32) -> Result<i32> { Ok(x + 1) }
 ///
-/// #[resonate::function]
+/// #[resonate_sdk::function]
 /// async fn my_workflow(ctx: &Context, x: i32) -> Result<i32> {
 ///     ctx.run(my_leaf, x).await
 /// }
@@ -152,7 +152,7 @@ fn generate_durable_impl(
     // Extract return type T from Result<T>
     let return_type = extract_return_type(&input.sig.output)?;
 
-    // Resolve the crate path (crate:: when inside resonate, resonate:: externally)
+    // Resolve the crate path (crate:: when inside resonate-sdk, resonate_sdk:: externally)
     let krate = resonate_crate();
 
     // Generate the kind constant

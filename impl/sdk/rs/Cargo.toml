@@ -1,8 +1,12 @@
 [workspace]
-members = ["resonate", "resonate-macros", "scratch"]
+members = ["resonate", "resonate-macros"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+description = "Durable promises SDK for Rust"
+repository = "https://github.com/resonatehq/resonate-sdk-rust"
+keywords = ["durable", "promise", "async", "workflow", "sdk"]
+categories = ["asynchronous", "development-tools"]

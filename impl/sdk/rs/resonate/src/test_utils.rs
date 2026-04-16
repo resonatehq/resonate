@@ -229,7 +229,7 @@ impl StubNetwork {
         // Return the promise from the action.
         // The action may be a full envelope { kind, head, data } or flat { id, state, value }.
         let raw_action = data.get("action");
-        let action = raw_action.map(|a| unwrap_sub_envelope(a));
+        let action = raw_action.map(unwrap_sub_envelope);
         let id = action
             .as_ref()
             .and_then(|a| a.get("id"))
@@ -467,7 +467,7 @@ impl TestHarness {
                     }
                     if let Some(actions) = flat.get("actions").and_then(|v| v.as_array()).cloned() {
                         let unwrapped: Vec<serde_json::Value> =
-                            actions.iter().map(|a| unwrap_sub_envelope(a)).collect();
+                            actions.iter().map(unwrap_sub_envelope).collect();
                         flat.insert("actions".to_string(), serde_json::Value::Array(unwrapped));
                     }
                     serde_json::Value::Object(flat)

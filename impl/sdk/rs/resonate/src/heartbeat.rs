@@ -197,7 +197,7 @@ mod tests {
 
         hb.stop("task-1");
         assert_eq!(hb.task_count(), 1);
-        assert!(hb.tracked_tasks().get("task-1").is_none());
+        assert!(!hb.tracked_tasks().contains_key("task-1"));
         assert_eq!(hb.tracked_tasks().get("task-2"), Some(&2));
 
         hb.shutdown();
