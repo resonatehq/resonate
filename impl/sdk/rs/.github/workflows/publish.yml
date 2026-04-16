@@ -18,34 +18,32 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check whether resonate-sdk-macros needs publishing
-        id: macros
-        run: |
-          version=$(cargo metadata --format-version=1 --no-deps \
-            | jq -r '.packages[] | select(.name=="resonate-sdk-macros") | .version')
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if cargo search resonate-sdk-macros --limit 1 2>/dev/null \
-              | grep -q "^resonate-sdk-macros = \"${version}\""; then
-            echo "resonate-sdk-macros@${version} already on crates.io — skipping publish."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish resonate-sdk-macros
-        if: steps.macros.outputs.publish == 'true'
-        run: cargo publish --locked -p resonate-sdk-macros
+        # Treat "already exists" as success so re-runs and version-unchanged
+        # releases are a safe no-op. A warning is emitted so an un-bumped
+        # version is still visible in the Actions UI.
+        run: |
+          cargo publish --locked -p resonate-sdk-macros 2>&1 | tee /tmp/publish-macros.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            if grep -q "already exists on crates.io" /tmp/publish-macros.log; then
+              echo "::warning title=resonate-sdk-macros already published::This version of resonate-sdk-macros is already on crates.io. If this release was meant to publish new code, bump the version in Cargo.toml."
+              exit 0
+            fi
+            exit "$code"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Wait for crates.io to index resonate-sdk-macros
-        if: steps.macros.outputs.publish == 'true'
         run: |
-          version="${{ steps.macros.outputs.version }}"
+          version=$(cargo metadata --format-version=1 --no-deps \
+            | jq -r '.packages[] | select(.name=="resonate-sdk-macros") | .version')
           echo "Waiting for resonate-sdk-macros@${version} to appear on crates.io..."
           for i in $(seq 1 60); do
-            if cargo search resonate-sdk-macros --limit 1 2>/dev/null \
-                | grep -q "^resonate-sdk-macros = \"${version}\""; then
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              "https://crates.io/api/v1/crates/resonate-sdk-macros/${version}")
+            if [ "$status" = "200" ]; then
               echo "Indexed."
               exit 0
             fi
@@ -55,6 +53,16 @@ jobs:
           exit 1
 
       - name: Publish resonate-sdk
-        run: cargo publish --locked -p resonate-sdk
+        # Same idempotency treatment as resonate-sdk-macros above.
+        run: |
+          cargo publish --locked -p resonate-sdk 2>&1 | tee /tmp/publish-sdk.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            if grep -q "already exists on crates.io" /tmp/publish-sdk.log; then
+              echo "::warning title=resonate-sdk already published::This version of resonate-sdk is already on crates.io. If this release was meant to publish new code, bump the version in Cargo.toml."
+              exit 0
+            fi
+            exit "$code"
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
