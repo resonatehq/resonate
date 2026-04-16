@@ -74,7 +74,7 @@ export interface STimeout {
 
 export type PromiseState = "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
 
-export interface DurablePromise {
+export interface Promise {
   id: string;
   state: PromiseState;
   param: Value;
@@ -83,8 +83,8 @@ export interface DurablePromise {
   timeoutAt: number;
   createdAt: number;
   settledAt: number | null;
-  awaiters: Set<string>; // IDs of promises waiting on this one
-  subscribers: Set<string>; // addresses subscribed to this promise
+  callbacks: Set<string>; // IDs of promises waiting on this one
+  listeners: Set<string>; // addresses listening for this promise's settlement
 }
 
 export type TaskState = "pending" | "acquired" | "suspended" | "halted" | "fulfilled";
@@ -137,7 +137,7 @@ const PENDING_RETRY_TTL = 30000;
 // =============================================================================
 
 export class Server {
-  promises = new Map<string, DurablePromise>();
+  promises = new Map<string, Promise>();
   tasks = new Map<string, Task>();
   schedules = new Map<string, Schedule>();
   pTimeouts: PTimeout[] = [];
@@ -330,10 +330,10 @@ export class Server {
   }
 
   private promiseCreate(now: number, req: PromiseCreateReq): { response: PromiseCreateRes; changes: Change[] } {
-    const existing = this.promises.get(req.data.id);
-    if (existing) {
+    const existingPromise = this.promises.get(req.data.id);
+    if (existingPromise) {
       return {
-        response: this.response("promise.create", 200, { promise: this.toPromiseRecord(existing) }),
+        response: this.response("promise.create", 200, { promise: this.toPromiseRecord(existingPromise) }),
         changes: [],
       };
     }
@@ -342,7 +342,7 @@ export class Server {
 
     // Check if the promise is already timed out at creation
     if (now >= req.data.timeoutAt) {
-      const promise: DurablePromise = {
+      const promise: Promise = {
         id: req.data.id,
         state: this.timeoutState(req.data.tags),
         param: req.data.param ?? { data: undefined, headers: undefined },
@@ -351,13 +351,27 @@ export class Server {
         createdAt: req.data.timeoutAt,
         settledAt: req.data.timeoutAt,
         timeoutAt: req.data.timeoutAt,
-        awaiters: new Set(),
-        subscribers: new Set(),
+        callbacks: new Set(),
+        listeners: new Set(),
       };
       changes.push(this.setPromise(promise));
-      changes.push(...this.enqueueSettle(req.data.id));
-      changes.push(...this.resumeAwaiters(req.data.id, now));
-      changes.push(...this.notifySubscribers(req.data.id));
+
+      // Create fulfilled task inline if promise has a target
+      const address = req.data.tags["resonate:target"];
+      if (address) {
+        changes.push(
+          this.setTask({
+            id: req.data.id,
+            state: "fulfilled",
+            version: 0,
+            pid: undefined,
+            ttl: undefined,
+            resumes: new Set(),
+          }),
+        );
+      }
+
+      changes.push(...this.triggerSettlement(req.data.id, now));
 
       return {
         response: this.response("promise.create", 200, { promise: this.toPromiseRecord(promise) }),
@@ -365,7 +379,7 @@ export class Server {
       };
     }
 
-    const promise: DurablePromise = {
+    const promise: Promise = {
       id: req.data.id,
       state: "pending",
       param: req.data.param ?? { data: undefined, headers: undefined },
@@ -374,8 +388,8 @@ export class Server {
       createdAt: now,
       settledAt: null,
       timeoutAt: req.data.timeoutAt,
-      awaiters: new Set(),
-      subscribers: new Set(),
+      callbacks: new Set(),
+      listeners: new Set(),
     };
     changes.push(this.setPromise(promise));
     changes.push(this.setPTimeout({ id: req.data.id, timeout: req.data.timeoutAt }));
@@ -427,20 +441,18 @@ export class Server {
 
     const changes: Change[] = [];
 
-    const settled: DurablePromise = {
+    const settledPromise: Promise = {
       ...promise,
       state: req.data.state,
       value: req.data.value,
       settledAt: now,
     };
-    changes.push(this.setPromise(settled));
+    changes.push(this.setPromise(settledPromise));
     changes.push(this.delPTimeout(req.data.id));
-    changes.push(...this.enqueueSettle(req.data.id));
-    changes.push(...this.resumeAwaiters(req.data.id, now));
-    changes.push(...this.notifySubscribers(req.data.id));
+    changes.push(...this.triggerSettlement(req.data.id, now));
 
     return {
-      response: this.response("promise.settle", 200, { promise: this.toPromiseRecord(settled) }),
+      response: this.response("promise.settle", 200, { promise: this.toPromiseRecord(settledPromise) }),
       changes,
     };
   }
@@ -466,9 +478,9 @@ export class Server {
 
     const changes: Change[] = [];
 
-    // Add to awaiters if awaited is pending and awaiter is not settled
+    // Add to callbacks if awaited is pending and awaiter is not settled
     if (awaitedPromise.state === "pending" && awaiterPromise.state === "pending") {
-      awaitedPromise.awaiters.add(req.data.awaiter);
+      awaitedPromise.callbacks.add(req.data.awaiter);
       changes.push(this.setPromise(awaitedPromise));
     }
 
@@ -489,9 +501,9 @@ export class Server {
 
     const changes: Change[] = [];
 
-    // Add subscriber if promise is pending
+    // Add listener if promise is pending
     if (promise.state === "pending") {
-      promise.subscribers.add(req.data.address);
+      promise.listeners.add(req.data.address);
       changes.push(this.setPromise(promise));
     }
 
@@ -520,11 +532,13 @@ export class Server {
 
       // Pending → Acquired (acquire and return 200)
       if (existingTask.state === "pending") {
+        const newVersion = existingTask.version + 1;
         const changes: Change[] = [];
         changes.push(
           this.setTask({
             ...existingTask,
             state: "acquired",
+            version: newVersion,
             pid: req.data.pid,
             ttl: req.data.ttl,
             resumes: new Set(),
@@ -536,6 +550,7 @@ export class Server {
             task: this.toTaskRecord({
               ...existingTask,
               state: "acquired",
+              version: newVersion,
               pid: req.data.pid,
               ttl: req.data.ttl,
               resumes: new Set(),
@@ -576,7 +591,7 @@ export class Server {
 
     // Guard: promise already timed out
     if (now >= actionData.timeoutAt) {
-      const promise: DurablePromise = {
+      const promise: Promise = {
         id: actionData.id,
         state: this.timeoutState(actionData.tags),
         param: actionData.param,
@@ -585,8 +600,8 @@ export class Server {
         createdAt: actionData.timeoutAt,
         settledAt: actionData.timeoutAt,
         timeoutAt: actionData.timeoutAt,
-        awaiters: new Set(),
-        subscribers: new Set(),
+        callbacks: new Set(),
+        listeners: new Set(),
       };
       changes.push(this.setPromise(promise));
       const task: Task = {
@@ -609,7 +624,7 @@ export class Server {
     }
 
     // Create promise in pending state
-    const promise: DurablePromise = {
+    const promise: Promise = {
       id: actionData.id,
       state: "pending",
       param: actionData.param,
@@ -618,8 +633,8 @@ export class Server {
       createdAt: now,
       settledAt: null,
       timeoutAt: actionData.timeoutAt,
-      awaiters: new Set(),
-      subscribers: new Set(),
+      callbacks: new Set(),
+      listeners: new Set(),
     };
     changes.push(this.setPromise(promise));
     changes.push(this.setPTimeout({ id: actionData.id, timeout: actionData.timeoutAt }));
@@ -628,7 +643,7 @@ export class Server {
     const task: Task = {
       id: actionData.id,
       state: "acquired",
-      version: 0,
+      version: 1,
       pid: req.data.pid,
       ttl: req.data.ttl,
       resumes: new Set(),
@@ -660,10 +675,18 @@ export class Server {
       return { response: this.response("task.acquire", 409, "Version mismatch"), changes: [] };
     }
 
+    const newVersion = task.version + 1;
     const changes: Change[] = [];
     const promise = this.getPromiseOrThrow(req.data.id);
     changes.push(
-      this.setTask({ ...task, state: "acquired", pid: req.data.pid, ttl: req.data.ttl, resumes: new Set() }),
+      this.setTask({
+        ...task,
+        state: "acquired",
+        version: newVersion,
+        pid: req.data.pid,
+        ttl: req.data.ttl,
+        resumes: new Set(),
+      }),
     );
     changes.push(this.setTTimeout({ id: req.data.id, type: 1, timeout: now + req.data.ttl }));
 
@@ -672,6 +695,7 @@ export class Server {
         task: this.toTaskRecord({
           ...task,
           state: "acquired",
+          version: newVersion,
           pid: req.data.pid,
           ttl: req.data.ttl,
           resumes: new Set(),
@@ -696,8 +720,7 @@ export class Server {
     }
 
     const changes: Change[] = [];
-    const newVersion = task.version + 1;
-    changes.push(this.setTask({ ...task, state: "pending", version: newVersion, pid: undefined, ttl: undefined }));
+    changes.push(this.setTask({ ...task, state: "pending", pid: undefined, ttl: undefined }));
     changes.push(this.setTTimeout({ id: req.data.id, type: 0, timeout: now + PENDING_RETRY_TTL }));
 
     const promise = this.getPromiseOrThrow(req.data.id);
@@ -706,7 +729,7 @@ export class Server {
       this.sendMessage(address, {
         kind: "execute",
         head: {},
-        data: { task: { id: req.data.id, version: newVersion } },
+        data: { task: { id: req.data.id, version: task.version } },
       }),
     );
 
@@ -725,33 +748,30 @@ export class Server {
       return { response: this.response("task.fulfill", 409, "Version mismatch"), changes: [] };
     }
 
-    const settle = req.data.action.data;
-    const promise = this.getPromiseOrThrow(settle.id);
+    const promise = this.getPromiseOrThrow(req.data.action.data.id);
 
     const changes: Change[] = [];
 
     // Check if promise is already settled (possibly by auto-timeout above)
     if (promise.state !== "pending") {
       // Still fulfill the task but indicate the promise was already settled
-      changes.push(...this.enqueueSettle(req.data.id));
+      changes.push(...this.triggerFulfilled(req.data.id));
 
       return { response: this.response("task.fulfill", 200, { promise: this.toPromiseRecord(promise) }), changes };
     }
 
     // Settle the promise
-    const settled: DurablePromise = {
+    const settledPromise: Promise = {
       ...promise,
-      state: settle.state,
-      value: settle.value ?? {},
+      state: req.data.action.data.state,
+      value: req.data.action.data.value ?? {},
       settledAt: now,
     };
-    changes.push(this.setPromise(settled));
-    changes.push(this.delPTimeout(settle.id));
-    changes.push(...this.enqueueSettle(req.data.id));
-    changes.push(...this.resumeAwaiters(settle.id, now));
-    changes.push(...this.notifySubscribers(settle.id));
+    changes.push(this.setPromise(settledPromise));
+    changes.push(this.delPTimeout(req.data.action.data.id));
+    changes.push(...this.triggerSettlement(req.data.id, now));
 
-    return { response: this.response("task.fulfill", 200, { promise: this.toPromiseRecord(settled) }), changes };
+    return { response: this.response("task.fulfill", 200, { promise: this.toPromiseRecord(settledPromise) }), changes };
   }
 
   private taskSuspend(now: number, req: TaskSuspendReq): { response: TaskSuspendRes; changes: Change[] } {
@@ -768,15 +788,11 @@ export class Server {
 
     const changes: Change[] = [];
 
-    // Immediate resume — stay acquired, clear all resumes
-    if (task.resumes.size > 0) {
-      changes.push(this.setTask({ ...task, resumes: new Set() }));
-      return { response: this.response("task.suspend", 300, { preload: this.preload(req.data.id) }), changes };
-    }
-
-    // Register this task as an awaiter on each awaited promise.
-    // The awaiter is always req.data.id (validated above).
-    const triggers: string[] = [];
+    // First pass: validate all promises exist and classify as pending or settled.
+    // Callbacks are only registered when ALL promises are pending (spec transition #40).
+    // If any promise is already settled, return 300 immediately with no callbacks (spec transition #39).
+    const pendingPromises: Promise[] = [];
+    let hasSettled = false;
 
     for (const action of req.data.actions) {
       const awaitedPromise = this.promises.get(action.data.awaited);
@@ -785,19 +801,24 @@ export class Server {
       }
 
       if (awaitedPromise.state === "pending") {
-        awaitedPromise.awaiters.add(req.data.id);
-        changes.push(this.setPromise(awaitedPromise));
+        pendingPromises.push(awaitedPromise);
       } else {
-        // Already settled → immediate trigger
-        triggers.push(action.data.awaited);
+        hasSettled = true;
       }
     }
 
-    if (triggers.length > 0) {
+    // Immediate resume — stay acquired, clear all resumes, no callbacks registered
+    if (hasSettled) {
+      changes.push(this.setTask({ ...task, resumes: new Set() }));
       return { response: this.response("task.suspend", 300, { preload: this.preload(req.data.id) }), changes };
     }
 
-    // Actually suspend
+    // All pending: register callbacks then suspend
+    for (const awaitedPromise of pendingPromises) {
+      awaitedPromise.callbacks.add(req.data.id);
+      changes.push(this.setPromise(awaitedPromise));
+    }
+
     changes.push(this.setTask({ ...task, state: "suspended", pid: undefined, ttl: undefined, resumes: new Set() }));
     changes.push(this.delTTimeout(req.data.id));
 
@@ -833,9 +854,8 @@ export class Server {
     }
 
     const changes: Change[] = [];
-    const newVersion = task.version + 1;
 
-    changes.push(this.setTask({ ...task, state: "pending", version: newVersion }));
+    changes.push(this.setTask({ ...task, state: "pending" }));
     changes.push(this.setTTimeout({ id: req.data.id, type: 0, timeout: now + PENDING_RETRY_TTL }));
 
     const promise = this.getPromiseOrThrow(req.data.id);
@@ -844,7 +864,7 @@ export class Server {
       this.sendMessage(address, {
         kind: "execute",
         head: {},
-        data: { task: { id: req.data.id, version: newVersion } },
+        data: { task: { id: req.data.id, version: task.version } },
       }),
     );
 
@@ -907,10 +927,10 @@ export class Server {
   }
 
   private scheduleCreate(now: number, req: ScheduleCreateReq): { response: ScheduleCreateRes; changes: Change[] } {
-    const existing = this.schedules.get(req.data.id);
-    if (existing) {
+    const existingSchedule = this.schedules.get(req.data.id);
+    if (existingSchedule) {
       return {
-        response: this.response("schedule.create", 200, { schedule: this.toScheduleRecord(existing) }),
+        response: this.response("schedule.create", 200, { schedule: this.toScheduleRecord(existingSchedule) }),
         changes: [],
       };
     }
@@ -978,10 +998,10 @@ export class Server {
         promises: Array.from(this.promises.values()).map((p) => this.toPromiseRecord(p)),
         promiseTimeouts: this.pTimeouts,
         callbacks: Array.from(this.promises.values()).flatMap((p) =>
-          [...p.awaiters].map((awaiter) => ({ awaiter, awaited: p.id })),
+          [...p.callbacks].map((awaiter) => ({ awaiter, awaited: p.id })),
         ),
         listeners: Array.from(this.promises.values()).flatMap((p) =>
-          [...p.subscribers].map((address) => ({ id: p.id, address })),
+          [...p.listeners].map((address) => ({ id: p.id, address })),
         ),
         tasks: Array.from(this.tasks.values()).map((t) => this.toTaskRecord(t)),
         taskTimeouts: this.tTimeouts,
@@ -1037,11 +1057,11 @@ export class Server {
     // order promises appear in pTimeouts.
     //
     //   Phase 1: Settle all expired promises (state change only).
-    //   Phase 2: Fulfill tasks whose own promise settled (enqueueSettle).
-    //   Phase 3: Resume suspended awaiters of settled promises (resumeAwaiters).
+    //   Phase 2: Fulfill tasks whose own promise settled (triggerFulfilled).
+    //   Phase 3: Resume suspended callbacks of settled promises (triggerCallbacks).
     //
     // Phase 2 before phase 3 ensures that a task whose own promise settled
-    // is fulfilled before resumeAwaiters runs. This prevents a spurious
+    // is fulfilled before triggerCallbacks runs. This prevents a spurious
     // suspended → pending (version++) → fulfilled path for tasks that
     // should go directly suspended → fulfilled.
 
@@ -1070,23 +1090,20 @@ export class Server {
 
     // Phase 2: Fulfill tasks whose own promise settled
     for (const id of settledIds) {
-      changes.push(...this.enqueueSettle(id));
+      changes.push(...this.triggerFulfilled(id));
     }
 
-    // Phase 3: Resume suspended awaiters and notify subscribers
+    // Phase 3: Resume suspended callbacks and notify listeners
     for (const id of settledIds) {
-      changes.push(...this.resumeAwaiters(id, now));
-      changes.push(...this.notifySubscribers(id));
+      changes.push(...this.triggerCallbacks(id, now));
+      changes.push(...this.triggerListeners(id));
     }
 
     for (const action of actions) {
       if (action.kind === "task.release") {
         const task = this.getTaskOrThrow(action.data.id);
         if (task.state === "acquired" && task.version === action.data.version) {
-          const newVersion = task.version + 1;
-          changes.push(
-            this.setTask({ ...task, state: "pending", version: newVersion, pid: undefined, ttl: undefined }),
-          );
+          changes.push(this.setTask({ ...task, state: "pending", pid: undefined, ttl: undefined }));
           changes.push(this.setTTimeout({ id: action.data.id, type: 0, timeout: now + PENDING_RETRY_TTL }));
 
           const promise = this.getPromiseOrThrow(action.data.id);
@@ -1095,7 +1112,7 @@ export class Server {
             this.sendMessage(address, {
               kind: "execute",
               head: {},
-              data: { task: { id: action.data.id, version: newVersion } },
+              data: { task: { id: action.data.id, version: task.version } },
             }),
           );
         }
@@ -1129,12 +1146,12 @@ export class Server {
 
       const { changes: createChanges } = this.promiseCreate(now, {
         kind: "promise.create",
-        head: { corrId: randomUUID(), version: VERSION },
+        head: { corrId: "", version: "" },
         data: {
           id: promiseId,
           timeoutAt: st.timeout + schedule.promiseTimeout,
           param: schedule.promiseParam,
-          tags: schedule.promiseTags,
+          tags: { ...schedule.promiseTags, "resonate:schedule": schedule.id },
         },
       });
       changes.push(...createChanges);
@@ -1160,8 +1177,8 @@ export class Server {
   // CONVERTERS
   // ===========================================================================
 
-  private toPromiseRecord(p: DurablePromise): PromiseRecord {
-    const { awaiters, subscribers, settledAt, ...rest } = p;
+  private toPromiseRecord(p: Promise): PromiseRecord {
+    const { callbacks, listeners, settledAt, ...rest } = p;
     return settledAt != null ? { ...rest, settledAt } : rest;
   }
 
@@ -1205,29 +1222,18 @@ export class Server {
     const state = this.timeoutState(promise.tags);
     changes.push(this.setPromise({ ...promise, state, settledAt: promise.timeoutAt }));
     changes.push(this.delPTimeout(id));
-    changes.push(...this.enqueueSettle(id));
-    changes.push(...this.resumeAwaiters(id, now));
-    changes.push(...this.notifySubscribers(id));
+    changes.push(...this.triggerSettlement(id, now));
 
     return changes;
   }
 
-  private enqueueSettle(promiseId: string): Change[] {
+  private triggerSettlement(id: string, now: number): Change[] {
+    return [...this.triggerFulfilled(id), ...this.triggerCallbacks(id, now), ...this.triggerListeners(id)];
+  }
+
+  private triggerFulfilled(promiseId: string): Change[] {
     const task = this.tasks.get(promiseId);
-    if (!task) {
-      const promise = this.promises.get(promiseId);
-      if (!promise?.tags["resonate:target"]) return [];
-      return [
-        this.setTask({
-          id: promiseId,
-          state: "fulfilled",
-          version: 0,
-          pid: undefined,
-          ttl: undefined,
-          resumes: new Set(),
-        }),
-      ];
-    }
+    if (!task) return [];
     if (task.state === "fulfilled") return [];
 
     const changes: Change[] = [];
@@ -1235,9 +1241,9 @@ export class Server {
     changes.push(this.setTask({ ...task, state: "fulfilled", pid: undefined, ttl: undefined, resumes: new Set() }));
     changes.push(this.delTTimeout(promiseId));
 
-    // Remove this task from all promise awaiters (delete callbacks where awaiter_id = task_id)
+    // Remove this task from all promise callbacks (delete callbacks where awaiter_id = task_id)
     for (const [, promise] of this.promises) {
-      if (promise.awaiters.delete(promiseId)) {
+      if (promise.callbacks.delete(promiseId)) {
         changes.push(this.setPromise(promise));
       }
     }
@@ -1245,18 +1251,17 @@ export class Server {
     return changes;
   }
 
-  private resumeAwaiters(promiseId: string, now: number): Change[] {
+  private triggerCallbacks(promiseId: string, now: number): Change[] {
     const settledPromise = this.getPromiseOrThrow(promiseId);
 
     const changes: Change[] = [];
 
     // Resume or buffer for all tasks that were awaiting this promise
-    for (const awaiterId of settledPromise.awaiters) {
+    for (const awaiterId of settledPromise.callbacks) {
       const task = this.getTaskOrThrow(awaiterId);
 
       if (task.state === "suspended") {
-        const newVersion = task.version + 1;
-        changes.push(this.setTask({ ...task, state: "pending", version: newVersion, resumes: new Set([promiseId]) }));
+        changes.push(this.setTask({ ...task, state: "pending", resumes: new Set([promiseId]) }));
 
         // Add task timeout entry back (type=0 for pending retry)
         changes.push(
@@ -1273,7 +1278,7 @@ export class Server {
           this.sendMessage(address, {
             kind: "execute",
             head: {},
-            data: { task: { id: awaiterId, version: newVersion } },
+            data: { task: { id: awaiterId, version: task.version } },
           }),
         );
       } else if (task.state === "pending" || task.state === "acquired" || task.state === "halted") {
@@ -1283,20 +1288,20 @@ export class Server {
       }
     }
 
-    // Clear awaiters after processing
-    settledPromise.awaiters.clear();
+    // Clear callbacks after processing
+    settledPromise.callbacks.clear();
     changes.push(this.setPromise(settledPromise));
 
     return changes;
   }
 
-  private notifySubscribers(promiseId: string): Change[] {
+  private triggerListeners(promiseId: string): Change[] {
     const promise = this.getPromiseOrThrow(promiseId);
-    if (promise.subscribers.size === 0) return [];
+    if (promise.listeners.size === 0) return [];
 
     const changes: Change[] = [];
 
-    for (const address of promise.subscribers) {
+    for (const address of promise.listeners) {
       changes.push(
         this.sendMessage(address, {
           kind: "unblock",
@@ -1306,7 +1311,7 @@ export class Server {
       );
     }
 
-    promise.subscribers.clear();
+    promise.listeners.clear();
     changes.push(this.setPromise(promise));
 
     return changes;
@@ -1332,7 +1337,7 @@ export class Server {
     return tags["resonate:timer"] === "true" ? "resolved" : "rejected_timedout";
   }
 
-  private getPromiseOrThrow(id: string): DurablePromise {
+  private getPromiseOrThrow(id: string): Promise {
     const promise = this.promises.get(id);
     if (!promise) {
       throw new Error(`Invariant violation: promise ${id} not found`);
@@ -1340,7 +1345,7 @@ export class Server {
     return promise;
   }
 
-  private getAddressOrThrow(promise: DurablePromise): string {
+  private getAddressOrThrow(promise: Promise): string {
     const address = promise.tags["resonate:target"];
     if (!address) {
       throw new Error(`Invariant violation: promise ${promise.id} has no resonate:target tag`);
@@ -1367,7 +1372,7 @@ export class Server {
   // ACCESSORS (change-tracking)
   // ===========================================================================
 
-  private setPromise(p: DurablePromise): Change {
+  private setPromise(p: Promise): Change {
     this.promises.set(p.id, p);
     return { kind: "promise.set", promise: this.toPromiseRecord(p) };
   }
@@ -1503,7 +1508,7 @@ export class LocalNetwork implements Network {
     return `local://any@${target}`;
   }
 
-  async init(): Promise<void> {
+  async init(): globalThis.Promise<void> {
     if (this.started) return;
     this.tickInterval = setInterval(() => {
       const now = Date.now();
@@ -1517,7 +1522,7 @@ export class LocalNetwork implements Network {
     this.started = true;
   }
 
-  async stop(): Promise<void> {
+  async stop(): globalThis.Promise<void> {
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
     }
@@ -1525,7 +1530,9 @@ export class LocalNetwork implements Network {
     this.started = false;
   }
 
-  send = <K extends Request["kind"]>(req: Extract<Request, { kind: K }>): Promise<Extract<Response, { kind: K }>> => {
+  send = <K extends Request["kind"]>(
+    req: Extract<Request, { kind: K }>,
+  ): globalThis.Promise<Extract<Response, { kind: K }>> => {
     const { corrId, version } = req.head;
 
     const now = Date.now();
