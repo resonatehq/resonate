@@ -1,11 +1,5 @@
 STORAGE ?= sqlite
-AUTH    ?= false
-
-ifeq ($(AUTH),true)
-  PROFILE := $(STORAGE)-auth
-else
-  PROFILE := $(STORAGE)
-endif
+PROFILE := $(STORAGE)-auth
 
 .PHONY: serve
 serve:

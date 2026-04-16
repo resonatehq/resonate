@@ -1,6 +1,8 @@
 pub mod persistence_postgres;
 pub mod persistence_sqlite;
 
+use std::collections::HashMap;
+
 use crate::types::{PromiseRecord, ScheduleRecord, Snapshot, TaskRecord, TaskState};
 
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -10,12 +12,16 @@ pub enum StorageError {
     /// A backend-agnostic storage error. Carries the formatted error message
     /// without exposing the underlying driver type (rusqlite, sqlx, etc.).
     Backend(String),
+    /// Serialization conflict — retries exhausted, nothing was committed.
+    /// The caller should return 503 (not 500) to indicate a retriable no-op.
+    Serialization,
 }
 
 impl std::fmt::Display for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StorageError::Backend(msg) => write!(f, "Storage error: {}", msg),
+            StorageError::Serialization => write!(f, "Serialization conflict"),
         }
     }
 }
@@ -28,6 +34,14 @@ impl From<rusqlite::Error> for StorageError {
 
 impl From<sqlx::Error> for StorageError {
     fn from(e: sqlx::Error) -> Self {
+        // Detect serialization failures (40001) and deadlocks (40P01) from within queries.
+        // Both mean nothing was committed and the transaction can be safely retried.
+        if let Some(db_err) = e.as_database_error() {
+            let code = db_err.code().map(|c| c.to_string());
+            if code.as_deref() == Some("40001") || code.as_deref() == Some("40P01") {
+                return StorageError::Serialization;
+            }
+        }
         StorageError::Backend(e.to_string())
     }
 }
@@ -49,7 +63,7 @@ pub struct RegisterCallbackResult {
 pub struct TaskCreateResult {
     pub promise: PromiseRecord,
     pub task_created: bool,
-    pub task_acquired: bool,
+    pub task_state: Option<String>,
 }
 
 pub struct TaskAcquireResult {
@@ -197,6 +211,8 @@ pub trait Db {
 
     // Ghost operation — runs before every user operation
     fn try_timeout(&self, ids: &[&str], time: i64) -> StorageResult<()>;
+    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)>;
+    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()>;
 
     // === Promise operations ===
     fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>>;
@@ -285,6 +301,7 @@ pub trait Db {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        promise_tags: &HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>>;
 
     // === Timeout processing ===
@@ -321,7 +338,7 @@ impl Storage {
     {
         match self {
             Storage::Sqlite(s) => s.transact(f).await,
-            Storage::Postgres(p) => p.transact(f).await,
+            Storage::Postgres(p) => p.transact(f, false).await,
         }
     }
 

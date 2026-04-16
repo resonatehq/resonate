@@ -34,13 +34,28 @@ pub fn resolve_time(debug_time: Option<i64>) -> i64 {
 // Cron
 // =============================================================================
 
-/// Validate a 5-field cron expression. Returns `true` if the expression is parseable.
+/// Normalize a cron expression for the `cron` crate.
+///
+/// The `cron` crate expects 6–7 fields (sec min hour dom month dow [year]).
+/// Standard 5-field expressions (min hour dom month dow) are promoted by
+/// prepending a `0` seconds field. 6- and 7-field expressions are used as-is.
+fn normalize_cron(cron_expr: &str) -> String {
+    if cron_expr.split_whitespace().count() == 5 {
+        format!("0 {}", cron_expr.trim())
+    } else {
+        cron_expr.trim().to_string()
+    }
+}
+
+/// Validate a cron expression. Returns `true` if the expression is parseable.
+///
+/// Accepts standard 5-field expressions (`min hour dom month dow`) or
+/// 6–7-field expressions (`sec min hour dom month dow [year]`).
 pub fn is_valid_cron(cron_expr: &str) -> bool {
     use cron::Schedule;
     use std::str::FromStr;
 
-    let full_expr = format!("0 {}", cron_expr);
-    Schedule::from_str(&full_expr).is_ok()
+    Schedule::from_str(&normalize_cron(cron_expr)).is_ok()
 }
 
 /// Compute next cron occurrence after a given time (in ms).
@@ -48,8 +63,7 @@ pub fn compute_next_cron(cron_expr: &str, after_ms: i64) -> i64 {
     use cron::Schedule;
     use std::str::FromStr;
 
-    // cron crate expects 7-field expressions; spec uses 5-field (standard cron)
-    let full_expr = format!("0 {}", cron_expr);
+    let full_expr = normalize_cron(cron_expr);
 
     if let Ok(schedule) = Schedule::from_str(&full_expr) {
         let after_secs = after_ms / 1000;
