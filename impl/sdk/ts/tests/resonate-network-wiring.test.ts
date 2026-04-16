@@ -67,6 +67,10 @@ class MockNetwork implements Network {
   async init(): Promise<void> {}
   async stop(): Promise<void> {}
 
+  match(target: string): string {
+    return `mock://any@${target}`;
+  }
+
   send: Send = async <K extends Request["kind"]>(
     req: Extract<Request, { kind: K }>,
   ): Promise<Extract<Response, { kind: K }>> => {
@@ -369,6 +373,59 @@ describe("Resonate <-> Network Wiring", () => {
     // The result should now resolve with the value from the unblock message
     const result = await handle.result();
     expect(result).toBe("delivered-via-recv");
+
+    await resonate.stop();
+  });
+
+  test("network.match is used to resolve a plain string target in rpc", async () => {
+    // MockNetwork.match("my-workers") returns "mock://any@my-workers".
+    // When rpc is called with target: "my-workers", OptionsBuilder must call
+    // network.match and store the resolved address as resonate:target.
+    const mockNet = new MockNetwork({
+      unicast: "mock://uni@wiring-group/wiring-pid",
+      anycast: "mock://any@wiring-group",
+    });
+
+    const resonate = new Resonate({
+      network: mockNet,
+      pid: "wiring-pid",
+      logLevel: "error",
+    });
+
+    resonate.register("targetedFunc", async (ctx: Context) => "ok");
+
+    await resonate.rpc("match-wiring-1", "targetedFunc", resonate.options({ target: "my-workers" }));
+
+    const promiseCreateReqs = mockNet.sentRequests.filter((r: any) => r.kind === "promise.create");
+    expect(promiseCreateReqs.length).toBeGreaterThan(0);
+
+    // The resolved target must come from MockNetwork.match("my-workers")
+    expect(promiseCreateReqs[0].data.tags["resonate:target"]).toBe("mock://any@my-workers");
+
+    await resonate.stop();
+  });
+
+  test("URL targets bypass network.match and are stored verbatim in resonate:target", async () => {
+    // OptionsBuilder short-circuits: if the final resolved target is already a
+    // URL it is returned as-is. network.match may still be called with "default"
+    // when building the base Options, but the user-supplied URL target overrides
+    // it in the merge — the URL is never passed through match.
+    const mockNet = new MockNetwork();
+
+    const resonate = new Resonate({
+      network: mockNet,
+      logLevel: "error",
+    });
+
+    resonate.register("urlTargetFunc", async (ctx: Context) => "ok");
+
+    const urlTarget = "http://some-remote-worker:9000";
+    await resonate.rpc("match-url-1", "urlTargetFunc", resonate.options({ target: urlTarget }));
+
+    // The URL must be stored verbatim — match must NOT have transformed it
+    const promiseCreateReqs = mockNet.sentRequests.filter((r: any) => r.kind === "promise.create");
+    expect(promiseCreateReqs.length).toBeGreaterThan(0);
+    expect(promiseCreateReqs[0].data.tags["resonate:target"]).toBe(urlTarget);
 
     await resonate.stop();
   });

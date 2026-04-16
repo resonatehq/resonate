@@ -1499,6 +1499,10 @@ export class LocalNetwork implements Network {
 
   // -- Network ---------------------------------------------------------------
 
+  match(target: string): string {
+    return `local://any@${target}`;
+  }
+
   async init(): Promise<void> {
     if (this.started) return;
     this.tickInterval = setInterval(() => {

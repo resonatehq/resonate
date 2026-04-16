@@ -183,20 +183,7 @@ export class Resonate {
     this.registry = new Registry();
     this.dependencies = new Map();
 
-    // match function: resolve target to an anycast address
-    const matchFn = (target: string): string => {
-      if (util.isUrl(target)) return target;
-      // For local network, derive from the anycast scheme
-      const anycast = this.network.anycast;
-      const schemeEnd = anycast.indexOf("://");
-      if (schemeEnd >= 0) {
-        const scheme = anycast.slice(0, schemeEnd);
-        return `${scheme}://any@${target}`;
-      }
-      return target;
-    };
-
-    this.optsBuilder = new OptionsBuilder({ match: matchFn, idPrefix: this.idPrefix });
+    this.optsBuilder = new OptionsBuilder({ match: this.network.match.bind(this.network), idPrefix: this.idPrefix });
 
     this.core = new Core({
       pid: this.pid,

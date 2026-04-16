@@ -10,6 +10,8 @@ export interface Network {
   readonly unicast: string;
   readonly anycast: string;
 
+  match(target: string): string;
+
   init(): Promise<void>;
   stop(): Promise<void>;
 

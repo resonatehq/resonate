@@ -19,6 +19,7 @@ import { isMessage, isResponse, type Message, type Request, type Response } from
 export interface HttpAdapter {
   readonly unicast: string;
   readonly anycast: string;
+  match(target: string): string;
   init(): Promise<void>;
   stop(): Promise<void>;
   onReceive(callback: (msg: Message) => void): void;
@@ -80,6 +81,11 @@ export class HttpNetwork implements Network {
   get anycast(): string {
     util.assert(this.adapter !== undefined);
     return this.adapter.anycast;
+  }
+
+  match(target: string): string {
+    util.assert(this.adapter !== undefined);
+    return this.adapter.match(target);
   }
 
   async init(): Promise<void> {
@@ -284,6 +290,10 @@ export class PollMessageSource implements HttpAdapter {
     this.eventSource = this.connect();
   }
 
+  match(target: string): string {
+    return `poll://any@${target}`;
+  }
+
   private connect() {
     this.eventSource = new EventSource(this.pollUrl, {
       fetch: (url, init) =>
@@ -410,6 +420,11 @@ export class PushMessageSource implements HttpAdapter {
     this.anycast = "";
 
     this.server = createServer((req, res) => this.handleRequest(req, res));
+  }
+
+  match(_target: string): string {
+    util.assert(this.anycast !== "", "PushMessageSource.match called before init()");
+    return this.anycast;
   }
 
   public init(): Promise<void> {

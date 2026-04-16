@@ -52,6 +52,10 @@ class SimulatedNetwork implements Network {
   async init(): Promise<void> {}
   async stop(): Promise<void> {}
 
+  match(target: string): string {
+    return `sim://any@${target}`;
+  }
+
   recv(callback: (msg: Message) => void): void {
     this.subscribers.push(callback);
   }
