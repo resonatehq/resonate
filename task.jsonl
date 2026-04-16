@@ -1,8 +1,0 @@
-{"step": 0, "action": "setup", "status": "done", "description": "Created task.md, task.jsonl, and task-test.sh. Branch fix created from main."}
-{"step": 1, "action": "persistence-patch", "status": "done", "description": "Applied dst→version persistence patch. All 3 files match version branch exactly."}
-{"step": 2, "action": "server-port", "status": "done", "description": "Ported 7 hunks to server.rs: imports, lock preambles, task.create rewrite, acquire response, suspend exists check."}
-{"step": 3, "action": "types", "status": "done", "description": "types.rs already has 2026-04-01 in SUPPORTED_VERSIONS. No change needed."}
-{"step": 4, "action": "build", "status": "done", "description": "cargo build --release succeeded (warnings only)."}
-{"step": 5, "action": "test-postgres", "status": "done", "description": "PostgreSQL: 999/1000 passed. Matches resonate-server-rs rate."}
-{"step": 6, "action": "test-sqlite", "status": "done", "description": "SQLite: passes 50/50 quick check. Full 1000 has cumulative state issue (shared with resonate-server-rs). Not a port bug."}
-{"step": 7, "action": "investigate-leak", "status": "done", "description": "Confirmed cumulative SQLite state issue exists in BOTH resonate and resonate-server-rs (~300-800 iterations). Same Cargo deps, same persistence code. Not caused by port."}
