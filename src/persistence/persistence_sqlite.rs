@@ -2,11 +2,11 @@ use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseSettleParams,
-    PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams, StorageResult,
-    TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams, TaskCreateResult,
-    TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams, TaskFulfillParams,
-    TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseCreateResult,
+    PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
+    StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams,
+    TaskCreateResult, TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams,
+    TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -439,7 +439,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
     }
 
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord> {
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
             state,
@@ -458,8 +458,9 @@ impl<'a> Db for SqliteDb<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at],
         )?;
+        let was_created = inserted > 0;
 
-        if inserted > 0 {
+        if was_created {
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
@@ -495,7 +496,10 @@ impl<'a> Db for SqliteDb<'a> {
             }
         }
 
-        Ok(self.promise_get(id)?.unwrap())
+        Ok(PromiseCreateResult {
+            was_created,
+            promise: self.promise_get(id)?.unwrap(),
+        })
     }
 
     fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult> {
@@ -795,7 +799,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
 
         // Execute inner promise.create
-        let promise = self.promise_create(&PromiseCreateParams {
+        let result = self.promise_create(&PromiseCreateParams {
             id: promise_id,
             state,
             param_headers,
@@ -811,7 +815,7 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(TaskFenceResult {
             task_exists,
             fence_ok,
-            promise: Some(promise),
+            promise: Some(result.promise),
         })
     }
 

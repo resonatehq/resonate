@@ -614,7 +614,7 @@ async fn op_promise_create(
                 .headers
                 .as_ref()
                 .map(|h| serde_json::to_string(h).unwrap());
-            let promise = db.promise_create(&PromiseCreateParams {
+            let result = db.promise_create(&PromiseCreateParams {
                 id: &r.id,
                 state: state.as_str(),
                 param_headers: param_headers_json.as_deref(),
@@ -626,27 +626,26 @@ async fn op_promise_create(
                 already_timedout,
                 address,
             })?;
-            let is_new = promise.created_at == created_at;
-            if is_new {
+            if result.was_created {
                 tracing::info!(
-                    promise_id = %promise.id,
-                    state = %promise.state,
-                    timeout_at = promise.timeout_at,
+                    promise_id = %result.promise.id,
+                    state = %result.promise.state,
+                    timeout_at = result.promise.timeout_at,
                     target = address.unwrap_or("none"),
                     already_timedout = already_timedout,
                     "Promise created"
                 );
             } else {
                 tracing::debug!(
-                    promise_id = %promise.id,
-                    state = %promise.state,
+                    promise_id = %result.promise.id,
+                    state = %result.promise.state,
                     "Promise create: already exists (idempotent)"
                 );
             }
             Ok(ResponseEnvelope::success(
                 kind_str.clone(),
                 corr_id.clone(),
-                &PromiseResponseData { promise },
+                &PromiseResponseData { promise: result.promise },
             ))
         })
         .await
@@ -706,14 +705,8 @@ async fn op_promise_settle(
             })?;
             match result.promise {
                 Some(promise) => {
-                    if !result.was_settled && promise.state == PromiseState::Pending {
-                        tracing::debug!(promise_id = %r.id, "Promise settle: TOCTOU race detected, treating as not found");
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            404,
-                            "Promise not found",
-                        ));
+                    if promise.state == PromiseState::Pending {
+                        unreachable!("promise settle returned pending promise without settling");
                     }
                     if result.was_settled {
                         tracing::info!(

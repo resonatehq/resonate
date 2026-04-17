@@ -48,6 +48,12 @@ impl From<sqlx::Error> for StorageError {
 
 // === Result types for CTE-based operations ===
 
+pub struct PromiseCreateResult {
+    /// Whether the promise was newly inserted (false = already existed).
+    pub was_created: bool,
+    pub promise: PromiseRecord,
+}
+
 pub struct PromiseSettleResult {
     /// Whether the promise was actually transitioned from pending to settled.
     pub was_settled: bool,
@@ -218,7 +224,7 @@ pub trait Db {
     // === Promise operations ===
     fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>>;
 
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord>;
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult>;
 
     fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult>;
 
