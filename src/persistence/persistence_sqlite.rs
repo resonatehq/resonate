@@ -636,8 +636,8 @@ impl<'a> Db for SqliteDb<'a> {
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
              WHERE t.id = ?1",
         )?;
@@ -1120,8 +1120,8 @@ impl<'a> Db for SqliteDb<'a> {
     ) -> StorageResult<Vec<TaskRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
              WHERE (?1 IS NULL OR t.state = ?1) AND (?2 IS NULL OR t.id > ?2)
              ORDER BY t.id ASC LIMIT ?3",
@@ -1550,8 +1550,8 @@ impl<'a> Db for SqliteDb<'a> {
 
         let mut stmt = conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id ORDER BY t.id",
         )?;
         let tasks: Vec<TaskRecord> = {

@@ -799,8 +799,8 @@ impl Db for PostgresDb<'_> {
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let row = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
@@ -1587,8 +1587,8 @@ impl Db for PostgresDb<'_> {
     ) -> StorageResult<Vec<TaskRecord>> {
         let rows = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
@@ -1984,8 +1984,8 @@ impl Db for PostgresDb<'_> {
 
         let task_rows = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
