@@ -119,6 +119,11 @@ pub struct CommonArgs {
     #[arg(long = "transports-gcps-project", value_name = "PROJECT")]
     pub transports_gcps_project: Option<String>,
 
+    // --- NATS ---
+    /// NATS server URL (enables NATS transport, e.g. nats://localhost:4222)
+    #[arg(long = "transports-nats-url", value_name = "URL")]
+    pub transports_nats_url: Option<String>,
+
     // --- Observability ---
     /// Prometheus metrics port (0 = disabled) [default: 9090]
     #[arg(long = "observability-metrics-port", value_name = "PORT")]
@@ -228,6 +233,10 @@ impl CommonArgs {
                 .gcps
                 .get_or_insert(crate::config::GcpsConfig { project: None });
             gcps.project = Some(project);
+        }
+
+        if let Some(url) = self.transports_nats_url {
+            config.transports.nats = Some(crate::config::NatsConfig { url });
         }
 
         if let Some(v) = self.observability_metrics_port {

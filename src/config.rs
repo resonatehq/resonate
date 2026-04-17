@@ -287,6 +287,10 @@ pub struct TransportsConfig {
     /// Google Cloud Pub/Sub transport configuration
     #[serde(default)]
     pub gcps: Option<GcpsConfig>,
+
+    /// NATS transport configuration
+    #[serde(default)]
+    pub nats: Option<NatsConfig>,
 }
 
 /// Google Cloud Pub/Sub transport configuration.
@@ -298,6 +302,15 @@ pub struct GcpsConfig {
     /// Default GCP project ID. Used when the address doesn't specify a project.
     #[serde(default)]
     pub project: Option<String>,
+}
+
+/// NATS transport configuration.
+///
+/// When present, enables the nats:// address scheme.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NatsConfig {
+    /// NATS server URL (e.g. "nats://localhost:4222")
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -227,10 +227,24 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
         None => None,
     };
+    let nats = match &state.config.transports.nats {
+        Some(nats_config) => {
+            tracing::info!(url = %nats_config.url, "NATS transport enabled");
+            match transport::transport_nats::NatsTransport::connect(&nats_config.url).await {
+                Ok(t) => Some(Arc::new(t)),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to connect to NATS, transport disabled");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
     let dispatcher = Arc::new(transport::TransportDispatcher::new(
         http_push,
         poll_registry.clone(),
         gcps,
+        nats,
     ));
 
     // Spawn background loops
