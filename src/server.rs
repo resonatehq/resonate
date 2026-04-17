@@ -1196,7 +1196,11 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                     ttl: if task_state == TaskState::Fulfilled { None } else { Some(r.ttl) },
                     pid: if task_state == TaskState::Fulfilled { None } else { Some(r.pid.to_string()) },
                 };
-                let preload = db.compute_preload(action_id)?;
+                let preload = if task_state == TaskState::Acquired {
+                    db.compute_preload(action_id)?
+                } else {
+                    vec![]
+                };
                 return Ok(ResponseEnvelope::success(
                     kind_str.clone(),
                     corr_id.clone(),
@@ -1233,14 +1237,13 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                         ));
                     }
                     Some(t) if t.state == TaskState::Fulfilled => {
-                        let preload = db.compute_preload(action_id)?;
                         return Ok(ResponseEnvelope::success(
                             kind_str.clone(),
                             corr_id.clone(),
                             &TaskCreateResponseData {
                                 task: t.clone(),
                                 promise: res.promise,
-                                preload,
+                                preload: vec![],
                             },
                         ));
                     }
