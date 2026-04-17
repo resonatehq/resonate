@@ -1,9 +1,9 @@
 use super::{
-    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseSettleParams,
-    PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams, StorageError, StorageResult,
-    TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams, TaskCreateResult,
-    TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams, TaskFulfillParams,
-    TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseCreateResult,
+    PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
+    StorageError, StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult,
+    TaskCreateParams, TaskCreateResult, TaskFenceCreateParams, TaskFenceResult,
+    TaskFenceSettleParams, TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -494,7 +494,7 @@ impl Db for PostgresDb<'_> {
     }
 
     // P-02: promise.create — single CTE
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord> {
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
             state,
@@ -551,22 +551,25 @@ impl Db for PostgresDb<'_> {
               RETURNING id
             ),
             result AS (
-              SELECT * FROM inserted_or_skipped_promise
+              SELECT *, TRUE AS was_created FROM inserted_or_skipped_promise
               UNION ALL
-              SELECT * FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
+              SELECT *, FALSE AS was_created FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at FROM result
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, was_created FROM result
         "))
             .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)       // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                           // $6-$8
             .bind(already_timedout).bind(address)                                         // $9-$10
             .fetch_all(self.tx().as_mut()))?;
 
-        // Fallback: under READ COMMITTED, a concurrent insert can cause the CTE to return 0 rows
         if rows.is_empty() {
-            return Ok(self.promise_get(id)?.unwrap());
+            unreachable!("promise_create CTE returned no rows");
         }
-        Ok(row_to_promise(&rows[0]))
+        let was_created: bool = rows[0].get("was_created");
+        Ok(PromiseCreateResult {
+            was_created,
+            promise: row_to_promise(&rows[0]),
+        })
     }
 
     // P-03: promise.settle — lock preamble + CTE
