@@ -1,19 +1,22 @@
 pub mod transport_gcps;
 pub mod transport_http_poll;
 pub mod transport_http_push;
+pub mod transport_nats;
 
 use transport_gcps::GcpsPubSubTransport;
 use transport_http_poll::PollRegistry;
 use transport_http_push::HttpPushTransport;
+use transport_nats::NatsTransport;
 
 use std::sync::Arc;
 
 /// Dispatches messages to the appropriate transport by parsing the address once.
-/// Routes by URL scheme: http/https → push, poll → SSE, gcps → GCP Pub/Sub.
+/// Routes by URL scheme: http/https → push, poll → SSE, gcps → GCP Pub/Sub, nats → NATS.
 pub struct TransportDispatcher {
     http: Arc<HttpPushTransport>,
     poll: Arc<PollRegistry>,
     gcps: Option<Arc<GcpsPubSubTransport>>,
+    nats: Option<Arc<NatsTransport>>,
 }
 
 impl TransportDispatcher {
@@ -21,8 +24,9 @@ impl TransportDispatcher {
         http: Arc<HttpPushTransport>,
         poll: Arc<PollRegistry>,
         gcps: Option<Arc<GcpsPubSubTransport>>,
+        nats: Option<Arc<NatsTransport>>,
     ) -> Self {
-        Self { http, poll, gcps }
+        Self { http, poll, gcps, nats }
     }
 
     /// Parse the address, route to the correct transport, deliver.
@@ -50,6 +54,15 @@ impl TransportDispatcher {
                     tracing::warn!(address = %address, "GCP Pub/Sub transport not configured, message dropped")
                 }
             },
+            Some(Address::Nats(addr)) => match &self.nats {
+                Some(nats) => {
+                    tracing::debug!(transport = "nats", subject = %addr.subject, kind = kind, "Dispatching message via NATS");
+                    nats.send(&addr, payload).await;
+                }
+                None => {
+                    tracing::warn!(address = %address, "NATS transport not configured, message dropped")
+                }
+            },
             None => {
                 tracing::warn!(address = %address, "Invalid address, message cannot be routed");
             }
@@ -66,6 +79,8 @@ pub enum Address {
     Poll(PollAddress),
     /// Google Cloud Pub/Sub delivery
     Gcps(GcpsAddress),
+    /// NATS subject delivery
+    Nats(NatsAddress),
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +107,11 @@ pub struct GcpsAddress {
     pub topic: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct NatsAddress {
+    pub subject: String,
+}
+
 /// Returns true if the address is a valid, routable URL.
 pub fn is_valid_address(address: &str) -> bool {
     parse_address(address).is_some()
@@ -103,6 +123,7 @@ pub fn is_valid_address(address: &str) -> bool {
 /// - `http://...` / `https://...` — HTTP webhook delivery
 /// - `poll://cast@group[/id]` — Poll SSE delivery
 /// - `gcps://project/topic` — Google Cloud Pub/Sub delivery
+/// - `nats://subject` — NATS subject delivery
 pub fn parse_address(address: &str) -> Option<Address> {
     let parsed = url::Url::parse(address).ok()?;
 
@@ -136,6 +157,13 @@ pub fn parse_address(address: &str) -> Option<Address> {
                 return None;
             }
             Some(Address::Gcps(GcpsAddress { project, topic }))
+        }
+        "nats" => {
+            let subject = parsed.host_str()?.to_string();
+            if subject.is_empty() {
+                return None;
+            }
+            Some(Address::Nats(NatsAddress { subject }))
         }
         _ => None,
     }
