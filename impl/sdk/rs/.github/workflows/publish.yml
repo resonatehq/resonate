@@ -36,14 +36,18 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Wait for crates.io to index resonate-sdk-macros
+        # Poll the sparse index (what cargo itself uses) rather than the public
+        # web API — the latter 403s requests from generic curl User-Agents per
+        # crates.io's crawler policy, which caused this step to time out.
         run: |
           version=$(cargo metadata --format-version=1 --no-deps \
             | jq -r '.packages[] | select(.name=="resonate-sdk-macros") | .version')
-          echo "Waiting for resonate-sdk-macros@${version} to appear on crates.io..."
+          echo "Waiting for resonate-sdk-macros@${version} to appear on the crates.io index..."
+          ua="resonate-sdk-rs publish workflow (https://github.com/resonatehq/resonate-sdk-rust)"
           for i in $(seq 1 60); do
-            status=$(curl -sS -o /dev/null -w '%{http_code}' \
-              "https://crates.io/api/v1/crates/resonate-sdk-macros/${version}")
-            if [ "$status" = "200" ]; then
+            if curl -sSf -A "$ua" \
+                "https://index.crates.io/re/so/resonate-sdk-macros" \
+                | grep -q "\"vers\":\"${version}\""; then
               echo "Indexed."
               exit 0
             fi
