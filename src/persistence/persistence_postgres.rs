@@ -822,7 +822,7 @@ impl Db for PostgresDb<'_> {
     }
 
     // T-02: task.create — single CTE
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>> {
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
         let TaskCreateParams {
             promise_id,
             state,
@@ -842,12 +842,10 @@ impl Db for PostgresDb<'_> {
             "acquired"
         };
 
-        let trt = self.task_retry_timeout;
-
         // Statement 1: Promise creation CTE — inserts promise + task (if new).
         // NO acquired_task — task acquire is done as a separate statement
         // so it gets a fresh READ COMMITTED snapshot.
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
               VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8)
@@ -869,8 +867,8 @@ impl Db for PostgresDb<'_> {
               RETURNING *
             ),
             inserted_ttimeout AS (
-              INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
-              SELECT ($7 + {trt}), $1, 0, {trt}
+              INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
+              SELECT ($7 + $10), $1, 1, $11, $10
               WHERE NOT $9 AND EXISTS (SELECT 1 FROM inserted_task)
               ON CONFLICT (id) DO NOTHING
               RETURNING id
@@ -882,53 +880,40 @@ impl Db for PostgresDb<'_> {
             )
             SELECT
               p.id, p.state, p.param_headers::text, p.param_data, p.value_headers::text, p.value_data, p.tags::text, p.timeout_at, p.created_at, p.settled_at,
-              EXISTS (SELECT 1 FROM inserted_task) AS task_created
+              EXISTS (SELECT 1 FROM inserted_task) AS task_created,
+              t.state   AS task_state,
+              t.version AS task_version
             FROM promise p
-        "))
+            LEFT JOIN tasks t ON t.id = p.id
+        ")
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                             // $6-$8
             .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)             // $9-$12
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
-            let promise = match self.promise_get(promise_id)? {
-                Some(p) => p,
-                None => return Ok(None),
-            };
-            return Ok(Some(TaskCreateResult {
-                promise,
-                task_created: false,
-                task_state: None,
-            }));
+            unreachable!("task_create CTE returned no rows");
         }
         let row = &rows[0];
         let promise = row_to_promise(row);
         let task_created: bool = row.get("task_created");
 
         if task_created {
-            // New task created — set up lease timeout
-            if !already_timedout {
-                rt_block_on(sqlx::query(
-                    "INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
-                     VALUES ($1, $2, 1, $3, $4)
-                     ON CONFLICT (id) DO UPDATE SET timeout_at = $1, timeout_type = 1, process_id = $3, ttl = $4")
-                    .bind(created_at + ttl).bind(promise_id).bind(pid).bind(ttl)
-                    .fetch_optional(self.tx().as_mut()))?;
-            }
-            return Ok(Some(TaskCreateResult {
+            return Ok(TaskCreateResult {
                 promise,
                 task_created: true,
                 task_state: Some(task_initial_state.to_string()),
-            }));
+                task_version: Some(if already_timedout { 0 } else { 1 }),
+            });
         }
 
         // Promise already existed, task not created.
-        // Acquire is done by the handler as a separate statement (fresh snapshot).
-        Ok(Some(TaskCreateResult {
+        Ok(TaskCreateResult {
             promise,
             task_created: false,
-            task_state: None,
-        }))
+            task_state: row.try_get("task_state").ok(),
+            task_version: row.try_get::<i32, _>("task_version").ok().map(|v| v as i64),
+        })
     }
 
     // T-03: task.acquire — single CTE

@@ -64,6 +64,7 @@ pub struct TaskCreateResult {
     pub promise: PromiseRecord,
     pub task_created: bool,
     pub task_state: Option<String>,
+    pub task_version: Option<i64>,
 }
 
 pub struct TaskAcquireResult {
@@ -245,7 +246,7 @@ pub trait Db {
     // === Task operations ===
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>>;
 
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>>;
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult>;
 
     fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult>;
 

@@ -1150,7 +1150,7 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                 .headers
                 .as_ref()
                 .map(|h| serde_json::to_string(h).unwrap());
-            let result = db.task_create(&TaskCreateParams {
+            let res = db.task_create(&TaskCreateParams {
                 promise_id: action_id,
                 state: p_state.as_str(),
                 param_headers: param_headers_json.as_deref(),
@@ -1163,16 +1163,6 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                 ttl: r.ttl,
                 pid: &r.pid,
             })?;
-            if result.is_none() {
-                tracing::debug!(task_id = %action_id, "Task create: underlying promise not found");
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Promise not found",
-                ));
-            }
-            let res = result.unwrap();
 
             // If the promise is settled, process callbacks as a separate
             // statement. This fires any callbacks registered by concurrent
@@ -1213,105 +1203,84 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             }
 
             // CTE didn't create the task (promise already existed).
-            // Statement 2: try to acquire as a SEPARATE statement —
-            // gets a fresh READ COMMITTED snapshot that sees all
-            // concurrent commits (e.g. task.release making it pending).
-            let acquire_result = db.task_acquire(&TaskAcquireParams {
-                task_id: action_id,
-                version: 0,
-                time: now,
-                ttl: r.ttl,
-                pid: &r.pid,
-            })?;
-            if !acquire_result.was_acquired {
-                // Acquire with version 0 failed. Read current state
-                // (fresh snapshot) and retry with actual version.
-                let task = db.task_get(action_id)?;
-                match &task {
-                    None => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            422,
-                            "Promise exists without a target task",
-                        ));
-                    }
-                    Some(t) if t.state == TaskState::Fulfilled => {
-                        return Ok(ResponseEnvelope::success(
+            // task_state and task_version come directly from the CTE result.
+            match (res.task_state.as_deref(), res.task_version) {
+                (Some("fulfilled"), version) => {
+                    // Transition #14: already fulfilled — idempotent success.
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &TaskCreateResponseData {
+                            task: TaskRecord {
+                                id: action_id.to_string(),
+                                state: TaskState::Fulfilled,
+                                version: version.unwrap_or(0),
+                                resumes: 0,
+                                ttl: None,
+                                pid: None,
+                            },
+                            promise: res.promise,
+                            preload: vec![],
+                        },
+                    ))
+                }
+                (Some("pending"), Some(version)) => {
+                    // Transition #16: pending with correct version — try to acquire.
+                    let acquire_result = db.task_acquire(&TaskAcquireParams {
+                        task_id: action_id,
+                        version,
+                        time: now,
+                        ttl: r.ttl,
+                        pid: &r.pid,
+                    })?;
+                    if acquire_result.was_acquired {
+                        let task = TaskRecord {
+                            id: action_id.to_string(),
+                            state: TaskState::Acquired,
+                            version: version + 1,
+                            resumes: 0,
+                            ttl: Some(r.ttl),
+                            pid: Some(r.pid.to_string()),
+                        };
+                        let preload = db.compute_preload(action_id)?;
+                        Ok(ResponseEnvelope::success(
                             kind_str.clone(),
                             corr_id.clone(),
                             &TaskCreateResponseData {
-                                task: t.clone(),
+                                task,
                                 promise: res.promise,
-                                preload: vec![],
+                                preload,
                             },
-                        ));
-                    }
-                    Some(t) if t.state == TaskState::Pending => {
-                        let retry = db.task_acquire(&TaskAcquireParams {
-                            task_id: action_id,
-                            version: t.version,
-                            time: now,
-                            ttl: r.ttl,
-                            pid: &r.pid,
-                        })?;
-                        if retry.was_acquired {
-                            let task = TaskRecord {
-                                id: action_id.to_string(),
-                                state: TaskState::Acquired,
-                                version: t.version + 1,
-                                resumes: 0,
-                                ttl: Some(r.ttl),
-                                pid: Some(r.pid.to_string()),
-                            };
-                            let preload = db.compute_preload(action_id)?;
-                            return Ok(ResponseEnvelope::success(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                &TaskCreateResponseData {
-                                    task,
-                                    promise: res.promise,
-                                    preload,
-                                },
-                            ));
-                        }
-                        return Ok(ResponseEnvelope::error(
+                        ))
+                    } else {
+                        // Transition #17: version raced — another caller acquired first.
+                        Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
                             409,
                             "Already exists",
-                        ));
-                    }
-                    _ => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            409,
-                            "Already exists",
-                        ));
+                        ))
                     }
                 }
+                (None, _) => {
+                    // Transition #9: promise exists but has no target task (no address).
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        422,
+                        "Promise exists without a target task",
+                    ))
+                }
+                _ => {
+                    // Transitions #11–#13: acquired / suspended / halted.
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        409,
+                        "Already exists",
+                    ))
+                }
             }
-
-            // Acquired with version 1 (first claim)
-            let task = TaskRecord {
-                id: action_id.to_string(),
-                state: TaskState::Acquired,
-                version: 1,
-                resumes: 0,
-                ttl: Some(r.ttl),
-                pid: Some(r.pid.to_string()),
-            };
-            let preload = db.compute_preload(action_id)?;
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &TaskCreateResponseData {
-                    task,
-                    promise: res.promise,
-                    preload,
-                },
-            ))
         })
         .await
     {

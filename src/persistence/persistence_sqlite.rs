@@ -656,7 +656,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
     }
 
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>> {
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
         let TaskCreateParams {
             promise_id,
             state,
@@ -677,10 +677,9 @@ impl<'a> Db for SqliteDb<'a> {
             params![promise_id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at],
         )? > 0;
 
-        let promise = match self.promise_get(promise_id)? {
-            Some(p) => p,
-            None => return Ok(None),
-        };
+        let promise = self
+            .promise_get(promise_id)?
+            .unwrap_or_else(|| unreachable!("promise missing after insert in task_create"));
 
         let mut task_created = false;
 
@@ -718,11 +717,12 @@ impl<'a> Db for SqliteDb<'a> {
 
         // SQLite: read task state for the result
         let task_row = self.task_get(promise_id)?;
-        Ok(Some(TaskCreateResult {
+        Ok(TaskCreateResult {
             promise,
             task_created,
             task_state: task_row.as_ref().map(|t| t.state.to_string()),
-        }))
+            task_version: task_row.as_ref().map(|t| t.version),
+        })
     }
 
     fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult> {
