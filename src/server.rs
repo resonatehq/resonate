@@ -1165,12 +1165,10 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                 db.process_callbacks(action_id, now)?;
             }
 
-            // When the CTE created the task, use CTE result directly.
             if res.task_created {
                 let task_state_str = res.task_state.unwrap_or_default();
                 let task_state = task_state_str.parse::<TaskState>().unwrap_or(TaskState::Acquired);
-                // Acquired tasks start at version 1 (first claim), fulfilled at 0
-                let task_version = if task_state == TaskState::Acquired { 1 } else { 0 };
+                let task_version = res.task_version.unwrap_or(0);
                 let task = TaskRecord {
                     id: action_id.to_string(),
                     state: task_state,
@@ -1257,6 +1255,11 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                 }
                 (None, _) => {
                     // Transition #9: promise exists but has no target task (no address).
+                    assert!(
+                        !res.promise.tags.contains_key("resonate:target"),
+                        "promise {} has resonate:target but no task row",
+                        action_id
+                    );
                     Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1333,53 +1336,17 @@ async fn op_task_acquire(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 }
                 Some(promise) => {
                     if !result.was_acquired {
-                        let task = db.task_get(&r.id)?;
-                        if let Some(t) = task {
-                            if t.state != TaskState::Pending {
-                                tracing::debug!(
-                                    task_id = %r.id,
-                                    current_state = %t.state,
-                                    "Task acquire rejected: not pending"
-                                );
-                                return Ok(ResponseEnvelope::error(
-                                    kind_str.clone(),
-                                    corr_id.clone(),
-                                    409,
-                                    "Task is not pending",
-                                ));
-                            }
-                            if t.version != r.version {
-                                tracing::debug!(
-                                    task_id = %r.id,
-                                    expected_version = r.version,
-                                    actual_version = t.version,
-                                    "Task acquire rejected: version mismatch"
-                                );
-                                return Ok(ResponseEnvelope::error(
-                                    kind_str.clone(),
-                                    corr_id.clone(),
-                                    409,
-                                    "Version mismatch",
-                                ));
-                            }
-                        }
-                        tracing::debug!(
-                            task_id = %r.id,
-                            "Task acquire rejected: could not acquire (concurrent modification)"
-                        );
                         return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
                             409,
-                            "Task is not pending",
+                            "Task could not be acquired",
                         ));
                     }
-                    // Use known values — no separate task_get that could
-                    // see stale state from concurrent transactions.
                     let task = TaskRecord {
                         id: r.id.to_string(),
-                        state: TaskState::Acquired,
-                        version: r.version + 1,
+                        state: result.task_state.unwrap(),
+                        version: result.task_version.unwrap(),
                         resumes: 0,
                         ttl: Some(r.ttl),
                         pid: Some(r.pid.to_string()),

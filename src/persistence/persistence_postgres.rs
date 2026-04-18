@@ -884,8 +884,8 @@ impl Db for PostgresDb<'_> {
             SELECT
               p.id, p.state, p.param_headers::text, p.param_data, p.value_headers::text, p.value_data, p.tags::text, p.timeout_at, p.created_at, p.settled_at,
               EXISTS (SELECT 1 FROM inserted_task) AS task_created,
-              t.state   AS task_state,
-              t.version AS task_version
+              COALESCE((SELECT state FROM inserted_task), t.state)   AS task_state,
+              COALESCE((SELECT version FROM inserted_task), t.version) AS task_version
             FROM promise p
             LEFT JOIN tasks t ON t.id = p.id
         ")
@@ -947,10 +947,13 @@ impl Db for PostgresDb<'_> {
               RETURNING *
             ),
             invoked AS (
-              SELECT p.*, EXISTS (SELECT 1 FROM acquired_task) AS was_acquired
+              SELECT p.*,
+                     (SELECT state FROM acquired_task) AS task_state,
+                     (SELECT version FROM acquired_task) AS task_version,
+                     EXISTS (SELECT 1 FROM acquired_task) AS was_acquired
               FROM promises p JOIN tasks t ON t.id = p.id WHERE p.id = $1
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, was_acquired FROM invoked
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_state, task_version, was_acquired FROM invoked
         ")
             .bind(task_id).bind(version as i32).bind(time).bind(ttl).bind(pid)
             .fetch_all(self.tx().as_mut()))?;
@@ -959,13 +962,22 @@ impl Db for PostgresDb<'_> {
             return Ok(TaskAcquireResult {
                 promise: None,
                 was_acquired: false,
+                task_state: None,
+                task_version: None,
             });
         }
         let row = &rows[0];
         let was_acquired: bool = row.get("was_acquired");
+        let task_state: Option<TaskState> = row
+            .get::<Option<String>, _>("task_state")
+            .map(|s| parse_task_state(&s));
+        let task_version: Option<i64> =
+            row.try_get::<i32, _>("task_version").ok().map(|v| v as i64);
         Ok(TaskAcquireResult {
             promise: Some(row_to_promise(row)),
             was_acquired,
+            task_state,
+            task_version,
         })
     }
 

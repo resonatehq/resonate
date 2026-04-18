@@ -743,12 +743,16 @@ impl<'a> Db for SqliteDb<'a> {
         )?;
 
         let promise = self.promise_get(task_id)?;
-        if promise.is_none() || self.task_get(task_id)?.is_none() {
+        let task = self.task_get(task_id)?;
+        if promise.is_none() || task.is_none() {
             return Ok(TaskAcquireResult {
                 promise: None,
                 was_acquired: false,
+                task_state: None,
+                task_version: None,
             });
         }
+        let task = task.unwrap();
 
         if updated > 0 {
             // Insert/update lease timeout
@@ -767,6 +771,8 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(TaskAcquireResult {
             promise,
             was_acquired: updated > 0,
+            task_state: Some(task.state),
+            task_version: Some(task.version),
         })
     }
 

@@ -76,6 +76,8 @@ pub struct TaskCreateResult {
 pub struct TaskAcquireResult {
     pub promise: Option<PromiseRecord>,
     pub was_acquired: bool,
+    pub task_state: Option<TaskState>,
+    pub task_version: Option<i64>,
 }
 
 pub struct TaskFenceResult {
