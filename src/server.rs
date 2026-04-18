@@ -1557,16 +1557,7 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                         &TaskFulfillResponseData { promise },
                     ))
                 }
-                None => {
-                    // TODO this is just wrong
-                    tracing::warn!(task_id = %r.id, "Task fulfilled but promise not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Promise not found",
-                    ))
-                }
+                None => unreachable!("task exists implies promise exists"),
             }
         })
         .await
