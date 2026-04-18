@@ -6,7 +6,7 @@ use super::{
     PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
     StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams,
     TaskCreateResult, TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams,
-    TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskReleaseResult, TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -1001,7 +1001,13 @@ impl<'a> Db for SqliteDb<'a> {
             )?;
         }
 
+        let task_exists = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            params![task_id],
+            |r| r.get::<_, bool>(0),
+        )?;
         Ok(TaskFulfillResult {
+            task_exists,
             task_fulfilled,
             promise: self.promise_get(promise_id)?,
         })
@@ -1013,18 +1019,22 @@ impl<'a> Db for SqliteDb<'a> {
         version: i64,
         time: i64,
         ttl: i64,
-    ) -> StorageResult<bool> {
-        let released = self.conn.execute(
+    ) -> StorageResult<TaskReleaseResult> {
+        let task_released = self.conn.execute(
             "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
             params![task_id, version],
         )? > 0;
+        let task_exists = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?1)",
+            params![task_id],
+            |r| r.get(0),
+        )?;
 
-        if released {
+        if task_released {
             self.conn.execute(
                 "UPDATE task_timeouts SET timeout_type = 0, timeout_at = ?1, process_id = NULL WHERE id = ?2",
                 params![time + ttl, task_id],
             )?;
-            // Insert outgoing execute
             let new_version: i64 = self.conn.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![task_id],
@@ -1047,7 +1057,10 @@ impl<'a> Db for SqliteDb<'a> {
                 )?;
             }
         }
-        Ok(released)
+        Ok(TaskReleaseResult {
+            task_released,
+            task_exists,
+        })
     }
 
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {

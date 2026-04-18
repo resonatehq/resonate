@@ -93,10 +93,16 @@ pub struct TaskSuspendResult {
 }
 
 pub struct TaskFulfillResult {
+    pub task_exists: bool,
     /// Whether the task was actually transitioned to fulfilled.
     pub task_fulfilled: bool,
     /// `None` when the promise was not found in the database.
     pub promise: Option<PromiseRecord>,
+}
+
+pub struct TaskReleaseResult {
+    pub task_released: bool,
+    pub task_exists: bool,
 }
 
 pub struct TaskHaltResult {
@@ -273,8 +279,13 @@ pub trait Db {
 
     fn task_fulfill(&self, params: &TaskFulfillParams) -> StorageResult<TaskFulfillResult>;
 
-    fn task_release(&self, task_id: &str, version: i64, time: i64, ttl: i64)
-        -> StorageResult<bool>;
+    fn task_release(
+        &self,
+        task_id: &str,
+        version: i64,
+        time: i64,
+        ttl: i64,
+    ) -> StorageResult<TaskReleaseResult>;
 
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult>;
 

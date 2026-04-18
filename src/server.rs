@@ -1403,61 +1403,31 @@ async fn op_task_release(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 ));
             }
             db.try_timeout(&[&r.id], now)?;
-            let task = match db.task_get(&r.id)? {
-                Some(t) => t,
-                None => {
-                    tracing::debug!(task_id = %r.id, "Task release: task not found");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ))
-                }
-            };
-            if task.state != TaskState::Acquired {
-                tracing::debug!(
-                    task_id = %r.id,
-                    current_state = %task.state,
-                    "Task release rejected: task is not acquired"
-                );
+            let result = db.task_release(&r.id, r.version, now, db.task_retry_timeout())?;
+            if result.task_released {
+                tracing::info!(task_id = %r.id, version = r.version, "Task released back to pending");
+                return Ok(ResponseEnvelope::new(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    200,
+                    serde_json::json!({}),
+                ));
+            }
+            if !result.task_exists {
+                tracing::debug!(task_id = %r.id, "Task release: task not found");
                 return Ok(ResponseEnvelope::error(
                     kind_str.clone(),
                     corr_id.clone(),
-                    409,
-                    "Task is not acquired",
+                    404,
+                    "Task not found",
                 ));
             }
-            if task.version != r.version {
-                tracing::debug!(
-                    task_id = %r.id,
-                    expected_version = r.version,
-                    actual_version = task.version,
-                    "Task release rejected: version mismatch"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Version mismatch",
-                ));
-            }
-            let released = db.task_release(&r.id, r.version, now, db.task_retry_timeout())?;
-            if !released {
-                tracing::debug!(task_id = %r.id, version = r.version, "Task release rejected: version mismatch or invalid state");
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Task version mismatch or invalid state",
-                ));
-            }
-            tracing::info!(task_id = %r.id, version = r.version, "Task released back to pending");
-            Ok(ResponseEnvelope::new(
+            tracing::debug!(task_id = %r.id, version = r.version, "Task release rejected: version mismatch or invalid state");
+            Ok(ResponseEnvelope::error(
                 kind_str.clone(),
                 corr_id.clone(),
-                200,
-                serde_json::json!({}),
+                409,
+                "Task version mismatch or invalid state",
             ))
         })
         .await
@@ -1503,45 +1473,6 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             // Lock preamble: lock promise + task to prevent stale snapshot
             // in precondition check and fulfillment CTE.
             let _ = db.lock_for_update(&r.id)?;
-            let task = match db.task_get(&r.id)? {
-                Some(t) => t,
-                None => {
-                    tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ))
-                }
-            };
-            if task.state != TaskState::Acquired {
-                tracing::debug!(
-                    task_id = %r.id,
-                    current_state = %task.state,
-                    "Task fulfill rejected: task is not acquired"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Task is not acquired",
-                ));
-            }
-            if task.version != r.version {
-                tracing::debug!(
-                    task_id = %r.id,
-                    expected_version = r.version,
-                    actual_version = task.version,
-                    "Task fulfill rejected: version mismatch"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Version mismatch",
-                ));
-            }
             let value_headers_json = action_data
                 .value
                 .headers
@@ -1556,6 +1487,15 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 value_data: action_data.value.data.as_deref(),
                 settled_at: now,
             })?;
+            if !result.task_exists {
+                tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    404,
+                    "Task not found",
+                ));
+            }
             if !result.task_fulfilled {
                 tracing::debug!(task_id = %r.id, version = r.version, "Task fulfill rejected: version mismatch or invalid state");
                 return Ok(ResponseEnvelope::error(
@@ -1580,6 +1520,7 @@ async fn op_task_fulfill(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                     ))
                 }
                 None => {
+                    // TODO this is just wrong
                     tracing::warn!(task_id = %r.id, "Task fulfilled but promise not found");
                     Ok(ResponseEnvelope::error(
                         kind_str.clone(),
@@ -1637,6 +1578,14 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
             // Lock the task row BEFORE try_timeout to prevent
             // try_timeout from fulfilling it via promise timeout.
             let (_, task_exists) = db.lock_for_update(&r.id)?;
+            if !task_exists {
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    404,
+                    "Task not found",
+                ));
+            }
             db.try_timeout(&timeout_ids, now)?;
             let mut seen = std::collections::HashSet::new();
             let unique_awaited: Vec<&str> = awaited_ids
@@ -1646,16 +1595,6 @@ async fn op_task_suspend(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -
                 .collect();
             let result = db.task_suspend(&r.id, r.version, &unique_awaited)?;
             if !result.task_matched {
-                // Use lock_for_update result — no separate task_get that
-                // could see a concurrent task creation.
-                if !task_exists {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ));
-                }
                 tracing::debug!(
                     task_id = %r.id,
                     version = r.version,

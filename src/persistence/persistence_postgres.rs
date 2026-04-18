@@ -3,7 +3,8 @@ use super::{
     PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
     StorageError, StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult,
     TaskCreateParams, TaskCreateResult, TaskFenceCreateParams, TaskFenceResult,
-    TaskFenceSettleParams, TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    TaskFenceSettleParams, TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskReleaseResult,
+    TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -1256,16 +1257,11 @@ impl Db for PostgresDb<'_> {
     ) -> StorageResult<TaskSuspendResult> {
         let awaited_ids: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
 
-        // Statement 1: acquire locks — promises first, then task (consistent lock ordering)
+        // Statement 1: lock awaited promises (task row already locked by lock_for_update)
         rt_block_on(
             sqlx::query("SELECT id FROM promises WHERE id = ANY($1) FOR UPDATE")
                 .bind(&awaited_ids)
                 .fetch_all(self.tx().as_mut()),
-        )?;
-        rt_block_on(
-            sqlx::query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE")
-                .bind(task_id)
-                .fetch_optional(self.tx().as_mut()),
         )?;
 
         // Statement 2: fresh snapshot — sees all callbacks/timeouts committed before this point
@@ -1358,25 +1354,6 @@ impl Db for PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        // Statement 1: lock preamble — promise first, then task (consistent lock ordering)
-        rt_block_on(
-            sqlx::query(
-                "
-            WITH lock_promise AS (
-              SELECT id FROM promises WHERE id = $1 FOR UPDATE
-            ),
-            lock_task AS (
-              SELECT id FROM tasks WHERE id = $2 FOR UPDATE
-            )
-            SELECT 1
-        ",
-            )
-            .bind(promise_id)
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-
-        // Statement 2: fresh snapshot — sees all callbacks/timeouts committed before this point
         let rows = rt_block_on(sqlx::query(&format!("
             WITH fulfilled_acquired_task AS (
               UPDATE tasks SET state = 'fulfilled'
@@ -1441,11 +1418,11 @@ impl Db for PostgresDb<'_> {
               DELETE FROM listeners WHERE promise_id = $3 AND EXISTS (SELECT 1 FROM updated_promise) RETURNING promise_id
             ),
             result AS (
-              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled FROM updated_promise
+              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled, EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists FROM updated_promise
               UNION ALL
-              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
+              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled, EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_fulfilled FROM result
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_fulfilled, task_exists FROM result
         "))
             .bind(task_id).bind(version as i32)                                       // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)  // $3-$7
@@ -1453,13 +1430,16 @@ impl Db for PostgresDb<'_> {
 
         if rows.is_empty() {
             return Ok(TaskFulfillResult {
+                task_exists: false,
                 task_fulfilled: false,
                 promise: None,
             });
         }
         let row = &rows[0];
         let task_fulfilled: bool = row.get("task_fulfilled");
+        let task_exists: bool = row.get("task_exists");
         Ok(TaskFulfillResult {
+            task_exists,
             task_fulfilled,
             promise: Some(row_to_promise(row)),
         })
@@ -1472,8 +1452,8 @@ impl Db for PostgresDb<'_> {
         version: i64,
         time: i64,
         ttl: i64,
-    ) -> StorageResult<bool> {
-        let rows = rt_block_on(
+    ) -> StorageResult<TaskReleaseResult> {
+        let row = rt_block_on(
             sqlx::query(
                 "
             WITH released_task AS (
@@ -1495,7 +1475,9 @@ impl Db for PostgresDb<'_> {
               ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address
               RETURNING id
             )
-            SELECT EXISTS (SELECT 1 FROM released_task) AS released
+            SELECT
+              EXISTS (SELECT 1 FROM released_task) AS task_released,
+              EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists
         ",
             )
             .bind(task_id)
@@ -1505,7 +1487,10 @@ impl Db for PostgresDb<'_> {
             .fetch_one(self.tx().as_mut()),
         )?;
 
-        Ok(rows.get("released"))
+        Ok(TaskReleaseResult {
+            task_released: row.get("task_released"),
+            task_exists: row.get("task_exists"),
+        })
     }
 
     // T-09: task.halt — single CTE
