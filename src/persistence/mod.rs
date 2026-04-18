@@ -48,6 +48,12 @@ impl From<sqlx::Error> for StorageError {
 
 // === Result types for CTE-based operations ===
 
+pub struct PromiseCreateResult {
+    /// Whether the promise was newly inserted (false = already existed).
+    pub was_created: bool,
+    pub promise: PromiseRecord,
+}
+
 pub struct PromiseSettleResult {
     /// Whether the promise was actually transitioned from pending to settled.
     pub was_settled: bool,
@@ -64,11 +70,14 @@ pub struct TaskCreateResult {
     pub promise: PromiseRecord,
     pub task_created: bool,
     pub task_state: Option<String>,
+    pub task_version: Option<i64>,
 }
 
 pub struct TaskAcquireResult {
     pub promise: Option<PromiseRecord>,
     pub was_acquired: bool,
+    pub task_state: Option<TaskState>,
+    pub task_version: Option<i64>,
 }
 
 pub struct TaskFenceResult {
@@ -84,10 +93,16 @@ pub struct TaskSuspendResult {
 }
 
 pub struct TaskFulfillResult {
+    pub task_exists: bool,
     /// Whether the task was actually transitioned to fulfilled.
     pub task_fulfilled: bool,
     /// `None` when the promise was not found in the database.
     pub promise: Option<PromiseRecord>,
+}
+
+pub struct TaskReleaseResult {
+    pub task_released: bool,
+    pub task_exists: bool,
 }
 
 pub struct TaskHaltResult {
@@ -217,7 +232,7 @@ pub trait Db {
     // === Promise operations ===
     fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>>;
 
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord>;
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult>;
 
     fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult>;
 
@@ -245,7 +260,7 @@ pub trait Db {
     // === Task operations ===
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>>;
 
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>>;
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult>;
 
     fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult>;
 
@@ -264,8 +279,13 @@ pub trait Db {
 
     fn task_fulfill(&self, params: &TaskFulfillParams) -> StorageResult<TaskFulfillResult>;
 
-    fn task_release(&self, task_id: &str, version: i64, time: i64, ttl: i64)
-        -> StorageResult<bool>;
+    fn task_release(
+        &self,
+        task_id: &str,
+        version: i64,
+        time: i64,
+        ttl: i64,
+    ) -> StorageResult<TaskReleaseResult>;
 
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult>;
 

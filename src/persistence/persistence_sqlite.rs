@@ -2,11 +2,11 @@ use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseSettleParams,
-    PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams, StorageResult,
-    TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams, TaskCreateResult,
-    TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams, TaskFulfillParams,
-    TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseCreateResult,
+    PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
+    StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams,
+    TaskCreateResult, TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams,
+    TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskReleaseResult, TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -439,7 +439,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
     }
 
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord> {
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
             state,
@@ -458,8 +458,9 @@ impl<'a> Db for SqliteDb<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at],
         )?;
+        let was_created = inserted > 0;
 
-        if inserted > 0 {
+        if was_created {
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
@@ -495,7 +496,10 @@ impl<'a> Db for SqliteDb<'a> {
             }
         }
 
-        Ok(self.promise_get(id)?.unwrap())
+        Ok(PromiseCreateResult {
+            was_created,
+            promise: self.promise_get(id)?.unwrap(),
+        })
     }
 
     fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult> {
@@ -632,8 +636,8 @@ impl<'a> Db for SqliteDb<'a> {
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
              WHERE t.id = ?1",
         )?;
@@ -656,7 +660,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
     }
 
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>> {
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
         let TaskCreateParams {
             promise_id,
             state,
@@ -677,10 +681,9 @@ impl<'a> Db for SqliteDb<'a> {
             params![promise_id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at],
         )? > 0;
 
-        let promise = match self.promise_get(promise_id)? {
-            Some(p) => p,
-            None => return Ok(None),
-        };
+        let promise = self
+            .promise_get(promise_id)?
+            .unwrap_or_else(|| unreachable!("promise missing after insert in task_create"));
 
         let mut task_created = false;
 
@@ -718,11 +721,12 @@ impl<'a> Db for SqliteDb<'a> {
 
         // SQLite: read task state for the result
         let task_row = self.task_get(promise_id)?;
-        Ok(Some(TaskCreateResult {
+        Ok(TaskCreateResult {
             promise,
             task_created,
             task_state: task_row.as_ref().map(|t| t.state.to_string()),
-        }))
+            task_version: task_row.as_ref().map(|t| t.version),
+        })
     }
 
     fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult> {
@@ -739,12 +743,16 @@ impl<'a> Db for SqliteDb<'a> {
         )?;
 
         let promise = self.promise_get(task_id)?;
-        if promise.is_none() || self.task_get(task_id)?.is_none() {
+        let task = self.task_get(task_id)?;
+        if promise.is_none() || task.is_none() {
             return Ok(TaskAcquireResult {
                 promise: None,
                 was_acquired: false,
+                task_state: None,
+                task_version: None,
             });
         }
+        let task = task.unwrap();
 
         if updated > 0 {
             // Insert/update lease timeout
@@ -763,6 +771,8 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(TaskAcquireResult {
             promise,
             was_acquired: updated > 0,
+            task_state: Some(task.state),
+            task_version: Some(task.version),
         })
     }
 
@@ -795,7 +805,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
 
         // Execute inner promise.create
-        let promise = self.promise_create(&PromiseCreateParams {
+        let result = self.promise_create(&PromiseCreateParams {
             id: promise_id,
             state,
             param_headers,
@@ -811,7 +821,7 @@ impl<'a> Db for SqliteDb<'a> {
         Ok(TaskFenceResult {
             task_exists,
             fence_ok,
-            promise: Some(promise),
+            promise: Some(result.promise),
         })
     }
 
@@ -991,7 +1001,13 @@ impl<'a> Db for SqliteDb<'a> {
             )?;
         }
 
+        let task_exists = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            params![task_id],
+            |r| r.get::<_, bool>(0),
+        )?;
         Ok(TaskFulfillResult {
+            task_exists,
             task_fulfilled,
             promise: self.promise_get(promise_id)?,
         })
@@ -1003,18 +1019,22 @@ impl<'a> Db for SqliteDb<'a> {
         version: i64,
         time: i64,
         ttl: i64,
-    ) -> StorageResult<bool> {
-        let released = self.conn.execute(
+    ) -> StorageResult<TaskReleaseResult> {
+        let task_released = self.conn.execute(
             "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
             params![task_id, version],
         )? > 0;
+        let task_exists = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?1)",
+            params![task_id],
+            |r| r.get(0),
+        )?;
 
-        if released {
+        if task_released {
             self.conn.execute(
                 "UPDATE task_timeouts SET timeout_type = 0, timeout_at = ?1, process_id = NULL WHERE id = ?2",
                 params![time + ttl, task_id],
             )?;
-            // Insert outgoing execute
             let new_version: i64 = self.conn.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![task_id],
@@ -1037,7 +1057,10 @@ impl<'a> Db for SqliteDb<'a> {
                 )?;
             }
         }
-        Ok(released)
+        Ok(TaskReleaseResult {
+            task_released,
+            task_exists,
+        })
     }
 
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {
@@ -1116,8 +1139,8 @@ impl<'a> Db for SqliteDb<'a> {
     ) -> StorageResult<Vec<TaskRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
              WHERE (?1 IS NULL OR t.state = ?1) AND (?2 IS NULL OR t.id > ?2)
              ORDER BY t.id ASC LIMIT ?3",
@@ -1546,8 +1569,8 @@ impl<'a> Db for SqliteDb<'a> {
 
         let mut stmt = conn.prepare(
             "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END,
+                    CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id ORDER BY t.id",
         )?;
         let tasks: Vec<TaskRecord> = {

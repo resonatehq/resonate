@@ -1,9 +1,10 @@
 use super::{
-    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseSettleParams,
-    PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams, StorageError, StorageResult,
-    TaskAcquireParams, TaskAcquireResult, TaskContinueResult, TaskCreateParams, TaskCreateResult,
-    TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams, TaskFulfillParams,
-    TaskFulfillResult, TaskHaltResult, TaskSuspendResult,
+    Db, OutgoingExecute, OutgoingUnblock, PromiseCreateParams, PromiseCreateResult,
+    PromiseSettleParams, PromiseSettleResult, RegisterCallbackResult, ScheduleCreateParams,
+    StorageError, StorageResult, TaskAcquireParams, TaskAcquireResult, TaskContinueResult,
+    TaskCreateParams, TaskCreateResult, TaskFenceCreateParams, TaskFenceResult,
+    TaskFenceSettleParams, TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskReleaseResult,
+    TaskSuspendResult,
 };
 use crate::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
@@ -494,7 +495,7 @@ impl Db for PostgresDb<'_> {
     }
 
     // P-02: promise.create — single CTE
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseRecord> {
+    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
             state,
@@ -551,22 +552,25 @@ impl Db for PostgresDb<'_> {
               RETURNING id
             ),
             result AS (
-              SELECT * FROM inserted_or_skipped_promise
+              SELECT *, TRUE AS was_created FROM inserted_or_skipped_promise
               UNION ALL
-              SELECT * FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
+              SELECT *, FALSE AS was_created FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at FROM result
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, was_created FROM result
         "))
             .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)       // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                           // $6-$8
             .bind(already_timedout).bind(address)                                         // $9-$10
             .fetch_all(self.tx().as_mut()))?;
 
-        // Fallback: under READ COMMITTED, a concurrent insert can cause the CTE to return 0 rows
         if rows.is_empty() {
-            return Ok(self.promise_get(id)?.unwrap());
+            unreachable!("promise_create CTE returned no rows");
         }
-        Ok(row_to_promise(&rows[0]))
+        let was_created: bool = rows[0].get("was_created");
+        Ok(PromiseCreateResult {
+            was_created,
+            promise: row_to_promise(&rows[0]),
+        })
     }
 
     // P-03: promise.settle — lock preamble + CTE
@@ -796,8 +800,8 @@ impl Db for PostgresDb<'_> {
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let row = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
@@ -822,7 +826,7 @@ impl Db for PostgresDb<'_> {
     }
 
     // T-02: task.create — single CTE
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<Option<TaskCreateResult>> {
+    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
         let TaskCreateParams {
             promise_id,
             state,
@@ -842,12 +846,10 @@ impl Db for PostgresDb<'_> {
             "acquired"
         };
 
-        let trt = self.task_retry_timeout;
-
         // Statement 1: Promise creation CTE — inserts promise + task (if new).
         // NO acquired_task — task acquire is done as a separate statement
         // so it gets a fresh READ COMMITTED snapshot.
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
               VALUES ($1, $2, $3::jsonb, $4, $5::jsonb, $6, $7, $8)
@@ -869,8 +871,8 @@ impl Db for PostgresDb<'_> {
               RETURNING *
             ),
             inserted_ttimeout AS (
-              INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
-              SELECT ($7 + {trt}), $1, 0, {trt}
+              INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
+              SELECT ($7 + $10), $1, 1, $11, $10
               WHERE NOT $9 AND EXISTS (SELECT 1 FROM inserted_task)
               ON CONFLICT (id) DO NOTHING
               RETURNING id
@@ -882,53 +884,40 @@ impl Db for PostgresDb<'_> {
             )
             SELECT
               p.id, p.state, p.param_headers::text, p.param_data, p.value_headers::text, p.value_data, p.tags::text, p.timeout_at, p.created_at, p.settled_at,
-              EXISTS (SELECT 1 FROM inserted_task) AS task_created
+              EXISTS (SELECT 1 FROM inserted_task) AS task_created,
+              COALESCE((SELECT state FROM inserted_task), t.state)   AS task_state,
+              COALESCE((SELECT version FROM inserted_task), t.version) AS task_version
             FROM promise p
-        "))
+            LEFT JOIN tasks t ON t.id = p.id
+        ")
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                             // $6-$8
             .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)             // $9-$12
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
-            let promise = match self.promise_get(promise_id)? {
-                Some(p) => p,
-                None => return Ok(None),
-            };
-            return Ok(Some(TaskCreateResult {
-                promise,
-                task_created: false,
-                task_state: None,
-            }));
+            unreachable!("task_create CTE returned no rows");
         }
         let row = &rows[0];
         let promise = row_to_promise(row);
         let task_created: bool = row.get("task_created");
 
         if task_created {
-            // New task created — set up lease timeout
-            if !already_timedout {
-                rt_block_on(sqlx::query(
-                    "INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl)
-                     VALUES ($1, $2, 1, $3, $4)
-                     ON CONFLICT (id) DO UPDATE SET timeout_at = $1, timeout_type = 1, process_id = $3, ttl = $4")
-                    .bind(created_at + ttl).bind(promise_id).bind(pid).bind(ttl)
-                    .fetch_optional(self.tx().as_mut()))?;
-            }
-            return Ok(Some(TaskCreateResult {
+            return Ok(TaskCreateResult {
                 promise,
                 task_created: true,
                 task_state: Some(task_initial_state.to_string()),
-            }));
+                task_version: Some(if already_timedout { 0 } else { 1 }),
+            });
         }
 
         // Promise already existed, task not created.
-        // Acquire is done by the handler as a separate statement (fresh snapshot).
-        Ok(Some(TaskCreateResult {
+        Ok(TaskCreateResult {
             promise,
             task_created: false,
-            task_state: None,
-        }))
+            task_state: row.try_get("task_state").ok(),
+            task_version: row.try_get::<i32, _>("task_version").ok().map(|v| v as i64),
+        })
     }
 
     // T-03: task.acquire — single CTE
@@ -959,10 +948,13 @@ impl Db for PostgresDb<'_> {
               RETURNING *
             ),
             invoked AS (
-              SELECT p.*, EXISTS (SELECT 1 FROM acquired_task) AS was_acquired
+              SELECT p.*,
+                     (SELECT state FROM acquired_task) AS task_state,
+                     (SELECT version FROM acquired_task) AS task_version,
+                     EXISTS (SELECT 1 FROM acquired_task) AS was_acquired
               FROM promises p JOIN tasks t ON t.id = p.id WHERE p.id = $1
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, was_acquired FROM invoked
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_state, task_version, was_acquired FROM invoked
         ")
             .bind(task_id).bind(version as i32).bind(time).bind(ttl).bind(pid)
             .fetch_all(self.tx().as_mut()))?;
@@ -971,13 +963,22 @@ impl Db for PostgresDb<'_> {
             return Ok(TaskAcquireResult {
                 promise: None,
                 was_acquired: false,
+                task_state: None,
+                task_version: None,
             });
         }
         let row = &rows[0];
         let was_acquired: bool = row.get("was_acquired");
+        let task_state: Option<TaskState> = row
+            .get::<Option<String>, _>("task_state")
+            .map(|s| parse_task_state(&s));
+        let task_version: Option<i64> =
+            row.try_get::<i32, _>("task_version").ok().map(|v| v as i64);
         Ok(TaskAcquireResult {
             promise: Some(row_to_promise(row)),
             was_acquired,
+            task_state,
+            task_version,
         })
     }
 
@@ -1256,16 +1257,11 @@ impl Db for PostgresDb<'_> {
     ) -> StorageResult<TaskSuspendResult> {
         let awaited_ids: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
 
-        // Statement 1: acquire locks — promises first, then task (consistent lock ordering)
+        // Statement 1: lock awaited promises (task row already locked by lock_for_update)
         rt_block_on(
             sqlx::query("SELECT id FROM promises WHERE id = ANY($1) FOR UPDATE")
                 .bind(&awaited_ids)
                 .fetch_all(self.tx().as_mut()),
-        )?;
-        rt_block_on(
-            sqlx::query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE")
-                .bind(task_id)
-                .fetch_optional(self.tx().as_mut()),
         )?;
 
         // Statement 2: fresh snapshot — sees all callbacks/timeouts committed before this point
@@ -1358,25 +1354,6 @@ impl Db for PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        // Statement 1: lock preamble — promise first, then task (consistent lock ordering)
-        rt_block_on(
-            sqlx::query(
-                "
-            WITH lock_promise AS (
-              SELECT id FROM promises WHERE id = $1 FOR UPDATE
-            ),
-            lock_task AS (
-              SELECT id FROM tasks WHERE id = $2 FOR UPDATE
-            )
-            SELECT 1
-        ",
-            )
-            .bind(promise_id)
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-
-        // Statement 2: fresh snapshot — sees all callbacks/timeouts committed before this point
         let rows = rt_block_on(sqlx::query(&format!("
             WITH fulfilled_acquired_task AS (
               UPDATE tasks SET state = 'fulfilled'
@@ -1441,11 +1418,11 @@ impl Db for PostgresDb<'_> {
               DELETE FROM listeners WHERE promise_id = $3 AND EXISTS (SELECT 1 FROM updated_promise) RETURNING promise_id
             ),
             result AS (
-              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled FROM updated_promise
+              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled, EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists FROM updated_promise
               UNION ALL
-              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
+              SELECT *, EXISTS (SELECT 1 FROM fulfilled_acquired_task) AS task_fulfilled, EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_fulfilled FROM result
+            SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_fulfilled, task_exists FROM result
         "))
             .bind(task_id).bind(version as i32)                                       // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)  // $3-$7
@@ -1453,13 +1430,16 @@ impl Db for PostgresDb<'_> {
 
         if rows.is_empty() {
             return Ok(TaskFulfillResult {
+                task_exists: false,
                 task_fulfilled: false,
                 promise: None,
             });
         }
         let row = &rows[0];
         let task_fulfilled: bool = row.get("task_fulfilled");
+        let task_exists: bool = row.get("task_exists");
         Ok(TaskFulfillResult {
+            task_exists,
             task_fulfilled,
             promise: Some(row_to_promise(row)),
         })
@@ -1472,8 +1452,8 @@ impl Db for PostgresDb<'_> {
         version: i64,
         time: i64,
         ttl: i64,
-    ) -> StorageResult<bool> {
-        let rows = rt_block_on(
+    ) -> StorageResult<TaskReleaseResult> {
+        let row = rt_block_on(
             sqlx::query(
                 "
             WITH released_task AS (
@@ -1495,7 +1475,9 @@ impl Db for PostgresDb<'_> {
               ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address
               RETURNING id
             )
-            SELECT EXISTS (SELECT 1 FROM released_task) AS released
+            SELECT
+              EXISTS (SELECT 1 FROM released_task) AS task_released,
+              EXISTS (SELECT 1 FROM tasks WHERE id = $1) AS task_exists
         ",
             )
             .bind(task_id)
@@ -1505,7 +1487,10 @@ impl Db for PostgresDb<'_> {
             .fetch_one(self.tx().as_mut()),
         )?;
 
-        Ok(rows.get("released"))
+        Ok(TaskReleaseResult {
+            task_released: row.get("task_released"),
+            task_exists: row.get("task_exists"),
+        })
     }
 
     // T-09: task.halt — single CTE
@@ -1599,8 +1584,8 @@ impl Db for PostgresDb<'_> {
     ) -> StorageResult<Vec<TaskRecord>> {
         let rows = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
@@ -1996,8 +1981,8 @@ impl Db for PostgresDb<'_> {
 
         let task_rows = rt_block_on(sqlx::query("
             SELECT t.id, t.state, t.version,
-              CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END AS ttl,
-              CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END AS pid,
+              CASE WHEN t.state = 'acquired' THEN tt.ttl ELSE NULL END AS ttl,
+              CASE WHEN t.state = 'acquired' THEN tt.process_id ELSE NULL END AS pid,
               COALESCE(
                 (SELECT COUNT(*)::INT FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true),
                 0
