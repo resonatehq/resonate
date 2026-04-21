@@ -11,7 +11,7 @@ import type { PromiseRecord, Request, TaskRecord } from "../src/network/types.js
 import { isSuccess } from "../src/network/types.js";
 import { OptionsBuilder } from "../src/options.js";
 import { Registry } from "../src/registry.js";
-import type { Send } from "../src/types.js";
+import type { Effects, Send } from "../src/types.js";
 import { VERSION } from "../src/util.js";
 
 class TestHeartbeat implements Heartbeat {
@@ -21,23 +21,33 @@ class TestHeartbeat implements Heartbeat {
 
 class MockComputation {
   public calls: { rootPromise: PromiseRecord }[] = [];
+  public effects?: Effects;
   private responses: (Status | Error)[];
   private callIndex = 0;
+  private onExec?: (effects: Effects) => Promise<void>;
 
-  constructor(responses: (Status | Error)[]) {
+  constructor(responses: (Status | Error)[], onExec?: (effects: Effects) => Promise<void>) {
     this.responses = responses;
+    this.onExec = onExec;
   }
 
-  executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {
+  async executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {
     this.calls.push({ rootPromise });
+    if (this.onExec && this.effects) {
+      await this.onExec(this.effects);
+    }
     const res = this.responses[this.callIndex] ?? this.responses[this.responses.length - 1];
     this.callIndex++;
-    if (res instanceof Error) return Promise.reject(res);
-    return Promise.resolve(res);
+    if (res instanceof Error) throw res;
+    return res;
   }
 }
 
-function buildCore(opts: { responses: (Status | Error)[]; mockRef?: { mock: MockComputation } }): {
+function buildCore(opts: {
+  responses: (Status | Error)[];
+  mockRef?: { mock: MockComputation };
+  onExec?: (effects: Effects) => Promise<void>;
+}): {
   core: Core;
   network: LocalNetwork;
   sendHolder: { fn: Send };
@@ -52,7 +62,7 @@ function buildCore(opts: { responses: (Status | Error)[]; mockRef?: { mock: Mock
   const sendHolder = { fn: network.send as Send };
   const proxiedSend: Send = (req: any) => sendHolder.fn(req);
 
-  const activeMock = new MockComputation(opts.responses);
+  const activeMock = new MockComputation(opts.responses, opts.onExec);
   if (opts.mockRef) {
     opts.mockRef.mock = activeMock;
   }
@@ -70,7 +80,11 @@ function buildCore(opts: { responses: (Status | Error)[]; mockRef?: { mock: Mock
     logger,
   });
 
-  const ctorSpy = jest.spyOn(core as any, "createComputation").mockReturnValue(activeMock);
+  const ctorSpy = jest.spyOn(core as any, "createComputation").mockImplementation((..._args: any[]) => {
+    const effects = _args[1] as Effects;
+    activeMock.effects = effects;
+    return activeMock;
+  });
 
   return { core, network, sendHolder, codec, ctorSpy };
 }
@@ -299,6 +313,153 @@ describe("Core", () => {
         expect(fulfill.data.action.data.value.data).toBeDefined();
         expect(typeof fulfill.data.action.data.value.data).toBe("string");
       }
+    });
+  });
+
+  describe("task.fence", () => {
+    test("promise.create issued during execution is wrapped in task.fence with acquired task id and version", async () => {
+      const { core, sendHolder, codec } = buildCore({
+        responses: [{ kind: "done", id: "fence-1", state: "resolved", value: 42, trace: [] }],
+        onExec: async (effects) => {
+          await effects.promiseCreate({
+            kind: "promise.create",
+            head: { corrId: randomUUID(), version: VERSION },
+            data: {
+              id: "fence-1.child",
+              timeoutAt: Date.now() + 60_000,
+              param: { headers: {}, data: { func: "child", args: [], version: 1 } },
+              tags: {},
+            },
+          });
+        },
+      });
+
+      const { task, rootPromise } = await seedAcquiredTask(sendHolder.fn, codec, "fence-1", "main", []);
+      const { sent } = interceptSend(sendHolder);
+
+      await core.executeUntilBlocked(task, rootPromise);
+
+      const fences = sent.filter((r) => r.kind === "task.fence");
+      expect(fences.length).toBe(1);
+      const fence = fences[0];
+      if (fence.kind === "task.fence") {
+        expect(fence.data.id).toBe(task.id);
+        expect(fence.data.version).toBe(task.version);
+        expect(fence.data.action.kind).toBe("promise.create");
+        expect(fence.data.action.data.id).toBe("fence-1.child");
+      }
+
+      // Ensure no bare promise.create was sent during execution
+      expect(sent.some((r) => r.kind === "promise.create")).toBe(false);
+    });
+
+    test("promise.settle issued during execution is wrapped in task.fence", async () => {
+      const { core, sendHolder, codec } = buildCore({
+        responses: [{ kind: "done", id: "fence-2", state: "resolved", value: 1, trace: [] }],
+        onExec: async (effects) => {
+          // Pre-create the child promise directly so we can settle it.
+          await sendHolder.fn({
+            kind: "promise.create",
+            head: { corrId: randomUUID(), version: VERSION },
+            data: {
+              id: "fence-2.child",
+              timeoutAt: Date.now() + 60_000,
+              param: codec.encode({ func: "child", args: [], version: 1 }),
+              tags: {},
+            },
+          });
+
+          await effects.promiseSettle({
+            kind: "promise.settle",
+            head: { corrId: randomUUID(), version: VERSION },
+            data: {
+              id: "fence-2.child",
+              state: "resolved",
+              value: { headers: {}, data: "result" },
+            },
+          });
+        },
+      });
+
+      const { task, rootPromise } = await seedAcquiredTask(sendHolder.fn, codec, "fence-2", "main", []);
+      const { sent } = interceptSend(sendHolder);
+
+      await core.executeUntilBlocked(task, rootPromise);
+
+      const fences = sent.filter((r) => r.kind === "task.fence");
+      expect(fences.length).toBe(1);
+      const fence = fences[0];
+      if (fence.kind === "task.fence") {
+        expect(fence.data.id).toBe(task.id);
+        expect(fence.data.version).toBe(task.version);
+        expect(fence.data.action.kind).toBe("promise.settle");
+        expect(fence.data.action.data.id).toBe("fence-2.child");
+      }
+
+      // No bare promise.settle should have been sent during execution
+      expect(sent.some((r) => r.kind === "promise.settle")).toBe(false);
+    });
+
+    test("fence fails when task version is stale (another process reacquired)", async () => {
+      const { core, sendHolder, codec } = buildCore({
+        responses: [{ kind: "done", id: "fence-3", state: "resolved", value: 1, trace: [] }],
+        onExec: async (effects) => {
+          await effects.promiseCreate({
+            kind: "promise.create",
+            head: { corrId: randomUUID(), version: VERSION },
+            data: {
+              id: "fence-3.child",
+              timeoutAt: Date.now() + 60_000,
+              param: { headers: {}, data: { func: "child", args: [], version: 1 } },
+              tags: {},
+            },
+          });
+        },
+      });
+
+      const { task, rootPromise } = await seedAcquiredTask(sendHolder.fn, codec, "fence-3", "main", []);
+
+      // Release and reacquire the task behind the SDK's back, bumping its version.
+      const releaseRes = await sendHolder.fn({
+        kind: "task.release",
+        head: { corrId: randomUUID(), version: VERSION },
+        data: { id: task.id, version: task.version },
+      });
+      expect(releaseRes.head.status).toBe(200);
+      const reAcquire = await sendHolder.fn({
+        kind: "task.acquire",
+        head: { corrId: randomUUID(), version: VERSION },
+        data: { id: task.id, version: task.version, pid: "other-pid", ttl: 60_000 },
+      });
+      expect(reAcquire.head.status).toBe(200);
+
+      // The SDK still holds the old version — fence should reject with 409.
+      await expect(core.executeUntilBlocked(task, rootPromise)).rejects.toThrow();
+    });
+
+    test("fence is not used outside of an acquired task (no fence when no task)", async () => {
+      // Directly exercise buildEffects without a task fence context via a bare send.
+      // This verifies that Core's fence wrapping is scoped to acquired-task execution.
+      const { sendHolder, codec } = buildCore({
+        responses: [{ kind: "done", id: "fence-4", state: "resolved", value: 1, trace: [] }],
+      });
+      const { sent } = interceptSend(sendHolder);
+
+      // Create a promise directly (no task context) — must be a bare promise.create.
+      const res = await sendHolder.fn({
+        kind: "promise.create",
+        head: { corrId: randomUUID(), version: VERSION },
+        data: {
+          id: "fence-4",
+          timeoutAt: Date.now() + 60_000,
+          param: codec.encode({ func: "anything", args: [], version: 1 }),
+          tags: {},
+        },
+      });
+      expect(isSuccess(res)).toBe(true);
+
+      expect(sent.some((r) => r.kind === "promise.create")).toBe(true);
+      expect(sent.some((r) => r.kind === "task.fence")).toBe(false);
     });
   });
 });

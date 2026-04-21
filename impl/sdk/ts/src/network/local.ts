@@ -136,6 +136,8 @@ const PENDING_RETRY_TTL = 30000;
 // SERVER
 // =============================================================================
 
+export type TimeoutMode = "eager" | "none";
+
 export class Server {
   promises = new Map<string, Promise>();
   tasks = new Map<string, Task>();
@@ -144,6 +146,17 @@ export class Server {
   tTimeouts: TTimeout[] = [];
   sTimeouts: STimeout[] = [];
   outgoing: { address: string; message: Message }[] = [];
+
+  // When "eager", every action handler converges physical state to logical
+  // state by running tryEagerTimeout for the relevant id(s) before the
+  // handler body. When "none", convergence happens only via debug.tick (or
+  // an equivalent background mechanism) — read paths must rely on
+  // projection to return the logical state.
+  readonly timeoutMode: TimeoutMode;
+
+  constructor(opts: { timeoutMode?: TimeoutMode } = {}) {
+    this.timeoutMode = opts.timeoutMode ?? "eager";
+  }
 
   apply(now: number, req: Request): { response: Response; changes: Change[] } {
     const changes: Change[] = [];
@@ -156,28 +169,28 @@ export class Server {
     let result: { response: Response; changes: Change[] };
     switch (req.kind) {
       case "promise.get": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.promiseGet(now, req);
         break;
       }
       case "promise.create": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.promiseCreate(now, req);
         break;
       }
       case "promise.settle": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.promiseSettle(now, req);
         break;
       }
       case "promise.register_callback": {
-        changes.push(...this.tryAutoTimeout(now, req.data.awaited));
-        changes.push(...this.tryAutoTimeout(now, req.data.awaiter));
+        changes.push(...this.tryEagerTimeout(now, req.data.awaited));
+        changes.push(...this.tryEagerTimeout(now, req.data.awaiter));
         result = this.promiseRegisterCallback(now, req);
         break;
       }
       case "promise.register_listener": {
-        changes.push(...this.tryAutoTimeout(now, req.data.awaited));
+        changes.push(...this.tryEagerTimeout(now, req.data.awaited));
         result = this.promiseRegisterListener(now, req);
         break;
       }
@@ -186,51 +199,51 @@ export class Server {
         break;
       }
       case "task.get": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskGet(now, req);
         break;
       }
       case "task.create": {
-        changes.push(...this.tryAutoTimeout(now, req.data.action.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.action.data.id));
         result = this.taskCreate(now, req);
         break;
       }
       case "task.acquire": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskAcquire(now, req);
         break;
       }
       case "task.release": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskRelease(now, req);
         break;
       }
       case "task.fulfill": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskFulfill(now, req);
         break;
       }
       case "task.suspend": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         for (const action of req.data.actions) {
-          changes.push(...this.tryAutoTimeout(now, action.data.awaited));
+          changes.push(...this.tryEagerTimeout(now, action.data.awaited));
         }
         result = this.taskSuspend(now, req);
         break;
       }
       case "task.halt": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskHalt(now, req);
         break;
       }
       case "task.continue": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
         result = this.taskContinue(now, req);
         break;
       }
       case "task.fence": {
-        changes.push(...this.tryAutoTimeout(now, req.data.id));
-        changes.push(...this.tryAutoTimeout(now, req.data.action.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.id));
+        changes.push(...this.tryEagerTimeout(now, req.data.action.data.id));
         result = this.taskFence(now, req);
         break;
       }
@@ -326,14 +339,21 @@ export class Server {
     if (!promise) {
       return { response: this.response("promise.get", 404, "Promise not found"), changes: [] };
     }
-    return { response: this.response("promise.get", 200, { promise: this.toPromiseRecord(promise) }), changes: [] };
+    return {
+      response: this.response("promise.get", 200, {
+        promise: this.toPromiseRecord(this.projectedPromise(now, promise)),
+      }),
+      changes: [],
+    };
   }
 
   private promiseCreate(now: number, req: PromiseCreateReq): { response: PromiseCreateRes; changes: Change[] } {
     const existingPromise = this.promises.get(req.data.id);
     if (existingPromise) {
       return {
-        response: this.response("promise.create", 200, { promise: this.toPromiseRecord(existingPromise) }),
+        response: this.response("promise.create", 200, {
+          promise: this.toPromiseRecord(this.projectedPromise(now, existingPromise)),
+        }),
         changes: [],
       };
     }
@@ -432,9 +452,13 @@ export class Server {
       return { response: this.response("promise.settle", 404, "Promise not found"), changes: [] };
     }
 
-    if (promise.state !== "pending") {
+    // Idempotent return: if the promise is already physically terminal OR
+    // pending past its deadline (logically settled), return the projected
+    // logical state without writing.
+    const projected = this.projectedPromise(now, promise);
+    if (projected.state !== "pending") {
       return {
-        response: this.response("promise.settle", 200, { promise: this.toPromiseRecord(promise) }),
+        response: this.response("promise.settle", 200, { promise: this.toPromiseRecord(projected) }),
         changes: [],
       };
     }
@@ -478,14 +502,20 @@ export class Server {
 
     const changes: Change[] = [];
 
-    // Add to callbacks if awaited is pending and awaiter is not settled
-    if (awaitedPromise.state === "pending" && awaiterPromise.state === "pending") {
+    // Project for the logically-pending check and for the response — the
+    // callback is written only when both sides are logically pending, and
+    // the response always reflects the projected awaited promise.
+    const awaitedProjected = this.projectedPromise(now, awaitedPromise);
+    const awaiterProjected = this.projectedPromise(now, awaiterPromise);
+    if (awaitedProjected.state === "pending" && awaiterProjected.state === "pending") {
       awaitedPromise.callbacks.add(req.data.awaiter);
       changes.push(this.setPromise(awaitedPromise));
     }
 
     return {
-      response: this.response("promise.register_callback", 200, { promise: this.toPromiseRecord(awaitedPromise) }),
+      response: this.response("promise.register_callback", 200, {
+        promise: this.toPromiseRecord(awaitedProjected),
+      }),
       changes,
     };
   }
@@ -501,14 +531,19 @@ export class Server {
 
     const changes: Change[] = [];
 
-    // Add listener if promise is pending
-    if (promise.state === "pending") {
+    // Project for the logically-pending check and for the response — the
+    // listener is registered only when the promise is logically pending,
+    // and the response always reflects the projected awaited promise.
+    const projected = this.projectedPromise(now, promise);
+    if (projected.state === "pending") {
       promise.listeners.add(req.data.address);
       changes.push(this.setPromise(promise));
     }
 
     return {
-      response: this.response("promise.register_listener", 200, { promise: this.toPromiseRecord(promise) }),
+      response: this.response("promise.register_listener", 200, {
+        promise: this.toPromiseRecord(projected),
+      }),
       changes,
     };
   }
@@ -522,7 +557,12 @@ export class Server {
     if (!task) {
       return { response: this.response("task.get", 404, "Task not found"), changes: [] };
     }
-    return { response: this.response("task.get", 200, { task: this.toTaskRecord(task) }), changes: [] };
+    return {
+      response: this.response("task.get", 200, {
+        task: this.toTaskRecord(this.projectedTask(now, task)),
+      }),
+      changes: [],
+    };
   }
 
   private taskCreate(now: number, req: TaskCreateReq): { response: TaskCreateRes; changes: Change[] } {
@@ -671,13 +711,20 @@ export class Server {
     if (task.state !== "pending") {
       return { response: this.response("task.acquire", 409, "Task not in pending state"), changes: [] };
     }
+    // Logical-state check: if the task's promise is logically settled,
+    // the task is logically fulfilled and cannot be acquired. This catches
+    // the projection-mode case where the physical task state has not yet
+    // converged.
+    const promise = this.getPromiseOrThrow(req.data.id);
+    if (this.projectedPromise(now, promise).state !== "pending") {
+      return { response: this.response("task.acquire", 409, "Task logically fulfilled"), changes: [] };
+    }
     if (task.version !== req.data.version) {
       return { response: this.response("task.acquire", 409, "Version mismatch"), changes: [] };
     }
 
     const newVersion = task.version + 1;
     const changes: Change[] = [];
-    const promise = this.getPromiseOrThrow(req.data.id);
     changes.push(
       this.setTask({
         ...task,
@@ -715,6 +762,12 @@ export class Server {
     if (task.state !== "acquired") {
       return { response: this.response("task.release", 409, "Task not acquired"), changes: [] };
     }
+    // Logical-state check: if the task's promise is logically settled,
+    // the task is logically fulfilled and cannot be released.
+    const taskPromise = this.getPromiseOrThrow(req.data.id);
+    if (this.projectedPromise(now, taskPromise).state !== "pending") {
+      return { response: this.response("task.release", 409, "Task not acquired"), changes: [] };
+    }
     if (task.version !== req.data.version) {
       return { response: this.response("task.release", 409, "Version mismatch"), changes: [] };
     }
@@ -742,6 +795,12 @@ export class Server {
       return { response: this.response("task.fulfill", 404, "Task not found"), changes: [] };
     }
     if (task.state !== "acquired") {
+      return { response: this.response("task.fulfill", 409, "Task not acquired"), changes: [] };
+    }
+    // Logical-state check: if the task's promise is logically settled, the
+    // task is logically fulfilled and cannot be fulfilled again.
+    const taskPromise = this.getPromiseOrThrow(req.data.id);
+    if (this.projectedPromise(now, taskPromise).state !== "pending") {
       return { response: this.response("task.fulfill", 409, "Task not acquired"), changes: [] };
     }
     if (task.version !== req.data.version) {
@@ -780,6 +839,12 @@ export class Server {
       return { response: this.response("task.suspend", 404, "Task not found"), changes: [] };
     }
     if (task.state !== "acquired") {
+      return { response: this.response("task.suspend", 409, "Task not acquired"), changes: [] };
+    }
+    // Logical-state check: if the task's promise is logically settled, the
+    // task is logically fulfilled and cannot be suspended.
+    const taskPromise = this.getPromiseOrThrow(req.data.id);
+    if (this.projectedPromise(now, taskPromise).state !== "pending") {
       return { response: this.response("task.suspend", 409, "Task not acquired"), changes: [] };
     }
     if (task.version !== req.data.version) {
@@ -879,6 +944,12 @@ export class Server {
     if (task.state !== "acquired") {
       return { response: this.response("task.fence", 409, "Fence check failed"), changes: [] };
     }
+    // Logical-state check: if the task's promise is logically settled,
+    // the task is logically fulfilled and the fence fails.
+    const taskPromise = this.getPromiseOrThrow(req.data.id);
+    if (this.projectedPromise(now, taskPromise).state !== "pending") {
+      return { response: this.response("task.fence", 409, "Fence check failed"), changes: [] };
+    }
     if (task.version !== req.data.version) {
       return { response: this.response("task.fence", 409, "Fence check failed"), changes: [] };
     }
@@ -892,8 +963,13 @@ export class Server {
       inner = this.promiseSettle(now, action);
     }
 
+    const actionResponse = {
+      ...inner.response,
+      head: { corrId: req.head.corrId, status: inner.response.head.status, version: req.head.version },
+    };
+
     return {
-      response: this.response("task.fence", 200, { action: inner.response, preload: [] }),
+      response: this.response("task.fence", 200, { action: actionResponse, preload: [] }),
       changes: inner.changes,
     };
   }
@@ -904,6 +980,12 @@ export class Server {
     for (const ref of req.data.tasks) {
       const task = this.tasks.get(ref.id);
       if (!task || task.state !== "acquired" || task.version !== ref.version || task.pid !== req.data.pid) {
+        continue;
+      }
+      // Logical-state check: if the task's promise is logically settled,
+      // the task is logically fulfilled and its lease cannot be refreshed.
+      const promise = this.getPromiseOrThrow(ref.id);
+      if (this.projectedPromise(now, promise).state !== "pending") {
         continue;
       }
 
@@ -1211,7 +1293,9 @@ export class Server {
   // HELPERS
   // ===========================================================================
 
-  private tryAutoTimeout(now: number, id: string): Change[] {
+  private tryEagerTimeout(now: number, id: string): Change[] {
+    if (this.timeoutMode !== "eager") return [];
+
     const promise = this.promises.get(id);
     if (!promise || promise.state !== "pending" || now < promise.timeoutAt) {
       return [];
@@ -1335,6 +1419,41 @@ export class Server {
 
   private timeoutState(tags: Record<string, string>): "resolved" | "rejected_timedout" {
     return tags["resonate:timer"] === "true" ? "resolved" : "rejected_timedout";
+  }
+
+  // Projection: return the LOGICAL view of a promise without mutating
+  // storage. When physical state is `pending` and `now >= timeoutAt`, the
+  // logical state is the terminal state implied by the timer tag. Used at
+  // response-construction sites in read paths so callers always observe
+  // logical state regardless of whether convergence has happened yet.
+  //
+  // Unguarded by timeoutMode: when timeoutMode === "eager", the physical
+  // state already matches the logical state by the time this runs (because
+  // tryEagerTimeout fired at the start of the action), so the projection
+  // condition is never met and this is a no-op.
+  private projectedPromise(now: number, promise: Promise): Promise {
+    if (promise.state !== "pending" || now < promise.timeoutAt) {
+      return promise;
+    }
+    return {
+      ...promise,
+      state: this.timeoutState(promise.tags),
+      settledAt: promise.timeoutAt,
+    };
+  }
+
+  // Projection: return the LOGICAL view of a task without mutating storage.
+  // A task's logical state is bound to its promise's logical state — when
+  // the promise is logically settled, the task is logically fulfilled.
+  //
+  // Unguarded for the same reason as projectedPromise.
+  private projectedTask(now: number, task: Task): Task {
+    const promise = this.promises.get(task.id);
+    if (!promise) return task;
+    const projected = this.projectedPromise(now, promise);
+    if (projected.state === "pending") return task;
+    if (task.state === "fulfilled") return task;
+    return { ...task, state: "fulfilled", pid: undefined, ttl: undefined };
   }
 
   private getPromiseOrThrow(id: string): Promise {

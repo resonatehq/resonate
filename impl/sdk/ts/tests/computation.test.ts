@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "@jest/globals";
 import { WallClock } from "../src/clock.js";
 import { Codec } from "../src/codec.js";
@@ -7,7 +8,7 @@ import type { Heartbeat } from "../src/heartbeat.js";
 import { ConsoleLogger } from "../src/logger.js";
 import { LocalNetwork } from "../src/network/local.js";
 import type { Network } from "../src/network/network.js";
-import type { PromiseRecord } from "../src/network/types.js";
+import { isSuccess, type PromiseRecord } from "../src/network/types.js";
 import { OptionsBuilder } from "../src/options.js";
 import { Registry } from "../src/registry.js";
 import { Exponential, Never } from "../src/retries.js";
@@ -19,16 +20,40 @@ class TestHeartbeat implements Heartbeat {
   stop(): void {}
 }
 
-function buildComputation(registry: Registry): {
+async function buildComputation(registry: Registry): Promise<{
   computation: Computation;
   network: Network;
   effects: Effects;
-} {
+}> {
   const network = new LocalNetwork();
   const codec = new Codec();
   const logger = new ConsoleLogger("error");
 
-  const effects = util.buildEffects(network.send, codec);
+  // Seed an acquired task so that fence-wrapped effects pass validation.
+  const seedRes = await network.send({
+    kind: "task.create",
+    head: { corrId: randomUUID(), version: util.VERSION },
+    data: {
+      pid: "test-pid",
+      ttl: 60_000,
+      action: {
+        kind: "promise.create",
+        head: { corrId: randomUUID(), version: util.VERSION },
+        data: {
+          id: "test-computation__fence-host",
+          param: codec.encode({ func: "__noop__", args: [], version: 1 }),
+          tags: { "resonate:target": "default" },
+          timeoutAt: Date.now() + 60_000,
+        },
+      },
+    },
+  });
+  if (!isSuccess(seedRes) || seedRes.data.task === undefined) {
+    throw new Error(`Failed to seed fence task: ${seedRes.head.status}`);
+  }
+  const fenceTask = seedRes.data.task;
+
+  const effects = util.buildEffects(network.send, codec, { id: fenceTask.id, version: fenceTask.version });
 
   const computation = new Computation(
     "test-computation",
@@ -93,7 +118,7 @@ describe("Computation", () => {
       registry.add(main, "main");
       registry.add(add, "add");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("local-single", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -124,7 +149,7 @@ describe("Computation", () => {
       registry.add(double, "double");
       registry.add(square, "square");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("local-multi", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -146,7 +171,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(main, "main");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("remote-single", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -166,7 +191,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(main, "main");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("remote-multi", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -193,7 +218,7 @@ describe("Computation", () => {
       registry.add(main, "main");
       registry.add(add, "add");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("mixed", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -220,7 +245,7 @@ describe("Computation", () => {
       registry.add(main, "main");
       registry.add(multiply, "multiply");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("mixed-parallel", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -240,7 +265,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(add, "add");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("func-resolve", "add", [3, 4]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -259,7 +284,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(fail, "fail");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("func-reject", "fail", [], {
         version: 1,
         retry: { type: "never", data: {} },
@@ -280,7 +305,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(noop, "noop");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("func-void", "noop", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -299,7 +324,7 @@ describe("Computation", () => {
       const registry = new Registry();
       registry.add(concat, "concat");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("func-args", "concat", ["x", "y", "z"]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -326,7 +351,7 @@ describe("Computation", () => {
       registry.add(main, "main");
       registry.add(fail, "fail");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("error-local", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -355,7 +380,7 @@ describe("Computation", () => {
       registry.add(main, "main");
       registry.add(counter, "counter");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("no-reexec", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 

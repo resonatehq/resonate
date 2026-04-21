@@ -20,6 +20,19 @@ class DummyNetwork {
   send: Send = <K extends Request["kind"]>(
     req: Extract<Request, { kind: K }>,
   ): Promise<Extract<Response, { kind: K }>> => {
+    // task.fence is transparent: unwrap and delegate to the inner handler.
+    if (req.kind === "task.fence") {
+      const fenceReq = req as Extract<Request, { kind: "task.fence" }>;
+      return this.send(fenceReq.data.action as any).then(
+        (innerRes) =>
+          ({
+            kind: "task.fence",
+            head: { corrId: req.head.corrId, status: 200, version: req.head.version },
+            data: { action: innerRes, preload: [] },
+          }) as unknown as Extract<Response, { kind: K }>,
+      );
+    }
+
     switch (req.kind) {
       case "promise.create": {
         const createReq = req as Extract<Request, { kind: "promise.create" }>;
@@ -68,7 +81,7 @@ class DummyNetwork {
 
 function buildEffects(network: DummyNetwork): Effects {
   const codec = new Codec();
-  return util.buildEffects(network.send, codec);
+  return util.buildEffects(network.send, codec, { id: "test-task", version: 1 });
 }
 
 describe("Coroutine", () => {

@@ -1,8 +1,16 @@
+import { randomUUID } from "node:crypto";
 import type { Codec } from "./codec.js";
 import type { InnerContext } from "./context.js";
 import exceptions from "./exceptions.js";
 import type { Logger } from "./logger.js";
-import { isSuccess, type PromiseRecord } from "./network/types.js";
+import {
+  isSuccess,
+  type PromiseCreateReq,
+  type PromiseCreateRes,
+  type PromiseRecord,
+  type PromiseSettleReq,
+  type PromiseSettleRes,
+} from "./network/types.js";
 import { type Options, RESONATE_OPTIONS } from "./options.js";
 import type { Effects, Func, Result, Send } from "./types.js";
 
@@ -133,16 +141,42 @@ export async function executeWithRetry(
 }
 
 // effects
-export function buildEffects(send: Send, codec: Codec, preload: PromiseRecord[] = []): Effects {
+export function buildEffects(
+  send: Send,
+  codec: Codec,
+  fence: { id: string; version: number },
+  preload: PromiseRecord[] = [],
+): Effects {
   // Decode preloaded promises, skipping any that fail to decode
   const cache = new Map<string, PromiseRecord>();
-  for (const p of preload) {
-    try {
-      const decoded = codec.decodePromise(p);
-      cache.set(p.id, decoded);
-    } catch {
-      // skip promises that fail to decode
+  const mergePreload = (pls: PromiseRecord[]) => {
+    for (const p of pls) {
+      try {
+        const decoded = codec.decodePromise(p);
+        cache.set(p.id, decoded);
+      } catch {
+        // skip promises that fail to decode
+      }
     }
+  };
+  mergePreload(preload);
+
+  async function sendFenced<R extends PromiseCreateReq | PromiseSettleReq>(
+    inner: R,
+  ): Promise<R extends PromiseCreateReq ? PromiseCreateRes : PromiseSettleRes> {
+    const outer = await send({
+      kind: "task.fence",
+      head: { corrId: randomUUID(), version: VERSION },
+      data: { id: fence.id, version: fence.version, action: inner },
+    });
+    if (!isSuccess(outer)) {
+      throw exceptions.SERVER_ERROR(outer.data, true, {
+        code: outer.head.status,
+        message: outer.data,
+      });
+    }
+    mergePreload(outer.data.preload);
+    return outer.data.action as any;
   }
 
   return {
@@ -158,7 +192,7 @@ export function buildEffects(send: Send, codec: Codec, preload: PromiseRecord[] 
         throw exceptions.ENCODING_ARGS_UNENCODEABLE(func, e);
       }
 
-      const res = await send(req);
+      const res = await sendFenced(req);
       if (!isSuccess(res)) {
         throw exceptions.SERVER_ERROR(res.data, true, {
           code: res.head.status,
@@ -183,7 +217,7 @@ export function buildEffects(send: Send, codec: Codec, preload: PromiseRecord[] 
         throw exceptions.ENCODING_RETV_UNENCODEABLE(func, e);
       }
 
-      const res = await send(req);
+      const res = await sendFenced(req);
       if (!isSuccess(res)) {
         throw exceptions.SERVER_ERROR(res.data, true, {
           code: res.head.status,

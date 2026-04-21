@@ -8,7 +8,7 @@ import type { Heartbeat } from "../src/heartbeat.js";
 import { ConsoleLogger } from "../src/logger.js";
 import { LocalNetwork } from "../src/network/local.js";
 import type { Network } from "../src/network/network.js";
-import type { PromiseRecord } from "../src/network/types.js";
+import { isSuccess, type PromiseRecord } from "../src/network/types.js";
 import { OptionsBuilder } from "../src/options.js";
 import { Registry } from "../src/registry.js";
 import { Exponential, Never } from "../src/retries.js";
@@ -35,19 +35,43 @@ class TestHeartbeat implements Heartbeat {
   stop(): void {}
 }
 
-function buildComputation(
+async function buildComputation(
   registry: Registry,
   id = "foo.1",
-): {
+): Promise<{
   computation: Computation;
   network: Network;
   effects: Effects;
-} {
+}> {
   const network = new LocalNetwork();
   const codec = new Codec();
   const logger = new ConsoleLogger("error");
 
-  const effects = util.buildEffects(network.send, codec);
+  // Seed an acquired task so that fence-wrapped effects pass validation.
+  const seedRes = await network.send({
+    kind: "task.create",
+    head: { corrId: randomUUID(), version: util.VERSION },
+    data: {
+      pid: "test-pid",
+      ttl: 60_000,
+      action: {
+        kind: "promise.create",
+        head: { corrId: randomUUID(), version: util.VERSION },
+        data: {
+          id: `${id}__fence-host`,
+          param: codec.encode({ func: "__noop__", args: [], version: 1 }),
+          tags: { "resonate:target": "default" },
+          timeoutAt: Date.now() + 60_000,
+        },
+      },
+    },
+  });
+  if (!isSuccess(seedRes) || seedRes.data.task === undefined) {
+    throw new Error(`Failed to seed fence task: ${seedRes.head.status}`);
+  }
+  const fenceTask = seedRes.data.task;
+
+  const effects = util.buildEffects(network.send, codec, { id: fenceTask.id, version: fenceTask.version });
 
   const computation = new Computation(
     id,
@@ -142,7 +166,7 @@ describe("Trace", () => {
       registry.add(main, "main");
       registry.add(add, "add");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -202,7 +226,7 @@ describe("Trace", () => {
       const registry = new Registry();
       registry.add(main, "main");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -244,7 +268,7 @@ describe("Trace", () => {
       const registry = new Registry();
       registry.add(main, "main");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -284,7 +308,7 @@ describe("Trace", () => {
       registry.add(main, "main");
       registry.add(compute, "compute");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -328,7 +352,7 @@ describe("Trace", () => {
       const registry = new Registry();
       registry.add(factorial, "factorial");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "factorial", [3]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -362,7 +386,7 @@ describe("Trace", () => {
       const registry = new Registry();
       registry.add(add, "add");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "add", [3, 4]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
@@ -383,7 +407,7 @@ describe("Trace", () => {
       const registry = new Registry();
       registry.add(main, "main");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise: PromiseRecord = {
         id: "foo.1",
         state: "resolved",
@@ -425,7 +449,7 @@ describe("Trace", () => {
       registry.add(main, "main");
       registry.add(compute, "compute");
 
-      const { computation, effects } = buildComputation(registry);
+      const { computation, effects } = await buildComputation(registry);
 
       // Pre-settle the child promise
       await presettle(effects, "foo.1.0", 42);
@@ -465,7 +489,7 @@ describe("Trace", () => {
       registry.add(taskA, "taskA");
       registry.add(taskB, "taskB");
 
-      const { computation } = buildComputation(registry);
+      const { computation } = await buildComputation(registry);
       const rootPromise = createRootPromise("foo.1", "scatter", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 

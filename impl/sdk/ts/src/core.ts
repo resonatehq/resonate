@@ -79,7 +79,10 @@ export class Core {
     preload?: PromiseRecord[],
   ): Promise<Status> {
     util.assert(task.state === "acquired", `expected task state to be 'acquired', got '${task.state}'`);
-    const computation = this.createComputation(rootPromise.id, util.buildEffects(this.send, this.codec, preload));
+    const computation = this.createComputation(
+      rootPromise.id,
+      util.buildEffects(this.send, this.codec, { id: task.id, version: task.version }, preload),
+    );
 
     try {
       const status = await computation.executeUntilBlocked(rootPromise);
