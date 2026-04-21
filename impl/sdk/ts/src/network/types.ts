@@ -72,6 +72,7 @@ export type RequestHead = {
   corrId: string;
   version: string;
   "resonate:debug_time"?: number;
+  "resonate:origin"?: string;
 };
 
 // =============================================================================
@@ -833,7 +834,8 @@ function isRequestHead(val: unknown): val is RequestHead {
     typeof v.corrId === "string" &&
     typeof v.version === "string" &&
     (v.auth === undefined || typeof v.auth === "string") &&
-    (v["resonate:debug_time"] === undefined || typeof v["resonate:debug_time"] === "number")
+    (v["resonate:debug_time"] === undefined || typeof v["resonate:debug_time"] === "number") &&
+    (v["resonate:origin"] === undefined || typeof v["resonate:origin"] === "string")
   );
 }
 

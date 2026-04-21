@@ -93,7 +93,7 @@ export class Core {
         }
       }
       if (status.kind === "done") {
-        await this.fulfillTask(task, status);
+        await this.fulfillTask(task, rootPromise, status);
       }
       return status;
     } catch (err) {
@@ -106,7 +106,7 @@ export class Core {
           "executeUntilBlocked failed unexpectedly",
         );
       }
-      await this.releaseTask(task).catch(() => {});
+      await this.releaseTask(task, rootPromise).catch(() => {});
       throw err;
     }
   }
@@ -126,10 +126,10 @@ export class Core {
     );
   }
 
-  private async releaseTask(task: TaskRecord): Promise<void> {
+  private async releaseTask(task: TaskRecord, rootPromise: PromiseRecord): Promise<void> {
     await this.send({
       kind: "task.release",
-      head: { corrId: randomUUID(), version: util.VERSION },
+      head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: { id: task.id, version: task.version },
     });
   }
@@ -141,7 +141,7 @@ export class Core {
   ): Promise<{ continue: true; preload: PromiseRecord[] } | { continue: false }> {
     const res = await this.send({
       kind: "task.suspend",
-      head: { corrId: randomUUID(), version: util.VERSION },
+      head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: {
         id: task.id,
         version: task.version,
@@ -164,18 +164,18 @@ export class Core {
     });
   }
 
-  private async fulfillTask(task: TaskRecord, doneValue: Done): Promise<void> {
+  private async fulfillTask(task: TaskRecord, rootPromise: PromiseRecord, doneValue: Done): Promise<void> {
     const encoded = this.codec.encode(doneValue.value);
 
     await this.send({
       kind: "task.fulfill",
-      head: { corrId: randomUUID(), version: util.VERSION },
+      head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: {
         id: task.id,
         version: task.version,
         action: {
           kind: "promise.settle",
-          head: { corrId: randomUUID(), version: util.VERSION },
+          head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
           data: {
             id: doneValue.id,
             state: doneValue.state,
@@ -192,7 +192,7 @@ export class Core {
     const task = msg.data.task;
     const res = await this.send({
       kind: "task.acquire",
-      head: { corrId: randomUUID(), version: util.VERSION },
+      head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": task.id },
       data: { id: task.id, version: task.version, pid: this.pid, ttl: this.ttl },
     });
 

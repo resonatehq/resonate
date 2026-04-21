@@ -965,7 +965,7 @@ export class Server {
 
     const actionResponse = {
       ...inner.response,
-      head: { corrId: req.head.corrId, status: inner.response.head.status, version: req.head.version },
+      head: { corrId: action.head.corrId, status: inner.response.head.status, version: action.head.version },
     };
 
     return {
