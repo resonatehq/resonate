@@ -335,21 +335,22 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    let r = await exec("foo.1", foo, [], effects);
+    const id = util.detachedId("foo", "foo.1");
+    let r = await exec(id, foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(effects, "foo.1.0", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, `${id}.0`, { kind: "value", value: 42 });
+    r = await exec(id, foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, util.detachedId(id, `${id}.1`), { kind: "value", value: 42 });
+    r = await exec(id, foo, [], effects);
 
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });

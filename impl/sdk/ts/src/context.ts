@@ -521,7 +521,8 @@ export class InnerContext implements Context {
     }
 
     const idChanged = opts.id !== undefined;
-    const id = idChanged ? opts.id : this.seqid();
+
+    const id = idChanged ? opts.id : util.detachedId(this.originId, this.seqid());
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);

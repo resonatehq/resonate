@@ -4,7 +4,7 @@ import { ConsoleLogger } from "../src/logger.js";
 import { OptionsBuilder } from "../src/options.js";
 import { Registry } from "../src/registry.js";
 import { Constant, Exponential, type RetryPolicy } from "../src/retries.js";
-import { base64Decode, base64Encode, executeWithRetry, isGeneratorFunction } from "../src/util.js";
+import { base64Decode, base64Encode, detachedId, executeWithRetry, isGeneratorFunction } from "../src/util.js";
 
 // Helper to create a minimal InnerContext for executeWithRetry tests
 function makeCtx({
@@ -166,6 +166,43 @@ describe("base64 encoder", () => {
 
   test.each(cases.map((str) => [str]))("encodes and decodes correctly: %s", (string) => {
     expect(base64Decode(base64Encode(string))).toEqual(string);
+  });
+});
+
+describe("detachedId", () => {
+  test("returns originId dot cyrb53 hex of seqid", () => {
+    const result = detachedId("root", "root.0");
+    expect(result).toBe(detachedId("root", "root.0"));
+    expect(result.startsWith("root.")).toBe(true);
+  });
+
+  test("hash is a hex string", () => {
+    const result = detachedId("origin", "origin.3");
+    const hash = result.split(".").slice(1).join(".");
+    expect(hash).toMatch(/^[0-9a-f]+$/);
+  });
+
+  test("is deterministic — same inputs produce same output", () => {
+    expect(detachedId("a", "a.0")).toBe(detachedId("a", "a.0"));
+  });
+
+  test("different seqids produce different ids", () => {
+    expect(detachedId("root", "root.0")).not.toBe(detachedId("root", "root.1"));
+  });
+
+  test("different originIds produce different ids", () => {
+    expect(detachedId("root.0", "root.0.0")).not.toBe(detachedId("root.1", "root.0.0"));
+  });
+
+  test("originId is preserved as prefix before the dot", () => {
+    const originId = "my-workflow-abc123";
+    const result = detachedId(originId, "my-workflow-abc123.5");
+    expect(result.startsWith(`${originId}.`)).toBe(true);
+  });
+
+  test("works with empty strings", () => {
+    const result = detachedId("", "");
+    expect(result.startsWith(".")).toBe(true);
   });
 });
 

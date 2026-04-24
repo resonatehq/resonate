@@ -602,7 +602,7 @@ describe("Resonate usage tests", () => {
     const v = await f.run("f");
     expect(v).toBe("myValue");
 
-    const durable = await resonate.promises.get("f.0");
+    const durable = await resonate.promises.get(util.detachedId("f", "f.0"));
     expect(durable).toMatchObject({ state: "pending" });
 
     await resonate.stop();
@@ -1192,8 +1192,11 @@ describe("Context usage tests", () => {
       expect(ctxRetryPolicy).toBeDefined();
       expect(ctxRetryPolicy).toEqual(retryPolicy);
 
-      if (f === "rfi" || f === "rfc" || f === "detached") {
+      if (f === "rfi" || f === "rfc") {
         const p = await resonate.promises.get(`f${i}.0`);
+        expect(JSON.parse(util.base64Decode(p.param.data!)).retry).toEqual(retryPolicy.encode());
+      } else if (f === "detached") {
+        const p = await resonate.promises.get(util.detachedId(`f${i}`, `f${i}.0`));
         expect(JSON.parse(util.base64Decode(p.param.data!)).retry).toEqual(retryPolicy.encode());
       }
     }
