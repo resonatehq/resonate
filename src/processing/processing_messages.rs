@@ -231,6 +231,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
@@ -249,13 +250,14 @@ mod tests {
         create_task_with_target(&server, "task-2", "http://stub-server/webhook").await;
 
         // First pass: http_push disabled — message is consumed from queue and dropped.
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = TransportDispatcher::new(None, None, None, None, None);
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: http_push now enabled — queue should already be empty.
         let stub = Arc::new(RecordingHttpTransport::new());
         let enabled = TransportDispatcher::new(
             Some(stub.clone() as Arc<dyn HttpTransport>),
+            None,
             None,
             None,
             None,
@@ -280,6 +282,7 @@ mod tests {
             Some(stub.clone() as Arc<dyn PollTransport>),
             None,
             None,
+            None,
         );
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
@@ -297,13 +300,14 @@ mod tests {
         let server = make_server();
         create_task_with_target(&server, "task-4", "poll://any@default").await;
 
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = TransportDispatcher::new(None, None, None, None, None);
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
         let stub = Arc::new(RecordingPollTransport::new());
         let enabled = TransportDispatcher::new(
             None,
             Some(stub.clone() as Arc<dyn PollTransport>),
+            None,
             None,
             None,
         );
@@ -339,6 +343,7 @@ mod tests {
             Some(stub.clone() as Arc<dyn PollTransport>),
             None,
             None,
+            None,
         );
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
@@ -371,7 +376,7 @@ mod tests {
         settle_promise(&server, "p-unblock-2").await;
 
         // First pass: poll disabled — message consumed and dropped.
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = TransportDispatcher::new(None, None, None, None, None);
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: poll enabled — queue already drained.
@@ -379,6 +384,7 @@ mod tests {
         let enabled = TransportDispatcher::new(
             None,
             Some(stub.clone() as Arc<dyn PollTransport>),
+            None,
             None,
             None,
         );

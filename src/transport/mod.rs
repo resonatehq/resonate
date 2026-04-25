@@ -1,4 +1,5 @@
 pub mod transport_exec_bash;
+pub mod transport_exec_wasm;
 pub mod transport_gcps;
 pub mod transport_http_poll;
 pub mod transport_http_push;
@@ -26,6 +27,11 @@ pub trait GcpsTransport: Send + Sync {
 
 #[async_trait]
 pub trait BashTransport: Send + Sync {
+    async fn send(&self, address: &str, payload: &serde_json::Value);
+}
+
+#[async_trait]
+pub trait WasmTransport: Send + Sync {
     async fn send(&self, address: &str, payload: &serde_json::Value);
 }
 
@@ -59,15 +65,24 @@ impl BashTransport for transport_exec_bash::BashExecTransport {
     }
 }
 
+#[async_trait]
+impl WasmTransport for transport_exec_wasm::WasmExecTransport {
+    async fn send(&self, address: &str, payload: &serde_json::Value) {
+        transport_exec_wasm::WasmExecTransport::send(self, address, payload).await
+    }
+}
+
 // ---- Dispatcher ----
 
 /// Dispatches messages to the appropriate transport by parsing the address once.
-/// Routes by URL scheme: http/https → push, poll → SSE, gcps → GCP Pub/Sub, bash → bash exec.
+/// Routes by URL scheme: http/https → push, poll → SSE, gcps → GCP Pub/Sub,
+/// bash → bash exec, wasm → WASM exec.
 pub struct TransportDispatcher {
     http: Option<Arc<dyn HttpTransport>>,
     poll: Option<Arc<dyn PollTransport>>,
     gcps: Option<Arc<dyn GcpsTransport>>,
     bash: Option<Arc<dyn BashTransport>>,
+    wasm: Option<Arc<dyn WasmTransport>>,
 }
 
 impl TransportDispatcher {
@@ -76,12 +91,14 @@ impl TransportDispatcher {
         poll: Option<Arc<dyn PollTransport>>,
         gcps: Option<Arc<dyn GcpsTransport>>,
         bash: Option<Arc<dyn BashTransport>>,
+        wasm: Option<Arc<dyn WasmTransport>>,
     ) -> Self {
         Self {
             http,
             poll,
             gcps,
             bash,
+            wasm,
         }
     }
 
@@ -134,6 +151,20 @@ impl TransportDispatcher {
                     tracing::warn!(address = %address, "Bash exec transport not configured, message dropped")
                 }
             },
+            Some(Address::Wasm(_)) => match &self.wasm {
+                Some(wasm) => {
+                    tracing::debug!(
+                        transport = "wasm",
+                        address,
+                        kind,
+                        "Dispatching message via WASM exec"
+                    );
+                    wasm.send(address, payload).await;
+                }
+                None => {
+                    tracing::warn!(address = %address, "WASM exec transport not configured, message dropped")
+                }
+            },
             None => {
                 tracing::warn!(address = %address, "Invalid address, message cannot be routed");
             }
@@ -155,6 +186,9 @@ pub enum Address {
     /// Bash script execution (script is in param.data)
     #[allow(dead_code)]
     Bash(BashAddress),
+    /// WASM module execution
+    #[allow(dead_code)]
+    Wasm(WasmAddress),
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +219,12 @@ pub struct GcpsAddress {
 #[allow(dead_code)]
 pub struct BashAddress;
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct WasmAddress {
+    pub path: String,
+}
+
 /// Returns true if the address is a valid, routable URL.
 pub fn is_valid_address(address: &str) -> bool {
     parse_address(address).is_some()
@@ -196,6 +236,8 @@ pub fn is_valid_address(address: &str) -> bool {
 /// - `http://...` / `https://...` — HTTP webhook delivery
 /// - `poll://cast@group[/id]` — Poll SSE delivery
 /// - `gcps://project/topic` — Google Cloud Pub/Sub delivery
+/// - `bash://[path]` — Bash script execution
+/// - `wasm:///path/to/module.wasm` — WASM module execution
 pub fn parse_address(address: &str) -> Option<Address> {
     let parsed = url::Url::parse(address).ok()?;
 
@@ -231,6 +273,13 @@ pub fn parse_address(address: &str) -> Option<Address> {
             Some(Address::Gcps(GcpsAddress { project, topic }))
         }
         "bash" => Some(Address::Bash(BashAddress)),
+        "wasm" => {
+            let path = parsed.path().to_string();
+            if path.is_empty() || path == "/" {
+                return None;
+            }
+            Some(Address::Wasm(WasmAddress { path }))
+        }
         _ => None,
     }
 }
@@ -348,6 +397,33 @@ pub mod stubs {
                 .push((address.to_string(), payload.clone()));
         }
     }
+
+    /// Records every (address, payload) pair delivered via wasm exec.
+    pub struct RecordingWasmTransport {
+        pub calls: Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl RecordingWasmTransport {
+        pub fn new() -> Self {
+            Self {
+                calls: Mutex::new(vec![]),
+            }
+        }
+
+        pub fn calls(&self) -> Vec<(String, serde_json::Value)> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl WasmTransport for RecordingWasmTransport {
+        async fn send(&self, address: &str, payload: &serde_json::Value) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((address.to_string(), payload.clone()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -361,19 +437,23 @@ mod tests {
     }
 
     fn dispatcher_with_http(stub: Arc<RecordingHttpTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(Some(stub as Arc<dyn HttpTransport>), None, None, None)
+        TransportDispatcher::new(Some(stub as Arc<dyn HttpTransport>), None, None, None, None)
     }
 
     fn dispatcher_with_poll(stub: Arc<RecordingPollTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, Some(stub as Arc<dyn PollTransport>), None, None)
+        TransportDispatcher::new(None, Some(stub as Arc<dyn PollTransport>), None, None, None)
     }
 
     fn dispatcher_with_gcps(stub: Arc<RecordingGcpsTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, None, Some(stub as Arc<dyn GcpsTransport>), None)
+        TransportDispatcher::new(None, None, Some(stub as Arc<dyn GcpsTransport>), None, None)
     }
 
     fn dispatcher_with_bash(stub: Arc<RecordingBashTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, None, None, Some(stub as Arc<dyn BashTransport>))
+        TransportDispatcher::new(None, None, None, Some(stub as Arc<dyn BashTransport>), None)
+    }
+
+    fn dispatcher_with_wasm(stub: Arc<RecordingWasmTransport>) -> TransportDispatcher {
+        TransportDispatcher::new(None, None, None, None, Some(stub as Arc<dyn WasmTransport>))
     }
 
     // ---- http_push ----
@@ -393,7 +473,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_push_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
+        let dispatcher = TransportDispatcher::new(None, None, None, None, None);
         // Should return without panicking — message silently dropped
         dispatcher
             .send("http://example.com/callback", &payload("execute"))
@@ -430,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_poll_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
+        let dispatcher = TransportDispatcher::new(None, None, None, None, None);
         dispatcher
             .send("poll://any@default", &payload("execute"))
             .await;
@@ -453,7 +533,7 @@ mod tests {
 
     #[tokio::test]
     async fn gcps_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
+        let dispatcher = TransportDispatcher::new(None, None, None, None, None);
         dispatcher
             .send("gcps://my-project/my-topic", &payload("execute"))
             .await;
@@ -475,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn bash_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
+        let dispatcher = TransportDispatcher::new(None, None, None, None, None);
         dispatcher.send("bash://", &payload("execute")).await;
     }
 
@@ -486,5 +566,39 @@ mod tests {
             parse_address("bash://inline"),
             Some(Address::Bash(_))
         ));
+    }
+
+    // ---- wasm ----
+
+    #[tokio::test]
+    async fn wasm_enabled_routes_to_stub() {
+        let stub = Arc::new(RecordingWasmTransport::new());
+        let dispatcher = dispatcher_with_wasm(stub.clone());
+        dispatcher
+            .send("wasm:///module.wasm", &payload("execute"))
+            .await;
+        let calls = stub.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "wasm:///module.wasm");
+        assert_eq!(calls[0].1["kind"], "execute");
+    }
+
+    #[tokio::test]
+    async fn wasm_disabled_drops_without_error() {
+        let dispatcher = TransportDispatcher::new(None, None, None, None, None);
+        dispatcher
+            .send("wasm:///module.wasm", &payload("execute"))
+            .await;
+    }
+
+    #[test]
+    fn wasm_address_parses() {
+        assert!(matches!(
+            parse_address("wasm:///module.wasm"),
+            Some(Address::Wasm(_))
+        ));
+        // empty path → invalid
+        assert!(parse_address("wasm://").is_none());
+        assert!(parse_address("wasm:///").is_none());
     }
 }

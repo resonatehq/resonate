@@ -325,6 +325,10 @@ pub struct TransportsConfig {
     /// Bash execution transport configuration
     #[serde(default)]
     pub bash_exec: BashExecConfig,
+
+    /// WASM execution transport configuration
+    #[serde(default)]
+    pub wasm_exec: WasmExecConfig,
 }
 
 /// Bash execution transport configuration.
@@ -357,6 +361,40 @@ impl Default for BashExecConfig {
             enabled: false,
             root_dir: None,
             working_dir: default_working_dir(),
+        }
+    }
+}
+
+/// WASM execution transport configuration.
+///
+/// When `enabled`, the wasm:// address scheme is active and modules are
+/// resolved relative to `root_dir`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmExecConfig {
+    /// Enable the wasm:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Root directory from which wasm:///relative/path.wasm is resolved.
+    /// Required when `enabled` is true.
+    #[serde(default)]
+    pub root_dir: Option<String>,
+
+    /// Number of compiled modules to keep in the LRU cache.
+    #[serde(default = "default_wasm_module_cache_size")]
+    pub module_cache_size: usize,
+}
+
+fn default_wasm_module_cache_size() -> usize {
+    64
+}
+
+impl Default for WasmExecConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            root_dir: None,
+            module_cache_size: default_wasm_module_cache_size(),
         }
     }
 }

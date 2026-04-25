@@ -25,7 +25,7 @@ use config::Config;
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use server::Server;
 use transport::transport_http_poll::PollRegistry;
-use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport};
+use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport, WasmTransport};
 use types::ResponseEnvelope;
 
 #[derive(Parser)]
@@ -301,8 +301,28 @@ async fn run_server(config: Config) -> Result<(), String> {
     } else {
         None
     };
+    let wasm: Option<Arc<dyn WasmTransport>> = if state.config.transports.wasm_exec.enabled {
+        let wasm_cfg = &state.config.transports.wasm_exec;
+        let root_dir = wasm_cfg.root_dir.as_deref().ok_or_else(|| {
+            "wasm_exec.enabled=true requires transports.wasm_exec.root_dir".to_string()
+        })?;
+        tracing::info!(
+            root_dir = %root_dir,
+            module_cache_size = wasm_cfg.module_cache_size,
+            "WASM exec transport enabled"
+        );
+        let transport = transport::transport_exec_wasm::WasmExecTransport::new(
+            Arc::clone(&state),
+            root_dir,
+            wasm_cfg.module_cache_size,
+        )
+        .map_err(|e| format!("Failed to initialize WASM exec transport: {e}"))?;
+        Some(Arc::new(transport))
+    } else {
+        None
+    };
     let dispatcher = Arc::new(transport::TransportDispatcher::new(
-        http_push, http_poll, gcps, bash,
+        http_push, http_poll, gcps, bash, wasm,
     ));
 
     // Spawn background loops

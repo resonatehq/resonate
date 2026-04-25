@@ -46,3 +46,6 @@ base64 = "0.22"
 google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
 google-cloud-pubsub = "0.33.1"
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
+wasmtime = { version = "26", features = ["async"] }
+lru = "0.12"
+anyhow = "1"
