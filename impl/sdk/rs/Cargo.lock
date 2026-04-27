@@ -1299,6 +1299,7 @@ dependencies = [
  "parking_lot",
  "reqwest",
  "resonate-sdk-macros",
+ "seahash",
  "serde",
  "serde_json",
  "test-with",

@@ -22,6 +22,7 @@ dashmap = "6"
 futures = "0.3"
 async-trait = "0.1"
 parking_lot = "0.12.5"
+seahash = "4"
 
 [dev-dependencies]
 test-with = "0.14"

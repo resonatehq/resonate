@@ -397,6 +397,44 @@ impl Context {
         }
     }
 
+    /// Detached fire-and-forget remote execution. Returns a `DetachedTask` builder
+    /// whose terminal `.spawn()` returns the created promise's ID.
+    ///
+    /// Detached calls are **not** part of structured concurrency:
+    /// - They are never added to `spawned_remote`, so the parent workflow does
+    ///   not suspend or wait for them to complete.
+    /// - There is no awaitable future — `.spawn()` returns only the promise ID.
+    ///
+    /// The promise ID is computed deterministically as
+    /// `{origin_id}.{16-hex-char hash of (parent_id, seq)}`. Hashing keeps the
+    /// id length bounded regardless of nesting depth, while the use of a
+    /// stable hash (`seahash`) over deterministic inputs preserves replay
+    /// safety.
+    ///
+    /// # Usage
+    /// ```ignore
+    /// let id = ctx.detached("audit_log", &payload).spawn().await?;
+    /// // hand `id` to an external system; do not await here.
+    /// ```
+    pub fn detached(&self, func: &str, args: impl Serialize) -> DetachedTask<'_> {
+        let raw = self.next_id();
+        let child_id = format!("{}.{}", self.origin_id, hash_id(&raw));
+        let (req, serialization_error) =
+            match self.remote_create_req(&child_id, func, &args, None, None) {
+                Ok(req) => (req, None),
+                Err(e) => (
+                    PromiseCreateReq::default_with_id(&child_id),
+                    Some(e.to_string()),
+                ),
+            };
+        DetachedTask {
+            child_id,
+            ctx: self,
+            req,
+            serialization_error,
+        }
+    }
+
     /// Take all accumulated remote todos.
     pub(crate) async fn take_remote_todos(&self) -> Vec<String> {
         let mut todos = self.spawned_remote.lock().await;
@@ -1052,6 +1090,67 @@ impl<'ctx> IntoFuture for SleepTask<'ctx> {
 }
 
 use crate::now_ms;
+
+// ═══════════════════════════════════════════════════════════════
+//  DetachedTask — builder returned by ctx.detached()
+// ═══════════════════════════════════════════════════════════════
+
+/// Compute a 64-bit `seahash` of `s` and return it as a 16-character
+/// lowercase hex string. Stable across processes and Rust versions.
+fn hash_id(s: &str) -> String {
+    use std::hash::Hasher;
+    let mut h = seahash::SeaHasher::new();
+    h.write(s.as_bytes());
+    format!("{:016x}", h.finish())
+}
+
+/// A fire-and-forget remote execution builder. Created by `ctx.detached()`.
+///
+/// Unlike `RpcTask`, this does **not** implement `IntoFuture` — there is no
+/// awaitable result, only the promise ID is returned by `.spawn()`. Detached
+/// promises are not registered in `spawned_remote`, so the parent workflow
+/// does not suspend on them.
+pub struct DetachedTask<'ctx> {
+    child_id: String,
+    ctx: &'ctx Context,
+    req: PromiseCreateReq,
+    /// Serialization error deferred from construction (if args failed to serialize).
+    serialization_error: Option<String>,
+}
+
+impl<'ctx> DetachedTask<'ctx> {
+    /// Set an explicit timeout for the detached promise (capped to parent's timeout).
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.req.timeout_at = self.ctx.child_timeout(Some(timeout));
+        self
+    }
+
+    /// Override the target for this detached call (resolved through `target_resolver`).
+    pub fn target(mut self, target: &str) -> Self {
+        let resolved = (self.ctx.target_resolver)(Some(target));
+        self.req
+            .tags
+            .insert("resonate:target".to_string(), resolved);
+        self
+    }
+
+    /// Eagerly create the durable promise on the server and return its ID.
+    /// Does not register the promise in `spawned_remote`, so the parent
+    /// workflow does not wait on it.
+    pub async fn spawn(self) -> Result<String> {
+        Context::check_serialization_error(&self.serialization_error)?;
+        let DetachedTask {
+            child_id, ctx, req, ..
+        } = self;
+        ctx.effects.create_promise(req).await?;
+        tracing::info!(
+            target: "resonate::validation",
+            promise_id = %child_id,
+            "promise_detached_spawn"
+        );
+        Ok(child_id)
+    }
+}
 
 #[cfg(test)]
 mod tests {

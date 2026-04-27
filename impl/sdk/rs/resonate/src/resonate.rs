@@ -2375,6 +2375,141 @@ mod tests {
         assert_eq!(result, "multi:42");
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  Detached (fire-and-forget) Tests
+    // ═══════════════════════════════════════════════════════════════
+
+    #[resonate_sdk_macros::function]
+    async fn detacher_one(ctx: &Context) -> Result<String> {
+        let id = ctx.detached("remote_handler", (42_i64,)).spawn().await?;
+        Ok(id)
+    }
+
+    #[resonate_sdk_macros::function]
+    async fn detacher_many(ctx: &Context) -> Result<Vec<String>> {
+        let a = ctx.detached("h", (1_i64,)).spawn().await?;
+        let b = ctx.detached("h", (2_i64,)).spawn().await?;
+        let c = ctx.detached("h", (3_i64,)).spawn().await?;
+        Ok(vec![a, b, c])
+    }
+
+    #[resonate_sdk_macros::function]
+    async fn detacher_with_target(ctx: &Context) -> Result<String> {
+        let id = ctx
+            .detached("remote_handler", (1_i64,))
+            .target("custom-worker")
+            .spawn()
+            .await?;
+        Ok(id)
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_returns_bounded_id_under_origin() {
+        let r = Resonate::local();
+        r.register(detacher_one).unwrap();
+
+        let id: String = r.run("e2e-det", detacher_one, ()).await.unwrap();
+
+        // Format: "{origin}.{16 hex chars}"
+        let prefix = "e2e-det.";
+        assert!(id.starts_with(prefix), "id = {}", id);
+        let suffix = &id[prefix.len()..];
+        assert_eq!(
+            suffix.len(),
+            16,
+            "suffix should be 16 hex chars: {}",
+            suffix
+        );
+        assert!(
+            suffix.chars().all(|c| c.is_ascii_hexdigit()),
+            "suffix not hex: {}",
+            suffix
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_promise_is_created_on_server() {
+        let r = Resonate::local();
+        r.register(detacher_one).unwrap();
+
+        let id: String = r.run("e2e-det-exists", detacher_one, ()).await.unwrap();
+
+        // The detached promise must be reachable on the server.
+        let handle = r.get::<i64>(&id).await;
+        assert!(
+            handle.is_ok(),
+            "detached promise should exist: {:?}",
+            handle.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_does_not_block_parent_completion() {
+        let r = Resonate::local();
+        r.register(detacher_one).unwrap();
+
+        // The detached promise targets a remote function nothing will resolve.
+        // The workflow must still complete promptly because it does not wait
+        // on detached children (no structured concurrency).
+        let id: String = tokio::time::timeout(
+            Duration::from_secs(5),
+            r.run("e2e-det-nb", detacher_one, ()),
+        )
+        .await
+        .expect("workflow should complete without waiting on detached promise")
+        .unwrap();
+        assert!(id.starts_with("e2e-det-nb."));
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_is_idempotent_on_replay() {
+        let r = Resonate::local();
+        r.register(detacher_one).unwrap();
+
+        let id1: String = r.run("e2e-det-idem", detacher_one, ()).await.unwrap();
+        // Re-run same root id — replay must produce the same detached id.
+        let id2: String = r.run("e2e-det-idem", detacher_one, ()).await.unwrap();
+        assert_eq!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_multiple_calls_yield_distinct_ids() {
+        let r = Resonate::local();
+        r.register(detacher_many).unwrap();
+
+        let ids: Vec<String> = r.run("e2e-det-many", detacher_many, ()).await.unwrap();
+        assert_eq!(ids.len(), 3);
+        // Each call uses a distinct seq → distinct hash → distinct id.
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+        assert_ne!(ids[0], ids[2]);
+        for id in &ids {
+            assert!(id.starts_with("e2e-det-many."));
+        }
+    }
+
+    #[tokio::test]
+    async fn e2e_detached_sets_global_scope_and_target_tags() {
+        let r = Resonate::local();
+        r.register(detacher_with_target).unwrap();
+
+        let id: String = r
+            .run("e2e-det-target", detacher_with_target, ())
+            .await
+            .unwrap();
+
+        let resp = r.transport().send_json(promise_get_req(&id)).await.unwrap();
+        let tags = &resp["data"]["promise"]["tags"];
+        assert_eq!(tags["resonate:scope"].as_str().unwrap(), "global");
+        assert_eq!(
+            tags["resonate:target"].as_str().unwrap(),
+            "local://any@custom-worker"
+        );
+        // Lineage is preserved: parent/origin point back to the workflow.
+        assert_eq!(tags["resonate:origin"].as_str().unwrap(), "e2e-det-target");
+        assert_eq!(tags["resonate:parent"].as_str().unwrap(), "e2e-det-target");
+    }
+
     #[tokio::test]
     async fn e2e_missing_dependency_panics_gracefully() {
         // Verify that a missing dependency causes a panic that is caught at
