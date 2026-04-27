@@ -403,7 +403,7 @@ export class PushMessageSource implements HttpAdapter {
   private logger?: Logger;
 
   constructor({
-    host = "0.0.0.0",
+    host = "127.0.0.1",
     port = 0,
     logger = undefined,
   }: {

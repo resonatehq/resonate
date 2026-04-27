@@ -134,8 +134,8 @@ describe("PushMessageSource (via HttpNetwork)", () => {
     await network.init();
 
     // Both addresses should be set to the same HTTP URL with the resolved port
-    expect(network.unicast).toMatch(/^http:\/\/0\.0\.0\.0:\d+$/);
-    expect(network.anycast).toMatch(/^http:\/\/0\.0\.0\.0:\d+$/);
+    expect(network.unicast).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(network.anycast).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(network.unicast).toBe(network.anycast);
   });
 });
