@@ -103,15 +103,33 @@ impl Resonate {
 
     /// Local-only mode. No external dependencies. In-memory state.
     /// group="default", pid="default", ttl=MAX, no heartbeat.
+    ///
+    /// Always uses an in-process `LocalNetwork`, regardless of
+    /// `RESONATE_URL`/`RESONATE_HOST` — local must mean local.
     pub fn local() -> Self {
-        let config = ResonateConfig {
-            pid: Some("default".to_string()),
-            group: Some("default".to_string()),
-            ttl: Some(u64::MAX),
-            encryptor: None,
-            ..Default::default()
-        };
-        Self::new(config)
+        Self::local_with(ResonateConfig::default())
+    }
+
+    /// Local-only mode with caller-supplied config (prefix, pid, ttl, etc.).
+    ///
+    /// Like [`Resonate::local`], this always uses an in-process
+    /// `LocalNetwork` — `config.url` and any `RESONATE_URL`/`RESONATE_HOST`
+    /// env vars are ignored. Use this in tests or local-mode applications
+    /// that need to set fields like `prefix` while staying off the network.
+    pub fn local_with(config: ResonateConfig) -> Self {
+        let pid = config.pid.or_else(|| Some("default".to_string()));
+        let group = config.group.or_else(|| Some("default".to_string()));
+        let net: Arc<dyn Network> = Arc::new(LocalNetwork::new(pid.clone(), group.clone()));
+        Self::new(ResonateConfig {
+            url: None,
+            pid,
+            group,
+            ttl: config.ttl.or(Some(u64::MAX)),
+            token: config.token,
+            encryptor: config.encryptor,
+            network: Some(net),
+            prefix: config.prefix,
+        })
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -422,13 +440,8 @@ impl Resonate {
             .await?;
 
         match outcome {
-            TaskCreateOutcome::Conflict(promise) => {
-                // Promise already exists — register listener and return handle
-                self.create_handle_from_record(prefixed_id, &promise).await
-            }
+            TaskCreateOutcome::Conflict => self.create_handle_from_id(prefixed_id).await,
             TaskCreateOutcome::Created(result) => {
-                let promise = &result.promise;
-
                 // If task is acquired, fire-and-forget core execution
                 if result.task.state == crate::types::TaskState::Acquired {
                     let task_id = result.task.id.clone();
@@ -466,7 +479,7 @@ impl Resonate {
                     });
                 }
 
-                self.create_handle_from_record(prefixed_id, promise).await
+                self.create_handle_from_id(prefixed_id).await
             }
         }
     }
@@ -480,15 +493,14 @@ impl Resonate {
         opts: Options,
     ) -> Result<ResonateHandle<T>> {
         let (prefixed_id, req) = self.build_promise_create_req(id, func_name, args, &opts)?;
-        let promise = self.sender.promise_create(req).await?;
-        self.create_handle_from_record(prefixed_id, &promise).await
+        self.sender.promise_create(req).await?;
+        self.create_handle_from_id(prefixed_id).await
     }
 
     /// Get a handle to an existing promise.
     pub async fn get<T: DeserializeOwned>(&self, id: &str) -> Result<ResonateHandle<T>> {
         let prefixed_id = self.prefix_id(id);
-        let promise = self.sender.promise_get(&prefixed_id).await?;
-        self.create_handle_from_record(prefixed_id, &promise).await
+        self.create_handle_from_id(prefixed_id).await
     }
 
     /// Create a schedule for periodic function execution. Returns a builder
@@ -708,47 +720,35 @@ impl Resonate {
         serde_json::Value::Object(map)
     }
 
-    /// Create a handle from a typed PromiseRecord.
-    async fn create_handle_from_record<T: DeserializeOwned>(
+    /// Build a handle for a promise that lives on the server.
+    ///
+    /// Subscribes to the id under the local subscriptions map, then registers
+    /// a unicast listener with the server. The listener call returns the
+    /// current `PromiseRecord` — already-settled promises are written into
+    /// the watch channel immediately; pending promises await an `unblock`
+    /// SSE. Inserting the subs entry before calling `register_listener`
+    /// keeps an early `unblock` from being dropped.
+    async fn create_handle_from_id<T: DeserializeOwned>(
         &self,
         id: String,
-        promise: &crate::types::PromiseRecord,
     ) -> Result<ResonateHandle<T>> {
-        let wire_value = Self::value_to_wire_json(&promise.value);
-        let settled = if promise.state == PromiseState::Pending {
-            None
-        } else {
-            Some(Arc::new(PromiseResult {
-                state: promise.state.clone(),
-                value: wire_value,
-            }))
-        };
-        let is_pending = promise.state == PromiseState::Pending;
-
         let (rx, needs_listener) = {
             let mut subs = self.subscriptions.lock().await;
             if let Some(tx) = subs.get(&id) {
-                // Existing entry — another handle or early Unblock.
                 (tx.subscribe(), false)
             } else {
-                // First time — create watch channel.
-                // If already settled, pre-load the value.
-                let (tx, rx) = watch::channel(settled);
+                let (tx, rx) = watch::channel(None);
                 subs.insert(id.clone(), tx);
-                (rx, is_pending)
+                (rx, true)
             }
         };
-        // Lock released.
 
-        // Register listener so the server pushes Unblock to us.
-        // Only needed on first subscription for a pending promise.
         if needs_listener {
-            let resp_promise = self.register_listener(&id).await?;
-            if resp_promise.state != PromiseState::Pending {
-                // Settled between promise creation and listener registration.
+            let promise = self.register_listener(&id).await?;
+            if promise.state != PromiseState::Pending {
                 let result = Arc::new(PromiseResult {
-                    state: resp_promise.state,
-                    value: Self::value_to_wire_json(&resp_promise.value),
+                    state: promise.state,
+                    value: Self::value_to_wire_json(&promise.value),
                 });
                 let subs = self.subscriptions.lock().await;
                 if let Some(tx) = subs.get(&id) {
@@ -1096,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_with_custom_pid_and_group() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             pid: Some("worker-1".into()),
             group: Some("workers".into()),
             ..Default::default()
@@ -1108,7 +1108,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_with_prefix() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             pid: Some("test".into()),
             group: Some("g1".into()),
             ttl: Some(30_000),
@@ -1122,7 +1122,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_with_empty_prefix() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("".into()),
             ..Default::default()
         });
@@ -1131,7 +1131,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_with_custom_ttl() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             ttl: Some(120_000),
             ..Default::default()
         });
@@ -1211,7 +1211,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_spawn_with_prefix_prepends_to_id() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("app".into()),
             pid: Some("default".into()),
             ..Default::default()
@@ -1294,7 +1294,7 @@ mod tests {
 
     #[tokio::test]
     async fn rpc_spawn_with_prefix() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("svc".into()),
             ..Default::default()
         });
@@ -1368,7 +1368,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_with_prefix_prepends_prefix() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("ns".into()),
             ..Default::default()
         });
@@ -1586,7 +1586,7 @@ mod tests {
 
     #[tokio::test]
     async fn prefix_is_prepended_with_colon() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("prefix".into()),
             ..Default::default()
         });
@@ -1598,7 +1598,7 @@ mod tests {
 
     #[tokio::test]
     async fn prefix_applied_consistently_to_run_rpc_and_get() {
-        let r = Resonate::new(ResonateConfig {
+        let r = Resonate::local_with(ResonateConfig {
             prefix: Some("p".into()),
             ..Default::default()
         });

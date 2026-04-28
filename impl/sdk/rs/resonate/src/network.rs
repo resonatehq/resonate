@@ -600,17 +600,17 @@ impl ServerState {
                 _ => {
                     return Ok(serde_json::json!({
                         "kind": "task.create", "corrId": corr_id, "status": 409,
-                        "promise": promise_record,
+                        "error": "Already exists",
                     }));
                 }
             }
         }
 
         // Promise already exists but no task?
-        if let Some(existing) = self.promises.get(promise_id) {
+        if self.promises.contains_key(promise_id) {
             return Ok(serde_json::json!({
                 "kind": "task.create", "corrId": corr_id, "status": 409,
-                "promise": existing.to_record(),
+                "error": "Already exists",
             }));
         }
 

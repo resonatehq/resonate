@@ -63,9 +63,11 @@ pub struct PromiseSearchResult {
 #[derive(Debug, Clone)]
 pub enum TaskCreateOutcome {
     /// Task was successfully created and acquired.
-    Created(TaskCreateResult),
-    /// Promise already exists (409 conflict). Contains the existing promise.
-    Conflict(PromiseRecord),
+    Created(Box<TaskCreateResult>),
+    /// Promise already exists and the existing task isn't (re-)acquirable
+    /// (409 conflict). The 409 response from the server carries no promise
+    /// data — callers must subscribe to the existing promise themselves.
+    Conflict,
 }
 
 /// Result of a schedule search.
@@ -238,8 +240,10 @@ impl Sender {
 
     /// Create a task and its associated promise, returning `Conflict` on 409.
     ///
-    /// Unlike `task_create`, this method does not fail on 409 (promise already exists).
-    /// Instead, it returns the existing promise data so the caller can build a handle.
+    /// Unlike `task_create`, this method does not fail on 409. The server's
+    /// 409 body carries no promise data (`data` is the bare string
+    /// `"Already exists"`); callers receiving `Conflict` are expected to
+    /// subscribe to the existing promise via `promise.register_listener`.
     pub async fn task_create_or_conflict(
         &self,
         pid: &str,
@@ -248,11 +252,10 @@ impl Sender {
     ) -> Result<TaskCreateOutcome> {
         let (status, data) = self.send_task_create(pid, ttl, &action, true).await?;
         if status == 409 {
-            let promise = parse_promise(&data)?;
-            Ok(TaskCreateOutcome::Conflict(promise))
+            Ok(TaskCreateOutcome::Conflict)
         } else {
             let result = parse_task_acquire(&data)?;
-            Ok(TaskCreateOutcome::Created(result))
+            Ok(TaskCreateOutcome::Created(Box::new(result)))
         }
     }
 
