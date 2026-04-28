@@ -110,10 +110,36 @@ struct OutgoingMessage {
 // SERVER STATE MACHINE
 // =============================================================================
 
+struct ScheduleStub {
+    id: String,
+    cron: String,
+    promise_id: String,
+    promise_timeout: i64,
+    promise_param: serde_json::Value,
+    promise_tags: serde_json::Value,
+    created_at: i64,
+}
+
+impl ScheduleStub {
+    fn to_record(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "cron": self.cron,
+            "promiseId": self.promise_id,
+            "promiseTimeout": self.promise_timeout,
+            "promiseParam": self.promise_param,
+            "promiseTags": self.promise_tags,
+            "createdAt": self.created_at,
+            "nextRunAt": 0,
+            "lastRunAt": serde_json::Value::Null,
+        })
+    }
+}
+
 struct ServerState {
     promises: HashMap<String, DurablePromise>,
     tasks: HashMap<String, Task>,
-    schedules: HashSet<String>,
+    schedules: HashMap<String, ScheduleStub>,
     p_timeouts: Vec<PTimeout>,
     t_timeouts: Vec<TTimeout>,
     outgoing: Vec<OutgoingMessage>,
@@ -140,7 +166,7 @@ impl ServerState {
         Self {
             promises: HashMap::new(),
             tasks: HashMap::new(),
-            schedules: HashSet::new(),
+            schedules: HashMap::new(),
             p_timeouts: Vec::new(),
             t_timeouts: Vec::new(),
             outgoing: Vec::new(),
@@ -219,9 +245,10 @@ impl ServerState {
             "task.fulfill" => self.task_fulfill(now, &corr_id, req),
             "task.suspend" => self.task_suspend(now, &corr_id, req),
             "task.heartbeat" => self.task_heartbeat(now, &corr_id, req),
-            "schedule.create" => self.schedule_create(&corr_id, req),
+            "schedule.create" => self.schedule_create(now, &corr_id, req),
             "schedule.get" => self.schedule_get(&corr_id, req),
             "schedule.delete" => self.schedule_delete(&corr_id, req),
+            "schedule.search" => self.schedule_search(&corr_id, req),
             _ => Err(Error::ServerError {
                 code: 400,
                 message: format!("unknown request kind: {}", kind),
@@ -948,18 +975,45 @@ impl ServerState {
 
     fn schedule_create(
         &mut self,
+        now: i64,
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let id = require_str(req, "id")?;
-        if self.schedules.contains(id) {
+        let id = require_str(req, "id")?.to_string();
+        if let Some(existing) = self.schedules.get(&id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,
+                "schedule": existing.to_record(),
             }));
         }
-        self.schedules.insert(id.to_string());
+        let cron = require_str(req, "cron")?.to_string();
+        let promise_id = require_str(req, "promiseId")?.to_string();
+        let promise_timeout = req
+            .get("promiseTimeout")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let promise_param = req
+            .get("promiseParam")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let promise_tags = req
+            .get("promiseTags")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let stub = ScheduleStub {
+            id: id.clone(),
+            cron,
+            promise_id,
+            promise_timeout,
+            promise_param,
+            promise_tags,
+            created_at: now,
+        };
+        let record = stub.to_record();
+        self.schedules.insert(id, stub);
         Ok(serde_json::json!({
             "kind": "schedule.create", "corrId": corr_id, "status": 201,
+            "schedule": record,
         }))
     }
 
@@ -969,14 +1023,15 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?;
-        if self.schedules.contains(id) {
-            Ok(serde_json::json!({
+        match self.schedules.get(id) {
+            Some(stub) => Ok(serde_json::json!({
                 "kind": "schedule.get", "corrId": corr_id, "status": 200,
-            }))
-        } else {
-            Ok(serde_json::json!({
+                "schedule": stub.to_record(),
+            })),
+            None => Ok(serde_json::json!({
                 "kind": "schedule.get", "corrId": corr_id, "status": 404,
-            }))
+                "error": format!("schedule {} not found", id),
+            })),
         }
     }
 
@@ -986,9 +1041,29 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?;
-        self.schedules.remove(id);
+        if self.schedules.remove(id).is_some() {
+            Ok(serde_json::json!({
+                "kind": "schedule.delete", "corrId": corr_id, "status": 200,
+            }))
+        } else {
+            Ok(serde_json::json!({
+                "kind": "schedule.delete", "corrId": corr_id, "status": 404,
+                "error": format!("schedule {} not found", id),
+            }))
+        }
+    }
+
+    fn schedule_search(
+        &self,
+        corr_id: &serde_json::Value,
+        _req: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, Error> {
+        let schedules: Vec<serde_json::Value> =
+            self.schedules.values().map(|s| s.to_record()).collect();
         Ok(serde_json::json!({
-            "kind": "schedule.delete", "corrId": corr_id, "status": 200,
+            "kind": "schedule.search", "corrId": corr_id, "status": 200,
+            "schedules": schedules,
+            "cursor": serde_json::Value::Null,
         }))
     }
 

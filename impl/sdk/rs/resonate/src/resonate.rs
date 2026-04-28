@@ -57,8 +57,7 @@ pub struct ResonateSchedule {
 impl ResonateSchedule {
     /// Delete this schedule.
     pub async fn delete(self) -> Result<()> {
-        self.schedules.delete(&self.name).await?;
-        Ok(())
+        self.schedules.delete(&self.name).await
     }
 }
 
@@ -212,8 +211,8 @@ impl Resonate {
             core_ttl,
             deps.clone(),
         ));
-        let promises = Promises::new(transport.clone());
-        let schedules = Schedules::new(transport.clone());
+        let promises = Promises::new(sender.clone());
+        let schedules = Schedules::new(sender.clone());
 
         let subscriptions: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);
@@ -613,7 +612,16 @@ impl Resonate {
                         .get("state")
                         .and_then(|v| v.as_str())
                         .unwrap_or("pending");
-                    let value = promise.get("value").cloned().unwrap_or_default();
+                    let raw_value = promise.get("value").cloned().unwrap_or_default();
+                    // Normalize into {data, headers} wire shape so handle decoding
+                    // works regardless of whether the server emits a structured
+                    // Value or a bare scalar/object.
+                    let value = match <crate::types::Value as serde::Deserialize>::deserialize(
+                        &raw_value,
+                    ) {
+                        Ok(v) => Self::value_to_wire_json(&v),
+                        Err(_) => raw_value,
+                    };
 
                     let result = Arc::new(PromiseResult {
                         state: Resonate::parse_promise_state(state_str),
@@ -1025,7 +1033,7 @@ impl<'a, Args: Serialize + Send + 'a> IntoFuture for ResScheduleTask<'a, Args> {
                     self.cron,
                     &template,
                     timeout.as_millis() as i64,
-                    serde_json::to_value(&encoded_param)?,
+                    encoded_param,
                 )
                 .await?;
 
@@ -1703,8 +1711,9 @@ mod tests {
             .create(
                 "sub-p1",
                 i64::MAX,
-                serde_json::json!({"data": "test"}),
-                serde_json::json!({}),
+                crate::types::Value::from_serializable(serde_json::json!({"data": "test"}))
+                    .unwrap(),
+                HashMap::new(),
             )
             .await;
         assert!(created.is_ok());
@@ -1712,7 +1721,7 @@ mod tests {
         // Get it back
         let fetched = r.promises.get("sub-p1").await;
         assert!(fetched.is_ok());
-        assert_eq!(fetched.unwrap()["id"], "sub-p1");
+        assert_eq!(fetched.unwrap().id, "sub-p1");
     }
 
     #[tokio::test]
@@ -1724,21 +1733,25 @@ mod tests {
             .create(
                 "sub-p2",
                 i64::MAX,
-                serde_json::json!(null),
-                serde_json::json!({}),
+                crate::types::Value::default(),
+                HashMap::new(),
             )
             .await
             .unwrap();
 
         let settled = r
             .promises
-            .resolve("sub-p2", serde_json::json!({"data": "result"}))
+            .resolve(
+                "sub-p2",
+                crate::types::Value::from_serializable(serde_json::json!({"data": "result"}))
+                    .unwrap(),
+            )
             .await;
         assert!(settled.is_ok());
 
         // Verify it's settled
         let fetched = r.promises.get("sub-p2").await.unwrap();
-        assert_eq!(fetched["state"], "resolved");
+        assert_eq!(fetched.state, PromiseState::Resolved);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1964,8 +1977,8 @@ mod tests {
             .create(
                 "early-unblock",
                 i64::MAX,
-                serde_json::json!(null),
-                serde_json::json!({}),
+                crate::types::Value::default(),
+                HashMap::new(),
             )
             .await
             .unwrap();
@@ -2046,7 +2059,7 @@ mod tests {
         // Settle the promise — the local network will dispatch an Unblock
         // message through the transport to our watch channel.
         r.promises
-            .resolve("e2e-1", serde_json::json!(null))
+            .resolve("e2e-1", crate::types::Value::default())
             .await
             .unwrap();
 
@@ -2072,7 +2085,7 @@ mod tests {
 
         // Settle — Unblock flows through transport → watch → both receivers
         r.promises
-            .resolve("e2e-multi", serde_json::json!(null))
+            .resolve("e2e-multi", crate::types::Value::default())
             .await
             .unwrap();
 
@@ -2096,7 +2109,7 @@ mod tests {
 
         // Reject the promise
         r.promises
-            .reject("e2e-reject", serde_json::json!(null))
+            .reject("e2e-reject", crate::types::Value::default())
             .await
             .unwrap();
 
@@ -2115,13 +2128,13 @@ mod tests {
             .create(
                 "e2e-pre",
                 i64::MAX,
-                serde_json::json!(null),
-                serde_json::json!({}),
+                crate::types::Value::default(),
+                HashMap::new(),
             )
             .await
             .unwrap();
         r.promises
-            .resolve("e2e-pre", serde_json::json!(null))
+            .resolve("e2e-pre", crate::types::Value::default())
             .await
             .unwrap();
 
@@ -2147,7 +2160,7 @@ mod tests {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             promises
-                .resolve("e2e-block", serde_json::json!(null))
+                .resolve("e2e-block", crate::types::Value::default())
                 .await
                 .unwrap();
         });

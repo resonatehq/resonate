@@ -12,9 +12,11 @@
 //! RESONATE_URL=http://localhost:8001 cargo test --test e2e
 //! ```
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use resonate_sdk::prelude::*;
+use resonate_sdk::types::Value;
 
 // ═══════════════════════════════════════════════════════════════════
 //  Helpers
@@ -116,12 +118,10 @@ async fn connectivity() {
     let id = unique_id("connectivity");
 
     // Create and fetch a promise via the sub-client
-    let created = with_timeout(r.promises.create(
-        &id,
-        i64::MAX,
-        serde_json::json!(null),
-        serde_json::json!({}),
-    ))
+    let created = with_timeout(
+        r.promises
+            .create(&id, i64::MAX, Value::default(), HashMap::new()),
+    )
     .await;
     assert!(
         created.is_ok(),
@@ -131,7 +131,7 @@ async fn connectivity() {
 
     let fetched = with_timeout(r.promises.get(&id)).await;
     assert!(fetched.is_ok(), "should get promise: {:?}", fetched.err());
-    assert_eq!(fetched.unwrap()["id"], id);
+    assert_eq!(fetched.unwrap().id, id);
 
     r.stop().await.unwrap();
 }
@@ -345,6 +345,240 @@ async fn schedule_create_and_delete() {
         delete_result.is_ok(),
         "should delete schedule: {:?}",
         delete_result.err()
+    );
+
+    r.stop().await.unwrap();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Tests — Promises sub-client
+// ═══════════════════════════════════════════════════════════════════
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_resolve_roundtrip() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("promises-resolve");
+
+    with_timeout(
+        r.promises
+            .create(&id, i64::MAX, Value::default(), HashMap::new()),
+    )
+    .await
+    .unwrap();
+
+    let payload = Value::from_serializable(serde_json::json!({"ok": true})).unwrap();
+    let settled = with_timeout(r.promises.resolve(&id, payload))
+        .await
+        .unwrap();
+    assert_eq!(settled.state, PromiseState::Resolved);
+
+    let fetched = with_timeout(r.promises.get(&id)).await.unwrap();
+    assert_eq!(fetched.state, PromiseState::Resolved);
+    assert_eq!(
+        fetched.value.data_as_ref(),
+        &serde_json::json!({"ok": true})
+    );
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_reject() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("promises-reject");
+
+    with_timeout(
+        r.promises
+            .create(&id, i64::MAX, Value::default(), HashMap::new()),
+    )
+    .await
+    .unwrap();
+
+    let settled = with_timeout(r.promises.reject(&id, Value::default()))
+        .await
+        .unwrap();
+    assert_eq!(settled.state, PromiseState::Rejected);
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_cancel() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("promises-cancel");
+
+    with_timeout(
+        r.promises
+            .create(&id, i64::MAX, Value::default(), HashMap::new()),
+    )
+    .await
+    .unwrap();
+
+    let settled = with_timeout(r.promises.cancel(&id, Value::default()))
+        .await
+        .unwrap();
+    assert_eq!(settled.state, PromiseState::RejectedCanceled);
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_get_not_found() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("promises-missing");
+
+    let err = with_timeout(r.promises.get(&id)).await.unwrap_err();
+    assert!(
+        matches!(err, Error::ServerError { code: 404, .. }),
+        "expected 404 ServerError, got {err:?}"
+    );
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_create_conflict() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("promises-conflict");
+
+    with_timeout(
+        r.promises
+            .create(&id, i64::MAX, Value::default(), HashMap::new()),
+    )
+    .await
+    .unwrap();
+
+    let second = with_timeout(r.promises.create(
+        &id,
+        i64::MAX,
+        Value::from_serializable(serde_json::json!({"different": true})).unwrap(),
+        HashMap::new(),
+    ))
+    .await;
+    let err = second.expect_err("second create should conflict");
+    assert!(
+        matches!(err, Error::ServerError { code: 409, .. }),
+        "expected 409 ServerError, got {err:?}"
+    );
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn promises_search_by_tag() {
+    let r = make_resonate(&resonate_url());
+    let tag_value = unique_id("tag");
+    let id1 = unique_id("search-a");
+    let id2 = unique_id("search-b");
+
+    let mut tags = HashMap::new();
+    tags.insert("e2e".to_string(), tag_value.clone());
+
+    with_timeout(
+        r.promises
+            .create(&id1, i64::MAX, Value::default(), tags.clone()),
+    )
+    .await
+    .unwrap();
+    with_timeout(
+        r.promises
+            .create(&id2, i64::MAX, Value::default(), tags.clone()),
+    )
+    .await
+    .unwrap();
+
+    let result = with_timeout(r.promises.search(None, Some(tags), Some(100), None))
+        .await
+        .unwrap();
+    let ids: Vec<&String> = result.promises.iter().map(|p| &p.id).collect();
+    assert!(ids.contains(&&id1), "expected {id1} in {ids:?}");
+    assert!(ids.contains(&&id2), "expected {id2} in {ids:?}");
+
+    r.stop().await.unwrap();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Tests — Schedules sub-client
+// ═══════════════════════════════════════════════════════════════════
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn schedules_create_and_get() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("sched-create");
+    let promise_tpl = format!("{id}.{{{{.timestamp}}}}");
+
+    let created = with_timeout(r.schedules.create(
+        &id,
+        "*/5 * * * *",
+        &promise_tpl,
+        60_000,
+        Value::default(),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(created.id, id);
+    assert_eq!(created.cron, "*/5 * * * *");
+
+    let fetched = with_timeout(r.schedules.get(&id)).await.unwrap();
+    assert_eq!(fetched.id, id);
+    assert_eq!(fetched.cron, "*/5 * * * *");
+
+    with_timeout(r.schedules.delete(&id)).await.unwrap();
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn schedules_delete_not_found() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("sched-missing");
+
+    let err = with_timeout(r.schedules.delete(&id)).await.unwrap_err();
+    assert!(
+        matches!(err, Error::ServerError { .. }),
+        "expected ServerError, got {err:?}"
+    );
+
+    r.stop().await.unwrap();
+}
+
+#[test_with::env(RESONATE_URL)]
+#[tokio::test]
+async fn schedules_search() {
+    let r = make_resonate(&resonate_url());
+    let id = unique_id("sched-search");
+    let promise_tpl = format!("{id}.{{{{.timestamp}}}}");
+
+    with_timeout(
+        r.schedules
+            .create(&id, "0 * * * *", &promise_tpl, 60_000, Value::default()),
+    )
+    .await
+    .unwrap();
+
+    let result = with_timeout(r.schedules.search(None, Some(100), None))
+        .await
+        .unwrap();
+    assert!(
+        result.schedules.iter().any(|s| s.id == id),
+        "expected {id} in search results"
+    );
+
+    with_timeout(r.schedules.delete(&id)).await.unwrap();
+
+    let after = with_timeout(r.schedules.search(None, Some(100), None))
+        .await
+        .unwrap();
+    assert!(
+        !after.schedules.iter().any(|s| s.id == id),
+        "expected {id} absent after delete"
     );
 
     r.stop().await.unwrap();
