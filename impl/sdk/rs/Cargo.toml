@@ -8,5 +8,5 @@ edition = "2021"
 license = "Apache-2.0"
 description = "Resonate SDK for Rust"
 repository = "https://github.com/resonatehq/resonate-sdk-rust"
-keywords = ["durable", "promise", "async", "workflow", "sdk", "durable-execution"]
+keywords = ["durable", "async", "workflow", "sdk", "durable-execution"]
 categories = ["asynchronous", "development-tools"]
