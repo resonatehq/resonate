@@ -19,7 +19,7 @@ pub mod transport;
 pub mod types;
 
 /// Protocol version string sent in all requests.
-pub(crate) const PROTOCOL_VERSION: &str = "2025-01-15";
+pub(crate) const PROTOCOL_VERSION: &str = "2026-04-01";
 
 // ═══════════════════════════════════════════════════════════════
 //  Dependency Injection

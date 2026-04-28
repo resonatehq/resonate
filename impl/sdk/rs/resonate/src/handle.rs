@@ -93,10 +93,12 @@ impl<T: DeserializeOwned> ResonateHandle<T> {
         // Try to decode the value.data field through codec
         if let Some(data) = value.get("data") {
             if let Some(s) = data.as_str() {
-                if !s.is_empty() {
-                    let decoded: Option<serde_json::Value> = self.codec.decode_base64_str(s)?;
-                    return Ok(decoded.unwrap_or(serde_json::Value::Null));
+                if s.is_empty() {
+                    // Empty string is the wire-encoding for null/unit values.
+                    return Ok(serde_json::Value::Null);
                 }
+                let decoded: Option<serde_json::Value> = self.codec.decode_base64_str(s)?;
+                return Ok(decoded.unwrap_or(serde_json::Value::Null));
             }
             return Ok(data.clone());
         }

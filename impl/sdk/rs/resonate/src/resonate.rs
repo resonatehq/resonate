@@ -211,8 +211,8 @@ impl Resonate {
             core_ttl,
             deps.clone(),
         ));
-        let promises = Promises::new(sender.clone());
-        let schedules = Schedules::new(sender.clone());
+        let promises = Promises::new(sender.clone(), codec.clone());
+        let schedules = Schedules::new(sender.clone(), codec.clone());
 
         let subscriptions: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let subscribe_every = Duration::from_secs(60);

@@ -1,25 +1,41 @@
 use std::collections::HashMap;
 
+use crate::codec::Codec;
 use crate::error::Result;
 use crate::send::{PromiseSearchResult, ScheduleCreateReq, ScheduleSearchResult, Sender};
 use crate::types::{
     PromiseCreateReq, PromiseRecord, PromiseSettleReq, ScheduleRecord, SettleState, Value,
 };
 
+/// Encode a user-supplied `Value`'s `data` field through the codec.
+///
+/// The wire protocol requires `data` to be a base64-encoded JSON string. The
+/// public client API accepts a deserialized `Value`; this helper converts it
+/// into the wire format.
+fn encode_value(codec: &Codec, value: Value) -> Result<Value> {
+    let mut encoded = codec.encode(&value.data_as_ref())?;
+    if value.headers.is_some() {
+        encoded.headers = value.headers;
+    }
+    Ok(encoded)
+}
+
 /// Sub-client for promise operations.
 #[derive(Clone)]
 pub struct Promises {
     sender: Sender,
+    codec: Codec,
 }
 
 impl Promises {
-    pub(crate) fn new(sender: Sender) -> Self {
-        Self { sender }
+    pub(crate) fn new(sender: Sender, codec: Codec) -> Self {
+        Self { sender, codec }
     }
 
     /// Get a promise by ID.
     pub async fn get(&self, id: &str) -> Result<PromiseRecord> {
-        self.sender.promise_get(id).await
+        let record = self.sender.promise_get(id).await?;
+        self.codec.decode_promise(record)
     }
 
     /// Create a promise.
@@ -30,14 +46,17 @@ impl Promises {
         param: Value,
         tags: HashMap<String, String>,
     ) -> Result<PromiseRecord> {
-        self.sender
+        let encoded_param = encode_value(&self.codec, param)?;
+        let record = self
+            .sender
             .promise_create(PromiseCreateReq {
                 id: id.to_string(),
                 timeout_at,
-                param,
+                param: encoded_param,
                 tags,
             })
-            .await
+            .await?;
+        self.codec.decode_promise(record)
     }
 
     /// Resolve a promise.
@@ -56,20 +75,25 @@ impl Promises {
     }
 
     async fn settle(&self, id: &str, state: SettleState, value: Value) -> Result<PromiseRecord> {
-        self.sender
+        let encoded_value = encode_value(&self.codec, value)?;
+        let record = self
+            .sender
             .promise_settle(PromiseSettleReq {
                 id: id.to_string(),
                 state,
-                value,
+                value: encoded_value,
             })
-            .await
+            .await?;
+        self.codec.decode_promise(record)
     }
 
     /// Register a listener on a promise so `address` is notified when it settles.
     pub async fn register_listener(&self, awaited: &str, address: &str) -> Result<PromiseRecord> {
-        self.sender
+        let record = self
+            .sender
             .promise_register_listener(awaited, address)
-            .await
+            .await?;
+        self.codec.decode_promise(record)
     }
 
     /// Search for promises matching optional state/tags filters.
@@ -80,7 +104,19 @@ impl Promises {
         limit: Option<u32>,
         cursor: Option<&str>,
     ) -> Result<PromiseSearchResult> {
-        self.sender.promise_search(state, tags, limit, cursor).await
+        let result = self
+            .sender
+            .promise_search(state, tags, limit, cursor)
+            .await?;
+        let promises = result
+            .promises
+            .into_iter()
+            .map(|p| self.codec.decode_promise(p))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PromiseSearchResult {
+            promises,
+            cursor: result.cursor,
+        })
     }
 }
 
@@ -88,11 +124,12 @@ impl Promises {
 #[derive(Clone)]
 pub struct Schedules {
     sender: Sender,
+    codec: Codec,
 }
 
 impl Schedules {
-    pub(crate) fn new(sender: Sender) -> Self {
-        Self { sender }
+    pub(crate) fn new(sender: Sender, codec: Codec) -> Self {
+        Self { sender, codec }
     }
 
     /// Create a schedule.
@@ -104,13 +141,14 @@ impl Schedules {
         promise_timeout: i64,
         promise_param: Value,
     ) -> Result<ScheduleRecord> {
+        let encoded_param = encode_value(&self.codec, promise_param)?;
         self.sender
             .schedule_create(ScheduleCreateReq {
                 id: id.to_string(),
                 cron: cron.to_string(),
                 promise_id: promise_id.to_string(),
                 promise_timeout,
-                promise_param,
+                promise_param: encoded_param,
                 promise_tags: HashMap::new(),
             })
             .await

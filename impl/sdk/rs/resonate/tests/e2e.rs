@@ -13,6 +13,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use resonate_sdk::prelude::*;
@@ -29,11 +30,13 @@ fn resonate_url() -> String {
 
 /// Generate a unique ID for a test run to avoid collisions on the server.
 fn unique_id(test_name: &str) -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_millis();
-    format!("e2e-{}-{}", test_name, ts)
+        .as_nanos();
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("e2e-{}-{}-{}", test_name, ts, n)
 }
 
 /// Default timeout applied to every server-facing await.
@@ -51,6 +54,8 @@ async fn with_timeout<F: std::future::IntoFuture>(f: F) -> F::Output {
 fn make_resonate(url: &str) -> Resonate {
     Resonate::new(ResonateConfig {
         url: Some(url.to_string()),
+        pid: Some(unique_id("worker")),
+        group: Some(unique_id("group")),
         ..Default::default()
     })
 }
@@ -442,29 +447,31 @@ async fn promises_get_not_found() {
 
 #[test_with::env(RESONATE_URL)]
 #[tokio::test]
-async fn promises_create_conflict() {
+async fn promises_create_is_idempotent() {
     let r = make_resonate(&resonate_url());
     let id = unique_id("promises-conflict");
 
-    with_timeout(
+    let first = with_timeout(
         r.promises
             .create(&id, i64::MAX, Value::default(), HashMap::new()),
     )
     .await
     .unwrap();
 
+    // Creating again with the same ID should return the original promise
+    // (Resonate's create is idempotent / memoized by ID).
     let second = with_timeout(r.promises.create(
         &id,
         i64::MAX,
         Value::from_serializable(serde_json::json!({"different": true})).unwrap(),
         HashMap::new(),
     ))
-    .await;
-    let err = second.expect_err("second create should conflict");
-    assert!(
-        matches!(err, Error::ServerError { code: 409, .. }),
-        "expected 409 ServerError, got {err:?}"
-    );
+    .await
+    .expect("second create should succeed and return the existing promise");
+
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.state, first.state);
+    assert_eq!(second.created_at, first.created_at);
 
     r.stop().await.unwrap();
 }
