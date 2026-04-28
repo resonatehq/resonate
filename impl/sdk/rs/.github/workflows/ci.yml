@@ -37,3 +37,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Start Resonate server
+        run: |
+          docker run -d --name resonate \
+            -p 8001:8001 \
+            resonatehqio/resonate:latest
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null http://localhost:8001/ 2>&1; then
+              echo "Resonate server is up."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Resonate server failed to start within 60s" >&2
+          docker logs resonate || true
+          exit 1
+
+      - name: Run e2e tests
+        env:
+          RESONATE_URL: http://localhost:8001
+        run: cargo test -p resonate-sdk --test e2e
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: docker logs resonate || true
+
+      - name: Stop Resonate server
+        if: always()
+        run: docker rm -f resonate || true
