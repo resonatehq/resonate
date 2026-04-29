@@ -167,6 +167,16 @@ describe("base64 encoder", () => {
   test.each(cases.map((str) => [str]))("encodes and decodes correctly: %s", (string) => {
     expect(base64Decode(base64Encode(string))).toEqual(string);
   });
+
+  test("encodes and decodes a large string without blowing the stack", () => {
+    // Reproduces a real-world failure where a ~123KB JSON return value triggered
+    // `RangeError: Maximum call stack size exceeded` inside base64Encode, surfacing
+    // to the user as the misleading ENCODING_RETV_UNENCODEABLE (code 08).
+    // Root cause: `String.fromCharCode(...bytes)` spreads every byte as an argument,
+    // and V8's argument-count limit caps that around ~100K.
+    const large = "a".repeat(200_000);
+    expect(base64Decode(base64Encode(large))).toEqual(large);
+  });
 });
 
 describe("detachedId", () => {
