@@ -3,6 +3,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
+use tracing_subscriber;
 
 // ---- Serve args ----
 
@@ -282,6 +283,13 @@ impl DevArgs {
         config.storage.sqlite.path = self.sqlite_path.unwrap_or_else(|| ":memory:".to_string());
         config
     }
+}
+
+/// CLI flags for the `mcp` subcommand.
+#[derive(Args)]
+pub struct McpArgs {
+    #[command(flatten)]
+    pub global: GlobalArgs,
 }
 
 // ---- Duration parsing ----
@@ -1242,6 +1250,18 @@ fn promise_detail(p: &Value) -> String {
     } else {
         String::new()
     }
+}
+
+pub async fn run_mcp(args: Box<McpArgs>) {
+    // Tracing must go to stderr — MCP uses stdout for framing
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(env_filter)
+        .init();
+
+    crate::mcp::run(args.global.server.clone(), args.global.token.clone()).await;
 }
 
 #[cfg(test)]

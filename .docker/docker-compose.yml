@@ -1,0 +1,11 @@
+services:
+  test-runner:
+    build:
+      context: ..
+      dockerfile: .docker/Dockerfile.test
+    networks:
+      - resonate
+
+networks:
+  resonate:
+    driver: bridge
