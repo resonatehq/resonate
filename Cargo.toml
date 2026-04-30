@@ -1,6 +1,6 @@
 [package]
 name = "resonate"
-version = "0.9.3"
+version = "0.9.5"
 edition = "2021"
 
 [lib]
@@ -43,5 +43,6 @@ async-trait = "0.1"
 validator = { version = "0.18", features = ["derive"] }
 url = "2"
 base64 = "0.22"
+google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
 google-cloud-pubsub = "0.33.1"
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }

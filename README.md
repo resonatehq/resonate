@@ -168,3 +168,53 @@ Or, you can run it as an executable using the following command:
 ```
 ./target/release/resonate serve
 ```
+
+## Outbound authentication for HTTP push
+
+When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[transports.http_push.auth]`.
+
+### Google Cloud ID token (recommended for Cloud Run / Cloud Functions)
+
+```toml
+[transports.http_push.auth]
+mode = "gcp"
+# audience = "https://my-function.example.com"  # optional; defaults to the delivery URL
+```
+
+Equivalent environment variables:
+```
+RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
+RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...   # optional
+```
+
+Equivalent CLI flags:
+```
+resonate serve --transports-http-push-auth-mode gcp
+```
+
+Tokens are obtained via [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials). On Cloud Run, this resolves to the service account identity automatically. Token acquisition and refresh are managed by the `google-cloud-auth` crate.
+
+### Static bearer token
+
+```toml
+[transports.http_push.auth]
+mode = "bearer"
+token = "my-static-token"
+```
+
+### No auth (default)
+
+```toml
+[transports.http_push.auth]
+mode = "none"
+```
+
+### Custom header name
+
+The auth header defaults to `Authorization`. Override with:
+
+```toml
+[transports.http_push.auth]
+mode = "gcp"
+header = "X-Custom-Auth"
+```

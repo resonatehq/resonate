@@ -106,6 +106,10 @@ pub struct CommonArgs {
     pub messages_batch_size: Option<i64>,
 
     // --- HTTP Push ---
+    /// Enable/disable HTTP push transport [default: true]
+    #[arg(long = "transports-http-push-enabled", value_name = "BOOL")]
+    pub transports_http_push_enabled: Option<bool>,
+
     /// Max concurrent HTTP push deliveries [default: 16]
     #[arg(long = "transports-http-push-concurrency", value_name = "N")]
     pub transports_http_push_concurrency: Option<usize>,
@@ -119,6 +123,10 @@ pub struct CommonArgs {
     pub transports_http_push_request_timeout: Option<u64>,
 
     // --- HTTP Poll/SSE ---
+    /// Enable/disable HTTP poll (SSE) transport [default: true]
+    #[arg(long = "transports-http-poll-enabled", value_name = "BOOL")]
+    pub transports_http_poll_enabled: Option<bool>,
+
     /// Max concurrent poll (SSE) connections [default: 1000]
     #[arg(long = "transports-http-poll-max-connections", value_name = "N")]
     pub transports_http_poll_max_connections: Option<usize>,
@@ -127,10 +135,36 @@ pub struct CommonArgs {
     #[arg(long = "transports-http-poll-buffer-size", value_name = "N")]
     pub transports_http_poll_buffer_size: Option<usize>,
 
+    // --- HTTP Push Auth ---
+    /// Outbound auth mode for HTTP push deliveries: none, bearer, gcp [default: none]
+    #[arg(long = "transports-http-push-auth-mode", value_name = "MODE")]
+    pub transports_http_push_auth_mode: Option<String>,
+
+    /// Static bearer token for HTTP push auth (mode=bearer)
+    #[arg(long = "transports-http-push-auth-token", value_name = "TOKEN")]
+    pub transports_http_push_auth_token: Option<String>,
+
+    /// GCP audience for HTTP push auth (mode=gcp; defaults to delivery target URL)
+    #[arg(long = "transports-http-push-auth-aud", value_name = "URL")]
+    pub transports_http_push_auth_audience: Option<String>,
+
+    /// Authorization header name for HTTP push auth [default: Authorization]
+    #[arg(long = "transports-http-push-auth-header", value_name = "HEADER")]
+    pub transports_http_push_auth_header: Option<String>,
+
     // --- GCP Pub/Sub ---
-    /// GCP project ID (enables GCP Pub/Sub transport)
+    /// Enable/disable GCP Pub/Sub transport [default: false]
+    #[arg(long = "transports-gcps-enabled", value_name = "BOOL")]
+    pub transports_gcps_enabled: Option<bool>,
+
+    /// GCP project ID
     #[arg(long = "transports-gcps-project", value_name = "PROJECT")]
     pub transports_gcps_project: Option<String>,
+
+    // --- Bash Exec ---
+    /// Enable/disable bash exec transport [default: false]
+    #[arg(long = "transports-bash-exec-enabled", value_name = "BOOL")]
+    pub transports_bash_exec_enabled: Option<bool>,
 
     // --- Observability ---
     /// Prometheus metrics port (0 = disabled) [default: 9090]
@@ -232,6 +266,9 @@ impl CommonArgs {
             config.messages.batch_size = v;
         }
 
+        if let Some(v) = self.transports_http_push_enabled {
+            config.transports.http_push.enabled = v;
+        }
         if let Some(v) = self.transports_http_push_concurrency {
             config.transports.http_push.concurrency = v;
         }
@@ -242,6 +279,9 @@ impl CommonArgs {
             config.transports.http_push.request_timeout = v;
         }
 
+        if let Some(v) = self.transports_http_poll_enabled {
+            config.transports.http_poll.enabled = v;
+        }
         if let Some(v) = self.transports_http_poll_max_connections {
             config.transports.http_poll.max_connections = v;
         }
@@ -249,12 +289,38 @@ impl CommonArgs {
             config.transports.http_poll.buffer_size = v;
         }
 
-        if let Some(project) = self.transports_gcps_project {
-            let gcps = config
+        if let Some(mode_str) = self.transports_http_push_auth_mode {
+            let mode = match mode_str.as_str() {
+                "bearer" => crate::config::HttpPushAuthMode::Bearer,
+                "gcp" => crate::config::HttpPushAuthMode::Gcp,
+                _ => crate::config::HttpPushAuthMode::None,
+            };
+            let auth = config
                 .transports
-                .gcps
-                .get_or_insert(crate::config::GcpsConfig { project: None });
-            gcps.project = Some(project);
+                .http_push
+                .auth
+                .get_or_insert_with(crate::config::HttpPushAuthConfig::default);
+            auth.mode = mode;
+            if let Some(v) = self.transports_http_push_auth_token {
+                auth.token = Some(v);
+            }
+            if let Some(v) = self.transports_http_push_auth_audience {
+                auth.audience = Some(v);
+            }
+            if let Some(v) = self.transports_http_push_auth_header {
+                auth.header = v;
+            }
+        }
+
+        if let Some(v) = self.transports_gcps_enabled {
+            config.transports.gcps.enabled = v;
+        }
+        if let Some(project) = self.transports_gcps_project {
+            config.transports.gcps.project = Some(project);
+        }
+
+        if let Some(v) = self.transports_bash_exec_enabled {
+            config.transports.bash_exec.enabled = v;
         }
 
         if let Some(v) = self.observability_metrics_port {
@@ -388,9 +454,11 @@ async fn post(server: &str, kind: &str, token: Option<&str>, data: Value) -> Res
 
     let body = build_envelope(kind, &gen_corr_id(), token, data);
 
-    let resp = client
-        .post(&url)
-        .json(&body)
+    let mut req = client.post(&url).json(&body);
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+    let resp = req
         .send()
         .await
         .map_err(|e| format!("Connection error: {}", e))?;

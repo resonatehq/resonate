@@ -25,6 +25,7 @@ use config::Config;
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use server::Server;
 use transport::transport_http_poll::PollRegistry;
+use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport};
 use types::ResponseEnvelope;
 
 #[derive(Parser)]
@@ -238,23 +239,70 @@ async fn run_server(config: Config) -> Result<(), String> {
         "Transport config"
     );
     let poll_registry = Arc::new(PollRegistry::new(poll_max_connections, poll_buffer_size));
-    let http_push = Arc::new(transport::transport_http_push::HttpPushTransport::new(
-        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout),
-        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout),
-    ));
-    let gcps = match &state.config.transports.gcps {
-        Some(_gcps_config) => {
-            tracing::info!("GCP Pub/Sub transport enabled");
-            Some(Arc::new(
-                transport::transport_gcps::GcpsPubSubTransport::new(),
-            ))
+    let connect_timeout =
+        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout);
+    let request_timeout =
+        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout);
+    let http_push: Option<Arc<dyn HttpTransport>> = if state.config.transports.http_push.enabled {
+        let outbound_auth = match &state.config.transports.http_push.auth {
+            Some(auth_cfg) => {
+                let mode_label = format!("{:?}", auth_cfg.mode);
+                let auth = transport::transport_http_push::Auth::from_config(auth_cfg);
+                tracing::info!(mode = %mode_label, "HTTP push outbound auth enabled");
+                auth
+            }
+            None => {
+                tracing::debug!("HTTP push outbound auth: none");
+                transport::transport_http_push::Auth::None
+            }
+        };
+        Some(Arc::new(
+            transport::transport_http_push::HttpPushTransport::new(
+                connect_timeout,
+                request_timeout,
+                outbound_auth,
+            ),
+        ))
+    } else {
+        tracing::info!("HTTP push transport disabled");
+        None
+    };
+    let http_poll: Option<Arc<dyn PollTransport>> = if state.config.transports.http_poll.enabled {
+        Some(poll_registry.clone())
+    } else {
+        tracing::info!("HTTP poll transport disabled");
+        None
+    };
+    let gcps: Option<Arc<dyn GcpsTransport>> = if state.config.transports.gcps.enabled {
+        tracing::info!("GCP Pub/Sub transport enabled");
+        Some(Arc::new(
+            transport::transport_gcps::GcpsPubSubTransport::new(),
+        ))
+    } else {
+        None
+    };
+    let bash: Option<Arc<dyn BashTransport>> = if state.config.transports.bash_exec.enabled {
+        let bash_cfg = &state.config.transports.bash_exec;
+        match &bash_cfg.root_dir {
+            Some(dir) => {
+                tracing::info!(root_dir = %dir, working_dir = %bash_cfg.working_dir, "Bash exec transport enabled")
+            }
+            None => tracing::info!("Bash exec transport enabled (inline only)"),
         }
-        None => None,
+        let working_dir =
+            transport::transport_exec_bash::WorkingDir::from_config(&bash_cfg.working_dir);
+        Some(Arc::new(
+            transport::transport_exec_bash::BashExecTransport::new(
+                Arc::clone(&state),
+                bash_cfg.root_dir.as_deref(),
+                working_dir,
+            ),
+        ))
+    } else {
+        None
     };
     let dispatcher = Arc::new(transport::TransportDispatcher::new(
-        http_push,
-        poll_registry.clone(),
-        gcps,
+        http_push, http_poll, gcps, bash,
     ));
 
     // Spawn background loops
