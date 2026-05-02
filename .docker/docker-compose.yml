@@ -1,0 +1,40 @@
+services:
+  resonate:
+    build:
+      context: ..
+      dockerfile: .docker/Dockerfile
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_STORAGE__TYPE=sqlite
+      - RESONATE_OBSERVABILITY__METRICS_PORT=0
+      - RESONATE_LEVEL=info
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 20
+      start_period: 90s
+    networks:
+      internal:
+        aliases:
+          - resonate
+
+  test-runner:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM alpine:3.20
+        RUN apk add --no-cache curl bash
+        COPY test-runner.sh /test-runner.sh
+        RUN chmod +x /test-runner.sh
+        ENTRYPOINT ["/test-runner.sh"]
+    environment:
+      - RESONATE_URL=http://resonate:8001
+    depends_on:
+      resonate:
+        condition: service_healthy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

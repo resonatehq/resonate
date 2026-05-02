@@ -1,0 +1,439 @@
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  --bg-canvas: #0d1117;
+  --bg-overlay: #161b22;
+  --bg-raised: #1c2128;
+  --bg-input: #21262d;
+
+  --border-subtle: rgba(240, 246, 252, 0.08);
+  --border-default: rgba(240, 246, 252, 0.13);
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+
+  --accent: #7c6af4;
+  --accent-hover: #9d8fff;
+  --accent-subtle: rgba(124, 106, 244, 0.15);
+
+  --status-pending-text: #388bfd;
+  --status-pending-bg: rgba(56, 139, 253, 0.1);
+  --status-resolved-text: #3fb950;
+  --status-resolved-bg: rgba(63, 185, 80, 0.1);
+  --status-rejected-text: #f85149;
+  --status-rejected-bg: rgba(248, 81, 73, 0.1);
+  --status-timedout-text: #d29922;
+  --status-timedout-bg: rgba(210, 153, 34, 0.1);
+  --status-canceled-text: #8b949e;
+  --status-canceled-bg: rgba(139, 148, 158, 0.1);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --nav-height: 52px;
+}
+
+/* ─── Global reset ───────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ─── App shell ──────────────────────────────────────────────────────────── */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Nav bar ────────────────────────────────────────────────────────────── */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--nav-height);
+  background: rgba(13, 17, 23, 0.85);
+  backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.nav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.nav-brand {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+  margin-right: 20px;
+  text-decoration: none;
+}
+
+.nav-link {
+  padding: 0 14px;
+  height: var(--nav-height);
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 450;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 150ms, border-color 150ms;
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+}
+
+.nav-link.active {
+  color: var(--text-primary);
+  font-weight: 500;
+  border-bottom-color: var(--accent);
+}
+
+/* ─── Page layout ────────────────────────────────────────────────────────── */
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ─── Stat cards ─────────────────────────────────────────────────────────── */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+}
+
+.stat-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value.accent  { color: var(--accent); }
+.stat-value.success { color: var(--status-resolved-text); }
+.stat-value.danger  { color: var(--status-rejected-text); }
+.stat-value.info    { color: var(--status-pending-text); }
+
+/* ─── Table card ─────────────────────────────────────────────────────────── */
+.table-card {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  overflow: clip;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead {
+  position: sticky;
+  top: var(--nav-height);
+  z-index: 10;
+  background: var(--bg-raised);
+}
+
+thead th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 120ms;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--bg-raised);
+}
+
+tbody td {
+  padding: 12px 16px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.cell-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-secondary {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* ─── Status badges ──────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.badge-pending { background: var(--status-pending-bg); color: var(--status-pending-text); }
+.badge-pending::before { background: var(--status-pending-text); }
+
+.badge-resolved { background: var(--status-resolved-bg); color: var(--status-resolved-text); }
+.badge-resolved::before { background: var(--status-resolved-text); }
+
+.badge-rejected { background: var(--status-rejected-bg); color: var(--status-rejected-text); }
+.badge-rejected::before { background: var(--status-rejected-text); }
+
+.badge-rejected_timedout { background: var(--status-timedout-bg); color: var(--status-timedout-text); }
+.badge-rejected_timedout::before { background: var(--status-timedout-text); }
+
+.badge-rejected_canceled { background: var(--status-canceled-bg); color: var(--status-canceled-text); }
+.badge-rejected_canceled::before { background: var(--status-canceled-text); }
+
+/* ─── Action buttons ─────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 120ms;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-default {
+  background: var(--bg-raised);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.btn-default:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  background: var(--bg-input);
+}
+
+.btn-danger {
+  background: var(--status-rejected-bg);
+  border-color: rgba(248, 81, 73, 0.25);
+  color: var(--status-rejected-text);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.2);
+}
+
+/* ─── Empty state ────────────────────────────────────────────────────────── */
+.empty-state {
+  padding: 56px 24px;
+  text-align: center;
+}
+
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.empty-state-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ─── Filter tabs ────────────────────────────────────────────────────────── */
+.filter-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 16px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  width: fit-content;
+}
+
+.filter-tab {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: all 120ms;
+}
+
+.filter-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-raised);
+}
+
+.filter-tab.active {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* ─── Status / error messages ────────────────────────────────────────────── */
+.status-bar {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-bar {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--status-rejected-text);
+  background: var(--status-rejected-bg);
+  border-bottom: 1px solid rgba(248, 81, 73, 0.2);
+}
+
+/* ─── Placeholder card ───────────────────────────────────────────────────── */
+.placeholder-card {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 48px 32px;
+  max-width: 560px;
+}
+
+.placeholder-badge {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+
+.placeholder-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+  margin-bottom: 10px;
+}
+
+.placeholder-body {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+/* ─── Action button row spacing ──────────────────────────────────────────── */
+.btn + .btn {
+  margin-left: 6px;
+}

@@ -129,6 +129,15 @@ pub fn poll_routes() -> Router<AppState> {
     Router::new().route("/poll/:group/:id", get(handle_poll))
 }
 
+/// Web UI routes: serve embedded SPA assets under /web.
+pub fn web_routes() -> Router<AppState> {
+    use crate::assets::web_handler;
+    Router::new()
+        .route("/web", get(web_handler))
+        .route("/web/", get(web_handler))
+        .route("/web/*path", get(web_handler))
+}
+
 async fn handle_health() -> StatusCode {
     StatusCode::OK
 }

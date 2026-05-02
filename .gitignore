@@ -33,3 +33,8 @@
 # Cloned test repos
 test/resonate-test
 test/resonate-perf
+
+# Web frontend build artifacts (rust-embed bakes these in at compile time;
+# regenerate with `npm install && npm run build` in web/)
+web/node_modules/
+web/dist/

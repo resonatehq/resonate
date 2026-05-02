@@ -1,3 +1,4 @@
+mod assets;
 mod auth;
 mod cli;
 mod config;
@@ -369,6 +370,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     };
     let mut app = server::api_routes()
         .merge(server::poll_routes())
+        .merge(server::web_routes())
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
                 let message = if let Some(s) = err.downcast_ref::<&str>() {
