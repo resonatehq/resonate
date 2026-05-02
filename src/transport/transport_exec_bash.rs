@@ -295,6 +295,18 @@ async fn run_task(
             .await;
         }
         Ok(out) => {
+            // A signal kill (e.g. SIGKILL from a shutdown or SIGTERM from the OS)
+            // is not a workflow failure — drop the task and let the lease expire so
+            // the message is rescheduled rather than rejecting the promise.
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = out.status.signal() {
+                tracing::warn!(
+                    task_id,
+                    signal = sig,
+                    "bash-exec: process killed by signal, dropping task for reschedule"
+                );
+                return;
+            }
             let now = system_time_ms();
             if out.status.success() {
                 let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
