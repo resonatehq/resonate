@@ -2,7 +2,7 @@ mod tools;
 
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::Mutex;
 
 type Writer = Arc<Mutex<BufWriter<tokio::io::Stdout>>>;
@@ -126,7 +126,7 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
                 &ctx.server,
                 ctx.token.as_deref(),
                 &ctx.session_id,
-                id, timeout_ms, script, script_path, bash_args, tags,
+                tools::BashParams { id, timeout_ms, script, script_path, args: bash_args, tags },
             ).await
         }
         other => Err(format!("unknown tool '{other}'")),

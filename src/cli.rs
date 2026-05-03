@@ -3,7 +3,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
-use tracing_subscriber;
 
 // ---- Serve args ----
 

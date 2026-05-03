@@ -128,17 +128,22 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+pub struct BashParams {
+    pub id: Option<String>,
+    pub timeout_ms: Option<u64>,
+    pub script: Option<String>,
+    pub script_path: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub tags: Option<Value>,
+}
+
 pub async fn resonate_bash(
     server: &str,
     token: Option<&str>,
     session_id: &str,
-    id: Option<String>,
-    timeout_ms: Option<u64>,
-    script: Option<String>,
-    script_path: Option<String>,
-    args: Option<Vec<String>>,
-    tags: Option<Value>,
+    p: BashParams,
 ) -> Result<Value, String> {
+    let BashParams { id, timeout_ms, script, script_path, args, tags } = p;
     let has_inline = script.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
     let has_path   = script_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
     if has_inline == has_path {
