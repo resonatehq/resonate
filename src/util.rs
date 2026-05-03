@@ -60,6 +60,8 @@ pub fn is_valid_cron(cron_expr: &str) -> bool {
 
 /// Compute next cron occurrence after a given time (in ms).
 pub fn compute_next_cron(cron_expr: &str, after_ms: i64) -> i64 {
+    use chrono::Datelike;
+    use chrono::Timelike;
     use cron::Schedule;
     use std::str::FromStr;
 
@@ -70,8 +72,48 @@ pub fn compute_next_cron(cron_expr: &str, after_ms: i64) -> i64 {
         let after_dt = chrono::DateTime::from_timestamp(after_secs, 0)
             .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
 
-        if let Some(next) = schedule.after(&after_dt).next() {
-            return next.timestamp() * 1000;
+        // The cron crate only generates times up to ~year 2100.  Fuzz tests use
+        // synthetic clock values that may be far in the future.  Find an
+        // equivalent time in [1970, 2099] — same (month, day, weekday, h:m:s) —
+        // compute the next cron tick from there, then shift the result back by
+        // the same offset.
+        const MAX_CRON_YEAR: i32 = 2099;
+        let (ref_dt, delta_secs) = if after_dt.year() <= MAX_CRON_YEAR {
+            (after_dt, 0i64)
+        } else {
+            let naive = after_dt.naive_utc();
+            let (month, day, hour, minute, second) = (
+                naive.month(),
+                naive.day(),
+                naive.hour(),
+                naive.minute(),
+                naive.second(),
+            );
+            let target_weekday = naive.weekday();
+            let is_leap_day = month == 2 && day == 29;
+
+            // Search for the latest year in [1970, 2099] with the same
+            // (month, day, weekday) so the cron library sees a valid schedule.
+            let equiv_secs = (1970i32..=MAX_CRON_YEAR).rev().find_map(|y| {
+                if is_leap_day && chrono::NaiveDate::from_ymd_opt(y, 2, 29).is_none() {
+                    return None;
+                }
+                chrono::NaiveDate::from_ymd_opt(y, month, day)
+                    .filter(|d| d.weekday() == target_weekday)
+                    .and_then(|d| d.and_hms_opt(hour, minute, second))
+                    .map(|dt| dt.and_utc().timestamp())
+            });
+
+            if let Some(ref_secs) = equiv_secs {
+                let ref_dt = chrono::DateTime::from_timestamp(ref_secs, 0).unwrap();
+                (ref_dt, after_secs - ref_secs)
+            } else {
+                (after_dt, 0i64)
+            }
+        };
+
+        if let Some(next) = schedule.after(&ref_dt).next() {
+            return (next.timestamp() + delta_secs) * 1000;
         }
     }
 

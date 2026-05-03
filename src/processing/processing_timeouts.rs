@@ -71,7 +71,13 @@ fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
         let mut promise_tags = schedule.promise_tags.clone();
         promise_tags.insert("resonate:schedule".to_string(), schedule_id.clone());
 
-        match db.process_schedule_timeout(schedule_id, *fired_at, next_run_at, &promise_tags)? {
+        match db.process_schedule_timeout(
+            schedule_id,
+            *fired_at,
+            next_run_at,
+            time,
+            &promise_tags,
+        )? {
             Some(_) => {
                 tracing::info!(
                     schedule_id = %schedule_id,

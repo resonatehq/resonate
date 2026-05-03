@@ -43,6 +43,31 @@ services:
       resonate:
         aliases: [resonate-server]
 
+  resonate-server-mysql:
+    build: .
+    profiles: [mysql]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+      - RESONATE_STORAGE__TYPE=mysql
+      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
   resonate-server-sqlite-auth:
     build: .
     profiles: [sqlite-auth]
@@ -56,6 +81,34 @@ services:
       - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
     volumes:
       - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
+  resonate-server-mysql-auth:
+    build: .
+    profiles: [mysql-auth]
+    ports:
+      - "8001:8001"
+      - "9090:9090"
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=info
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+      - RESONATE_STORAGE__TYPE=mysql
+      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+    volumes:
+      - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
       interval: 5s
@@ -92,6 +145,24 @@ services:
     networks:
       resonate:
         aliases: [resonate-server]
+
+  mysql:
+    image: mysql:8.0
+    profiles: [mysql, mysql-auth]
+    environment:
+      MYSQL_ROOT_PASSWORD: resonate
+      MYSQL_USER: resonate
+      MYSQL_PASSWORD: resonate
+      MYSQL_DATABASE: resonate
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "resonate", "-presonate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - resonate
 
   postgres:
     image: postgres:16-alpine

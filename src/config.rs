@@ -60,6 +60,13 @@ fn default_level() -> String {
     "info".to_string()
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CorsConfig {
+    /// Allowed origins. Empty = CORS disabled. Use ["*"] for permissive access.
+    #[serde(default)]
+    pub allow_origins: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     /// HTTP server host
@@ -82,6 +89,10 @@ pub struct ServerConfig {
     /// Defaults to http://{host}:{port} if not set.
     #[serde(default)]
     pub url: Option<String>,
+
+    /// CORS configuration
+    #[serde(default)]
+    pub cors: CorsConfig,
 }
 
 fn default_host() -> String {
@@ -105,17 +116,18 @@ impl Default for ServerConfig {
             bind: default_bind(),
             shutdown_timeout: default_shutdown_timeout(),
             url: None,
+            cors: CorsConfig::default(),
         }
     }
 }
 
 /// Storage backend configuration.
 ///
-/// The `type` field selects the active backend ("sqlite" or "postgres").
-/// Backend-specific settings are in the `sqlite` and `postgres` sub-structs.
+/// The `type` field selects the active backend ("sqlite", "postgres", or "mysql").
+/// Backend-specific settings are in the `sqlite`, `postgres`, and `mysql` sub-structs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Active backend: "sqlite" or "postgres"
+    /// Active backend: "sqlite", "postgres", or "mysql"
     #[serde(default = "default_storage_type", rename = "type")]
     pub storage_type: String,
 
@@ -126,6 +138,10 @@ pub struct StorageConfig {
     /// PostgreSQL-specific configuration
     #[serde(default)]
     pub postgres: PostgresConfig,
+
+    /// MySQL-specific configuration
+    #[serde(default)]
+    pub mysql: MysqlConfig,
 }
 
 fn default_storage_type() -> String {
@@ -175,12 +191,30 @@ impl Default for PostgresConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MysqlConfig {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_pool_size")]
+    pub pool_size: u32,
+}
+
+impl Default for MysqlConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            pool_size: default_pool_size(),
+        }
+    }
+}
+
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             storage_type: default_storage_type(),
             sqlite: SqliteConfig::default(),
             postgres: PostgresConfig::default(),
+            mysql: MysqlConfig::default(),
         }
     }
 }
@@ -286,22 +320,70 @@ pub struct TransportsConfig {
 
     /// Google Cloud Pub/Sub transport configuration
     #[serde(default)]
-    pub gcps: Option<GcpsConfig>,
+    pub gcps: GcpsConfig,
+
+    /// Bash execution transport configuration
+    #[serde(default)]
+    pub bash_exec: BashExecConfig,
+}
+
+/// Bash execution transport configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BashExecConfig {
+    /// Enable the bash:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Root directory for named scripts (bash:///relative/path.sh).
+    /// Not required if only inline scripts are used.
+    #[serde(default)]
+    pub root_dir: Option<String>,
+
+    /// Working directory for named script execution.
+    /// "<root>"   — CWD is set to root_dir (default)
+    /// "<script>" — CWD is set to the directory containing the script
+    /// any path   — CWD is set to that literal path
+    #[serde(default = "default_working_dir")]
+    pub working_dir: String,
+}
+
+fn default_working_dir() -> String {
+    "<root>".to_string()
+}
+
+impl Default for BashExecConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            root_dir: None,
+            working_dir: default_working_dir(),
+        }
+    }
 }
 
 /// Google Cloud Pub/Sub transport configuration.
-///
-/// When present, enables the gcps:// address scheme.
 /// Authentication uses Application Default Credentials (ADC).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GcpsConfig {
+    /// Enable the gcps:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
     /// Default GCP project ID. Used when the address doesn't specify a project.
     #[serde(default)]
     pub project: Option<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpPushConfig {
+    /// Enable the http:// / https:// address scheme [default: true]
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
     /// Max concurrent HTTP push deliveries
     #[serde(default = "default_http_push_concurrency")]
     pub concurrency: usize,
@@ -313,6 +395,11 @@ pub struct HttpPushConfig {
     /// HTTP request timeout (ms)
     #[serde(default = "default_http_push_request_timeout")]
     pub request_timeout: u64,
+
+    /// Outbound auth for HTTP push deliveries.
+    /// Absent (default) = no auth attached to outbound requests.
+    #[serde(default)]
+    pub auth: Option<HttpPushAuthConfig>,
 }
 
 fn default_http_push_concurrency() -> usize {
@@ -328,15 +415,82 @@ fn default_http_push_request_timeout() -> u64 {
 impl Default for HttpPushConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             concurrency: default_http_push_concurrency(),
             connect_timeout: default_http_push_connect_timeout(),
             request_timeout: default_http_push_request_timeout(),
+            auth: None,
         }
     }
 }
 
+/// Outbound authentication for HTTP push deliveries.
+///
+/// Example config:
+/// ```toml
+/// [transports.http_push.auth]
+/// mode = "gcp"
+/// # audience = "https://my-function.example.com"  # optional; defaults to delivery URL
+/// ```
+///
+/// Equivalent env vars (double-underscore nesting):
+///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
+///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpPushAuthConfig {
+    /// Auth mode. Default: `none`.
+    #[serde(default)]
+    pub mode: HttpPushAuthMode,
+
+    /// Static bearer token. Used only when `mode = "bearer"`.
+    /// Falls back to the `RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__TOKEN` env var.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// GCP audience override. Used only when `mode = "gcp"`.
+    /// When absent, each delivery target URL is used as its own audience.
+    #[serde(default)]
+    pub audience: Option<String>,
+
+    /// Header name to set. Default: `"Authorization"`.
+    #[serde(default = "default_auth_header")]
+    pub header: String,
+}
+
+fn default_auth_header() -> String {
+    "Authorization".to_string()
+}
+
+impl Default for HttpPushAuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: HttpPushAuthMode::default(),
+            token: None,
+            audience: None,
+            header: default_auth_header(),
+        }
+    }
+}
+
+/// Outbound auth mode for HTTP push deliveries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpPushAuthMode {
+    /// No auth header. Default.
+    #[default]
+    None,
+    /// Static `Authorization: Bearer <token>`.
+    Bearer,
+    /// GCP OIDC ID token via the GCP metadata server.
+    Gcp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpPollConfig {
+    /// Enable the poll:// (SSE) address scheme [default: true]
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
     /// Maximum number of concurrent poll (SSE) connections
     #[serde(default = "default_http_poll_max_connections")]
     pub max_connections: usize,
@@ -356,6 +510,7 @@ fn default_http_poll_buffer_size() -> usize {
 impl Default for HttpPollConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             max_connections: default_http_poll_max_connections(),
             buffer_size: default_http_poll_buffer_size(),
         }
@@ -433,10 +588,10 @@ impl Config {
 
         // Validate storage type
         match config.storage.storage_type.as_str() {
-            "sqlite" | "postgres" => {}
+            "sqlite" | "postgres" | "mysql" => {}
             other => {
                 return Err(format!(
-                    "Unknown storage backend: '{}'. Valid options are 'sqlite' and 'postgres'.",
+                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
                     other
                 ));
             }

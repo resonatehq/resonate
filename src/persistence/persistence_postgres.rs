@@ -1235,6 +1235,9 @@ impl Db for PostgresDb<'_> {
               SET timeout_at = $3 + tt.ttl
               FROM task_data td
               JOIN tasks t ON t.id = td.id AND t.version = td.version AND t.state = 'acquired'
+              -- TODO: also guard that the promise is still active so heartbeats on tasks whose
+              -- promise has already timed out are no-ops. Add after the tasks JOIN:
+              --   JOIN promises p ON p.id = td.id AND p.state = 'pending' AND p.timeout_at > $3
               WHERE tt.id = td.id AND tt.process_id = $4
               RETURNING tt.id
             )
@@ -1315,7 +1318,6 @@ impl Db for PostgresDb<'_> {
             deleted_ready_callbacks AS (
               DELETE FROM callbacks
               WHERE awaiter_id = $1 AND ready = true
-                AND NOT EXISTS (SELECT 1 FROM can_suspend)
                 AND EXISTS (SELECT 1 FROM locked_task WHERE version = $2 AND state = 'acquired')
                 AND (SELECT cnt FROM missing_count) = 0
               RETURNING *
@@ -1744,12 +1746,12 @@ impl Db for PostgresDb<'_> {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        time: i64,
         promise_tags: &std::collections::HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>> {
         let trt = self.task_retry_timeout;
         let promise_tags_json = serde_json::to_string(promise_tags).unwrap();
-        // Template substitution and address extraction happen inside the CTE.
-        // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags
+        // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags, $5=time
         let rows = rt_block_on(sqlx::query(&format!("
             WITH fired_stimeout AS (
               SELECT st.id
@@ -1760,16 +1762,20 @@ impl Db for PostgresDb<'_> {
               SELECT *,
                 REPLACE(REPLACE(promise_id, '{{{{.id}}}}', id), '{{{{.timestamp}}}}', CAST($2 AS TEXT)) AS computed_promise_id,
                 ($2 + promise_timeout) AS computed_timeout_at,
-                (promise_tags->>'resonate:target') AS address
+                (promise_tags->>'resonate:target') AS address,
+                ($5 >= ($2 + promise_timeout)) AS already_timedout
               FROM schedules
               WHERE id = $1
                 AND EXISTS (SELECT 1 FROM fired_stimeout)
             ),
             inserted_or_skipped_promise AS (
-              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
-              SELECT s.computed_promise_id, 'pending',
+              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
+              SELECT s.computed_promise_id,
+                CASE WHEN s.already_timedout THEN CASE WHEN ($4::jsonb->>'resonate:timer') = 'true' THEN 'resolved' ELSE 'rejected_timedout' END ELSE 'pending' END,
                 s.promise_param_headers, s.promise_param_data, $4::jsonb,
-                s.computed_timeout_at, $2
+                s.computed_timeout_at,
+                $2,
+                CASE WHEN s.already_timedout THEN s.computed_timeout_at ELSE NULL END
               FROM schedule s
               ON CONFLICT (id) DO NOTHING
               RETURNING *
@@ -1777,21 +1783,24 @@ impl Db for PostgresDb<'_> {
             inserted_or_skipped_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
               SELECT p.timeout_at, p.id FROM inserted_or_skipped_promise p
+              WHERE p.state = 'pending'
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
             inserted_or_skipped_task AS (
               INSERT INTO tasks (id, state)
-              SELECT p.id, 'pending'
+              SELECT p.id,
+                CASE WHEN p.state != 'pending' THEN 'fulfilled' ELSE 'pending' END
               FROM inserted_or_skipped_promise p
               WHERE EXISTS (SELECT 1 FROM schedule s WHERE s.address IS NOT NULL)
               ON CONFLICT (id) DO NOTHING
-              RETURNING id
+              RETURNING id, state
             ),
             inserted_or_skipped_ttimeout AS (
               INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
               SELECT ($2 + {trt}), t.id, 0, {trt}
               FROM inserted_or_skipped_task t
+              WHERE t.state = 'pending'
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
@@ -1799,6 +1808,7 @@ impl Db for PostgresDb<'_> {
               INSERT INTO outgoing_execute (id, version, address)
               SELECT t.id, 0, s.address
               FROM inserted_or_skipped_task t, schedule s
+              WHERE t.state = 'pending'
               ON CONFLICT (id) DO UPDATE
                 SET version = EXCLUDED.version, address = EXCLUDED.address
               RETURNING id
@@ -1821,6 +1831,7 @@ impl Db for PostgresDb<'_> {
             .bind(fired_at)          // $2
             .bind(next_run_at)       // $3
             .bind(promise_tags_json) // $4
+            .bind(time)              // $5
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
@@ -1964,6 +1975,11 @@ impl Db for PostgresDb<'_> {
 
     // D-04: debug.snap — multiple simple queries
     fn snap(&self) -> StorageResult<Snapshot> {
+        // TODO: set REPEATABLE READ so all snap queries see a single consistent snapshot and
+        // mid-snap interleaving from concurrent writes cannot produce an inconsistent picture.
+        // Add before the first query:
+        //   rt_block_on(sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        //       .execute(self.tx().as_mut()))?;
         let promise_rows = rt_block_on(sqlx::query(
             "SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at FROM promises ORDER BY id")
             .fetch_all(self.tx().as_mut()))?;

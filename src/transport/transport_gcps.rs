@@ -18,6 +18,12 @@ pub struct GcpsPubSubTransport {
     publishers: Mutex<HashMap<String, Publisher>>,
 }
 
+impl Default for GcpsPubSubTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GcpsPubSubTransport {
     pub fn new() -> Self {
         Self {

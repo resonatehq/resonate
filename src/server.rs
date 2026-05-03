@@ -17,8 +17,9 @@ use crate::auth;
 use crate::config::Config;
 use crate::metrics;
 use crate::persistence::{
-    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, TaskAcquireParams,
-    TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams, TaskFulfillParams,
+    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
+    TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
+    TaskFulfillParams,
 };
 use crate::processing::processing_timeouts;
 use crate::transport::transport_http_poll::PollRegistry;
@@ -403,7 +404,7 @@ impl Drop for PollGuard {
     }
 }
 
-async fn dispatch(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+pub async fn dispatch(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
     let kind = req.kind.as_str();
 
     match kind {
@@ -651,6 +652,12 @@ async fn op_promise_create(
         .await
     {
         Ok(resp) => resp,
+        Err(StorageError::InvalidInput(msg)) => ResponseEnvelope::error(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            400,
+            &format!("Invalid request: {}", msg),
+        ),
         Err(e) => ResponseEnvelope::error(
             req.kind.clone(),
             req.head.corr_id.clone(),
@@ -1301,6 +1308,12 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
         .await
     {
         Ok(resp) => resp,
+        Err(StorageError::InvalidInput(msg)) => ResponseEnvelope::error(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            400,
+            &format!("Invalid request: {}", msg),
+        ),
         Err(e) => ResponseEnvelope::error(
             req.kind.clone(),
             req.head.corr_id.clone(),

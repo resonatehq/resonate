@@ -1,11 +1,19 @@
 [package]
 name = "resonate"
-version = "0.9.3"
+version = "0.9.5"
 edition = "2021"
+
+[lib]
+name = "resonate"
+path = "src/lib.rs"
 
 [[bin]]
 name = "resonate"
 path = "src/main.rs"
+
+[[test]]
+name = "differential"
+path = "diff/differential.rs"
 
 [features]
 concurrency-stress = []
@@ -15,7 +23,7 @@ jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "macros"] }
+sqlx = { version = "0.8", features = ["postgres", "mysql", "runtime-tokio-rustls", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -35,5 +43,6 @@ async-trait = "0.1"
 validator = { version = "0.18", features = ["derive"] }
 url = "2"
 base64 = "0.22"
+google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
 google-cloud-pubsub = "0.33.1"
-tower-http = { version = "0.6", features = ["trace", "catch-panic"] }
+tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }

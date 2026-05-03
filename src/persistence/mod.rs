@@ -1,3 +1,4 @@
+pub mod persistence_mysql;
 pub mod persistence_postgres;
 pub mod persistence_sqlite;
 
@@ -15,6 +16,9 @@ pub enum StorageError {
     /// Serialization conflict — retries exhausted, nothing was committed.
     /// The caller should return 503 (not 500) to indicate a retriable no-op.
     Serialization,
+    /// The request contains a field that violates a storage-level constraint
+    /// (e.g. a VARCHAR(255) column in MySQL). The caller should return 400.
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -22,6 +26,7 @@ impl std::fmt::Display for StorageError {
         match self {
             StorageError::Backend(msg) => write!(f, "Storage error: {}", msg),
             StorageError::Serialization => write!(f, "Serialization conflict"),
+            StorageError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
         }
     }
 }
@@ -321,6 +326,7 @@ pub trait Db {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        time: i64,
         promise_tags: &HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>>;
 
@@ -348,6 +354,7 @@ pub trait Db {
 pub enum Storage {
     Sqlite(persistence_sqlite::SqliteStorage),
     Postgres(persistence_postgres::PostgresStorage),
+    Mysql(persistence_mysql::MysqlStorage),
 }
 
 impl Storage {
@@ -359,6 +366,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.transact(f).await,
             Storage::Postgres(p) => p.transact(f, false).await,
+            Storage::Mysql(m) => m.transact(f).await,
         }
     }
 
@@ -370,6 +378,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.query(f).await,
             Storage::Postgres(p) => p.query(f).await,
+            Storage::Mysql(m) => m.query(f).await,
         }
     }
 }

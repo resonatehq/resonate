@@ -876,6 +876,12 @@ impl<'a> Db for SqliteDb<'a> {
             }
 
             // Update timeout only if task is acquired at right version by right pid
+            // TODO: also guard that the promise is still active (state = 'pending' AND timeout_at > time),
+            // so heartbeats on tasks whose promise has already timed out are no-ops. Replace the query with:
+            //   "UPDATE task_timeouts SET timeout_at = ?1 + ttl
+            //    WHERE id = ?2 AND process_id = ?3
+            //      AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = ?2 AND t.version = ?4 AND t.state = 'acquired')
+            //      AND EXISTS (SELECT 1 FROM promises p WHERE p.id = ?2 AND p.state = 'pending' AND p.timeout_at > ?1)"
             self.conn.execute(
                 "UPDATE task_timeouts SET timeout_at = ?1 + ttl
                  WHERE id = ?2 AND process_id = ?3
@@ -923,6 +929,11 @@ impl<'a> Db for SqliteDb<'a> {
         let can_suspend = missing_count == 0 && !has_settled;
 
         if can_suspend {
+            // Clear stale ready callbacks from a prior resume before registering new ones
+            self.conn.execute(
+                "DELETE FROM callbacks WHERE awaiter_id = ?1 AND ready = true",
+                params![task_id],
+            )?;
             // Register callbacks for all awaited
             for aid in awaited_ids {
                 self.conn.execute(
@@ -1142,7 +1153,8 @@ impl<'a> Db for SqliteDb<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.state, t.version,
                     CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
+                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END,
+                    COALESCE((SELECT COUNT(*) FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true), 0) AS resumes
              FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
              WHERE (?1 IS NULL OR t.state = ?1) AND (?2 IS NULL OR t.id > ?2)
              ORDER BY t.id ASC LIMIT ?3",
@@ -1155,9 +1167,9 @@ impl<'a> Db for SqliteDb<'a> {
                 id: row.get(0)?,
                 state: parse_task_state(&state_str),
                 version: row.get(2)?,
-                resumes: 0,
                 ttl: row.get::<_, Option<i64>>(3).ok().flatten(),
                 pid: row.get::<_, Option<String>>(4).ok().flatten(),
+                resumes: row.get(5)?,
             });
         }
         Ok(results)
@@ -1270,6 +1282,7 @@ impl<'a> Db for SqliteDb<'a> {
         schedule_id: &str,
         fired_at: i64,
         next_run_at: i64,
+        time: i64,
         promise_tags: &std::collections::HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>> {
         // Step 1: Guard check — idempotency
@@ -1297,6 +1310,18 @@ impl<'a> Db for SqliteDb<'a> {
             .replace("{{.id}}", &schedule.id)
             .replace("{{.timestamp}}", &fired_at.to_string());
         let promise_timeout_at = fired_at + schedule.promise_timeout;
+        let already_timedout = time >= promise_timeout_at;
+        let is_timer = promise_tags.get("resonate:timer").map(|v| v.as_str()) == Some("true");
+        let (state, settled_at, created_at): (&str, Option<i64>, i64) = if already_timedout {
+            let s = if is_timer {
+                "resolved"
+            } else {
+                "rejected_timedout"
+            };
+            (s, Some(promise_timeout_at), fired_at)
+        } else {
+            ("pending", None, fired_at)
+        };
 
         // Step 5: Create promise
         let ph = schedule
@@ -1306,35 +1331,45 @@ impl<'a> Db for SqliteDb<'a> {
             .map(|h| serde_json::to_string(h).unwrap());
         let tags_json = serde_json::to_string(promise_tags).unwrap();
         self.conn.execute(
-            "INSERT OR IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
-             VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6)",
-            params![promise_id, ph, schedule.promise_param.data, tags_json, promise_timeout_at, fired_at],
+            "INSERT OR IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![promise_id, state, ph, schedule.promise_param.data, tags_json, promise_timeout_at, created_at, settled_at],
         )?;
         let promise_inserted = self.conn.changes() > 0;
 
         if promise_inserted {
-            // Step 6: Create promise_timeout
-            self.conn.execute(
-                "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                params![promise_timeout_at, promise_id],
-            )?;
-
-            // Step 7: Create task infrastructure if resonate:target is set
-            if let Some(addr) = &address {
+            if already_timedout {
+                // Promise is immediately settled — create fulfilled task if resonate:target is set
+                if address.is_some() {
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'fulfilled')",
+                        params![promise_id],
+                    )?;
+                }
+            } else {
+                // Step 6: Create promise_timeout
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'pending')",
-                    params![promise_id],
+                    "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
+                    params![promise_timeout_at, promise_id],
                 )?;
-                if self.conn.changes() > 0 {
+
+                // Step 7: Create task infrastructure if resonate:target is set
+                if let Some(addr) = &address {
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
-                        params![fired_at + self.task_retry_timeout, promise_id, self.task_retry_timeout],
+                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'pending')",
+                        params![promise_id],
                     )?;
-                    self.conn.execute(
-                        "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
-                         ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
-                        params![promise_id, addr],
-                    )?;
+                    if self.conn.changes() > 0 {
+                        self.conn.execute(
+                            "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
+                            params![fired_at + self.task_retry_timeout, promise_id, self.task_retry_timeout],
+                        )?;
+                        self.conn.execute(
+                            "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
+                             ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
+                            params![promise_id, addr],
+                        )?;
+                    }
                 }
             }
         }

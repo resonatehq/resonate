@@ -1,0 +1,56 @@
+services:
+  test:
+    build:
+      context: ..
+      dockerfile: diff/Dockerfile
+    environment:
+      TEST_POSTGRES_URL: postgres://resonate:resonate@postgres:5432/resonate
+      TEST_MYSQL_URL: mysql://resonate:resonate@mysql:3306/resonate
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: resonate
+      POSTGRES_PASSWORD: resonate
+      POSTGRES_DB: resonate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resonate"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: resonate
+      MYSQL_USER: resonate
+      MYSQL_PASSWORD: resonate
+      MYSQL_DATABASE: resonate
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "resonate",
+          "-presonate",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512m

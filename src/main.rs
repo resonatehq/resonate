@@ -12,12 +12,21 @@ mod util;
 
 use std::sync::Arc;
 
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use axum::{
+    http::{
+        header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
+        HeaderValue, Method, StatusCode,
+    },
+    response::IntoResponse,
+    routing::get,
+    Json, Router,
+};
 use clap::{Parser, Subcommand};
 use config::Config;
-use persistence::{persistence_sqlite::SqliteStorage, Storage};
+use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use server::Server;
 use transport::transport_http_poll::PollRegistry;
+use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport};
 use types::ResponseEnvelope;
 
 #[derive(Parser)]
@@ -136,6 +145,9 @@ async fn run_server(config: Config) -> Result<(), String> {
     if config.storage.storage_type == "postgres" && config.storage.postgres.url.is_none() {
         return Err("storage.type=postgres requires RESONATE_STORAGE__POSTGRES__URL".into());
     }
+    if config.storage.storage_type == "mysql" && config.storage.mysql.url.is_none() {
+        return Err("MySQL storage selected but no URL configured. Set --storage-mysql-url or RESONATE_STORAGE__MYSQL__URL".to_string());
+    }
 
     // Validate poll config (buffer_size=0 panics in tokio::mpsc::channel)
     if config.transports.http_poll.buffer_size == 0 {
@@ -194,6 +206,18 @@ async fn run_server(config: Config) -> Result<(), String> {
             tracing::info!("PostgreSQL initialized");
             Storage::Postgres(pg)
         }
+        "mysql" => {
+            let url = config.storage.mysql.url.as_deref().unwrap();
+            let pool_size = config.storage.mysql.pool_size;
+            let mysql = MysqlStorage::connect(url, pool_size, config.tasks.retry_timeout)
+                .await
+                .map_err(|e| format!("MySQL connection failed: {e}"))?;
+            mysql
+                .init()
+                .await
+                .map_err(|e| format!("MySQL init failed: {e}"))?;
+            Storage::Mysql(mysql)
+        }
         _ => {
             let path = &config.storage.sqlite.path;
             tracing::info!(path = %path, "Using SQLite backend");
@@ -209,6 +233,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_max_connections = config.transports.http_poll.max_connections;
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
+    let is_sqlite = config.storage.storage_type == "sqlite";
     let state = Arc::new(Server::new(config, auth_config, storage));
 
     // Build transports
@@ -220,23 +245,70 @@ async fn run_server(config: Config) -> Result<(), String> {
         "Transport config"
     );
     let poll_registry = Arc::new(PollRegistry::new(poll_max_connections, poll_buffer_size));
-    let http_push = Arc::new(transport::transport_http_push::HttpPushTransport::new(
-        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout),
-        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout),
-    ));
-    let gcps = match &state.config.transports.gcps {
-        Some(_gcps_config) => {
-            tracing::info!("GCP Pub/Sub transport enabled");
-            Some(Arc::new(
-                transport::transport_gcps::GcpsPubSubTransport::new(),
-            ))
+    let connect_timeout =
+        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout);
+    let request_timeout =
+        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout);
+    let http_push: Option<Arc<dyn HttpTransport>> = if state.config.transports.http_push.enabled {
+        let outbound_auth = match &state.config.transports.http_push.auth {
+            Some(auth_cfg) => {
+                let mode_label = format!("{:?}", auth_cfg.mode);
+                let auth = transport::transport_http_push::Auth::from_config(auth_cfg);
+                tracing::info!(mode = %mode_label, "HTTP push outbound auth enabled");
+                auth
+            }
+            None => {
+                tracing::debug!("HTTP push outbound auth: none");
+                transport::transport_http_push::Auth::None
+            }
+        };
+        Some(Arc::new(
+            transport::transport_http_push::HttpPushTransport::new(
+                connect_timeout,
+                request_timeout,
+                outbound_auth,
+            ),
+        ))
+    } else {
+        tracing::info!("HTTP push transport disabled");
+        None
+    };
+    let http_poll: Option<Arc<dyn PollTransport>> = if state.config.transports.http_poll.enabled {
+        Some(poll_registry.clone())
+    } else {
+        tracing::info!("HTTP poll transport disabled");
+        None
+    };
+    let gcps: Option<Arc<dyn GcpsTransport>> = if state.config.transports.gcps.enabled {
+        tracing::info!("GCP Pub/Sub transport enabled");
+        Some(Arc::new(
+            transport::transport_gcps::GcpsPubSubTransport::new(),
+        ))
+    } else {
+        None
+    };
+    let bash: Option<Arc<dyn BashTransport>> = if state.config.transports.bash_exec.enabled {
+        let bash_cfg = &state.config.transports.bash_exec;
+        match &bash_cfg.root_dir {
+            Some(dir) => {
+                tracing::info!(root_dir = %dir, working_dir = %bash_cfg.working_dir, "Bash exec transport enabled")
+            }
+            None => tracing::info!("Bash exec transport enabled (inline only)"),
         }
-        None => None,
+        let working_dir =
+            transport::transport_exec_bash::WorkingDir::from_config(&bash_cfg.working_dir);
+        Some(Arc::new(
+            transport::transport_exec_bash::BashExecTransport::new(
+                Arc::clone(&state),
+                bash_cfg.root_dir.as_deref(),
+                working_dir,
+            ),
+        ))
+    } else {
+        None
     };
     let dispatcher = Arc::new(transport::TransportDispatcher::new(
-        http_push,
-        poll_registry.clone(),
-        gcps,
+        http_push, http_poll, gcps, bash,
     ));
 
     // Spawn background loops
@@ -287,15 +359,39 @@ async fn run_server(config: Config) -> Result<(), String> {
     // Build HTTP router
     let effective_url = state.config.server.url.clone().unwrap_or_default();
     let (sse_shutdown_tx, sse_shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let cors_layer = build_cors_layer(&state.config.server.cors.allow_origins);
+    if !state.config.server.cors.allow_origins.is_empty() {
+        tracing::info!(
+            origins = ?state.config.server.cors.allow_origins,
+            "CORS enabled"
+        );
+    }
+
     let app_state = server::AppState {
         server: state,
         poll_registry,
         sse_shutdown_rx,
     };
-    let app = server::api_routes()
+    let mut app = server::api_routes()
         .merge(server::poll_routes())
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
-            handle_panic,
+            move |err: Box<dyn std::any::Any + Send + 'static>| {
+                let message = if let Some(s) = err.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = err.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "internal server error".to_string()
+                };
+                tracing::error!(message = %message, "panic in request handler");
+                if is_sqlite {
+                    std::process::abort();
+                }
+                let body =
+                    ResponseEnvelope::error("unknown".to_string(), "0".to_string(), 500, &message);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+            },
         ))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
@@ -310,6 +406,10 @@ async fn run_server(config: Config) -> Result<(), String> {
                 ),
         )
         .with_state(app_state);
+    if let Some(layer) = cors_layer {
+        app = app.layer(layer);
+    }
+    let app = app;
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind, port))
         .await
         .map_err(|e| format!("Failed to bind to {}:{}: {e}", bind, port))?;
@@ -342,17 +442,30 @@ async fn run_server(config: Config) -> Result<(), String> {
     Ok(())
 }
 
-fn handle_panic(err: Box<dyn std::any::Any + Send + 'static>) -> axum::response::Response {
-    let message = if let Some(s) = err.downcast_ref::<&str>() {
-        s.to_string()
-    } else if let Some(s) = err.downcast_ref::<String>() {
-        s.clone()
+fn build_cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
+    if allow_origins.is_empty() {
+        return None;
+    }
+    let layer = if allow_origins.iter().any(|o| o == "*") {
+        tower_http::cors::CorsLayer::permissive()
     } else {
-        "internal server error".to_string()
+        let origins: Vec<HeaderValue> = allow_origins
+            .iter()
+            .filter_map(|o| o.parse().ok())
+            .collect();
+        tower_http::cors::CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([ORIGIN, CONTENT_LENGTH, CONTENT_TYPE, AUTHORIZATION])
     };
-    tracing::error!(message = %message, "panic in request handler");
-    let body = ResponseEnvelope::error("unknown".to_string(), "0".to_string(), 500, &message);
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+    Some(layer)
 }
 
 /// Wait for SIGINT or SIGTERM to initiate graceful shutdown.

@@ -1,4 +1,26 @@
 services:
+  mysql:
+    image: mysql:8.0
+    profiles: [mysql, mysql-auth]
+    environment:
+      MYSQL_ROOT_PASSWORD: resonate
+      MYSQL_USER: resonate
+      MYSQL_PASSWORD: resonate
+      MYSQL_DATABASE: resonate
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "resonate", "-presonate"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - resonate
+
   postgres:
     image: postgres:16-alpine
     profiles: [postgres, postgres-auth, postgres-perf]
@@ -70,6 +92,34 @@ services:
     networks:
       - resonate
 
+  resonate-server-mysql:
+    build: ..
+    profiles: [mysql]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_STORAGE__TYPE=mysql
+      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+      - RESONATE_DEBUG=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - resonate
+
   resonate-server-sqlite-auth:
     build: ..
     profiles: [sqlite-auth]
@@ -92,6 +142,37 @@ services:
       resources:
         limits:
           memory: 512m
+    networks:
+      - resonate
+
+  resonate-server-mysql-auth:
+    build: ..
+    profiles: [mysql-auth]
+    environment:
+      - RESONATE_SERVER__PORT=8001
+      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_LEVEL=error
+      - RESONATE_STORAGE__TYPE=mysql
+      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+      - RESONATE_DEBUG=true
+      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+    volumes:
+      - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "none"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     networks:
       - resonate
 
@@ -162,6 +243,24 @@ services:
     networks:
       - resonate
 
+  testbed-mysql:
+    build: ./resonate-test
+    profiles: [mysql]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-mysql:8001"}'
+      - --advertise-host
+      - testbed-mysql
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-mysql:
+        condition: service_healthy
+    networks:
+      - resonate
+
   testbed-sqlite-auth:
     build: ./resonate-test
     profiles: [sqlite-auth]
@@ -180,6 +279,28 @@ services:
       driver: "none"
     depends_on:
       resonate-server-sqlite-auth:
+        condition: service_healthy
+    networks:
+      - resonate
+
+  testbed-mysql-auth:
+    build: ./resonate-test
+    profiles: [mysql-auth]
+    command:
+      - --client
+      - http
+      - --config
+      - '{"baseUrl":"http://resonate-server-mysql-auth:8001"}'
+      - --advertise-host
+      - testbed-mysql-auth
+    environment:
+      - RESONATE_AUTH_PRIVATE_KEY=/etc/resonate/auth/private.pem
+    volumes:
+      - ../config/auth/dev/private.pem:/etc/resonate/auth/private.pem:ro
+    logging:
+      driver: "none"
+    depends_on:
+      resonate-server-mysql-auth:
         condition: service_healthy
     networks:
       - resonate

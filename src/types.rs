@@ -136,14 +136,14 @@ pub const SUPPORTED_VERSIONS: &[&str] = &["2026-04-01"];
 
 // --- Request Envelope ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RequestEnvelope {
     pub kind: String,
     pub head: RequestHead,
     pub data: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RequestHead {
     #[serde(rename = "corrId")]
     pub corr_id: String,

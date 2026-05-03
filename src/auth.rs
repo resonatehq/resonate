@@ -99,6 +99,7 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
 ///
 /// Returns `Ok(())` if the token is valid.
 /// Returns `Err(())` if the token is missing, empty, or fails verification.
+#[allow(clippy::result_unit_err)]
 pub fn auth_check_token(auth: &AuthConfig, token: Option<&str>) -> Result<(), ()> {
     match token {
         Some(t) if !t.is_empty() => verify_jwt(auth, t).map(|_| ()).map_err(|_| ()),
