@@ -80,9 +80,14 @@ pub async fn promise_settle(
 ) -> Result<Value, String> {
     let state_str = match resolution.as_str() {
         "resolve" => "resolved",
-        "reject"  => "rejected",
-        "cancel"  => "rejected_canceled",
-        other     => return Err(format!("invalid resolution '{}'; must be resolve, reject, or cancel", other)),
+        "reject" => "rejected",
+        "cancel" => "rejected_canceled",
+        other => {
+            return Err(format!(
+                "invalid resolution '{}'; must be resolve, reject, or cancel",
+                other
+            ))
+        }
     };
     let mut data = json!({ "id": id, "state": state_str });
     if let Some(mut v) = value {
@@ -101,10 +106,18 @@ pub async fn promise_search(
     cursor: Option<String>,
 ) -> Result<Value, String> {
     let mut data = json!({});
-    if let Some(s) = state_filter { data["state"] = json!(s); }
-    if let Some(t) = tags         { data["tags"]  = t; }
-    if let Some(l) = limit        { data["limit"] = json!(l); }
-    if let Some(c) = cursor       { data["cursor"] = json!(c); }
+    if let Some(s) = state_filter {
+        data["state"] = json!(s);
+    }
+    if let Some(t) = tags {
+        data["tags"] = t;
+    }
+    if let Some(l) = limit {
+        data["limit"] = json!(l);
+    }
+    if let Some(c) = cursor {
+        data["cursor"] = json!(c);
+    }
     post(server, token, "promise.search", data).await
 }
 
@@ -115,10 +128,16 @@ pub async fn promise_listen(
     id: String,
 ) -> Result<Value, String> {
     let address = format!("poll://uni@mcp/{}", session_id);
-    post(server, token, "promise.register_listener", json!({
-        "awaited": id,
-        "address": address
-    })).await
+    post(
+        server,
+        token,
+        "promise.register_listener",
+        json!({
+            "awaited": id,
+            "address": address
+        }),
+    )
+    .await
 }
 
 fn now_ms() -> i64 {
@@ -143,9 +162,16 @@ pub async fn resonate_bash(
     session_id: &str,
     p: BashParams,
 ) -> Result<Value, String> {
-    let BashParams { id, timeout_ms, script, script_path, args, tags } = p;
+    let BashParams {
+        id,
+        timeout_ms,
+        script,
+        script_path,
+        args,
+        tags,
+    } = p;
     let has_inline = script.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-    let has_path   = script_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+    let has_path = script_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
     if has_inline == has_path {
         return Err("Provide exactly one of `script` or `scriptPath`".into());
     }
@@ -194,21 +220,27 @@ pub async fn resonate_bash(
 
     let create_resp = post(server, token, "promise.create", create_data).await?;
 
-    let promise = create_resp
-        .get("promise")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let promise = create_resp.get("promise").cloned().unwrap_or(Value::Null);
     let promise_state = promise["state"].as_str().unwrap_or("").to_string();
 
     let mut listener_registered = false;
     if promise_state == "pending" {
         let address = format!("poll://uni@mcp/{}", session_id);
-        match post(server, token, "promise.register_listener", json!({
-            "awaited": promise_id,
-            "address": address,
-        })).await {
+        match post(
+            server,
+            token,
+            "promise.register_listener",
+            json!({
+                "awaited": promise_id,
+                "address": address,
+            }),
+        )
+        .await
+        {
             Ok(_) => listener_registered = true,
-            Err(e) => tracing::warn!(error = %e, "Failed to register listener for resonate-bash promise"),
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to register listener for resonate-bash promise")
+            }
         }
     }
 

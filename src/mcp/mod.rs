@@ -29,7 +29,11 @@ pub async fn run(server: String, token: Option<String>) {
         });
     }
 
-    let ctx = Ctx { server, token, session_id };
+    let ctx = Ctx {
+        server,
+        token,
+        session_id,
+    };
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin);
 
@@ -52,17 +56,23 @@ pub async fn run(server: String, token: Option<String>) {
 async fn handle(ctx: &Ctx, req: &Value) -> Option<Value> {
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    let is_notification = req.as_object().map(|o| !o.contains_key("id")).unwrap_or(true);
+    let is_notification = req
+        .as_object()
+        .map(|o| !o.contains_key("id"))
+        .unwrap_or(true);
 
     match method {
-        "initialize" => Some(json_rpc_result(id, json!({
-            "protocolVersion": "2025-11-25",
-            "capabilities": {
-                "tools": {},
-                "experimental": { "claude/channel": {} }
-            },
-            "serverInfo": { "name": "resonate-mcp", "version": env!("CARGO_PKG_VERSION") }
-        }))),
+        "initialize" => Some(json_rpc_result(
+            id,
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {
+                    "tools": {},
+                    "experimental": { "claude/channel": {} }
+                },
+                "serverInfo": { "name": "resonate-mcp", "version": env!("CARGO_PKG_VERSION") }
+            }),
+        )),
 
         "notifications/initialized" => None,
 
@@ -88,7 +98,15 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
             let timeout_at = args["timeout_at"].as_i64().ok_or("missing timeout_at")?;
             let param = args.get("param").cloned();
             let tags = args.get("tags").cloned();
-            tools::promise_create(&ctx.server, ctx.token.as_deref(), id, timeout_at, param, tags).await
+            tools::promise_create(
+                &ctx.server,
+                ctx.token.as_deref(),
+                id,
+                timeout_at,
+                param,
+                tags,
+            )
+            .await
         }
         "promise-get" => {
             let id = args["id"].as_str().ok_or("missing id")?.to_string();
@@ -96,26 +114,52 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
         }
         "promise-settle" => {
             let id = args["id"].as_str().ok_or("missing id")?.to_string();
-            let resolution = args["resolution"].as_str().ok_or("missing resolution")?.to_string();
+            let resolution = args["resolution"]
+                .as_str()
+                .ok_or("missing resolution")?
+                .to_string();
             let value = args.get("value").cloned();
             tools::promise_settle(&ctx.server, ctx.token.as_deref(), id, resolution, value).await
         }
         "promise-search" => {
-            let state_filter = args.get("state").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let state_filter = args
+                .get("state")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let tags = args.get("tags").cloned();
             let limit = args.get("limit").and_then(|v| v.as_i64());
-            let cursor = args.get("cursor").and_then(|v| v.as_str()).map(|s| s.to_string());
-            tools::promise_search(&ctx.server, ctx.token.as_deref(), state_filter, tags, limit, cursor).await
+            let cursor = args
+                .get("cursor")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            tools::promise_search(
+                &ctx.server,
+                ctx.token.as_deref(),
+                state_filter,
+                tags,
+                limit,
+                cursor,
+            )
+            .await
         }
         "promise-listen" => {
             let id = args["id"].as_str().ok_or("missing id")?.to_string();
             tools::promise_listen(&ctx.server, ctx.token.as_deref(), &ctx.session_id, id).await
         }
         "resonate-bash" => {
-            let id = args.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let timeout_ms = args.get("timeoutMs").and_then(|v| v.as_u64());
-            let script = args.get("script").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let script_path = args.get("scriptPath").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let script = args
+                .get("script")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let script_path = args
+                .get("scriptPath")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let bash_args = args.get("args").and_then(|v| v.as_array()).map(|a| {
                 a.iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -126,8 +170,16 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
                 &ctx.server,
                 ctx.token.as_deref(),
                 &ctx.session_id,
-                tools::BashParams { id, timeout_ms, script, script_path, args: bash_args, tags },
-            ).await
+                tools::BashParams {
+                    id,
+                    timeout_ms,
+                    script,
+                    script_path,
+                    args: bash_args,
+                    tags,
+                },
+            )
+            .await
         }
         other => Err(format!("unknown tool '{other}'")),
     }
@@ -220,9 +272,7 @@ async fn sse_listener(server: String, token: Option<String>, session_id: String,
     let client = reqwest::Client::new();
     loop {
         tracing::info!(url = %url, "Connecting to SSE");
-        let mut req = client
-            .get(&url)
-            .header("Accept", "text/event-stream");
+        let mut req = client.get(&url).header("Accept", "text/event-stream");
         if let Some(t) = &token {
             req = req.bearer_auth(t);
         }
@@ -234,7 +284,7 @@ async fn sse_listener(server: String, token: Option<String>, session_id: String,
                 }
             }
             Ok(resp) => tracing::warn!(status = %resp.status(), "SSE connection rejected"),
-            Err(e)   => tracing::warn!(error = %e, "SSE connection failed"),
+            Err(e) => tracing::warn!(error = %e, "SSE connection failed"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
@@ -243,7 +293,11 @@ async fn sse_listener(server: String, token: Option<String>, session_id: String,
 async fn drain_sse(mut resp: reqwest::Response, writer: &Writer) -> Result<(), String> {
     let mut buf = String::new();
 
-    while let Some(chunk) = resp.chunk().await.map_err(|e: reqwest::Error| e.to_string())? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?
+    {
         buf.push_str(&String::from_utf8_lossy(&chunk));
 
         while let Some(pos) = buf.find("\n\n") {
@@ -259,11 +313,11 @@ async fn drain_sse(mut resp: reqwest::Response, writer: &Writer) -> Result<(), S
                         }
                         let handle = promise_obj["id"].as_str().unwrap_or("unknown").to_string();
                         let status = match promise_obj["state"].as_str().unwrap_or("") {
-                            "resolved"          => "resolved",
-                            "rejected"          => "rejected",
+                            "resolved" => "resolved",
+                            "rejected" => "rejected",
                             "rejected_timedout" => "timedout",
                             "rejected_canceled" => "canceled",
-                            _                   => "unknown",
+                            _ => "unknown",
                         };
                         let content = serde_json::to_string(promise_obj).unwrap_or_default();
                         let notification = json!({
@@ -286,11 +340,16 @@ async fn drain_sse(mut resp: reqwest::Response, writer: &Writer) -> Result<(), S
 async fn send(writer: &Writer, msg: Value) {
     let mut line = match serde_json::to_string(&msg) {
         Ok(s) => s,
-        Err(e) => { tracing::error!("serialize error: {e}"); return; }
+        Err(e) => {
+            tracing::error!("serialize error: {e}");
+            return;
+        }
     };
     line.push('\n');
     let mut w = writer.lock().await;
-    if w.write_all(line.as_bytes()).await.is_err() { return; }
+    if w.write_all(line.as_bytes()).await.is_err() {
+        return;
+    }
     let _ = w.flush().await;
 }
 
