@@ -1,6 +1,7 @@
 mod auth;
 mod cli;
 mod config;
+mod mcp;
 mod metrics;
 mod persistence;
 mod processing;
@@ -58,6 +59,8 @@ enum Commands {
     Invoke(cli::InvokeArgs),
     /// Display the call-graph tree rooted at a promise ID
     Tree(cli::TreeArgs),
+    /// Start the Resonate MCP server (stdio transport)
+    Mcp(Box<cli::McpArgs>),
 }
 
 #[tokio::main]
@@ -78,6 +81,9 @@ async fn main() -> std::process::ExitCode {
         }
         Commands::Tree(args) => {
             cli::run_tree(args).await;
+        }
+        Commands::Mcp(args) => {
+            cli::run_mcp(args).await;
         }
         Commands::Serve(args) => {
             let config = match Config::load() {

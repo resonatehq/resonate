@@ -377,6 +377,13 @@ impl DevArgs {
     }
 }
 
+/// CLI flags for the `mcp` subcommand.
+#[derive(Args)]
+pub struct McpArgs {
+    #[command(flatten)]
+    pub global: GlobalArgs,
+}
+
 // ---- Duration parsing ----
 
 /// Parse a duration string (e.g. "1h", "30s", "1m30s", "100ms") into milliseconds.
@@ -1337,6 +1344,18 @@ fn promise_detail(p: &Value) -> String {
     } else {
         String::new()
     }
+}
+
+pub async fn run_mcp(args: Box<McpArgs>) {
+    // Tracing must go to stderr — MCP uses stdout for framing
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(env_filter)
+        .init();
+
+    crate::mcp::run(args.global.server.clone(), args.global.token.clone()).await;
 }
 
 #[cfg(test)]
