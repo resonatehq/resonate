@@ -328,37 +328,18 @@ pub struct TransportsConfig {
 }
 
 /// Bash execution transport configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// When `enabled`, the bash:// scheme is routable via three backends:
+/// - `bash://`                       → local bash
+/// - `bash://docker/<image>`         → docker run --rm <image> bash -c <script>
+/// - `bash://tensorlake/<image>`     → Tensorlake Sandboxes API (needs TENSORLAKE_API_KEY)
+///
+/// Scripts are always inline (carried in `param.data`); named scripts are not supported.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BashExecConfig {
     /// Enable the bash:// address scheme [default: false]
     #[serde(default)]
     pub enabled: bool,
-
-    /// Root directory for named scripts (bash:///relative/path.sh).
-    /// Not required if only inline scripts are used.
-    #[serde(default)]
-    pub root_dir: Option<String>,
-
-    /// Working directory for named script execution.
-    /// "<root>"   — CWD is set to root_dir (default)
-    /// "<script>" — CWD is set to the directory containing the script
-    /// any path   — CWD is set to that literal path
-    #[serde(default = "default_working_dir")]
-    pub working_dir: String,
-}
-
-fn default_working_dir() -> String {
-    "<root>".to_string()
-}
-
-impl Default for BashExecConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            root_dir: None,
-            working_dir: default_working_dir(),
-        }
-    }
 }
 
 /// Google Cloud Pub/Sub transport configuration.

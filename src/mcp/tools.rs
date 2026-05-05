@@ -150,9 +150,10 @@ fn now_ms() -> i64 {
 pub struct BashParams {
     pub id: Option<String>,
     pub timeout_ms: Option<u64>,
-    pub script: Option<String>,
-    pub script_path: Option<String>,
-    pub args: Option<Vec<String>>,
+    pub script: String,
+    /// Optional address override. Defaults to "bash://" (local).
+    /// Examples: "bash://docker/ubuntu:latest", "bash://tensorlake/python-3.11".
+    pub target: Option<String>,
     pub tags: Option<Value>,
 }
 
@@ -166,14 +167,11 @@ pub async fn resonate_bash(
         id,
         timeout_ms,
         script,
-        script_path,
-        args,
+        target,
         tags,
     } = p;
-    let has_inline = script.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-    let has_path = script_path.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-    if has_inline == has_path {
-        return Err("Provide exactly one of `script` or `scriptPath`".into());
+    if script.is_empty() {
+        return Err("`script` must not be empty".into());
     }
 
     let promise_id = id.unwrap_or_else(|| {
@@ -185,22 +183,8 @@ pub async fn resonate_bash(
 
     let timeout_at = now_ms() + timeout_ms.unwrap_or(5 * 60 * 1000) as i64;
 
-    let (target_address, param_data) = if has_inline {
-        let s = script.unwrap();
-        ("bash://".to_string(), STANDARD.encode(s.as_bytes()))
-    } else {
-        let normalized = script_path.unwrap().trim_start_matches('/').to_string();
-        if normalized.is_empty() {
-            return Err("`scriptPath` must not be empty".into());
-        }
-        if normalized.contains('\0') {
-            return Err("`scriptPath` must not contain null bytes".into());
-        }
-        let address = format!("bash:///{}", normalized);
-        let args_json = serde_json::to_string(&args.unwrap_or_default())
-            .map_err(|e| format!("failed to encode args: {}", e))?;
-        (address, STANDARD.encode(args_json.as_bytes()))
-    };
+    let target_address = target.unwrap_or_else(|| "bash://".to_string());
+    let param_data = STANDARD.encode(script.as_bytes());
 
     let mut merged_tags = match tags {
         Some(Value::Object(map)) => map,
