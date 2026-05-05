@@ -152,7 +152,9 @@ pub enum Address {
     Poll(PollAddress),
     /// Google Cloud Pub/Sub delivery
     Gcps(GcpsAddress),
-    /// Bash script execution (script is in param.data)
+    /// Bash script execution (script is in param.data).
+    /// The bash transport re-parses the address to pick a backend
+    /// (local / docker / tensorlake), so we only mark it routable here.
     #[allow(dead_code)]
     Bash(BashAddress),
 }
@@ -196,6 +198,7 @@ pub fn is_valid_address(address: &str) -> bool {
 /// - `http://...` / `https://...` — HTTP webhook delivery
 /// - `poll://cast@group[/id]` — Poll SSE delivery
 /// - `gcps://project/topic` — Google Cloud Pub/Sub delivery
+/// - `bash://` (local), `bash://docker/<image>`, `bash://tensorlake/<image>`
 pub fn parse_address(address: &str) -> Option<Address> {
     let parsed = url::Url::parse(address).ok()?;
 
@@ -481,10 +484,17 @@ mod tests {
 
     #[test]
     fn bash_address_parses() {
-        assert!(matches!(parse_address("bash://"), Some(Address::Bash(_))));
-        assert!(matches!(
-            parse_address("bash://inline"),
-            Some(Address::Bash(_))
-        ));
+        for addr in [
+            "bash://",
+            "bash://bash",
+            "bash://docker/alpine",
+            "bash://docker/library/ubuntu:latest",
+            "bash://tensorlake/python-3.11",
+        ] {
+            assert!(
+                matches!(parse_address(addr), Some(Address::Bash(_))),
+                "expected Bash for {addr}"
+            );
+        }
     }
 }

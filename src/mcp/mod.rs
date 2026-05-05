@@ -155,16 +155,12 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
             let script = args
                 .get("script")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let script_path = args
-                .get("scriptPath")
+                .unwrap_or("")
+                .to_string();
+            let target = args
+                .get("target")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let bash_args = args.get("args").and_then(|v| v.as_array()).map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            });
             let tags = args.get("tags").cloned();
             tools::resonate_bash(
                 &ctx.server,
@@ -174,8 +170,7 @@ async fn call_tool(ctx: &Ctx, name: &str, args: &Value) -> Result<Value, String>
                     id,
                     timeout_ms,
                     script,
-                    script_path,
-                    args: bash_args,
+                    target,
                     tags,
                 },
             )
@@ -255,13 +250,13 @@ fn tools_list() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "id":         { "type": "string",  "description": "Promise ID (auto-generated if omitted)" },
-                    "timeoutMs":  { "type": "integer", "description": "Milliseconds from now before timeout (default 300000 = 5 min)" },
-                    "script":     { "type": "string",  "description": "Inline bash script (mutually exclusive with scriptPath)" },
-                    "scriptPath": { "type": "string",  "description": "Named script path under bash_exec.root_dir (mutually exclusive with script)" },
-                    "args":       { "type": "array",   "items": { "type": "string" }, "description": "Arguments for named script" },
-                    "tags":       { "type": "object",  "description": "Additional tags merged with resonate:target" }
-                }
+                    "id":        { "type": "string",  "description": "Promise ID (auto-generated if omitted)" },
+                    "timeoutMs": { "type": "integer", "description": "Milliseconds from now before timeout (default 300000 = 5 min)" },
+                    "script":    { "type": "string",  "description": "Inline bash script body" },
+                    "target":    { "type": "string",  "description": "Execution target. Defaults to 'bash://' (local). Examples: 'bash://docker/ubuntu:latest', 'bash://tensorlake/python-3.11'." },
+                    "tags":      { "type": "object",  "description": "Additional tags merged with resonate:target" }
+                },
+                "required": ["script"]
             }
         }
     ])
