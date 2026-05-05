@@ -503,6 +503,45 @@ export class InnerContext implements Context {
     return new RFC(id, func, version, this.remoteCreateReq({ id, data, opts, breaksLineage: idChanged }));
   }
 
+  /**
+   * Spawns a workflow as a fresh root promise — independent execution lifecycle
+   * and independent replay scope (lineage break, new originId).
+   *
+   * Unlike `ctx.run` / `ctx.rpc`, the spawned workflow is not a child of the
+   * current invocation. It survives parent completion and replays in its own
+   * isolated scope.
+   *
+   * Use when:
+   * - Cross-service fire-and-forget where the parent does not wait for the result.
+   * - Background tasks that should outlive the parent invocation.
+   * - Bounded replay scope for long-running or forever-loop workflows: re-rooting
+   *   per logical unit of work caps the history each replay must walk.
+   *
+   * @example
+   * Forever-loop pattern — recursive tail call from inside the per-iteration function:
+   * ```ts
+   * // Each invocation plays exactly one game, then spawns the next as a fresh
+   * // root and returns. Replay scope is bounded to one game forever.
+   * function* playGame(ctx: Context, n: number) {
+   *   // ...play one game (ctx.run, ctx.sleep, etc.)...
+   *   yield* ctx.detached(playGame, n + 1); // last yield, then return
+   * }
+   * ```
+   *
+   * The split must happen *inside* the per-iteration function. A parent loop
+   * that calls `ctx.detached` repeatedly — `for (;;) yield* ctx.detached(work, n)`
+   * — still records each call in the parent's history via its sequence counter,
+   * reproducing the bug on the parent.
+   *
+   * Without this split, a forever loop in a single durable invocation
+   * accumulates child promises on every iteration. On cold-start, each replay
+   * re-walks the full history. Once replay duration exceeds the acquired-task
+   * lease, the server reassigns the task mid-execution (error code 1199) and
+   * cadence collapses.
+   *
+   * @returns An {@link RFI} handle. Optionally `yield*` it to await completion;
+   *   otherwise the spawned workflow runs independently of the caller.
+   */
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   detached<T>(func: string, ...args: any[]): RFI<T>;
   detached(funcOrName: Func | string, ...args: any[]): RFI<any> {
