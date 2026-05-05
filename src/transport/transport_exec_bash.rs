@@ -73,7 +73,10 @@ enum BackendChoice {
 fn parse_backend(address: &str) -> Result<BackendChoice, String> {
     let parsed = url::Url::parse(address).map_err(|e| format!("invalid address: {e}"))?;
     if parsed.scheme() != "bash" {
-        return Err(format!("expected bash:// scheme, got {}://", parsed.scheme()));
+        return Err(format!(
+            "expected bash:// scheme, got {}://",
+            parsed.scheme()
+        ));
     }
     let host = parsed.host_str().unwrap_or("");
     let path = parsed.path().trim_start_matches('/');
@@ -451,9 +454,7 @@ impl ExecBackend for TensorlakeBackend {
         };
 
         // From here on, always best-effort delete the sandbox before returning.
-        let outcome = self
-            .run_in_sandbox(&api_key, &sandbox_id, &req)
-            .await;
+        let outcome = self.run_in_sandbox(&api_key, &sandbox_id, &req).await;
         let _ = self
             .client
             .delete(format!("{TENSORLAKE_API}/sandboxes/{sandbox_id}"))
@@ -551,7 +552,11 @@ impl TensorlakeBackend {
                 Ok(r) => r.json().await.unwrap_or_else(|_| json!({})),
                 Err(_) => json!({}),
             };
-            match s.get("status").and_then(|v| v.as_str()).unwrap_or("running") {
+            match s
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("running")
+            {
                 "exited" | "signaled" => break s,
                 _ => tokio::time::sleep(Duration::from_millis(PROCESS_POLL_INTERVAL_MS)).await,
             }
