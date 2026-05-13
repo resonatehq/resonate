@@ -1,9 +1,14 @@
-package network
+// Package httpnet provides an HTTP-based transport implementation of the
+// resonate.Network interface, talking to a live Resonate server via JSON
+// envelopes over POST and SSE long-poll for push messages.
+package httpnet
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -264,4 +269,12 @@ func waitOrCancel(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+func randomPID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%016x", time.Now().UnixMilli())
+	}
+	return hex.EncodeToString(b[:])
 }

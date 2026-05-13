@@ -1,4 +1,4 @@
-package network
+package resonate
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
-
-	resonate "github.com/resonatehq/resonate-sdk-go"
 )
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -16,9 +14,9 @@ import (
 
 // TaskAcquireResult is the parsed outcome of task.acquire and task.create.
 type TaskAcquireResult struct {
-	Task    resonate.TaskRecord
-	Promise resonate.PromiseRecord
-	Preload []resonate.PromiseRecord
+	Task    TaskRecord
+	Promise PromiseRecord
+	Preload []PromiseRecord
 }
 
 // TaskCreateResult is the result of Sender.TaskCreate. Exactly one of Created
@@ -35,30 +33,30 @@ type TaskCreateResult struct {
 // Preload carries the freshly preloaded promises.
 type SuspendResult struct {
 	Redirected bool
-	Preload    []resonate.PromiseRecord
+	Preload    []PromiseRecord
 }
 
 // TaskFenceResult is the parsed outcome of a task.fence call.
 type TaskFenceResult struct {
-	Promise resonate.PromiseRecord
-	Preload []resonate.PromiseRecord
+	Promise PromiseRecord
+	Preload []PromiseRecord
 }
 
 // TaskSearchResult is a paginated task list.
 type TaskSearchResult struct {
-	Tasks  []resonate.TaskRecord
+	Tasks  []TaskRecord
 	Cursor *string
 }
 
 // PromiseSearchResult is a paginated promise list.
 type PromiseSearchResult struct {
-	Promises []resonate.PromiseRecord
+	Promises []PromiseRecord
 	Cursor   *string
 }
 
 // ScheduleSearchResult is a paginated schedule list.
 type ScheduleSearchResult struct {
-	Schedules []resonate.ScheduleRecord
+	Schedules []ScheduleRecord
 	Cursor    *string
 }
 
@@ -68,7 +66,7 @@ type ScheduleCreateReq struct {
 	Cron           string            `json:"cron"`
 	PromiseID      string            `json:"promiseId"`
 	PromiseTimeout int64             `json:"promiseTimeout"`
-	PromiseParam   resonate.Value    `json:"promiseParam"`
+	PromiseParam   Value             `json:"promiseParam"`
 	PromiseTags    map[string]string `json:"promiseTags"`
 }
 
@@ -96,7 +94,7 @@ type Sender struct {
 }
 
 // NewSender wraps a Network. Pass nil for auth when no Authorization header
-// is required (e.g., for LocalNetwork or unauthenticated servers).
+// is required (e.g., for localnet or unauthenticated servers).
 func NewSender(n Network, auth *string) *Sender {
 	return &Sender{net: n, auth: auth, log: slog.Default()}
 }
@@ -139,7 +137,7 @@ type subEnvelope struct {
 func (s *Sender) makeHead() head {
 	return head{
 		CorrID:  fmt.Sprintf("sr-%d", time.Now().UnixMilli()),
-		Version: resonate.ProtocolVersion,
+		Version: ProtocolVersion,
 		Auth:    s.auth,
 	}
 }
@@ -147,13 +145,13 @@ func (s *Sender) makeHead() head {
 // sendEnvelope builds and ships an envelope, validates correlation, and
 // returns (status, response data). If allow409 is true, a 409 status is
 // returned to the caller without being converted into an error; any other
-// 4xx/5xx status returns a *resonate.ServerError.
+// 4xx/5xx status returns a *ServerError.
 func (s *Sender) sendEnvelope(ctx context.Context, kind string, data any, allow409 bool) (int, json.RawMessage, error) {
 	h := s.makeHead()
 	env := envelope{Kind: kind, Head: h, Data: data}
 	body, err := json.Marshal(env)
 	if err != nil {
-		return 0, nil, &resonate.EncodingError{Msg: fmt.Sprintf("marshal envelope: %v", err)}
+		return 0, nil, &EncodingError{Msg: fmt.Sprintf("marshal envelope: %v", err)}
 	}
 
 	respRaw, err := s.net.Send(ctx, string(body))
@@ -167,16 +165,16 @@ func (s *Sender) sendEnvelope(ctx context.Context, kind string, data any, allow4
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(respRaw), &resp); err != nil {
-		return 0, nil, &resonate.DecodingError{Msg: fmt.Sprintf("response envelope: %v", err)}
+		return 0, nil, &DecodingError{Msg: fmt.Sprintf("response envelope: %v", err)}
 	}
 	if resp.Kind != kind {
-		return 0, nil, &resonate.ServerError{
+		return 0, nil, &ServerError{
 			Code:    500,
 			Message: fmt.Sprintf("response kind mismatch: expected %q, got %q", kind, resp.Kind),
 		}
 	}
 	if resp.Head.CorrID != h.CorrID {
-		return 0, nil, &resonate.ServerError{
+		return 0, nil, &ServerError{
 			Code:    500,
 			Message: fmt.Sprintf("response corrId mismatch: expected %q, got %q", h.CorrID, resp.Head.CorrID),
 		}
@@ -188,7 +186,7 @@ func (s *Sender) sendEnvelope(ctx context.Context, kind string, data any, allow4
 	}
 	if status >= 400 && !(allow409 && status == 409) {
 		msg := errorMessageFromData(resp.Data, status)
-		return status, resp.Data, &resonate.ServerError{Code: status, Message: msg}
+		return status, resp.Data, &ServerError{Code: status, Message: msg}
 	}
 	return status, resp.Data, nil
 }
@@ -223,56 +221,56 @@ func (s *Sender) wrapAction(kind string, data any) subEnvelope {
 // ──────────────────────────────────────────────────────────────────────────
 
 // PromiseCreate creates a durable promise.
-func (s *Sender) PromiseCreate(ctx context.Context, req resonate.PromiseCreateReq) (resonate.PromiseRecord, error) {
+func (s *Sender) PromiseCreate(ctx context.Context, req PromiseCreateReq) (PromiseRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "promise.create", req, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // PromiseSettle resolves, rejects, or cancels a durable promise.
-func (s *Sender) PromiseSettle(ctx context.Context, req resonate.PromiseSettleReq) (resonate.PromiseRecord, error) {
+func (s *Sender) PromiseSettle(ctx context.Context, req PromiseSettleReq) (PromiseRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "promise.settle", req, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // PromiseGet fetches a promise by ID.
-func (s *Sender) PromiseGet(ctx context.Context, id string) (resonate.PromiseRecord, error) {
+func (s *Sender) PromiseGet(ctx context.Context, id string) (PromiseRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "promise.get", map[string]any{"id": id}, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // PromiseRegisterCallback links two promises so that settlement of `awaited`
 // resumes the task identified by `awaiter`.
-func (s *Sender) PromiseRegisterCallback(ctx context.Context, awaited, awaiter string) (resonate.PromiseRecord, error) {
+func (s *Sender) PromiseRegisterCallback(ctx context.Context, awaited, awaiter string) (PromiseRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "promise.register_callback", map[string]any{
 		"awaited": awaited,
 		"awaiter": awaiter,
 	}, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // PromiseRegisterListener subscribes a polling address to a promise so the
 // server emits an unblock push when it settles.
-func (s *Sender) PromiseRegisterListener(ctx context.Context, awaited, address string) (resonate.PromiseRecord, error) {
+func (s *Sender) PromiseRegisterListener(ctx context.Context, awaited, address string) (PromiseRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "promise.register_listener", map[string]any{
 		"awaited": awaited,
 		"address": address,
 	}, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // PromiseSearchOptions controls a PromiseSearch call. Any zero-valued field
@@ -299,7 +297,7 @@ func (s *Sender) PromiseSearch(ctx context.Context, opts PromiseSearchOptions) (
 	if opts.Cursor != "" {
 		payload["cursor"] = opts.Cursor
 	}
-	items, cursor, err := searchList[resonate.PromiseRecord](ctx, s, "promise.search", payload, "promises")
+	items, cursor, err := searchList[PromiseRecord](ctx, s, "promise.search", payload, "promises")
 	if err != nil {
 		return PromiseSearchResult{}, err
 	}
@@ -328,7 +326,7 @@ func (s *Sender) TaskAcquire(ctx context.Context, id string, version int64, pid 
 // TaskCreate creates both a root promise and a task in one shot. A 409 from
 // the server is treated as an idempotency conflict and surfaced as
 // TaskCreateResult{Conflict: true} rather than an error.
-func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, action resonate.PromiseCreateReq) (TaskCreateResult, error) {
+func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, action PromiseCreateReq) (TaskCreateResult, error) {
 	payload := map[string]any{
 		"pid":    pid,
 		"ttl":    ttl,
@@ -350,7 +348,7 @@ func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, action r
 
 // TaskFulfill settles the task's root promise as part of a single
 // fence+settle operation.
-func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, action resonate.PromiseSettleReq) (resonate.PromiseRecord, error) {
+func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, action PromiseSettleReq) (PromiseRecord, error) {
 	payload := map[string]any{
 		"id":      id,
 		"version": version,
@@ -358,15 +356,15 @@ func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, acti
 	}
 	_, data, err := s.sendEnvelope(ctx, "task.fulfill", payload, false)
 	if err != nil {
-		return resonate.PromiseRecord{}, err
+		return PromiseRecord{}, err
 	}
-	return parseRecord[resonate.PromiseRecord](data, "promise")
+	return parseRecord[PromiseRecord](data, "promise")
 }
 
 // TaskSuspend registers callbacks for awaited promises and suspends the task.
 // Returns Redirected=true when at least one awaited promise was already
 // settled, in which case the caller should retry rather than suspend.
-func (s *Sender) TaskSuspend(ctx context.Context, id string, version int64, actions []resonate.PromiseRegisterCallbackData) (SuspendResult, error) {
+func (s *Sender) TaskSuspend(ctx context.Context, id string, version int64, actions []PromiseRegisterCallbackData) (SuspendResult, error) {
 	wrapped := make([]subEnvelope, len(actions))
 	for i, a := range actions {
 		wrapped[i] = s.wrapAction("promise.register_callback", a)
@@ -407,13 +405,13 @@ func (s *Sender) TaskContinue(ctx context.Context, id string) error {
 
 // TaskFenceCreate creates a promise via task.fence, executing only if the
 // task lease (id, version) is still valid.
-func (s *Sender) TaskFenceCreate(ctx context.Context, id string, version int64, req resonate.PromiseCreateReq) (TaskFenceResult, error) {
+func (s *Sender) TaskFenceCreate(ctx context.Context, id string, version int64, req PromiseCreateReq) (TaskFenceResult, error) {
 	return s.taskFence(ctx, id, version, "promise.create", req)
 }
 
 // TaskFenceSettle settles a promise via task.fence, executing only if the
 // task lease (id, version) is still valid.
-func (s *Sender) TaskFenceSettle(ctx context.Context, id string, version int64, req resonate.PromiseSettleReq) (TaskFenceResult, error) {
+func (s *Sender) TaskFenceSettle(ctx context.Context, id string, version int64, req PromiseSettleReq) (TaskFenceResult, error) {
 	return s.taskFence(ctx, id, version, "promise.settle", req)
 }
 
@@ -435,14 +433,14 @@ func (s *Sender) taskFence(ctx context.Context, id string, version int64, subKin
 		} `json:"action"`
 	}
 	if err := json.Unmarshal(data, &wrap); err != nil {
-		return TaskFenceResult{}, &resonate.DecodingError{Msg: fmt.Sprintf("fence response: %v", err)}
+		return TaskFenceResult{}, &DecodingError{Msg: fmt.Sprintf("fence response: %v", err)}
 	}
 	if len(wrap.Action.Data.Promise) == 0 {
-		return TaskFenceResult{}, &resonate.DecodingError{Msg: "missing promise in fence action response"}
+		return TaskFenceResult{}, &DecodingError{Msg: "missing promise in fence action response"}
 	}
-	var promise resonate.PromiseRecord
+	var promise PromiseRecord
 	if err := json.Unmarshal(wrap.Action.Data.Promise, &promise); err != nil {
-		return TaskFenceResult{}, &resonate.DecodingError{Msg: fmt.Sprintf("invalid promise in fence response: %v", err)}
+		return TaskFenceResult{}, &DecodingError{Msg: fmt.Sprintf("invalid promise in fence response: %v", err)}
 	}
 	return TaskFenceResult{Promise: promise, Preload: parsePreloadedFromData(data)}, nil
 }
@@ -475,7 +473,7 @@ func (s *Sender) TaskSearch(ctx context.Context, opts TaskSearchOptions) (TaskSe
 	if opts.Cursor != "" {
 		payload["cursor"] = opts.Cursor
 	}
-	items, cursor, err := searchList[resonate.TaskRecord](ctx, s, "task.search", payload, "tasks")
+	items, cursor, err := searchList[TaskRecord](ctx, s, "task.search", payload, "tasks")
 	if err != nil {
 		return TaskSearchResult{}, err
 	}
@@ -487,21 +485,21 @@ func (s *Sender) TaskSearch(ctx context.Context, opts TaskSearchOptions) (TaskSe
 // ──────────────────────────────────────────────────────────────────────────
 
 // ScheduleCreate creates a new schedule.
-func (s *Sender) ScheduleCreate(ctx context.Context, req ScheduleCreateReq) (resonate.ScheduleRecord, error) {
+func (s *Sender) ScheduleCreate(ctx context.Context, req ScheduleCreateReq) (ScheduleRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "schedule.create", req, false)
 	if err != nil {
-		return resonate.ScheduleRecord{}, err
+		return ScheduleRecord{}, err
 	}
-	return parseRecord[resonate.ScheduleRecord](data, "schedule")
+	return parseRecord[ScheduleRecord](data, "schedule")
 }
 
 // ScheduleGet fetches a schedule by ID.
-func (s *Sender) ScheduleGet(ctx context.Context, id string) (resonate.ScheduleRecord, error) {
+func (s *Sender) ScheduleGet(ctx context.Context, id string) (ScheduleRecord, error) {
 	_, data, err := s.sendEnvelope(ctx, "schedule.get", map[string]any{"id": id}, false)
 	if err != nil {
-		return resonate.ScheduleRecord{}, err
+		return ScheduleRecord{}, err
 	}
-	return parseRecord[resonate.ScheduleRecord](data, "schedule")
+	return parseRecord[ScheduleRecord](data, "schedule")
 }
 
 // ScheduleDelete removes a schedule by ID.
@@ -529,7 +527,7 @@ func (s *Sender) ScheduleSearch(ctx context.Context, opts ScheduleSearchOptions)
 	if opts.Cursor != "" {
 		payload["cursor"] = opts.Cursor
 	}
-	items, cursor, err := searchList[resonate.ScheduleRecord](ctx, s, "schedule.search", payload, "schedules")
+	items, cursor, err := searchList[ScheduleRecord](ctx, s, "schedule.search", payload, "schedules")
 	if err != nil {
 		return ScheduleSearchResult{}, err
 	}
@@ -547,19 +545,19 @@ func parseTaskAcquireFromData(data json.RawMessage) (TaskAcquireResult, error) {
 		Preload []json.RawMessage `json:"preload"`
 	}
 	if err := json.Unmarshal(data, &wrap); err != nil {
-		return TaskAcquireResult{}, &resonate.DecodingError{Msg: fmt.Sprintf("task.acquire response: %v", err)}
+		return TaskAcquireResult{}, &DecodingError{Msg: fmt.Sprintf("task.acquire response: %v", err)}
 	}
-	var task resonate.TaskRecord
+	var task TaskRecord
 	if err := json.Unmarshal(wrap.Task, &task); err != nil {
-		return TaskAcquireResult{}, &resonate.DecodingError{Msg: fmt.Sprintf("invalid task: %v", err)}
+		return TaskAcquireResult{}, &DecodingError{Msg: fmt.Sprintf("invalid task: %v", err)}
 	}
-	var promise resonate.PromiseRecord
+	var promise PromiseRecord
 	if err := json.Unmarshal(wrap.Promise, &promise); err != nil {
-		return TaskAcquireResult{}, &resonate.DecodingError{Msg: fmt.Sprintf("invalid promise: %v", err)}
+		return TaskAcquireResult{}, &DecodingError{Msg: fmt.Sprintf("invalid promise: %v", err)}
 	}
-	preload := make([]resonate.PromiseRecord, 0, len(wrap.Preload))
+	preload := make([]PromiseRecord, 0, len(wrap.Preload))
 	for _, raw := range wrap.Preload {
-		var p resonate.PromiseRecord
+		var p PromiseRecord
 		if err := json.Unmarshal(raw, &p); err == nil {
 			preload = append(preload, p)
 		}
@@ -567,16 +565,16 @@ func parseTaskAcquireFromData(data json.RawMessage) (TaskAcquireResult, error) {
 	return TaskAcquireResult{Task: task, Promise: promise, Preload: preload}, nil
 }
 
-func parsePreloadedFromData(data json.RawMessage) []resonate.PromiseRecord {
+func parsePreloadedFromData(data json.RawMessage) []PromiseRecord {
 	var wrap struct {
 		Preload []json.RawMessage `json:"preload"`
 	}
 	if err := json.Unmarshal(data, &wrap); err != nil {
 		return nil
 	}
-	out := make([]resonate.PromiseRecord, 0, len(wrap.Preload))
+	out := make([]PromiseRecord, 0, len(wrap.Preload))
 	for _, raw := range wrap.Preload {
-		var p resonate.PromiseRecord
+		var p PromiseRecord
 		if err := json.Unmarshal(raw, &p); err == nil {
 			out = append(out, p)
 		}
@@ -595,15 +593,15 @@ func parseRecord[T any](data json.RawMessage, field string) (T, error) {
 	var zero T
 	wrap := map[string]json.RawMessage{}
 	if err := json.Unmarshal(data, &wrap); err != nil {
-		return zero, &resonate.DecodingError{Msg: fmt.Sprintf("missing %q in response", field)}
+		return zero, &DecodingError{Msg: fmt.Sprintf("missing %q in response", field)}
 	}
 	raw, ok := wrap[field]
 	if !ok || len(raw) == 0 {
-		return zero, &resonate.DecodingError{Msg: fmt.Sprintf("missing %q in response", field)}
+		return zero, &DecodingError{Msg: fmt.Sprintf("missing %q in response", field)}
 	}
 	var out T
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return zero, &resonate.DecodingError{Msg: fmt.Sprintf("invalid %s: %v", field, err)}
+		return zero, &DecodingError{Msg: fmt.Sprintf("invalid %s: %v", field, err)}
 	}
 	return out, nil
 }
@@ -617,7 +615,7 @@ func searchList[T any](ctx context.Context, s *Sender, kind string, payload map[
 	}
 	var aux map[string]json.RawMessage
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return nil, nil, &resonate.DecodingError{Msg: fmt.Sprintf("%s response: %v", kind, err)}
+		return nil, nil, &DecodingError{Msg: fmt.Sprintf("%s response: %v", kind, err)}
 	}
 	var items []json.RawMessage
 	if raw, ok := aux[field]; ok {

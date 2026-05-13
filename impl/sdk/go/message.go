@@ -1,10 +1,8 @@
-package network
+package resonate
 
 import (
 	"encoding/json"
 	"fmt"
-
-	resonate "github.com/resonatehq/resonate-sdk-go"
 )
 
 // Message is the sum type of server push-messages.
@@ -41,7 +39,7 @@ func DecodeMessage(raw []byte) (Message, error) {
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return nil, &resonate.DecodingError{Msg: fmt.Sprintf("message envelope: %v", err)}
+		return nil, &DecodingError{Msg: fmt.Sprintf("message envelope: %v", err)}
 	}
 	switch head.Kind {
 	case "execute":
@@ -52,7 +50,7 @@ func DecodeMessage(raw []byte) (Message, error) {
 			} `json:"task"`
 		}
 		if err := json.Unmarshal(head.Data, &inner); err != nil {
-			return nil, &resonate.DecodingError{Msg: fmt.Sprintf("execute data: %v", err)}
+			return nil, &DecodingError{Msg: fmt.Sprintf("execute data: %v", err)}
 		}
 		return ExecuteMessage{TaskID: inner.Task.ID, Version: inner.Task.Version}, nil
 	case "unblock":
@@ -60,10 +58,10 @@ func DecodeMessage(raw []byte) (Message, error) {
 			Promise json.RawMessage `json:"promise"`
 		}
 		if err := json.Unmarshal(head.Data, &inner); err != nil {
-			return nil, &resonate.DecodingError{Msg: fmt.Sprintf("unblock data: %v", err)}
+			return nil, &DecodingError{Msg: fmt.Sprintf("unblock data: %v", err)}
 		}
 		return UnblockMessage{Promise: inner.Promise}, nil
 	default:
-		return nil, &resonate.DecodingError{Msg: fmt.Sprintf("unknown message kind %q", head.Kind)}
+		return nil, &DecodingError{Msg: fmt.Sprintf("unknown message kind %q", head.Kind)}
 	}
 }

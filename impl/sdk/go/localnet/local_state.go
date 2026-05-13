@@ -1,4 +1,4 @@
-package network
+package localnet
 
 import (
 	"encoding/json"

@@ -1,4 +1,8 @@
-package network
+// Package localnet provides an in-process implementation of the
+// resonate.Network interface. It runs the server state machine in a single
+// actor goroutine — useful for tests and "no-server-required" local
+// development.
+package localnet
 
 import (
 	"context"

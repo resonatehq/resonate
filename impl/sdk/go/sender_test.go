@@ -1,4 +1,4 @@
-package network
+package resonate_test
 
 import (
 	"context"
@@ -9,19 +9,20 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	"github.com/resonatehq/resonate-sdk-go"
+	"github.com/resonatehq/resonate-sdk-go/localnet"
 )
 
-func newTestSender(t *testing.T) (*Sender, func()) {
+func newTestSender(t *testing.T) (*resonate.Sender, func()) {
 	t.Helper()
 	pid := "w1"
-	ln := NewLocal("test", &pid)
+	ln := localnet.NewLocal("test", &pid)
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := ln.Start(ctx); err != nil {
 		cancel()
 		t.Fatal(err)
 	}
-	return NewSender(ln, nil), func() {
+	return resonate.NewSender(ln, nil), func() {
 		cancel()
 		_ = ln.Stop()
 	}
@@ -97,7 +98,6 @@ func TestSenderTaskSuspendReturnsRedirectOnSettledDependency(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	// Set up a root task that we can suspend.
 	if _, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
@@ -106,7 +106,6 @@ func TestSenderTaskSuspendReturnsRedirectOnSettledDependency(t *testing.T) {
 		t.Fatalf("task.create root: %v", err)
 	}
 
-	// Create a dependency promise and settle it.
 	if _, err := s.PromiseCreate(ctx, resonate.PromiseCreateReq{
 		ID: "dep", TimeoutAt: int64(1) << 50, Tags: map[string]string{},
 	}); err != nil {
@@ -134,8 +133,6 @@ func TestSenderTaskFenceCreate(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	// Acquire a task to fence against. TaskCreate returns the task already in
-	// Acquired state at version 0.
 	created, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
@@ -227,15 +224,13 @@ func TestSenderTaskFenceWrongVersionReturnsConflict(t *testing.T) {
 func TestSenderRecvDropsMalformedFrames(t *testing.T) {
 	pid := "w1"
 	stub := &stubNetwork{}
-	s := NewSender(stub, nil)
+	s := resonate.NewSender(stub, nil)
 	var received int32
-	s.Recv(func(Message) { atomic.AddInt32(&received, 1) })
+	s.Recv(func(resonate.Message) { atomic.AddInt32(&received, 1) })
 
-	// Push a bogus frame followed by a valid one.
 	stub.push(`not json`)
 	stub.push(`{"kind":"execute","data":{"task":{"id":"t1","version":3}}}`)
 
-	// Wait briefly for the goroutine to run callbacks.
 	time.Sleep(20 * time.Millisecond)
 	if got := atomic.LoadInt32(&received); got != 1 {
 		t.Errorf("received = %d, want 1 (malformed should be dropped)", got)
@@ -245,11 +240,10 @@ func TestSenderRecvDropsMalformedFrames(t *testing.T) {
 
 func TestSenderCorrIDMismatchSurfacesAsServerError(t *testing.T) {
 	stub := &fixedRespNetwork{
-		respKind: "promise.create",
-		// Deliberately wrong corrId.
+		respKind:   "promise.create",
 		respCorrID: "WRONG",
 	}
-	s := NewSender(stub, nil)
+	s := resonate.NewSender(stub, nil)
 	_, err := s.PromiseGet(context.Background(), "x")
 	if err == nil {
 		t.Fatal("expected error")
@@ -264,8 +258,6 @@ func TestSenderCorrIDMismatchSurfacesAsServerError(t *testing.T) {
 // Test doubles for Network
 // ──────────────────────────────────────────────────────────────────────────
 
-// stubNetwork captures the most recent subscriber callback and lets the test
-// invoke it. It is intentionally minimal: Send is unimplemented.
 type stubNetwork struct {
 	mu  sync.Mutex
 	cbs []func(string)
@@ -285,19 +277,17 @@ func (n *stubNetwork) Recv(cb func(raw string)) {
 	n.cbs = append(n.cbs, cb)
 	n.mu.Unlock()
 }
-func (n *stubNetwork) PID() string                                 { return "stub" }
-func (n *stubNetwork) Group() string                               { return "stub" }
-func (n *stubNetwork) Unicast() string                             { return "stub://uni" }
-func (n *stubNetwork) Anycast() string                             { return "stub://any" }
-func (n *stubNetwork) Start(ctx context.Context) error             { return nil }
-func (n *stubNetwork) Stop() error                                 { return nil }
+func (n *stubNetwork) PID() string                                       { return "stub" }
+func (n *stubNetwork) Group() string                                     { return "stub" }
+func (n *stubNetwork) Unicast() string                                   { return "stub://uni" }
+func (n *stubNetwork) Anycast() string                                   { return "stub://any" }
+func (n *stubNetwork) Start(ctx context.Context) error                   { return nil }
+func (n *stubNetwork) Stop() error                                       { return nil }
 func (n *stubNetwork) Send(ctx context.Context, req string) (string, error) {
 	return "", errors.New("not implemented")
 }
 func (n *stubNetwork) TargetResolver(target string) string { return "stub://any@" + target }
 
-// fixedRespNetwork returns a fixed envelope shape regardless of input — used
-// to inject a corrId mismatch.
 type fixedRespNetwork struct {
 	stubNetwork
 	respKind   string

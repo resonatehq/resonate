@@ -1,4 +1,4 @@
-package network
+package localnet
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 // sendEnvelope is a small test helper that wraps a flat data payload into a
 // protocol envelope, sends it through the network, and returns the parsed
 // response envelope.
-func sendEnvelope(t *testing.T, ctx context.Context, n Network, kind, corrID string, data map[string]any) map[string]any {
+func sendEnvelope(t *testing.T, ctx context.Context, n resonate.Network, kind, corrID string, data map[string]any) map[string]any {
 	t.Helper()
 	env := map[string]any{
 		"kind": kind,
@@ -143,11 +143,11 @@ func TestLocalPromiseSettleNotifiesSubscribers(t *testing.T) {
 	if len(received) == 0 {
 		t.Fatal("expected at least one push frame")
 	}
-	msg, err := DecodeMessage([]byte(received[0]))
+	msg, err := resonate.DecodeMessage([]byte(received[0]))
 	if err != nil {
 		t.Fatalf("decode push: %v", err)
 	}
-	if _, ok := msg.(UnblockMessage); !ok {
+	if _, ok := msg.(resonate.UnblockMessage); !ok {
 		t.Errorf("expected UnblockMessage, got %T", msg)
 	}
 }
