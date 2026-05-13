@@ -183,7 +183,7 @@ func addFn(_ *Context, a addArgs2) (int, error) { return a.A + a.B, nil }
 
 func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 
 	fut, err := ctx.Run(addFn, addArgs2{A: 2, B: 3})
@@ -212,7 +212,7 @@ func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 func TestContext_Run_PreSettledSkipsGoroutine(t *testing.T) {
 	fake := newFakeFenceClient()
 	fake.preset("root.1", resolvedPromise(t, "root.1", 99))
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 
 	fut, err := ctx.Run(addFn, addArgs2{A: 1, B: 2})
@@ -233,7 +233,7 @@ func TestContext_Run_PreSettledSkipsGoroutine(t *testing.T) {
 
 func TestContext_Run_TwoConcurrentGoroutines(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 
 	f1, _ := ctx.Run(addFn, addArgs2{A: 1, B: 2})
@@ -253,7 +253,7 @@ func TestContext_Run_TwoConcurrentGoroutines(t *testing.T) {
 
 func TestContext_Run_FunctionError(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 
 	failing := func(*Context, int) (int, error) { return 0, errors.New("denied") }
@@ -279,7 +279,7 @@ func TestContext_Run_FunctionError(t *testing.T) {
 
 func TestContext_RPC_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.RPC("payments.charge", map[string]int{"amount": 100})
 	if err != nil {
@@ -297,7 +297,7 @@ func TestContext_RPC_PendingSuspends(t *testing.T) {
 
 func TestContext_Sleep_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.Sleep(time.Hour)
 	if err != nil {
@@ -308,7 +308,7 @@ func TestContext_Sleep_PendingSuspends(t *testing.T) {
 
 func TestContext_Promise_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.Promise()
 	if err != nil {
@@ -320,7 +320,7 @@ func TestContext_Promise_PendingSuspends(t *testing.T) {
 func TestContext_RPC_AlreadyResolved_DecodesValue(t *testing.T) {
 	fake := newFakeFenceClient()
 	fake.preset("root.1", resolvedPromise(t, "root.1", "ok"))
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	fut, _ := ctx.RPC("noop", nil)
 	var got string
@@ -336,7 +336,7 @@ func TestContext_RPC_AlreadyResolved_DecodesValue(t *testing.T) {
 
 func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	id, err := ctx.Detached("audit", map[string]int{"v": 1})
 	if err != nil {
@@ -355,7 +355,7 @@ func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 
 func TestContext_Detached_IDIsHashed16Hex(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 	id, _ := ctx.Detached("f", nil)
 	suffix := strings.TrimPrefix(id, "root.")
@@ -380,135 +380,11 @@ func TestHashID_StableAndHexLength(t *testing.T) {
 	}
 }
 
-// ── runWorkflow boundary ────────────────────────────────────────────────
-
-func TestRunWorkflow_DoneOnReturn(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	done := func(*Context) (int, error) { return 7, nil }
-	out := RunWorkflow(ctx, done, nil)
-	if !out.Done || out.Err != nil {
-		t.Fatalf("expected Done, no err, got %+v", out)
-	}
-}
-
-func TestRunWorkflow_SuspendedOnPendingRPC(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	wf := func(c *Context) (int, error) {
-		fut, err := c.RPC("x", nil)
-		if err != nil {
-			return 0, err
-		}
-		return 0, fut.Await(nil)
-	}
-	out := RunWorkflow(ctx, wf, nil)
-	if out.Done {
-		t.Fatal("expected Suspended")
-	}
-	if len(out.RemoteTodos) != 1 || out.RemoteTodos[0] != "root.1" {
-		t.Fatalf("todos: %v", out.RemoteTodos)
-	}
-}
-
-func TestRunWorkflow_NonSuspensionPanicReRaised(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	boom := func(*Context) (int, error) { panic("boom") }
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected re-raised panic")
-		}
-		if _, ok := r.(suspendSignal); ok {
-			t.Fatal("should not have been suspendSignal")
-		}
-	}()
-	_ = RunWorkflow(ctx, boom, nil)
-}
-
-// A workflow that swallows the suspension panic must still report
-// Suspended (todos preserved). This is the "boundary assertion" — also
-// the structured-concurrency path for fire-and-forget children.
-func TestRunWorkflow_SwallowedSuspendStillReported(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	wf := func(c *Context) (int, error) {
-		defer func() { _ = recover() }()
-		fut, _ := c.RPC("x", nil)
-		_ = fut.Await(nil)
-		return 0, nil
-	}
-	out := RunWorkflow(ctx, wf, nil)
-	if out.Done {
-		t.Fatal("expected Suspended despite swallowed panic")
-	}
-	if len(out.RemoteTodos) != 1 {
-		t.Fatalf("expected 1 todo preserved, got %v", out.RemoteTodos)
-	}
-}
-
-// Fire-and-forget local that suspends: parent has no Await, but
-// flushLocalWork must merge the child's todos and the runtime must report
-// Suspended.
-func TestRunWorkflow_FireAndForgetLocalThatSuspends(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	childThatSuspends := func(c *Context) (int, error) {
-		fut, _ := c.RPC("x", nil)
-		return 0, fut.Await(nil)
-	}
-	parent := func(c *Context) (int, error) {
-		_, _ = c.Run(childThatSuspends, nil)
-		return 0, nil
-	}
-	out := RunWorkflow(ctx, parent, nil)
-	if out.Done {
-		t.Fatal("expected Suspended via fire-and-forget child")
-	}
-	if len(out.RemoteTodos) == 0 {
-		t.Fatal("expected todos merged from child")
-	}
-}
-
-func TestContext_Run_AwaitChildSuspend_RePanics(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-	ctx := testContext("root", eff)
-
-	childThatSuspends := func(c *Context) (int, error) {
-		fut, _ := c.RPC("x", nil)
-		return 0, fut.Await(nil)
-	}
-	parent := func(c *Context) (int, error) {
-		fut, _ := c.Run(childThatSuspends, nil)
-		var v int
-		return 0, fut.Await(&v)
-	}
-	out := RunWorkflow(ctx, parent, nil)
-	if out.Done {
-		t.Fatal("expected Suspended (child suspended via Await)")
-	}
-	if len(out.RemoteTodos) == 0 {
-		t.Fatal("expected merged todos")
-	}
-}
-
 // ── DurableFunction integration ─────────────────────────────────────────
 
 func TestContext_Run_ZeroArgs(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
+	eff := NewEffects(fake, "task-1", 1, nil)
 	ctx := testContext("root", eff)
 
 	beat := func(*Context) (string, error) { return "tick", nil }
@@ -530,42 +406,6 @@ func TestContext_Run_BadFunction(t *testing.T) {
 	_, err := ctx.Run(42, nil)
 	if err == nil {
 		t.Fatal("expected validation error for non-function")
-	}
-}
-
-// ── End-to-end suspension/resume cycle (single context) ─────────────────
-
-// Cycle 1: RPC is pending → workflow suspends.
-// Cycle 2: Same workflow body re-runs, fake now returns Resolved → Done.
-func TestRunWorkflow_TwoCycle_ResumeAfterSettle(t *testing.T) {
-	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1)
-
-	wf := func(c *Context) (int, error) {
-		fut, err := c.RPC("x", nil)
-		if err != nil {
-			return 0, err
-		}
-		var got int
-		if err := fut.Await(&got); err != nil {
-			return 0, err
-		}
-		return got, nil
-	}
-
-	// Cycle 1.
-	ctx1 := testContext("root", eff)
-	out1 := RunWorkflow(ctx1, wf, nil)
-	if out1.Done {
-		t.Fatal("cycle 1: expected Suspended")
-	}
-
-	// Cycle 2: server has now resolved root.1 with value 13.
-	fake.preset("root.1", resolvedPromise(t, "root.1", 13))
-	ctx2 := testContext("root", eff)
-	out2 := RunWorkflow(ctx2, wf, nil)
-	if !out2.Done || out2.Err != nil {
-		t.Fatalf("cycle 2: expected Done, got %+v", out2)
 	}
 }
 

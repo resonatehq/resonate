@@ -36,7 +36,7 @@ func newEffectsWithSender(t *testing.T, branch string) (*resonate.Effects, *reso
 		cleanup()
 		t.Fatalf("task.create root: %v", err)
 	}
-	e := resonate.NewEffects(s, res.Created.Task.ID, res.Created.Task.Version)
+	e := resonate.NewEffects(s, res.Created.Task.ID, res.Created.Task.Version, nil)
 	return e, s, cleanup
 }
 
@@ -113,7 +113,7 @@ func TestEffects_VersionMismatchSurfacesAsServerError(t *testing.T) {
 	}
 
 	// Wrong version (real lease is 0).
-	e := resonate.NewEffects(s, "root", 99)
+	e := resonate.NewEffects(s, "root", 99, nil)
 	_, err := e.CreatePromise(ctx, resonate.PromiseCreateReq{
 		ID:        "child",
 		TimeoutAt: int64(1) << 50,
@@ -172,7 +172,7 @@ func TestEffects_PreloadAbsorbedIntoCache(t *testing.T) {
 // keep one targeted test using an inline stub client that does.
 func TestEffects_AbsorbDoesNotClobberTerminalWithPending(t *testing.T) {
 	stub := &scriptedFenceClient{}
-	e := resonate.NewEffects(stub, "root", 0)
+	e := resonate.NewEffects(stub, "root", 0, nil)
 
 	// First call: preload carries terminal child.
 	stub.next = resonate.TaskFenceResult{

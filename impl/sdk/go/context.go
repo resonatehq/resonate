@@ -4,7 +4,6 @@ import (
 	stdctx "context"
 	"fmt"
 	"hash/fnv"
-	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,16 +35,6 @@ type spawnedLocal struct {
 type localResult struct {
 	suspended bool
 	err       error
-}
-
-// Outcome is the workflow runtime's view of one execution attempt. A Done
-// outcome means the workflow function returned (with Err set if it failed).
-// A non-Done outcome means execution suspended on remote work; the runtime
-// should register callbacks on RemoteTodos before releasing the lease.
-type Outcome struct {
-	Done        bool
-	Err         error
-	RemoteTodos []string
 }
 
 // Context is the workflow-facing API. It carries a host context.Context
@@ -427,57 +416,6 @@ func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (str
 // the time it exits, so the caller need only wait.
 func (c *Context) flushLocalWork() {
 	c.wg.Wait()
-}
-
-// ── Runtime boundary ────────────────────────────────────────────────────
-
-// RunWorkflow invokes a durable function inside the panic-based suspension
-// boundary. It recovers suspendSignal{} and converts to Outcome.Suspended;
-// any other panic is re-raised. After the function returns, flushLocalWork
-// drains in-flight Run goroutines and any merged remote todos convert a
-// Done outcome into Suspended (matching Rust's structured-concurrency rule;
-// also acts as a safety net for a user who swallowed the suspension panic).
-func RunWorkflow(ctx *Context, fn any, args any) Outcome {
-	df, err := durableFunctionFor(fn)
-	if err != nil {
-		return Outcome{Done: true, Err: err}
-	}
-
-	var out Outcome
-	suspended := false
-	func() {
-		defer func() {
-			r := recover()
-			if r == nil {
-				return
-			}
-			if _, ok := r.(suspendSignal); ok {
-				suspended = true
-				return
-			}
-			panic(r)
-		}()
-		_, err := df.invoke(ctx, args)
-		if err != nil {
-			out = Outcome{Done: true, Err: err}
-		} else {
-			out = Outcome{Done: true}
-		}
-	}()
-
-	ctx.flushLocalWork()
-	todos := ctx.drainSpawnedRemote()
-
-	if suspended {
-		return Outcome{Done: false, RemoteTodos: todos}
-	}
-	if len(todos) > 0 {
-		slog.Warn("resonate: workflow returned Done with pending remote todos — "+
-			"either a fire-and-forget child suspended, or the function swallowed a panic with bare recover()",
-			"func", ctx.funcName, "id", ctx.id, "todos", todos)
-		return Outcome{Done: false, RemoteTodos: todos}
-	}
-	return out
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────

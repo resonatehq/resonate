@@ -26,15 +26,22 @@ type Effects struct {
 	cache map[string]PromiseRecord
 }
 
-// NewEffects constructs an Effects with the given transport and initial
-// task lease.
-func NewEffects(client fenceClient, taskID string, taskVersion int64) *Effects {
-	return &Effects{
+// NewEffects constructs an Effects with the given transport, initial task
+// lease, and a preload of promise records to seed the cache. Preload is the
+// server-provided snapshot of children already known at task acquisition
+// time; seeding it up front lets a workflow read those children inline
+// (without a network round-trip) on the first execution attempt.
+func NewEffects(client fenceClient, taskID string, taskVersion int64, preload []PromiseRecord) *Effects {
+	e := &Effects{
 		client:      client,
 		taskID:      taskID,
 		taskVersion: taskVersion,
 		cache:       map[string]PromiseRecord{},
 	}
+	if len(preload) > 0 {
+		e.absorb(preload)
+	}
+	return e
 }
 
 // CreatePromise creates a durable promise via task.fence, absorbing any
