@@ -93,6 +93,17 @@ func (l *LocalNetwork) TargetResolver(target string) string {
 	return "local://any@" + target
 }
 
+// accepts reports whether a push frame addressed to addr is intended for
+// this network. A LocalNetwork delivers to its own unicast (point-to-point)
+// or to any anycast frame for its group; everything else is dropped, matching
+// real-server routing so tests can use a non-default Target to opt out.
+func (l *LocalNetwork) accepts(addr string) bool {
+	if addr == "" || addr == l.unicast {
+		return true
+	}
+	return addr == "local://any@"+l.group
+}
+
 // Start spawns the actor goroutine and the ticker goroutine. The supplied
 // context governs the lifetime of both.
 func (l *LocalNetwork) Start(ctx context.Context) error {
@@ -216,12 +227,12 @@ func (l *LocalNetwork) handle(state *serverState, subs *subscriberList, op state
 		resp, outgoing, err := state.apply(op.now, op.req)
 		op.reply <- opReply{resp: resp, outgoing: outgoing, err: err}
 		if len(outgoing) > 0 {
-			go dispatchOutgoing(subs, outgoing)
+			go l.dispatchOutgoing(subs, outgoing)
 		}
 	case opTick:
 		outgoing := state.tick(op.now)
 		if len(outgoing) > 0 {
-			go dispatchOutgoing(subs, outgoing)
+			go l.dispatchOutgoing(subs, outgoing)
 		}
 	case opSubscribe:
 		subs.add(op.cb)
@@ -270,12 +281,15 @@ func (s *subscriberList) snapshot() []func(string) {
 	return out
 }
 
-func dispatchOutgoing(subs *subscriberList, msgs []outgoingMsg) {
+func (l *LocalNetwork) dispatchOutgoing(subs *subscriberList, msgs []outgoingMsg) {
 	cbs := subs.snapshot()
 	if len(cbs) == 0 {
 		return
 	}
 	for _, m := range msgs {
+		if !l.accepts(m.address) {
+			continue
+		}
 		body, err := json.Marshal(m.message)
 		if err != nil {
 			continue

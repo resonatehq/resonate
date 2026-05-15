@@ -52,6 +52,7 @@ type Context struct {
 
 	effects        *Effects
 	targetResolver TargetResolver
+	codec          *Codec
 
 	mu            sync.Mutex
 	spawnedRemote []string
@@ -61,12 +62,16 @@ type Context struct {
 
 // NewRootContext constructs a root Context for a top-level workflow run.
 // The Resonate worker layer (out of scope here) is the typical caller.
-func NewRootContext(host stdctx.Context, id string, timeoutAt int64, funcName string, effects *Effects, resolver TargetResolver) *Context {
+// A nil codec defaults to NewCodec(nil) (NoopEncryptor).
+func NewRootContext(host stdctx.Context, id string, timeoutAt int64, funcName string, effects *Effects, resolver TargetResolver, codec *Codec) *Context {
 	if host == nil {
 		host = stdctx.Background()
 	}
 	if resolver == nil {
 		resolver = IdentityTargetResolver
+	}
+	if codec == nil {
+		codec = NewCodec(nil)
 	}
 	return &Context{
 		host:           host,
@@ -77,6 +82,7 @@ func NewRootContext(host stdctx.Context, id string, timeoutAt int64, funcName st
 		timeoutAt:      timeoutAt,
 		effects:        effects,
 		targetResolver: resolver,
+		codec:          codec,
 	}
 }
 
@@ -123,6 +129,7 @@ func (c *Context) child(id, funcName string, timeoutAt int64) *Context {
 		timeoutAt:      timeoutAt,
 		effects:        c.effects,
 		targetResolver: c.targetResolver,
+		codec:          c.codec,
 	}
 }
 
@@ -153,7 +160,7 @@ func (c *Context) baseTags(scope, branch string) map[string]string {
 }
 
 func (c *Context) localCreateReq(id string, args any, timeout time.Duration) (PromiseCreateReq, error) {
-	param, err := NewValue(args)
+	param, err := c.codec.Encode(args)
 	if err != nil {
 		return PromiseCreateReq{}, err
 	}
@@ -166,7 +173,7 @@ func (c *Context) localCreateReq(id string, args any, timeout time.Duration) (Pr
 }
 
 func (c *Context) remoteCreateReq(id, funcName string, args any, timeout time.Duration, targetOverride *string) (PromiseCreateReq, error) {
-	param, err := TaskDataValue(funcName, args)
+	param, err := c.codec.Encode(map[string]any{"func": funcName, "args": args})
 	if err != nil {
 		return PromiseCreateReq{}, err
 	}
@@ -183,7 +190,7 @@ func (c *Context) remoteCreateReq(id, funcName string, args any, timeout time.Du
 func (c *Context) promiseCreateReq(id string, timeout time.Duration, data any) (PromiseCreateReq, error) {
 	var param Value
 	if data != nil {
-		v, err := NewValue(data)
+		v, err := c.codec.Encode(data)
 		if err != nil {
 			return PromiseCreateReq{}, err
 		}
@@ -325,10 +332,15 @@ func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context
 
 	settleReq := PromiseSettleReq{ID: f.id}
 	if runErr != nil {
+		v, err := c.codec.Encode(EncodeError(runErr))
+		if err != nil {
+			f.result <- localResult{err: err}
+			return
+		}
 		settleReq.State = SettleStateRejected
-		settleReq.Value = Value{Data: EncodeError(runErr)}
+		settleReq.Value = v
 	} else {
-		resVal, mErr := NewValue(res)
+		resVal, mErr := c.codec.Encode(res)
 		if mErr != nil {
 			f.result <- localResult{err: mErr}
 			return

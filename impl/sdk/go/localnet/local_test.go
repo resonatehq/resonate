@@ -125,7 +125,7 @@ func TestLocalPromiseSettleNotifiesSubscribers(t *testing.T) {
 	})
 	sendEnvelope(t, ctx, ln, "promise.register_listener", "c2", map[string]any{
 		"awaited": "p:sub",
-		"address": "test://listener",
+		"address": ln.Unicast(),
 	})
 	sendEnvelope(t, ctx, ln, "promise.settle", "c3", map[string]any{
 		"id":    "p:sub",

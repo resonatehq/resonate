@@ -1,6 +1,7 @@
 package resonate
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -11,15 +12,26 @@ import (
 // code as an error.
 type suspendSignal struct{}
 
-func decodeSettled(rec PromiseRecord, into any) error {
+func decodeSettled(codec *Codec, rec PromiseRecord, into any) error {
 	switch rec.State {
 	case PromiseStateResolved:
 		if into == nil {
 			return nil
 		}
-		return rec.Value.Decode(into)
+		if _, err := codec.Decode(rec.Value, into); err != nil {
+			return err
+		}
+		return nil
 	case PromiseStateRejected, PromiseStateRejectedCanceled, PromiseStateRejectedTimedout:
-		return DeserializeError(rec.Value.DataOrNull())
+		var inner json.RawMessage
+		ok, err := codec.Decode(rec.Value, &inner)
+		if err != nil {
+			return err
+		}
+		if !ok || len(inner) == 0 {
+			return &ApplicationError{Message: fmt.Sprintf("promise %s rejected with no payload", rec.ID)}
+		}
+		return DeserializeError(inner)
 	default:
 		return fmt.Errorf("resonate: future %s has unexpected state %q", rec.ID, rec.State)
 	}
@@ -85,5 +97,5 @@ func (f *Future) Await(into any) error {
 	if f.record == nil {
 		return fmt.Errorf("resonate: future %s completed without a settled record", f.id)
 	}
-	return decodeSettled(*f.record, into)
+	return decodeSettled(f.ctx.codec, *f.record, into)
 }

@@ -216,7 +216,7 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 	}
 
 	// 4. EXECUTE the workflow.
-	rootCtx := NewRootContext(ctx, promise.ID, promise.TimeoutAt, taskData.Func, effects, c.resolver)
+	rootCtx := NewRootContext(ctx, promise.ID, promise.TimeoutAt, taskData.Func, effects, c.resolver, c.codec)
 
 	res, runErr, suspended, panicErr := c.invoke(df, rootCtx, args)
 	if panicErr != nil {

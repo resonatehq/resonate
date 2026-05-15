@@ -104,9 +104,8 @@ func (f *coreFixture) promiseGet(t *testing.T, id string) resonate.PromiseRecord
 	return decoded
 }
 
-// promiseGetRaw fetches a promise without codec decoding. Use this for
-// *children* — ctx.Run / ctx.RPC build child promise params via NewValue
-// (raw JSON), not the codec, so DecodePromise would mis-parse them.
+// promiseGetRaw fetches a promise without codec decoding. Use this when the
+// test only inspects state/tags and doesn't need to read param/value contents.
 func (f *coreFixture) promiseGetRaw(t *testing.T, id string) resonate.PromiseRecord {
 	t.Helper()
 	rec, err := f.sender.PromiseGet(f.ctx, id)
@@ -359,22 +358,22 @@ func TestCore_ExecuteUntilBlocked_WithPreload(t *testing.T) {
 	}
 
 	// Pre-resolve the child the workflow will read. ctx.RPC generates the
-	// child id "p1-pre.1". Children are wire-stored as raw JSON (Go's Run /
-	// RPC use NewValue, not codec.Encode), so pre-settle with NewValue.
-	rawVal, _ := resonate.NewValue(99)
+	// child id "p1-pre.1". Children are codec-encoded on the wire just like
+	// root promises, so pre-settle with codec.Encode to match.
+	encVal, _ := f.codec.Encode(99)
 	if _, err := f.sender.PromiseCreate(f.ctx, resonate.PromiseCreateReq{
 		ID: "p1-pre.1", TimeoutAt: int64(1) << 50,
 	}); err != nil {
 		t.Fatalf("promise.create child: %v", err)
 	}
 	if _, err := f.sender.PromiseSettle(f.ctx, resonate.PromiseSettleReq{
-		ID: "p1-pre.1", State: resonate.SettleStateResolved, Value: rawVal,
+		ID: "p1-pre.1", State: resonate.SettleStateResolved, Value: encVal,
 	}); err != nil {
 		t.Fatalf("promise.settle child: %v", err)
 	}
 
 	// Feed the preloaded child to Effects via the preload arg too, exercising
-	// the seed-at-construction path. Child uses raw encoding; no codec decode.
+	// the seed-at-construction path.
 	pre, _ := f.sender.PromiseGet(f.ctx, "p1-pre.1")
 	preload := []resonate.PromiseRecord{pre}
 

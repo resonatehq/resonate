@@ -2,7 +2,6 @@ package resonate
 
 import (
 	stdctx "context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -125,6 +124,7 @@ func testContext(rootID string, eff *Effects) *Context {
 		timeoutAt:      1 << 62,
 		effects:        eff,
 		targetResolver: IdentityTargetResolver,
+		codec:          NewCodec(nil),
 	}
 }
 
@@ -133,28 +133,34 @@ func pendingPromise(id string) PromiseRecord {
 	return PromiseRecord{ID: id, State: PromiseStatePending}
 }
 
-// resolvedPromise returns a Resolved promise record carrying the JSON of v.
+// resolvedPromise returns a Resolved promise record carrying the codec-encoded
+// representation of v (matching what executeLocal / TaskFulfill produce on the
+// wire).
 func resolvedPromise(t *testing.T, id string, v any) PromiseRecord {
 	t.Helper()
-	raw, err := json.Marshal(v)
+	val, err := NewCodec(nil).Encode(v)
 	if err != nil {
-		t.Fatalf("resolvedPromise marshal: %v", err)
+		t.Fatalf("resolvedPromise encode: %v", err)
 	}
 	return PromiseRecord{
 		ID:    id,
 		State: PromiseStateResolved,
-		Value: Value{Data: raw},
+		Value: val,
 	}
 }
 
 // rejectedPromise returns a Rejected promise record carrying an application
-// error payload with the given message.
+// error payload with the given message, codec-encoded like a real settle.
 func rejectedPromise(t *testing.T, id, msg string) PromiseRecord {
 	t.Helper()
+	val, err := NewCodec(nil).Encode(EncodeError(errors.New(msg)))
+	if err != nil {
+		t.Fatalf("rejectedPromise encode: %v", err)
+	}
 	return PromiseRecord{
 		ID:    id,
 		State: PromiseStateRejected,
-		Value: Value{Data: EncodeError(errors.New(msg))},
+		Value: val,
 	}
 }
 
