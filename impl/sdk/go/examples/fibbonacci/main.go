@@ -123,7 +123,7 @@ func main() {
 	args := FibArgs{N: *n}
 
 	var (
-		out int
+		out  int
 		rerr error
 	)
 	switch *mode {
