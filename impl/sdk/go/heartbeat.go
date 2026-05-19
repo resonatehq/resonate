@@ -13,9 +13,16 @@ import (
 // execution begins; Stop is called once execution completes (success, error,
 // or panic). Implementations must be safe to call concurrently with distinct
 // taskIDs — Core may have many tasks in flight in parallel goroutines.
+//
+// Shutdown is invoked exactly once by Resonate.Stop and must release any
+// long-lived resources owned by the implementation (background goroutines,
+// timers, network connections). After Shutdown returns, no further Start /
+// Stop calls will be made. Implementations that hold no resources may
+// implement Shutdown as a no-op.
 type Heartbeat interface {
 	Start(taskID string, taskVersion int64)
 	Stop(taskID string)
+	Shutdown()
 }
 
 // NoopHeartbeat is the default Heartbeat for local mode and tests where the
@@ -24,6 +31,7 @@ type NoopHeartbeat struct{}
 
 func (NoopHeartbeat) Start(string, int64) {}
 func (NoopHeartbeat) Stop(string)         {}
+func (NoopHeartbeat) Shutdown()           {}
 
 // AsyncHeartbeat is a Heartbeat that runs a single background goroutine which
 // periodically issues task.heartbeat for every tracked task. Start and Stop

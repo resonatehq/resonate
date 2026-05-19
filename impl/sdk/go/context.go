@@ -261,6 +261,33 @@ func optTarget(s string) *string {
 // *Context, or (d) *Context plus one args value. The promise is created
 // synchronously; if already settled (idempotent recovery) Run skips spawning
 // the goroutine.
+//
+// # Execution model
+//
+// Run spawns one goroutine that invokes fn and (on success) settles the
+// child's durable promise. The goroutine is owned by this Context and is
+// joined by flushLocalWork before the workflow returns or suspends — see
+// the contract notes below.
+//
+// # Contract for fn
+//
+//   - fn MUST return promptly. The workflow runtime joins every spawned-local
+//     goroutine before it can suspend or fulfill the parent task; a fn that
+//     blocks indefinitely will hold the task lease open until it expires and
+//     the worker is forcibly evicted. Long-running or external-blocking work
+//     belongs in RPC (remote dispatch) or Promise (latent durable promise),
+//     not Run.
+//   - fn MUST be deterministic enough to tolerate re-execution. Whenever a
+//     workflow suspends and is later resumed, the entire workflow body runs
+//     again from the top; every Run call repeats. The durable promise layer
+//     short-circuits children that have already settled (by ID), but a fn
+//     whose body executes before reaching that boundary will execute again.
+//     Wrap external side effects (DB writes, payments, emails) in their own
+//     ctx.Run / ctx.RPC so the durable promise records the result.
+//   - fn MAY itself call ctx.Run / ctx.RPC / ctx.Sleep / ctx.Promise. The
+//     Future.Await machinery panics suspendSignal{} on a pending dependency;
+//     executeLocal recovers that panic, drains the child's remote todos into
+//     the parent, and reports back as suspended.
 func (c *Context) Run(fn any, args any, opts ...RunOpts) (*Future, error) {
 	df, err := durableFunctionFor(fn)
 	if err != nil {
@@ -426,6 +453,17 @@ func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (str
 // flushLocalWork waits for every spawned-local goroutine on this context to
 // finish. Each goroutine has already merged its todos / set its record by
 // the time it exits, so the caller need only wait.
+//
+// This is an UNBOUNDED wait by design. The structured-concurrency invariant
+// requires that all child remote-todos are merged into the parent before the
+// parent decides to suspend (otherwise the suspend would register a partial
+// awaited list and the missing dependencies would never wake the task). A
+// timeout here would trade correctness for liveness; a misbehaving fn that
+// blocks forever holds the task lease open instead, which is a recoverable
+// failure mode (the server eventually evicts the worker on TTL expiry).
+//
+// See Context.Run for the contract user functions must respect to keep this
+// wait short.
 func (c *Context) flushLocalWork() {
 	c.wg.Wait()
 }

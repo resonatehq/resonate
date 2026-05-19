@@ -14,6 +14,7 @@ coverage.html
 # Go workspace
 go.work
 go.work.sum
+!examples/go.work
 
 # Dependency directories
 vendor/

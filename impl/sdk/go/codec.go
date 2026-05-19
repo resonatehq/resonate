@@ -119,20 +119,38 @@ func (c *Codec) DecodePromiseJSON(raw json.RawMessage) (PromiseRecord, error) {
 	return c.DecodePromise(pr)
 }
 
+// decodeValueData runs the encoded payload (base64 → decrypt) and returns the
+// resulting plaintext bytes verbatim as a json.RawMessage. We deliberately do
+// NOT round-trip through `any`: that would (a) lose int64 precision (the
+// JSON-→-any path coerces every number to float64, losing values above 2^53)
+// and (b) cost two extra JSON passes per promise on the hot DecodePromise
+// path. The plaintext is validated with json.Valid before being returned.
 func (c *Codec) decodeValueData(v Value) (json.RawMessage, error) {
-	var inner any
-	ok, err := c.Decode(v, &inner)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
+	if len(v.Data) == 0 {
 		return json.RawMessage("null"), nil
 	}
-	out, err := json.Marshal(inner)
-	if err != nil {
-		return nil, &DecodingError{Msg: fmt.Sprintf("re-encode decoded data: %v", err)}
+	var s string
+	if err := json.Unmarshal(v.Data, &s); err != nil {
+		if string(v.Data) == "null" {
+			return json.RawMessage("null"), nil
+		}
+		return nil, &DecodingError{Msg: "expected string or null data"}
 	}
-	return out, nil
+	if s == "" {
+		return json.RawMessage("null"), nil
+	}
+	cipher, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, &DecodingError{Msg: fmt.Sprintf("base64: %v", err)}
+	}
+	plain, err := c.Encryptor.Decrypt(cipher)
+	if err != nil {
+		return nil, &DecodingError{Msg: fmt.Sprintf("decrypt: %v", err)}
+	}
+	if !json.Valid(plain) {
+		return nil, &DecodingError{Msg: "decoded payload is not valid JSON"}
+	}
+	return plain, nil
 }
 
 // IsValidBase64 reports whether s decodes as standard base64.

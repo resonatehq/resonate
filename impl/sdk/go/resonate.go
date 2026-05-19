@@ -6,21 +6,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/resonatehq/resonate-sdk-go/httpnet"
 )
 
 // ──────────────────────────────────────────────────────────────────────────
 // Config
 // ──────────────────────────────────────────────────────────────────────────
 
-// Config configures a Resonate instance. Callers must supply a Network
-// (typically constructed via localnet.NewLocal or httpnet.NewHTTP). Other
-// fields have sensible defaults.
+// Config configures a Resonate instance. Callers must supply one of URL or
+// Network, or set the RESONATE_URL environment variable. Other fields have
+// sensible defaults.
 type Config struct {
-	// Network is the transport for all server communication. Required.
+	// URL, if non-empty, builds a default HTTPNetwork pointing at this address.
+	// Takes precedence over both Network and the RESONATE_URL env variable.
+	URL string
+
+	// Network is the transport for all server communication. Used when URL is
+	// empty. If both URL and Network are empty, the RESONATE_URL env variable
+	// is consulted; if all three are empty, New returns ErrNetworkRequired.
 	Network Network
 
 	// Heartbeat keeps an acquired task's lease alive. Defaults to a fresh
@@ -43,8 +52,9 @@ type Config struct {
 	Token string
 }
 
-// ErrNetworkRequired is returned by New when cfg.Network is nil.
-var ErrNetworkRequired = errors.New("resonate.New: cfg.Network is required")
+// ErrNetworkRequired is returned by New when none of cfg.URL, cfg.Network, or
+// the RESONATE_URL env variable are set.
+var ErrNetworkRequired = errors.New("resonate.New: one of cfg.URL, cfg.Network, or RESONATE_URL env is required")
 
 // ──────────────────────────────────────────────────────────────────────────
 // Subscription map
@@ -161,11 +171,21 @@ const subscriptionRefreshInterval = 60 * time.Second
 // Constructors
 // ──────────────────────────────────────────────────────────────────────────
 
-// New builds a Resonate instance. cfg.Network must be supplied — typically by
-// calling localnet.NewLocal or httpnet.NewHTTP in the caller. Defaults: TTL
-// 60s, AsyncHeartbeat at TTL/2, NoopEncryptor, no prefix.
+// New builds a Resonate instance. Network selection precedence: cfg.URL >
+// cfg.Network > RESONATE_URL env variable. When a URL is used, a default
+// HTTPNetwork is constructed against it. Defaults: TTL 60s, AsyncHeartbeat at
+// TTL/2, NoopEncryptor, no prefix.
 func New(cfg Config) (*Resonate, error) {
-	if cfg.Network == nil {
+	network := cfg.Network
+	switch {
+	case cfg.URL != "":
+		network = httpnet.NewHTTP(cfg.URL, httpnet.HTTPOptions{})
+	case network == nil:
+		if envURL := os.Getenv("RESONATE_URL"); envURL != "" {
+			network = httpnet.NewHTTP(envURL, httpnet.HTTPOptions{})
+		}
+	}
+	if network == nil {
 		return nil, ErrNetworkRequired
 	}
 
@@ -185,7 +205,7 @@ func New(cfg Config) (*Resonate, error) {
 		authPtr = &t
 	}
 
-	sender := NewSender(cfg.Network, authPtr)
+	sender := NewSender(network, authPtr)
 	codec := NewCodec(cfg.Encryptor)
 	registry := NewRegistry()
 
@@ -195,17 +215,17 @@ func New(cfg Config) (*Resonate, error) {
 		if hbInterval <= 0 {
 			hbInterval = 30 * time.Second
 		}
-		hb = NewAsyncHeartbeat(cfg.Network.PID(), hbInterval, sender)
+		hb = NewAsyncHeartbeat(network.PID(), hbInterval, sender)
 	}
 
 	bgCtx, bgCancel := stdctx.WithCancel(stdctx.Background())
 
 	r := &Resonate{
-		pid:       cfg.Network.PID(),
+		pid:       network.PID(),
 		idPrefix:  idPrefix,
 		ttl:       ttl,
 		codec:     codec,
-		network:   cfg.Network,
+		network:   network,
 		registry:  registry,
 		heartbeat: hb,
 		sender:    sender,
@@ -222,7 +242,7 @@ func New(cfg Config) (*Resonate, error) {
 		}
 		return r.resolveTarget(target)
 	}
-	r.core = NewCore(sender, codec, registry, resolver, hb, cfg.Network.PID(), r.safeTTLMs())
+	r.core = NewCore(sender, codec, registry, resolver, hb, network.PID(), r.safeTTLMs())
 
 	// Wire push-message dispatch BEFORE starting the network so we don't miss
 	// the initial frames.
@@ -231,7 +251,7 @@ func New(cfg Config) (*Resonate, error) {
 	// Start the network. Errors are logged but not fatal — HTTPNetwork
 	// reconnects via SSE backoff if the server isn't up yet; LocalNetwork
 	// never fails here.
-	if err := cfg.Network.Start(bgCtx); err != nil {
+	if err := network.Start(bgCtx); err != nil {
 		r.log.Error("network start failed", "err", err)
 	}
 
@@ -274,9 +294,7 @@ func (r *Resonate) Stop() error {
 		if err := r.network.Stop(); err != nil {
 			stopErr = err
 		}
-		if hb, ok := r.heartbeat.(*AsyncHeartbeat); ok {
-			hb.Shutdown()
-		}
+		r.heartbeat.Shutdown()
 		r.bgCancel()
 		r.refreshWG.Wait()
 	})

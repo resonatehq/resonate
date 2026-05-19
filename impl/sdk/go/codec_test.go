@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -149,6 +150,30 @@ func TestCodecDecodePromiseDecodesParamAndValue(t *testing.T) {
 	_ = json.Unmarshal(decoded.Value.Data, &vObj)
 	if vObj["result"] != 42.0 {
 		t.Errorf("value.result = %v", vObj["result"])
+	}
+}
+
+// TestCodecDecodePromisePreservesInt64 verifies that DecodePromise preserves
+// integer precision above 2^53 (regression for the int64-→-float64 round-trip
+// the previous decodeValueData implementation introduced).
+func TestCodecDecodePromisePreservesInt64(t *testing.T) {
+	c := newCodec()
+	const big int64 = 1<<60 + 7
+	v, err := c.Encode(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := PromiseRecord{
+		ID:    "test",
+		State: PromiseStateResolved,
+		Value: v,
+	}
+	decoded, err := c.DecodePromise(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded.Value.Data) != fmt.Sprintf("%d", big) {
+		t.Fatalf("expected raw %d, got %s", big, decoded.Value.Data)
 	}
 }
 

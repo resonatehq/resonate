@@ -123,6 +123,7 @@ type trackingHeartbeat struct {
 
 func (h *trackingHeartbeat) Start(string, int64) { h.started.Add(1) }
 func (h *trackingHeartbeat) Stop(string)         { h.stopped.Add(1) }
+func (h *trackingHeartbeat) Shutdown()           {}
 
 // ── Workflow library used across tests ──────────────────────────────────
 
