@@ -119,12 +119,12 @@ func (s *scheduleStub) toRecord() map[string]any {
 // serverState holds the entire in-memory state of LocalNetwork. It is owned
 // by a single goroutine (the actor) and has no internal locking.
 type serverState struct {
-	promises   map[string]*durablePromise
-	tasks      map[string]*task
-	schedules  map[string]*scheduleStub
-	pTimeouts  []pTimeout
-	tTimeouts  []tTimeout
-	outgoing   []outgoingMsg
+	promises  map[string]*durablePromise
+	tasks     map[string]*task
+	schedules map[string]*scheduleStub
+	pTimeouts []pTimeout
+	tTimeouts []tTimeout
+	outgoing  []outgoingMsg
 }
 
 func newServerState() *serverState {

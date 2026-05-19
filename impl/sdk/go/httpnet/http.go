@@ -79,10 +79,10 @@ func NewHTTP(url string, opts HTTPOptions) *HTTPNetwork {
 	}
 }
 
-func (h *HTTPNetwork) PID() string                       { return h.pid }
-func (h *HTTPNetwork) Group() string                     { return h.group }
-func (h *HTTPNetwork) Unicast() string                   { return h.unicast }
-func (h *HTTPNetwork) Anycast() string                   { return h.anycast }
+func (h *HTTPNetwork) PID() string                         { return h.pid }
+func (h *HTTPNetwork) Group() string                       { return h.group }
+func (h *HTTPNetwork) Unicast() string                     { return h.unicast }
+func (h *HTTPNetwork) Anycast() string                     { return h.anycast }
 func (h *HTTPNetwork) TargetResolver(target string) string { return "poll://any@" + target }
 
 func (h *HTTPNetwork) Start(ctx context.Context) error {

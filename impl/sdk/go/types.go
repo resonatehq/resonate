@@ -116,9 +116,9 @@ type PromiseRecord struct {
 
 // TaskRecord is a task as returned by the server.
 type TaskRecord struct {
-	ID      string          `json:"id"`
-	State   TaskState       `json:"state"`
-	Version int64           `json:"version"`
+	ID      string    `json:"id"`
+	State   TaskState `json:"state"`
+	Version int64     `json:"version"`
 	// Resumes is intentionally untyped on the wire: it may be an array of
 	// strings, a number, or a boolean depending on the server's choice.
 	Resumes json.RawMessage `json:"resumes,omitempty"`

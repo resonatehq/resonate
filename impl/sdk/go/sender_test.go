@@ -277,12 +277,12 @@ func (n *stubNetwork) Recv(cb func(raw string)) {
 	n.cbs = append(n.cbs, cb)
 	n.mu.Unlock()
 }
-func (n *stubNetwork) PID() string                                       { return "stub" }
-func (n *stubNetwork) Group() string                                     { return "stub" }
-func (n *stubNetwork) Unicast() string                                   { return "stub://uni" }
-func (n *stubNetwork) Anycast() string                                   { return "stub://any" }
-func (n *stubNetwork) Start(ctx context.Context) error                   { return nil }
-func (n *stubNetwork) Stop() error                                       { return nil }
+func (n *stubNetwork) PID() string                     { return "stub" }
+func (n *stubNetwork) Group() string                   { return "stub" }
+func (n *stubNetwork) Unicast() string                 { return "stub://uni" }
+func (n *stubNetwork) Anycast() string                 { return "stub://any" }
+func (n *stubNetwork) Start(ctx context.Context) error { return nil }
+func (n *stubNetwork) Stop() error                     { return nil }
 func (n *stubNetwork) Send(ctx context.Context, req string) (string, error) {
 	return "", errors.New("not implemented")
 }
