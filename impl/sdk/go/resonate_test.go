@@ -81,6 +81,7 @@ func failAlways(_ *resonate.Context, msg string) (string, error) { return "", er
 // ──────────────────────────────────────────────────────────────────────────
 
 func TestNewRequiresNetwork(t *testing.T) {
+	t.Setenv("RESONATE_URL", "")
 	_, err := resonate.New(resonate.Config{})
 	if !errors.Is(err, resonate.ErrNetworkRequired) {
 		t.Fatalf("expected ErrNetworkRequired, got %v", err)
