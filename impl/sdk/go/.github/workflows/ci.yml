@@ -65,8 +65,8 @@ jobs:
       - name: Start Resonate server
         run: |
           docker run -d --name resonate \
-            -p 8001:8001 -p 8002:8002 \
-            resonatehq/resonate:latest serve
+            -p 8001:8001 \
+            resonatehqio/resonate:latest serve
 
           echo "Waiting for Resonate server to become ready..."
           for i in $(seq 1 60); do

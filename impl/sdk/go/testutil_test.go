@@ -13,7 +13,6 @@ import (
 //
 //   - preset(id, rec): the next Create for that id returns rec (used to test
 //     idempotent recovery — promise already settled when we re-create).
-//   - setPreload(id, preload): preload bundle returned by Create(id=...).
 //   - enforceVersion + expected{TaskID,Version}: rejects mismatched leases.
 //   - nextErr: short-circuits all calls until cleared.
 type fakeFenceClient struct {
@@ -44,12 +43,6 @@ func newFakeFenceClient() *fakeFenceClient {
 func (f *fakeFenceClient) preset(id string, rec PromiseRecord) {
 	f.mu.Lock()
 	f.records[id] = rec
-	f.mu.Unlock()
-}
-
-func (f *fakeFenceClient) setPreload(id string, p []PromiseRecord) {
-	f.mu.Lock()
-	f.preload[id] = p
 	f.mu.Unlock()
 }
 

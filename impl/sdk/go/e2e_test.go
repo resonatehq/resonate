@@ -145,7 +145,7 @@ func e2eRunSubWorkflow(c *resonate.Context, _ struct{}) (int64, error) {
 func TestE2ESimpleAdd(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestE2ESimpleAdd(t *testing.T) {
 func TestE2ESimpleGreet(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	greetFn, err := resonate.Register(r, "greet", e2eGreet)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestE2ESimpleGreet(t *testing.T) {
 func TestE2ESimpleNoop(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	noopFn, err := resonate.Register(r, "noop", noop)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestE2ESimpleNoop(t *testing.T) {
 func TestE2ERPCToRegisteredFunction(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	if _, err := resonate.Register(r, "add", add); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestE2ERPCToRegisteredFunction(t *testing.T) {
 func TestE2EIdempotentRun(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestE2EIdempotentRun(t *testing.T) {
 func TestE2EIdempotentRPC(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	if _, err := resonate.Register(r, "add", add); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestE2EIdempotentRunOrphanedTask(t *testing.T) {
 	id := uniqueID("orphaned")
 
 	rA := makeE2EResonate(t, url)
-	defer rA.Stop()
+	t.Cleanup(func() { _ = rA.Stop() })
 	hangsA, err := resonate.Register(rA, "hangs", e2eHangs)
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestE2EIdempotentRunOrphanedTask(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	rB := makeE2EResonate(t, url)
-	defer rB.Stop()
+	t.Cleanup(func() { _ = rB.Stop() })
 	hangsB, err := resonate.Register(rB, "hangs", e2eHangs)
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestE2EIdempotentRPCOrphanedTask(t *testing.T) {
 	id := uniqueID("orphaned-rpc")
 
 	rA := makeE2EResonate(t, url)
-	defer rA.Stop()
+	t.Cleanup(func() { _ = rA.Stop() })
 	hangsA, err := resonate.Register(rA, "hangs", e2eHangs)
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +367,7 @@ func TestE2EIdempotentRPCOrphanedTask(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	rB := makeE2EResonate(t, url)
-	defer rB.Stop()
+	t.Cleanup(func() { _ = rB.Stop() })
 	ctxB, cancelB := stdctx.WithTimeout(stdctx.Background(), 5*time.Second)
 	defer cancelB()
 	if _, err := rB.RPC(ctxB, id, "hangs", nil); err != nil {
@@ -380,7 +380,7 @@ func TestE2ERunAfterResolvedDifferentWorker(t *testing.T) {
 	id := uniqueID("run-after-resolved")
 
 	rA := makeE2EResonate(t, url)
-	defer rA.Stop()
+	t.Cleanup(func() { _ = rA.Stop() })
 	addA, err := resonate.Register(rA, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +400,7 @@ func TestE2ERunAfterResolvedDifferentWorker(t *testing.T) {
 	}
 
 	rB := makeE2EResonate(t, url)
-	defer rB.Stop()
+	t.Cleanup(func() { _ = rB.Stop() })
 	addB, err := resonate.Register(rB, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestE2ERunAfterRejectedDifferentWorker(t *testing.T) {
 	id := uniqueID("run-after-rejected")
 
 	rA := makeE2EResonate(t, url)
-	defer rA.Stop()
+	t.Cleanup(func() { _ = rA.Stop() })
 	failA, err := resonate.Register(rA, "fail_always", failAlways)
 	if err != nil {
 		t.Fatal(err)
@@ -441,7 +441,7 @@ func TestE2ERunAfterRejectedDifferentWorker(t *testing.T) {
 	}
 
 	rB := makeE2EResonate(t, url)
-	defer rB.Stop()
+	t.Cleanup(func() { _ = rB.Stop() })
 	failB, err := resonate.Register(rB, "fail_always", failAlways)
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +460,7 @@ func TestE2ERunAfterRejectedDifferentWorker(t *testing.T) {
 func TestE2ERunThenRPCSameID(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -498,7 +498,7 @@ func TestE2ERunThenRPCSameID(t *testing.T) {
 func TestE2ERPCThenRunSameID(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -538,13 +538,13 @@ func TestE2EConcurrentRunSameID(t *testing.T) {
 	id := uniqueID("concurrent-run")
 
 	rA := makeE2EResonate(t, url)
-	defer rA.Stop()
+	t.Cleanup(func() { _ = rA.Stop() })
 	addA, err := resonate.Register(rA, "add", add)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rB := makeE2EResonate(t, url)
-	defer rB.Stop()
+	t.Cleanup(func() { _ = rB.Stop() })
 	addB, err := resonate.Register(rB, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -588,7 +588,7 @@ func TestE2EConcurrentRunSameID(t *testing.T) {
 func TestE2ERunMemoizedByID(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)
@@ -630,7 +630,7 @@ func TestE2ERunMemoizedByID(t *testing.T) {
 func TestE2EWorkflowSequentialRPCs(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	if _, err := resonate.Register(r, "add", add); err != nil {
 		t.Fatal(err)
 	}
@@ -660,7 +660,7 @@ func TestE2EWorkflowSequentialRPCs(t *testing.T) {
 func TestE2EWorkflowParallelRPCs(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	if _, err := resonate.Register(r, "add", add); err != nil {
 		t.Fatal(err)
 	}
@@ -690,7 +690,7 @@ func TestE2EWorkflowParallelRPCs(t *testing.T) {
 func TestE2EWorkflowWithCtxRun(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	if _, err := resonate.Register(r, "add", add); err != nil {
 		t.Fatal(err)
 	}
@@ -724,7 +724,7 @@ func TestE2EWorkflowWithCtxRun(t *testing.T) {
 func TestE2EErrorPropagation(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	failFn, err := resonate.Register(r, "fail_always", failAlways)
 	if err != nil {
 		t.Fatal(err)
@@ -750,7 +750,7 @@ func TestE2EErrorPropagation(t *testing.T) {
 func TestE2EHandleResult(t *testing.T) {
 	url := resonateURL(t)
 	r := makeE2EResonate(t, url)
-	defer r.Stop()
+	t.Cleanup(func() { _ = r.Stop() })
 	addFn, err := resonate.Register(r, "add", add)
 	if err != nil {
 		t.Fatal(err)

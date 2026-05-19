@@ -1,6 +1,7 @@
 package resonate
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -410,7 +411,7 @@ func TestContext_Run_BadFunction(t *testing.T) {
 }
 
 func TestContext_NewRootContextDefaults(t *testing.T) {
-	ctx := NewRootContext(nil, "root", 100, "myFunc", nil, nil, nil)
+	ctx := NewRootContext(context.TODO(), "root", 100, "myFunc", nil, nil, nil)
 	if ctx.FuncName() != "myFunc" {
 		t.Fatalf("funcName: %q", ctx.FuncName())
 	}
