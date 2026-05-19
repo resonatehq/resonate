@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Verify gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-clean:" >&2
+            echo "$unformatted" >&2
+            echo >&2
+            echo "Run 'gofmt -w .' to fix." >&2
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Build examples
+        run: |
+          for dir in examples/*/; do
+            if [ -f "$dir/go.mod" ]; then
+              echo "Building $dir"
+              (cd "$dir" && go build ./...)
+            fi
+          done
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Start Resonate server
+        run: |
+          docker run -d --name resonate \
+            -p 8001:8001 -p 8002:8002 \
+            resonatehq/resonate:latest serve
+
+          echo "Waiting for Resonate server to become ready..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8001/health >/dev/null 2>&1 \
+               || curl -sf http://localhost:8001/ >/dev/null 2>&1; then
+              echo "Resonate server is up."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Resonate server failed to start within 60s." >&2
+          docker logs resonate || true
+          exit 1
+
+      - name: Run tests
+        env:
+          RESONATE_URL: http://localhost:8001
+        run: go test -race -timeout 5m ./...
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: docker logs resonate || true
