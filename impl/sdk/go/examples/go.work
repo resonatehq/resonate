@@ -4,4 +4,6 @@ use (
 	..
 	./hello
 	./fibbonacci
+	./saga
+	./pipeline
 )
