@@ -11,7 +11,7 @@ setup.
 | Example       | What it shows                                                       |
 |---------------|---------------------------------------------------------------------|
 | `hello`       | Minimal: register a function, run it durably, read the result.      |
-| `fibbonacci`  | Recursive composition via `ctx.Run` / `ctx.RPC` / a mix.            |
+| `fibonacci`   | Recursive composition via `ctx.Run` / `ctx.RPC` / a mix.            |
 | `saga`        | Multi-step workflow with compensation on failure.                   |
 | `pipeline`    | DAG-shaped pipeline with parallel transforms and a merge stage.     |
 

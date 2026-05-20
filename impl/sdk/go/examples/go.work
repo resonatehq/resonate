@@ -3,7 +3,7 @@ go 1.22
 use (
 	..
 	./hello
-	./fibbonacci
+	./fibonacci
 	./saga
 	./pipeline
 )
