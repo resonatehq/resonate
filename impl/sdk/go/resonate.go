@@ -111,8 +111,8 @@ type RunOptions struct {
 	// Timeout caps the root promise's deadline. Zero uses DefaultTopLevelTimeout (24h).
 	Timeout time.Duration
 	// Version is reserved for future use; it is declared but not yet consumed
-	// by the SDK when building the root promise create request.
-	// TODO(sdk-go-prelaunch): document semantics — see initiatives/sdk-go-prelaunch/OPEN.md
+	// by the SDK when building the root promise create request. See
+	// https://github.com/resonatehq/resonate-sdk-go/issues/5 for status.
 	Version uint32
 	// Tags are merged into the root promise's tag set alongside the SDK's
 	// built-in resonate:origin/branch/parent/scope/target tags.
@@ -127,8 +127,8 @@ type RPCOptions struct {
 	// Timeout caps the root promise's deadline. Zero uses DefaultTopLevelTimeout (24h).
 	Timeout time.Duration
 	// Version is reserved for future use; it is declared but not yet consumed
-	// by the SDK when building the root promise create request.
-	// TODO(sdk-go-prelaunch): document semantics — see initiatives/sdk-go-prelaunch/OPEN.md
+	// by the SDK when building the root promise create request. See
+	// https://github.com/resonatehq/resonate-sdk-go/issues/5 for status.
 	Version uint32
 	// Tags are merged into the root promise's tag set alongside the SDK's
 	// built-in resonate:origin/branch/parent/scope/target tags.
