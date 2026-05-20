@@ -6,9 +6,18 @@ import (
 )
 
 var (
-	ErrSuspended      = errors.New("execution suspended")
+	// ErrSuspended is returned when a workflow cannot proceed because one or more
+	// of its awaited promises are still pending and execution must be deferred
+	// until those promises settle.
+	ErrSuspended = errors.New("execution suspended")
+
+	// ErrAlreadySettled is returned when a caller attempts to settle a promise
+	// that has already reached a terminal state (resolved, rejected, or canceled).
 	ErrAlreadySettled = errors.New("promise already settled")
-	ErrTimeout        = errors.New("timeout")
+
+	// ErrTimeout is returned when an invocation or promise exceeds its configured
+	// deadline before completing.
+	ErrTimeout = errors.New("timeout")
 )
 
 // ServerError carries a status code returned by the server alongside a message.

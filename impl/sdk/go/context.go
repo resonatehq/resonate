@@ -216,27 +216,40 @@ func (c *Context) sleepCreateReq(id string, duration time.Duration) PromiseCreat
 
 // ── Options ─────────────────────────────────────────────────────────────
 
-// RunOpts controls a Run invocation.
+// RunOpts controls a ctx.Run invocation (local, in-process child workflow).
 type RunOpts struct {
+	// Timeout caps the child promise's deadline. Zero inherits the parent's
+	// remaining deadline (via DefaultChildTimeout if none is set).
 	Timeout time.Duration
 }
 
-// RPCOpts controls an RPC invocation.
+// RPCOpts controls a ctx.RPC invocation (remote, cross-worker dispatch).
 type RPCOpts struct {
+	// Timeout caps the child promise's deadline. Zero inherits the parent's
+	// remaining deadline (via DefaultChildTimeout if none is set).
 	Timeout time.Duration
-	Target  string // empty = use the default target resolver
+	// Target is the routing address for the remote worker. Empty delegates to
+	// the Context's TargetResolver, which picks a default group address.
+	Target string // empty = use the default target resolver
 }
 
-// PromiseOpts controls a latent Promise creation.
+// PromiseOpts controls a latent ctx.Promise creation (caller-settled durable
+// promise that the workflow awaits as an external signal).
 type PromiseOpts struct {
+	// Timeout caps the promise's deadline. Zero uses DefaultChildTimeout.
 	Timeout time.Duration
-	Data    any
+	// Data is an optional initial payload stored in the promise's param field.
+	Data any
 }
 
-// DetachedOpts controls a Detached invocation.
+// DetachedOpts controls a ctx.Detached invocation (fire-and-forget remote
+// dispatch whose lifecycle is independent of the parent workflow).
 type DetachedOpts struct {
+	// Timeout caps the detached promise's deadline. Zero uses DefaultChildTimeout.
 	Timeout time.Duration
-	Target  string
+	// Target is the routing address for the remote worker. Empty delegates to
+	// the Context's TargetResolver.
+	Target string
 }
 
 func firstOpt[T any](opts []T) T {

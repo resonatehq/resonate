@@ -79,12 +79,23 @@ func NewHTTP(url string, opts HTTPOptions) *HTTPNetwork {
 	}
 }
 
-func (h *HTTPNetwork) PID() string                         { return h.pid }
-func (h *HTTPNetwork) Group() string                       { return h.group }
-func (h *HTTPNetwork) Unicast() string                     { return h.unicast }
-func (h *HTTPNetwork) Anycast() string                     { return h.anycast }
+// PID returns the unique process identifier for this network instance.
+func (h *HTTPNetwork) PID() string { return h.pid }
+
+// Group returns the routing group this instance belongs to (default: "default").
+func (h *HTTPNetwork) Group() string { return h.group }
+
+// Unicast returns the point-to-point poll address for this instance (poll://uni@<group>/<pid>).
+func (h *HTTPNetwork) Unicast() string { return h.unicast }
+
+// Anycast returns the load-balanced group address for this instance (poll://any@<group>/<pid>).
+func (h *HTTPNetwork) Anycast() string { return h.anycast }
+
+// TargetResolver converts a logical target name to a poll:// anycast address for that group.
 func (h *HTTPNetwork) TargetResolver(target string) string { return "poll://any@" + target }
 
+// Start launches the SSE long-poll goroutine that delivers push frames to Recv subscribers.
+// Subsequent calls are no-ops if already started.
 func (h *HTTPNetwork) Start(ctx context.Context) error {
 	h.startMu.Lock()
 	defer h.startMu.Unlock()
@@ -101,6 +112,7 @@ func (h *HTTPNetwork) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop cancels the SSE goroutine, waits for it to exit, and clears all Recv subscribers.
 func (h *HTTPNetwork) Stop() error {
 	h.startMu.Lock()
 	cancel := h.cancel
@@ -116,6 +128,7 @@ func (h *HTTPNetwork) Stop() error {
 	return nil
 }
 
+// Send posts the JSON envelope to the server and returns the response envelope JSON.
 func (h *HTTPNetwork) Send(ctx context.Context, body string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url+"/", strings.NewReader(body))
 	if err != nil {
@@ -137,6 +150,7 @@ func (h *HTTPNetwork) Send(ctx context.Context, body string) (string, error) {
 	return string(buf), nil
 }
 
+// Recv registers cb to receive raw push-message JSON frames delivered via SSE.
 func (h *HTTPNetwork) Recv(cb func(raw string)) {
 	if cb == nil {
 		return

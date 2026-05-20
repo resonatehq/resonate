@@ -276,9 +276,17 @@ func (s *Sender) PromiseRegisterListener(ctx context.Context, awaited, address s
 // PromiseSearchOptions controls a PromiseSearch call. Any zero-valued field
 // is omitted from the request.
 type PromiseSearchOptions struct {
-	State  string
-	Tags   map[string]string
-	Limit  *uint32
+	// State filters results to promises in this lifecycle state (e.g. "pending",
+	// "resolved"). Empty means no state filter is applied server-side.
+	State string
+	// Tags filters results to promises whose tag set contains all specified
+	// key-value pairs. Nil means no tag filter is applied.
+	Tags map[string]string
+	// Limit caps the number of promises returned per page. Nil lets the server
+	// choose its default page size.
+	Limit *uint32
+	// Cursor is the opaque pagination token from a previous PromiseSearch result;
+	// empty means start from the beginning.
 	Cursor string
 }
 
@@ -456,8 +464,14 @@ func (s *Sender) TaskHeartbeat(ctx context.Context, pid string, tasks []TaskRef)
 
 // TaskSearchOptions controls a TaskSearch call.
 type TaskSearchOptions struct {
-	State  string
-	Limit  *uint32
+	// State filters results to tasks in this lifecycle state (e.g. "pending",
+	// "acquired"). Empty means no state filter is applied server-side.
+	State string
+	// Limit caps the number of tasks returned per page. Nil lets the server
+	// choose its default page size.
+	Limit *uint32
+	// Cursor is the opaque pagination token from a previous TaskSearch result;
+	// empty means start from the beginning.
 	Cursor string
 }
 
@@ -510,8 +524,14 @@ func (s *Sender) ScheduleDelete(ctx context.Context, id string) error {
 
 // ScheduleSearchOptions controls a ScheduleSearch call.
 type ScheduleSearchOptions struct {
-	Tags   map[string]string
-	Limit  *uint32
+	// Tags filters results to schedules whose tag set contains all specified
+	// key-value pairs. Nil means no tag filter is applied.
+	Tags map[string]string
+	// Limit caps the number of schedules returned per page. Nil lets the server
+	// choose its default page size.
+	Limit *uint32
+	// Cursor is the opaque pagination token from a previous ScheduleSearch result;
+	// empty means start from the beginning.
 	Cursor string
 }
 
