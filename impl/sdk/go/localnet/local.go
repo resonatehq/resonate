@@ -84,11 +84,19 @@ func NewLocal(group string, pid *string) *LocalNetwork {
 	}
 }
 
-func (l *LocalNetwork) PID() string     { return l.pid }
-func (l *LocalNetwork) Group() string   { return l.group }
+// PID returns the unique process identifier for this network instance.
+func (l *LocalNetwork) PID() string { return l.pid }
+
+// Group returns the routing group this instance belongs to.
+func (l *LocalNetwork) Group() string { return l.group }
+
+// Unicast returns the point-to-point local address for this instance (local://uni@<group>/<pid>).
 func (l *LocalNetwork) Unicast() string { return l.unicast }
+
+// Anycast returns the load-balanced group address for this instance (local://any@<group>/<pid>).
 func (l *LocalNetwork) Anycast() string { return l.anycast }
 
+// TargetResolver converts a logical target name to a local:// anycast address for that group.
 func (l *LocalNetwork) TargetResolver(target string) string {
 	return "local://any@" + target
 }

@@ -106,20 +106,36 @@ func (s *subscription) settled() bool {
 // or RPC when the caller does not pass one. Matches the Rust SDK default.
 const DefaultTopLevelTimeout = 24 * time.Hour
 
-// RunOptions controls a top-level Run.
+// RunOptions controls a top-level Run (local execution via RegisteredFunc.Run).
 type RunOptions struct {
+	// Timeout caps the root promise's deadline. Zero uses DefaultTopLevelTimeout (24h).
 	Timeout time.Duration
+	// Version is reserved for future use; it is declared but not yet consumed
+	// by the SDK when building the root promise create request. See
+	// https://github.com/resonatehq/resonate-sdk-go/issues/5 for status.
 	Version uint32
-	Tags    map[string]string
-	Target  string
+	// Tags are merged into the root promise's tag set alongside the SDK's
+	// built-in resonate:origin/branch/parent/scope/target tags.
+	Tags map[string]string
+	// Target is the logical routing address sent as the resonate:target tag.
+	// Empty falls back to the Resonate instance's configured network group.
+	Target string
 }
 
-// RPCOptions controls a top-level RPC.
+// RPCOptions controls a top-level RPC (remote dispatch via Resonate.RPC).
 type RPCOptions struct {
+	// Timeout caps the root promise's deadline. Zero uses DefaultTopLevelTimeout (24h).
 	Timeout time.Duration
+	// Version is reserved for future use; it is declared but not yet consumed
+	// by the SDK when building the root promise create request. See
+	// https://github.com/resonatehq/resonate-sdk-go/issues/5 for status.
 	Version uint32
-	Tags    map[string]string
-	Target  string
+	// Tags are merged into the root promise's tag set alongside the SDK's
+	// built-in resonate:origin/branch/parent/scope/target tags.
+	Tags map[string]string
+	// Target is the logical routing address sent as the resonate:target tag.
+	// Empty falls back to the Resonate instance's configured network group.
+	Target string
 }
 
 // ──────────────────────────────────────────────────────────────────────────

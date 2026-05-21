@@ -75,10 +75,15 @@ func (v *Value) UnmarshalJSON(b []byte) error {
 type PromiseState string
 
 const (
-	PromiseStatePending          PromiseState = "pending"
-	PromiseStateResolved         PromiseState = "resolved"
-	PromiseStateRejected         PromiseState = "rejected"
+	// PromiseStatePending means the promise has been created but not yet settled.
+	PromiseStatePending PromiseState = "pending"
+	// PromiseStateResolved means the promise completed successfully with a value.
+	PromiseStateResolved PromiseState = "resolved"
+	// PromiseStateRejected means the promise was rejected with an error by the workflow.
+	PromiseStateRejected PromiseState = "rejected"
+	// PromiseStateRejectedCanceled means the promise was explicitly canceled before it resolved.
 	PromiseStateRejectedCanceled PromiseState = "rejected_canceled"
+	// PromiseStateRejectedTimedout means the promise expired before it was settled.
 	PromiseStateRejectedTimedout PromiseState = "rejected_timedout"
 )
 
@@ -86,10 +91,15 @@ const (
 type TaskState string
 
 const (
-	TaskStatePending   TaskState = "pending"
-	TaskStateAcquired  TaskState = "acquired"
+	// TaskStatePending means the task exists on the server but no worker has acquired it yet.
+	TaskStatePending TaskState = "pending"
+	// TaskStateAcquired means a worker holds the lease and is currently executing the task.
+	TaskStateAcquired TaskState = "acquired"
+	// TaskStateSuspended means the task is waiting on one or more promise callbacks before resuming.
 	TaskStateSuspended TaskState = "suspended"
-	TaskStateHalted    TaskState = "halted"
+	// TaskStateHalted means the task has been administratively stopped and will not resume.
+	TaskStateHalted TaskState = "halted"
+	// TaskStateFulfilled means the task completed and its root promise has been settled.
 	TaskStateFulfilled TaskState = "fulfilled"
 )
 
@@ -97,8 +107,11 @@ const (
 type SettleState string
 
 const (
-	SettleStateResolved         SettleState = "resolved"
-	SettleStateRejected         SettleState = "rejected"
+	// SettleStateResolved requests that the promise be settled as successfully completed.
+	SettleStateResolved SettleState = "resolved"
+	// SettleStateRejected requests that the promise be settled as failed with an error.
+	SettleStateRejected SettleState = "rejected"
+	// SettleStateRejectedCanceled requests that the promise be settled as explicitly canceled.
 	SettleStateRejectedCanceled SettleState = "rejected_canceled"
 )
 

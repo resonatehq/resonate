@@ -14,8 +14,13 @@ import (
 type Status int
 
 const (
+	// StatusDone means the workflow ran to completion and its root promise has been fulfilled.
 	StatusDone Status = iota
+	// StatusSuspended means the workflow is waiting on one or more remote promises
+	// and has been suspended; callbacks are registered so it resumes when they settle.
 	StatusSuspended
+	// StatusErr means the workflow could not be executed or suspended; the accompanying
+	// non-nil error from Core.OnMessage or Core.ExecuteUntilBlocked carries the cause.
 	StatusErr
 )
 
