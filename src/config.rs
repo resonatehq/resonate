@@ -344,7 +344,7 @@ pub struct BashExecConfig {
 
 /// Google Cloud Pub/Sub transport configuration.
 /// Authentication uses Application Default Credentials (ADC).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GcpsConfig {
     /// Enable the gcps:// address scheme [default: false]
     #[serde(default)]
@@ -353,6 +353,24 @@ pub struct GcpsConfig {
     /// Default GCP project ID. Used when the address doesn't specify a project.
     #[serde(default)]
     pub project: Option<String>,
+
+    /// Max concurrent GCP Pub/Sub deliveries
+    #[serde(default = "default_gcps_concurrency")]
+    pub concurrency: usize,
+}
+
+fn default_gcps_concurrency() -> usize {
+    16
+}
+
+impl Default for GcpsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            project: None,
+            concurrency: default_gcps_concurrency(),
+        }
+    }
 }
 
 fn default_true() -> bool {
