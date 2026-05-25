@@ -1843,6 +1843,9 @@ impl Oracle {
                 let promise_id = promise_id_template
                     .replace("{{.id}}", &schedule_id)
                     .replace("{{.timestamp}}", &current_timeout.to_string());
+                tags.insert("resonate:origin".to_string(), promise_id.clone());
+                tags.insert("resonate:branch".to_string(), promise_id.clone());
+                tags.insert("resonate:parent".to_string(), promise_id.clone());
                 if !self.promises.contains_key(&promise_id) {
                     let timeout_at = current_timeout + promise_timeout;
                     let already_timedout = current_timeout >= timeout_at;
