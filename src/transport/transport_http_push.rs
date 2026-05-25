@@ -391,7 +391,9 @@ mod tests {
         .await;
         // send() spawns the request; wait for the server to receive it so the
         // mock's recorded_audience is populated before we assert on it.
-        rx.recv().await.expect("delivery target received no request");
+        rx.recv()
+            .await
+            .expect("delivery target received no request");
         assert_eq!(
             mock.recorded_audience.lock().unwrap().as_deref(),
             Some("https://my-audience.example.com"),
@@ -409,7 +411,9 @@ mod tests {
         })
         .send(&HttpAddress { url: url.clone() }, &serde_json::json!({}))
         .await;
-        rx.recv().await.expect("delivery target received no request");
+        rx.recv()
+            .await
+            .expect("delivery target received no request");
         assert_eq!(
             mock.recorded_audience.lock().unwrap().as_deref(),
             Some(url.as_str()),

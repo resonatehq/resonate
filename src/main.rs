@@ -282,9 +282,11 @@ async fn run_server(config: Config) -> Result<(), String> {
     };
     let gcps: Option<Arc<dyn GcpsTransport>> = if state.config.transports.gcps.enabled {
         tracing::info!("GCP Pub/Sub transport enabled");
-        Some(Arc::new(transport::transport_gcps::GcpsPubSubTransport::new(
-            state.config.transports.gcps.concurrency,
-        )))
+        Some(Arc::new(
+            transport::transport_gcps::GcpsPubSubTransport::new(
+                state.config.transports.gcps.concurrency,
+            ),
+        ))
     } else {
         None
     };
