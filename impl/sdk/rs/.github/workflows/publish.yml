@@ -43,7 +43,7 @@ jobs:
           version=$(cargo metadata --format-version=1 --no-deps \
             | jq -r '.packages[] | select(.name=="resonate-sdk-macros") | .version')
           echo "Waiting for resonate-sdk-macros@${version} to appear on the crates.io index..."
-          ua="resonate-sdk-rs publish workflow (https://github.com/resonatehq/resonate-sdk-rust)"
+          ua="resonate-sdk-rs publish workflow (https://github.com/resonatehq/resonate-sdk-rs)"
           for i in $(seq 1 60); do
             if curl -sSf -A "$ua" \
                 "https://index.crates.io/re/so/resonate-sdk-macros" \

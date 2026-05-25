@@ -36,7 +36,7 @@ To track the latest development version, use a git dependency:
 
 ```toml
 [dependencies]
-resonate-sdk = { git = "https://github.com/resonatehq/resonate-sdk-rust", branch = "main" }
+resonate-sdk = { git = "https://github.com/resonatehq/resonate-sdk-rs", branch = "main" }
 ```
 
 ## Quick example
