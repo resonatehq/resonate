@@ -472,12 +472,23 @@ pub struct TaskFenceActionData {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_fence_data"))]
 pub struct TaskFenceData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
     pub version: i64,
     pub action: TaskFenceActionData,
+}
+
+fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::ValidationError> {
+    if let Some(action_id) = data.action.data.get("id").and_then(|v| v.as_str()) {
+        if action_id == data.id {
+            return Err(validator::ValidationError::new("action_id_equals_task_id")
+                .with_message("Action ID must not equal the task ID".into()));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
