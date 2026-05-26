@@ -633,22 +633,31 @@ mod tests {
 
     #[test]
     fn default_config_is_valid() {
-        Config::default().validate().expect("default config should validate");
+        Config::default()
+            .validate()
+            .expect("default config should validate");
     }
 
     #[test]
     fn rejects_zero_http_push_concurrency() {
         let mut config = Config::default();
         config.transports.http_push.concurrency = 0;
-        let err = config.validate().expect_err("zero concurrency must be rejected");
-        assert!(err.contains("http_push.concurrency"), "unexpected error: {err}");
+        let err = config
+            .validate()
+            .expect_err("zero concurrency must be rejected");
+        assert!(
+            err.contains("http_push.concurrency"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
     fn rejects_zero_gcps_concurrency() {
         let mut config = Config::default();
         config.transports.gcps.concurrency = 0;
-        let err = config.validate().expect_err("zero concurrency must be rejected");
+        let err = config
+            .validate()
+            .expect_err("zero concurrency must be rejected");
         assert!(err.contains("gcps.concurrency"), "unexpected error: {err}");
     }
 }
