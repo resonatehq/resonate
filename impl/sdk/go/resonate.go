@@ -120,6 +120,12 @@ type RunOptions struct {
 	// Target is the logical routing address sent as the resonate:target tag.
 	// Empty falls back to the Resonate instance's configured network group.
 	Target string
+	// RetryPolicy governs re-execution when the registered function returns
+	// an error. Nil applies DefaultRetryPolicy (exponential backoff). Only
+	// effective when this worker is the one that executes the function (i.e.
+	// the local create-and-acquire path); see DefaultRetryPolicy for the
+	// fallback used by tasks received via server push.
+	RetryPolicy RetryPolicy
 }
 
 // RPCOptions controls a top-level RPC (remote dispatch via Resonate.RPC).
@@ -689,8 +695,9 @@ func (rf *RegisteredFunc[A, R]) Run(ctx stdctx.Context, id string, args A, opts 
 			taskID := created.Task.ID
 			version := created.Task.Version
 			preload := created.Preload
+			retryPolicy := opt.RetryPolicy
 			go func() {
-				if _, e := r.core.ExecuteUntilBlocked(r.bgCtx, taskID, version, decoded, preload); e != nil {
+				if _, e := r.core.ExecuteUntilBlocked(r.bgCtx, taskID, version, decoded, preload, retryPolicy); e != nil {
 					r.log.Error("ExecuteUntilBlocked failed", "task_id", taskID, "err", e)
 				}
 			}()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -407,6 +408,112 @@ func TestContext_Run_BadFunction(t *testing.T) {
 	_, err := ctx.Run(42, nil)
 	if err == nil {
 		t.Fatal("expected validation error for non-function")
+	}
+}
+
+func TestContext_Run_RetrySucceedsAfterTransientErrors(t *testing.T) {
+	fake := newFakeFenceClient()
+	eff := NewEffects(fake, "task-1", 1, nil)
+	ctx := testContext("root", eff)
+
+	var calls int32
+	flake := func(_ *Context, _ int) (int, error) {
+		c := atomic.AddInt32(&calls, 1)
+		if c < 3 {
+			return 0, errors.New("flake")
+		}
+		return 99, nil
+	}
+	fut, err := ctx.Run(flake, 0, RunOpts{
+		RetryPolicy: ConstantRetry{MaxAttempts: 5, Delay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got int
+	if err := fut.Await(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 99 {
+		t.Errorf("got %d, want 99", got)
+	}
+	if c := atomic.LoadInt32(&calls); c != 3 {
+		t.Errorf("invocations = %d, want 3", c)
+	}
+}
+
+func TestContext_Run_NonRetryableShortCircuits(t *testing.T) {
+	fake := newFakeFenceClient()
+	eff := NewEffects(fake, "task-1", 1, nil)
+	ctx := testContext("root", eff)
+
+	var calls int32
+	sentinel := errors.New("bad-input")
+	bad := func(_ *Context, _ int) (int, error) {
+		atomic.AddInt32(&calls, 1)
+		return 0, NewNonRetryable(sentinel)
+	}
+	fut, err := ctx.Run(bad, 0, RunOpts{
+		RetryPolicy: ConstantRetry{MaxAttempts: 10, Delay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got int
+	err = fut.Await(&got)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var appErr *ApplicationError
+	if !errors.As(err, &appErr) || !strings.Contains(appErr.Message, "bad-input") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if c := atomic.LoadInt32(&calls); c != 1 {
+		t.Errorf("invocations = %d, want 1 (NonRetryable)", c)
+	}
+}
+
+// retryPolicyAlwaysWithDelay is a custom RetryPolicy used to confirm ctx
+// cancellation aborts a mid-sleep retry promptly.
+type retryPolicyAlwaysWithDelay struct{ delay time.Duration }
+
+func (p retryPolicyAlwaysWithDelay) NextDelay(_ int, _ error) (time.Duration, bool) {
+	return p.delay, true
+}
+
+func TestContext_Run_RetryAbortsOnCtxCancel(t *testing.T) {
+	fake := newFakeFenceClient()
+	eff := NewEffects(fake, "task-1", 1, nil)
+	c := testContext("root", eff)
+	cctx, cancel := context.WithCancel(context.Background())
+	c.host = cctx
+
+	var calls int32
+	alwaysFail := func(_ *Context, _ int) (int, error) {
+		atomic.AddInt32(&calls, 1)
+		return 0, errors.New("nope")
+	}
+	// Long sleep between retries; cancelling the host context mid-sleep should
+	// short-circuit the loop without waiting it out.
+	fut, err := c.Run(alwaysFail, 0, RunOpts{
+		RetryPolicy: retryPolicyAlwaysWithDelay{delay: 30 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Give the first attempt a moment to fail and enter the sleep.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	start := time.Now()
+	var got int
+	if err := fut.Await(&got); err == nil {
+		t.Fatal("expected error after cancellation")
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Errorf("Await took %v after cancel; expected prompt return", waited)
+	}
+	if c := atomic.LoadInt32(&calls); c != 1 {
+		t.Errorf("invocations after cancel = %d, want 1 (no retry should have completed)", c)
 	}
 }
 

@@ -196,7 +196,7 @@ func TestCore_FulfillResolved_ViaExecuteUntilBlocked(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-add", "add", addArgs{A: 3, B: 4})
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-add", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-add", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestCore_FulfillRejected_ViaExecuteUntilBlocked(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-fail", "fail", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-fail", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-fail", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestCore_FulfillObjectValue_RoundTripsCodec(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-obj", "obj", nil)
 
-	if _, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-obj", v, promise, preload); err != nil {
+	if _, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-obj", v, promise, preload, nil); err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
 	got := f.promiseGet(t, "p1-obj")
@@ -266,7 +266,7 @@ func TestCore_SuspendsOnPendingRemote(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-wait", "waitOne", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-wait", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-wait", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestCore_SuspendsRegistersAllAwaiteds(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-two", "waitTwo", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-two", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-two", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestCore_ExecuteUntilBlocked_WithPreload(t *testing.T) {
 	pre, _ := f.sender.PromiseGet(f.ctx, "p1-pre.1")
 	preload := []resonate.PromiseRecord{pre}
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-pre", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-pre", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestCore_ReleasesTaskOnFunctionNotFound(t *testing.T) {
 	f := newCoreFixture(t)
 	v, promise, preload := f.createRootTask(t, "p1-nofn", "missing", nil)
 
-	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-nofn", v, promise, preload)
+	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-nofn", v, promise, preload, nil)
 	if err == nil {
 		t.Fatal("expected FunctionNotFoundError, got nil")
 	}
@@ -434,7 +434,7 @@ func TestCore_HeartbeatStartedAndStopped_OnSuccess(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-hb-ok", "seven2", nil)
 
-	if _, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-ok", v, promise, preload); err != nil {
+	if _, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-ok", v, promise, preload, nil); err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
 	if got := f.hb.started.Load(); got != 1 {
@@ -449,7 +449,7 @@ func TestCore_HeartbeatStoppedOnError(t *testing.T) {
 	f := newCoreFixture(t)
 	v, promise, preload := f.createRootTask(t, "p1-hb-err", "missing", nil)
 
-	_, _ = f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-err", v, promise, preload)
+	_, _ = f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-err", v, promise, preload, nil)
 	if got := f.hb.started.Load(); got != 1 {
 		t.Errorf("started = %d, want 1", got)
 	}
@@ -467,7 +467,7 @@ func TestCore_PlainPanicYieldsApplicationErrorAndReleasesTask(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-panic", "boom", nil)
 
-	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-panic", v, promise, preload)
+	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-panic", v, promise, preload, nil)
 	if err == nil {
 		t.Fatal("expected ApplicationError from panic, got nil")
 	}
@@ -490,7 +490,7 @@ func TestCore_PanicMentioningSuspendStillClassifiedAsAppError(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-unwrap", "unwrap", nil)
 
-	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-unwrap", v, promise, preload)
+	_, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-unwrap", v, promise, preload, nil)
 	if err == nil {
 		t.Fatal("expected ApplicationError, got nil")
 	}
@@ -507,7 +507,7 @@ func TestCore_HeartbeatStoppedAfterPanic(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-hb-panic", "boomHb", nil)
 
-	_, _ = f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-panic", v, promise, preload)
+	_, _ = f.core.ExecuteUntilBlocked(f.ctx, "p1-hb-panic", v, promise, preload, nil)
 	if got := f.hb.started.Load(); got != 1 {
 		t.Errorf("started = %d, want 1", got)
 	}
@@ -543,7 +543,7 @@ func TestCore_NoopHeartbeatDoesNotInterfere(t *testing.T) {
 		t.Fatalf("task.create: %v (conflict=%v)", err, res.Conflict)
 	}
 	decoded, _ := codec.DecodePromise(res.Created.Promise)
-	status, err := core.ExecuteUntilBlocked(ctx, "p1-noophb", res.Created.Task.Version, decoded, res.Created.Preload)
+	status, err := core.ExecuteUntilBlocked(ctx, "p1-noophb", res.Created.Task.Version, decoded, res.Created.Preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestCore_DoneOnReturn(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-done", "done", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-done", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-done", v, promise, preload, nil)
 	if err != nil || status != resonate.StatusDone {
 		t.Fatalf("status=%v err=%v, want Done/nil", status, err)
 	}
@@ -587,7 +587,7 @@ func TestCore_SwallowedSuspendStillSuspends(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-swallow", "swallow", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-swallow", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-swallow", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}
@@ -613,7 +613,7 @@ func TestCore_FireAndForgetLocalSuspension(t *testing.T) {
 	}
 	v, promise, preload := f.createRootTask(t, "p1-ff", "ffparent", nil)
 
-	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-ff", v, promise, preload)
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-ff", v, promise, preload, nil)
 	if err != nil {
 		t.Fatalf("ExecuteUntilBlocked: %v", err)
 	}

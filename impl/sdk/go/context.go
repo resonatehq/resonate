@@ -221,6 +221,9 @@ type RunOpts struct {
 	// Timeout caps the child promise's deadline. Zero inherits the parent's
 	// remaining deadline (via DefaultChildTimeout if none is set).
 	Timeout time.Duration
+	// RetryPolicy governs re-execution when the child function returns an
+	// error. Nil applies DefaultRetryPolicy (exponential backoff).
+	RetryPolicy RetryPolicy
 }
 
 // RPCOpts controls a ctx.RPC invocation (remote, cross-worker dispatch).
@@ -331,35 +334,43 @@ func (c *Context) Run(fn any, args any, opts ...RunOpts) (*Future, error) {
 	c.mu.Unlock()
 	c.wg.Add(1)
 
-	go c.executeLocal(f, df, childCtx, args)
+	go c.executeLocal(f, df, childCtx, args, opt.RetryPolicy)
 
 	return f, nil
 }
 
-func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context, args any) {
+func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context, args any, policy RetryPolicy) {
 	defer c.wg.Done()
+	// Defensive recover: invokeWithRetry already converts user-function
+	// panics (including suspendSignal) into return values, so any panic
+	// reaching here is from flushLocalWork, codec, or settle paths.
 	defer func() {
 		r := recover()
 		if r == nil {
 			return
 		}
-		if _, ok := r.(suspendSignal); ok {
-			childCtx.flushLocalWork()
-			childTodos := childCtx.drainSpawnedRemote()
-			if len(childTodos) > 0 {
-				c.mu.Lock()
-				c.spawnedRemote = append(c.spawnedRemote, childTodos...)
-				c.mu.Unlock()
-			}
-			f.result <- localResult{suspended: true}
-			return
-		}
 		f.result <- localResult{err: fmt.Errorf("resonate: panic in %s: %v", df.name, r)}
 	}()
 
-	res, runErr := df.invoke(childCtx, args)
+	res, runErr, suspended, panicErr := invokeWithRetry(childCtx.host, df, childCtx, args, policy, nil)
+	if panicErr != nil {
+		f.result <- localResult{err: fmt.Errorf("resonate: panic in %s: %v", df.name, panicErr)}
+		return
+	}
+
 	childCtx.flushLocalWork()
 	childTodos := childCtx.drainSpawnedRemote()
+
+	if suspended {
+		if len(childTodos) > 0 {
+			c.mu.Lock()
+			c.spawnedRemote = append(c.spawnedRemote, childTodos...)
+			c.mu.Unlock()
+		}
+		f.result <- localResult{suspended: true}
+		return
+	}
+
 	if len(childTodos) > 0 {
 		// A child suspended in the background; merge todos and treat parent
 		// as suspended too — matches Rust's structured-concurrency rule.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -770,5 +771,135 @@ func TestErrorPropagationViaResult(t *testing.T) {
 	}
 	if !strings.Contains(appErr.Message, "boom") {
 		t.Errorf("error %q should mention boom", appErr.Message)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Retry policy
+// ──────────────────────────────────────────────────────────────────────────
+
+func TestRun_RetrySucceedsAfterTransientErrors(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	var calls atomic.Int32
+	flake := func(_ *resonate.Context, _ struct{}) (int, error) {
+		n := calls.Add(1)
+		if n < 3 {
+			return 0, errors.New("transient")
+		}
+		return 42, nil
+	}
+	fn, err := resonate.Register(r, "flake", flake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "retry-success", struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 5, Delay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("invocation count = %d, want 3", n)
+	}
+}
+
+func TestRun_RetryExhausted(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	var calls atomic.Int32
+	alwaysFail := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, errors.New("nope")
+	}
+	fn, err := resonate.Register(r, "always_fail_retry", alwaysFail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "retry-exhausted", struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 3, Delay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.Result(ctx)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+	var appErr *resonate.ApplicationError
+	if !errors.As(err, &appErr) || !strings.Contains(appErr.Message, "nope") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("invocation count = %d, want 3", n)
+	}
+}
+
+func TestRun_NoRetry(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	var calls atomic.Int32
+	failOnce := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, errors.New("once")
+	}
+	fn, err := resonate.Register(r, "fail_once", failOnce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "no-retry", struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.NoRetry,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Result(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("invocation count = %d, want 1 (NoRetry)", n)
+	}
+}
+
+func TestRun_NonRetryableShortCircuits(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	var calls atomic.Int32
+	sentinel := errors.New("validation-failed")
+	bad := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, resonate.NewNonRetryable(sentinel)
+	}
+	fn, err := resonate.Register(r, "non_retryable_fn", bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "non-retryable", struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 10, Delay: time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.Result(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var appErr *resonate.ApplicationError
+	if !errors.As(err, &appErr) || !strings.Contains(appErr.Message, "validation-failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("invocation count = %d, want 1 (NonRetryable short-circuit)", n)
 	}
 }

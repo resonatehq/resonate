@@ -2,6 +2,7 @@ package resonate_test
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -770,5 +771,284 @@ func TestE2EHandleResult(t *testing.T) {
 	}
 	if v != 300 {
 		t.Errorf("v = %d, want 300", v)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tests — Retry policy
+// ──────────────────────────────────────────────────────────────────────────
+
+func TestE2E_Run_RetrySucceedsAfterTransientErrors(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	flake := func(_ *resonate.Context, _ struct{}) (int, error) {
+		n := calls.Add(1)
+		if n < 3 {
+			return 0, fmt.Errorf("transient %d", n)
+		}
+		return 42, nil
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_retry_ok"), flake)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, uniqueID("retry-ok"), struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ExponentialRetry{MaxAttempts: 5, Base: 50 * time.Millisecond, Max: 1 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("invocations = %d, want 3", n)
+	}
+}
+
+func TestE2E_Run_RetryExhausted(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	alwaysFail := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, errors.New("nope")
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_retry_exhaust"), alwaysFail)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	id := uniqueID("retry-exhausted")
+	h, err := fn.Run(ctx, id, struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 3, Delay: 50 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.Result(ctx)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error %q should mention nope", err.Error())
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("invocations = %d, want 3", n)
+	}
+}
+
+func TestE2E_Run_NoRetry(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	failOnce := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, errors.New("once")
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_no_retry"), failOnce)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, uniqueID("no-retry"), struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.NoRetry,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Result(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("invocations = %d, want 1", n)
+	}
+}
+
+func TestE2E_Run_NonRetryable(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	bad := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, resonate.NewNonRetryable(errors.New("validation-failed"))
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_non_retryable"), bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, uniqueID("non-retryable"), struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 10, Delay: 50 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.Result(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "validation-failed") {
+		t.Errorf("error %q should mention validation-failed", err.Error())
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("invocations = %d, want 1 (NonRetryable)", n)
+	}
+}
+
+func TestE2E_Run_RetrySpanRespectsTimeout(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	alwaysFail := func(_ *resonate.Context, _ struct{}) (int, error) {
+		calls.Add(1)
+		return 0, errors.New("doomed")
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_retry_timeout"), alwaysFail)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	id := uniqueID("retry-timeout")
+	// Promise lives 300ms; constant delay is 500ms — at most 1 invocation can
+	// fit before the loop refuses to sleep past TimeoutAt.
+	h, err := fn.Run(ctx, id, struct{}{}, resonate.RunOptions{
+		Timeout:     300 * time.Millisecond,
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 100, Delay: 500 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Result(ctx); err == nil {
+		t.Fatal("expected error after timeout-bounded retry")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("invocations = %d, want 1 (TimeoutAt should have cut retry short)", n)
+	}
+}
+
+func TestE2E_CtxRun_RetryWithinWorkflow(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var inner atomic.Int32
+	innerFn := func(_ *resonate.Context, _ struct{}) (int, error) {
+		n := inner.Add(1)
+		if n < 3 {
+			return 0, errors.New("flake")
+		}
+		return 7, nil
+	}
+	outerFn := func(c *resonate.Context, _ struct{}) (int, error) {
+		f, err := c.Run(innerFn, struct{}{}, resonate.RunOpts{
+			RetryPolicy: resonate.ConstantRetry{MaxAttempts: 5, Delay: 10 * time.Millisecond},
+		})
+		if err != nil {
+			return 0, err
+		}
+		var got int
+		if err := f.Await(&got); err != nil {
+			return 0, err
+		}
+		return got, nil
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_ctxrun_retry_outer"), outerFn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, uniqueID("ctxrun-retry"), struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if got != 7 {
+		t.Errorf("got %d, want 7", got)
+	}
+	if n := inner.Load(); n != 3 {
+		t.Errorf("inner invocations = %d, want 3", n)
+	}
+}
+
+func TestE2E_Run_RetrySurvivesHeartbeat(t *testing.T) {
+	url := resonateURL(t)
+	// Force a short TTL/heartbeat so this test exercises the lease being kept
+	// alive across multiple retry sleeps.
+	r, err := resonate.New(resonate.Config{
+		Network: httpnet.NewHTTP(url, httpnet.HTTPOptions{
+			PID:   uniqueID("worker-hb"),
+			Group: uniqueID("group-hb"),
+		}),
+		TTL: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("resonate.New: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Stop() })
+
+	var calls atomic.Int32
+	flake := func(_ *resonate.Context, _ struct{}) (int, error) {
+		n := calls.Add(1)
+		if n < 4 {
+			return 0, fmt.Errorf("transient %d", n)
+		}
+		return 1, nil
+	}
+	fn, err := resonate.Register(r, uniqueID("e2e_retry_hb"), flake)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+	// Cumulative sleep across 3 failed attempts: ~3*1.5s = 4.5s — longer than
+	// the 2s TTL, so heartbeat must keep the lease alive across the loop.
+	h, err := fn.Run(ctx, uniqueID("retry-hb"), struct{}{}, resonate.RunOptions{
+		RetryPolicy: resonate.ConstantRetry{MaxAttempts: 6, Delay: 1500 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if got != 1 {
+		t.Errorf("got %d, want 1", got)
+	}
+	if n := calls.Load(); n != 4 {
+		t.Errorf("invocations = %d, want 4", n)
 	}
 }
