@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::Client;
-use tokio::sync::Semaphore;
+use tokio::sync::{mpsc, Semaphore};
 
 use super::HttpAddress;
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
@@ -119,10 +119,13 @@ impl Auth {
 // Transport
 // ---------------------------------------------------------------------------
 
+struct DeliveryJob {
+    address: HttpAddress,
+    payload: serde_json::Value,
+}
+
 pub struct HttpPushTransport {
-    client: Client,
-    auth: Arc<Auth>,
-    semaphore: Arc<Semaphore>,
+    tx: mpsc::Sender<DeliveryJob>,
 }
 
 impl HttpPushTransport {
@@ -137,84 +140,104 @@ impl HttpPushTransport {
             .timeout(request_timeout)
             .build()
             .expect("failed to build HTTP client");
-        Self {
-            client,
-            auth: Arc::new(auth),
-            semaphore: Arc::new(Semaphore::new(concurrency)),
-        }
+        let auth = Arc::new(auth);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        // Queue capacity is intentionally larger than `concurrency` so short
+        // bursts smooth out; full queue + full in-flight pushes back on
+        // `send()`, which in turn pushes back on the claim loop in
+        // processing_messages — the DB is the durable buffer.
+        let (tx, rx) = mpsc::channel::<DeliveryJob>(64 * concurrency);
+
+        tokio::spawn(dispatcher(client, auth, semaphore, rx));
+
+        Self { tx }
     }
 
-    /// Non-blocking dispatch: acquires a concurrency permit and spawns the
-    /// HTTP request on a background task. Returns immediately so the
-    /// message-processing loop is never head-of-line blocked by token
-    /// resolution or slow targets. If all permits are in use the message
-    /// is dropped (warn + "dropped" metric).
+    /// Enqueue a delivery. Returns once the job is on the in-memory queue.
+    /// Blocks only when the queue is full (never on network I/O), which
+    /// applies natural backpressure to the message-processing loop instead
+    /// of dropping messages.
     pub async fn send(&self, address: &HttpAddress, payload: &serde_json::Value) {
-        let permit = match self.semaphore.clone().try_acquire_owned() {
-            Ok(p) => p,
-            Err(_) => {
-                tracing::warn!(
-                    address = %address.url,
-                    "HTTP push concurrency limit reached, message dropped"
-                );
-                metrics::DELIVERIES_TOTAL
-                    .with_label_values(&["dropped"])
-                    .inc();
-                return;
-            }
+        let job = DeliveryJob {
+            address: address.clone(),
+            payload: payload.clone(),
         };
+        if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
+            // Dispatcher task is gone (transport shutting down). Should not
+            // happen during normal operation; surface for diagnosis.
+            tracing::warn!(
+                address = %job.address.url,
+                "HTTP push dispatcher gone, message dropped"
+            );
+            metrics::DELIVERIES_TOTAL
+                .with_label_values(&["dropped"])
+                .inc();
+        }
+    }
+}
 
-        let client = self.client.clone();
-        let auth = self.auth.clone();
-        let address = address.clone();
-        let payload = payload.clone();
-
+async fn dispatcher(
+    client: Client,
+    auth: Arc<Auth>,
+    semaphore: Arc<Semaphore>,
+    mut rx: mpsc::Receiver<DeliveryJob>,
+) {
+    while let Some(job) = rx.recv().await {
+        // Wait for an in-flight slot rather than dropping. Backpressure
+        // propagates: full in-flight → dispatcher parked here → queue fills
+        // → send() parks the claim loop.
+        let permit = match Arc::clone(&semaphore).acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let client = client.clone();
+        let auth = Arc::clone(&auth);
         tokio::spawn(async move {
-            // Hold the permit for the task's lifetime — its Drop is what
-            // releases the semaphore slot. Referencing `permit` here is also
-            // what forces `async move` to capture it; without this line the
-            // permit would drop when `send()` returns and the cap would be a
-            // no-op.
             let _permit = permit;
-            let auth_header = auth.resolve(&address.url).await;
-
-            let mut request = client
-                .post(&address.url)
-                .header("Content-Type", "application/json")
-                .json(&payload);
-
-            if let Some((name, value)) = auth_header {
-                request = request.header(name, value);
-            }
-
-            match request.send().await {
-                Ok(resp) => {
-                    let status = resp.status().as_u16();
-                    if resp.status().is_success() {
-                        tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
-                        metrics::DELIVERIES_TOTAL
-                            .with_label_values(&["success"])
-                            .inc();
-                    } else {
-                        tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
-                        metrics::DELIVERIES_TOTAL
-                            .with_label_values(&["error"])
-                            .inc();
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        address = %address.url,
-                        error = %e,
-                        error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
-                        "HTTP push delivery failed"
-                    );
-                    metrics::DELIVERIES_TOTAL
-                        .with_label_values(&["error"])
-                        .inc();
-                }
-            }
+            deliver(client, auth, job).await;
         });
+    }
+}
+
+async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
+    let DeliveryJob { address, payload } = job;
+    let auth_header = auth.resolve(&address.url).await;
+
+    let mut request = client
+        .post(&address.url)
+        .header("Content-Type", "application/json")
+        .json(&payload);
+
+    if let Some((name, value)) = auth_header {
+        request = request.header(name, value);
+    }
+
+    match request.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if resp.status().is_success() {
+                tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
+                metrics::DELIVERIES_TOTAL
+                    .with_label_values(&["success"])
+                    .inc();
+            } else {
+                tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
+                metrics::DELIVERIES_TOTAL
+                    .with_label_values(&["error"])
+                    .inc();
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                address = %address.url,
+                error = %e,
+                error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
+                "HTTP push delivery failed"
+            );
+            metrics::DELIVERIES_TOTAL
+                .with_label_values(&["error"])
+                .inc();
+        }
     }
 }
 

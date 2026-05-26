@@ -357,10 +357,18 @@ pub struct GcpsConfig {
     /// Max concurrent GCP Pub/Sub deliveries
     #[serde(default = "default_gcps_concurrency")]
     pub concurrency: usize,
+
+    /// Per-publish timeout (ms)
+    #[serde(default = "default_gcps_timeout")]
+    pub timeout: u64,
 }
 
 fn default_gcps_concurrency() -> usize {
     16
+}
+
+fn default_gcps_timeout() -> u64 {
+    10000
 }
 
 impl Default for GcpsConfig {
@@ -369,6 +377,7 @@ impl Default for GcpsConfig {
             enabled: false,
             project: None,
             concurrency: default_gcps_concurrency(),
+            timeout: default_gcps_timeout(),
         }
     }
 }
