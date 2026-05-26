@@ -594,8 +594,15 @@ impl Config {
             .extract()
             .map_err(|e| format!("Configuration error: {e}"))?;
 
+        config.validate()?;
+
+        Ok(config)
+    }
+
+    /// Validate semantic constraints that serde/figment cannot express.
+    fn validate(&self) -> Result<(), String> {
         // Validate storage type
-        match config.storage.storage_type.as_str() {
+        match self.storage.storage_type.as_str() {
             "sqlite" | "postgres" | "mysql" => {}
             other => {
                 return Err(format!(
@@ -605,6 +612,43 @@ impl Config {
             }
         }
 
-        Ok(config)
+        // Validate transport concurrency caps. A value of 0 sizes the delivery
+        // semaphore to zero permits, so the dispatcher could never acquire a
+        // slot — every message would queue and then block the processing loop
+        // forever. Reject it up front rather than hang silently at runtime.
+        if self.transports.http_push.concurrency == 0 {
+            return Err("transports.http_push.concurrency must be at least 1 (got 0)".to_string());
+        }
+        if self.transports.gcps.concurrency == 0 {
+            return Err("transports.gcps.concurrency must be at least 1 (got 0)".to_string());
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_is_valid() {
+        Config::default().validate().expect("default config should validate");
+    }
+
+    #[test]
+    fn rejects_zero_http_push_concurrency() {
+        let mut config = Config::default();
+        config.transports.http_push.concurrency = 0;
+        let err = config.validate().expect_err("zero concurrency must be rejected");
+        assert!(err.contains("http_push.concurrency"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_zero_gcps_concurrency() {
+        let mut config = Config::default();
+        config.transports.gcps.concurrency = 0;
+        let err = config.validate().expect_err("zero concurrency must be rejected");
+        assert!(err.contains("gcps.concurrency"), "unexpected error: {err}");
     }
 }
