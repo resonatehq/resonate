@@ -393,15 +393,22 @@ impl Oracle {
                 .promises
                 .get(&r.awaiter)
                 .and_then(|p| p.tags.get("resonate:target").cloned());
-            if task_state == Some(TaskState::Suspended) {
-                if let Some(t) = self.tasks.get_mut(&r.awaiter) {
-                    t.state = TaskState::Pending;
-                    // Don't add to t.resumes: SQLite has no ready-callback entry for direct resumes.
+            match task_state {
+                Some(TaskState::Suspended) => {
+                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
+                        t.state = TaskState::Pending;
+                    }
+                    self.set_t_timeout(&r.awaiter, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
+                    if let Some(addr) = addr {
+                        self.send_execute(&addr, &r.awaiter, version);
+                    }
                 }
-                self.set_t_timeout(&r.awaiter, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
-                if let Some(addr) = addr {
-                    self.send_execute(&addr, &r.awaiter, version);
+                Some(TaskState::Pending) | Some(TaskState::Acquired) => {
+                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
+                        t.resumes.insert(r.awaited.clone());
+                    }
                 }
+                _ => {}
             }
         }
 
