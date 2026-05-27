@@ -364,7 +364,7 @@ pub struct GcpsConfig {
 }
 
 fn default_gcps_concurrency() -> usize {
-    16
+    256
 }
 
 fn default_gcps_timeout() -> u64 {
@@ -411,7 +411,7 @@ pub struct HttpPushConfig {
 }
 
 fn default_http_push_concurrency() -> usize {
-    16
+    256
 }
 fn default_http_push_connect_timeout() -> u64 {
     10000

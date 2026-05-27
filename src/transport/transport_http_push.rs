@@ -146,7 +146,7 @@ impl HttpPushTransport {
         // bursts smooth out; full queue + full in-flight pushes back on
         // `send()`, which in turn pushes back on the claim loop in
         // processing_messages — the DB is the durable buffer.
-        let (tx, rx) = mpsc::channel::<DeliveryJob>(64 * concurrency);
+        let (tx, rx) = mpsc::channel::<DeliveryJob>(concurrency);
 
         tokio::spawn(dispatcher(client, auth, semaphore, rx));
 

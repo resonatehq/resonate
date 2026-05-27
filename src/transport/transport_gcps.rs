@@ -35,7 +35,7 @@ impl GcpsPubSubTransport {
         // full queue + full in-flight pushes back on `send()`, which in turn
         // pushes back on the claim loop in processing_messages — the DB is
         // the durable buffer.
-        let (tx, rx) = mpsc::channel::<PublishJob>(64 * concurrency);
+        let (tx, rx) = mpsc::channel::<PublishJob>(concurrency);
 
         tokio::spawn(dispatcher(publishers, semaphore, timeout, rx));
 
