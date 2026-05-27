@@ -731,6 +731,15 @@ impl Db for PostgresDb<'_> {
               SELECT t.id, t.version, p.target FROM resumed_tasks t JOIN promises p ON p.id = t.id
               ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address
               RETURNING id
+            ),
+            -- EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
+            inserted_ready_callback AS (
+              INSERT INTO callbacks (awaited_id, awaiter_id, ready)
+              SELECT $1, $2, true
+              WHERE EXISTS (SELECT 1 FROM awaited WHERE state != 'pending')
+                AND EXISTS (SELECT 1 FROM tasks WHERE id = $2 AND state IN ('pending', 'acquired'))
+              ON CONFLICT (awaited_id, awaiter_id) DO NOTHING
+              RETURNING awaited_id
             )
             SELECT 'awaited' AS type, id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at FROM awaited
             UNION ALL

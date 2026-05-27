@@ -985,6 +985,19 @@ impl Db for MysqlDb<'_> {
                         .execute(self.tx().as_mut()),
                     )?;
                 }
+
+                // EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
+                rt_block_on(
+                    sqlx::query(
+                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
+                         SELECT ?, ?, true FROM tasks
+                         WHERE id = ? AND state IN ('pending', 'acquired')",
+                    )
+                    .bind(awaited_id)
+                    .bind(awaiter_id)
+                    .bind(awaiter_id)
+                    .execute(self.tx().as_mut()),
+                )?;
             }
             _ => {}
         }

@@ -585,6 +585,16 @@ impl<'a> Db for SqliteDb<'a> {
                         )?;
                     }
                 }
+
+                // EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
+                     SELECT ?1, ?2, true
+                     WHERE EXISTS (
+                       SELECT 1 FROM tasks WHERE id = ?2 AND state IN ('pending', 'acquired')
+                     )",
+                    params![awaited_id, awaiter_id],
+                )?;
             }
         }
 
