@@ -1853,6 +1853,7 @@ impl Oracle {
                 tags.insert("resonate:origin".to_string(), promise_id.clone());
                 tags.insert("resonate:branch".to_string(), promise_id.clone());
                 tags.insert("resonate:parent".to_string(), promise_id.clone());
+                tags.insert("resonate:prefix".to_string(), promise_id.clone());
                 if !self.promises.contains_key(&promise_id) {
                     let timeout_at = current_timeout + promise_timeout;
                     let already_timedout = current_timeout >= timeout_at;

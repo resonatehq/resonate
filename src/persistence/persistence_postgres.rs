@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS promises (
   target TEXT GENERATED ALWAYS AS (tags->>'resonate:target') STORED,
   origin TEXT GENERATED ALWAYS AS (tags->>'resonate:origin') STORED,
   branch TEXT GENERATED ALWAYS AS (tags->>'resonate:branch') STORED,
+  prefix TEXT GENERATED ALWAYS AS (tags->>'resonate:prefix') STORED,
   timer BOOLEAN NOT NULL GENERATED ALWAYS AS (COALESCE(tags->>'resonate:timer', '') = 'true') STORED,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
