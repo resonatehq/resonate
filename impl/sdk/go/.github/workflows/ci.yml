@@ -35,9 +35,9 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.61.0
+          version: v2.12.2
 
       - name: Build all packages
         run: go build ./...

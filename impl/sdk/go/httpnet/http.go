@@ -142,7 +142,7 @@ func (h *HTTPNetwork) Send(ctx context.Context, body string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -195,7 +195,7 @@ func (h *HTTPNetwork) runSSE(ctx context.Context) {
 		resp, err := h.client.Do(req)
 		if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			if resp != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 			if !waitOrCancel(ctx, backoff) {
 				return
@@ -206,7 +206,7 @@ func (h *HTTPNetwork) runSSE(ctx context.Context) {
 
 		backoff = time.Second // reset on success
 		h.readSSEStream(ctx, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if !waitOrCancel(ctx, backoff) {
 			return
