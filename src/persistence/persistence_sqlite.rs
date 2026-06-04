@@ -53,7 +53,6 @@ fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
           target TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:target')) STORED,
           origin TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:origin')) STORED,
           branch TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:branch')) STORED,
-          prefix TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:prefix')) STORED,
           timer BOOLEAN NOT NULL GENERATED ALWAYS AS (COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
           timeout_at BIGINT NOT NULL,
           created_at BIGINT NOT NULL,
