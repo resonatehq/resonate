@@ -123,6 +123,65 @@ hello, world!
 - Visualize the call graph with `resonate tree <id>`.
 - Crash the worker mid-run (`Ctrl-C` before `h.Result` returns) and restart it — the same `Run` call will resume rather than re-invoke `greet` from scratch.
 
+## No-server Quickstart
+
+You can also run the SDK entirely in-process with [`localnet`](./localnet) -- no Resonate server installation required. This is ideal for local development, testing, and prototyping.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    resonate "github.com/resonatehq/resonate-sdk-go"
+    "github.com/resonatehq/resonate-sdk-go/localnet"
+)
+
+type GreetArgs struct {
+    Name string `json:"name"`
+}
+
+func greet(_ *resonate.Context, args GreetArgs) (string, error) {
+    return fmt.Sprintf("hello, %s!", args.Name), nil
+}
+
+func main() {
+    pid := "worker-1"
+    r, err := resonate.New(resonate.Config{
+        Network:   localnet.NewLocal("default", &pid),
+        Heartbeat: resonate.NoopHeartbeat{},
+    })
+    if err != nil {
+        log.Fatalf("resonate.New: %v", err)
+    }
+    defer func() { _ = r.Stop() }()
+
+    greetFn, err := resonate.Register(r, "greet", greet)
+    if err != nil {
+        log.Fatalf("Register: %v", err)
+    }
+
+    ctx := context.Background()
+    id := fmt.Sprintf("greet-%d", time.Now().UnixNano())
+
+    h, err := greetFn.Run(ctx, id, GreetArgs{Name: "world"})
+    if err != nil {
+        log.Fatalf("Run: %v", err)
+    }
+
+    out, err := h.Result(ctx)
+    if err != nil {
+        log.Fatalf("Result: %v", err)
+    }
+    fmt.Println(out)
+}
+```
+
+**Key difference:** `localnet` replaces the `URL` field with `Network: localnet.NewLocal("default", &pid)` and **requires** `Heartbeat: resonate.NoopHeartbeat{}`. Without `NoopHeartbeat`, the default `AsyncHeartbeat` spawns goroutines that attempt HTTP requests against a non-existent server endpoint. `localnet` has no HTTP layer -- `NoopHeartbeat` is the correct pairing.
+
 ## What's in the package
 
 The package owns the workflow API (`Context`, `Effects`, `Run`, `RPC`, `Sleep`, `Promise`, `Detached`), the wire protocol (`Sender`, the `Network` interface, push-message decoding), and the shared domain types (`PromiseRecord`, `TaskRecord`, etc.). Concrete transports live in two leaf subpackages:
