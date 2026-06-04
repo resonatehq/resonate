@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS promises (
   PRIMARY KEY (id),
   INDEX idx_promises_timeout_at (timeout_at),
   INDEX idx_promises_target (target),
+  INDEX idx_promises_branch (branch),
   CONSTRAINT promises_state_check CHECK (state IN ('pending', 'resolved', 'rejected', 'rejected_canceled', 'rejected_timedout'))
 );
 
