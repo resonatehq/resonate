@@ -426,7 +426,10 @@ func (c *Context) RPC(funcName string, args any, opts ...RPCOpts) (*Future, erro
 }
 
 // Sleep creates a durable timer promise. Await on the returned future yields
-// (suspends) until the timer elapses.
+// (suspends) until the timer elapses. Because workflow functions re-execute
+// from the top on resume, any code above a ctx.Sleep call runs again after the
+// timer resolves — wrap observable side effects in [Context.Run] so the durable
+// child record short-circuits them on replay.
 func (c *Context) Sleep(d time.Duration) (*Future, error) {
 	childID := c.nextID()
 	req := c.sleepCreateReq(childID, d)

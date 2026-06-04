@@ -182,6 +182,14 @@ func main() {
 
 **Key difference:** `localnet` replaces the `URL` field with `Network: localnet.NewLocal("default", &pid)` and **requires** `Heartbeat: resonate.NoopHeartbeat{}`. Without `NoopHeartbeat`, the default `AsyncHeartbeat` spawns goroutines that attempt HTTP requests against a non-existent server endpoint. `localnet` has no HTTP layer -- `NoopHeartbeat` is the correct pairing.
 
+## Replay semantics
+
+Workflow functions execute from the top on every resume. Pure computation can
+run directly in the workflow body, but observable side effects such as printing,
+sending HTTP requests, or incrementing metrics will happen again on each replay
+unless they are wrapped in `ctx.Run`. A settled `ctx.Run` call is recorded as a
+durable child promise, so replay short-circuits the child and skips the body.
+
 ## What's in the package
 
 The package owns the workflow API (`Context`, `Effects`, `Run`, `RPC`, `Sleep`, `Promise`, `Detached`), the wire protocol (`Sender`, the `Network` interface, push-message decoding), and the shared domain types (`PromiseRecord`, `TaskRecord`, etc.). Concrete transports live in two leaf subpackages:
