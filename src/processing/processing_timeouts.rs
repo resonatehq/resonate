@@ -78,6 +78,7 @@ fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<()> {
         promise_tags.insert("resonate:origin".to_string(), promise_id.clone());
         promise_tags.insert("resonate:branch".to_string(), promise_id.clone());
         promise_tags.insert("resonate:parent".to_string(), promise_id.clone());
+        promise_tags.insert("resonate:prefix".to_string(), promise_id.clone());
 
         match db.process_schedule_timeout(
             schedule_id,
