@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS promises (
 );
 CREATE INDEX IF NOT EXISTS idx_promises_timeout_at ON promises (timeout_at) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS idx_promises_target ON promises (target) WHERE target IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_promises_branch ON promises (branch) WHERE branch IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS promise_timeouts (
   timeout_at BIGINT NOT NULL,
