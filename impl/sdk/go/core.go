@@ -228,8 +228,15 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 		return execOutcome{kind: execFulfill, settleState: settleState, value: encoded}, nil
 	}
 
-	// 4. EXECUTE the workflow.
-	rootCtx := NewRootContext(ctx, promise.ID, promise.TimeoutAt, taskData.Func, effects, c.resolver, c.codec)
+	// 4. EXECUTE the workflow. Seed the origin from the promise's
+	//    resonate:origin tag: a promise spawned by another workflow carries the
+	//    lineage's true origin there, and inner promises must inherit it. Fall
+	//    back to the promise's own ID for a genuine root (no origin tag).
+	origin := promise.ID
+	if o, ok := promise.Tags["resonate:origin"]; ok && o != "" {
+		origin = o
+	}
+	rootCtx := newRootContext(ctx, promise.ID, origin, promise.TimeoutAt, taskData.Func, effects, c.resolver, c.codec)
 
 	res, runErr, suspended, panicErr := invokeWithRetry(ctx, df, rootCtx, args, retryPolicy, c.log)
 	if panicErr != nil {

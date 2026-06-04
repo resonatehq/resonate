@@ -64,6 +64,17 @@ type Context struct {
 // The Resonate worker layer (out of scope here) is the typical caller.
 // A nil codec defaults to NewCodec(nil) (NoopEncryptor).
 func NewRootContext(host stdctx.Context, id string, timeoutAt int64, funcName string, effects *Effects, resolver TargetResolver, codec *Codec) *Context {
+	return newRootContext(host, id, id, timeoutAt, funcName, effects, resolver, codec)
+}
+
+// newRootContext is the origin-aware constructor backing NewRootContext. When
+// a worker acquires a task for a promise spawned by another workflow (via RPC,
+// a remote child, or Detached), that promise already carries the lineage's
+// origin in its resonate:origin tag. The worker must seed the execution
+// context with that origin — not the promise's own ID — so inner promises
+// created during the run inherit the correct origin. A genuine root passes its
+// own ID as origin (see NewRootContext).
+func newRootContext(host stdctx.Context, id, originID string, timeoutAt int64, funcName string, effects *Effects, resolver TargetResolver, codec *Codec) *Context {
 	if host == nil {
 		host = stdctx.Background()
 	}
@@ -76,7 +87,7 @@ func NewRootContext(host stdctx.Context, id string, timeoutAt int64, funcName st
 	return &Context{
 		host:           host,
 		id:             id,
-		originID:       id,
+		originID:       originID,
 		branchID:       id,
 		funcName:       funcName,
 		timeoutAt:      timeoutAt,

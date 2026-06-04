@@ -77,6 +77,67 @@ func noop(_ *resonate.Context, _ struct{}) (any, error) { return nil, nil }
 
 func failAlways(_ *resonate.Context, msg string) (string, error) { return "", errors.New(msg) }
 
+// originRootWorkflow spawns a remote child workflow (origin_child) and awaits
+// it. Together with originChildWorkflow it builds a three-level lineage
+// (root → remote child → grandchild) used to verify that the resonate:origin
+// tag propagates across the worker-acquire boundary. The bug it guards against:
+// when a worker acquires the remote origin_child promise, it must seed the
+// execution origin from that promise's resonate:origin tag (the lineage root),
+// not from the child's own id — otherwise grandchildren get the wrong origin.
+func originRootWorkflow(c *resonate.Context, _ struct{}) (int64, error) {
+	h, err := c.RPC("origin_child", struct{}{})
+	if err != nil {
+		return 0, err
+	}
+	var v int64
+	if err := h.Await(&v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+// originChildWorkflow runs on a worker that acquired its remote promise, then
+// creates an inner promise (the grandchild). That grandchild's origin tag is
+// what the test inspects.
+func originChildWorkflow(c *resonate.Context, _ struct{}) (int64, error) {
+	h, err := c.RPC("add", addPair{X: 2, Y: 3})
+	if err != nil {
+		return 0, err
+	}
+	var v int64
+	if err := h.Await(&v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+// mustPromise fetches a promise record by id and fails the test if absent.
+func mustPromise(t *testing.T, ctx stdctx.Context, r *resonate.Resonate, id string) resonate.PromiseRecord {
+	t.Helper()
+	rec, err := r.Sender().PromiseGet(ctx, id)
+	if err != nil {
+		t.Fatalf("PromiseGet %s: %v", id, err)
+	}
+	return rec
+}
+
+// registerOriginLineage registers the add/origin_child/origin_root trio and
+// returns the root function handle. Shared by the local and e2e origin tests.
+func registerOriginLineage(t *testing.T, r *resonate.Resonate) *resonate.RegisteredFunc[struct{}, int64] {
+	t.Helper()
+	if _, err := resonate.Register(r, "add", add); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resonate.Register(r, "origin_child", originChildWorkflow); err != nil {
+		t.Fatal(err)
+	}
+	rootFn, err := resonate.Register(r, "origin_root", originRootWorkflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rootFn
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Constructor / configuration
 // ──────────────────────────────────────────────────────────────────────────
@@ -187,6 +248,46 @@ func TestRegisterDuplicateReturnsError(t *testing.T) {
 	var dup *resonate.AlreadyRegisteredError
 	if !errors.As(err, &dup) {
 		t.Fatalf("expected AlreadyRegisteredError, got %v", err)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Origin tag propagation across the worker-acquire boundary
+// ──────────────────────────────────────────────────────────────────────────
+
+// TestRunInnerPromiseOriginPropagatesAcrossWorker exercises the full path:
+// the local worker runs origin_root, which RPCs origin_child (a remote
+// promise), which the worker re-acquires and runs, which in turn creates a
+// grandchild promise. The grandchild's resonate:origin must be the lineage
+// root, not origin_child's own id. Pre-fix, the worker reset the origin to the
+// acquired promise's id and the grandchild inherited the wrong origin.
+func TestRunInnerPromiseOriginPropagatesAcrossWorker(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	rootFn := registerOriginLineage(t, r)
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+
+	const rootID = "origin-root"
+	h, err := rootFn.Run(ctx, rootID, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.Result(ctx); err != nil {
+		t.Fatalf("Result: %v", err)
+	} else if got != 5 {
+		t.Errorf("result = %d, want 5", got)
+	}
+
+	// Lineage ids: root = "origin-root", remote child = "origin-root.1",
+	// grandchild created inside the child = "origin-root.1.1".
+	child := mustPromise(t, ctx, r, rootID+".1")
+	if got := child.Tags["resonate:origin"]; got != rootID {
+		t.Errorf("child resonate:origin = %q, want %q", got, rootID)
+	}
+	grandchild := mustPromise(t, ctx, r, rootID+".1.1")
+	if got := grandchild.Tags["resonate:origin"]; got != rootID {
+		t.Errorf("grandchild resonate:origin = %q, want %q (lineage root, not the child id)", got, rootID)
 	}
 }
 

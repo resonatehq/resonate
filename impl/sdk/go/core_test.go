@@ -89,6 +89,38 @@ func (f *coreFixture) createRootTask(t *testing.T, id, funcName string, args any
 	return res.Created.Task.Version, decoded, res.Created.Preload
 }
 
+// createRootTaskWithTags is createRootTask with caller-supplied tags merged in.
+// Use it to simulate a promise that was spawned by another workflow — i.e. one
+// that already carries a resonate:origin tag pointing at a different root.
+func (f *coreFixture) createRootTaskWithTags(t *testing.T, id, funcName string, args any, extraTags map[string]string) (int64, resonate.PromiseRecord, []resonate.PromiseRecord) {
+	t.Helper()
+	param, err := f.codec.Encode(map[string]any{"func": funcName, "args": args})
+	if err != nil {
+		t.Fatalf("encode task data: %v", err)
+	}
+	tags := map[string]string{"resonate:branch": id, "resonate:target": "any"}
+	for k, v := range extraTags {
+		tags[k] = v
+	}
+	res, err := f.sender.TaskCreate(f.ctx, f.pid, 10_000, resonate.PromiseCreateReq{
+		ID:        id,
+		TimeoutAt: int64(1) << 50,
+		Param:     param,
+		Tags:      tags,
+	})
+	if err != nil {
+		t.Fatalf("task.create: %v", err)
+	}
+	if res.Conflict || res.Created == nil {
+		t.Fatalf("task.create unexpected conflict")
+	}
+	decoded, err := f.codec.DecodePromise(res.Created.Promise)
+	if err != nil {
+		t.Fatalf("decode promise: %v", err)
+	}
+	return res.Created.Task.Version, decoded, res.Created.Preload
+}
+
 // promiseGet fetches a promise and decodes it through the codec. Use this
 // for the *root* promise (Core fulfills root promises through codec.Encode).
 func (f *coreFixture) promiseGet(t *testing.T, id string) resonate.PromiseRecord {
@@ -619,6 +651,64 @@ func TestCore_FireAndForgetLocalSuspension(t *testing.T) {
 	}
 	if status != resonate.StatusSuspended {
 		t.Errorf("status = %v, want StatusSuspended via fire-and-forget child", status)
+	}
+}
+
+// ── Origin tag propagation ─────────────────────────────────────────────
+
+// When a worker acquires a task for a promise that was spawned by another
+// workflow, that promise carries the lineage's true origin in its
+// resonate:origin tag. Inner promises created during the run must inherit that
+// origin — NOT the acquired promise's own ID. This is the bug fixed in
+// executeUntilBlockedInner (seed origin from promise.Tags["resonate:origin"]).
+func TestCore_InnerPromiseInheritsOriginFromTag(t *testing.T) {
+	f := newCoreFixture(t)
+	if err := f.reg.Register("waitOrigin", wfSuspendOnPending); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// "child-of-other" is itself a child of root "real-root": it carries the
+	// lineage origin in its tag, exactly as a parent's baseTags would stamp it.
+	const realRoot = "real-root"
+	v, promise, preload := f.createRootTaskWithTags(t, "child-of-other", "waitOrigin", nil,
+		map[string]string{"resonate:origin": realRoot})
+
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "child-of-other", v, promise, preload, nil)
+	if err != nil {
+		t.Fatalf("ExecuteUntilBlocked: %v", err)
+	}
+	if status != resonate.StatusSuspended {
+		t.Fatalf("status = %v, want StatusSuspended", status)
+	}
+
+	// The inner RPC promise (child-of-other.1) must carry the lineage origin,
+	// not "child-of-other".
+	inner := f.promiseGetRaw(t, "child-of-other.1")
+	if got := inner.Tags["resonate:origin"]; got != realRoot {
+		t.Errorf("inner resonate:origin = %q, want %q (lineage origin from the acquired promise's tag)", got, realRoot)
+	}
+}
+
+// A genuine root promise has no inherited origin tag (or its origin tag equals
+// its own ID). Inner promises must then fall back to the promise's own ID.
+func TestCore_InnerPromiseFallsBackToPromiseIDWhenNoOriginTag(t *testing.T) {
+	f := newCoreFixture(t)
+	if err := f.reg.Register("waitNoOrigin", wfSuspendOnPending); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// createRootTask sets no resonate:origin tag, so the fallback applies.
+	v, promise, preload := f.createRootTask(t, "genuine-root", "waitNoOrigin", nil)
+
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "genuine-root", v, promise, preload, nil)
+	if err != nil {
+		t.Fatalf("ExecuteUntilBlocked: %v", err)
+	}
+	if status != resonate.StatusSuspended {
+		t.Fatalf("status = %v, want StatusSuspended", status)
+	}
+
+	inner := f.promiseGetRaw(t, "genuine-root.1")
+	if got := inner.Tags["resonate:origin"]; got != "genuine-root" {
+		t.Errorf("inner resonate:origin = %q, want %q (fallback to promise ID)", got, "genuine-root")
 	}
 }
 

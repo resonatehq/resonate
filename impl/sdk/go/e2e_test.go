@@ -718,6 +718,42 @@ func TestE2EWorkflowWithCtxRun(t *testing.T) {
 	}
 }
 
+// TestE2EOriginPropagatesAcrossWorker verifies, against a live server, that
+// the resonate:origin tag survives the worker-acquire boundary. origin_root
+// RPCs origin_child (a remote promise dispatched back to the worker), and
+// origin_child creates a grandchild promise. The grandchild's origin must be
+// the lineage root — not origin_child's own id.
+func TestE2EOriginPropagatesAcrossWorker(t *testing.T) {
+	url := resonateURL(t)
+	r := makeE2EResonate(t, url)
+	t.Cleanup(func() { _ = r.Stop() })
+	rootFn := registerOriginLineage(t, r)
+
+	ctx, cancel := e2eCtx(t)
+	defer cancel()
+
+	rootID := uniqueID("origin-root")
+	h, err := rootFn.Run(ctx, rootID, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.Result(ctx); err != nil {
+		t.Fatalf("Result: %v", err)
+	} else if got != 5 {
+		t.Errorf("result = %d, want 5", got)
+	}
+
+	// Lineage ids: root = rootID, remote child = rootID.1, grandchild = rootID.1.1.
+	child := mustPromise(t, ctx, r, rootID+".1")
+	if got := child.Tags["resonate:origin"]; got != rootID {
+		t.Errorf("child resonate:origin = %q, want %q", got, rootID)
+	}
+	grandchild := mustPromise(t, ctx, r, rootID+".1.1")
+	if got := grandchild.Tags["resonate:origin"]; got != rootID {
+		t.Errorf("grandchild resonate:origin = %q, want %q (lineage root, not the child id)", got, rootID)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Tests — Error propagation, handles
 // ──────────────────────────────────────────────────────────────────────────
