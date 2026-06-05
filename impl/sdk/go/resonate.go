@@ -187,7 +187,7 @@ type Resonate struct {
 // subscriptionRefreshInterval is how often the background goroutine re-issues
 // PromiseRegisterListener for pending subscriptions, to defend against missed
 // pushes (e.g. SSE reconnects).
-const subscriptionRefreshInterval = 60 * time.Second
+const subscriptionRefreshInterval = 10 * time.Second
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constructors

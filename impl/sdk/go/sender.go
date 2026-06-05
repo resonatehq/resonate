@@ -316,7 +316,7 @@ func (s *Sender) PromiseSearch(ctx context.Context, opts PromiseSearchOptions) (
 // TaskAcquire claims a task's lease so this worker can execute it. Returns
 // the task record, root promise, and any preloaded branch promises. origin is
 // the task promise's partition origin (the lineage root from the execute
-// message's rootPromiseId); it is stamped into the head as resonate:origin so
+// message's data.origin); it is stamped into the head as resonate:origin so
 // the server can locate the row, which is keyed by (origin, id).
 func (s *Sender) TaskAcquire(ctx context.Context, id string, version int64, pid string, ttl int64, origin string) (TaskAcquireResult, error) {
 	_, data, err := s.sendEnvelope(ctx, "task.acquire", origin, map[string]any{

@@ -17,7 +17,7 @@ type Message interface {
 // the nested `data.task.{id,version}` shape for ergonomics.
 //
 // Origin is the partition origin (lineage root) of the task's promise, carried
-// in `data.rootPromiseId`. The worker must echo it back as resonate:origin on
+// in `data.origin`. The worker must echo it back as resonate:origin on
 // task.acquire: the server keys promises by (origin, id), so a child task whose
 // origin differs from its id is otherwise unfindable (404 Task not found).
 type ExecuteMessage struct {
@@ -54,12 +54,12 @@ func DecodeMessage(raw []byte) (Message, error) {
 				ID      string `json:"id"`
 				Version int64  `json:"version"`
 			} `json:"task"`
-			RootPromiseID string `json:"rootPromiseId"`
+			Origin string `json:"origin"`
 		}
 		if err := json.Unmarshal(head.Data, &inner); err != nil {
 			return nil, &DecodingError{Msg: fmt.Sprintf("execute data: %v", err)}
 		}
-		return ExecuteMessage{TaskID: inner.Task.ID, Version: inner.Task.Version, Origin: inner.RootPromiseID}, nil
+		return ExecuteMessage{TaskID: inner.Task.ID, Version: inner.Task.Version, Origin: inner.Origin}, nil
 	case "unblock":
 		var inner struct {
 			Promise json.RawMessage `json:"promise"`
