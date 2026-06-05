@@ -9,33 +9,38 @@ import (
 // *Sender satisfies it directly, so production code wires Effects to a
 // Sender with zero adapter glue. Tests use an in-package fake.
 type fenceClient interface {
-	TaskFenceCreate(ctx stdctx.Context, taskID string, taskVersion int64, req PromiseCreateReq) (TaskFenceResult, error)
-	TaskFenceSettle(ctx stdctx.Context, taskID string, taskVersion int64, req PromiseSettleReq) (TaskFenceResult, error)
+	TaskFenceCreate(ctx stdctx.Context, taskID string, taskVersion int64, origin string, req PromiseCreateReq) (TaskFenceResult, error)
+	TaskFenceSettle(ctx stdctx.Context, taskID string, taskVersion int64, origin string, req PromiseSettleReq) (TaskFenceResult, error)
 }
 
 // Effects owns the per-worker side-effecting state: the active task's lease
-// (id+version, used as the fencing token on every promise mutation) and an
-// in-process promise cache fed by TaskFence{Create,Settle} responses' Preload
-// list.
+// (id+version, used as the fencing token on every promise mutation), the
+// lineage origin stamped into each mutation's message head, and an in-process
+// promise cache fed by TaskFence{Create,Settle} responses' Preload list.
 type Effects struct {
 	client      fenceClient
 	taskID      string
 	taskVersion int64
+	origin      string
 
 	mu    sync.Mutex
 	cache map[string]PromiseRecord
 }
 
 // NewEffects constructs an Effects with the given transport, initial task
-// lease, and a preload of promise records to seed the cache. Preload is the
-// server-provided snapshot of children already known at task acquisition
-// time; seeding it up front lets a workflow read those children inline
-// (without a network round-trip) on the first execution attempt.
-func NewEffects(client fenceClient, taskID string, taskVersion int64, preload []PromiseRecord) *Effects {
+// lease, lineage origin, and a preload of promise records to seed the cache.
+// origin is the run's resonate:origin (the acquired promise's origin tag, or
+// its own ID for a genuine root); it is stamped into the head of every
+// task.fence mutation this Effects issues. Preload is the server-provided
+// snapshot of children already known at task acquisition time; seeding it up
+// front lets a workflow read those children inline (without a network
+// round-trip) on the first execution attempt.
+func NewEffects(client fenceClient, taskID string, taskVersion int64, origin string, preload []PromiseRecord) *Effects {
 	e := &Effects{
 		client:      client,
 		taskID:      taskID,
 		taskVersion: taskVersion,
+		origin:      origin,
 		cache:       map[string]PromiseRecord{},
 	}
 	if len(preload) > 0 {
@@ -47,7 +52,7 @@ func NewEffects(client fenceClient, taskID string, taskVersion int64, preload []
 // CreatePromise creates a durable promise via task.fence, absorbing any
 // preloaded records the server returns.
 func (e *Effects) CreatePromise(ctx stdctx.Context, req PromiseCreateReq) (PromiseRecord, error) {
-	res, err := e.client.TaskFenceCreate(ctx, e.taskID, e.taskVersion, req)
+	res, err := e.client.TaskFenceCreate(ctx, e.taskID, e.taskVersion, e.origin, req)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -58,7 +63,7 @@ func (e *Effects) CreatePromise(ctx stdctx.Context, req PromiseCreateReq) (Promi
 // SettlePromise settles a durable promise via task.fence, absorbing any
 // preloaded records the server returns.
 func (e *Effects) SettlePromise(ctx stdctx.Context, req PromiseSettleReq) (PromiseRecord, error) {
-	res, err := e.client.TaskFenceSettle(ctx, e.taskID, e.taskVersion, req)
+	res, err := e.client.TaskFenceSettle(ctx, e.taskID, e.taskVersion, e.origin, req)
 	if err != nil {
 		return PromiseRecord{}, err
 	}

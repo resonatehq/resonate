@@ -70,7 +70,7 @@ func (f *coreFixture) createRootTask(t *testing.T, id, funcName string, args any
 	if err != nil {
 		t.Fatalf("encode task data: %v", err)
 	}
-	res, err := f.sender.TaskCreate(f.ctx, f.pid, 10_000, resonate.PromiseCreateReq{
+	res, err := f.sender.TaskCreate(f.ctx, f.pid, 10_000, id, resonate.PromiseCreateReq{
 		ID:        id,
 		TimeoutAt: int64(1) << 50,
 		Param:     param,
@@ -102,7 +102,7 @@ func (f *coreFixture) createRootTaskWithTags(t *testing.T, id, funcName string, 
 	for k, v := range extraTags {
 		tags[k] = v
 	}
-	res, err := f.sender.TaskCreate(f.ctx, f.pid, 10_000, resonate.PromiseCreateReq{
+	res, err := f.sender.TaskCreate(f.ctx, f.pid, 10_000, id, resonate.PromiseCreateReq{
 		ID:        id,
 		TimeoutAt: int64(1) << 50,
 		Param:     param,
@@ -341,7 +341,7 @@ func TestCore_OnMessage_HappyPath(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	status, err := f.core.OnMessage(f.ctx, "p1-on", v)
+	status, err := f.core.OnMessage(f.ctx, "p1-on", v, "p1-on")
 	if err != nil {
 		t.Fatalf("OnMessage: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestCore_OnMessage_HappyPath(t *testing.T) {
 
 func TestCore_OnMessage_AcquireFailureReturnsError(t *testing.T) {
 	f := newCoreFixture(t)
-	_, err := f.core.OnMessage(f.ctx, "nonexistent-task", 0)
+	_, err := f.core.OnMessage(f.ctx, "nonexistent-task", 0, "nonexistent-task")
 	if err == nil {
 		t.Fatal("expected error for nonexistent task")
 	}
@@ -372,7 +372,7 @@ func TestCore_OnMessage_ReturnsSuspended(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	status, err := f.core.OnMessage(f.ctx, "p1-onsus", v)
+	status, err := f.core.OnMessage(f.ctx, "p1-onsus", v, "p1-onsus")
 	if err != nil {
 		t.Fatalf("OnMessage: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestCore_ExecuteUntilBlocked_WithPreload(t *testing.T) {
 	// child id "p1-pre.1". Children are codec-encoded on the wire just like
 	// root promises, so pre-settle with codec.Encode to match.
 	encVal, _ := f.codec.Encode(99)
-	if _, err := f.sender.PromiseCreate(f.ctx, resonate.PromiseCreateReq{
+	if _, err := f.sender.PromiseCreate(f.ctx, "", resonate.PromiseCreateReq{
 		ID: "p1-pre.1", TimeoutAt: int64(1) << 50,
 	}); err != nil {
 		t.Fatalf("promise.create child: %v", err)
@@ -452,7 +452,7 @@ func TestCore_ReleasesTaskOnFunctionNotFound(t *testing.T) {
 		t.Fatalf("error = %T, want *FunctionNotFoundError", err)
 	}
 	// Task should be releasable: a fresh acquire under a different pid succeeds.
-	if _, acqErr := f.sender.TaskAcquire(f.ctx, "p1-nofn", 0, "other-pid", 1000); acqErr != nil {
+	if _, acqErr := f.sender.TaskAcquire(f.ctx, "p1-nofn", 0, "other-pid", 1000, "p1-nofn"); acqErr != nil {
 		t.Errorf("expected acquire after release, got: %v", acqErr)
 	}
 }
@@ -510,7 +510,7 @@ func TestCore_PlainPanicYieldsApplicationErrorAndReleasesTask(t *testing.T) {
 	if !strings.Contains(appErr.Message, "something went wrong") {
 		t.Errorf("error message = %q, want it to contain the panic value", appErr.Message)
 	}
-	if _, acqErr := f.sender.TaskAcquire(f.ctx, "p1-panic", 0, "other-pid", 1000); acqErr != nil {
+	if _, acqErr := f.sender.TaskAcquire(f.ctx, "p1-panic", 0, "other-pid", 1000, "p1-panic"); acqErr != nil {
 		t.Errorf("expected acquire to succeed after release, got: %v", acqErr)
 	}
 }
@@ -567,7 +567,7 @@ func TestCore_NoopHeartbeatDoesNotInterfere(t *testing.T) {
 	core := resonate.NewCore(sender, codec, reg, resonate.IdentityTargetResolver, resonate.NoopHeartbeat{}, pid, 10_000)
 
 	param, _ := codec.Encode(map[string]any{"func": "seven3", "args": nil})
-	res, err := sender.TaskCreate(ctx, pid, 10_000, resonate.PromiseCreateReq{
+	res, err := sender.TaskCreate(ctx, pid, 10_000, "p1-noophb", resonate.PromiseCreateReq{
 		ID: "p1-noophb", TimeoutAt: int64(1) << 50, Param: param,
 		Tags: map[string]string{"resonate:branch": "p1-noophb", "resonate:target": "any"},
 	})

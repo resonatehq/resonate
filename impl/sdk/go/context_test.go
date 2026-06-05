@@ -183,9 +183,32 @@ type addArgs2 struct {
 
 func addFn(_ *Context, a addArgs2) (int, error) { return a.A + a.B, nil }
 
+func TestEffects_ForwardsOriginToFenceClient(t *testing.T) {
+	fake := newFakeFenceClient()
+	eff := NewEffects(fake, "task-1", 1, "lineage-root", nil)
+
+	if _, err := eff.CreatePromise(context.Background(), PromiseCreateReq{
+		ID: "child", TimeoutAt: 1 << 50, Tags: map[string]string{},
+	}); err != nil {
+		t.Fatalf("CreatePromise: %v", err)
+	}
+	if got := fake.lastOrigin.Load(); got != "lineage-root" {
+		t.Errorf("create origin = %v, want lineage-root", got)
+	}
+
+	if _, err := eff.SettlePromise(context.Background(), PromiseSettleReq{
+		ID: "child", State: SettleStateResolved,
+	}); err != nil {
+		t.Fatalf("SettlePromise: %v", err)
+	}
+	if got := fake.lastOrigin.Load(); got != "lineage-root" {
+		t.Errorf("settle origin = %v, want lineage-root", got)
+	}
+}
+
 func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	fut, err := ctx.Run(addFn, addArgs2{A: 2, B: 3})
@@ -214,7 +237,7 @@ func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 func TestContext_Run_PreSettledSkipsGoroutine(t *testing.T) {
 	fake := newFakeFenceClient()
 	fake.preset("root.1", resolvedPromise(t, "root.1", 99))
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	fut, err := ctx.Run(addFn, addArgs2{A: 1, B: 2})
@@ -235,7 +258,7 @@ func TestContext_Run_PreSettledSkipsGoroutine(t *testing.T) {
 
 func TestContext_Run_TwoConcurrentGoroutines(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	f1, _ := ctx.Run(addFn, addArgs2{A: 1, B: 2})
@@ -255,7 +278,7 @@ func TestContext_Run_TwoConcurrentGoroutines(t *testing.T) {
 
 func TestContext_Run_FunctionError(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	failing := func(*Context, int) (int, error) { return 0, errors.New("denied") }
@@ -281,7 +304,7 @@ func TestContext_Run_FunctionError(t *testing.T) {
 
 func TestContext_RPC_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.RPC("payments.charge", map[string]int{"amount": 100})
 	if err != nil {
@@ -299,7 +322,7 @@ func TestContext_RPC_PendingSuspends(t *testing.T) {
 
 func TestContext_Sleep_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.Sleep(time.Hour)
 	if err != nil {
@@ -310,7 +333,7 @@ func TestContext_Sleep_PendingSuspends(t *testing.T) {
 
 func TestContext_Promise_PendingSuspends(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	fut, err := ctx.Promise()
 	if err != nil {
@@ -322,7 +345,7 @@ func TestContext_Promise_PendingSuspends(t *testing.T) {
 func TestContext_RPC_AlreadyResolved_DecodesValue(t *testing.T) {
 	fake := newFakeFenceClient()
 	fake.preset("root.1", resolvedPromise(t, "root.1", "ok"))
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	fut, _ := ctx.RPC("noop", nil)
 	var got string
@@ -338,7 +361,7 @@ func TestContext_RPC_AlreadyResolved_DecodesValue(t *testing.T) {
 
 func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	id, err := ctx.Detached("audit", map[string]int{"v": 1})
 	if err != nil {
@@ -357,7 +380,7 @@ func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 
 func TestContext_Detached_IDIsHashed16Hex(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	id, _ := ctx.Detached("f", nil)
 	suffix := strings.TrimPrefix(id, "root.")
@@ -386,7 +409,7 @@ func TestHashID_StableAndHexLength(t *testing.T) {
 
 func TestContext_Run_ZeroArgs(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	beat := func(*Context) (string, error) { return "tick", nil }
@@ -413,7 +436,7 @@ func TestContext_Run_BadFunction(t *testing.T) {
 
 func TestContext_Run_RetrySucceedsAfterTransientErrors(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	var calls int32
@@ -444,7 +467,7 @@ func TestContext_Run_RetrySucceedsAfterTransientErrors(t *testing.T) {
 
 func TestContext_Run_NonRetryableShortCircuits(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
 	var calls int32
@@ -483,7 +506,7 @@ func (p retryPolicyAlwaysWithDelay) NextDelay(_ int, _ error) (time.Duration, bo
 
 func TestContext_Run_RetryAbortsOnCtxCancel(t *testing.T) {
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, nil)
+	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	c := testContext("root", eff)
 	cctx, cancel := context.WithCancel(context.Background())
 	c.host = cctx

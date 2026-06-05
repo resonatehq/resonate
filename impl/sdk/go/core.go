@@ -87,8 +87,8 @@ func NewCore(sender *Sender, codec *Codec, reg *Registry, resolver TargetResolve
 // the root promise, and runs ExecuteUntilBlocked. The task was dispatched
 // by the server (not locally created here), so the per-call retry policy
 // is unknown; DefaultRetryPolicy applies.
-func (c *Core) OnMessage(ctx stdctx.Context, taskID string, version int64) (Status, error) {
-	res, err := c.sender.TaskAcquire(ctx, taskID, version, c.pid, c.ttl)
+func (c *Core) OnMessage(ctx stdctx.Context, taskID string, version int64, origin string) (Status, error) {
+	res, err := c.sender.TaskAcquire(ctx, taskID, version, c.pid, c.ttl, origin)
 	if err != nil {
 		return StatusErr, err
 	}
@@ -136,17 +136,23 @@ func (c *Core) ExecuteUntilBlocked(ctx stdctx.Context, taskID string, taskVersio
 
 	c.log.Debug("core: starting execution", "task_id", taskID, "promise_id", promise.ID)
 
+	// Seed the origin once from the acquired promise: a promise spawned by
+	// another workflow carries the lineage's true origin in its resonate:origin
+	// tag, and both the execution context and every effect-driven mutation must
+	// use it. Fall back to the promise's own ID for a genuine root.
+	origin := originFromPromise(promise)
+
 	currentPreload := preload
 	for {
-		effects := NewEffects(c.sender, taskID, taskVersion, currentPreload)
-		outcome, err := c.executeUntilBlockedInner(ctx, promise, effects, retryPolicy)
+		effects := NewEffects(c.sender, taskID, taskVersion, origin, currentPreload)
+		outcome, err := c.executeUntilBlockedInner(ctx, promise, origin, effects, retryPolicy)
 		if err != nil {
 			return StatusErr, err
 		}
 
 		switch outcome.kind {
 		case execFulfill:
-			if err := c.fulfillTaskEncoded(ctx, taskID, taskVersion, promise.ID, outcome.settleState, outcome.value); err != nil {
+			if err := c.fulfillTaskEncoded(ctx, taskID, taskVersion, origin, promise.ID, outcome.settleState, outcome.value); err != nil {
 				return StatusErr, err
 			}
 			c.log.Debug("core: task fulfilled", "task_id", taskID, "promise_id", promise.ID)
@@ -155,7 +161,7 @@ func (c *Core) ExecuteUntilBlocked(ctx stdctx.Context, taskID string, taskVersio
 		case execSuspend:
 			c.log.Debug("core: attempting to suspend task",
 				"task_id", taskID, "remote_deps", len(outcome.todos))
-			sr, err := c.suspendTask(ctx, taskID, taskVersion, outcome.todos)
+			sr, err := c.suspendTask(ctx, taskID, taskVersion, origin, outcome.todos)
 			if err != nil {
 				return StatusErr, err
 			}
@@ -192,7 +198,7 @@ const (
 // outcome. It does not call into task lifecycle APIs (fulfill/suspend/
 // release) — the caller owns that. It does encode return values through
 // the codec so the caller has a single, uniform "fulfill" path.
-func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecord, effects *Effects, retryPolicy RetryPolicy) (execOutcome, error) {
+func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecord, origin string, effects *Effects, retryPolicy RetryPolicy) (execOutcome, error) {
 	// 1. Decode TaskData from the (already-decoded) promise param.
 	var taskData TaskData
 	if err := json.Unmarshal(promise.Param.DataOrNull(), &taskData); err != nil {
@@ -228,14 +234,8 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 		return execOutcome{kind: execFulfill, settleState: settleState, value: encoded}, nil
 	}
 
-	// 4. EXECUTE the workflow. Seed the origin from the promise's
-	//    resonate:origin tag: a promise spawned by another workflow carries the
-	//    lineage's true origin there, and inner promises must inherit it. Fall
-	//    back to the promise's own ID for a genuine root (no origin tag).
-	origin := promise.ID
-	if o, ok := promise.Tags["resonate:origin"]; ok && o != "" {
-		origin = o
-	}
+	// 4. EXECUTE the workflow. origin is the lineage's resonate:origin (computed
+	//    by the caller from the acquired promise); inner promises inherit it.
 	rootCtx := newRootContext(ctx, promise.ID, origin, promise.TimeoutAt, taskData.Func, effects, c.resolver, c.codec)
 
 	res, runErr, suspended, panicErr := invokeWithRetry(ctx, df, rootCtx, args, retryPolicy, c.log)
@@ -286,11 +286,12 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 //  Task lifecycle helpers
 // ═══════════════════════════════════════════════════════════════
 
-// fulfillTaskEncoded sends an already-encoded value via TaskFulfill.
+// fulfillTaskEncoded sends an already-encoded value via TaskFulfill. origin is
+// the lineage's resonate:origin, stamped into the message head.
 func (c *Core) fulfillTaskEncoded(ctx stdctx.Context, taskID string, taskVersion int64,
-	promiseID string, state SettleState, encoded Value) error {
+	origin, promiseID string, state SettleState, encoded Value) error {
 
-	_, err := c.sender.TaskFulfill(ctx, taskID, taskVersion, PromiseSettleReq{
+	_, err := c.sender.TaskFulfill(ctx, taskID, taskVersion, origin, PromiseSettleReq{
 		ID:    promiseID,
 		State: state,
 		Value: encoded,
@@ -301,19 +302,31 @@ func (c *Core) fulfillTaskEncoded(ctx stdctx.Context, taskID string, taskVersion
 // suspendTask registers callbacks for each remote todo and suspends the task.
 // A redirect response (SuspendResult.Redirected) means at least one awaited
 // promise is already settled; the caller should retry rather than suspend.
+// origin is the lineage's resonate:origin, stamped into the message head.
 func (c *Core) suspendTask(ctx stdctx.Context, taskID string, taskVersion int64,
-	todos []string) (SuspendResult, error) {
+	origin string, todos []string) (SuspendResult, error) {
 
 	actions := make([]PromiseRegisterCallbackData, len(todos))
 	for i, awaited := range todos {
 		actions[i] = PromiseRegisterCallbackData{Awaited: awaited, Awaiter: taskID}
 	}
-	return c.sender.TaskSuspend(ctx, taskID, taskVersion, actions)
+	return c.sender.TaskSuspend(ctx, taskID, taskVersion, origin, actions)
 }
 
 // releaseTask releases the lease on a task so another worker can retry it.
 func (c *Core) releaseTask(ctx stdctx.Context, taskID string, taskVersion int64) error {
 	return c.sender.TaskRelease(ctx, taskID, taskVersion)
+}
+
+// originFromPromise returns the lineage origin for a run: the acquired
+// promise's resonate:origin tag when set (a promise spawned by another workflow
+// carries its lineage's origin there), or the promise's own ID for a genuine
+// root that has no origin tag.
+func originFromPromise(p PromiseRecord) string {
+	if o, ok := p.Tags["resonate:origin"]; ok && o != "" {
+		return o
+	}
+	return p.ID
 }
 
 // settleStateFromPromiseState maps a settled promise state to its settle action.

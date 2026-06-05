@@ -119,11 +119,16 @@ type envelope struct {
 	Data any    `json:"data"`
 }
 
-// head carries the per-request correlation id, protocol version, and (optionally) auth.
+// head carries the per-request correlation id, protocol version, (optionally)
+// auth, and (optionally) the resonate:origin of the lineage that issued the
+// request. Origin-aware servers read the origin from the head rather than from
+// promise tags or an HTTP header; it is omitted when the caller passes no
+// origin.
 type head struct {
 	CorrID  string  `json:"corrId"`
 	Version string  `json:"version"`
 	Auth    *string `json:"auth,omitempty"`
+	Origin  string  `json:"resonate:origin,omitempty"`
 }
 
 // subEnvelope is the nested envelope used inside task.create / task.fulfill /
@@ -134,20 +139,24 @@ type subEnvelope struct {
 	Data any    `json:"data"`
 }
 
-func (s *Sender) makeHead() head {
+func (s *Sender) makeHead(origin string) head {
 	return head{
 		CorrID:  fmt.Sprintf("sr-%d", time.Now().UnixMilli()),
 		Version: ProtocolVersion,
 		Auth:    s.auth,
+		Origin:  origin,
 	}
 }
 
-// sendEnvelope builds and ships an envelope, validates correlation, and
-// returns (status, response data). If allow409 is true, a 409 status is
-// returned to the caller without being converted into an error; any other
-// 4xx/5xx status returns a *ServerError.
-func (s *Sender) sendEnvelope(ctx context.Context, kind string, data any, allow409 bool) (int, json.RawMessage, error) {
-	h := s.makeHead()
+// sendEnvelope builds and ships an envelope, stamping origin into the head
+// (omitted when empty), validates correlation, and returns (status, response
+// data). Callers pass the lineage's resonate:origin, or "" when there is none
+// (reads, lease management, and task.acquire — where the origin is not yet
+// known). If allow409 is true, a 409 status is returned to the caller without
+// being converted into an error; any other 4xx/5xx status returns a
+// *ServerError.
+func (s *Sender) sendEnvelope(ctx context.Context, kind, origin string, data any, allow409 bool) (int, json.RawMessage, error) {
+	h := s.makeHead(origin)
 	env := envelope{Kind: kind, Head: h, Data: data}
 	body, err := json.Marshal(env)
 	if err != nil {
@@ -212,17 +221,18 @@ func errorMessageFromData(data json.RawMessage, status int) string {
 
 // wrapAction builds a nested envelope used by task.create / task.fulfill /
 // task.suspend / task.fence for the action payload.
-func (s *Sender) wrapAction(kind string, data any) subEnvelope {
-	return subEnvelope{Kind: kind, Head: s.makeHead(), Data: data}
+func (s *Sender) wrapAction(origin, kind string, data any) subEnvelope {
+	return subEnvelope{Kind: kind, Head: s.makeHead(origin), Data: data}
 }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Promises
 // ──────────────────────────────────────────────────────────────────────────
 
-// PromiseCreate creates a durable promise.
-func (s *Sender) PromiseCreate(ctx context.Context, req PromiseCreateReq) (PromiseRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "promise.create", req, false)
+// PromiseCreate creates a durable promise. origin is the lineage's
+// resonate:origin stamped into the message head; pass "" when there is none.
+func (s *Sender) PromiseCreate(ctx context.Context, origin string, req PromiseCreateReq) (PromiseRecord, error) {
+	_, data, err := s.sendEnvelope(ctx, "promise.create", origin, req, false)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -231,7 +241,7 @@ func (s *Sender) PromiseCreate(ctx context.Context, req PromiseCreateReq) (Promi
 
 // PromiseSettle resolves, rejects, or cancels a durable promise.
 func (s *Sender) PromiseSettle(ctx context.Context, req PromiseSettleReq) (PromiseRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "promise.settle", req, false)
+	_, data, err := s.sendEnvelope(ctx, "promise.settle", "", req, false)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -240,20 +250,7 @@ func (s *Sender) PromiseSettle(ctx context.Context, req PromiseSettleReq) (Promi
 
 // PromiseGet fetches a promise by ID.
 func (s *Sender) PromiseGet(ctx context.Context, id string) (PromiseRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "promise.get", map[string]any{"id": id}, false)
-	if err != nil {
-		return PromiseRecord{}, err
-	}
-	return parseRecord[PromiseRecord](data, "promise")
-}
-
-// PromiseRegisterCallback links two promises so that settlement of `awaited`
-// resumes the task identified by `awaiter`.
-func (s *Sender) PromiseRegisterCallback(ctx context.Context, awaited, awaiter string) (PromiseRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "promise.register_callback", map[string]any{
-		"awaited": awaited,
-		"awaiter": awaiter,
-	}, false)
+	_, data, err := s.sendEnvelope(ctx, "promise.get", "", map[string]any{"id": id}, false)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -263,7 +260,7 @@ func (s *Sender) PromiseRegisterCallback(ctx context.Context, awaited, awaiter s
 // PromiseRegisterListener subscribes a polling address to a promise so the
 // server emits an unblock push when it settles.
 func (s *Sender) PromiseRegisterListener(ctx context.Context, awaited, address string) (PromiseRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "promise.register_listener", map[string]any{
+	_, data, err := s.sendEnvelope(ctx, "promise.register_listener", "", map[string]any{
 		"awaited": awaited,
 		"address": address,
 	}, false)
@@ -317,9 +314,12 @@ func (s *Sender) PromiseSearch(ctx context.Context, opts PromiseSearchOptions) (
 // ──────────────────────────────────────────────────────────────────────────
 
 // TaskAcquire claims a task's lease so this worker can execute it. Returns
-// the task record, root promise, and any preloaded branch promises.
-func (s *Sender) TaskAcquire(ctx context.Context, id string, version int64, pid string, ttl int64) (TaskAcquireResult, error) {
-	_, data, err := s.sendEnvelope(ctx, "task.acquire", map[string]any{
+// the task record, root promise, and any preloaded branch promises. origin is
+// the task promise's partition origin (the lineage root from the execute
+// message's rootPromiseId); it is stamped into the head as resonate:origin so
+// the server can locate the row, which is keyed by (origin, id).
+func (s *Sender) TaskAcquire(ctx context.Context, id string, version int64, pid string, ttl int64, origin string) (TaskAcquireResult, error) {
+	_, data, err := s.sendEnvelope(ctx, "task.acquire", origin, map[string]any{
 		"id":      id,
 		"version": version,
 		"pid":     pid,
@@ -334,13 +334,13 @@ func (s *Sender) TaskAcquire(ctx context.Context, id string, version int64, pid 
 // TaskCreate creates both a root promise and a task in one shot. A 409 from
 // the server is treated as an idempotency conflict and surfaced as
 // TaskCreateResult{Conflict: true} rather than an error.
-func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, action PromiseCreateReq) (TaskCreateResult, error) {
+func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, origin string, action PromiseCreateReq) (TaskCreateResult, error) {
 	payload := map[string]any{
 		"pid":    pid,
 		"ttl":    ttl,
-		"action": s.wrapAction("promise.create", action),
+		"action": s.wrapAction(origin, "promise.create", action),
 	}
-	status, data, err := s.sendEnvelope(ctx, "task.create", payload, true)
+	status, data, err := s.sendEnvelope(ctx, "task.create", origin, payload, true)
 	if err != nil {
 		return TaskCreateResult{}, err
 	}
@@ -355,14 +355,15 @@ func (s *Sender) TaskCreate(ctx context.Context, pid string, ttl int64, action P
 }
 
 // TaskFulfill settles the task's root promise as part of a single
-// fence+settle operation.
-func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, action PromiseSettleReq) (PromiseRecord, error) {
+// fence+settle operation. origin is the lineage's resonate:origin stamped into
+// the message head; pass "" when there is none.
+func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, origin string, action PromiseSettleReq) (PromiseRecord, error) {
 	payload := map[string]any{
 		"id":      id,
 		"version": version,
-		"action":  s.wrapAction("promise.settle", action),
+		"action":  s.wrapAction(origin, "promise.settle", action),
 	}
-	_, data, err := s.sendEnvelope(ctx, "task.fulfill", payload, false)
+	_, data, err := s.sendEnvelope(ctx, "task.fulfill", origin, payload, false)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -372,17 +373,17 @@ func (s *Sender) TaskFulfill(ctx context.Context, id string, version int64, acti
 // TaskSuspend registers callbacks for awaited promises and suspends the task.
 // Returns Redirected=true when at least one awaited promise was already
 // settled, in which case the caller should retry rather than suspend.
-func (s *Sender) TaskSuspend(ctx context.Context, id string, version int64, actions []PromiseRegisterCallbackData) (SuspendResult, error) {
+func (s *Sender) TaskSuspend(ctx context.Context, id string, version int64, origin string, actions []PromiseRegisterCallbackData) (SuspendResult, error) {
 	wrapped := make([]subEnvelope, len(actions))
 	for i, a := range actions {
-		wrapped[i] = s.wrapAction("promise.register_callback", a)
+		wrapped[i] = s.wrapAction(origin, "promise.register_callback", a)
 	}
 	payload := map[string]any{
 		"id":      id,
 		"version": version,
 		"actions": wrapped,
 	}
-	status, data, err := s.sendEnvelope(ctx, "task.suspend", payload, false)
+	status, data, err := s.sendEnvelope(ctx, "task.suspend", origin, payload, false)
 	if err != nil {
 		return SuspendResult{}, err
 	}
@@ -392,7 +393,7 @@ func (s *Sender) TaskSuspend(ctx context.Context, id string, version int64, acti
 // TaskRelease gives up the lease on a task without fulfilling it; the server
 // will retry it on the next tick.
 func (s *Sender) TaskRelease(ctx context.Context, id string, version int64) error {
-	_, _, err := s.sendEnvelope(ctx, "task.release", map[string]any{
+	_, _, err := s.sendEnvelope(ctx, "task.release", "", map[string]any{
 		"id":      id,
 		"version": version,
 	}, false)
@@ -401,35 +402,37 @@ func (s *Sender) TaskRelease(ctx context.Context, id string, version int64) erro
 
 // TaskHalt prevents a task from being acquired or making progress.
 func (s *Sender) TaskHalt(ctx context.Context, id string) error {
-	_, _, err := s.sendEnvelope(ctx, "task.halt", map[string]any{"id": id}, false)
+	_, _, err := s.sendEnvelope(ctx, "task.halt", "", map[string]any{"id": id}, false)
 	return err
 }
 
 // TaskContinue transitions a halted task back to pending.
 func (s *Sender) TaskContinue(ctx context.Context, id string) error {
-	_, _, err := s.sendEnvelope(ctx, "task.continue", map[string]any{"id": id}, false)
+	_, _, err := s.sendEnvelope(ctx, "task.continue", "", map[string]any{"id": id}, false)
 	return err
 }
 
 // TaskFenceCreate creates a promise via task.fence, executing only if the
-// task lease (id, version) is still valid.
-func (s *Sender) TaskFenceCreate(ctx context.Context, id string, version int64, req PromiseCreateReq) (TaskFenceResult, error) {
-	return s.taskFence(ctx, id, version, "promise.create", req)
+// task lease (id, version) is still valid. origin is the lineage's
+// resonate:origin stamped into the message head; pass "" when there is none.
+func (s *Sender) TaskFenceCreate(ctx context.Context, id string, version int64, origin string, req PromiseCreateReq) (TaskFenceResult, error) {
+	return s.taskFence(ctx, id, version, origin, "promise.create", req)
 }
 
 // TaskFenceSettle settles a promise via task.fence, executing only if the
-// task lease (id, version) is still valid.
-func (s *Sender) TaskFenceSettle(ctx context.Context, id string, version int64, req PromiseSettleReq) (TaskFenceResult, error) {
-	return s.taskFence(ctx, id, version, "promise.settle", req)
+// task lease (id, version) is still valid. origin is the lineage's
+// resonate:origin stamped into the message head; pass "" when there is none.
+func (s *Sender) TaskFenceSettle(ctx context.Context, id string, version int64, origin string, req PromiseSettleReq) (TaskFenceResult, error) {
+	return s.taskFence(ctx, id, version, origin, "promise.settle", req)
 }
 
-func (s *Sender) taskFence(ctx context.Context, id string, version int64, subKind string, action any) (TaskFenceResult, error) {
+func (s *Sender) taskFence(ctx context.Context, id string, version int64, origin, subKind string, action any) (TaskFenceResult, error) {
 	payload := map[string]any{
 		"id":      id,
 		"version": version,
-		"action":  s.wrapAction(subKind, action),
+		"action":  s.wrapAction(origin, subKind, action),
 	}
-	_, data, err := s.sendEnvelope(ctx, "task.fence", payload, false)
+	_, data, err := s.sendEnvelope(ctx, "task.fence", origin, payload, false)
 	if err != nil {
 		return TaskFenceResult{}, err
 	}
@@ -455,7 +458,7 @@ func (s *Sender) taskFence(ctx context.Context, id string, version int64, subKin
 
 // TaskHeartbeat extends the lease on one or more tasks owned by pid.
 func (s *Sender) TaskHeartbeat(ctx context.Context, pid string, tasks []TaskRef) error {
-	_, _, err := s.sendEnvelope(ctx, "task.heartbeat", map[string]any{
+	_, _, err := s.sendEnvelope(ctx, "task.heartbeat", "", map[string]any{
 		"pid":   pid,
 		"tasks": tasks,
 	}, false)
@@ -500,7 +503,7 @@ func (s *Sender) TaskSearch(ctx context.Context, opts TaskSearchOptions) (TaskSe
 
 // ScheduleCreate creates a new schedule.
 func (s *Sender) ScheduleCreate(ctx context.Context, req ScheduleCreateReq) (ScheduleRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "schedule.create", req, false)
+	_, data, err := s.sendEnvelope(ctx, "schedule.create", "", req, false)
 	if err != nil {
 		return ScheduleRecord{}, err
 	}
@@ -509,7 +512,7 @@ func (s *Sender) ScheduleCreate(ctx context.Context, req ScheduleCreateReq) (Sch
 
 // ScheduleGet fetches a schedule by ID.
 func (s *Sender) ScheduleGet(ctx context.Context, id string) (ScheduleRecord, error) {
-	_, data, err := s.sendEnvelope(ctx, "schedule.get", map[string]any{"id": id}, false)
+	_, data, err := s.sendEnvelope(ctx, "schedule.get", "", map[string]any{"id": id}, false)
 	if err != nil {
 		return ScheduleRecord{}, err
 	}
@@ -518,7 +521,7 @@ func (s *Sender) ScheduleGet(ctx context.Context, id string) (ScheduleRecord, er
 
 // ScheduleDelete removes a schedule by ID.
 func (s *Sender) ScheduleDelete(ctx context.Context, id string) error {
-	_, _, err := s.sendEnvelope(ctx, "schedule.delete", map[string]any{"id": id}, false)
+	_, _, err := s.sendEnvelope(ctx, "schedule.delete", "", map[string]any{"id": id}, false)
 	return err
 }
 
@@ -629,7 +632,7 @@ func parseRecord[T any](data json.RawMessage, field string) (T, error) {
 // searchList runs a paginated search RPC, unmarshaling response items from the
 // named field into a typed slice. Items that fail to decode are skipped.
 func searchList[T any](ctx context.Context, s *Sender, kind string, payload map[string]any, field string) ([]T, *string, error) {
-	_, data, err := s.sendEnvelope(ctx, kind, payload, false)
+	_, data, err := s.sendEnvelope(ctx, kind, "", payload, false)
 	if err != nil {
 		return nil, nil, err
 	}

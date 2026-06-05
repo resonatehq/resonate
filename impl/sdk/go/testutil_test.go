@@ -27,6 +27,7 @@ type fakeFenceClient struct {
 
 	lastTaskID  atomic.Value
 	lastVersion atomic.Int64
+	lastOrigin  atomic.Value
 	createCalls atomic.Int32
 	settleCalls atomic.Int32
 
@@ -53,10 +54,11 @@ func (f *fakeFenceClient) record(id string) (PromiseRecord, bool) {
 	return r, ok
 }
 
-func (f *fakeFenceClient) TaskFenceCreate(_ stdctx.Context, taskID string, taskVersion int64, req PromiseCreateReq) (TaskFenceResult, error) {
+func (f *fakeFenceClient) TaskFenceCreate(_ stdctx.Context, taskID string, taskVersion int64, origin string, req PromiseCreateReq) (TaskFenceResult, error) {
 	f.createCalls.Add(1)
 	f.lastTaskID.Store(taskID)
 	f.lastVersion.Store(taskVersion)
+	f.lastOrigin.Store(origin)
 	if f.enforceVersion && (taskID != f.expectedTaskID || taskVersion != f.expectedVersion) {
 		return TaskFenceResult{}, errors.New("fence mismatch")
 	}
@@ -79,10 +81,11 @@ func (f *fakeFenceClient) TaskFenceCreate(_ stdctx.Context, taskID string, taskV
 	return TaskFenceResult{Promise: rec, Preload: f.preload[req.ID]}, nil
 }
 
-func (f *fakeFenceClient) TaskFenceSettle(_ stdctx.Context, taskID string, taskVersion int64, req PromiseSettleReq) (TaskFenceResult, error) {
+func (f *fakeFenceClient) TaskFenceSettle(_ stdctx.Context, taskID string, taskVersion int64, origin string, req PromiseSettleReq) (TaskFenceResult, error) {
 	f.settleCalls.Add(1)
 	f.lastTaskID.Store(taskID)
 	f.lastVersion.Store(taskVersion)
+	f.lastOrigin.Store(origin)
 	if f.enforceVersion && (taskID != f.expectedTaskID || taskVersion != f.expectedVersion) {
 		return TaskFenceResult{}, errors.New("fence mismatch")
 	}

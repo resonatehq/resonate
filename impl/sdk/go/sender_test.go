@@ -38,7 +38,7 @@ func TestSenderPromiseCreateGetRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := s.PromiseCreate(ctx, resonate.PromiseCreateReq{
+	created, err := s.PromiseCreate(ctx, "", resonate.PromiseCreateReq{
 		ID:        "p:roundtrip",
 		TimeoutAt: int64(1) << 50,
 		Param:     paramV,
@@ -76,7 +76,7 @@ func TestSenderTaskCreateReturnsConflictOnDuplicate(t *testing.T) {
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
 	}
-	first, err := s.TaskCreate(ctx, "w1", 10_000, req)
+	first, err := s.TaskCreate(ctx, "w1", 10_000, "", req)
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestSenderTaskCreateReturnsConflictOnDuplicate(t *testing.T) {
 		t.Errorf("first call: expected Created, got %+v", first)
 	}
 
-	second, err := s.TaskCreate(ctx, "w1", 10_000, req)
+	second, err := s.TaskCreate(ctx, "w1", 10_000, "", req)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSenderTaskSuspendReturnsRedirectOnSettledDependency(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	if _, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
+	if _, err := s.TaskCreate(ctx, "w1", 10_000, "", resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -106,7 +106,7 @@ func TestSenderTaskSuspendReturnsRedirectOnSettledDependency(t *testing.T) {
 		t.Fatalf("task.create root: %v", err)
 	}
 
-	if _, err := s.PromiseCreate(ctx, resonate.PromiseCreateReq{
+	if _, err := s.PromiseCreate(ctx, "", resonate.PromiseCreateReq{
 		ID: "dep", TimeoutAt: int64(1) << 50, Tags: map[string]string{},
 	}); err != nil {
 		t.Fatalf("create dep: %v", err)
@@ -117,7 +117,7 @@ func TestSenderTaskSuspendReturnsRedirectOnSettledDependency(t *testing.T) {
 		t.Fatalf("settle dep: %v", err)
 	}
 
-	res, err := s.TaskSuspend(ctx, "root", 0, []resonate.PromiseRegisterCallbackData{
+	res, err := s.TaskSuspend(ctx, "root", 0, "", []resonate.PromiseRegisterCallbackData{
 		{Awaited: "dep", Awaiter: "root"},
 	})
 	if err != nil {
@@ -133,7 +133,7 @@ func TestSenderTaskFenceCreate(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	created, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
+	created, err := s.TaskCreate(ctx, "w1", 10_000, "", resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -142,7 +142,7 @@ func TestSenderTaskFenceCreate(t *testing.T) {
 		t.Fatalf("task.create: %v", err)
 	}
 
-	res, err := s.TaskFenceCreate(ctx, created.Created.Task.ID, created.Created.Task.Version, resonate.PromiseCreateReq{
+	res, err := s.TaskFenceCreate(ctx, created.Created.Task.ID, created.Created.Task.Version, "", resonate.PromiseCreateReq{
 		ID:        "child",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -168,7 +168,7 @@ func TestSenderTaskFenceSettle(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	created, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
+	created, err := s.TaskCreate(ctx, "w1", 10_000, "", resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -176,7 +176,7 @@ func TestSenderTaskFenceSettle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("task.create: %v", err)
 	}
-	if _, err := s.PromiseCreate(ctx, resonate.PromiseCreateReq{
+	if _, err := s.PromiseCreate(ctx, "", resonate.PromiseCreateReq{
 		ID:        "child",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -184,7 +184,7 @@ func TestSenderTaskFenceSettle(t *testing.T) {
 		t.Fatalf("create child: %v", err)
 	}
 
-	res, err := s.TaskFenceSettle(ctx, created.Created.Task.ID, created.Created.Task.Version, resonate.PromiseSettleReq{
+	res, err := s.TaskFenceSettle(ctx, created.Created.Task.ID, created.Created.Task.Version, "", resonate.PromiseSettleReq{
 		ID:    "child",
 		State: resonate.SettleStateResolved,
 	})
@@ -201,7 +201,7 @@ func TestSenderTaskFenceWrongVersionReturnsConflict(t *testing.T) {
 	defer stop()
 	ctx := context.Background()
 
-	created, err := s.TaskCreate(ctx, "w1", 10_000, resonate.PromiseCreateReq{
+	created, err := s.TaskCreate(ctx, "w1", 10_000, "", resonate.PromiseCreateReq{
 		ID:        "root",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -210,7 +210,7 @@ func TestSenderTaskFenceWrongVersionReturnsConflict(t *testing.T) {
 		t.Fatalf("task.create: %v", err)
 	}
 
-	_, err = s.TaskFenceCreate(ctx, created.Created.Task.ID, created.Created.Task.Version+1, resonate.PromiseCreateReq{
+	_, err = s.TaskFenceCreate(ctx, created.Created.Task.ID, created.Created.Task.Version+1, "", resonate.PromiseCreateReq{
 		ID:        "child",
 		TimeoutAt: int64(1) << 50,
 		Tags:      map[string]string{},
@@ -254,9 +254,106 @@ func TestSenderCorrIDMismatchSurfacesAsServerError(t *testing.T) {
 	}
 }
 
+func TestSenderStampsOriginIntoHead(t *testing.T) {
+	// captureNetwork records the outgoing body and echoes back a well-formed
+	// response with the matching corrId so the Sender accepts it.
+	cap := &captureNetwork{}
+	s := resonate.NewSender(cap, nil)
+
+	// A pointer origin distinguishes "stamped" (non-nil) from "omitted" (nil),
+	// in both the outer envelope head and the nested task.fence action head.
+	type sentEnvelope struct {
+		Head struct {
+			Origin *string `json:"resonate:origin"`
+		} `json:"head"`
+		Data struct {
+			Action struct {
+				Head struct {
+					Origin *string `json:"resonate:origin"`
+				} `json:"head"`
+			} `json:"action"`
+		} `json:"data"`
+	}
+	parseSent := func() sentEnvelope {
+		var env sentEnvelope
+		if err := json.Unmarshal([]byte(cap.last()), &env); err != nil {
+			t.Fatalf("unmarshal sent body: %v", err)
+		}
+		return env
+	}
+
+	// With an explicit origin: both the outer head and the nested action head
+	// carry resonate:origin.
+	ctx := context.Background()
+	if _, err := s.TaskFenceCreate(ctx, "task-1", 1, "lineage-root", resonate.PromiseCreateReq{
+		ID: "child", TimeoutAt: int64(1) << 50, Tags: map[string]string{},
+	}); err != nil {
+		t.Fatalf("TaskFenceCreate: %v", err)
+	}
+	env := parseSent()
+	if got := env.Head.Origin; got == nil || *got != "lineage-root" {
+		t.Errorf("outer head origin = %v, want lineage-root", got)
+	}
+	if got := env.Data.Action.Head.Origin; got == nil || *got != "lineage-root" {
+		t.Errorf("action head origin = %v, want lineage-root", got)
+	}
+
+	// With an empty origin: the key is omitted from the head entirely.
+	if _, err := s.PromiseCreate(ctx, "", resonate.PromiseCreateReq{
+		ID: "p", TimeoutAt: int64(1) << 50, Tags: map[string]string{},
+	}); err != nil {
+		t.Fatalf("PromiseCreate: %v", err)
+	}
+	if got := parseSent().Head.Origin; got != nil {
+		t.Errorf("expected resonate:origin to be omitted, got %q", *got)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test doubles for Network
 // ──────────────────────────────────────────────────────────────────────────
+
+// captureNetwork records the most recent outgoing request body and replies with
+// a well-formed envelope echoing the request's corrId/kind so the Sender's
+// validation passes. The action payload carries a minimal promise so fence and
+// create parsers succeed.
+type captureNetwork struct {
+	stubNetwork
+	mu   sync.Mutex
+	body string
+}
+
+func (n *captureNetwork) last() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.body
+}
+
+func (n *captureNetwork) Send(_ context.Context, req string) (string, error) {
+	n.mu.Lock()
+	n.body = req
+	n.mu.Unlock()
+
+	var in struct {
+		Kind string `json:"kind"`
+		Head struct {
+			CorrID string `json:"corrId"`
+		} `json:"head"`
+	}
+	_ = json.Unmarshal([]byte(req), &in)
+
+	promise := map[string]any{"id": "child", "state": "PENDING", "timeoutAt": int64(1) << 50}
+	resp := map[string]any{
+		"kind": in.Kind,
+		"head": map[string]any{"corrId": in.Head.CorrID, "status": 200, "version": resonate.ProtocolVersion},
+		"data": map[string]any{
+			"promise": promise,
+			"action":  map[string]any{"data": map[string]any{"promise": promise}},
+		},
+	}
+	body, _ := json.Marshal(resp)
+	return string(body), nil
+}
 
 type stubNetwork struct {
 	mu  sync.Mutex
