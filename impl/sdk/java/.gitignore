@@ -6,3 +6,6 @@ build
 
 # Ignore Kotlin plugin data
 .kotlin
+
+# Ignore IDE (Eclipse/VS Code JDT) compiled output
+bin

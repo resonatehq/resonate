@@ -8,6 +8,9 @@
 plugins {
     // Apply the java-library plugin for API and implementation separation.
     `java-library`
+
+    // Apply Spotless for code formatting and linting.
+    alias(libs.plugins.spotless)
 }
 
 repositories {
@@ -30,5 +33,16 @@ dependencies {
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// Configure Spotless to format Java sources with Palantir Java Format.
+spotless {
+    java {
+        palantirJavaFormat()
+        removeUnusedImports()
+        importOrder()
+        trimTrailingWhitespace()
+        endWithNewline()
     }
 }
