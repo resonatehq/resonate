@@ -9,3 +9,6 @@ build
 
 # Ignore IDE (Eclipse/VS Code JDT) compiled output
 bin
+
+# Ignore macOS folder metadata
+.DS_Store

@@ -11,4 +11,4 @@ plugins {
 }
 
 rootProject.name = "resonate-sdk-java"
-include("lib")
+include("resonate")
