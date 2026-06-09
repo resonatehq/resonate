@@ -192,6 +192,7 @@ export class Future<T> implements Iterable<Future<T>> {
 export interface Context {
   readonly id: string;
   readonly originId: string;
+  readonly prefixId: string;
   readonly parentId: string;
   readonly branchId: string;
   readonly info: { readonly attempt: number; readonly timeout: number; readonly version: number };
@@ -272,6 +273,7 @@ export class InnerContext implements Context {
   readonly nonRetryableErrors: Array<new (...args: any[]) => Error>;
 
   readonly originId: string;
+  readonly prefixId: string;
   readonly branchId: string;
   readonly parentId: string;
   readonly clock: Clock;
@@ -288,6 +290,7 @@ export class InnerContext implements Context {
   constructor({
     id,
     oId = id,
+    prId = id,
     bId = id,
     pId = id,
     func,
@@ -302,6 +305,7 @@ export class InnerContext implements Context {
   }: {
     id: string;
     oId?: string;
+    prId?: string;
     bId?: string;
     pId?: string;
     func: string;
@@ -316,6 +320,13 @@ export class InnerContext implements Context {
   }) {
     this.id = id;
     this.originId = oId;
+    // The id-generation prefix (resonate:prefix). Set once at the top
+    // (resonate.run/rpc) and propagated down unchanged forever -- through every
+    // child AND across detached re-roots -- never tracking the (diverging)
+    // lineage origin. Bounds recursive detached ids: each level mints
+    // `${prefixId}.d${hash}` off this fixed prefix. Mirrors the Python SDK's
+    // `Context.prefix_id`.
+    this.prefixId = prId;
     this.branchId = bId;
     this.parentId = pId;
     this.func = func;
@@ -351,6 +362,7 @@ export class InnerContext implements Context {
     return new InnerContext({
       id,
       oId: this.originId,
+      prId: this.prefixId,
       bId: this.branchId,
       pId: this.id,
       func,
@@ -561,7 +573,7 @@ export class InnerContext implements Context {
 
     const idChanged = opts.id !== undefined;
 
-    const id = idChanged ? opts.id : util.detachedId(this.originId, this.seqid());
+    const id = idChanged ? opts.id : util.detachedId(this.prefixId, this.seqid());
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
@@ -578,6 +590,15 @@ export class InnerContext implements Context {
       id,
       func,
       version,
+      // detached ALWAYS breaks the origin lineage (breaksLineage: true): it is
+      // fire-and-forget and runs as its own root, so resonate:origin must equal
+      // its own id (origin == id == branch), starting a fresh lineage. Recursive
+      // detached ids stay bounded NOT via origin but via resonate:prefix, which
+      // is propagated down unchanged (set in remoteCreateReq = this.prefixId) and
+      // is what `util.detachedId(this.prefixId, ...)` roots the id on. So each
+      // level mints `${prefix}.d${hash}` off the same fixed prefix instead of
+      // off its own grown id. Mirrors the Python SDK (detached origin = its id,
+      // prefix carried forward).
       this.remoteCreateReq({ id, data, opts, maxTimeout: Number.MAX_SAFE_INTEGER, breaksLineage: true }),
       "detached",
     );
@@ -662,6 +683,9 @@ export class InnerContext implements Context {
           "resonate:branch": this.branchId,
           "resonate:parent": this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
+          // Prefix is set at the top and propagates down unchanged forever,
+          // independent of origin (which detached/explicit-id may break).
+          "resonate:prefix": this.prefixId,
           ...opts.tags,
         },
       },
@@ -696,6 +720,9 @@ export class InnerContext implements Context {
           "resonate:branch": id,
           "resonate:parent": this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
+          // Prefix is set at the top and propagates down unchanged forever,
+          // independent of origin (which detached/explicit-id may break).
+          "resonate:prefix": this.prefixId,
           ...opts.tags,
         },
         param: { headers: {}, data },
@@ -731,6 +758,9 @@ export class InnerContext implements Context {
           "resonate:branch": id,
           "resonate:parent": this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
+          // Prefix is set at the top and propagates down unchanged forever,
+          // independent of origin (which detached/explicit-id may break).
+          "resonate:prefix": this.prefixId,
           ...tags,
         },
       },
@@ -743,6 +773,8 @@ export class InnerContext implements Context {
       "resonate:branch": id,
       "resonate:parent": this.id,
       "resonate:origin": this.originId,
+      // Prefix is set at the top and propagates down unchanged forever.
+      "resonate:prefix": this.prefixId,
       "resonate:timer": "true",
     };
 

@@ -180,16 +180,17 @@ describe("base64 encoder", () => {
 });
 
 describe("detachedId", () => {
-  test("returns originId dot cyrb53 hex of seqid", () => {
+  test("returns prefix dot-d plus cyrb53 hex of seqid", () => {
     const result = detachedId("root", "root.0");
     expect(result).toBe(detachedId("root", "root.0"));
-    expect(result.startsWith("root.")).toBe(true);
+    expect(result.startsWith("root.d")).toBe(true);
   });
 
-  test("hash is a hex string", () => {
+  test("segment after the prefix is a `d` marker followed by hex", () => {
     const result = detachedId("origin", "origin.3");
-    const hash = result.split(".").slice(1).join(".");
-    expect(hash).toMatch(/^[0-9a-f]+$/);
+    const segment = result.split(".").slice(1).join(".");
+    expect(segment[0]).toBe("d");
+    expect(segment.slice(1)).toMatch(/^[0-9a-f]+$/);
   });
 
   test("is deterministic — same inputs produce same output", () => {
@@ -200,19 +201,19 @@ describe("detachedId", () => {
     expect(detachedId("root", "root.0")).not.toBe(detachedId("root", "root.1"));
   });
 
-  test("different originIds produce different ids", () => {
+  test("different prefixes produce different ids", () => {
     expect(detachedId("root.0", "root.0.0")).not.toBe(detachedId("root.1", "root.0.0"));
   });
 
-  test("originId is preserved as prefix before the dot", () => {
-    const originId = "my-workflow-abc123";
-    const result = detachedId(originId, "my-workflow-abc123.5");
-    expect(result.startsWith(`${originId}.`)).toBe(true);
+  test("prefix is preserved before the `.d` segment", () => {
+    const prefix = "my-workflow-abc123";
+    const result = detachedId(prefix, "my-workflow-abc123.5");
+    expect(result.startsWith(`${prefix}.d`)).toBe(true);
   });
 
   test("works with empty strings", () => {
     const result = detachedId("", "");
-    expect(result.startsWith(".")).toBe(true);
+    expect(result.startsWith(".d")).toBe(true);
   });
 });
 

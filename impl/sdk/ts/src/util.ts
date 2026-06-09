@@ -112,8 +112,12 @@ function cyrb53(input: string | Uint8Array, seed = 0): number {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
-export function detachedId(originId: string, seqid: string): string {
-  return `${originId}.${cyrb53(seqid).toString(16).padStart(14, "0")}`;
+export function detachedId(prefix: string, seqid: string): string {
+  // `${prefix}.d${hash}` -- the `d` marks the segment as a detached child (vs an
+  // rfi child's numeric `.${seq}`). `prefix` is the id-generation prefix
+  // (resonate:prefix), set once at the top and propagated down unchanged, so
+  // recursive detached ids stay bounded at one segment past the prefix.
+  return `${prefix}.d${cyrb53(seqid).toString(16).padStart(14, "0")}`;
 }
 
 export function getCallerInfo(): string {

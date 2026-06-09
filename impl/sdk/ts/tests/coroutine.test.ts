@@ -355,6 +355,131 @@ describe("Coroutine", () => {
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 
+  test("detached id stays bounded across recursive re-root", () => {
+    // A detached workflow runs as its own root: resonate:origin is reset to its
+    // own id (a fresh lineage). Recursive detached ids stay bounded NOT via
+    // origin but via resonate:prefix, propagated unchanged across re-roots. Were
+    // the id minted off the (grown) origin, each level would add a `.d${hash}`
+    // segment without bound; rooting it on the pinned prefix keeps it at
+    // `${prefix}.d${hash}` -- one segment past the prefix, at every depth.
+    const grownId = "top.deadbeefdeadbe"; // a workflow already several detached levels deep
+    const ctx = new InnerContext({
+      id: grownId,
+      oId: grownId, // detached re-roots origin to its own (grown) id
+      prId: "top", // the id-generation prefix is still pinned to the top
+      func: "fires",
+      clock: new WallClock(),
+      registry: new Registry(),
+      dependencies: new Map(),
+      timeout: 0,
+      version: 1,
+      retryPolicy: new Never(),
+      optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+    });
+
+    const rfi = ctx.detached("fires");
+
+    // The detached id is rooted at the pinned PREFIX "top", exactly one segment
+    // past it -- NOT the grown id (which would add a segment per level).
+    expect(rfi.id).toBe(util.detachedId("top", `${grownId}.0`));
+    expect(rfi.id.startsWith("top.d")).toBe(true);
+    expect(rfi.id.split(".")).toHaveLength(2);
+
+    // The prefix carries forward unchanged, bounding the next level; the child's
+    // lineage origin is its OWN id (a fresh lineage root).
+    expect(rfi.createReq.data.tags?.["resonate:prefix"]).toBe("top");
+    expect(rfi.createReq.data.tags?.["resonate:origin"]).toBe(rfi.id);
+  });
+
+  test("recursive multi-detached keeps every id at the same bounded length", () => {
+    // End-to-end proof: fan out FANOUT detached per workflow, DEPTH levels deep,
+    // re-rooting each child exactly as production does -- a detached promise
+    // executes as its own root with oId = its resonate:origin tag (its own id)
+    // and prId = its resonate:prefix tag (computation.ts). The id is
+    // `${prefix}.d${cyrb53(seqid).padStart(14)}`: the hash flattens the
+    // (ever-growing) seqid to a constant 14 chars, and the prefix tag keeps the
+    // prefix pinned to the top, so it never grows. Net: every detached id at
+    // every depth is exactly `${top}.d${14hex}` -- bounded regardless of depth.
+    const makeCtx = (id: string, oId: string, prId: string) =>
+      new InnerContext({
+        id,
+        oId,
+        prId,
+        func: "fires",
+        clock: new WallClock(),
+        registry: new Registry(),
+        dependencies: new Map(),
+        timeout: 0,
+        version: 1,
+        retryPolicy: new Never(),
+        optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+      });
+
+    const TOP = "top";
+    const FANOUT = 3;
+    const DEPTH = 4;
+
+    // Frontier of workflows to run; seed with the genuine top-level root
+    // (origin == prefix == its id).
+    let frontier: Array<{ id: string; oId: string; prId: string }> = [{ id: TOP, oId: TOP, prId: TOP }];
+    const lengths = new Set<number>();
+    const ids = new Set<string>();
+
+    for (let level = 0; level < DEPTH; level++) {
+      const next: Array<{ id: string; oId: string; prId: string }> = [];
+      for (const { id, oId, prId } of frontier) {
+        const ctx = makeCtx(id, oId, prId);
+        for (let i = 0; i < FANOUT; i++) {
+          const rfi = ctx.detached("fires");
+          lengths.add(rfi.id.length);
+          ids.add(rfi.id);
+          // Re-root as production does: oId = origin tag (its own id), prId =
+          // prefix tag (the top, propagated unchanged -- what bounds the id).
+          next.push({
+            id: rfi.id,
+            oId: rfi.createReq.data.tags?.["resonate:origin"] as string,
+            prId: rfi.createReq.data.tags?.["resonate:prefix"] as string,
+          });
+        }
+      }
+      frontier = next;
+    }
+
+    // Bounded: a single length across all depths, exactly `${top}.d${14hex}`.
+    expect(lengths.size).toBe(1);
+    expect([...lengths][0]).toBe(TOP.length + ".d".length + 14);
+    // ...and no collisions: every node in the tree got a distinct id.
+    expect(ids.size).toBe((FANOUT ** (DEPTH + 1) - FANOUT) / (FANOUT - 1));
+  });
+
+  test("detached breaks the origin lineage and starts a new one, even with an explicit id", () => {
+    // "detached" is fire-and-forget and runs as its own root, so resonate:origin
+    // is reset to its own id (origin == id == branch) -- a fresh lineage -- even
+    // with a caller-pinned id. The id-generation prefix (resonate:prefix) is
+    // carried forward unchanged, independent of the diverging origin.
+    const optsBuilder = new OptionsBuilder({ match: (t) => t, idPrefix: "" });
+    const ctx = new InnerContext({
+      id: "wf",
+      oId: "top",
+      prId: "top",
+      func: "fires",
+      clock: new WallClock(),
+      registry: new Registry(),
+      dependencies: new Map(),
+      timeout: 0,
+      version: 1,
+      retryPolicy: new Never(),
+      optsBuilder,
+    });
+
+    const rfi = ctx.detached("fires", optsBuilder.build({ id: "custom-detached" }));
+
+    expect(rfi.id).toBe("custom-detached");
+    // Origin is the detached's own id (new lineage); prefix is propagated.
+    expect(rfi.createReq.data.tags?.["resonate:origin"]).toBe("custom-detached");
+    expect(rfi.createReq.data.tags?.["resonate:prefix"]).toBe("top");
+  });
+
   test("lfc/rfc", async () => {
     function* bar() {
       return 42;

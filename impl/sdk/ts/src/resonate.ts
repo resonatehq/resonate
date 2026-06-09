@@ -333,6 +333,9 @@ export class Resonate {
             tags: {
               ...opts.tags,
               "resonate:origin": id,
+              // A genuine top-level root is its own lineage origin AND its own
+              // id-generation prefix; the prefix then propagates down unchanged.
+              "resonate:prefix": id,
               "resonate:branch": id,
               "resonate:parent": id,
               "resonate:scope": "global",
@@ -402,6 +405,9 @@ export class Resonate {
         tags: {
           ...opts.tags,
           "resonate:origin": id,
+          // A genuine top-level root is its own lineage origin AND its own
+          // id-generation prefix; the prefix then propagates down unchanged.
+          "resonate:prefix": id,
           "resonate:branch": id,
           "resonate:parent": id,
           "resonate:scope": "global",
