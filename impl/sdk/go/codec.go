@@ -91,21 +91,32 @@ func (c *Codec) DecodeBase64(s string, out any) (bool, error) {
 	return true, nil
 }
 
+// DecodeValue decodes a single encoded Value (base64 → decrypt), preserving
+// headers. After this call, Data holds the decoded JSON of the durable payload
+// (or a JSON null literal if absent).
+func (c *Codec) DecodeValue(v Value) (Value, error) {
+	decoded, err := c.decodeValueData(v)
+	if err != nil {
+		return Value{}, err
+	}
+	return Value{Headers: v.Headers, Data: decoded}, nil
+}
+
 // DecodePromise decodes a PromiseRecord's Param and Value fields in place,
 // preserving headers. After this call, Param.Data and Value.Data hold the
 // decoded JSON of the durable payload (or a JSON null literal if absent).
 func (c *Codec) DecodePromise(p PromiseRecord) (PromiseRecord, error) {
-	decoded, err := c.decodeValueData(p.Param)
+	param, err := c.DecodeValue(p.Param)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
-	p.Param = Value{Headers: p.Param.Headers, Data: decoded}
+	p.Param = param
 
-	decoded, err = c.decodeValueData(p.Value)
+	value, err := c.DecodeValue(p.Value)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
-	p.Value = Value{Headers: p.Value.Headers, Data: decoded}
+	p.Value = value
 	return p, nil
 }
 

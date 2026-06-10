@@ -5,8 +5,9 @@
 // so already-settled child promises can be short-circuited on replay.
 //
 // This package owns the workflow API ([Context], [Effects], [Run], [RPC],
-// [Sleep], [Promise], [Detached]), the wire protocol ([Sender], [Network]
-// interface, push-message decoding), and the shared domain types
+// [Sleep], [Promise], [Detached]), the direct promise and schedule API
+// ([Resonate.Promises], [Resonate.Schedules]), the wire protocol ([Sender],
+// [Network] interface, push-message decoding), and the shared domain types
 // ([PromiseRecord], [TaskRecord], etc.). Concrete transport implementations
 // live in leaf subpackages:
 //

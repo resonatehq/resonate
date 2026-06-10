@@ -44,8 +44,9 @@ type Config struct {
 	// TTL is the per-task lease duration. Defaults to 60s.
 	TTL time.Duration
 
-	// Prefix is prepended (with ":") to every promise/task ID created by
-	// Run, RPC, or Get. Empty means no prefix.
+	// Prefix is prepended (with ":") to every promise/task/schedule ID created
+	// by Run, RPC, Get, or the Promises and Schedules APIs. Empty means no
+	// prefix.
 	Prefix string
 
 	// Token, if non-empty, is sent as Bearer auth in every protocol request.
@@ -103,7 +104,7 @@ func (s *subscription) settled() bool {
 // ──────────────────────────────────────────────────────────────────────────
 
 // DefaultTopLevelTimeout is the default deadline applied to a top-level Run
-// or RPC when the caller does not pass one. Matches the Rust SDK default.
+// or RPC when the caller does not pass one.
 const DefaultTopLevelTimeout = 24 * time.Hour
 
 // RunOptions controls a top-level Run (local execution via RegisteredFunc.Run).
@@ -167,6 +168,8 @@ type Resonate struct {
 	registry  *Registry
 	heartbeat Heartbeat
 	sender    *Sender
+	promises  *Promises
+	schedules *Schedules
 
 	subsMu sync.RWMutex
 	subs   map[string]*subscription
@@ -256,6 +259,8 @@ func New(cfg Config) (*Resonate, error) {
 		bgCancel:  bgCancel,
 		log:       slog.Default(),
 	}
+	r.promises = &Promises{r: r}
+	r.schedules = &Schedules{r: r}
 
 	resolver := func(override *string) string {
 		target := ""
@@ -341,6 +346,15 @@ func (r *Resonate) IDPrefix() string { return r.idPrefix }
 // Network as the Resonate instance).
 func (r *Resonate) Sender() *Sender { return r.sender }
 
+// Promises returns the direct durable-promise API (create, get, resolve,
+// reject, cancel) for interacting with promises outside the workflow
+// machinery.
+func (r *Resonate) Promises() *Promises { return r.promises }
+
+// Schedules returns the direct schedule API (create, get, delete) for
+// managing cron schedules that create promises on a recurring basis.
+func (r *Resonate) Schedules() *Schedules { return r.schedules }
+
 // Network returns the underlying Network — useful for tests that need to
 // inspect network identity / addresses.
 func (r *Resonate) Network() Network { return r.network }
@@ -381,9 +395,9 @@ func (r *Resonate) safeTTLMs() int64 {
 }
 
 // buildRootPromiseCreateReq builds the PromiseCreateReq used by Run and RPC
-// at the top level. Sets the resonate:origin/branch/parent/scope/target tags
-// to match Rust's build_root_tags. The param is codec-encoded so the worker
-// that acquires the task can decode it via Codec.DecodePromise (the symmetric
+// at the top level. Sets the resonate:origin/branch/parent/scope/target
+// lineage and dispatch tags. The param is codec-encoded so the worker that
+// acquires the task can decode it via Codec.DecodePromise (the symmetric
 // inverse used by Core).
 func (r *Resonate) buildRootPromiseCreateReq(prefixedID, funcName string, args any, timeout time.Duration, target string, extraTags map[string]string) (PromiseCreateReq, error) {
 	if timeout <= 0 {

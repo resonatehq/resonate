@@ -125,6 +125,38 @@ func TestCodecEncodeProducesValidBase64(t *testing.T) {
 	}
 }
 
+func TestCodecDecodeValueRoundtrip(t *testing.T) {
+	c := newCodec()
+	v, err := c.Encode(map[string]any{"x": 1.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.Headers = map[string]string{"k": "h"}
+	decoded, err := c.DecodeValue(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Headers["k"] != "h" {
+		t.Errorf("headers not preserved: %v", decoded.Headers)
+	}
+	var obj map[string]any
+	_ = json.Unmarshal(decoded.Data, &obj)
+	if obj["x"] != 1.0 {
+		t.Errorf("x = %v", obj["x"])
+	}
+}
+
+func TestCodecDecodeValueEmpty(t *testing.T) {
+	c := newCodec()
+	decoded, err := c.DecodeValue(Value{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded.Data) != "null" {
+		t.Errorf("Data = %s, want null", decoded.Data)
+	}
+}
+
 func TestCodecDecodePromiseDecodesParamAndValue(t *testing.T) {
 	c := newCodec()
 	paramV, _ := c.Encode(map[string]any{"func": "f"})

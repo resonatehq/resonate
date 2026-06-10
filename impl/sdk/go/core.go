@@ -271,8 +271,8 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 	}
 
 	// If the function returned Done but there are pending todos, treat as
-	// suspended (matches Rust's structured-concurrency rule; covers the
-	// fire-and-forget child case).
+	// suspended (structured concurrency: a parent is not done while children
+	// are pending; covers the fire-and-forget child case).
 	if !suspended && len(todos) > 0 {
 		c.log.Warn("core: workflow returned Done with pending remote todos — "+
 			"either a fire-and-forget child suspended or the function swallowed a panic",

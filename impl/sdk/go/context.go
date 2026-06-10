@@ -384,7 +384,8 @@ func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context
 
 	if len(childTodos) > 0 {
 		// A child suspended in the background; merge todos and treat parent
-		// as suspended too — matches Rust's structured-concurrency rule.
+		// as suspended too — structured concurrency: the parent cannot
+		// complete while a child is pending.
 		c.mu.Lock()
 		c.spawnedRemote = append(c.spawnedRemote, childTodos...)
 		c.mu.Unlock()
@@ -471,9 +472,9 @@ func (c *Context) Promise(opts ...PromiseOpts) (*Future, error) {
 // is NOT registered in spawnedRemote — the parent workflow does not suspend
 // on it. The ID is deterministic: `{origin}.{16-hex FNV-1a 64 of "id.seq"}`.
 //
-// The hash is FNV-1a 64 — the Rust SDK uses seahash, so Detached IDs are
-// NOT cross-SDK-portable. If you need cross-runtime determinism, do not
-// run the same workflow body on both SDKs.
+// The hash is FNV-1a 64; other Resonate runtimes may hash differently, so
+// Detached IDs are NOT portable across runtimes. If you need cross-runtime
+// determinism, do not run the same workflow body on multiple runtimes.
 func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (string, error) {
 	opt := firstOpt(opts)
 	raw := c.nextID()

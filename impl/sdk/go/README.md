@@ -190,9 +190,37 @@ sending HTTP requests, or incrementing metrics will happen again on each replay
 unless they are wrapped in `ctx.Run`. A settled `ctx.Run` call is recorded as a
 durable child promise, so replay short-circuits the child and skips the body.
 
+## Direct promise & schedule API
+
+Beyond the workflow machinery, durable promises and cron schedules can be
+managed directly. Values are codec-encoded (JSON, plus encryption when an
+`Encryptor` is configured), and returned records come back decoded:
+
+```go
+// Create a promise settled by some external party.
+rec, err := r.Promises().Create(ctx, "order-1", 24*time.Hour, resonate.PromiseCreateOptions{
+    Param: Order{Item: "book"},
+    Tags:  map[string]string{"kind": "order"},
+})
+
+// Settle it from anywhere holding the ID.
+rec, err = r.Promises().Resolve(ctx, "order-1", Receipt{Total: 42})
+// ...or r.Promises().Reject(ctx, "order-1", err) / r.Promises().Cancel(ctx, "order-1", nil)
+
+// Read it back; Param/Value decode directly into Go values.
+rec, err = r.Promises().Get(ctx, "order-1")
+var receipt Receipt
+err = rec.Value.Decode(&receipt)
+
+// Cron schedules create a fresh promise on every firing.
+s, err := r.Schedules().Create(ctx, "nightly", "0 0 * * *", "report-{{.timestamp}}", time.Hour,
+    resonate.ScheduleCreateOptions{PromiseParam: ReportArgs{Region: "us"}})
+err = r.Schedules().Delete(ctx, "nightly")
+```
+
 ## What's in the package
 
-The package owns the workflow API (`Context`, `Effects`, `Run`, `RPC`, `Sleep`, `Promise`, `Detached`), the wire protocol (`Sender`, the `Network` interface, push-message decoding), and the shared domain types (`PromiseRecord`, `TaskRecord`, etc.). Concrete transports live in two leaf subpackages:
+The package owns the workflow API (`Context`, `Effects`, `Run`, `RPC`, `Sleep`, `Promise`, `Detached`), the direct promise and schedule API (`Resonate.Promises`, `Resonate.Schedules`), the wire protocol (`Sender`, the `Network` interface, push-message decoding), and the shared domain types (`PromiseRecord`, `TaskRecord`, etc.). Concrete transports live in two leaf subpackages:
 
 - [`httpnet`](./httpnet) — HTTP + SSE transport for talking to a live Resonate server.
 - [`localnet`](./localnet) — in-process transport that runs the server state machine in a single actor goroutine. Useful for tests and for "no-server-required" local development.
