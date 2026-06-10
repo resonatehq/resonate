@@ -267,6 +267,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 connect_timeout,
                 request_timeout,
                 outbound_auth,
+                state.config.transports.http_push.concurrency,
             ),
         ))
     } else {
@@ -280,9 +281,16 @@ async fn run_server(config: Config) -> Result<(), String> {
         None
     };
     let gcps: Option<Arc<dyn GcpsTransport>> = if state.config.transports.gcps.enabled {
-        tracing::info!("GCP Pub/Sub transport enabled");
+        tracing::info!(
+            concurrency = state.config.transports.gcps.concurrency,
+            timeout_ms = state.config.transports.gcps.timeout,
+            "GCP Pub/Sub transport enabled"
+        );
         Some(Arc::new(
-            transport::transport_gcps::GcpsPubSubTransport::new(),
+            transport::transport_gcps::GcpsPubSubTransport::new(
+                state.config.transports.gcps.concurrency,
+                std::time::Duration::from_millis(state.config.transports.gcps.timeout),
+            ),
         ))
     } else {
         None

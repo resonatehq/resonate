@@ -1,10 +1,11 @@
 //! HTTP transport — send messages via HTTP POST to webhook URLs.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::Client;
+use tokio::sync::{mpsc, Semaphore};
 
 use super::HttpAddress;
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
@@ -118,60 +119,124 @@ impl Auth {
 // Transport
 // ---------------------------------------------------------------------------
 
+struct DeliveryJob {
+    address: HttpAddress,
+    payload: serde_json::Value,
+}
+
 pub struct HttpPushTransport {
-    client: Client,
-    auth: Auth,
+    tx: mpsc::Sender<DeliveryJob>,
 }
 
 impl HttpPushTransport {
-    pub fn new(connect_timeout: Duration, request_timeout: Duration, auth: Auth) -> Self {
+    pub fn new(
+        connect_timeout: Duration,
+        request_timeout: Duration,
+        auth: Auth,
+        concurrency: usize,
+    ) -> Self {
         let client = Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(request_timeout)
             .build()
             .expect("failed to build HTTP client");
-        Self { client, auth }
+        let auth = Arc::new(auth);
+        let semaphore = Arc::new(Semaphore::new(concurrency));
+        // Queue capacity is intentionally larger than `concurrency` so short
+        // bursts smooth out; full queue + full in-flight pushes back on
+        // `send()`, which in turn pushes back on the claim loop in
+        // processing_messages — the DB is the durable buffer.
+        let (tx, rx) = mpsc::channel::<DeliveryJob>(concurrency);
+
+        tokio::spawn(dispatcher(client, auth, semaphore, rx));
+
+        Self { tx }
     }
 
+    /// Enqueue a delivery. Returns once the job is on the in-memory queue.
+    /// Blocks only when the queue is full (never on network I/O), which
+    /// applies natural backpressure to the message-processing loop instead
+    /// of dropping messages.
     pub async fn send(&self, address: &HttpAddress, payload: &serde_json::Value) {
-        let auth_header = self.auth.resolve(&address.url).await;
-
-        let mut request = self
-            .client
-            .post(&address.url)
-            .header("Content-Type", "application/json")
-            .json(payload);
-
-        if let Some((name, value)) = auth_header {
-            request = request.header(name, value);
+        let job = DeliveryJob {
+            address: address.clone(),
+            payload: payload.clone(),
+        };
+        if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
+            // Dispatcher task is gone (transport shutting down). Should not
+            // happen during normal operation; surface for diagnosis.
+            tracing::warn!(
+                address = %job.address.url,
+                "HTTP push dispatcher gone, message dropped"
+            );
+            metrics::DELIVERIES_TOTAL
+                .with_label_values(&["dropped"])
+                .inc();
         }
+    }
+}
 
-        match request.send().await {
-            Ok(resp) => {
-                let status = resp.status().as_u16();
-                if resp.status().is_success() {
-                    tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
-                    metrics::DELIVERIES_TOTAL
-                        .with_label_values(&["success"])
-                        .inc();
-                } else {
-                    tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
-                    metrics::DELIVERIES_TOTAL
-                        .with_label_values(&["error"])
-                        .inc();
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    address = %address.url,
-                    error = %e,
-                    error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
-                    "HTTP push delivery failed"
-                );
+async fn dispatcher(
+    client: Client,
+    auth: Arc<Auth>,
+    semaphore: Arc<Semaphore>,
+    mut rx: mpsc::Receiver<DeliveryJob>,
+) {
+    while let Some(job) = rx.recv().await {
+        // Wait for an in-flight slot rather than dropping. Backpressure
+        // propagates: full in-flight → dispatcher parked here → queue fills
+        // → send() parks the claim loop.
+        let permit = match Arc::clone(&semaphore).acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let client = client.clone();
+        let auth = Arc::clone(&auth);
+        tokio::spawn(async move {
+            let _permit = permit;
+            deliver(client, auth, job).await;
+        });
+    }
+}
+
+async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
+    let DeliveryJob { address, payload } = job;
+    let auth_header = auth.resolve(&address.url).await;
+
+    let mut request = client
+        .post(&address.url)
+        .header("Content-Type", "application/json")
+        .json(&payload);
+
+    if let Some((name, value)) = auth_header {
+        request = request.header(name, value);
+    }
+
+    match request.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if resp.status().is_success() {
+                tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
+                metrics::DELIVERIES_TOTAL
+                    .with_label_values(&["success"])
+                    .inc();
+            } else {
+                tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
                 metrics::DELIVERIES_TOTAL
                     .with_label_values(&["error"])
                     .inc();
             }
+        }
+        Err(e) => {
+            tracing::warn!(
+                address = %address.url,
+                error = %e,
+                error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
+                "HTTP push delivery failed"
+            );
+            metrics::DELIVERIES_TOTAL
+                .with_label_values(&["error"])
+                .inc();
         }
     }
 }
@@ -254,7 +319,7 @@ mod tests {
     }
 
     fn make_transport(auth: Auth) -> HttpPushTransport {
-        HttpPushTransport::new(Duration::from_secs(5), Duration::from_secs(5), auth)
+        HttpPushTransport::new(Duration::from_secs(5), Duration::from_secs(5), auth, 16)
     }
 
     #[tokio::test]
@@ -338,7 +403,7 @@ mod tests {
 
     #[tokio::test]
     async fn gcp_auth_fixed_audience_is_passed_to_provider() {
-        let (url, _rx) = spawn_capture_server().await;
+        let (url, mut rx) = spawn_capture_server().await;
         let mock = Arc::new(MockTokenProvider::ok("mock-token"));
         make_transport(Auth::GcpIdToken {
             header: "Authorization".to_string(),
@@ -347,6 +412,11 @@ mod tests {
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await;
+        // send() spawns the request; wait for the server to receive it so the
+        // mock's recorded_audience is populated before we assert on it.
+        rx.recv()
+            .await
+            .expect("delivery target received no request");
         assert_eq!(
             mock.recorded_audience.lock().unwrap().as_deref(),
             Some("https://my-audience.example.com"),
@@ -355,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn gcp_auth_target_url_used_as_audience_when_none_configured() {
-        let (url, _rx) = spawn_capture_server().await;
+        let (url, mut rx) = spawn_capture_server().await;
         let mock = Arc::new(MockTokenProvider::ok("mock-token"));
         make_transport(Auth::GcpIdToken {
             header: "Authorization".to_string(),
@@ -364,6 +434,9 @@ mod tests {
         })
         .send(&HttpAddress { url: url.clone() }, &serde_json::json!({}))
         .await;
+        rx.recv()
+            .await
+            .expect("delivery target received no request");
         assert_eq!(
             mock.recorded_audience.lock().unwrap().as_deref(),
             Some(url.as_str()),

@@ -161,6 +161,14 @@ pub struct CommonArgs {
     #[arg(long = "transports-gcps-project", value_name = "PROJECT")]
     pub transports_gcps_project: Option<String>,
 
+    /// Max concurrent GCP Pub/Sub deliveries [default: 16]
+    #[arg(long = "transports-gcps-concurrency", value_name = "N")]
+    pub transports_gcps_concurrency: Option<usize>,
+
+    /// GCP Pub/Sub per-publish timeout (ms) [default: 10000]
+    #[arg(long = "transports-gcps-timeout", value_name = "MS")]
+    pub transports_gcps_timeout: Option<u64>,
+
     // --- Bash Exec ---
     /// Enable/disable bash exec transport [default: false]
     #[arg(long = "transports-bash-exec-enabled", value_name = "BOOL")]
@@ -317,6 +325,12 @@ impl CommonArgs {
         }
         if let Some(project) = self.transports_gcps_project {
             config.transports.gcps.project = Some(project);
+        }
+        if let Some(v) = self.transports_gcps_concurrency {
+            config.transports.gcps.concurrency = v;
+        }
+        if let Some(v) = self.transports_gcps_timeout {
+            config.transports.gcps.timeout = v;
         }
 
         if let Some(v) = self.transports_bash_exec_enabled {
