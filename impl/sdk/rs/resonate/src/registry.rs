@@ -66,11 +66,8 @@ impl Registry {
         let func: Func = Arc::new(move |env, args_json| {
             Box::pin(async move {
                 let args: Args = serde_json::from_value(args_json)?;
-                let result = func.execute(env, args).await;
-                match result {
-                    Ok(val) => serde_json::to_value(val).map_err(Into::into),
-                    Err(e) => Err(e),
-                }
+                let val = func.execute(env, args).await?;
+                serde_json::to_value(val).map_err(Into::into)
             })
         });
         self.add(D::NAME, D::KIND, func)
@@ -84,11 +81,6 @@ impl Registry {
     /// Check if a function is registered.
     pub fn contains(&self, name: &str) -> bool {
         self.by_name.contains_key(name)
-    }
-
-    /// Get all registered function names.
-    pub fn names(&self) -> Vec<&str> {
-        self.by_name.keys().map(|s| s.as_str()).collect()
     }
 }
 

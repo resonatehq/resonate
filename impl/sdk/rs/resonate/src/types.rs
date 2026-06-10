@@ -40,11 +40,6 @@ impl Value {
         self.data.unwrap_or(serde_json::Value::Null)
     }
 
-    /// Get headers, defaulting to empty map if absent.
-    pub fn headers_or_empty(&self) -> HashMap<String, String> {
-        self.headers.clone().unwrap_or_default()
-    }
-
     /// Serialize any value into a `Value`.
     pub fn from_serializable<T: Serialize>(val: T) -> crate::error::Result<Self> {
         Ok(Self {
@@ -244,7 +239,6 @@ pub struct PromiseCreateReq {
     pub id: String,
     pub timeout_at: i64,
     pub param: Value,
-    // #[serde(default)]
     pub tags: HashMap<String, String>,
 }
 
@@ -254,10 +248,7 @@ impl PromiseCreateReq {
         Self {
             id: id.to_string(),
             timeout_at: 0,
-            param: Value {
-                headers: None,
-                data: None,
-            },
+            param: Value::default(),
             tags: HashMap::new(),
         }
     }

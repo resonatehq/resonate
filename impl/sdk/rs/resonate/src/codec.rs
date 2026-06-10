@@ -3,7 +3,7 @@ use std::sync::Arc;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::error::{Error, Result};
 use crate::types::{PromiseRecord, Value};
@@ -113,14 +113,6 @@ impl Codec {
             created_at: promise.created_at,
             settled_at: promise.settled_at,
         })
-    }
-
-    /// Decode a promise from a raw JSON value (as returned by the network).
-    /// Parses the JSON into a PromiseRecord, then decodes param/value fields.
-    pub fn decode_promise_from_json(&self, json: &serde_json::Value) -> Result<PromiseRecord> {
-        let record: PromiseRecord = PromiseRecord::deserialize(json)
-            .map_err(|e| Error::DecodingError(format!("invalid promise JSON: {}", e)))?;
-        self.decode_promise(record)
     }
 
     /// Check if a string is valid base64.

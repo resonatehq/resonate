@@ -156,9 +156,14 @@ fn require_str<'a>(obj: &'a serde_json::Value, field: &str) -> std::result::Resu
     }
 }
 
-/// Extract task ID from request.
-fn require_task_id(obj: &serde_json::Value) -> std::result::Result<&str, Error> {
-    require_str(obj, "id")
+/// Extract a task TTL field, clamping u64 values that exceed i64::MAX.
+fn extract_ttl(req: &serde_json::Value) -> i64 {
+    req.get("ttl")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64))
+        })
+        .unwrap_or(60_000)
 }
 
 impl ServerState {
@@ -188,15 +193,8 @@ impl ServerState {
 
         // Auto-timeout relevant promises before processing
         match kind {
-            "promise.get" => {
-                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                self.try_auto_timeout(now, id);
-            }
-            "promise.create" => {
-                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                self.try_auto_timeout(now, id);
-            }
-            "promise.settle" => {
+            "promise.get" | "promise.create" | "promise.settle" | "task.acquire"
+            | "task.release" | "task.fulfill" => {
                 let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
@@ -208,10 +206,6 @@ impl ServerState {
                 let action = req.get("action").unwrap_or(&serde_json::Value::Null);
                 let pd = extract_action_data(action);
                 let id = pd.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                self.try_auto_timeout(now, id);
-            }
-            "task.acquire" | "task.release" | "task.fulfill" => {
-                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
             "task.suspend" => {
@@ -260,7 +254,7 @@ impl ServerState {
         // Collect actions
         let mut promise_settles: Vec<String> = Vec::new();
         let mut task_releases: Vec<(String, i64)> = Vec::new();
-        let mut task_retries: Vec<(String, i64)> = Vec::new();
+        let mut task_retries: Vec<String> = Vec::new();
 
         for pt in &self.p_timeouts {
             if now >= pt.timeout {
@@ -284,7 +278,7 @@ impl ServerState {
             } else if tt.typ == 0 {
                 if let Some(t) = self.tasks.get(&tt.id) {
                     if t.state == TaskState::Pending {
-                        task_retries.push((tt.id.clone(), t.version));
+                        task_retries.push(tt.id.clone());
                     }
                 }
             }
@@ -338,7 +332,7 @@ impl ServerState {
         }
 
         // Phase 5: Retry pending tasks
-        for (id, _version) in &task_retries {
+        for id in &task_retries {
             if let Some(t) = self.tasks.get(id) {
                 if t.state == TaskState::Pending {
                     let v = t.version;
@@ -552,13 +546,7 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let pid = require_str(req, "pid")?;
-        let ttl = req
-            .get("ttl")
-            .and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64))
-            })
-            .unwrap_or(60_000);
+        let ttl = extract_ttl(req);
         // action is a PromiseCreateReq envelope
         let action_raw = req.get("action").unwrap_or(&serde_json::Value::Null);
         let promise_req = extract_action_data(action_raw);
@@ -700,16 +688,10 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_task_id(req)?;
+        let task_id = require_str(req, "id")?;
         let pid = req.get("pid").and_then(|v| v.as_str()).unwrap_or("");
-        let ttl = req
-            .get("ttl")
-            .and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_u64().map(|u| u.min(i64::MAX as u64) as i64))
-            })
-            .unwrap_or(60_000)
-            .max(1); // Ensure TTL is always positive to prevent lease timeouts in the past
+        // Ensure TTL is always positive to prevent lease timeouts in the past
+        let ttl = extract_ttl(req).max(1);
 
         match self.tasks.get(task_id) {
             None => Ok(serde_json::json!({
@@ -749,7 +731,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_task_id(req)?;
+        let task_id = require_str(req, "id")?;
 
         match self.tasks.get(task_id) {
             None => Ok(serde_json::json!({
@@ -785,7 +767,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_task_id(req)?;
+        let task_id = require_str(req, "id")?;
 
         match self.tasks.get(task_id) {
             None => {
@@ -850,7 +832,7 @@ impl ServerState {
         corr_id: &serde_json::Value,
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
-        let task_id = require_task_id(req)?;
+        let task_id = require_str(req, "id")?;
 
         match self.tasks.get(task_id) {
             None => {

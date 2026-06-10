@@ -259,10 +259,10 @@ impl Core {
                 }
             };
 
-            // Flush remaining local work
-            let flush_remote = ctx.flush_local_work().await;
-            let mut remote_todos = ctx.take_remote_todos().await;
-            remote_todos.extend(flush_remote);
+            // Flush remaining local work. A flush error (e.g. a fire-and-forget
+            // promise creation that failed in the background) fails the whole
+            // execution so the task is released and retried.
+            let remote_todos = ctx.drain_remote_work().await?;
 
             // 5. FINALIZE: determine outcome
             if remote_todos.is_empty() {
@@ -419,15 +419,15 @@ mod tests {
     /// Workflow that suspends on a single remote dependency.
     #[resonate_sdk_macros::function]
     async fn suspending_once(ctx: &Context) -> Result<i64> {
-        let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
+        let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
         Ok(0)
     }
 
     /// Workflow that suspends on two remote dependencies.
     #[resonate_sdk_macros::function]
     async fn suspending_multi(ctx: &Context) -> Result<i64> {
-        let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
-        let _ = ctx.rpc::<i32>("dep-b", &()).spawn().await?;
+        let _ = ctx.rpc::<i32>("dep-a", &()).spawn()?;
+        let _ = ctx.rpc::<i32>("dep-b", &()).spawn()?;
         Ok(0)
     }
 
@@ -438,7 +438,7 @@ mod tests {
     async fn suspending_then_done(ctx: &Context) -> Result<i64> {
         let count = COMP_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
             Ok(0)
         } else {
             Ok(42)
@@ -453,7 +453,7 @@ mod tests {
 
     #[resonate_sdk_macros::function]
     async fn remote_dep(ctx: &Context) -> Result<i32> {
-        let _ = ctx.rpc::<i32>("dep-a", &()).spawn().await?;
+        let _ = ctx.rpc::<i32>("dep-a", &()).spawn()?;
         Ok(0)
     }
 
@@ -635,7 +635,7 @@ mod tests {
     async fn redir_no_acquire(ctx: &Context) -> Result<i64> {
         let count = REDIR_NO_ACQUIRE_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
             Ok(0)
         } else {
             Ok(42)
@@ -679,7 +679,7 @@ mod tests {
     async fn redir_preload(ctx: &Context) -> Result<i64> {
         let count = REDIR_PRELOAD_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count == 0 {
-            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
             Ok(0)
         } else {
             Ok(42)
@@ -720,7 +720,7 @@ mod tests {
     async fn multi_redirect(ctx: &Context) -> Result<i64> {
         let count = MULTI_REDIR_COUNT.fetch_add(1, AtomicOrdering::SeqCst);
         if count < 2 {
-            let _ = ctx.rpc::<i32>("dep", &()).spawn().await?;
+            let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
         }
         Ok(count as i64)
     }
@@ -1219,7 +1219,7 @@ mod tests {
     #[resonate_sdk_macros::function]
     async fn unwrap_suspend(ctx: &Context) -> Result<i32> {
         // Simulates a user accidentally calling .unwrap() on a suspended rpc
-        let handle = ctx.rpc::<i32>("dep", &()).spawn().await?;
+        let handle = ctx.rpc::<i32>("dep", &()).spawn()?;
         let val: i32 = handle.await.unwrap();
         Ok(val)
     }
@@ -1318,6 +1318,48 @@ mod tests {
             hb.stop_count(),
             1,
             "heartbeat should be stopped even after panic"
+        );
+    }
+
+    // ── Background creation failure → release ─────────────────────
+
+    #[resonate_sdk_macros::function]
+    async fn fire_and_forget_rpc(ctx: &Context) -> Result<i64> {
+        let _ = ctx.rpc::<i32>("dep", &()).spawn()?;
+        Ok(0)
+    }
+
+    #[tokio::test]
+    async fn failed_background_creation_releases_task() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "fire_and_forget_rpc", serde_json::json!(null));
+        harness.add_task("task1", root, vec![]).await;
+        // The rpc's background promise.create fails; the handle is never
+        // awaited, so the error must surface at flush and release the task.
+        harness.set_fail_promise_create(true).await;
+
+        let mut registry = Registry::new();
+        registry.register(fire_and_forget_rpc).unwrap();
+
+        let core = test_core(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(registry)),
+        );
+        let result = core.on_message("task1", 0).await;
+        assert!(
+            result.is_err(),
+            "execution should fail when a background creation fails"
+        );
+
+        let requests = harness.sent_requests_json().await;
+        assert!(
+            requests.iter().any(|r| r["kind"] == "task.release"),
+            "task should be released after a background creation failure"
+        );
+        assert!(
+            !requests.iter().any(|r| r["kind"] == "task.fulfill"),
+            "task must not be fulfilled when a child creation was lost"
         );
     }
 

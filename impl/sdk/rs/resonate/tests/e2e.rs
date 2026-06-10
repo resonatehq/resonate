@@ -103,8 +103,8 @@ async fn sequential_workflow(ctx: &Context) -> Result<i64> {
 
 #[resonate_sdk::function]
 async fn parallel_workflow(ctx: &Context) -> Result<i64> {
-    let h1 = ctx.rpc::<i64>("add", (10_i64, 20_i64)).spawn().await?;
-    let h2 = ctx.rpc::<i64>("add", (30_i64, 40_i64)).spawn().await?;
+    let h1 = ctx.rpc::<i64>("add", (10_i64, 20_i64)).spawn()?;
+    let h2 = ctx.rpc::<i64>("add", (30_i64, 40_i64)).spawn()?;
     let r1: i64 = h1.await?;
     let r2: i64 = h2.await?;
     Ok(r1 + r2)

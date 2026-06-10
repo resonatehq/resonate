@@ -220,11 +220,7 @@ impl Sender {
             id: &'a str,
         }
         let (_, data) = self.send_envelope("task.get", &Data { id }, false).await?;
-        let task = data
-            .get("task")
-            .ok_or_else(|| Error::DecodingError("missing 'task' in response".into()))?;
-        TaskRecord::deserialize(task)
-            .map_err(|e| Error::DecodingError(format!("invalid task record: {}", e)))
+        parse_record(&data, "task")
     }
 
     /// Create a task and its associated promise.
@@ -322,7 +318,7 @@ impl Sender {
         let promise = PromiseRecord::deserialize(promise_val).map_err(|e| {
             Error::DecodingError(format!("invalid promise in fence response: {}", e))
         })?;
-        let preload = parse_preloaded(&data);
+        let preload = parse_records(&data, "preload");
         Ok(TaskFenceResult { promise, preload })
     }
 
@@ -365,19 +361,10 @@ impl Sender {
                 false,
             )
             .await?;
-        let tasks_val = data.get("tasks").and_then(|v| v.as_array());
-        let tasks = tasks_val
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| TaskRecord::deserialize(v).ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let cursor = data
-            .get("cursor")
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string());
-        Ok(TaskSearchResult { tasks, cursor })
+        Ok(TaskSearchResult {
+            tasks: parse_records(&data, "tasks"),
+            cursor: parse_cursor(&data),
+        })
     }
 
     /// Get a promise by ID.
@@ -477,19 +464,10 @@ impl Sender {
                 false,
             )
             .await?;
-        let promises_val = data.get("promises").and_then(|v| v.as_array());
-        let promises = promises_val
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| PromiseRecord::deserialize(v).ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let cursor = data
-            .get("cursor")
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string());
-        Ok(PromiseSearchResult { promises, cursor })
+        Ok(PromiseSearchResult {
+            promises: parse_records(&data, "promises"),
+            cursor: parse_cursor(&data),
+        })
     }
 
     /// Get a schedule by ID.
@@ -501,21 +479,13 @@ impl Sender {
         let (_, data) = self
             .send_envelope("schedule.get", &Data { id }, false)
             .await?;
-        let schedule = data
-            .get("schedule")
-            .ok_or_else(|| Error::DecodingError("missing 'schedule' in response".into()))?;
-        ScheduleRecord::deserialize(schedule)
-            .map_err(|e| Error::DecodingError(format!("invalid schedule record: {}", e)))
+        parse_record(&data, "schedule")
     }
 
     /// Create a schedule.
     pub async fn schedule_create(&self, req: ScheduleCreateReq) -> Result<ScheduleRecord> {
         let (_, data) = self.send_envelope("schedule.create", &req, false).await?;
-        let schedule = data
-            .get("schedule")
-            .ok_or_else(|| Error::DecodingError("missing 'schedule' in response".into()))?;
-        ScheduleRecord::deserialize(schedule)
-            .map_err(|e| Error::DecodingError(format!("invalid schedule record: {}", e)))
+        parse_record(&data, "schedule")
     }
 
     /// Delete a schedule.
@@ -556,19 +526,10 @@ impl Sender {
                 false,
             )
             .await?;
-        let schedules_val = data.get("schedules").and_then(|v| v.as_array());
-        let schedules = schedules_val
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| ScheduleRecord::deserialize(v).ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-        let cursor = data
-            .get("cursor")
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string());
-        Ok(ScheduleSearchResult { schedules, cursor })
+        Ok(ScheduleSearchResult {
+            schedules: parse_records(&data, "schedules"),
+            cursor: parse_cursor(&data),
+        })
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -681,34 +642,42 @@ struct SubEnvelope<'a, D: Serialize> {
 //  Response parsing helpers (internal)
 // ═══════════════════════════════════════════════════════════════════
 
+/// Parse a single required record (`promise`, `task`, `schedule`, ...) from a
+/// server JSON response.
+fn parse_record<T: serde::de::DeserializeOwned>(json: &serde_json::Value, key: &str) -> Result<T> {
+    let val = json
+        .get(key)
+        .ok_or_else(|| Error::DecodingError(format!("missing '{}' in response", key)))?;
+    T::deserialize(val).map_err(|e| Error::DecodingError(format!("invalid {} record: {}", key, e)))
+}
+
+/// Parse an array of records from a response field, skipping invalid entries.
+/// Returns an empty vec if the field is absent.
+fn parse_records<T: serde::de::DeserializeOwned>(json: &serde_json::Value, key: &str) -> Vec<T> {
+    json.get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| T::deserialize(v).ok()).collect())
+        .unwrap_or_default()
+}
+
+/// Extract the optional pagination cursor from a search response.
+fn parse_cursor(json: &serde_json::Value) -> Option<String> {
+    json.get("cursor")
+        .and_then(|c| c.as_str())
+        .map(String::from)
+}
+
 /// Parse a promise record from a server JSON response.
 fn parse_promise(json: &serde_json::Value) -> Result<PromiseRecord> {
-    let promise = json
-        .get("promise")
-        .ok_or_else(|| Error::DecodingError("missing 'promise' in response".into()))?;
-    PromiseRecord::deserialize(promise)
-        .map_err(|e| Error::DecodingError(format!("invalid promise record: {}", e)))
+    parse_record(json, "promise")
 }
 
 /// Parse a task.acquire response.
 fn parse_task_acquire(json: &serde_json::Value) -> Result<TaskAcquireResult> {
-    let task_val = json
-        .get("task")
-        .ok_or_else(|| Error::DecodingError("missing 'task' in task.acquire response".into()))?;
-    let task: TaskRecord = TaskRecord::deserialize(task_val)
-        .map_err(|e| Error::DecodingError(format!("invalid task in task.acquire: {}", e)))?;
-
-    let promise_val = json
-        .get("promise")
-        .ok_or_else(|| Error::DecodingError("missing 'promise' in task.acquire response".into()))?;
-    let promise: PromiseRecord = PromiseRecord::deserialize(promise_val)
-        .map_err(|e| Error::DecodingError(format!("invalid promise in task.acquire: {}", e)))?;
-
-    let preload = parse_preloaded(json);
     Ok(TaskAcquireResult {
-        task,
-        promise,
-        preload,
+        task: parse_record(json, "task")?,
+        promise: parse_record(json, "promise")?,
+        preload: parse_records(json, "preload"),
     })
 }
 
@@ -716,23 +685,11 @@ fn parse_task_acquire(json: &serde_json::Value) -> Result<TaskAcquireResult> {
 fn parse_suspend_result(status: u16, data: &serde_json::Value) -> Result<SuspendResult> {
     if status == 300 {
         Ok(SuspendResult::Redirect {
-            preload: parse_preloaded(data),
+            preload: parse_records(data, "preload"),
         })
     } else {
         Ok(SuspendResult::Suspended)
     }
-}
-
-/// Extract preloaded promises from a response.
-fn parse_preloaded(json: &serde_json::Value) -> Vec<PromiseRecord> {
-    json.get("preload")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| PromiseRecord::deserialize(v).ok())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

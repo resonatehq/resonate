@@ -168,103 +168,28 @@ fn generate_durable_impl(
     let fn_attrs = &input.attrs;
 
     // Generate the execute body based on kind.
-    // Instead of delegating to the original function, we inline the body directly.
-    // We destructure the `args` tuple and set up `ctx`/`info` bindings as needed.
-    let execute_body = match kind {
-        FunctionKind::PureLeaf => {
-            let ignore_env = quote! { let _ = env; };
-            if arg_names.is_empty() {
-                quote! {
-                    #ignore_env
-                    async move #fn_body .await
-                }
-            } else if arg_names.len() == 1 {
-                let name = &arg_names[0];
-                quote! {
-                    #ignore_env
-                    let #name = args;
-                    async move #fn_body .await
-                }
-            } else {
-                let destructure: Vec<_> = arg_names
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| {
-                        let idx = syn::Index::from(i);
-                        quote! { let #name = args.#idx; }
-                    })
-                    .collect();
-                quote! {
-                    #ignore_env
-                    #(#destructure)*
-                    async move #fn_body .await
-                }
-            }
+    // Instead of delegating to the original function, we inline the body directly:
+    // an env binding (`ctx`/`info`) per kind, then the destructured `args` tuple.
+    let env_binding = match kind {
+        FunctionKind::PureLeaf => quote! { let _ = env; },
+        FunctionKind::LeafWithInfo => quote! { let info = env.into_info(); },
+        FunctionKind::Workflow => quote! { let ctx = env.into_context(); },
+    };
+    let bind_args = match arg_names.as_slice() {
+        [] => quote! {},
+        [name] => quote! { let #name = args; },
+        names => {
+            let destructure = names.iter().enumerate().map(|(i, name)| {
+                let idx = syn::Index::from(i);
+                quote! { let #name = args.#idx; }
+            });
+            quote! { #(#destructure)* }
         }
-        FunctionKind::LeafWithInfo => {
-            let info_unwrap = quote! {
-                let info = env.into_info();
-            };
-            if arg_names.is_empty() {
-                quote! {
-                    #info_unwrap
-                    async move #fn_body .await
-                }
-            } else if arg_names.len() == 1 {
-                let name = &arg_names[0];
-                quote! {
-                    #info_unwrap
-                    let #name = args;
-                    async move #fn_body .await
-                }
-            } else {
-                let destructure: Vec<_> = arg_names
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| {
-                        let idx = syn::Index::from(i);
-                        quote! { let #name = args.#idx; }
-                    })
-                    .collect();
-                quote! {
-                    #info_unwrap
-                    #(#destructure)*
-                    async move #fn_body .await
-                }
-            }
-        }
-        FunctionKind::Workflow => {
-            let ctx_unwrap = quote! {
-                let ctx = env.into_context();
-            };
-            if arg_names.is_empty() {
-                quote! {
-                    #ctx_unwrap
-                    async move #fn_body .await
-                }
-            } else if arg_names.len() == 1 {
-                let name = &arg_names[0];
-                quote! {
-                    #ctx_unwrap
-                    let #name = args;
-                    async move #fn_body .await
-                }
-            } else {
-                let destructure: Vec<_> = arg_names
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| {
-                        let idx = syn::Index::from(i);
-                        quote! { let #name = args.#idx; }
-                    })
-                    .collect();
-                quote! {
-                    #ctx_unwrap
-                    #(#destructure)*
-                    async move #fn_body .await
-                }
-            }
-        }
+    };
+    let execute_body = quote! {
+        #env_binding
+        #bind_args
+        async move #fn_body .await
     };
 
     let internal_struct_name = format_ident!("__Durable_{}", struct_name);

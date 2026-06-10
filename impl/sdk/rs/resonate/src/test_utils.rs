@@ -33,6 +33,8 @@ pub struct StubNetwork {
     /// How many times redirect has been returned (to avoid infinite loops).
     pub redirect_count: usize,
     pub max_redirects: usize,
+    /// If true, every promise.create request fails with a 500.
+    pub fail_promise_create: bool,
 }
 
 impl StubNetwork {
@@ -43,6 +45,7 @@ impl StubNetwork {
             suspend_returns_redirect: false,
             redirect_count: 0,
             max_redirects: 1,
+            fail_promise_create: false,
         }
     }
 
@@ -78,6 +81,9 @@ impl StubNetwork {
             };
 
         let (status, resp_data) = match kind.as_str() {
+            "promise.create" if self.fail_promise_create => {
+                (500, serde_json::json!("injected promise.create failure"))
+            }
             "promise.create" => (200, self.handle_promise_create(&data)),
             "promise.settle" => (200, self.handle_promise_settle(&data)),
             "task.acquire" => {
@@ -92,10 +98,7 @@ impl StubNetwork {
                 }
             }
             "task.fulfill" => (200, self.handle_task_fulfill(&data)),
-            "task.suspend" => {
-                let (s, d) = self.handle_task_suspend(&data);
-                (s, d)
-            }
+            "task.suspend" => self.handle_task_suspend(&data),
             "task.release" => (200, self.handle_task_release(&data)),
             _ => (
                 400,
@@ -416,6 +419,12 @@ impl TestHarness {
         net.max_redirects = max;
     }
 
+    /// Make every subsequent promise.create request fail with a 500.
+    pub async fn set_fail_promise_create(&self, val: bool) {
+        let mut net = self.network.lock().await;
+        net.fail_promise_create = val;
+    }
+
     /// Build a Sender backed by the StubNetwork.
     pub fn build_sender(&self) -> Sender {
         self.build_sender_with_auth(None)
@@ -606,17 +615,27 @@ pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) ->
 
 /// Finalize a context into an Outcome after a workflow function has been called.
 /// Call this after running operations on the context to determine Done vs Suspended.
+/// Panics if flush fails — use `try_finalize_context` for failure-path tests.
 pub async fn finalize_context<T>(
     ctx: &Context,
     result: error::Result<T>,
 ) -> crate::types::Outcome<T> {
-    let flush_remote = ctx.flush_local_work().await;
-    let mut remote_todos = ctx.take_remote_todos().await;
-    remote_todos.extend(flush_remote);
+    try_finalize_context(ctx, result)
+        .await
+        .expect("flush_local_work failed")
+}
 
-    if remote_todos.is_empty() {
+/// Like `finalize_context`, but surfaces flush errors (e.g. a fire-and-forget
+/// promise creation that failed in the background) instead of panicking.
+pub async fn try_finalize_context<T>(
+    ctx: &Context,
+    result: error::Result<T>,
+) -> error::Result<crate::types::Outcome<T>> {
+    let remote_todos = ctx.drain_remote_work().await?;
+
+    Ok(if remote_todos.is_empty() {
         crate::types::Outcome::Done(result)
     } else {
         crate::types::Outcome::Suspended { remote_todos }
-    }
+    })
 }

@@ -98,82 +98,10 @@ impl Network for HttpNetwork {
             const MAX_BACKOFF_SECS: u64 = 60;
 
             loop {
-                tracing::debug!(url = %url, "connecting to SSE endpoint");
-
-                let mut request = client.get(&url);
-                request = match &auth {
-                    Some(token) => request.bearer_auth(token),
-                    None => request,
-                };
-
-                let response = match request.send().await {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        tracing::warn!(error = %e, backoff = backoff_secs, "SSE connection failed, retrying");
-                        tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
-                        continue;
-                    }
-                };
-
-                if !response.status().is_success() {
-                    tracing::warn!(status = %response.status(), backoff = backoff_secs, "SSE endpoint returned error, retrying");
-                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-                    backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
-                    continue;
+                if stream_sse(&client, &url, &auth, &subscribers).await {
+                    // A connection was established (and later closed) — reset backoff.
+                    backoff_secs = 1;
                 }
-
-                // Connection succeeded, reset backoff.
-                backoff_secs = 1;
-                tracing::info!(url = %url, "SSE connection established");
-
-                // Read SSE stream
-                let mut stream = response.bytes_stream();
-                let mut buffer = String::new();
-
-                use futures::StreamExt;
-                while let Some(chunk) = stream.next().await {
-                    match chunk {
-                        Ok(bytes) => {
-                            let text = match std::str::from_utf8(&bytes) {
-                                Ok(t) => t,
-                                Err(_) => continue,
-                            };
-                            buffer.push_str(text);
-
-                            // Parse SSE events from buffer
-                            // SSE format: "data: <json>\n\n"
-                            while let Some(pos) = buffer.find("\n\n") {
-                                let event_block = buffer[..pos].to_string();
-                                buffer.drain(..pos + 2);
-
-                                // Extract data lines
-                                for line in event_block.lines() {
-                                    if let Some(data) = line.strip_prefix("data:") {
-                                        let data = data.trim();
-                                        if data.is_empty() {
-                                            continue;
-                                        }
-                                        tracing::debug!(direction = "sse_recv", body = %data, "http_network");
-                                        let subs = subscribers.read();
-                                        for cb in subs.iter() {
-                                            cb(data.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "SSE stream error, reconnecting");
-                            break;
-                        }
-                    }
-                }
-
-                tracing::info!(
-                    backoff = backoff_secs,
-                    "SSE connection closed, reconnecting"
-                );
                 tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
@@ -222,6 +150,78 @@ impl Network for HttpNetwork {
     fn target_resolver(&self, target: &str) -> String {
         format!("poll://any@{}", target)
     }
+}
+
+/// Connect to the SSE endpoint and forward `data:` events to subscribers until
+/// the stream ends or errors. Returns `true` if a connection was established
+/// (so the caller resets its backoff), `false` if connecting failed.
+async fn stream_sse(
+    client: &reqwest::Client,
+    url: &str,
+    auth: &Option<String>,
+    subscribers: &Subscribers,
+) -> bool {
+    tracing::debug!(url = %url, "connecting to SSE endpoint");
+
+    let mut request = client.get(url);
+    if let Some(token) = auth {
+        request = request.bearer_auth(token);
+    }
+
+    let response = match request.send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::warn!(error = %e, "SSE connection failed, retrying");
+            return false;
+        }
+    };
+    if !response.status().is_success() {
+        tracing::warn!(status = %response.status(), "SSE endpoint returned error, retrying");
+        return false;
+    }
+
+    tracing::info!(url = %url, "SSE connection established");
+
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "SSE stream error, reconnecting");
+                break;
+            }
+        };
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        buffer.push_str(text);
+
+        // Parse SSE events from buffer. SSE format: "data: <json>\n\n"
+        while let Some(pos) = buffer.find("\n\n") {
+            let event_block = buffer[..pos].to_string();
+            buffer.drain(..pos + 2);
+
+            for line in event_block.lines() {
+                if let Some(data) = line.strip_prefix("data:") {
+                    let data = data.trim();
+                    if data.is_empty() {
+                        continue;
+                    }
+                    tracing::debug!(direction = "sse_recv", body = %data, "http_network");
+                    let subs = subscribers.read();
+                    for cb in subs.iter() {
+                        cb(data.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("SSE connection closed, reconnecting");
+    true
 }
 
 fn uuid_no_dashes() -> String {

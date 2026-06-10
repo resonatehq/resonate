@@ -78,20 +78,6 @@ pub struct UnblockData {
     pub promise: serde_json::Value,
 }
 
-/// Extract the `data` portion from a protocol envelope response.
-pub fn response_data(resp: &serde_json::Value) -> Result<&serde_json::Value> {
-    resp.get("data")
-        .ok_or_else(|| Error::DecodingError("response missing 'data' envelope field".into()))
-}
-
-/// Extract the `head.status` from a protocol envelope response.
-pub fn response_status(resp: &serde_json::Value) -> Result<u64> {
-    resp.get("head")
-        .and_then(|h| h.get("status"))
-        .and_then(|s| s.as_u64())
-        .ok_or_else(|| Error::DecodingError("response missing 'head.status' envelope field".into()))
-}
-
 impl Transport {
     /// Build a Transport from a Network.
     pub fn new(network: Arc<dyn Network>) -> Self {

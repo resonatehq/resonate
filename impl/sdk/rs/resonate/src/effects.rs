@@ -43,10 +43,8 @@ impl Effects {
         // 2. Encode param via codec
         let encoded_param = self.codec.encode(req.param.data_as_ref())?;
         let encoded_req = PromiseCreateReq {
-            id: req.id.clone(),
-            timeout_at: req.timeout_at,
             param: encoded_param,
-            tags: req.tags.clone(),
+            ..req
         };
 
         // validation tracing

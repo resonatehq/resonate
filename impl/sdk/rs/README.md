@@ -86,10 +86,10 @@ Use `.spawn()` to fan out durable tasks in parallel:
 ```rust
 #[resonate_sdk::function]
 async fn fan_out(ctx: &Context) -> Result<Vec<String>> {
-    // Spawn tasks in parallel
-    let h1 = ctx.run(process, "alpha".into()).spawn().await?;
-    let h2 = ctx.run(process, "beta".into()).spawn().await?;
-    let h3 = ctx.run(process, "gamma".into()).spawn().await?;
+    // Spawn tasks in parallel — spawn() is synchronous, work starts immediately
+    let h1 = ctx.run(process, "alpha".into()).spawn()?;
+    let h2 = ctx.run(process, "beta".into()).spawn()?;
+    let h3 = ctx.run(process, "gamma".into()).spawn()?;
 
     // Collect results — each is individually durable
     let r1 = h1.await?;
@@ -132,7 +132,7 @@ If the process crashes after `h1` completes but before `h2` finishes, only `h2` 
 | `ctx.rpc::<T>(func_name, args)` | Invoke a child function remotely |
 | `ctx.sleep(duration)` | Durable sleep (survives restarts) |
 
-All builders support `.await` (sequential) or `.spawn().await` (parallel, returns a handle).
+All builders support `.await` (sequential) or `.spawn()` (parallel — synchronous, returns a handle to await later).
 
 ### Builder options
 

@@ -116,20 +116,16 @@ impl Resonate {
     /// `LocalNetwork` — `config.url` and any `RESONATE_URL`/`RESONATE_HOST`
     /// env vars are ignored. Use this in tests or local-mode applications
     /// that need to set fields like `prefix` while staying off the network.
-    pub fn local_with(config: ResonateConfig) -> Self {
-        let pid = config.pid.or_else(|| Some("default".to_string()));
-        let group = config.group.or_else(|| Some("default".to_string()));
-        let net: Arc<dyn Network> = Arc::new(LocalNetwork::new(pid.clone(), group.clone()));
-        Self::new(ResonateConfig {
-            url: None,
-            pid,
-            group,
-            ttl: config.ttl.or(Some(u64::MAX)),
-            token: config.token,
-            encryptor: config.encryptor,
-            network: Some(net),
-            prefix: config.prefix,
-        })
+    pub fn local_with(mut config: ResonateConfig) -> Self {
+        config.pid.get_or_insert_with(|| "default".to_string());
+        config.group.get_or_insert_with(|| "default".to_string());
+        config.ttl.get_or_insert(u64::MAX);
+        config.url = None;
+        config.network = Some(Arc::new(LocalNetwork::new(
+            config.pid.clone(),
+            config.group.clone(),
+        )));
+        Self::new(config)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2284,7 +2280,7 @@ mod tests {
 
     #[resonate_sdk_macros::function]
     async fn spawn_child(ctx: &Context) -> Result<i64> {
-        let h = ctx.run(multiply, (3_i64, 5_i64)).spawn().await?;
+        let h = ctx.run(multiply, (3_i64, 5_i64)).spawn()?;
         let result = h.await?;
         Ok(result)
     }
@@ -2394,15 +2390,19 @@ mod tests {
 
     #[resonate_sdk_macros::function]
     async fn detacher_one(ctx: &Context) -> Result<String> {
-        let id = ctx.detached("remote_handler", (42_i64,)).spawn().await?;
+        let id = ctx
+            .detached("remote_handler", (42_i64,))
+            .spawn()?
+            .id()
+            .await?;
         Ok(id)
     }
 
     #[resonate_sdk_macros::function]
     async fn detacher_many(ctx: &Context) -> Result<Vec<String>> {
-        let a = ctx.detached("h", (1_i64,)).spawn().await?;
-        let b = ctx.detached("h", (2_i64,)).spawn().await?;
-        let c = ctx.detached("h", (3_i64,)).spawn().await?;
+        let a = ctx.detached("h", (1_i64,)).spawn()?.id().await?;
+        let b = ctx.detached("h", (2_i64,)).spawn()?.id().await?;
+        let c = ctx.detached("h", (3_i64,)).spawn()?.id().await?;
         Ok(vec![a, b, c])
     }
 
@@ -2411,7 +2411,8 @@ mod tests {
         let id = ctx
             .detached("remote_handler", (1_i64,))
             .target("custom-worker")
-            .spawn()
+            .spawn()?
+            .id()
             .await?;
         Ok(id)
     }

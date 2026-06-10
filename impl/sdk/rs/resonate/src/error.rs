@@ -42,6 +42,9 @@ pub enum Error {
     #[error("task join error: {0}")]
     JoinError(String),
 
+    #[error("promise creation failed: {0}")]
+    PromiseCreation(String),
+
     #[error("application error: {message}")]
     Application { message: String },
 
