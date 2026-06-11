@@ -828,8 +828,8 @@ impl Db for PostgresDb<'_> {
                 Ok(Some(TaskRecord {
                     id: r.get("id"),
                     state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes: resumes as i64,
+                    version: r.get("version"),
+                    resumes,
                     ttl: r.get("ttl"),
                     pid: r.get("pid"),
                 }))
@@ -932,7 +932,7 @@ impl Db for PostgresDb<'_> {
             promise,
             task_created: false,
             task_state: row.try_get::<String, _>("task_state").ok(),
-            task_version: row.try_get::<i32, _>("task_version").ok().map(|v| v as i64),
+            task_version: row.try_get::<i32, _>("task_version").ok(),
         })
     }
 
@@ -975,7 +975,7 @@ impl Db for PostgresDb<'_> {
             )
             SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_state, task_version, was_acquired FROM invoked
         ")
-            .bind(task_id).bind(version as i32).bind(time).bind(ttl).bind(pid)
+            .bind(task_id).bind(version).bind(time).bind(ttl).bind(pid)
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
@@ -989,7 +989,7 @@ impl Db for PostgresDb<'_> {
         let row = &rows[0];
         let was_acquired: bool = row.get("was_acquired");
         let task_state: String = row.get("task_state");
-        let task_version: i64 = row.get::<i32, _>("task_version") as i64;
+        let task_version: i32 = row.get("task_version");
         Ok(TaskAcquireResult {
             promise: Some(row_to_promise(row)),
             was_acquired,
@@ -1078,7 +1078,7 @@ impl Db for PostgresDb<'_> {
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
         "))
-            .bind(task_id).bind(version as i32)                                              // $1-$2
+            .bind(task_id).bind(version)                                                     // $1-$2
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)    // $3-$7
             .bind(timeout_at).bind(created_at).bind(settled_at)                               // $8-$10
             .bind(already_timedout).bind(address)                                             // $11-$12
@@ -1203,7 +1203,7 @@ impl Db for PostgresDb<'_> {
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
         "))
-            .bind(task_id).bind(version as i32)                                       // $1-$2
+            .bind(task_id).bind(version)                                                     // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)  // $3-$7
             .fetch_all(self.tx().as_mut()))?;
 
@@ -1227,12 +1227,12 @@ impl Db for PostgresDb<'_> {
     }
 
     // T-05: task.heartbeat — single CTE with unnest
-    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i64)], time: i64) -> StorageResult<()> {
+    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i32)], time: i64) -> StorageResult<()> {
         if tasks.is_empty() {
             return Ok(());
         }
         let ids: Vec<String> = tasks.iter().map(|(id, _)| id.to_string()).collect();
-        let versions: Vec<i32> = tasks.iter().map(|(_, v)| *v as i32).collect();
+        let versions: Vec<i32> = tasks.iter().map(|(_, v)| *v).collect();
 
         rt_block_on(
             sqlx::query(
@@ -1267,7 +1267,7 @@ impl Db for PostgresDb<'_> {
     fn task_suspend(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         awaited_ids: &[&str],
     ) -> StorageResult<TaskSuspendResult> {
         let awaited_ids: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
@@ -1337,7 +1337,7 @@ impl Db for PostgresDb<'_> {
               EXISTS (SELECT 1 FROM suspended_task) AS was_suspended,
               (SELECT cnt FROM missing_count) AS missing_count
         ")
-            .bind(task_id).bind(version as i32).bind(&awaited_ids)
+            .bind(task_id).bind(version).bind(&awaited_ids)
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
@@ -1462,7 +1462,7 @@ impl Db for PostgresDb<'_> {
             )
             SELECT id, state, param_headers::text, param_data, value_headers::text, value_data, tags::text, timeout_at, created_at, settled_at, task_fulfilled, task_exists FROM result
         "))
-            .bind(task_id).bind(version as i32)                                       // $1-$2
+            .bind(task_id).bind(version)                                                     // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)  // $3-$7
             .fetch_all(self.tx().as_mut()))?;
 
@@ -1487,7 +1487,7 @@ impl Db for PostgresDb<'_> {
     fn task_release(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
@@ -1519,7 +1519,7 @@ impl Db for PostgresDb<'_> {
         ",
             )
             .bind(task_id)
-            .bind(version as i32)
+            .bind(version)
             .bind(time)
             .bind(ttl)
             .fetch_one(self.tx().as_mut()),
@@ -1636,8 +1636,8 @@ impl Db for PostgresDb<'_> {
                 TaskRecord {
                     id: r.get("id"),
                     state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes: resumes as i64,
+                    version: r.get("version"),
+                    resumes,
                     ttl: r.get("ttl"),
                     pid: r.get("pid"),
                 }
@@ -2045,8 +2045,8 @@ impl Db for PostgresDb<'_> {
                 TaskRecord {
                     id: r.get("id"),
                     state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes: resumes as i64,
+                    version: r.get("version"),
+                    resumes,
                     ttl: r.get("ttl"),
                     pid: r.get("pid"),
                 }
@@ -2119,13 +2119,10 @@ impl Db for PostgresDb<'_> {
         )?;
         let execute_msgs: Vec<OutgoingExecute> = exec_rows
             .iter()
-            .map(|r| {
-                let v: i32 = r.get("version");
-                OutgoingExecute {
-                    id: r.get("id"),
-                    version: v as i64,
-                    address: r.get("address"),
-                }
+            .map(|r| OutgoingExecute {
+                id: r.get("id"),
+                version: r.get("version"),
+                address: r.get("address"),
             })
             .collect();
 

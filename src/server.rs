@@ -2024,7 +2024,7 @@ async fn op_task_heartbeat(
                     &format_validation_errors(&e),
                 ));
             }
-            let task_pairs: Vec<(&str, i64)> =
+            let task_pairs: Vec<(&str, i32)> =
                 r.tasks.iter().map(|t| (t.id.as_str(), t.version)).collect();
             db.task_heartbeat(&r.pid, &task_pairs, now)?;
             tracing::debug!(
