@@ -295,6 +295,77 @@ func TestRunInnerPromiseOriginPropagatesAcrossWorker(t *testing.T) {
 // Run
 // ──────────────────────────────────────────────────────────────────────────
 
+func TestSetDependencyReachesWorkflow(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	type closer struct{ name string } // stands in for a non-serializable client
+	dep := &closer{name: "db"}
+
+	fn, err := resonate.Register(r, "read_dep", func(c *resonate.Context, _ struct{}) (string, error) {
+		got, ok := resonate.DependencyOf[*closer](c, "db")
+		if !ok {
+			return "", errors.New("dependency db not found")
+		}
+		if got != dep {
+			return "", errors.New("dependency db is not the registered instance")
+		}
+		if _, ok := c.GetDependency("missing"); ok {
+			return "", errors.New("unregistered dependency reported as found")
+		}
+		return got.name, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Registered after New, before Run: the execution must still see it.
+	r.SetDependency("db", dep)
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "dep-1", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "db" {
+		t.Errorf("result = %q, want %q", got, "db")
+	}
+}
+
+func TestSetDependencyShadowsPreviousValue(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	fn, err := resonate.Register(r, "read_dep", func(c *resonate.Context, _ struct{}) (string, error) {
+		s, ok := resonate.DependencyOf[string](c, "greeting")
+		if !ok {
+			return "", errors.New("dependency greeting not found")
+		}
+		return s, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r.SetDependency("greeting", "hello")
+	r.SetDependency("greeting", "hola")
+
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := fn.Run(ctx, "dep-2", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "hola" {
+		t.Errorf("result = %q, want %q (last write wins)", got, "hola")
+	}
+}
+
 func TestRunReturnsHandle(t *testing.T) {
 	r := newLocal(t, localConfig{})
 	noopFn, err := resonate.Register(r, "noop", noop)

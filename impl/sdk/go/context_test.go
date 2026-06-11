@@ -550,3 +550,57 @@ func TestContext_NewRootContextDefaults(t *testing.T) {
 		t.Fatalf("expected empty default, got %q", got)
 	}
 }
+
+// ── Dependencies ────────────────────────────────────────────────────────
+
+type fakeDB struct{ dsn string }
+
+func TestContext_GetDependency(t *testing.T) {
+	db := &fakeDB{dsn: "postgres://localhost"}
+	c := testContext("root", nil)
+	c.host = context.WithValue(c.host, depKey("db"), db)
+
+	got, ok := c.GetDependency("db")
+	if !ok {
+		t.Fatal("GetDependency(db) not found")
+	}
+	if got != any(db) {
+		t.Fatalf("GetDependency(db) = %v, want %v", got, db)
+	}
+}
+
+func TestContext_GetDependency_Missing(t *testing.T) {
+	c := testContext("root", nil)
+	if v, ok := c.GetDependency("db"); ok || v != nil {
+		t.Fatalf("GetDependency on bare context = (%v, %v), want (nil, false)", v, ok)
+	}
+}
+
+func TestContext_GetDependency_ChildInherits(t *testing.T) {
+	db := &fakeDB{dsn: "postgres://localhost"}
+	c := testContext("root", nil)
+	c.host = context.WithValue(c.host, depKey("db"), db)
+
+	child := c.child("root.1", "childFunc", c.timeoutAt)
+	got, ok := child.GetDependency("db")
+	if !ok || got != any(db) {
+		t.Fatalf("child GetDependency(db) = (%v, %v), want (%v, true)", got, ok, db)
+	}
+}
+
+func TestDependencyOf(t *testing.T) {
+	db := &fakeDB{dsn: "postgres://localhost"}
+	c := testContext("root", nil)
+	c.host = context.WithValue(c.host, depKey("db"), db)
+
+	got, ok := DependencyOf[*fakeDB](c, "db")
+	if !ok || got != db {
+		t.Fatalf("DependencyOf[*fakeDB] = (%v, %v), want (%v, true)", got, ok, db)
+	}
+	if _, ok := DependencyOf[string](c, "db"); ok {
+		t.Fatal("DependencyOf[string] on a *fakeDB value reported ok")
+	}
+	if _, ok := DependencyOf[*fakeDB](c, "nope"); ok {
+		t.Fatal("DependencyOf on missing name reported ok")
+	}
+}

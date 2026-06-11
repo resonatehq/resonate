@@ -174,6 +174,9 @@ type Resonate struct {
 	subsMu sync.RWMutex
 	subs   map[string]*subscription
 
+	// bgMu guards bgCtx, which SetDependency swaps for a WithValue-derived
+	// context. Goroutines snapshot it via backgroundCtx().
+	bgMu     sync.RWMutex
 	bgCtx    stdctx.Context
 	bgCancel stdctx.CancelFunc
 	stopOnce sync.Once
@@ -312,6 +315,27 @@ func (r *Resonate) RPC(ctx stdctx.Context, id, funcName string, args any, opts .
 // when the promise does not exist.
 func (r *Resonate) Get(ctx stdctx.Context, id string) (*Handle, error) {
 	return r.handleFromID(ctx, r.prefixID(id))
+}
+
+// SetDependency registers a named process-local dependency (a database
+// connection, cloud client, ...) that durable functions retrieve via
+// Context.GetDependency. Dependencies are not durable state and never travel
+// through promise payloads — each worker process registers its own.
+// Re-setting a name shadows the previous value; executions see the
+// dependencies registered before they started. Typically called right after
+// New, before any workflow runs.
+func (r *Resonate) SetDependency(name string, value any) {
+	r.bgMu.Lock()
+	r.bgCtx = stdctx.WithValue(r.bgCtx, depKey(name), value)
+	r.bgMu.Unlock()
+}
+
+// backgroundCtx snapshots bgCtx; goroutines must read it through here since
+// SetDependency swaps the field.
+func (r *Resonate) backgroundCtx() stdctx.Context {
+	r.bgMu.RLock()
+	defer r.bgMu.RUnlock()
+	return r.bgCtx
 }
 
 // Stop tears down background goroutines and the network. Idempotent.
@@ -502,7 +526,7 @@ func (r *Resonate) installMessageHandler() {
 			version := m.Version
 			origin := m.Origin
 			go func() {
-				if _, err := r.core.OnMessage(r.bgCtx, taskID, version, origin); err != nil {
+				if _, err := r.core.OnMessage(r.backgroundCtx(), taskID, version, origin); err != nil {
 					r.log.Error("core.OnMessage failed", "task_id", taskID, "err", err)
 				}
 			}()
@@ -539,9 +563,12 @@ func (r *Resonate) runRefresh() {
 	defer r.refreshWG.Done()
 	ticker := time.NewTicker(subscriptionRefreshInterval)
 	defer ticker.Stop()
+	// Snapshot Done once: WithValue derivations (SetDependency) share the
+	// original cancel context's Done channel.
+	done := r.backgroundCtx().Done()
 	for {
 		select {
-		case <-r.bgCtx.Done():
+		case <-done:
 			return
 		case <-ticker.C:
 			r.refreshPending()
@@ -568,8 +595,9 @@ func (r *Resonate) refreshPending() {
 	r.subsMu.RUnlock()
 
 	addr := r.network.Unicast()
+	ctx := r.backgroundCtx()
 	for _, p := range pending {
-		record, err := r.sender.PromiseRegisterListener(r.bgCtx, p.id, addr)
+		record, err := r.sender.PromiseRegisterListener(ctx, p.id, addr)
 		if err != nil {
 			r.log.Warn("subscription refresh failed", "id", p.id, "err", err)
 			continue
@@ -712,7 +740,7 @@ func (rf *RegisteredFunc[A, R]) Run(ctx stdctx.Context, id string, args A, opts 
 			preload := created.Preload
 			retryPolicy := opt.RetryPolicy
 			go func() {
-				if _, e := r.core.ExecuteUntilBlocked(r.bgCtx, taskID, version, decoded, preload, retryPolicy); e != nil {
+				if _, e := r.core.ExecuteUntilBlocked(r.backgroundCtx(), taskID, version, decoded, preload, retryPolicy); e != nil {
 					r.log.Error("ExecuteUntilBlocked failed", "task_id", taskID, "err", e)
 				}
 			}()

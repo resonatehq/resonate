@@ -38,7 +38,8 @@ type localResult struct {
 }
 
 // Context is the workflow-facing API. It carries a host context.Context
-// internally (used to plumb cancellation into effect calls) and adds the
+// internally (used to plumb cancellation into effect calls and to carry
+// dependencies registered via Resonate.SetDependency) and adds the
 // durable-promise entrypoints. The host context's Deadline/Done/Err are
 // intentionally NOT exposed: they reflect host cancellation, not workflow
 // suspension or durable-promise timeout, and exposing them invites
@@ -97,8 +98,28 @@ func newRootContext(host stdctx.Context, id, originID string, timeoutAt int64, f
 	}
 }
 
-// Value delegates to the embedded host context for dependency injection.
-func (c *Context) Value(key any) any { return c.host.Value(key) }
+// depKey is the private context-key type under which dependencies registered
+// via Resonate.SetDependency travel on the host context, one value per name.
+type depKey string
+
+// GetDependency returns the dependency registered under name via
+// Resonate.SetDependency, or (nil, false) if no such dependency exists.
+// Dependencies are process-local resources (database connections, cloud
+// clients, ...) — not durable state. Each worker process must register its
+// own; an execution sees the dependencies registered before it started.
+func (c *Context) GetDependency(name string) (any, bool) {
+	v := c.host.Value(depKey(name))
+	return v, v != nil
+}
+
+// DependencyOf is the type-safe convenience wrapper around
+// Context.GetDependency. It returns false when no dependency is registered
+// under name or the registered value is not a T.
+func DependencyOf[T any](c *Context, name string) (T, bool) {
+	v, _ := c.GetDependency(name)
+	t, ok := v.(T)
+	return t, ok
+}
 
 // ID returns the current execution's promise ID.
 func (c *Context) ID() string { return c.id }
