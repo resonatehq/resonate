@@ -15,6 +15,7 @@ pub mod promises;
 pub mod registry;
 pub mod resonate;
 pub mod send;
+pub(crate) mod sequencing;
 pub mod transport;
 pub mod types;
 

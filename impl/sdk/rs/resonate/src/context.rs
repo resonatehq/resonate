@@ -13,10 +13,9 @@ use crate::codec::deserialize_error;
 use crate::durable::{Durable, ExecutionEnv};
 use crate::effects::Effects;
 use crate::error::{Error, Result};
-use crate::futures::{
-    creation_channel, CreationState, DetachedHandle, DurableFuture, RemoteFuture,
-};
+use crate::futures::{DetachedHandle, DurableFuture, RemoteFuture};
 use crate::info::Info;
+use crate::sequencing::{CreationSequencer, CreationState};
 use crate::types::{
     DurableKind, Outcome, PromiseCreateReq, PromiseRecord, PromiseState, TaskData, Value,
 };
@@ -27,9 +26,9 @@ use crate::types::{
 /// Mirrors `network.match()` — passed down from Resonate → Core → Context.
 pub type TargetResolver = Arc<dyn Fn(Option<&str>) -> String + Send + Sync>;
 
-/// Shared state between a spawned task and the context's flush mechanism.
-/// The DurableFuture also reads from this via a oneshot channel.
-pub(crate) struct SpawnedLocal {
+/// Shared state between a spawned background task and the context's flush
+/// mechanism. The DurableFuture also reads from this via a oneshot channel.
+pub(crate) struct SpawnedHandle {
     pub id: String,
     pub handle: tokio::task::JoinHandle<Outcome<()>>,
 }
@@ -56,14 +55,12 @@ pub struct Context {
     seq: AtomicU32,
     effects: Arc<Effects>,
     target_resolver: TargetResolver,
-    spawned_remote: Arc<Mutex<Vec<String>>>,
-    spawned_locals: Arc<Mutex<Vec<SpawnedLocal>>>,
-    /// Tail of the create-promise chain: the creation-state receiver of the
-    /// most recently claimed link. Each terminal op (`spawn()`, `.await`,
-    /// `create()`) captures the current tail as its predecessor and installs a
-    /// fresh link, so `promise.create` requests reach the server in call order
-    /// even though they run on concurrent background tasks.
-    chain_tail: Mutex<Option<tokio::sync::watch::Receiver<CreationState>>>,
+    remote_todos: Arc<Mutex<Vec<String>>>,
+    spawned_handles: Arc<Mutex<Vec<SpawnedHandle>>>,
+    /// Hands out creation slots so `promise.create` requests reach the server
+    /// in terminal-op call order even though they run on concurrent background
+    /// tasks. See [`CreationSequencer`].
+    sequencer: CreationSequencer,
     deps: Arc<crate::DependencyMap>,
 }
 
@@ -87,9 +84,9 @@ impl Context {
             seq: AtomicU32::new(0),
             effects: Arc::new(effects),
             target_resolver,
-            spawned_remote: Arc::new(Mutex::new(Vec::new())),
-            spawned_locals: Arc::new(Mutex::new(Vec::new())),
-            chain_tail: Mutex::new(None),
+            remote_todos: Arc::new(Mutex::new(Vec::new())),
+            spawned_handles: Arc::new(Mutex::new(Vec::new())),
+            sequencer: CreationSequencer::new(),
             deps,
         }
     }
@@ -371,7 +368,7 @@ impl Context {
     /// builder whose terminal `.spawn()` returns a `DetachedHandle`.
     ///
     /// Detached calls are **not** part of structured concurrency:
-    /// - They are never added to `spawned_remote`, so the parent workflow does
+    /// - They are never added to `remote_todos`, so the parent workflow does
     ///   not suspend or wait for them to complete.
     /// - The handle is not a future: it exposes only `id()`, which yields the
     ///   promise ID once the promise exists on the server. A detached call's
@@ -412,23 +409,8 @@ impl Context {
 
     /// Take all accumulated remote todos.
     pub(crate) fn take_remote_todos(&self) -> Vec<String> {
-        let mut todos = self.spawned_remote.lock();
+        let mut todos = self.remote_todos.lock();
         std::mem::take(&mut *todos)
-    }
-
-    /// Claim the next link in the create-promise chain: capture the current
-    /// tail as the predecessor and install this link's state channel as the
-    /// new tail.
-    ///
-    /// Must be called synchronously by the terminal ops (`spawn()`, `.await`,
-    /// `create()`) — never at builder construction, so a builder that is never
-    /// spawned/awaited never touches the chain (lazy-future semantics), and
-    /// never inside the spawned/async body, or creation order would no longer
-    /// match terminal-op call order.
-    fn claim_chain_link(&self) -> ChainLink {
-        let (tx, rx) = creation_channel();
-        let prev = self.chain_tail.lock().replace(rx);
-        ChainLink { prev, tx }
     }
 
     // ── Shared helpers for task state-machine logic ─────────────────
@@ -453,15 +435,15 @@ impl Context {
     /// fire-and-forget creation failure fail the whole task execution, so the
     /// task is released and retried instead of settling with lost work.
     pub(crate) async fn flush_local_work(&self) -> Result<Vec<String>> {
-        let tasks = {
-            let mut tasks = self.spawned_locals.lock();
-            std::mem::take(&mut *tasks)
+        let handles = {
+            let mut handles = self.spawned_handles.lock();
+            std::mem::take(&mut *handles)
         };
 
         let mut remote_todos = Vec::new();
         let mut first_err: Option<Error> = None;
 
-        for task in tasks {
+        for task in handles {
             match task.handle.await {
                 Ok(Outcome::Done(Ok(_))) => {
                     // Already settled inside the spawned task
@@ -494,9 +476,9 @@ impl Context {
     /// drained even when flush fails (the error wins and the todos are
     /// dropped), so a retry starts clean.
     pub(crate) async fn drain_remote_work(&self) -> Result<Vec<String>> {
-        let flush_result = self.flush_local_work().await;
+        let spawned_todos = self.flush_local_work().await;
         let mut todos = self.take_remote_todos();
-        todos.extend(flush_result?);
+        todos.extend(spawned_todos?);
         Ok(todos)
     }
 
@@ -538,9 +520,9 @@ impl ChildSeed {
             seq: AtomicU32::new(0),
             effects: Arc::clone(&self.effects),
             target_resolver: self.target_resolver.clone(),
-            spawned_remote: Arc::new(Mutex::new(Vec::new())),
-            spawned_locals: Arc::new(Mutex::new(Vec::new())),
-            chain_tail: Mutex::new(None),
+            remote_todos: Arc::new(Mutex::new(Vec::new())),
+            spawned_handles: Arc::new(Mutex::new(Vec::new())),
+            sequencer: CreationSequencer::new(),
             deps: Arc::clone(&self.deps),
         }
     }
@@ -568,58 +550,6 @@ impl ChildSeed {
 fn duplicate_error(e: &Error) -> Error {
     Error::Application {
         message: e.to_string(),
-    }
-}
-
-/// One claimed link in the create-promise chain. The link's `watch` channel
-/// carries its creation state to both the successor link and the handle's
-/// `id()` gate.
-struct ChainLink {
-    prev: Option<tokio::sync::watch::Receiver<CreationState>>,
-    tx: tokio::sync::watch::Sender<CreationState>,
-}
-
-impl ChainLink {
-    /// Receiver for this link's creation state — the handle's `id()` gate.
-    fn subscribe(&self) -> tokio::sync::watch::Receiver<CreationState> {
-        self.tx.subscribe()
-    }
-
-    /// Create a promise in creation-chain order.
-    ///
-    /// Waits for the predecessor link, creates the promise, and broadcasts
-    /// the outcome. The chain is success-gated: if creation k fails (or its
-    /// task is dropped, closing the channel while still `InFlight`), creation
-    /// k+1 aborts without touching the server, so the server's created
-    /// promises are always an exact call-order prefix — no successor can ever
-    /// deadlock.
-    async fn create(self, effects: &Effects, req: PromiseCreateReq) -> Result<PromiseRecord> {
-        if let Some(mut prev) = self.prev {
-            let predecessor_ok = match prev
-                .wait_for(|s| !matches!(s, CreationState::InFlight))
-                .await
-            {
-                Ok(state) => matches!(&*state, CreationState::Created),
-                Err(_) => false, // predecessor task dropped while in flight
-            };
-            if !predecessor_ok {
-                let e = Error::PromiseCreation(
-                    "aborted: a previous promise creation in this workflow failed".to_string(),
-                );
-                let _ = self.tx.send(CreationState::Failed(e.to_string()));
-                return Err(e);
-            }
-        }
-        match effects.create_promise(req).await {
-            Ok(record) => {
-                let _ = self.tx.send(CreationState::Created); // release the next link
-                Ok(record)
-            }
-            Err(e) => {
-                let _ = self.tx.send(CreationState::Failed(e.to_string()));
-                Err(e)
-            }
-        }
     }
 }
 
@@ -699,7 +629,6 @@ where
         let req = ctx.local_create_req(&child_id, &args, timeout_override)?;
         let effects = Arc::clone(&ctx.effects);
         let seed = ctx.child_seed();
-        let parent_remote_todos = ctx.spawned_remote.clone();
         let task_id = child_id.clone();
 
         tracing::info!(
@@ -707,7 +636,7 @@ where
             promise_id = %child_id,
             "promise_execution_spawn"
         );
-        let (rx, created_rx) = spawn_in_chain(ctx, child_id.clone(), req, move |record, tx| {
+        let (rx, created_rx) = spawn_sequenced(ctx, child_id.clone(), req, move |record, tx| {
             async move {
                 // Replay short-circuit: an already-settled promise skips execution.
                 match record.state {
@@ -763,7 +692,6 @@ where
                         !child_remote.is_empty(),
                         "Suspended error but no remote todos — this is a bug"
                     );
-                    parent_remote_todos.lock().extend(child_remote.clone());
                     let _ = tx.send(Err(Error::Suspended));
                     return Outcome::Suspended {
                         remote_todos: child_remote,
@@ -777,7 +705,6 @@ where
                     let _ = tx.send(result);
                     Outcome::Done(Ok(()))
                 } else {
-                    parent_remote_todos.lock().extend(child_remote.clone());
                     let _ = tx.send(Err(Error::Suspended));
                     Outcome::Suspended {
                         remote_todos: child_remote,
@@ -813,10 +740,10 @@ where
             Ok(req) => req,
             Err(e) => return Box::pin(async move { Err(e) }),
         };
-        let link = ctx.claim_chain_link();
+        let slot = ctx.sequencer.claim_slot();
 
         Box::pin(async move {
-            let record = link.create(&ctx.effects, req).await?;
+            let record = slot.create(&ctx.effects, req).await?;
 
             if let Some(result) = record.as_result::<T>() {
                 return result;
@@ -856,7 +783,7 @@ where
                     !child_remote.is_empty(),
                     "Suspended error but no remote todos — this is a bug"
                 );
-                ctx.spawned_remote.lock().extend(child_remote);
+                ctx.remote_todos.lock().extend(child_remote);
                 return Err(Error::Suspended);
             }
 
@@ -865,7 +792,7 @@ where
             if child_remote.is_empty() {
                 ctx.effects.settle_promise(&child_id, &result).await?;
             } else {
-                ctx.spawned_remote.lock().extend(child_remote);
+                ctx.remote_todos.lock().extend(child_remote);
             }
             result
         })
@@ -946,13 +873,13 @@ where
     }
 }
 
-/// Shared scaffold for the spawn-like terminal ops: claim the chain link
+/// Shared scaffold for the spawn-like terminal ops: claim the creation slot
 /// synchronously (so creation order matches terminal-op call order), then run
-/// the chained creation on a background tokio task tracked in
-/// `spawned_locals` (so flush always joins it). The promise record is handed
+/// the sequenced creation on a background tokio task tracked in
+/// `spawned_handles` (so flush always joins it). The promise record is handed
 /// to `on_created`; a creation failure is delivered to both the handle's
 /// channel and — via the task's `Outcome` — to flush.
-fn spawn_in_chain<T, F, Fut>(
+fn spawn_sequenced<T, F, Fut>(
     ctx: &Context,
     child_id: String,
     req: PromiseCreateReq,
@@ -966,13 +893,13 @@ where
     F: FnOnce(PromiseRecord, tokio::sync::oneshot::Sender<Result<T>>) -> Fut + Send + 'static,
     Fut: Future<Output = Outcome<()>> + Send,
 {
-    let link = ctx.claim_chain_link();
-    let created_rx = link.subscribe();
+    let slot = ctx.sequencer.claim_slot();
+    let created_rx = slot.subscribe();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let effects = Arc::clone(&ctx.effects);
 
     let handle = tokio::spawn(async move {
-        match link.create(&effects, req).await {
+        match slot.create(&effects, req).await {
             Ok(record) => on_created(record, tx).await,
             Err(e) => {
                 let _ = tx.send(Err(duplicate_error(&e)));
@@ -982,7 +909,7 @@ where
     });
 
     // Track for flush
-    ctx.spawned_locals.lock().push(SpawnedLocal {
+    ctx.spawned_handles.lock().push(SpawnedHandle {
         id: child_id,
         handle,
     });
@@ -990,7 +917,7 @@ where
     (rx, created_rx)
 }
 
-/// Shared `spawn()` body for `rpc`, `sleep`, and `promise`: start the chained
+/// Shared `spawn()` body for `rpc`, `sleep`, and `promise`: start the sequenced
 /// promise creation on a background task and return a `RemoteFuture` handle.
 ///
 /// The background task short-circuits an already-settled record (replay),
@@ -1002,7 +929,7 @@ where
     T: DeserializeOwned + Send + 'static,
 {
     let task_id = child_id.clone();
-    let (rx, created_rx) = spawn_in_chain(ctx, child_id.clone(), req, move |record, tx| {
+    let (rx, created_rx) = spawn_sequenced(ctx, child_id.clone(), req, move |record, tx| {
         async move {
             match record.as_result::<T>() {
                 // Replay short-circuit: already settled, deliver the value/error.
@@ -1029,9 +956,9 @@ where
     RemoteFuture::pending(child_id, rx, created_rx)
 }
 
-/// Shared `.await` body for `rpc`, `sleep`, and `promise`: chained creation,
+/// Shared `.await` body for `rpc`, `sleep`, and `promise`: sequenced creation,
 /// replay short-circuit, otherwise register the remote todo and suspend. The
-/// chain link is claimed synchronously (before the future is returned), so
+/// creation slot is claimed synchronously (before the future is returned), so
 /// creation order matches the order in which ops were awaited/spawned.
 fn block_on_remote<'ctx, T>(
     ctx: &'ctx Context,
@@ -1041,9 +968,9 @@ fn block_on_remote<'ctx, T>(
 where
     T: DeserializeOwned + Send + 'ctx,
 {
-    let link = ctx.claim_chain_link();
+    let slot = ctx.sequencer.claim_slot();
     Box::pin(async move {
-        let record = link.create(&ctx.effects, req).await?;
+        let record = slot.create(&ctx.effects, req).await?;
 
         if let Some(result) = record.as_result::<T>() {
             return result;
@@ -1055,7 +982,7 @@ where
             promise_id = %child_id,
             "promise_execution_block"
         );
-        ctx.spawned_remote.lock().push(child_id);
+        ctx.remote_todos.lock().push(child_id);
         Err(Error::Suspended)
     })
 }
@@ -1188,7 +1115,7 @@ fn hash_id(s: &str) -> String {
 /// awaitable result. `.spawn()` returns a `DetachedHandle` (also not a
 /// future); its only operation is `id()`, which yields the promise ID once
 /// the promise exists on the server. Detached promises are not registered in
-/// `spawned_remote`, so the parent workflow does not suspend on them.
+/// `remote_todos`, so the parent workflow does not suspend on them.
 pub struct DetachedTask<'ctx> {
     child_id: String,
     ctx: &'ctx Context,
@@ -1220,7 +1147,7 @@ impl<'ctx> DetachedTask<'ctx> {
     /// delivered back to the parent. Call `handle.id()` to obtain the promise
     /// ID once the promise exists on the server (never hand an ID to an
     /// external system before then). Detached promises are not registered in
-    /// `spawned_remote`, so the parent workflow does not suspend on them, but a
+    /// `remote_todos`, so the parent workflow does not suspend on them, but a
     /// creation failure still fails the task at flush — and the promise is
     /// created even if the handle is dropped.
     pub fn spawn(self) -> Result<DetachedHandle> {
@@ -1232,9 +1159,9 @@ impl<'ctx> DetachedTask<'ctx> {
         let task_id = child_id.clone();
         // The result channel is unused: a detached call never reports a result
         // back to the parent, so the closure simply drops `tx`. Reusing
-        // `spawn_in_chain` keeps detached creation in the create-promise chain
+        // `spawn_sequenced` keeps detached creation in the creation sequence
         // and tracked for flush.
-        let (_rx, created_rx) = spawn_in_chain::<(), _, _>(
+        let (_rx, created_rx) = spawn_sequenced::<(), _, _>(
             ctx,
             child_id.clone(),
             req,
@@ -3076,7 +3003,7 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Create-promise chain Tests
+    //  Creation sequencing Tests
     // ═══════════════════════════════════════════════════════════════
 
     /// Extract the promise.create request IDs in the order they reached the stub.
@@ -3091,13 +3018,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chained_spawns_create_promises_in_call_order() {
+    async fn sequenced_spawns_create_promises_in_call_order() {
         let harness = TestHarness::new();
         let effects = harness.build_effects(vec![]);
         let ctx = test_context("root", effects);
 
         // Fire-and-forget: creations run on concurrent background tasks, but
-        // the chain forces them to reach the server in call order.
+        // the creation sequence forces them to reach the server in call order.
         for i in 0..8 {
             let _ = ctx.rpc::<i32>(&format!("f{}", i), &()).spawn().unwrap();
         }
@@ -3144,7 +3071,7 @@ mod tests {
         let h2 = ctx.rpc::<i32>("c", &()).spawn().unwrap();
 
         // All handles resolve (no hang): the first with the creation error,
-        // the successors with the chain-aborted error.
+        // the successors with the sequence-aborted error.
         let e0 = h0.await.unwrap_err();
         assert!(
             !matches!(e0, Error::Suspended),
@@ -3272,7 +3199,7 @@ mod tests {
 
         let e0 = h0.id().await.unwrap_err();
         assert!(matches!(e0, Error::PromiseCreation(_)), "got: {e0}");
-        // Chain-aborted successor also reports failure via id().
+        // Sequence-aborted successor also reports failure via id().
         let e1 = h1.id().await.unwrap_err();
         assert!(matches!(e1, Error::PromiseCreation(_)), "got: {e1}");
 

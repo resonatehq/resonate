@@ -2,48 +2,9 @@ use std::future::IntoFuture;
 use std::pin::Pin;
 
 use crate::error::{Error, Result};
-
-/// State of the background promise creation backing a spawned handle.
-///
-/// Broadcast through a `tokio::sync::watch` channel that doubles as the
-/// create-promise chain link: the background task moves the state out of
-/// `InFlight` exactly once, right after `create_promise` completes. Handles
-/// gate `id()` on this — the promise ID is only handed out once the durable
-/// promise is known to exist on the server — and the next creation in the
-/// chain gates on its predecessor reaching `Created`.
-#[derive(Clone, Debug)]
-pub(crate) enum CreationState {
-    InFlight,
-    Created,
-    Failed(String),
-}
-
-/// Create a `watch` channel for a creation's state, starting `InFlight`.
-pub(crate) fn creation_channel() -> (
-    tokio::sync::watch::Sender<CreationState>,
-    tokio::sync::watch::Receiver<CreationState>,
-) {
-    tokio::sync::watch::channel(CreationState::InFlight)
-}
-
-/// Wait until the creation state leaves `InFlight`, then map it to the ID.
-/// The ID is only returned on confirmed server-side creation. Shared by every
-/// handle type's `id()` so the gating logic lives in one place.
-async fn await_created_id(
-    id: &str,
-    created: &tokio::sync::watch::Receiver<CreationState>,
-) -> Result<String> {
-    let mut rx = created.clone();
-    let state = rx
-        .wait_for(|s| !matches!(s, CreationState::InFlight))
-        .await
-        .map_err(|_| Error::JoinError(format!("task {} was dropped", id)))?;
-    match &*state {
-        CreationState::Created => Ok(id.to_string()),
-        CreationState::Failed(msg) => Err(Error::PromiseCreation(msg.clone())),
-        CreationState::InFlight => unreachable!("wait_for excludes InFlight"),
-    }
-}
+#[cfg(test)]
+use crate::sequencing::creation_channel;
+use crate::sequencing::{await_created_id, CreationState};
 
 /// Shared state of a spawned-task handle: the promise ID, the creation gate,
 /// and the typed result channel. `DurableFuture` and `RemoteFuture` are thin
