@@ -12,12 +12,6 @@ pub struct Transport {
 }
 
 /// A parsed incoming message from the network.
-///
-/// Mirrors the TS types:
-/// ```ts
-/// type ExecuteMsg = { kind: "execute"; data: { task: { id: string; version: number } } };
-/// type UnblockMsg = { kind: "unblock"; data: { promise: PromiseRecord } };
-/// ```
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "kind")]
 pub enum Message {

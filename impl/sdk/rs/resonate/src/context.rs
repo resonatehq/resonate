@@ -26,6 +26,11 @@ use crate::types::{
 /// Mirrors `network.match()` — passed down from Resonate → Core → Context.
 pub type TargetResolver = Arc<dyn Fn(Option<&str>) -> String + Send + Sync>;
 
+/// The boxed future returned by the lazy `*Task` builders' `IntoFuture` impls
+/// (and by `block_on_remote`). Boxed because each `.await` body is a distinct
+/// `async` block that can't be named on stable Rust.
+type TaskFuture<'ctx, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+
 /// Shared state between a spawned background task and the context's flush
 /// mechanism. The DurableFuture also reads from this via a oneshot channel.
 pub(crate) struct SpawnedHandle {
@@ -54,9 +59,7 @@ impl Drop for SpawnedHandle {
 /// Both return builder structs (`RunTask`, `RpcTask`) that implement `IntoFuture`,
 /// so `.await` works seamlessly for the sequential case. Use the synchronous
 /// `.spawn()` to start the work eagerly on a background tokio task and return a
-/// handle to await later — on a multi-thread runtime spawned tasks can run in
-/// parallel on separate workers, while on a `current_thread` runtime they run
-/// concurrently (interleaved on one thread) — or `tokio::join!` for cooperative
+/// handle to await later or `tokio::join!` for cooperative
 /// concurrency. The builders are lazy: nothing executes until `.spawn()` or
 /// `.await`. Durable promises are created in terminal-op call order (each
 /// background creation waits for its predecessor to succeed).
@@ -72,9 +75,6 @@ pub struct Context {
     target_resolver: TargetResolver,
     remote_todos: Arc<Mutex<Vec<String>>>,
     spawned_handles: Arc<Mutex<Vec<SpawnedHandle>>>,
-    /// Hands out creation slots so `promise.create` requests reach the server
-    /// in terminal-op call order even though they run on concurrent background
-    /// tasks. See [`CreationSequencer`].
     sequencer: CreationSequencer,
     deps: Arc<crate::DependencyMap>,
 }
@@ -127,12 +127,11 @@ impl Context {
         format!("{}.{}", self.id, seq)
     }
 
-    /// Default timeout for child promises (24 hours), matching TS SDK.
+    /// Default timeout for child promises (24 hours).
     const DEFAULT_TIMEOUT: Duration = Duration::from_secs(86_400);
 
     /// Calculate timeout for child promises.
-    /// Computes `min(now + requested_timeout, parent_timeout)`, matching the
-    /// TS SDK behavior: `Math.min(now + opts.timeout, parent.timeout)`.
+    /// Computes `min(now + requested_timeout, parent_timeout)`.
     /// If no explicit timeout is provided, defaults to 24 hours.
     fn child_timeout(&self, requested: Option<Duration>) -> i64 {
         let timeout = requested.unwrap_or(Self::DEFAULT_TIMEOUT);
@@ -493,11 +492,12 @@ impl Context {
         }
     }
 
-    /// Flush spawned local work and collect every remote todo: the context's
-    /// own plus those from flushed children. The context's own todos are
-    /// drained even when flush fails (the error wins and the todos are
-    /// dropped), so a retry starts clean.
-    pub(crate) async fn drain_remote_work(&self) -> Result<Vec<String>> {
+    /// Collect every remote todo the task is now waiting on: the context's own
+    /// plus those surfaced by flushing spawned children. Flushing the children
+    /// (awaiting their local work) is how their suspensions become visible here.
+    /// The context's own todos are drained even when the flush fails (the error
+    /// wins and the todos are dropped), so a retry starts clean.
+    pub(crate) async fn collect_remote_todos(&self) -> Result<Vec<String>> {
         let spawned_todos = self.flush_local_work().await;
         let mut todos = self.take_remote_todos();
         todos.extend(spawned_todos?);
@@ -692,10 +692,10 @@ where
                 };
                 let result = func.execute(env, args).await;
 
-                // Collect remote work (workflows only)
+                // Collect remote todos (workflows only)
                 let mut child_remote = Vec::new();
                 if D::KIND == DurableKind::Workflow {
-                    match child_ctx.drain_remote_work().await {
+                    match child_ctx.collect_remote_todos().await {
                         Ok(todos) => child_remote = todos,
                         Err(e) => {
                             // A grandchild's background creation failed — do NOT
@@ -746,7 +746,7 @@ where
     T: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
     type Output = Result<T>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+    type IntoFuture = TaskFuture<'ctx, T>;
 
     fn into_future(self) -> Self::IntoFuture {
         let RunTask {
@@ -765,25 +765,31 @@ where
         let slot = ctx.sequencer.claim_slot();
 
         Box::pin(async move {
-            let record = slot.create(&ctx.effects, req).await?;
+            let promise_record = slot.create(&ctx.effects, req).await?;
 
-            if let Some(result) = record.as_result::<T>() {
+            if let Some(result) = promise_record.as_result::<T>() {
                 return result;
             }
 
-            // Pending — execute locally
+            // Pending, execute locally
             tracing::info!(
                 target: "resonate::validation",
                 promise_id = %child_id,
                 "promise_execution_spawn"
             );
-            let timeout_at = record.timeout_at;
-            let info = ctx.child_info(&child_id, D::NAME, timeout_at);
-            let child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
+            let timeout_at = promise_record.timeout_at;
 
+            let info;
+            let child_ctx;
             let env = match D::KIND {
-                DurableKind::Function => ExecutionEnv::Function(&info),
-                DurableKind::Workflow => ExecutionEnv::Workflow(&child_ctx),
+                DurableKind::Function => {
+                    info = ctx.child_info(&child_id, D::NAME, timeout_at);
+                    ExecutionEnv::Function(&info)
+                }
+                DurableKind::Workflow => {
+                    child_ctx = ctx.child(&child_id, D::NAME, timeout_at);
+                    ExecutionEnv::Workflow(&child_ctx)
+                }
             };
             tracing::info!(
                 target: "resonate::validation",
@@ -791,30 +797,20 @@ where
                 "promise_execution_await"
             );
             let result = func.execute(env, args).await;
+            let child_remotes = env.collect_remote_todos().await?;
 
-            // Collect remote work (workflows only)
-            let mut child_remote = Vec::new();
-            if D::KIND == DurableKind::Workflow {
-                child_remote = child_ctx.drain_remote_work().await?;
-            }
-
-            // Explicit suspension handling: propagate Suspended directly
-            // instead of letting it fall through as an application error.
-            if matches!(&result, Err(Error::Suspended)) {
-                debug_assert!(
-                    !child_remote.is_empty(),
-                    "Suspended error but no remote todos — this is a bug"
-                );
-                ctx.remote_todos.lock().extend(child_remote);
-                return Err(Error::Suspended);
-            }
-
-            // Spawned sub-workflows may have remote todos even if the
-            // main function completed successfully.
-            if child_remote.is_empty() {
+            // FINALIZE. A child suspends iff it left unresolved remote
+            // dependencies — independent of `result`: it can return `Ok` while
+            // still having spawned remote work it never awaited, and that work
+            // is what it now waits on. So `child_remote`, not `result`, decides.
+            // Mirrors `Core::execute_until_blocked_inner`, except a child hoists
+            // its todos to the parent and still hands `result` back to the
+            // caller (the root executor returns a `Status` instead).
+            if child_remotes.is_empty() {
+                debug_assert!(!matches!(&result, Err(Error::Suspended)));
                 ctx.effects.settle_promise(&child_id, &result).await?;
             } else {
-                ctx.remote_todos.lock().extend(child_remote);
+                ctx.remote_todos.lock().extend(child_remotes);
             }
             result
         })
@@ -878,7 +874,7 @@ where
     T: DeserializeOwned + Send + 'static,
 {
     type Output = Result<T>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+    type IntoFuture = TaskFuture<'ctx, T>;
 
     fn into_future(self) -> Self::IntoFuture {
         let RpcTask {
@@ -944,7 +940,7 @@ where
 ///
 /// The background task short-circuits an already-settled record (replay),
 /// otherwise reports the pending child as a remote todo via its `Outcome` —
-/// collected by `drain_remote_work`, which every caller runs at flush, so a
+/// collected by `collect_remote_todos`, which every caller runs at flush, so a
 /// fire-and-forget spawn is never lost.
 fn spawn_remote<T>(ctx: &Context, child_id: String, req: PromiseCreateReq) -> RemoteFuture<T>
 where
@@ -986,7 +982,7 @@ fn block_on_remote<'ctx, T>(
     ctx: &'ctx Context,
     child_id: String,
     req: PromiseCreateReq,
-) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>
+) -> TaskFuture<'ctx, T>
 where
     T: DeserializeOwned + Send + 'ctx,
 {
@@ -1064,7 +1060,7 @@ where
     T: DeserializeOwned + Send + 'static,
 {
     type Output = Result<T>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<T>> + Send + 'ctx>>;
+    type IntoFuture = TaskFuture<'ctx, T>;
 
     fn into_future(self) -> Self::IntoFuture {
         let PromiseTask {
@@ -1106,7 +1102,7 @@ impl<'ctx> SleepTask<'ctx> {
 
 impl<'ctx> IntoFuture for SleepTask<'ctx> {
     type Output = Result<()>;
-    type IntoFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'ctx>>;
+    type IntoFuture = TaskFuture<'ctx, ()>;
 
     fn into_future(self) -> Self::IntoFuture {
         let SleepTask {

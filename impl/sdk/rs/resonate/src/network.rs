@@ -30,7 +30,7 @@ type Subscribers = Arc<RwLock<Vec<Box<dyn Fn(String) + Send + Sync>>>>;
 const PENDING_RETRY_TTL: i64 = 30_000;
 
 // =============================================================================
-// SERVER STATE TYPES (ported from TS Server class in local.ts)
+// SERVER STATE TYPES
 // =============================================================================
 
 struct DurablePromise {
@@ -1250,7 +1250,7 @@ impl ServerState {
             "kind": "execute",
             "data": { "task": { "id": task_id, "version": version } },
         });
-        // Upsert: replace existing execute message for same task (like TS)
+        // Upsert: replace existing execute message for same task
         if let Some(existing) = self.outgoing.iter_mut().find(|m| {
             m.message.get("kind").and_then(|k| k.as_str()) == Some("execute")
                 && m.message
@@ -1385,7 +1385,7 @@ impl Network for LocalNetwork {
         let envelope_response = wrap_response_envelope(&flat_response);
         let resp_str = serde_json::to_string(&envelope_response)?;
 
-        // Dispatch messages asynchronously (like TS setTimeout(0))
+        // Dispatch messages asynchronously
         Self::dispatch_messages(self.subscribers.clone(), outgoing);
 
         Ok(resp_str)

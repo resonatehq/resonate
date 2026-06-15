@@ -631,7 +631,7 @@ pub async fn try_finalize_context<T>(
     ctx: &Context,
     result: error::Result<T>,
 ) -> error::Result<crate::types::Outcome<T>> {
-    let remote_todos = ctx.drain_remote_work().await?;
+    let remote_todos = ctx.collect_remote_todos().await?;
 
     Ok(if remote_todos.is_empty() {
         crate::types::Outcome::Done(result)

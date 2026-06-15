@@ -9,12 +9,22 @@ use crate::types::DurableKind;
 ///
 /// - `Function(Info)` — leaf functions receive read-only metadata.
 /// - `Workflow(Context)` — workflow functions receive a full context for sub-tasks.
+#[derive(Clone, Copy)]
 pub enum ExecutionEnv<'a> {
     Function(&'a Info),
     Workflow(&'a Context),
 }
 
 impl<'a> ExecutionEnv<'a> {
+    /// Remote dependencies the execution is now waiting on. Leaf functions
+    /// can't spawn durable work, so they never have any.
+    pub(crate) async fn collect_remote_todos(&self) -> Result<Vec<String>> {
+        match self {
+            ExecutionEnv::Workflow(ctx) => ctx.collect_remote_todos().await,
+            ExecutionEnv::Function(_) => Ok(Vec::new()),
+        }
+    }
+
     /// Extract the `Context` reference, panicking if this is a `Function` env.
     pub fn into_context(self) -> &'a Context {
         match self {
