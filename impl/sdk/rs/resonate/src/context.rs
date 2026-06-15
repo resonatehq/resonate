@@ -33,6 +33,21 @@ pub(crate) struct SpawnedHandle {
     pub handle: tokio::task::JoinHandle<Outcome<()>>,
 }
 
+/// Abort the background task if the handle is dropped without being flushed.
+///
+/// The normal path (`flush_local_work`) awaits every handle to completion, so
+/// `abort()` then runs on an already-finished task and is a no-op. The case
+/// that matters is an abnormal early return — e.g. a user function that
+/// panics after spawning children — where the `Context` is dropped without
+/// flushing: dropping the leftover handles cancels the in-flight promise
+/// creations instead of detaching them, so no spawned task outlives its
+/// execution.
+impl Drop for SpawnedHandle {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 /// The primary interface for workflow functions.
 /// Provides two core operations: `run` (local execution) and `rpc` (remote execution).
 ///
@@ -430,6 +445,10 @@ impl Context {
     /// Awaits every spawned task's JoinHandle (no early return, so no task is
     /// orphaned), collects remote_todos from any that suspended.
     ///
+    /// Any handle not flushed through here (e.g. because the user function
+    /// panicked before flush ran) is aborted when its `SpawnedHandle` drops —
+    /// see the `Drop` impl on `SpawnedHandle`.
+    ///
     /// Returns `Err` if any task failed with an infrastructure error (e.g. a
     /// promise creation that failed in the background) — this is what makes a
     /// fire-and-forget creation failure fail the whole task execution, so the
@@ -443,8 +462,11 @@ impl Context {
         let mut remote_todos = Vec::new();
         let mut first_err: Option<Error> = None;
 
-        for task in handles {
-            match task.handle.await {
+        for mut task in handles {
+            // Await by mutable borrow so the `SpawnedHandle`'s `Drop` impl can
+            // still run — moving `handle` out would be E0509. `JoinHandle` is
+            // `Unpin`, so `&mut` awaits directly without any `Pin` wrapper.
+            match (&mut task.handle).await {
                 Ok(Outcome::Done(Ok(_))) => {
                     // Already settled inside the spawned task
                 }
@@ -3204,5 +3226,46 @@ mod tests {
         assert!(matches!(e1, Error::PromiseCreation(_)), "got: {e1}");
 
         let _ = try_finalize_context(&ctx, Ok(0)).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_spawned_handle_aborts_inflight_task() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        // Drops only when the task's future is dropped — either on normal
+        // completion or on abort. Since the body parks forever and never
+        // returns, the only way this runs is cancellation.
+        struct Probe(Arc<AtomicBool>);
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.store(true, SeqCst);
+            }
+        }
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let probe = Probe(cancelled.clone());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+
+        let handle = tokio::spawn(async move {
+            let _probe = probe;
+            started_tx.send(()).unwrap();
+            std::future::pending::<()>().await; // park forever; only abort ends this
+            Outcome::Done(Ok(()))
+        });
+
+        let sh = SpawnedHandle {
+            id: "child".to_string(),
+            handle,
+        };
+
+        // Ensure the task is actually running and parked before we drop.
+        started_rx.await.unwrap();
+        drop(sh); // abort-on-drop fires
+        tokio::task::yield_now().await; // let the runtime process the abort
+
+        assert!(
+            cancelled.load(SeqCst),
+            "parked task should have been aborted when its SpawnedHandle dropped"
+        );
     }
 }

@@ -1261,6 +1261,56 @@ mod tests {
         panic!("something went wrong");
     }
 
+    /// Spawns a background child creation, then panics before yielding — so the
+    /// child task is queued but never polled when the panic unwinds.
+    #[resonate_sdk_macros::function]
+    async fn spawn_then_panic(ctx: &Context) -> Result<i32> {
+        let _ = ctx.rpc::<i32>("child", &()).spawn()?;
+        panic!("boom");
+    }
+
+    #[tokio::test]
+    async fn panic_aborts_inflight_child_creation() {
+        let harness = TestHarness::new();
+        let root = make_root_promise("p1", "spawn_then_panic", serde_json::json!(null));
+        harness.add_task("task1", root, vec![]).await;
+
+        let mut registry = Registry::new();
+        registry.register(spawn_then_panic).unwrap();
+
+        let core = test_core(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(registry)),
+        );
+        let result = core.on_message("task1", 0).await;
+        assert!(result.is_err(), "panic should surface as an error");
+
+        // Give any *non-aborted* detached task a chance to run and hit the
+        // network. On the current-thread test runtime, the panicking future
+        // never yields after spawning the child, so the child is only ever
+        // queued — abort-on-drop must cancel it before it sends its create.
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+
+        let requests = harness.sent_requests_json().await;
+        assert!(
+            !requests.iter().any(|r| {
+                r["kind"] == "promise.create"
+                    && r["id"].as_str().is_some_and(|id| id.starts_with("p1."))
+            }),
+            "child creation must not be sent after the parent panics — \
+             the spawned task should be aborted on Context drop"
+        );
+
+        // The parent task is still released for retry (existing behavior).
+        assert!(
+            requests.iter().any(|r| r["kind"] == "task.release"),
+            "task should be released after panic"
+        );
+    }
+
     #[tokio::test]
     async fn panic_from_user_function_is_caught_and_task_released() {
         let harness = TestHarness::new();
