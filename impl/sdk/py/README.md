@@ -4,7 +4,6 @@
 
 [![ci](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/ci.yml/badge.svg)](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/resonatehq/resonate-sdk-py/graph/badge.svg?token=61GYC3DXID)](https://codecov.io/gh/resonatehq/resonate-sdk-py)
-[![dst](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/dst.yml/badge.svg)](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/dst.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## About this component
@@ -24,7 +23,7 @@ The Resonate Python SDK enables developers to build reliable and scalable cloud 
 ## Requirements
 
 - **Python ≥3.12**
-- **Resonate Server**: The Python SDK v0.6.7 currently works with the **[legacy Resonate server](https://github.com/resonatehq/resonate-legacy-server)** only. Support for the new server (v0.9.x) is coming in a future release.
+- **Resonate Server**: The Python SDK works with the latest **[Resonate server](https://github.com/resonatehq/resonate)** (v0.9.x and up).
 
 ## Quickstart
 
@@ -47,31 +46,44 @@ pip install resonate-sdk
 A countdown as a loop. Simple, but the function can run for minutes, hours, or days, despite restarts.
 
 ```python
-from resonate import Resonate, Context
-from threading import Event
+import asyncio
+from datetime import timedelta
 
-# Instantiate Resonate
-resonate = Resonate.remote()
+from resonate.context import Context
+from resonate.resonate import Resonate
 
-@resonate.register
-def countdown(ctx: Context, count: int, delay: int):
+
+async def countdown(ctx: Context, count: int, delay: int) -> None:
     for i in range(count, 0, -1):
-        # Run a function, persist its result
-        yield ctx.run(ntfy, i)
-        # Sleep
-        yield ctx.sleep(delay)
+        # Run a function durably, awaiting its persisted result
+        await ctx.run(ntfy, i)
+        # Sleep durably -- the worker holds no state while suspended
+        await ctx.sleep(timedelta(seconds=delay))
     print("Done!")
 
 
-def ntfy(_: Context, i: int):
+async def ntfy(ctx: Context, i: int) -> None:
     print(f"Countdown: {i}")
 
 
-resonate.start() # Start Resonate threads
-Event().wait()  # Keep the main thread alive
-```
+async def main() -> None:
+    # Connect to the Resonate server and register the functions
+    resonate = Resonate(url="http://localhost:8001")
+    resonate.register(countdown)
+    resonate.register(ntfy)
 
-[Working example](https://github.com/resonatehq-examples/example-quickstart-py)
+    try:
+        # Invoke with execution id "countdown.1"; run() returns a handle
+        # immediately, result() awaits the durable outcome
+        handle = resonate.run("countdown.1", countdown, 5, 1)
+        await handle.result()
+    finally:
+        await resonate.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 4. Start the server
 
@@ -79,18 +91,10 @@ Event().wait()  # Keep the main thread alive
 resonate dev
 ```
 
-5. Start the worker
+5. Run the worker
 
 ```shell
 python countdown.py
-```
-
-6. Run the function
-
-Run the function with execution ID `countdown.1`:
-
-```shell
-resonate invoke countdown.1 --func countdown --arg 5 --arg 60
 ```
 
 **Result**
@@ -109,10 +113,37 @@ Done!
 
 **What to try**
 
-After starting the function, inspect the current state of the execution using the `resonate tree` command. The tree command visualizes the call graph of the function execution as a graph of durable promises.
+While the function is running, inspect the current state of the execution using the `resonate tree` command. The tree command visualizes the call graph of the function execution as a graph of durable promises.
 
 ```shell
 resonate tree countdown.1
 ```
 
-Now try killing the worker mid-countdown and restarting. **The countdown picks up right where it left off without missing a beat.**
+Now try killing the worker mid-countdown and restarting `python countdown.py`. Because the invocation id is the same (`countdown.1`), the worker reattaches to the existing durable promise and **the countdown picks up right where it left off without missing a beat.**
+
+## Examples
+
+The [`examples/`](./examples) directory contains runnable programs covering the
+core patterns. Start a server (`resonate dev`) on `localhost:8001`, then run any
+of them, for example:
+
+```shell
+uv run python examples/hello-world
+uv run python examples/fibonacci --mode rpc --n 10
+```
+
+| Example | What it shows |
+| --- | --- |
+| [`hello-world`](./examples/hello-world) | A minimal `ctx.run` / `ctx.rpc` chain |
+| [`fibonacci`](./examples/fibonacci) | Recursive durable invocations via `run`, `rpc`, or a mix |
+| [`pipeline`](./examples/pipeline) | A multi-stage DAG with stages running in parallel |
+| [`structured-concurrency`](./examples/structured-concurrency) | The runtime never leaks an unawaited durable child |
+| [`recovery`](./examples/recovery) | Typed serialize/deserialize across the durability boundary |
+| [`retries`](./examples/retries) | Resonate retrying a flaky leaf function until it succeeds |
+| [`error-handling`](./examples/error-handling) | How a failure crosses the boundary and is re-raised |
+| [`detached`](./examples/detached) | Fire-and-forget invocations decoupled from the parent |
+| [`human-in-the-loop`](./examples/human-in-the-loop) | Suspending on a promise an external party resolves |
+| [`polling`](./examples/polling) | Non-blocking progress tracking with `handle.done()` |
+| [`rpc`](./examples/rpc) | One worker dispatching to another by group |
+| [`versioning`](./examples/versioning) | Running several versions of one function side by side |
+| [`saga`](./examples/saga) | Compensating completed steps when a later step fails |

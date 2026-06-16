@@ -1,14 +1,13 @@
 [project]
 name = "resonate-sdk"
-version = "0.6.7"
+version = "0.7.0"
 description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
 dependencies = [
-    "croniter >= 6.0.0, < 7",
-    "jsonpickle >= 4, < 5",
-    "requests >= 2, < 3",
+    "aiohttp>=3.13.5",
+    "msgspec>=0.21.1",
 ]
 
 [project.urls]
@@ -17,28 +16,23 @@ Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
 Source = "https://github.com/resonatehq/resonate-sdk-py"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "resonate"
 
 [dependency-groups]
 dev = [
-    "docutils>=0.21.2",
-    "pydoctor>=24.11.2",
-    "pyright>=1.1.396",
-    "pytest-cov>=6.1.1",
-    "pytest>=8.3.5",
-    "ruff>=0.11.0",
-    "tabulate>=0.9.0",
-    "types-requests>=2.32.0.20250306",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.14",
+    "ty>=0.0.39",
+    "attrs>=24.0.0",
+    "pydantic>=2.0.0",
+    "vulture>=2.16",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--import-mode=importlib"]
-
-[tool.hatch.build.targets.wheel]
-packages = ["resonate"]
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"

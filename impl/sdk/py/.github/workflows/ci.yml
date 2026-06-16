@@ -15,32 +15,26 @@ on:
       - README.md
 
 jobs:
-  run:
+  test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-
-    env:
-      RESONATE_HOST: http://localhost
+    timeout-minutes: 15
 
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: [3.12, 3.13]
-        server-version: [main, latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: install uv
         uses: astral-sh/setup-uv@v5
-        with:
-          version: 0.5.23
 
       - name: set up python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{matrix.python-version}}
+          python-version: ${{ matrix.python-version }}
 
       - name: install
         run: uv sync --dev
@@ -49,48 +43,49 @@ jobs:
         run: uv run ruff check
 
       - name: check types
-        run: uv run pyright
-
-      - name: set up go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23.0"
-          cache: false # turn caching off to avoid warning
-
-      - name: Get latest Resonate release tag (if needed)
-        if: matrix.server-version == 'latest'
-        id: get-resonate-tag
-        run: |
-          LATEST_TAG=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/resonatehq/resonate/releases/latest | jq -r .tag_name)
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-
-      - name: checkout resonate repository
-        uses: actions/checkout@v4
-        with:
-          repository: resonatehq/resonate
-          path: server
-          ref: ${{ matrix.server-version == 'latest' && steps.get-resonate-tag.outputs.tag || 'main' }}
-
-      - name: build resonate
-        run: go build -o resonate
-        working-directory: server
-
-      - name: start resonate server
-        run: ./resonate serve --system-signal-timeout 0.1s &
-        working-directory: server
+        run: uv run ty check
 
       - name: run tests with coverage
-        id: coverage
-        if: ${{ matrix.server-version == 'latest' && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/main' }}
         run: uv run pytest --cov --cov-branch --cov-report=xml
 
-      - name: Upload coverage reports to Codecov
-        if: ${{ steps.coverage.outcome != 'skipped' }}
+      - name: upload coverage reports to codecov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && github.ref == 'refs/heads/main' }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: run tests
-        if: ${{ steps.coverage.outcome == 'skipped' }}
-        run: uv run pytest
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: install
+        run: uv sync --dev
+
+      - name: install just
+        uses: extractions/setup-just@v3
+
+      - name: install resonate server
+        run: |
+          curl -sSL https://github.com/resonatehq/resonate/releases/latest/download/resonate_linux_x86_64.tar.gz | tar -xz
+          sudo mv resonate /usr/local/bin/resonate
+
+      - name: start resonate server
+        run: |
+          resonate serve --server-port 8080 &
+          until curl -s -o /dev/null http://localhost:8080/api/v1/promises; do sleep 0.5; done
+
+      - name: run examples
+        run: just examples
+        env:
+          RESONATE_URL: http://localhost:8080

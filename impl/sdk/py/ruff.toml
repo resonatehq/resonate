@@ -1,6 +1,8 @@
-line-length = 200
+src = ["src", "tests"]
+target-version = "py312"
 
 [lint]
+select = ["ALL"]
 ignore = [
     "A001",
     "A002",
@@ -37,8 +39,17 @@ ignore = [
     "S311",
     "TD003",
 ]
-select = ["ALL"]
 
 [lint.isort]
 combine-as-imports = true
 required-imports = ["from __future__ import annotations"]
+
+[lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["msgspec.Struct"]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["SLF001"]
+# Examples are runnable CLI demos: they print to stdout, and their module
+# docstrings follow Go's multi-line package-comment style rather than the
+# imperative one-line summary the D rules expect.
+"examples/**/*.py" = ["T201", "D205", "D400", "D415"]
