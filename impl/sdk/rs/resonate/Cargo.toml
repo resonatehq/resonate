@@ -25,4 +25,4 @@ parking_lot = "0.12.5"
 seahash = "4"
 
 [dev-dependencies]
-test-with = "0.14"
+test-with = "0.16"
