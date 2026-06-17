@@ -7,7 +7,7 @@ import msgspec
 
 from resonate.error import (
     ApplicationError,
-    TimeoutError as ResonateTimeoutError,
+    ResonateTimeoutError,
 )
 from resonate.types import PromiseState, Value
 

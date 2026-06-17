@@ -9,23 +9,30 @@ class FunctionNotFoundError(ResonateError):
     def __init__(self, name: str, version: int = 1) -> None:
         self.name = name
         self.version = version
-        super().__init__(f"function not found: {name} (version {version})")
+        super().__init__(name, version)
+
+    def __str__(self) -> str:
+        return f"function not found: {self.name} (version {self.version})"
 
 
 class AlreadyRegisteredError(ResonateError):
     def __init__(self, name: str, version: int = 1) -> None:
         self.name = name
         self.version = version
-        super().__init__(
-            f"function '{self.name}' (version {self.version}) is already registered"
-        )
+        super().__init__(name, version)
+
+    def __str__(self) -> str:
+        return f"function '{self.name}' (version {self.version}) is already registered"
 
 
 class ServerError(ResonateError):
     def __init__(self, code: int, message: str) -> None:
         self.code = code
         self.message = message
-        super().__init__(f"server error (code={self.code}): {self.message}")
+        super().__init__(code, message)
+
+    def __str__(self) -> str:
+        return f"server error (code={self.code}): {self.message}"
 
 
 class StoppedError(ResonateError):
@@ -35,31 +42,46 @@ class StoppedError(ResonateError):
     """
 
     def __init__(self) -> None:
-        super().__init__("execution stopped")
+        super().__init__()
+
+    def __str__(self) -> str:
+        return "execution stopped"
 
 
 class DecodingError(ResonateError):
     def __init__(self, message: str) -> None:
         self.message = message
-        super().__init__(f"decoding error: {self.message}")
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return f"decoding error: {self.message}"
 
 
 class SerializationError(ResonateError):
     def __init__(self, error: Exception) -> None:
         self.error = error
-        super().__init__(f"serialization error: {error}")
+        super().__init__(error)
+
+    def __str__(self) -> str:
+        return f"serialization error: {self.error}"
 
 
 class HttpError(ResonateError):
     def __init__(self, error: Exception) -> None:
         self.error = error
-        super().__init__(f"http error: {error}")
+        super().__init__(error)
+
+    def __str__(self) -> str:
+        return f"http error: {self.error}"
 
 
 class Base64DecodeError(ResonateError):
     def __init__(self, error: Exception) -> None:
         self.error = error
-        super().__init__(f"base64 decode error: {error}")
+        super().__init__(error)
+
+    def __str__(self) -> str:
+        return f"base64 decode error: {self.error}"
 
 
 class PlatformError(BaseException):
@@ -83,7 +105,10 @@ class PlatformError(BaseException):
             msg = "PlatformError needs at least one cause"
             raise ValueError(msg)
         self.causes: list[ResonateError] = causes
-        super().__init__("platform error: " + "; ".join(str(c) for c in causes))
+        super().__init__(causes)
+
+    def __str__(self) -> str:
+        return "platform error: " + "; ".join(str(c) for c in self.causes)
 
     @property
     def cause(self) -> ResonateError:
@@ -99,15 +124,24 @@ class Suspended(BaseException):
     """
 
     def __init__(self) -> None:
-        super().__init__("execution suspended")
+        super().__init__()
+
+    def __str__(self) -> str:
+        return "execution suspended"
 
 
 class ApplicationError(ResonateError):
     def __init__(self, message: str) -> None:
         self.message = message
-        super().__init__(self.message)
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        return self.message
 
 
-class TimeoutError(ResonateError):
+class ResonateTimeoutError(ResonateError):
     def __init__(self) -> None:
-        super().__init__("timeout")
+        super().__init__()
+
+    def __str__(self) -> str:
+        return "timeout"
