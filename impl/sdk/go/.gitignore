@@ -5,6 +5,12 @@
 *.so
 *.dylib
 
+# Example binaries (compiled output named after each example directory)
+/examples/fibonacci/fibonacci
+/examples/hello/hello
+/examples/pipeline/pipeline
+/examples/saga/saga
+
 # Test binaries and coverage
 *.test
 *.out
