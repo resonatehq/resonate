@@ -314,7 +314,7 @@ func TestContext_RPC_PendingSuspends(t *testing.T) {
 		t.Fatalf("expected root.1, got %q", fut.ID())
 	}
 	assertPanicsWithSuspend(t, func() { _ = fut.Await(nil) })
-	todos := ctx.drainSpawnedRemote()
+	todos := ctx.drainRemoteTodos()
 	if len(todos) != 1 || todos[0] != "root.1" {
 		t.Fatalf("todos: %v", todos)
 	}
@@ -373,7 +373,7 @@ func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 	if _, ok := fake.record(id); !ok {
 		t.Fatalf("promise %q not created", id)
 	}
-	if got := ctx.drainSpawnedRemote(); len(got) != 0 {
+	if got := ctx.drainRemoteTodos(); len(got) != 0 {
 		t.Fatalf("detached should not register todo, got %v", got)
 	}
 }
@@ -602,5 +602,19 @@ func TestDependencyOf(t *testing.T) {
 	}
 	if _, ok := DependencyOf[*fakeDB](c, "nope"); ok {
 		t.Fatal("DependencyOf on missing name reported ok")
+	}
+}
+
+func TestDependencyOf_AcceptsInfo(t *testing.T) {
+	db := &fakeDB{dsn: "postgres://localhost"}
+	c := testContext("root", nil)
+	c.host = context.WithValue(c.host, depKey("db"), db)
+
+	// Call through a variable whose static type is Info (the leaf view), proving
+	// the widened DependencyOf signature accepts it.
+	var i Info = c
+	got, ok := DependencyOf[*fakeDB](i, "db")
+	if !ok || got != db {
+		t.Fatalf("DependencyOf via Info = (%v, %v), want (%v, true)", got, ok, db)
 	}
 }

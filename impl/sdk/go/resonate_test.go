@@ -239,6 +239,30 @@ func TestRegisterByName(t *testing.T) {
 	}
 }
 
+// A leaf (first param resonate.Info) can be registered as a root through the
+// same Register entrypoint as a workflow, and driven via the typed handle.
+func TestRegisterLeafRoot(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	leaf := func(_ resonate.Info, x int64) (int64, error) { return x * 2, nil }
+	leafFn, err := resonate.Register(r, "leaf_double", leaf)
+	if err != nil {
+		t.Fatalf("register leaf: %v", err)
+	}
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	h, err := leafFn.Run(ctx, "leaf-1", 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Result(ctx)
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("result = %d, want 42", got)
+	}
+}
+
 func TestRegisterDuplicateReturnsError(t *testing.T) {
 	r := newLocal(t, localConfig{})
 	if _, err := resonate.Register(r, "noop", noop); err != nil {

@@ -629,7 +629,7 @@ func TestCore_SwallowedSuspendStillSuspends(t *testing.T) {
 }
 
 // Migrated: fire-and-forget local child that suspends propagates as parent
-// suspension (child todos merge via flushLocalWork).
+// suspension (child todos merge via joinLocalWork).
 func TestCore_FireAndForgetLocalSuspension(t *testing.T) {
 	f := newCoreFixture(t)
 	childThatSuspends := func(c *resonate.Context) (int, error) {
@@ -651,6 +651,48 @@ func TestCore_FireAndForgetLocalSuspension(t *testing.T) {
 	}
 	if status != resonate.StatusSuspended {
 		t.Errorf("status = %v, want StatusSuspended via fire-and-forget child", status)
+	}
+}
+
+// A leaf child (first param resonate.Info) spawned via ctx.Run settles its
+// durable promise normally and its value flows back to the awaiting parent.
+func TestCore_LeafChildViaRun(t *testing.T) {
+	f := newCoreFixture(t)
+	leaf := func(_ resonate.Info, x int) (int, error) { return x * 2, nil }
+	parent := func(c *resonate.Context) (int, error) {
+		fut, err := c.Run(leaf, 21)
+		if err != nil {
+			return 0, err
+		}
+		var n int
+		if err := fut.Await(&n); err != nil {
+			return 0, err
+		}
+		return n, nil
+	}
+	if err := f.reg.Register("leafparent", parent); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	v, promise, preload := f.createRootTask(t, "p1-leaf", "leafparent", nil)
+
+	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-leaf", v, promise, preload, nil)
+	if err != nil {
+		t.Fatalf("ExecuteUntilBlocked: %v", err)
+	}
+	if status != resonate.StatusDone {
+		t.Fatalf("status = %v, want StatusDone", status)
+	}
+
+	got := f.promiseGet(t, "p1-leaf")
+	if got.State != resonate.PromiseStateResolved {
+		t.Fatalf("state = %v, want resolved", got.State)
+	}
+	var n int
+	if err := got.Value.Decode(&n); err != nil {
+		t.Fatalf("decode value: %v", err)
+	}
+	if n != 42 {
+		t.Errorf("value = %d, want 42", n)
 	}
 }
 

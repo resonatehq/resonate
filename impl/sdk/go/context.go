@@ -113,13 +113,40 @@ func (c *Context) GetDependency(name string) (any, bool) {
 }
 
 // DependencyOf is the type-safe convenience wrapper around
-// Context.GetDependency. It returns false when no dependency is registered
-// under name or the registered value is not a T.
-func DependencyOf[T any](c *Context, name string) (T, bool) {
+// GetDependency. It returns false when no dependency is registered
+// under name or the registered value is not a T. It accepts any execution
+// view, so both workflows (*Context) and leaves (Info) can call it.
+func DependencyOf[T any](c Info, name string) (T, bool) {
 	v, _ := c.GetDependency(name)
 	t, ok := v.(T)
 	return t, ok
 }
+
+// Info is the read-only view of an execution that a leaf function receives.
+// A function whose first parameter is Info (rather than *Context) is a leaf:
+// it can read its identity and reach process-local dependencies, but it cannot
+// spawn children — Info deliberately omits Run/RPC/Sleep/Promise/Detached.
+// *Context implements Info, so the runtime always passes the real *Context;
+// the parameter type is purely the author's compile-time choice of "leaf"
+// (Info) versus "workflow" (*Context).
+type Info interface {
+	// ID returns the current execution's promise ID.
+	ID() string
+	// ParentID returns the parent promise's ID (empty for root).
+	ParentID() string
+	// OriginID returns the root workflow's ID — stable across the whole tree.
+	OriginID() string
+	// TimeoutAt returns the promise deadline in epoch milliseconds.
+	TimeoutAt() int64
+	// FuncName returns the registered function name for this execution.
+	FuncName() string
+	// GetDependency returns the dependency registered under name via
+	// Resonate.SetDependency, or (nil, false) if no such dependency exists.
+	GetDependency(name string) (any, bool)
+}
+
+// Compile-time guarantee that the full Context satisfies the leaf view.
+var _ Info = (*Context)(nil)
 
 // ID returns the current execution's promise ID.
 func (c *Context) ID() string { return c.id }
@@ -142,7 +169,7 @@ func (c *Context) appendRemoteTodo(id string) {
 	c.mu.Unlock()
 }
 
-func (c *Context) drainSpawnedRemote() []string {
+func (c *Context) drainRemoteTodos() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := c.spawnedRemote
@@ -305,8 +332,10 @@ func optTarget(s string) *string {
 // ── Entrypoints ─────────────────────────────────────────────────────────
 
 // Run executes a local Go function durably. fn must be a function returning
-// (T, error) and taking either (a) zero args, (b) one args value, (c)
-// *Context, or (d) *Context plus one args value. The promise is created
+// (T, error) and taking either (a) zero args, (b) one args value, (c) a context
+// view, or (d) a context view plus one args value. A context view is either
+// *Context (a workflow, which may spawn children) or Info (a leaf, read-only —
+// it cannot itself call Run/RPC/Sleep/Promise/Detached). The promise is created
 // synchronously; if already settled (idempotent recovery) Run skips spawning
 // the goroutine.
 //
@@ -314,7 +343,7 @@ func optTarget(s string) *string {
 //
 // Run spawns one goroutine that invokes fn and (on success) settles the
 // child's durable promise. The goroutine is owned by this Context and is
-// joined by flushLocalWork before the workflow returns or suspends — see
+// joined by joinLocalWork before the workflow returns or suspends — see
 // the contract notes below.
 //
 // # Contract for fn
@@ -332,10 +361,11 @@ func optTarget(s string) *string {
 //     whose body executes before reaching that boundary will execute again.
 //     Wrap external side effects (DB writes, payments, emails) in their own
 //     ctx.Run / ctx.RPC so the durable promise records the result.
-//   - fn MAY itself call ctx.Run / ctx.RPC / ctx.Sleep / ctx.Promise. The
-//     Future.Await machinery panics suspendSignal{} on a pending dependency;
-//     executeLocal recovers that panic, drains the child's remote todos into
-//     the parent, and reports back as suspended.
+//   - A workflow fn (first param *Context) MAY itself call ctx.Run / ctx.RPC /
+//     ctx.Sleep / ctx.Promise. The Future.Await machinery panics suspendSignal{}
+//     on a pending dependency; executeLocal recovers that panic, drains the
+//     child's remote todos into the parent, and reports back as suspended. A
+//     leaf fn (first param Info) holds no such methods and cannot do this.
 func (c *Context) Run(fn any, args any, opts ...RunOpts) (*Future, error) {
 	df, err := durableFunctionFor(fn)
 	if err != nil {
@@ -375,7 +405,7 @@ func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context
 	defer c.wg.Done()
 	// Defensive recover: invokeWithRetry already converts user-function
 	// panics (including suspendSignal) into return values, so any panic
-	// reaching here is from flushLocalWork, codec, or settle paths.
+	// reaching here is from joinLocalWork, codec, or settle paths.
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -390,26 +420,24 @@ func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context
 		return
 	}
 
-	childCtx.flushLocalWork()
-	childTodos := childCtx.drainSpawnedRemote()
+	childCtx.joinLocalWork()
+	childTodos := childCtx.drainRemoteTodos()
 
-	if suspended {
+	// Suspend the parent rather than settle unless it ran cleanly to a value:
+	// either the body unwound on a pending await (suspended), or a local child
+	// it spawned via ctx.Run is still blocked on a remote dependency that
+	// bubbled up here (childTodos). Structured concurrency forbids settling
+	// while a dependency is pending. suspended — not childTodos — is the
+	// authoritative "there is no result to settle" signal: a body can recover
+	// the suspend panic and return, leaving todos with suspended=false, and
+	// settling it with the empty res would be wrong. Merge any todos upward so
+	// the parent registers them when it suspends.
+	if suspended || len(childTodos) > 0 {
 		if len(childTodos) > 0 {
 			c.mu.Lock()
 			c.spawnedRemote = append(c.spawnedRemote, childTodos...)
 			c.mu.Unlock()
 		}
-		f.result <- localResult{suspended: true}
-		return
-	}
-
-	if len(childTodos) > 0 {
-		// A child suspended in the background; merge todos and treat parent
-		// as suspended too — structured concurrency: the parent cannot
-		// complete while a child is pending.
-		c.mu.Lock()
-		c.spawnedRemote = append(c.spawnedRemote, childTodos...)
-		c.mu.Unlock()
 		f.result <- localResult{suspended: true}
 		return
 	}
@@ -510,7 +538,7 @@ func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (str
 	return childID, nil
 }
 
-// flushLocalWork waits for every spawned-local goroutine on this context to
+// joinLocalWork waits for every spawned-local goroutine on this context to
 // finish. Each goroutine has already merged its todos / set its record by
 // the time it exits, so the caller need only wait.
 //
@@ -524,7 +552,7 @@ func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (str
 //
 // See Context.Run for the contract user functions must respect to keep this
 // wait short.
-func (c *Context) flushLocalWork() {
+func (c *Context) joinLocalWork() {
 	c.wg.Wait()
 }
 

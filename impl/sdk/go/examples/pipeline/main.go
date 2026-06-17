@@ -61,36 +61,41 @@ type EmitResult struct {
 }
 
 // ── Stage functions ─────────────────────────────────────────────────────
+//
+// Every stage is a leaf: it does its work and returns without spawning
+// children, so each takes resonate.Info (the read-only view) rather than
+// *resonate.Context. Only the runPipeline orchestrator below needs the full
+// context to fan out via ctx.RPC.
 
-func download(_ *resonate.Context, args PipelineArgs) (Raw, error) {
+func download(_ resonate.Info, args PipelineArgs) (Raw, error) {
 	body := fmt.Sprintf("the quick brown fox jumps over %s", args.URL)
 	fmt.Printf("  [download] %s -> %d bytes\n", args.URL, len(body))
 	return Raw{Body: body}, nil
 }
 
-func parseStage(_ *resonate.Context, raw Raw) (Parsed, error) {
+func parseStage(_ resonate.Info, raw Raw) (Parsed, error) {
 	words := strings.Fields(raw.Body)
 	fmt.Printf("  [parse] %d words\n", len(words))
 	return Parsed{Words: words}, nil
 }
 
-func transformA(_ *resonate.Context, p Parsed) (TransformAResult, error) {
+func transformA(_ resonate.Info, p Parsed) (TransformAResult, error) {
 	fmt.Printf("  [transformA] counting words\n")
 	return TransformAResult{WordCount: len(p.Words)}, nil
 }
 
-func transformB(_ *resonate.Context, p Parsed) (TransformBResult, error) {
+func transformB(_ resonate.Info, p Parsed) (TransformBResult, error) {
 	upper := strings.ToUpper(strings.Join(p.Words, " "))
 	fmt.Printf("  [transformB] uppercased %d chars\n", len(upper))
 	return TransformBResult{Upper: upper}, nil
 }
 
-func merge(_ *resonate.Context, args MergeArgs) (Merged, error) {
+func merge(_ resonate.Info, args MergeArgs) (Merged, error) {
 	fmt.Printf("  [merge] combining transforms\n")
 	return Merged{WordCount: args.A.WordCount, Upper: args.B.Upper}, nil
 }
 
-func emit(_ *resonate.Context, m Merged) (EmitResult, error) {
+func emit(_ resonate.Info, m Merged) (EmitResult, error) {
 	fmt.Printf("  [emit] words=%d upper=%q\n", m.WordCount, m.Upper)
 	return EmitResult{Sent: "ok"}, nil
 }

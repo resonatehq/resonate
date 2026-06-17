@@ -53,7 +53,7 @@ func TestFuture_Remote_Await_Pending_PanicsAndRegistersTodo(t *testing.T) {
 	assertPanicsWithSuspend(t, func() {
 		_ = f.Await(nil)
 	})
-	todos := ctx.drainSpawnedRemote()
+	todos := ctx.drainRemoteTodos()
 	if len(todos) != 1 || todos[0] != "p-pending" {
 		t.Fatalf("expected spawnedRemote=[p-pending], got %v", todos)
 	}

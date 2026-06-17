@@ -79,14 +79,18 @@ type ReleaseResult struct {
 }
 
 // ── Step functions ──────────────────────────────────────────────────────
+//
+// Each step (and each compensation) is a leaf: it performs one action and
+// returns without spawning children, so it takes resonate.Info rather than
+// *resonate.Context. Only the bookTrip orchestrator drives them via ctx.RPC.
 
-func reserveFlight(_ *resonate.Context, args FlightArgs) (Reservation, error) {
+func reserveFlight(_ resonate.Info, args FlightArgs) (Reservation, error) {
 	ref := fmt.Sprintf("FL-%s-%s-%s", args.Customer, args.From, args.To)
 	fmt.Printf("  [reserveFlight] reserved %s\n", ref)
 	return Reservation{Ref: ref}, nil
 }
 
-func reserveHotel(_ *resonate.Context, args HotelArgs) (Reservation, error) {
+func reserveHotel(_ resonate.Info, args HotelArgs) (Reservation, error) {
 	if args.Fail {
 		fmt.Printf("  [reserveHotel] FAILED for %s in %s\n", args.Customer, args.City)
 		return Reservation{}, fmt.Errorf("no rooms available in %s", args.City)
@@ -96,7 +100,7 @@ func reserveHotel(_ *resonate.Context, args HotelArgs) (Reservation, error) {
 	return Reservation{Ref: ref}, nil
 }
 
-func chargeCard(_ *resonate.Context, args ChargeArgs) (Charge, error) {
+func chargeCard(_ resonate.Info, args ChargeArgs) (Charge, error) {
 	if args.Fail {
 		fmt.Printf("  [chargeCard] FAILED for %s ($%d)\n", args.Customer, args.Amount)
 		return Charge{}, fmt.Errorf("card declined for $%d", args.Amount)
@@ -106,12 +110,12 @@ func chargeCard(_ *resonate.Context, args ChargeArgs) (Charge, error) {
 	return Charge{Ref: ref}, nil
 }
 
-func releaseFlight(_ *resonate.Context, args ReleaseArgs) (ReleaseResult, error) {
+func releaseFlight(_ resonate.Info, args ReleaseArgs) (ReleaseResult, error) {
 	fmt.Printf("  [releaseFlight] released %s\n", args.Ref)
 	return ReleaseResult{Released: args.Ref}, nil
 }
 
-func releaseHotel(_ *resonate.Context, args ReleaseArgs) (ReleaseResult, error) {
+func releaseHotel(_ resonate.Info, args ReleaseArgs) (ReleaseResult, error) {
 	fmt.Printf("  [releaseHotel] released %s\n", args.Ref)
 	return ReleaseResult{Released: args.Ref}, nil
 }

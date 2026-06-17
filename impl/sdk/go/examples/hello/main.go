@@ -16,7 +16,9 @@ type GreetArgs struct {
 	Name string `json:"name"`
 }
 
-func greet(_ *resonate.Context, args GreetArgs) (string, error) {
+// greet is a leaf: it does its work and returns without spawning children, so
+// it takes resonate.Info (the read-only view) rather than *resonate.Context.
+func greet(_ resonate.Info, args GreetArgs) (string, error) {
 	return fmt.Sprintf("hello, %s!", args.Name), nil
 }
 

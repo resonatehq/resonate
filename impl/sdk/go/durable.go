@@ -11,7 +11,9 @@ import (
 // to ctx.Run. Built fresh on every call — a local reflection pass is cheap
 // next to the network round-trip each invocation already costs.
 type durableFunction struct {
-	name     string
+	name string
+	// hasCtx reports whether the first parameter is the context slot, i.e.
+	// either *Context (workflow) or Info (leaf).
 	hasCtx   bool
 	argsType reflect.Type
 	resType  reflect.Type
@@ -20,6 +22,7 @@ type durableFunction struct {
 
 var (
 	ctxPtrType = reflect.TypeOf((*Context)(nil))
+	infoIface  = reflect.TypeOf((*Info)(nil)).Elem()
 	errorIface = reflect.TypeOf((*error)(nil)).Elem()
 )
 
@@ -46,24 +49,31 @@ func durableFunctionFor(fn any) (*durableFunction, error) {
 		return nil, fmt.Errorf("resonate: function %s must return (T, error), second return must be error, got %s", name, t.Out(1))
 	}
 
+	// The first parameter may be the context slot: *Context (workflow) or Info
+	// (leaf). Match Info exactly rather than "any interface *Context satisfies"
+	// so an unrelated single-interface parameter is not mistaken for context.
+	isCtxParam := func(p reflect.Type) bool {
+		return p == ctxPtrType || p == infoIface
+	}
+
 	var hasCtx bool
 	var argsType reflect.Type
 	switch t.NumIn() {
 	case 0:
 	case 1:
-		if t.In(0) == ctxPtrType {
+		if isCtxParam(t.In(0)) {
 			hasCtx = true
 		} else {
 			argsType = t.In(0)
 		}
 	case 2:
-		if t.In(0) != ctxPtrType {
-			return nil, fmt.Errorf("resonate: function %s with two parameters must have *resonate.Context as the first parameter", name)
+		if !isCtxParam(t.In(0)) {
+			return nil, fmt.Errorf("resonate: function %s with two parameters must have *resonate.Context or resonate.Info as the first parameter", name)
 		}
 		hasCtx = true
 		argsType = t.In(1)
 	default:
-		return nil, fmt.Errorf("resonate: function %s must take at most one args parameter after the optional *resonate.Context, got %d", name, t.NumIn())
+		return nil, fmt.Errorf("resonate: function %s must take at most one args parameter after the optional *resonate.Context or resonate.Info, got %d", name, t.NumIn())
 	}
 
 	return &durableFunction{

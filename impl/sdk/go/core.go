@@ -244,8 +244,8 @@ func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecor
 	}
 
 	// Flush local work and collect remote todos.
-	rootCtx.flushLocalWork()
-	todos := rootCtx.drainSpawnedRemote()
+	rootCtx.joinLocalWork()
+	todos := rootCtx.drainRemoteTodos()
 
 	// 5. FINALIZE: fulfill when no remote todos remain and the function did
 	//    not request suspension.

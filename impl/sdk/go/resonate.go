@@ -692,10 +692,11 @@ type RegisteredFunc[A, R any] struct {
 }
 
 // Register installs fn in r's registry under name and returns a typed handle.
-// The function must have signature func(*Context, A) (R, error); use struct{}
-// for A when the function takes no arguments. Returns *AlreadyRegisteredError
-// if name is already taken.
-func Register[A, R any](r *Resonate, name string, fn func(*Context, A) (R, error)) (*RegisteredFunc[A, R], error) {
+// fn must have signature func(C, A) (R, error) where C is the context view:
+// either *Context (a workflow that may spawn children) or Info (a leaf that may
+// not). Use struct{} for A when the function takes no arguments. Returns
+// *AlreadyRegisteredError if name is already taken.
+func Register[A, R any, C Info](r *Resonate, name string, fn func(C, A) (R, error)) (*RegisteredFunc[A, R], error) {
 	if err := r.registry.Register(name, fn); err != nil {
 		return nil, err
 	}
