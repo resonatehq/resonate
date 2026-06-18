@@ -195,7 +195,7 @@ pub struct ExecuteMsgData {
 #[derive(Debug, Serialize)]
 pub struct ExecuteMsgTask {
     pub id: String,
-    pub version: i64,
+    pub version: i32,
 }
 
 // --- Record Types ---
@@ -227,9 +227,9 @@ pub struct PromiseRecord {
 pub struct TaskRecord {
     pub id: String,
     pub state: TaskState,
-    pub version: i64,
+    pub version: i32,
     #[serde(default)]
-    pub resumes: i64,
+    pub resumes: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -374,7 +374,7 @@ pub struct TaskAcquireData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
-    pub version: i64,
+    pub version: i32,
     #[validate(length(min = 1, message = "Process ID is required"))]
     pub pid: String,
     #[validate(range(min = 1, message = "TTL must be a positive integer"))]
@@ -386,7 +386,7 @@ pub struct TaskReleaseData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
-    pub version: i64,
+    pub version: i32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -405,7 +405,7 @@ pub struct TaskSuspendData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
-    pub version: i64,
+    pub version: i32,
     #[validate(length(min = 1, message = "Actions array cannot be empty"))]
     #[validate(nested)]
     pub actions: Vec<TaskSuspendAction>,
@@ -450,7 +450,7 @@ pub struct TaskFulfillData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
-    pub version: i64,
+    pub version: i32,
     #[validate(nested)]
     pub action: TaskFulfillAction,
 }
@@ -477,7 +477,7 @@ pub struct TaskFenceData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
     #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
-    pub version: i64,
+    pub version: i32,
     pub action: TaskFenceActionData,
 }
 
@@ -494,7 +494,7 @@ fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::Valid
 #[derive(Debug, Deserialize)]
 pub struct TaskHeartbeatTask {
     pub id: String,
-    pub version: i64,
+    pub version: i32,
 }
 
 #[derive(Debug, Deserialize, Validate)]

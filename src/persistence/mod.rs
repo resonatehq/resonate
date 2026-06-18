@@ -75,14 +75,14 @@ pub struct TaskCreateResult {
     pub promise: PromiseRecord,
     pub task_created: bool,
     pub task_state: Option<String>,
-    pub task_version: Option<i64>,
+    pub task_version: Option<i32>,
 }
 
 pub struct TaskAcquireResult {
     pub promise: Option<PromiseRecord>,
     pub was_acquired: bool,
     pub task_state: Option<TaskState>,
-    pub task_version: Option<i64>,
+    pub task_version: Option<i32>,
 }
 
 pub struct TaskFenceResult {
@@ -122,7 +122,7 @@ pub struct TaskContinueResult {
 
 pub struct OutgoingExecute {
     pub id: String,
-    pub version: i64,
+    pub version: i32,
     pub address: String,
 }
 
@@ -170,7 +170,7 @@ pub struct TaskCreateParams<'a> {
 
 pub struct TaskAcquireParams<'a> {
     pub task_id: &'a str,
-    pub version: i64,
+    pub version: i32,
     pub time: i64,
     pub ttl: i64,
     pub pid: &'a str,
@@ -178,7 +178,7 @@ pub struct TaskAcquireParams<'a> {
 
 pub struct TaskFenceCreateParams<'a> {
     pub task_id: &'a str,
-    pub version: i64,
+    pub version: i32,
     pub promise_id: &'a str,
     pub state: &'a str,
     pub param_headers: Option<&'a str>,
@@ -193,7 +193,7 @@ pub struct TaskFenceCreateParams<'a> {
 
 pub struct TaskFenceSettleParams<'a> {
     pub task_id: &'a str,
-    pub version: i64,
+    pub version: i32,
     pub promise_id: &'a str,
     pub state: &'a str,
     pub value_headers: Option<&'a str>,
@@ -203,7 +203,7 @@ pub struct TaskFenceSettleParams<'a> {
 
 pub struct TaskFulfillParams<'a> {
     pub task_id: &'a str,
-    pub version: i64,
+    pub version: i32,
     pub promise_id: &'a str,
     pub state: &'a str,
     pub value_headers: Option<&'a str>,
@@ -273,12 +273,12 @@ pub trait Db {
 
     fn task_fence_settle(&self, params: &TaskFenceSettleParams) -> StorageResult<TaskFenceResult>;
 
-    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i64)], time: i64) -> StorageResult<()>;
+    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i32)], time: i64) -> StorageResult<()>;
 
     fn task_suspend(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         awaited_ids: &[&str],
     ) -> StorageResult<TaskSuspendResult>;
 
@@ -287,7 +287,7 @@ pub trait Db {
     fn task_release(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult>;

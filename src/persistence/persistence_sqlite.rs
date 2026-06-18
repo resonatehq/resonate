@@ -268,7 +268,7 @@ fn resumption_enqueued(
         )?;
         if updated > 0 {
             // Get current version
-            let version: i64 = tx.query_row(
+            let version: i32 = tx.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![awaiter_id],
                 |r| r.get(0),
@@ -559,7 +559,7 @@ impl<'a> Db for SqliteDb<'a> {
                     params![awaiter_id],
                 )?;
                 if updated > 0 {
-                    let version: i64 = self.conn.query_row(
+                    let version: i32 = self.conn.query_row(
                         "SELECT version FROM tasks WHERE id = ?1",
                         params![awaiter_id],
                         |r| r.get(0),
@@ -708,7 +708,7 @@ impl<'a> Db for SqliteDb<'a> {
             } else {
                 "acquired"
             };
-            let task_version: i64 = if task_state == "acquired" { 1 } else { 0 };
+            let task_version: i32 = if task_state == "acquired" { 1 } else { 0 };
             let inserted = self.conn.execute(
                 "INSERT OR IGNORE INTO tasks (id, state, version) VALUES (?1, ?2, ?3)",
                 params![promise_id, task_state, task_version],
@@ -880,7 +880,7 @@ impl<'a> Db for SqliteDb<'a> {
         })
     }
 
-    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i64)], time: i64) -> StorageResult<()> {
+    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i32)], time: i64) -> StorageResult<()> {
         for &(task_id, version) in tasks {
             if task_id.is_empty() {
                 continue;
@@ -906,7 +906,7 @@ impl<'a> Db for SqliteDb<'a> {
     fn task_suspend(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         awaited_ids: &[&str],
     ) -> StorageResult<TaskSuspendResult> {
         // Check task state
@@ -1040,7 +1040,7 @@ impl<'a> Db for SqliteDb<'a> {
     fn task_release(
         &self,
         task_id: &str,
-        version: i64,
+        version: i32,
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
@@ -1055,7 +1055,7 @@ impl<'a> Db for SqliteDb<'a> {
                 params![time + ttl, task_id],
             )?;
             // Insert outgoing execute
-            let new_version: i64 = self.conn.query_row(
+            let new_version: i32 = self.conn.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![task_id],
                 |r| r.get(0),
@@ -1121,7 +1121,7 @@ impl<'a> Db for SqliteDb<'a> {
                 "INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3) ON CONFLICT (id) DO NOTHING",
                 params![time + self.task_retry_timeout, task_id, self.task_retry_timeout],
             )?;
-            let version: i64 = self.conn.query_row(
+            let version: i32 = self.conn.query_row(
                 "SELECT version FROM tasks WHERE id = ?1",
                 params![task_id],
                 |r| r.get(0),
@@ -1484,7 +1484,7 @@ impl<'a> Db for SqliteDb<'a> {
                 "UPDATE task_timeouts SET timeout_at = ?1 + ?3, process_id = NULL WHERE id = ?2",
                 params![time, id, self.task_retry_timeout],
             )?;
-            let version: i64 = self
+            let version: i32 = self
                 .conn
                 .query_row(
                     "SELECT version FROM tasks WHERE id = ?1",
@@ -1529,7 +1529,7 @@ impl<'a> Db for SqliteDb<'a> {
                 "UPDATE tasks SET state = 'pending' WHERE id = ?1",
                 params![id],
             )?;
-            let version: i64 = self
+            let version: i32 = self
                 .conn
                 .query_row(
                     "SELECT version FROM tasks WHERE id = ?1",
@@ -1663,7 +1663,7 @@ impl<'a> Db for SqliteDb<'a> {
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
                 let id: String = row.get(0)?;
-                let version: i64 = row.get(1)?;
+                let version: i32 = row.get(1)?;
                 let address: String = row.get(2)?;
                 messages.push(SnapshotMessage { address, message: serde_json::json!({ "kind": "execute", "head": {}, "data": { "task": { "id": id, "version": version } } }) });
             }
@@ -1745,7 +1745,7 @@ impl<'a> Db for SqliteDb<'a> {
 }
 
 /// Get resumes count (number of ready callbacks) for a task
-fn get_resumes(tx: &rusqlite::Connection, task_id: &str) -> rusqlite::Result<i64> {
+fn get_resumes(tx: &rusqlite::Connection, task_id: &str) -> rusqlite::Result<i32> {
     tx.query_row(
         "SELECT COUNT(*) FROM callbacks WHERE awaiter_id = ?1 AND ready = true",
         params![task_id],

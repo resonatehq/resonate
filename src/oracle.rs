@@ -36,7 +36,7 @@ struct Promise {
 
 struct Task {
     state: TaskState,
-    version: i64,
+    version: i32,
     pid: Option<String>,
     ttl: Option<i64>,
     resumes: HashSet<String>,
@@ -557,7 +557,7 @@ impl Oracle {
             }
             Some(t) => {
                 let eff = self.effective_task_state(now, &r.id).unwrap_or(t.state);
-                (eff, t.version, t.resumes.len() as i64, t.ttl, t.pid.clone())
+                (eff, t.version, t.resumes.len() as i32, t.ttl, t.pid.clone())
             }
         };
         let task = TaskRecord {
@@ -704,9 +704,9 @@ impl Oracle {
         self.promises.insert(promise_id.clone(), promise);
 
         let (task_state, task_version, task_ttl, task_pid) = if already_timedout {
-            (TaskState::Fulfilled, 0i64, None, None)
+            (TaskState::Fulfilled, 0i32, None, None)
         } else {
-            (TaskState::Acquired, 1i64, Some(r.ttl), Some(r.pid.clone()))
+            (TaskState::Acquired, 1i32, Some(r.ttl), Some(r.pid.clone()))
         };
         self.tasks.insert(
             promise_id.clone(),
@@ -1734,7 +1734,7 @@ impl Oracle {
             .collect();
 
         // Collect expired task lease timeouts
-        let expired_leases: Vec<(String, i64)> = self
+        let expired_leases: Vec<(String, i32)> = self
             .t_timeouts
             .iter()
             .filter(|tt| time >= tt.timeout && matches!(tt.kind, TTimeoutKind::Lease))
@@ -2057,7 +2057,7 @@ impl Oracle {
         }
     }
 
-    fn send_execute(&mut self, address: &str, task_id: &str, version: i64) {
+    fn send_execute(&mut self, address: &str, task_id: &str, version: i32) {
         let msg = json!({ "kind": "execute", "head": {}, "data": { "task": { "id": task_id, "version": version } } });
         for (addr, existing) in &mut self.outgoing {
             if existing
@@ -2145,7 +2145,7 @@ impl Oracle {
             id: id.to_string(),
             state: t.state,
             version: t.version,
-            resumes: t.resumes.len() as i64,
+            resumes: t.resumes.len() as i32,
             ttl: t.ttl,
             pid: t.pid.clone(),
         }
@@ -2240,7 +2240,7 @@ impl Oracle {
             .collect()
     }
 
-    pub fn tasks_by_state(&self, state: TaskState) -> Vec<(String, i64)> {
+    pub fn tasks_by_state(&self, state: TaskState) -> Vec<(String, i32)> {
         self.tasks
             .iter()
             .filter(|(_, t)| t.state == state)
