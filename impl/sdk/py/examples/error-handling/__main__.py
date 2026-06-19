@@ -114,6 +114,7 @@ async def main() -> None:
     try:
         id = f"error-handling-{time.time_ns()}"
         await r.run(id, foo, username, age, args.mode).result()
+        (await r.get(id)).done()
 
     finally:
         await r.stop()

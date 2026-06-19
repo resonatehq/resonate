@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 import msgspec
 
 from resonate import now_ms
+from resonate.chain import Chain, Link
 from resonate.codec import decode_settled
 from resonate.durable import DurableFunction
 from resonate.error import (
@@ -29,7 +30,6 @@ from resonate.types import Info, PromiseCreateReq, Status, TaskData, Value
 if TYPE_CHECKING:
     from resonate.dependencies import DependencyMap
     from resonate.effects import Effects
-    from resonate.types import PromiseRecord
 
 
 TargetResolver = Callable[[str | None], str]
@@ -143,10 +143,11 @@ class _State:
         # retries.
         self.retry_policy = retry_policy
 
-        # Tail of the create-promise chain. Each ctx.run() captures this as
-        # its prev-link and installs a fresh event as the new tail, so bg
-        # tasks issue create_promise in ctx.run call order under concurrency.
-        self.tail: asyncio.Future[None] | None = None
+        # Serializes create-promise calls in ctx.run call order under
+        # concurrency. Each durable op acquires a link synchronously at call
+        # time and runs its create through it from a bg task (see
+        # :class:`~resonate.creation_chain.CreationChain`).
+        self.chain = Chain()
 
         # Whether this execution has performed any durable operation
         # (run/rpc/sleep/promise/detached) -- i.e. is a workflow rather than a
@@ -531,9 +532,9 @@ class Context:
         **kwargs: Any,
     ) -> ResonateFuture[Any]:
         self._state.workflow = True
-        # Chain promise creation: capture the previous tail
-        # and install ours as the new tail.
-        prev_created, created = self._advance_promise_chain()
+        # Acquire our chain link synchronously, so create order matches call
+        # order even though the create itself runs in the bg task below.
+        link = self._state.chain.link()
 
         # Build id/req synchronously so child-id ordering matches call order
         # without relying on asyncio's task-start scheduling being FIFO.
@@ -585,7 +586,7 @@ class Context:
         self._state.tree.add_child(self._state.id, req.id, "int")
 
         async def bg() -> Any:
-            record = await self._create_promise_in_chain(req, prev_created, created)
+            record = await link.run(lambda: self._state.effects.create_promise(req))
 
             # Idempotent recovery: an already-settled promise short-circuits
             # execution. The settled value comes back as JSON builtins, so coerce
@@ -691,7 +692,7 @@ class Context:
         return ResonateFuture(
             _id=req.id,
             _task=task,
-            _created=created,
+            _created=link.done,
         )
 
     @overload
@@ -718,7 +719,7 @@ class Context:
     ) -> ResonateFuture:
         self._state.workflow = True
 
-        prev_created, created = self._advance_promise_chain()
+        link = self._state.chain.link()
 
         # A function object is dispatched by the name it was registered under
         # (reverse lookup), carrying its own registered version. Because that
@@ -749,29 +750,29 @@ class Context:
             target=self._state.target_resolver(self.opts.target),
         )
 
-        return self._remote_future(req, prev_created, created, df)
+        return self._remote_future(req, link, df)
 
     def sleep(self, duration: timedelta) -> ResonateFuture[None]:
         self._state.workflow = True
 
-        prev_created, created = self._advance_promise_chain()
+        link = self._state.chain.link()
 
         req = self._global_req(self._next_id(), duration, timer=True)
 
-        return self._remote_future(req, prev_created, created)
+        return self._remote_future(req, link)
 
     def promise(self, timeout: timedelta | None = None) -> ResonateFuture[Any]:
         self._state.workflow = True
 
-        prev_created, created = self._advance_promise_chain()
+        link = self._state.chain.link()
 
         req = self._global_req(self._next_id(), timeout)
 
-        return self._remote_future(req, prev_created, created)
+        return self._remote_future(req, link)
 
     def detached(self, fn: str, *args: Any, **kwargs: Any) -> ResonateFuture[str]:
         self._state.workflow = True
-        prev_created, created = self._advance_promise_chain()
+        link = self._state.chain.link()
 
         # Mint the id off ``prefix_id`` -- set at the top and propagated unchanged
         # forever -- as ``{prefix}.d{16hex}``, so recursion stays bounded at one
@@ -806,7 +807,7 @@ class Context:
             creation chain rather than deadlocking its successors: each link
             re-raises the upstream exception.
             """
-            record = await self._create_promise_in_chain(req, prev_created, created)
+            record = await link.run(lambda: self._state.effects.create_promise(req))
             # Det nodes are exempt from the contract, but track settlement anyway
             # so :meth:`Tree.print` and :meth:`Tree.get` reflect reality.
             if record.state != "pending":
@@ -818,67 +819,13 @@ class Context:
         return ResonateFuture(
             _id=req.id,
             _task=task,
-            _created=created,
+            _created=link.done,
         )
-
-    def _advance_promise_chain(
-        self,
-    ) -> tuple[asyncio.Future[None] | None, asyncio.Future[None]]:
-        """Advances the creation chain tail, returning (prev_tail, new_tail)."""
-        # No context-side abort gate: the circuit breaker lives in effects
-        # (``create_promise`` / ``settle_promise`` short-circuit once
-        # ``stopped`` is set), so a body that swallowed a platform error and
-        # issued more durable work re-raises off the effects gate when the new
-        # op hits the server, and the creation chain propagates an upstream
-        # failure to later links.
-        prev_tail = self._state.tail
-        new_tail = asyncio.Future[None]()
-        self._state.tail = new_tail
-        return prev_tail, new_tail
-
-    async def _create_promise_in_chain(
-        self,
-        req: PromiseCreateReq,
-        prev_created: asyncio.Future[None] | None,
-        created: asyncio.Future[None],
-    ) -> PromiseRecord:
-        """Create ``req``'s promise in creation-chain order.
-
-        Waits on the previous chain link (so create_promise calls issue in
-        ctx.run call order under concurrency), creates the promise, then
-        resolves ``created`` to release the next link. ``created`` carries
-        this link's outcome so awaiters (the next link, :meth:`ResonateFuture.id`)
-        observe it: ``set_result`` on success, ``set_exception`` on failure.
-        A predecessor that failed propagates its exception through
-        ``await prev_created``; we re-raise it on this link too, so the whole
-        chain fails as a unit rather than issuing a create on top of an
-        inconsistent prefix. The *same* upstream exception object travels down
-        every successor link (each catches it from ``await prev_created`` and
-        re-installs it on its own ``created``), so the failure surfaces
-        identically no matter how far down the chain it is observed.
-        """
-        try:
-            if prev_created is not None:
-                await prev_created
-
-            record = await self._state.effects.create_promise(req)
-            created.set_result(None)
-        # PlatformError is included so a platform failure still settles this
-        # link's ``created`` (successor links and ``ResonateFuture.id()``
-        # awaiters would otherwise deadlock). Deliberately not a bare
-        # ``BaseException``: that would interfere with task cancellation.
-        except (Exception, PlatformError) as e:
-            created.set_exception(e)
-            # Mark retrieved
-            created.exception()
-            raise
-        return record
 
     def _remote_future(
         self,
         req: PromiseCreateReq,
-        prev_created: asyncio.Future[None] | None,
-        created: asyncio.Future[None],
+        link: Link,
         df: DurableFunction | None = None,
     ) -> ResonateFuture:
         """Wrap a remote ``req`` in a future backed by a deferred-create task.
@@ -901,15 +848,14 @@ class Context:
         self._state.tree.add_child(self._state.id, req.id, "ext")
         return ResonateFuture(
             _id=req.id,
-            _task=self._spawn_remote_await(req, prev_created, created, df),
-            _created=created,
+            _task=self._spawn_remote_await(req, link, df),
+            _created=link.done,
         )
 
     def _spawn_remote_await(
         self,
         req: PromiseCreateReq,
-        prev_created: asyncio.Future[None] | None,
-        created: asyncio.Future[None],
+        link: Link,
         df: DurableFunction | None = None,
     ) -> asyncio.Task[Any]:
         """Spawn the :meth:`_await_remote` task for rpc/sleep/promise.
@@ -924,15 +870,14 @@ class Context:
         and the future await do not conflict. ``df`` is forwarded to
         :meth:`_await_remote` for return-type coercion (by-object ``rpc`` only).
         """
-        task = asyncio.create_task(self._await_remote(req, prev_created, created, df))
+        task = asyncio.create_task(self._await_remote(req, link, df))
         self._state.spawned_remote_tasks.append(task)
         return task
 
     async def _await_remote(
         self,
         req: PromiseCreateReq,
-        prev_created: asyncio.Future[None] | None,
-        created: asyncio.Future[None],
+        link: Link,
         df: DurableFunction | None = None,
     ) -> Any:
         """Background body shared by :meth:`rpc`, :meth:`sleep`, and :meth:`promise`.
@@ -948,7 +893,7 @@ class Context:
         successors waiting on this link: each link re-raises the upstream
         exception.
         """
-        record = await self._create_promise_in_chain(req, prev_created, created)
+        record = await link.run(lambda: self._state.effects.create_promise(req))
 
         if record.state != "pending":
             # Already settled: mark the node settled so it leaves the
