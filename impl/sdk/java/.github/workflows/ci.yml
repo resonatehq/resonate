@@ -1,0 +1,91 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - README.md
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    # The library is always compiled for Java 21 (the bytecode we ship); the
+    # matrix only varies the JVM the tests RUN on, proving the 21 artifact works
+    # on newer runtimes. -PtestJavaVersion is read by build.gradle.kts.
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        test-java-version: ["21", "24", "25"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install both JDKs so Gradle can compile with 21 and run tests on the
+      # matrix version. The last entry sets JAVA_HOME / runs Gradle itself.
+      - name: set up java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            ${{ matrix.test-java-version }}
+            21
+
+      - name: setup gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: check linting
+        run: ./gradlew spotlessCheck
+
+      # TODO: missing type-check step. Python ran `ty check`; Java type-checks
+      # during compilation (covered by the test task), so no separate step.
+      - name: run tests
+        run: ./gradlew test -PtestJavaVersion=${{ matrix.test-java-version }}
+
+      # TODO: missing coverage + codecov upload. Add the `jacoco` plugin to
+      # build.gradle, run `./gradlew test jacocoTestReport`, then upload with
+      # codecov/codecov-action@v5 (needs secrets.CODECOV_TOKEN).
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: setup gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: install just
+        uses: extractions/setup-just@v3
+
+      - name: install resonate server
+        run: |
+          curl -sSL https://github.com/resonatehq/resonate/releases/latest/download/resonate_linux_x86_64.tar.gz | tar -xz
+          sudo mv resonate /usr/local/bin/resonate
+
+      - name: start resonate server
+        run: |
+          resonate serve --server-port 8080 &
+          until curl -s -o /dev/null http://localhost:8080/api/v1/promises; do sleep 0.5; done
+
+      - name: run examples
+        run: just examples
+        env:
+          RESONATE_URL: http://localhost:8080

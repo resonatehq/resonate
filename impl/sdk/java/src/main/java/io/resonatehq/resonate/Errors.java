@@ -1,21 +1,37 @@
 package io.resonatehq.resonate;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 /**
  * Error types mirroring {@code resonate.error} from the Python SDK.
  *
- * <p>The Python module declares a base {@code ResonateError(Exception)} and 15 concrete subclasses.
- * We mirror those as nested classes inside {@link Errors}, all rooted at {@link ResonateError},
- * which extends {@link RuntimeException} — Python {@code Exception} is unchecked-like for callers
- * that don't catch, and {@link RuntimeException} preserves that ergonomics across the SDK.
+ * <p>Python declares a base {@code ResonateError(Exception)} with ten concrete subclasses, plus two
+ * control-flow signals — {@code Suspended} and {@code PlatformError} — that deliberately extend
+ * {@code BaseException} rather than {@code Exception}. We mirror all of these as nested classes
+ * inside {@link Errors}.
  *
- * <p><b>Naming.</b> The Python classes use the {@code *Error} suffix and we keep those names
- * verbatim for cross-SDK parity, even though Java convention reserves {@code Error} for
- * unrecoverable JVM conditions ({@link java.lang.Error}) and uses {@code Exception} elsewhere.
- * Nesting under {@link Errors} disambiguates and prevents any clash with {@link java.lang.Error}
- * or {@link java.util.concurrent.TimeoutException}.
+ * <p><b>Two hierarchies, mirroring Python's two roots.</b>
  *
- * <p><b>Message formatting.</b> Python {@code f"...: {error}"} calls {@code str(error)}, which for
- * an exception returns the message args. The closest Java analogue is {@link Throwable#getMessage()
+ * <ul>
+ *   <li>{@link ResonateError} extends {@link RuntimeException} — the analogue of Python's
+ *       {@code ResonateError(Exception)}. Unchecked, and meant to be caught/matched by callers.
+ *   <li>{@link Suspended} and {@link PlatformError} extend {@link java.lang.Error} — the analogue of
+ *       Python's {@code BaseException}. In Python these sit beside {@code Exception} so a user's
+ *       {@code except Exception} cannot swallow them; the closest Java analogue is
+ *       {@link java.lang.Error}, which is unchecked and which application code is documented not to
+ *       catch (a plain {@code catch (Exception e)} / {@code catch (RuntimeException e)} will not
+ *       catch it). These are SDK control-flow signals: the task must be released, not fulfilled.
+ * </ul>
+ *
+ * <p><b>Naming.</b> Class names track Python verbatim ({@code Suspended}, {@code PlatformError},
+ * {@code ResonateTimeoutError}, the {@code *Error} subclasses) for cross-SDK parity, even though
+ * Java convention reserves {@code Error} for unrecoverable JVM conditions. Nesting under
+ * {@link Errors} disambiguates and prevents any clash with {@link java.lang.Error} or
+ * {@link java.util.concurrent.TimeoutException}.
+ *
+ * <p><b>Message formatting.</b> Python's {@code f"...: {error}"} calls {@code str(error)}, which for
+ * an exception returns its message args. The closest Java analogue is {@link Throwable#getMessage()
  * Throwable.getMessage()} — not {@link Throwable#toString() Throwable.toString()}, which prefixes
  * the class name. We use {@code getMessage()} for cross-language string parity.
  *
@@ -33,6 +49,7 @@ public final class Errors {
      * {@code instanceof}), not constructed directly. Use the relevant subclass instead.
      */
     public static class ResonateError extends RuntimeException {
+
         protected ResonateError(String message) {
             super(message);
         }
@@ -117,22 +134,21 @@ public final class Errors {
         }
     }
 
-    // --- codec: message-only wrappers ---
+    // --- execution lifecycle ---
 
-    /** Encoding the request side of the wire failed. */
-    public static final class EncodingError extends ResonateError {
-        private final String message;
+    /**
+     * Skipped op after a prior failure stopped the execution.
+     *
+     * <p>Not a server failure — the network was never touched.
+     */
+    public static final class StoppedError extends ResonateError {
 
-        public EncodingError(String message) {
-            super("encoding error: " + message);
-            this.message = message;
-        }
-
-        /** The raw inner message — distinct from {@link #getMessage()}, which has the prefix. */
-        public String message() {
-            return message;
+        public StoppedError() {
+            super("execution stopped");
         }
     }
+
+    // --- codec: message-only wrappers ---
 
     /** Decoding the response side of the wire failed. */
     public static final class DecodingError extends ResonateError {
@@ -196,66 +212,7 @@ public final class Errors {
         }
     }
 
-    /** Wraps a UTF-8 decoding failure. */
-    public static final class Utf8Error extends ResonateError {
-        private final Throwable error;
-
-        public Utf8Error(Throwable error) {
-            super("utf8 error: " + (error == null ? "null" : error.getMessage()), error);
-            this.error = error;
-        }
-
-        /** The wrapped cause; mirrors Python's {@code self.error}. Same value as {@link #getCause()}. */
-        public Throwable error() {
-            return error;
-        }
-    }
-
-    /** Wraps an underlying I/O failure. */
-    public static final class IoError extends ResonateError {
-        private final Throwable error;
-
-        public IoError(Throwable error) {
-            super("io error: " + (error == null ? "null" : error.getMessage()), error);
-            this.error = error;
-        }
-
-        /** The wrapped cause; mirrors Python's {@code self.error}. Same value as {@link #getCause()}. */
-        public Throwable error() {
-            return error;
-        }
-    }
-
-    // --- execution lifecycle ---
-
-    /** Execution suspended (e.g. awaiting an external resolution). */
-    public static final class SuspendedError extends ResonateError {
-        public SuspendedError() {
-            super("execution suspended");
-        }
-    }
-
-    /** Attempted to settle a promise that is already settled. */
-    public static final class AlreadySettledError extends ResonateError {
-        public AlreadySettledError() {
-            super("promise already settled");
-        }
-    }
-
-    /** A task-join boundary surfaced an error message. */
-    public static final class JoinError extends ResonateError {
-        private final String message;
-
-        public JoinError(String message) {
-            super("task join error: " + message);
-            this.message = message;
-        }
-
-        /** The raw inner message — distinct from {@link #getMessage()}, which has the prefix. */
-        public String message() {
-            return message;
-        }
-    }
+    // --- application escape hatch ---
 
     /**
      * User-supplied application error: the cross-SDK-safe escape hatch.
@@ -278,9 +235,74 @@ public final class Errors {
     }
 
     /** Operation timed out. */
-    public static final class TimeoutError extends ResonateError {
-        public TimeoutError() {
+    public static final class ResonateTimeoutError extends ResonateError {
+
+        public ResonateTimeoutError() {
             super("timeout");
+        }
+    }
+
+    // --- control-flow signals: NOT meant to be caught by user code ---
+    // Mirrors Python's BaseException subclasses. They extend java.lang.Error so a user's
+    // catch (Exception) / catch (RuntimeException) cannot swallow them — the task must be released,
+    // not fulfilled.
+
+    /**
+     * Signals that an execution has suspended.
+     *
+     * <p>Mirrors Python's {@code Suspended(BaseException)}. Extends {@link java.lang.Error} so a
+     * {@code try/catch (Exception)} in user code does not swallow it.
+     */
+    public static final class Suspended extends java.lang.Error {
+
+        public Suspended() {
+            super("execution suspended");
+        }
+    }
+
+    /**
+     * A Resonate platform failure inside a durable execution.
+     *
+     * <p>Mirrors Python's {@code PlatformError(BaseException)}. Extends {@link java.lang.Error} (like
+     * {@link Suspended}) so user code's {@code catch (Exception)} cannot swallow it; the task must be
+     * released, not fulfilled. Always constructed from the original {@link ResonateError}, which is
+     * also kept on {@link #causes()} and chained as the JDK {@link #getCause() cause}.
+     *
+     * <p>Always carries a <em>list</em> of causes: a single durable op failing wraps one error,
+     * while a flush of concurrent local work aggregates every failure into one error with all
+     * causes. {@link #cause()} returns the first (primary) one so the outer-boundary unwrap keeps
+     * surfacing a single {@link ResonateError}.
+     */
+    public static final class PlatformError extends java.lang.Error {
+        private final List<ResonateError> causes;
+
+        public PlatformError(List<ResonateError> causes) {
+            // Mirrors Python: a ValueError (here, IllegalArgumentException) rather than an assert,
+            // so an empty-causes bug surfaces here instead of as a later out-of-bounds on cause().
+            super(
+                    "platform error: "
+                            + requireNonEmpty(causes).stream()
+                                    .map(Throwable::getMessage)
+                                    .collect(Collectors.joining("; ")),
+                    causes.get(0));
+            this.causes = List.copyOf(causes);
+        }
+
+        private static List<ResonateError> requireNonEmpty(List<ResonateError> causes) {
+            if (causes == null || causes.isEmpty()) {
+                throw new IllegalArgumentException("PlatformError needs at least one cause");
+            }
+            return causes;
+        }
+
+        /** All causes, in order. The single-op case has exactly one. */
+        public List<ResonateError> causes() {
+            return causes;
+        }
+
+        /** The first (primary) cause — what the outer boundary unwraps to. */
+        public ResonateError cause() {
+            return causes.get(0);
         }
     }
 }
