@@ -95,7 +95,7 @@ public final class Retries {
             String c = r.run("retries-checkout-" + ts, Retries::checkout).result();
             System.out.println("  -> " + c);
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

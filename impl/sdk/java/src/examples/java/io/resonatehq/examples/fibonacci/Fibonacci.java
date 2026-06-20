@@ -79,14 +79,14 @@ public final class Fibonacci {
             ResonateHandle<Integer> handle = r.run(id, fns.get(mode), n);
             int out = handle.result();
             assert out == fib(n);
-            ResonateHandle<Object> got = r.get(id).join();
+            ResonateHandle<Object> got = r.get(id);
             boolean done = got.done();
             assert done;
             System.out.printf("fib(%d) = %d  [mode=%s]%n", n, out, mode);
         } catch (RuntimeException e) {
             System.out.println("oops " + e);
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 

@@ -179,7 +179,7 @@ public final class Saga {
             assert "HT-alice-JFK".equals(trip.hotel());
             assert "CH-alice-850".equals(trip.charge());
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 

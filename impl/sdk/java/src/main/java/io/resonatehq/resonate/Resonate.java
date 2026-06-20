@@ -108,8 +108,12 @@ public final class Resonate {
         }
 
         /** Delete this schedule. */
-        public CompletableFuture<Void> delete() {
-            return schedules.delete(name);
+        public void delete() {
+            try {
+                schedules.delete(name).join();
+            } catch (CompletionException exc) {
+                throw sneaky(unwrap(exc));
+            }
         }
     }
 
@@ -644,32 +648,38 @@ public final class Resonate {
      * promise does not exist. The result is untyped ({@code Object}, the analogue of Python's {@code
      * Any}) -- there is no local function to read a return annotation from.
      */
-    public CompletableFuture<ResonateHandle<Object>> get(String id) {
+    public ResonateHandle<Object> get(String id) {
         String pid = prefixId(id);
         Sub s = subscribe(pid);
         Subscription sub = s.sub();
 
         if (!s.isNew()) {
-            return CompletableFuture.completedFuture(handleFor(pid, sub));
+            return handleFor(pid, sub);
         }
 
-        return sender.promiseRegisterListener(pid, network.unicast()).handle((record, exc) -> {
-            if (exc != null) {
-                Throwable cause = unwrap(exc);
-                if (cause instanceof ResonateError) {
-                    synchronized (runtime.subs) {
-                        if (runtime.subs.get(pid) == sub && !sub.settled()) {
-                            runtime.subs.remove(pid);
+        try {
+            return sender.promiseRegisterListener(pid, network.unicast())
+                    .handle((record, exc) -> {
+                        if (exc != null) {
+                            Throwable cause = unwrap(exc);
+                            if (cause instanceof ResonateError) {
+                                synchronized (runtime.subs) {
+                                    if (runtime.subs.get(pid) == sub && !sub.settled()) {
+                                        runtime.subs.remove(pid);
+                                    }
+                                }
+                            }
+                            throw sneaky(cause);
                         }
-                    }
-                }
-                throw sneaky(cause);
-            }
-            if (!"pending".equals(record.state())) {
-                settleAndCleanup(pid, sub, record.state(), record.value());
-            }
-            return handleFor(pid, sub);
-        });
+                        if (!"pending".equals(record.state())) {
+                            settleAndCleanup(pid, sub, record.state(), record.value());
+                        }
+                        return handleFor(pid, sub);
+                    })
+                    .join();
+        } catch (CompletionException exc) {
+            throw sneaky(unwrap(exc));
+        }
     }
 
     private ResonateHandle<Object> handleFor(String id, Subscription sub) {
@@ -677,7 +687,7 @@ public final class Resonate {
     }
 
     /** Create a schedule for periodic function execution. */
-    public CompletableFuture<ResonateSchedule> schedule(
+    public ResonateSchedule schedule(
             String id,
             String cron,
             String funcName,
@@ -687,9 +697,14 @@ public final class Resonate {
             int version) {
         Duration pt = promiseTimeout != null ? promiseTimeout : DEFAULT_TOP_LEVEL_TIMEOUT;
         Value param = new Value(null, new TaskData(args, kwargs, funcName, version));
-        return schedules
-                .create(id, cron, idPrefix + "{{.id}}.{{.timestamp}}", timeoutMs(pt), param)
-                .thenApply(record -> new ResonateSchedule(id, schedules));
+        try {
+            return schedules
+                    .create(id, cron, idPrefix + "{{.id}}.{{.timestamp}}", timeoutMs(pt), param)
+                    .thenApply(record -> new ResonateSchedule(id, schedules))
+                    .join();
+        } catch (CompletionException exc) {
+            throw sneaky(unwrap(exc));
+        }
     }
 
     /**
@@ -699,7 +714,7 @@ public final class Resonate {
      * listening and the spawn chain terminates), then every remaining background job is joined, then
      * the refresh loop is cancelled and the heartbeat shut down.
      */
-    public CompletableFuture<Void> stop() {
+    public void stop() {
         runtime.stopping = true;
 
         Future<?> handle = runtime.refreshHandle;
@@ -747,7 +762,6 @@ public final class Resonate {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        return CompletableFuture.completedFuture(null);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

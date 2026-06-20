@@ -74,7 +74,7 @@ public final class StructuredConcurrency {
             // durable promise and confirm it resolved with bar's result.
             for (int seq = 1; seq <= 2; seq++) {
                 String childId = fooId + "." + seq;
-                ResonateHandle<Object> childHandle = r.get(childId).join();
+                ResonateHandle<Object> childHandle = r.get(childId);
                 int childOut = ((Number) childHandle.result()).intValue();
                 assert childOut == seq * 10 : "child " + childId + " resolved " + childOut + ", expected " + (seq * 10);
                 System.out.println("[child] " + childId + " resolved " + childOut + " -- the runtime awaited it");
@@ -82,7 +82,7 @@ public final class StructuredConcurrency {
 
             System.out.println("[ok] both never-awaited children completed: structured concurrency holds");
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

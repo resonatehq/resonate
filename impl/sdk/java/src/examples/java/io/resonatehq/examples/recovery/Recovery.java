@@ -121,7 +121,7 @@ public final class Recovery {
             System.out.println(
                     "[checkout] recovered untyped result equals the original: " + untypedAgain.equals(untyped));
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

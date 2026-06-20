@@ -57,8 +57,8 @@ public final class Rpc {
             assert "hello from backend, world!".equals(result);
             System.out.println("frontend: got " + result);
         } finally {
-            frontend.stop().join();
-            backend.stop().join();
+            frontend.stop();
+            backend.stop();
         }
     }
 }

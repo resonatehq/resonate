@@ -641,7 +641,7 @@ class PlatformErrorsTest {
             ResonateError thrown = assertThrows(ResonateError.class, () -> await(handle.id()));
             assertInstanceOf(ServerError.class, thrown);
         } finally {
-            res.stop().join();
+            res.stop();
         }
     }
 
@@ -654,7 +654,7 @@ class PlatformErrorsTest {
                     "pe-ser", (io.resonatehq.resonate.Fn.F1<Object, Integer>) PlatformErrorsTest::myfn, new Object());
             assertThrows(SerializationError.class, () -> await(handle.id()));
         } finally {
-            res.stop().join();
+            res.stop();
         }
     }
 

@@ -117,7 +117,7 @@ public final class Detached {
             System.out.println("[audit] OK: " + location);
             assert location.startsWith("audit-");
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

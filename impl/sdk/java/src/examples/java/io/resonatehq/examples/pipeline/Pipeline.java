@@ -92,7 +92,7 @@ public final class Pipeline {
             assert "ok".equals(out);
             System.out.println("[run_pipeline] OK: sent=" + out);
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

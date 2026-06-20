@@ -154,7 +154,7 @@ public final class HumanInTheLoop {
             }
             System.out.println("[fulfill_order] OK: " + out);
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 

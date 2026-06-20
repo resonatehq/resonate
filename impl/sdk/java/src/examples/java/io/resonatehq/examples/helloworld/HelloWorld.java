@@ -41,7 +41,7 @@ public final class HelloWorld {
             assert ok.equals("hello, world!");
             System.out.println(ok);
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

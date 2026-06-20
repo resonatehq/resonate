@@ -64,7 +64,7 @@ class ResonateTest {
     @AfterEach
     void cleanup() {
         for (Resonate r : created) {
-            r.stop().join();
+            r.stop();
         }
         created.clear();
     }
@@ -780,7 +780,7 @@ class ResonateTest {
     @Test
     void getNonexistentRaises404() {
         Resonate r = local();
-        ServerError exc = assertThrows(ServerError.class, () -> await(r.get("nonexistent")));
+        ServerError exc = assertThrows(ServerError.class, () -> r.get("nonexistent"));
         assertEquals(404, exc.code());
     }
 
@@ -789,7 +789,7 @@ class ResonateTest {
         Resonate r = local();
         r.register(ResonateTest::add);
         r.run("g1", ResonateTest::add, 1, 2).result();
-        ResonateHandle<Object> handle = await(r.get("g1"));
+        ResonateHandle<Object> handle = r.get("g1");
         assertEquals("g1", await(handle.id()));
         assertEquals(3, handle.result());
     }
@@ -799,7 +799,7 @@ class ResonateTest {
         Resonate r = track(Resonate.builder().retryPolicy(new Never()).prefix("ns"));
         r.rpc("p1", "remote");
         waitForPromise(r, "ns:p1");
-        ResonateHandle<Object> handle = await(r.get("p1"));
+        ResonateHandle<Object> handle = r.get("p1");
         assertEquals("ns:p1", await(handle.id()));
     }
 
@@ -808,7 +808,7 @@ class ResonateTest {
         Resonate r = local();
         r.rpc("g-pending", "remote");
         waitForPromise(r, "g-pending");
-        ResonateHandle<Object> handle = await(r.get("g-pending"));
+        ResonateHandle<Object> handle = r.get("g-pending");
         assertFalse(handle.done());
     }
 
@@ -821,7 +821,7 @@ class ResonateTest {
         } catch (ApplicationError ignored) {
             // expected
         }
-        ResonateHandle<Object> handle = await(r.get("g-boom"));
+        ResonateHandle<Object> handle = r.get("g-boom");
         ApplicationError exc = assertThrows(ApplicationError.class, () -> handle.result());
         assertTrue(exc.getMessage().contains("deliberate failure"));
     }
@@ -831,7 +831,7 @@ class ResonateTest {
         Resonate r = local();
         r.register(ResonateTest::makePoint);
         r.run("g-pt", ResonateTest::makePoint, 1, 2).result();
-        ResonateHandle<Object> handle = await(r.get("g-pt"));
+        ResonateHandle<Object> handle = r.get("g-pt");
         assertEquals(Map.of("x", 1, "y", 2), handle.result());
     }
 
@@ -840,8 +840,8 @@ class ResonateTest {
         Resonate r = local();
         r.register(ResonateTest::add);
         r.run("g-share", ResonateTest::add, 1, 2).result();
-        ResonateHandle<Object> h1 = await(r.get("g-share"));
-        ResonateHandle<Object> h2 = await(r.get("g-share"));
+        ResonateHandle<Object> h1 = r.get("g-share");
+        ResonateHandle<Object> h2 = r.get("g-share");
         assertEquals(3, h1.result());
         assertEquals(3, h2.result());
     }
@@ -855,7 +855,7 @@ class ResonateTest {
         Resonate r = local();
         r.register(ResonateTest::add);
         var h1 = r.run("multi", ResonateTest::add, 2, 3);
-        ResonateHandle<Object> h2 = await(r.get("multi"));
+        ResonateHandle<Object> h2 = r.get("multi");
         assertEquals(5, h1.result());
         assertEquals(5, h2.result());
     }
@@ -873,7 +873,7 @@ class ResonateTest {
         ResonateHandle<Object> h2 = r.rpc("id2", "remote");
         assertEquals("p:id2", await(h2.id()));
         waitForPromise(r, "p:id2");
-        ResonateHandle<Object> h3 = await(r.get("id2"));
+        ResonateHandle<Object> h3 = r.get("id2");
         assertEquals("p:id2", await(h3.id()));
     }
 
@@ -884,10 +884,9 @@ class ResonateTest {
     @Test
     void scheduleCreatesAndDeletes() {
         Resonate r = local();
-        ResonateSchedule schedule =
-                await(r.schedule("my-schedule", "*/5 * * * *", "my-func", List.of(), Map.of(), null, 1));
+        ResonateSchedule schedule = r.schedule("my-schedule", "*/5 * * * *", "my-func", List.of(), Map.of(), null, 1);
         assertEquals("my-schedule", schedule.name());
-        await(schedule.delete()); // does not raise
+        schedule.delete(); // does not raise
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -897,8 +896,8 @@ class ResonateTest {
     @Test
     void stopIsCleanAndIdempotent() {
         Resonate r = new Resonate();
-        r.stop().join();
-        r.stop().join(); // second stop is a no-op
+        r.stop();
+        r.stop(); // second stop is a no-op
     }
 
     @Test
@@ -906,7 +905,7 @@ class ResonateTest {
         Resonate r = new Resonate();
         Future<?> handle = r.runtime.refreshHandle;
         assertTrue(handle != null && !handle.isDone());
-        r.stop().join();
+        r.stop();
         assertEquals(null, r.runtime.refreshHandle);
         assertTrue(handle.isCancelled());
     }

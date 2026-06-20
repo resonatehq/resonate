@@ -74,7 +74,7 @@ public final class Versioning {
             System.out.println("rpc  charge v1 (100) = " + rpcV1); // 100.0 -- default version 1
             System.out.println("rpc  charge v2 (100) = " + rpcV2); // 103.0 -- selected via options
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 }

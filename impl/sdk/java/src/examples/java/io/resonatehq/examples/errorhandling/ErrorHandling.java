@@ -97,9 +97,9 @@ public final class ErrorHandling {
         try {
             String id = "error-handling-" + System.nanoTime();
             r.run(id, ErrorHandling::foo, username, age, mode).result();
-            r.get(id).join().done();
+            r.get(id).done();
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 

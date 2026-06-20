@@ -90,7 +90,7 @@ public final class Polling {
                 assert result.equals("encoded-" + e.getKey());
             }
         } finally {
-            r.stop().join();
+            r.stop();
         }
     }
 
