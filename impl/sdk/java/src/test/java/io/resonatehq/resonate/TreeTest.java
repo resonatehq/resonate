@@ -697,42 +697,40 @@ class TreeTest {
 
         for (int w = 0; w < writers; w++) {
             final int id = w;
-            new Thread(() -> {
-                        try {
-                            start.await();
-                            for (int i = 0; i < perWriter; i++) {
-                                String child = "root." + id + "." + i;
-                                t.addChild("root", child, Tree.EXT);
-                                t.settle(child); // settled ext leaf keeps the tree well-formed (frontier empty)
-                            }
-                        } catch (Throwable e) {
-                            failures.add(e);
-                        } finally {
-                            done.countDown();
-                        }
-                    })
-                    .start();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    for (int i = 0; i < perWriter; i++) {
+                        String child = "root." + id + "." + i;
+                        t.addChild("root", child, Tree.EXT);
+                        t.settle(child); // settled ext leaf keeps the tree well-formed (frontier empty)
+                    }
+                } catch (Throwable e) {
+                    failures.add(e);
+                } finally {
+                    done.countDown();
+                }
+            });
         }
 
         // Reader races the writers: whole-tree walks must never observe a torn map.
-        new Thread(() -> {
-                    try {
-                        start.await();
-                        for (int i = 0; i < 2000; i++) {
-                            // These never throw on a *valid* tree, even mid-add (a pending ext leaf is a
-                            // legal transient). Corruption (torn map) surfaces here as NPE/CME/AssertionError.
-                            t.frontier();
-                            t.ids();
-                            t.size();
-                            t.useful();
-                        }
-                    } catch (Throwable e) {
-                        failures.add(e);
-                    } finally {
-                        done.countDown();
-                    }
-                })
-                .start();
+        Thread.ofVirtual().start(() -> {
+            try {
+                start.await();
+                for (int i = 0; i < 2000; i++) {
+                    // These never throw on a *valid* tree, even mid-add (a pending ext leaf is a
+                    // legal transient). Corruption (torn map) surfaces here as NPE/CME/AssertionError.
+                    t.frontier();
+                    t.ids();
+                    t.size();
+                    t.useful();
+                }
+            } catch (Throwable e) {
+                failures.add(e);
+            } finally {
+                done.countDown();
+            }
+        });
 
         start.countDown();
         done.await();

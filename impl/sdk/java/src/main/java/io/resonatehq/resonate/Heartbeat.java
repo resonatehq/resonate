@@ -8,9 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Keeps task leases alive, mirroring {@code resonate.heartbeat} from the Python SDK.
@@ -62,9 +59,10 @@ public final class Heartbeat {
      * protocol envelope with corrId, version header, etc.
      *
      * <p>Python runs the loop as a single asyncio task and relies on its single-threaded model to
-     * avoid a lock. Java schedules the loop on a {@link ScheduledExecutorService}, which runs on its
-     * own thread, so {@code activeTasks} is a {@link ConcurrentHashMap} and the loop lifecycle is
-     * guarded by {@code this}.
+     * avoid a lock. Java runs the loop on a single dedicated daemon platform thread, so
+     * {@code activeTasks} is a {@link ConcurrentHashMap} and the loop lifecycle is guarded by
+     * {@code this}. (A virtual thread would compete for the shared carrier pool, and the
+     * synchronized lifecycle would pin carriers on JDK 21 -- starving its own join on stop.)
      */
     public static final class Async implements Hb {
 
@@ -75,7 +73,7 @@ public final class Heartbeat {
         private final Sender sender;
         private final Map<String, Integer> activeTasks = new ConcurrentHashMap<>();
 
-        private ScheduledExecutorService executor;
+        private Thread loopThread;
 
         public Async(String pid, long intervalMs, Sender sender) {
             this.pid = pid;
@@ -110,31 +108,37 @@ public final class Heartbeat {
 
         /** Spawn the heartbeat loop if not already running. Sends first tick immediately, then every interval. */
         private void ensureLoopRunning() {
-            if (executor != null) {
+            if (loopThread != null) {
                 return;
             }
-            executor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "resonate-heartbeat");
-                t.setDaemon(true);
-                return t;
+            loopThread = Thread.ofPlatform().name("resonate-heartbeat").daemon().start(() -> {
+                while (!Thread.currentThread().isInterrupted()) {
+                    tick();
+                    try {
+                        Thread.sleep(intervalMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
             });
-            executor.scheduleAtFixedRate(this::tick, 0, intervalMs, TimeUnit.MILLISECONDS);
         }
 
         private void cancelLoop() {
-            if (executor != null) {
-                executor.shutdownNow();
+            if (loopThread != null) {
+                loopThread.interrupt();
                 // Wait for an in-flight tick to finish before returning so that, once stop/shutdown
                 // returns, no further heartbeat can be sent. tick() never acquires this monitor, so
                 // awaiting here cannot deadlock.
                 try {
-                    if (!executor.awaitTermination(intervalMs * 2 + 1000, TimeUnit.MILLISECONDS)) {
+                    loopThread.join(intervalMs * 2 + 1000);
+                    if (loopThread.isAlive()) {
                         LOGGER.log(Level.WARNING, "heartbeat loop did not terminate in time");
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                executor = null;
+                loopThread = null;
             }
         }
 

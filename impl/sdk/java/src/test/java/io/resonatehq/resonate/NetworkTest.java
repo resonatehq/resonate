@@ -490,7 +490,7 @@ class NetworkTest {
 
         int threads = 16;
         int perThread = 50;
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
         java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
         java.util.List<CompletableFuture<Void>> futures = new java.util.ArrayList<>();
         java.util.concurrent.atomic.AtomicReference<Throwable> failure =
@@ -558,13 +558,12 @@ class NetworkTest {
     void closeUnblocksInflightGet() throws Exception {
         // A server that accepts the connection but never replies, modelling the SSE long-poll.
         try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
-            new Thread(() -> {
-                        try {
-                            server.accept(); // hold the connection open, send nothing
-                        } catch (Exception ignored) {
-                        }
-                    })
-                    .start();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    server.accept(); // hold the connection open, send nothing
+                } catch (Exception ignored) {
+                }
+            });
 
             RealHttpSession session = new RealHttpSession(8);
             String url = "http://localhost:" + server.getLocalPort() + "/poll";

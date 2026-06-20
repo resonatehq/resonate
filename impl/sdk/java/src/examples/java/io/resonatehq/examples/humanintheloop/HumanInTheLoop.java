@@ -139,8 +139,7 @@ public final class HumanInTheLoop {
 
             boolean approve = decisionArg.equals("approve");
             Decision decision = new Decision(approve, approve ? "looks good" : "policy violation");
-            Thread reviewer = new Thread(() -> simulateReviewer(r, inbox, decision));
-            reviewer.start();
+            Thread reviewer = Thread.ofVirtual().start(() -> simulateReviewer(r, inbox, decision));
 
             String out = handle.result();
             try {

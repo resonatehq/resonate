@@ -49,6 +49,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The top-level Resonate SDK entry point, mirroring {@code resonate.resonate.Resonate} from the
@@ -289,11 +290,9 @@ public final class Resonate {
         this.schedules = new Schedules(sender, codec);
         this.runtime = new Runtime(b.maxConcurrentTasks != null ? b.maxConcurrentTasks : DEFAULT_MAX_CONCURRENT_TASKS);
         this.opts = new Opts();
-        this.executor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "resonate-bg");
-            t.setDaemon(true);
-            return t;
-        });
+        // Virtual threads: JVM-managed, always daemon, unmount while blocked so no carrier starves.
+        this.executor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("resonate-bg-", 0).factory());
         this.core =
                 new Core(sender, codec, registry, this::resolveTarget, hb, netPid, safeTtl, deps, resolvedRetryPolicy);
 
@@ -740,7 +739,14 @@ public final class Resonate {
         }
 
         heartbeat.shutdown();
+        // Confirm the background virtual threads are actually gone before returning, rather than
+        // firing shutdownNow() and leaving them to drain unobserved.
         executor.shutdownNow();
+        try {
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         return CompletableFuture.completedFuture(null);
     }
 

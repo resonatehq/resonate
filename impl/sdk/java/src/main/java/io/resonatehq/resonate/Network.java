@@ -29,8 +29,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
@@ -1264,12 +1264,11 @@ public interface Network {
         private final String anycast;
         private final ReentrantLock lock = new ReentrantLock();
         private final List<Consumer<String>> subscribers = new ArrayList<>();
-        private volatile ScheduledExecutorService tickExecutor;
-        private final ScheduledExecutorService dispatchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "resonate-local-dispatch");
-            t.setDaemon(true);
-            return t;
-        });
+        private volatile Thread tickThread;
+        // Single virtual worker so dispatch stays FIFO (ordering matters) while still being
+        // JVM-managed and always daemon.
+        private final ExecutorService dispatchExecutor = Executors.newSingleThreadExecutor(
+                Thread.ofVirtual().name("resonate-local-dispatch").factory());
 
         public LocalNetwork() {
             this(null, null);
@@ -1304,13 +1303,23 @@ public interface Network {
 
         @Override
         public CompletableFuture<Void> start() {
-            tickExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "resonate-local-tick");
-                t.setDaemon(true);
-                return t;
-            });
-            // Runs once immediately, then once per second thereafter.
-            tickExecutor.scheduleAtFixedRate(this::tickOnce, 0, 1, TimeUnit.SECONDS);
+            // Runs once immediately, then roughly once per second thereafter (fixed delay). Dedicated
+            // daemon platform thread: a single long-lived timer, so a virtual thread would only add
+            // carrier-pool contention with no benefit.
+            tickThread = Thread.ofPlatform()
+                    .name("resonate-local-tick")
+                    .daemon()
+                    .start(() -> {
+                        while (!Thread.currentThread().isInterrupted()) {
+                            tickOnce();
+                            try {
+                                Thread.sleep(1000);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                return;
+                            }
+                        }
+                    });
             return CompletableFuture.completedFuture(null);
         }
 
@@ -1333,15 +1342,32 @@ public interface Network {
 
         @Override
         public CompletableFuture<Void> stop() {
-            if (tickExecutor != null) {
-                tickExecutor.shutdownNow();
-                tickExecutor = null;
+            Thread tick = tickThread;
+            tickThread = null;
+            if (tick != null) {
+                tick.interrupt();
+                try {
+                    tick.join(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
             lock.lock();
             try {
                 subscribers.clear();
             } finally {
                 lock.unlock();
+            }
+            // Drain the dispatch worker so its virtual thread is gone once stop() returns (the tick
+            // thread is already joined above, so no new work arrives). Not restarted after stop.
+            dispatchExecutor.shutdown();
+            try {
+                if (!dispatchExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                    dispatchExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                dispatchExecutor.shutdownNow();
             }
             return CompletableFuture.completedFuture(null);
         }
@@ -1559,15 +1585,13 @@ public interface Network {
         static final double MAX_BACKOFF_SECS = 60;
         public static final int DEFAULT_CONN_LIMIT = 256;
 
-        // Per-instance daemon pool for the blocking send/backoff loop so a request parked in its 60s
-        // backoff never starves the common ForkJoinPool. Owned by this network so stop() can drain it:
-        // the send future's .thenApply continuations (e.g. building Send.Created) run on these threads,
-        // and if one ran during JVM shutdown it would NoClassDefFoundError on a not-yet-loaded class.
-        private final ExecutorService sendExecutor = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "resonate-http-send");
-            t.setDaemon(true);
-            return t;
-        });
+        // Per-instance virtual-thread pool for the blocking send/backoff loop: a request parked in its
+        // 60s backoff unmounts its carrier instead of starving a shared pool. Owned by this network so
+        // stop() can drain it: the send future's .thenApply continuations (e.g. building Send.Created)
+        // run on these threads, and if one ran during JVM shutdown it would NoClassDefFoundError on a
+        // not-yet-loaded class.
+        private final ExecutorService sendExecutor = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("resonate-http-send-", 0).factory());
 
         private final String pid;
         private final String group;
@@ -1584,8 +1608,12 @@ public interface Network {
         private volatile Thread sseThread;
         volatile boolean running;
 
-        private final Object stopMonitor = new Object();
-        private volatile boolean stopSignaled;
+        // ReentrantLock + Condition, not synchronized/wait(): a virtual send or SSE thread parked here
+        // during backoff must unmount its carrier. Object.wait() inside a monitor pins the carrier on
+        // JDK 21, which would stall the whole carrier pool for up to a 60s backoff.
+        private final ReentrantLock stopLock = new ReentrantLock();
+        private final Condition stopCond = stopLock.newCondition();
+        private boolean stopSignaled;
 
         public HttpNetwork(String url) {
             this(url, null, null, null, null);
@@ -1632,19 +1660,25 @@ public interface Network {
         @Override
         public CompletableFuture<Void> start() {
             running = true;
-            stopSignaled = false;
-            sseThread = new Thread(this::sseLoop, "resonate-http-sse");
-            sseThread.setDaemon(true);
-            sseThread.start();
+            stopLock.lock();
+            try {
+                stopSignaled = false;
+            } finally {
+                stopLock.unlock();
+            }
+            sseThread = Thread.ofVirtual().name("resonate-http-sse").start(this::sseLoop);
             return CompletableFuture.completedFuture(null);
         }
 
         @Override
         public CompletableFuture<Void> stop() {
             running = false;
-            synchronized (stopMonitor) {
+            stopLock.lock();
+            try {
                 stopSignaled = true;
-                stopMonitor.notifyAll();
+                stopCond.signalAll();
+            } finally {
+                stopLock.unlock();
             }
             // Close the session first so the SSE long-poll and any in-flight POST are cancelled
             // deterministically (client.shutdownNow), instead of relying on Thread.interrupt
@@ -1759,20 +1793,19 @@ public interface Network {
         }
 
         protected void sleepOrStop(double secs) {
-            long deadline = System.currentTimeMillis() + (long) (secs * 1000);
-            synchronized (stopMonitor) {
-                while (!stopSignaled) {
-                    long rem = deadline - System.currentTimeMillis();
-                    if (rem <= 0) {
-                        return;
-                    }
+            long remNanos = (long) (secs * 1_000_000_000L);
+            stopLock.lock();
+            try {
+                while (!stopSignaled && remNanos > 0) {
                     try {
-                        stopMonitor.wait(rem);
+                        remNanos = stopCond.awaitNanos(remNanos);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         return;
                     }
                 }
+            } finally {
+                stopLock.unlock();
             }
         }
 

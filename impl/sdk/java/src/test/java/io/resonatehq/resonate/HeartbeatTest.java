@@ -158,7 +158,7 @@ class HeartbeatTest {
         Async hb = heartbeat();
         int threads = 8;
         int iters = 500;
-        var pool = Executors.newFixedThreadPool(threads);
+        var pool = Executors.newVirtualThreadPerTaskExecutor();
         var barrier = new java.util.concurrent.CountDownLatch(1);
         List<CompletableFuture<Void>> workers = new ArrayList<>();
         for (int t = 0; t < threads; t++) {
