@@ -112,7 +112,7 @@ public final class Detached {
             // The order has committed. Attach to the audit's durable promise by id and await it,
             // separately from the order. In a real system this could be a wholly different process.
             System.out.println("[audit] attaching to detached workflow id=" + result.auditId());
-            ResonateHandle<Object> auditHandle = r.get(result.auditId()).join();
+            ResonateHandle<Object> auditHandle = r.get(result.auditId());
             String location = (String) auditHandle.result();
             System.out.println("[audit] OK: " + location);
             assert location.startsWith("audit-");
