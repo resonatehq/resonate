@@ -942,7 +942,7 @@ class ResonateTest {
         assertTrue(live.get() <= 2);
 
         gate.countDown();
-        CompletableFuture.allOf(tasks.toArray(new CompletableFuture[0])).join();
+        CompletableFuture.allOf(tasks.toArray(new CompletableFuture<?>[0])).join();
         assertEquals(0, live.get());
         assertTrue(peak.get() <= 2);
     }

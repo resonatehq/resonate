@@ -1,5 +1,7 @@
 package io.resonatehq.resonate;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -49,6 +51,7 @@ public final class Errors {
      * {@code instanceof}), not constructed directly. Use the relevant subclass instead.
      */
     public static class ResonateError extends RuntimeException {
+        private static final long serialVersionUID = 1L;
 
         protected ResonateError(String message) {
             super(message);
@@ -63,6 +66,7 @@ public final class Errors {
 
     /** A function name (and version) is not registered. */
     public static final class FunctionNotFoundError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final String name;
         private final int version;
 
@@ -88,6 +92,7 @@ public final class Errors {
 
     /** A function name (and version) is already registered. */
     public static final class AlreadyRegisteredError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final String name;
         private final int version;
 
@@ -115,6 +120,7 @@ public final class Errors {
 
     /** The server returned a structured error code + message. */
     public static final class ServerError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final int code;
         private final String message;
 
@@ -142,6 +148,7 @@ public final class Errors {
      * <p>Not a server failure — the network was never touched.
      */
     public static final class StoppedError extends ResonateError {
+        private static final long serialVersionUID = 1L;
 
         public StoppedError() {
             super("execution stopped");
@@ -152,6 +159,7 @@ public final class Errors {
 
     /** Decoding the response side of the wire failed. */
     public static final class DecodingError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final String message;
 
         public DecodingError(String message) {
@@ -169,6 +177,7 @@ public final class Errors {
 
     /** Wraps an arbitrary serialization failure. */
     public static final class SerializationError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final Throwable error;
 
         public SerializationError(Throwable error) {
@@ -184,6 +193,7 @@ public final class Errors {
 
     /** Wraps an arbitrary HTTP-layer failure. */
     public static final class HttpError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final Throwable error;
 
         public HttpError(Throwable error) {
@@ -199,6 +209,7 @@ public final class Errors {
 
     /** Wraps a base64 decoding failure. */
     public static final class Base64DecodeError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final Throwable error;
 
         public Base64DecodeError(Throwable error) {
@@ -221,6 +232,7 @@ public final class Errors {
      * match by message. The message is passed through unchanged with no prefix.
      */
     public static final class ApplicationError extends ResonateError {
+        private static final long serialVersionUID = 1L;
         private final String message;
 
         public ApplicationError(String message) {
@@ -236,6 +248,7 @@ public final class Errors {
 
     /** Operation timed out. */
     public static final class ResonateTimeoutError extends ResonateError {
+        private static final long serialVersionUID = 1L;
 
         public ResonateTimeoutError() {
             super("timeout");
@@ -254,6 +267,7 @@ public final class Errors {
      * {@code try/catch (Exception)} in user code does not swallow it.
      */
     public static final class Suspended extends java.lang.Error {
+        private static final long serialVersionUID = 1L;
 
         public Suspended() {
             super("execution suspended");
@@ -274,7 +288,11 @@ public final class Errors {
      * surfacing a single {@link ResonateError}.
      */
     public static final class PlatformError extends java.lang.Error {
-        private final List<ResonateError> causes;
+        private static final long serialVersionUID = 1L;
+
+        // ArrayList (a Serializable type) rather than the List interface, so this serializable
+        // Error has no non-serializable instance field. Exposed as an unmodifiable view below.
+        private final ArrayList<ResonateError> causes;
 
         public PlatformError(List<ResonateError> causes) {
             // Mirrors Python: a ValueError (here, IllegalArgumentException) rather than an assert,
@@ -285,7 +303,7 @@ public final class Errors {
                                     .map(Throwable::getMessage)
                                     .collect(Collectors.joining("; ")),
                     causes.get(0));
-            this.causes = List.copyOf(causes);
+            this.causes = new ArrayList<>(causes);
         }
 
         private static List<ResonateError> requireNonEmpty(List<ResonateError> causes) {
@@ -297,7 +315,7 @@ public final class Errors {
 
         /** All causes, in order. The single-op case has exactly one. */
         public List<ResonateError> causes() {
-            return causes;
+            return Collections.unmodifiableList(causes);
         }
 
         /** The first (primary) cause — what the outer boundary unwraps to. */

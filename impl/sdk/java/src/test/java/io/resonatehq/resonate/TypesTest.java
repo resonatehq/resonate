@@ -58,6 +58,8 @@ class TypesTest {
 
     /** Unchecked carrier that still preserves the original {@link JsonMappingException} type. */
     private static final class UncheckedJsonMappingException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         UncheckedJsonMappingException(JsonMappingException cause) {
             super(cause);
         }

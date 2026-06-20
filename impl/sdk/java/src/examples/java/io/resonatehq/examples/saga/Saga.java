@@ -49,18 +49,24 @@ public final class Saga {
      * ApplicationError} otherwise.
      */
     public static class BookingError extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         public BookingError(String message) {
             super(message);
         }
     }
 
     public static final class HotelReservationError extends BookingError {
+        private static final long serialVersionUID = 1L;
+
         public HotelReservationError(String message) {
             super(message);
         }
     }
 
     public static final class ChargeCardError extends BookingError {
+        private static final long serialVersionUID = 1L;
+
         public ChargeCardError(String message) {
             super(message);
         }

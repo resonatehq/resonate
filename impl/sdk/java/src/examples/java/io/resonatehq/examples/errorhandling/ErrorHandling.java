@@ -29,6 +29,8 @@ public final class ErrorHandling {
 
     /** Raised when a username is already registered. A {@link RuntimeException} so it round-trips by type. */
     public static final class UsernameTakenError extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         public UsernameTakenError(String message) {
             super(message);
         }

@@ -55,7 +55,7 @@ class ChainTest {
                             })));
         }
 
-        CompletableFuture.allOf(results.toArray(new CompletableFuture[0])).join();
+        CompletableFuture.allOf(results.toArray(new CompletableFuture<?>[0])).join();
 
         assertEquals(List.of(0, 1, 2, 3, 4), order);
         List<Integer> resolved =

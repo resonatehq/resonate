@@ -741,7 +741,7 @@ public final class Resonate {
                 break;
             }
             try {
-                CompletableFuture.allOf(snapshot.toArray(new CompletableFuture[0]))
+                CompletableFuture.allOf(snapshot.toArray(new CompletableFuture<?>[0]))
                         .join();
             } catch (CompletionException | CancellationException ignored) {
                 // join surfaces the first failure; we only care that the jobs have settled.

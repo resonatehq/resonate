@@ -181,7 +181,7 @@ class HeartbeatTest {
                     pool));
         }
         barrier.countDown();
-        CompletableFuture.allOf(workers.toArray(new CompletableFuture[0])).join();
+        CompletableFuture.allOf(workers.toArray(new CompletableFuture<?>[0])).join();
         pool.shutdown();
         assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
 

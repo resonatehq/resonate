@@ -110,6 +110,8 @@ class ContextTest {
     // =========================================================================
 
     static final class BookingError extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         BookingError(String message) {
             super(message);
         }
@@ -924,7 +926,7 @@ class ContextTest {
     @Test
     void detachedIdIsPrefixRootedHash() {
         Context ctx = root();
-        String childId = (String) ctx.detached("remote_fn").await();
+        String childId = ctx.detached("remote_fn").await();
         assertEquals(detachedId("root", "root.1"), childId);
         assertNotEquals("root.1", childId);
         String suffix = childId.substring(childId.indexOf('.') + 1);
@@ -936,8 +938,8 @@ class ContextTest {
     @Test
     void detachedConsumesSeqAndYieldsDistinctIds() {
         Context ctx = root();
-        String id1 = (String) ctx.detached("fn").await();
-        String id2 = (String) ctx.detached("fn").await();
+        String id1 = ctx.detached("fn").await();
+        String id2 = ctx.detached("fn").await();
         assertEquals(detachedId("root", "root.1"), id1);
         assertEquals(detachedId("root", "root.2"), id2);
         assertNotEquals(id1, id2);

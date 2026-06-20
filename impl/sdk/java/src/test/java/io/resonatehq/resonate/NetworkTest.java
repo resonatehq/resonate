@@ -529,7 +529,7 @@ class NetworkTest {
                     pool));
         }
         start.countDown();
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get(30, TimeUnit.SECONDS);
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0])).get(30, TimeUnit.SECONDS);
         pool.shutdownNow();
 
         assertNull(failure.get(), () -> "concurrent send/recv threw: " + failure.get());

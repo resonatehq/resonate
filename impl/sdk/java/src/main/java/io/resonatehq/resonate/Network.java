@@ -1464,6 +1464,8 @@ public interface Network {
 
     /** A retriable connection failure — the analogue of {@code aiohttp.ClientError}. */
     final class ConnectionException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         ConnectionException(Throwable cause) {
             super(cause);
         }
@@ -1471,6 +1473,8 @@ public interface Network {
 
     /** The session was closed mid-flight — the analogue of {@code RuntimeError("Session is closed")}. */
     final class SessionClosedException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
         SessionClosedException(String message) {
             super(message);
         }

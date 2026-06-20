@@ -36,6 +36,12 @@ java {
     toolchain { languageVersion = JavaLanguageVersion.of(21) }
 }
 
+// Surface javac lint warnings (serial, unchecked, deprecation, ...) and fail the build on them so
+// CI catches regressions. The IDE-side equivalent lives in .settings/org.eclipse.jdt.core.prefs.
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf("-Xlint:all", "-Werror"))
+}
+
 tasks.named<Test>("test") {
     useJUnitPlatform()
     // Run the 21-built artifact on a configurable JVM to prove backward
@@ -58,6 +64,10 @@ sourceSets {
 // The examples need the library's own dependencies (Jackson) on their compile/runtime classpaths.
 configurations["examplesImplementation"].extendsFrom(configurations["implementation"])
 configurations["examplesRuntimeOnly"].extendsFrom(configurations["runtimeOnly"])
+
+// Compile (and thus lint) the examples as part of `check`, so API drift or warnings in them fail the
+// build. They stay in their own source set, so they are still excluded from the published jar.
+tasks.named("check") { dependsOn("compileExamplesJava") }
 
 // Run an example, e.g.:
 //   ./gradlew runExample -PmainClass=io.resonatehq.examples.fibonacci.Fibonacci -PexampleArgs="--mode rpc --n 10"
