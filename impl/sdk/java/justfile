@@ -1,7 +1,6 @@
 default:
     just --list
 
-
 build:
     ./gradlew build
 
@@ -15,10 +14,6 @@ format:
 # Check formatting without modifying files
 lint:
     ./gradlew spotlessCheck
-
-# Fail on javac lint warnings (serial, rawtypes, unchecked, ...) — the CI compiler-warning gate
-warnings:
-    ./gradlew compileJava compileTestJava --rerun-tasks
 
 # Run every example against a Resonate server on localhost:8001 (`resonate dev`)
 examples:
