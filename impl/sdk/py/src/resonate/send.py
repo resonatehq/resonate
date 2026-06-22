@@ -49,6 +49,17 @@ class TaskRef(msgspec.Struct, frozen=True, kw_only=True):
     version: int
 
 
+class TaskFenceResult(msgspec.Struct, frozen=True, kw_only=True):
+    """Parsed outcome of a ``task.fence`` call.
+
+    Carries the settled/created promise plus any preloaded sibling promises the
+    server returned.
+    """
+
+    promise: PromiseRecord
+    preload: list[PromiseRecord]
+
+
 class PromiseSearchResult(msgspec.Struct, frozen=True, kw_only=True):
     promises: list[PromiseRecord]
     cursor: str | None
@@ -153,6 +164,34 @@ class Sender:
         if status == 409:
             return "conflict"
         return parse_task_acquire(resp)
+
+    async def task_fence_create(
+        self, id: str, version: int, req: PromiseCreateReq
+    ) -> TaskFenceResult:
+        """Create a promise via ``task.fence``, gated on the task's lease.
+
+        The server applies the create only if the task is still acquired at the
+        given ``version`` (the fencing token); a lapsed lease yields a server
+        error instead of a split-brain mutation.
+        """
+        return await self._task_fence(id, version, "promise.create", req)
+
+    async def task_fence_settle(
+        self, id: str, version: int, req: PromiseSettleReq
+    ) -> TaskFenceResult:
+        """Settle a promise via ``task.fence``, gated on the task's lease."""
+        return await self._task_fence(id, version, "promise.settle", req)
+
+    async def _task_fence(
+        self, id: str, version: int, sub_kind: str, action: Any
+    ) -> TaskFenceResult:
+        data = {
+            "id": id,
+            "version": version,
+            "action": SubEnvelope(kind=sub_kind, head=self._make_head(), data=action),
+        }
+        _, resp = await self._send_envelope("task.fence", data, allow_409=False)
+        return parse_task_fence(resp)
 
     async def task_heartbeat(self, pid: str, tasks: list[TaskRef]) -> None:
         """Extend the lease for one or more tasks."""
@@ -414,6 +453,22 @@ def parse_task_acquire(data: Any) -> TaskAcquireResult:
     promise = _decode_or_raise(promise_val, PromiseRecord, "promise in task.acquire")
 
     return TaskAcquireResult(task=task, promise=promise, preload=parse_preloaded(data))
+
+
+def parse_task_fence(data: Any) -> TaskFenceResult:
+    """Parse a ``task.fence`` response.
+
+    The created/settled promise lives at ``data.action.data.promise``; preloaded
+    siblings (if any) live at ``data.preload``.
+    """
+    action = data.get("action") if isinstance(data, dict) else None
+    inner = action.get("data") if isinstance(action, dict) else None
+    promise_val = inner.get("promise") if isinstance(inner, dict) else None
+    if promise_val is None:
+        msg = "missing promise in fence action response"
+        raise DecodingError(msg)
+    promise = _decode_or_raise(promise_val, PromiseRecord, "promise in fence response")
+    return TaskFenceResult(promise=promise, preload=parse_preloaded(data))
 
 
 def parse_suspend_result(status: int, data: Any) -> SuspendResult:

@@ -258,6 +258,11 @@ class ServerState:
             self.try_auto_timeout(now, _str(pd, "id"))
         elif kind in ("task.acquire", "task.release", "task.fulfill"):
             self.try_auto_timeout(now, _str(req, "id"))
+        elif kind == "task.fence":
+            self.try_auto_timeout(now, _str(req, "id"))
+            self.try_auto_timeout(
+                now, _str(extract_action_data(_get(req, "action")), "id")
+            )
         elif kind == "task.suspend":
             self.try_auto_timeout(now, _str(req, "id"))
             actions = _get(req, "actions")
@@ -283,6 +288,8 @@ class ServerState:
             return self.task_release(now, corr_id, req)
         if kind == "task.fulfill":
             return self.task_fulfill(now, corr_id, req)
+        if kind == "task.fence":
+            return self.task_fence(now, corr_id, req)
         if kind == "task.suspend":
             return self.task_suspend(now, corr_id, req)
         if kind == "task.heartbeat":
@@ -757,6 +764,44 @@ class ServerState:
             "corrId": corr_id,
             "status": 200,
             "promise": promise_record,
+        }
+
+    def task_fence(self, now: int, corr_id: Any, req: Any) -> dict[str, Any]:
+        """Run a promise.create/settle action gated on the task's lease.
+
+        On a missing task returns 404; on a state/version mismatch returns 409
+        without applying the action.
+        """
+        task_id = require_task_id(req)
+        version = _i64(req, "version", 0)
+
+        t = self.tasks.get(task_id)
+        if t is None:
+            return {"kind": "task.fence", "corrId": corr_id, "status": 404}
+        if t.state != "acquired" or t.version != version:
+            return {"kind": "task.fence", "corrId": corr_id, "status": 409}
+
+        action = _get(req, "action")
+        sub_kind = _get(action, "kind")
+        action_data = extract_action_data(action)
+        flat = dict(action_data) if isinstance(action_data, dict) else {}
+
+        if sub_kind == "promise.create":
+            flat["kind"] = "promise.create"
+            inner = self.promise_create(now, corr_id, flat)
+        elif sub_kind == "promise.settle":
+            flat["kind"] = "promise.settle"
+            inner = self.promise_settle(now, corr_id, flat)
+        else:
+            msg = f"unknown fence action kind: {sub_kind}"
+            raise ServerError(400, msg)
+
+        return {
+            "kind": "task.fence",
+            "corrId": corr_id,
+            "status": 200,
+            "action": {"data": {"promise": inner.get("promise")}},
+            "preload": self.preload(task_id),
         }
 
     def task_suspend(self, now: int, corr_id: Any, req: Any) -> dict[str, Any]:

@@ -4,13 +4,16 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 import msgspec
+import pytest
 
+from resonate.error import ServerError
 from resonate.network import LocalNetwork
 from resonate.send import (
     Envelope,
     Head,
     Sender,
     SubEnvelope,
+    TaskFenceResult,
 )
 from resonate.transport import Transport
 from resonate.types import (
@@ -147,6 +150,47 @@ def test_task_fulfill_roundtrip() -> None:
             PromiseSettleReq(id="rt-p3", state="resolved", value=Value(data="result")),
         )
         assert promise.id == "rt-p3"
+
+    asyncio.run(run())
+
+
+def test_task_fence_create_roundtrip() -> None:
+    async def run() -> None:
+        net = LocalNetwork(pid="pid1")
+
+        rdata = await _raw_send(net, _create_task_req("c1", "rt-fence"))
+        task_id = rdata["task"]["id"]
+        version = rdata["task"]["version"]
+
+        sender = _sender(net)
+        child = PromiseCreateReq(
+            id="rt-fence-child", timeout_at=I64_MAX, param=Value(), tags={}
+        )
+        res = await sender.task_fence_create(task_id, version, child)
+        assert isinstance(res, TaskFenceResult)
+        assert res.promise.id == "rt-fence-child"
+
+    asyncio.run(run())
+
+
+def test_task_fence_wrong_version_raises_and_does_not_apply() -> None:
+    """A fence with a stale lease version raises ServerError(409) and is a no-op."""
+
+    async def run() -> None:
+        net = LocalNetwork(pid="pid1")
+
+        rdata = await _raw_send(net, _create_task_req("c1", "rt-fence2"))
+        task_id = rdata["task"]["id"]
+        version = rdata["task"]["version"]
+
+        sender = _sender(net)
+        child = PromiseCreateReq(
+            id="rt-fence2-child", timeout_at=I64_MAX, param=Value(), tags={}
+        )
+        with pytest.raises(ServerError) as excinfo:
+            await sender.task_fence_create(task_id, version + 1, child)
+        assert excinfo.value.code == 409
+        assert "rt-fence2-child" not in net.state.promises
 
     asyncio.run(run())
 

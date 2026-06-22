@@ -182,7 +182,13 @@ class Core(msgspec.Struct, kw_only=True):
                 )
                 current_preload = preload
                 while True:
-                    effects = ResonateEffects(self.sender, self.codec, current_preload)
+                    effects = ResonateEffects(
+                        self.sender,
+                        self.codec,
+                        task_id,
+                        task_version,
+                        current_preload,
+                    )
                     outcome = await self.execute_until_blocked_inner(promise, effects)
 
                     match outcome:

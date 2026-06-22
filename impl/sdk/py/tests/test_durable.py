@@ -30,6 +30,7 @@ from resonate.durable import DurableFunction
 from resonate.effects import ResonateEffects
 from resonate.error import ApplicationError, SerializationError
 from resonate.network import LocalNetwork
+from resonate.network.local import Task
 from resonate.send import Sender
 from resonate.transport import Transport
 from resonate.types import Args
@@ -43,8 +44,17 @@ I64_MAX = 2**63 - 1
 
 
 def _context() -> Context:
-    sender = Sender(Transport(LocalNetwork()), None)
-    effects = ResonateEffects(sender, Codec(NoopEncryptor()), [])
+    net = LocalNetwork()
+    net.state.tasks["root"] = Task(
+        id="root",
+        state="acquired",
+        version=1,
+        pid="test-pid",
+        ttl=60_000,
+        resumes=set(),
+    )
+    sender = Sender(Transport(net), None)
+    effects = ResonateEffects(sender, Codec(NoopEncryptor()), "root", 1, [])
     return Context.root(
         id="root",
         origin_id="root",

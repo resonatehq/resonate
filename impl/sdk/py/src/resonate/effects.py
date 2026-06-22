@@ -42,23 +42,50 @@ class ResonateEffects:
     """
 
     def __init__(
-        self, sender: Sender, codec: Codec, preload: list[PromiseRecord]
+        self,
+        sender: Sender,
+        codec: Codec,
+        task_id: str,
+        task_version: int,
+        preload: list[PromiseRecord],
     ) -> None:
-        """Build Effects from a Sender, Codec, and optional preloaded promises.
+        """Build Effects from a Sender, Codec, task lease, and preloaded promises.
 
-        Each preloaded record is decoded into the cache; a record that fails to
-        decode is silently skipped.
+        ``task_id``/``task_version`` are the active task's lease, used as the
+        fencing token on every durable promise mutation. Each preloaded record
+        is decoded into the cache; a record that fails to decode is skipped.
         """
         self.sender = sender
         self.codec = codec
+        self.task_id = task_id
+        self.task_version = task_version
         self.cache: dict[str, PromiseRecord] = {}
         self._stopped: bool = False
         for p in preload:
-            try:
-                decoded = codec.decode_promise(p)
-            except ResonateError:
-                continue
-            self.cache[decoded.id] = decoded
+            self._absorb(p)
+
+    def _absorb(self, record: PromiseRecord) -> None:
+        """Decode and cache a server promise record.
+
+        Records that fail to decode are skipped. The decoded record is inserted
+        monotonically (see ``_insert_monotonic``).
+        """
+        try:
+            decoded = self.codec.decode_promise(record)
+        except ResonateError:
+            return
+        self._insert_monotonic(decoded)
+
+    def _insert_monotonic(self, record: PromiseRecord) -> None:
+        """Insert a decoded record, preserving monotonicity.
+
+        Promise state is monotonic (pending -> terminal, then immutable), so a
+        terminal cache entry is never overwritten by a (possibly stale) record.
+        """
+        existing = self.cache.get(record.id)
+        if existing is not None and existing.state != "pending":
+            return
+        self.cache[record.id] = record
 
     async def create_promise(self, req: PromiseCreateReq) -> PromiseRecord:
         """Create a durable promise, returning the decoded record.
@@ -95,13 +122,16 @@ class ResonateEffects:
                 invocation,
             )
 
-            record = await self.sender.promise_create(encoded_req)
-
-            decoded = self.codec.decode_promise(record)
+            res = await self.sender.task_fence_create(
+                self.task_id, self.task_version, encoded_req
+            )
+            for p in res.preload:
+                self._absorb(p)
+            decoded = self.codec.decode_promise(res.promise)
         except ResonateError as exc:
             self._stopped = True
             raise PlatformError([exc]) from exc
-        self.cache[decoded.id] = decoded
+        self._insert_monotonic(decoded)
         logger.info(
             "promise_create_response promise_id=%s invocation=%s state=%s",
             decoded.id,
@@ -139,14 +169,17 @@ class ResonateEffects:
             logger.info(
                 "promise_settle_request promise_id=%s state=%s", req.id, req.state
             )
-            record = await self.sender.promise_settle(req)
-
-            decoded = self.codec.decode_promise(record)
+            res = await self.sender.task_fence_settle(
+                self.task_id, self.task_version, req
+            )
+            for p in res.preload:
+                self._absorb(p)
+            decoded = self.codec.decode_promise(res.promise)
         except ResonateError as exc:
             self._stopped = True
             raise PlatformError([exc]) from exc
         logger.info(
             "promise_settle_response promise_id=%s state=%s", decoded.id, decoded.state
         )
-        self.cache[decoded.id] = decoded
+        self._insert_monotonic(decoded)
         return decoded

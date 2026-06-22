@@ -35,6 +35,7 @@ from resonate.error import (
     Suspended,
 )
 from resonate.network import LocalNetwork
+from resonate.network.local import Task
 from resonate.registry import Registry
 from resonate.retry import Constant, Never
 from resonate.send import Sender
@@ -76,8 +77,17 @@ def _root(
     durable ops resolve to not-found; pass one (with functions registered) to
     exercise by-name ``run`` / by-object ``rpc`` resolution.
     """
-    sender = Sender(Transport(LocalNetwork()), None)
-    effects = ResonateEffects(sender, _codec(), preload or [])
+    net = LocalNetwork()
+    net.state.tasks["root"] = Task(
+        id="root",
+        state="acquired",
+        version=1,
+        pid="test-pid",
+        ttl=60_000,
+        resumes=set(),
+    )
+    sender = Sender(Transport(net), None)
+    effects = ResonateEffects(sender, _codec(), "root", 1, preload or [])
     return Context.root(
         id="root",
         origin_id="root",

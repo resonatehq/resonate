@@ -100,6 +100,17 @@ class StubNetwork:
             status, resp_data = 200, self._handle_promise_create(data)
         elif kind == "promise.settle":
             status, resp_data = 200, self._handle_promise_settle(data)
+        elif kind == "task.fence":
+            # Stub: ignore the lease, unwrap the action, and dispatch to the
+            # matching promise handler, echoing the fence response shape.
+            action = data.get("action", {})
+            sub = action.get("data", {})
+            if action.get("kind") == "promise.settle":
+                inner = self._handle_promise_settle(sub)
+            else:
+                inner = self._handle_promise_create(sub)
+            status = 200
+            resp_data = {"action": {"data": inner}, "preload": []}
         else:
             status, resp_data = 400, f"unknown request kind: {kind}"
 
@@ -174,7 +185,7 @@ class Harness:
 
     def build_effects(self, preload: list[PromiseRecord]) -> ResonateEffects:
         sender = Sender(Transport(self.network), None)
-        return ResonateEffects(sender, _test_codec(), preload)
+        return ResonateEffects(sender, _test_codec(), "root-task", 1, preload)
 
 
 def pending_promise(id: str) -> PromiseRecord:

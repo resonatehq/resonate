@@ -91,6 +91,22 @@ class FailingSender(Sender):
             raise self.error
         return await super().promise_settle(req)
 
+    async def task_fence_create(
+        self, id: str, version: int, req: PromiseCreateReq
+    ) -> Any:
+        # Effects now routes durable creates through task.fence; the
+        # fail_promise_create flag arms a failure of that durable op.
+        if self.fail_promise_create:
+            raise self.error
+        return await super().task_fence_create(id, version, req)
+
+    async def task_fence_settle(
+        self, id: str, version: int, req: PromiseSettleReq
+    ) -> Any:
+        if self.fail_promise_settle:
+            raise self.error
+        return await super().task_fence_settle(id, version, req)
+
     async def task_fulfill(
         self, id: str, version: int, action: PromiseSettleReq
     ) -> Any:
@@ -347,15 +363,13 @@ async def test_first_platform_error_stops_further_durable_work(
     make the second child unwind without ever attempting its own ``create``.
     """
     create_attempts = 0
-    original_create = fix.sender.promise_create
 
-    async def counting_create(req: PromiseCreateReq) -> PromiseRecord:
+    async def counting_create(id: str, version: int, req: PromiseCreateReq) -> Any:
         nonlocal create_attempts
         create_attempts += 1
         # Fail the first create only; the gate must prevent a second attempt.
         if create_attempts == 1:
             raise fix.sender.error
-        return await original_create(req)
 
     async def wf(ctx: Context) -> int:
         ctx.run(leaf)  # "pe-stop.1" -- its create fails first
@@ -367,7 +381,7 @@ async def test_first_platform_error_stops_further_durable_work(
 
     with (
         patch.object(
-            fix.sender, "promise_create", new=AsyncMock(side_effect=counting_create)
+            fix.sender, "task_fence_create", new=AsyncMock(side_effect=counting_create)
         ),
         pytest.raises(ServerError),
     ):
@@ -590,7 +604,7 @@ async def test_on_message_root_decode_failure_releases_task(
 async def test_chain_failure_rejects_created_so_successors_do_not_deadlock() -> None:
     sender = FailingSender(Transport(LocalNetwork(pid="chain-pid")))
     sender.fail_promise_create = True
-    effects = ResonateEffects(sender, Codec(NoopEncryptor()), [])
+    effects = ResonateEffects(sender, Codec(NoopEncryptor()), "r", 1, [])
     ctx = Context.root(
         id="r",
         origin_id="r",

@@ -138,6 +138,77 @@ def test_local_network_task_create_and_fulfill() -> None:
     asyncio.run(run())
 
 
+def test_task_fence_rejects_wrong_version() -> None:
+    """task.fence is gated on the task lease: a stale version is a 409 no-op."""
+
+    async def run() -> None:
+        net = LocalNetwork(pid="pid1")
+        # Create + acquire a task at version 0.
+        create = {
+            "kind": "task.create",
+            "head": {"corrId": "c1", "version": "2025-01-15"},
+            "data": {
+                "pid": "pid1",
+                "ttl": 60000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": {"corrId": "c1a", "version": "2025-01-15"},
+                    "data": {"id": "root", "timeoutAt": I64_MAX, "tags": {}},
+                },
+            },
+        }
+        resp = await send(net, create)
+        version = data(resp)["task"]["version"]
+        assert version == 0
+
+        def fence(task_version: int, child_id: str) -> dict[str, Any]:
+            return {
+                "kind": "task.fence",
+                "head": {"corrId": "f", "version": "2025-01-15"},
+                "data": {
+                    "id": "root",
+                    "version": task_version,
+                    "action": {
+                        "kind": "promise.create",
+                        "head": {"corrId": "fa", "version": "2025-01-15"},
+                        "data": {"id": child_id, "timeoutAt": I64_MAX, "tags": {}},
+                    },
+                },
+            }
+
+        # Wrong version -> 409, and the child promise is NOT created.
+        bad = await send(net, fence(version + 1, "child-bad"))
+        assert status(bad) == 409
+        assert "child-bad" not in net.state.promises
+
+        # Unknown task -> 404.
+        missing = await send(
+            net,
+            {
+                "kind": "task.fence",
+                "head": {"corrId": "f2", "version": "2025-01-15"},
+                "data": {
+                    "id": "nope",
+                    "version": 0,
+                    "action": {
+                        "kind": "promise.create",
+                        "head": {"corrId": "f2a", "version": "2025-01-15"},
+                        "data": {"id": "child-x", "timeoutAt": I64_MAX, "tags": {}},
+                    },
+                },
+            },
+        )
+        assert status(missing) == 404
+
+        # Correct version -> 200, child promise created.
+        ok = await send(net, fence(version, "child-ok"))
+        assert status(ok) == 200
+        assert data(ok)["action"]["data"]["promise"]["id"] == "child-ok"
+        assert "child-ok" in net.state.promises
+
+    asyncio.run(run())
+
+
 def test_local_network_identity() -> None:
     net = LocalNetwork(pid="mypid", group="mygroup")
     assert net.pid() == "mypid"
