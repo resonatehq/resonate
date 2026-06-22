@@ -224,6 +224,8 @@ impl Core {
                     let effects = Effects::new(
                         self.sender.clone(),
                         self.codec.clone(),
+                        task_id.to_string(),
+                        task_version,
                         current_preload.take().unwrap_or_default(),
                     );
                     ctx = Context::root(

@@ -322,6 +322,30 @@ impl Sender {
         Ok(TaskFenceResult { promise, preload })
     }
 
+    /// Create a promise via task.fence, executing only if the task lease
+    /// (id, version) is still valid. Mirrors `task_fence` with a typed request.
+    pub async fn task_fence_create(
+        &self,
+        id: &str,
+        version: i64,
+        req: PromiseCreateReq,
+    ) -> Result<TaskFenceResult> {
+        self.task_fence(id, version, serde_json::to_value(&req)?)
+            .await
+    }
+
+    /// Settle a promise via task.fence, executing only if the task lease
+    /// (id, version) is still valid. Mirrors `task_fence` with a typed request.
+    pub async fn task_fence_settle(
+        &self,
+        id: &str,
+        version: i64,
+        req: PromiseSettleReq,
+    ) -> Result<TaskFenceResult> {
+        self.task_fence(id, version, serde_json::to_value(&req)?)
+            .await
+    }
+
     /// Extend the lease for one or more tasks.
     pub async fn task_heartbeat(&self, pid: &str, tasks: Vec<TaskRef>) -> Result<()> {
         #[derive(Serialize)]
@@ -866,6 +890,170 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(promise.id, "rt-p3");
+    }
+
+    #[tokio::test]
+    async fn task_fence_create_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
+        let sender = test_sender(net);
+
+        // Create a task (acquired at version 0) to fence against.
+        let created = sender
+            .task_create(
+                "pid1",
+                60000,
+                PromiseCreateReq {
+                    id: "root".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let res = sender
+            .task_fence_create(
+                &created.task.id,
+                created.task.version,
+                PromiseCreateReq {
+                    id: "child".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.promise.id, "child");
+        assert_eq!(res.promise.state, crate::types::PromiseState::Pending);
+
+        // The create was actually applied server-side, not just echoed back.
+        let stored = sender.promise_get("child").await.unwrap();
+        assert_eq!(stored.id, "child");
+        assert_eq!(stored.state, crate::types::PromiseState::Pending);
+    }
+
+    #[tokio::test]
+    async fn task_fence_settle_roundtrip() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
+        let sender = test_sender(net);
+
+        let created = sender
+            .task_create(
+                "pid1",
+                60000,
+                PromiseCreateReq {
+                    id: "root".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+        sender
+            .promise_create(PromiseCreateReq {
+                id: "child".into(),
+                timeout_at: i64::MAX,
+                param: Value::default(),
+                tags: HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        let res = sender
+            .task_fence_settle(
+                &created.task.id,
+                created.task.version,
+                PromiseSettleReq {
+                    id: "child".into(),
+                    state: SettleState::Resolved,
+                    value: Value::default(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.promise.id, "child");
+        assert_eq!(res.promise.state, crate::types::PromiseState::Resolved);
+    }
+
+    #[tokio::test]
+    async fn task_fence_wrong_version_returns_conflict() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
+        let sender = test_sender(net);
+
+        let created = sender
+            .task_create(
+                "pid1",
+                60000,
+                PromiseCreateReq {
+                    id: "root".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // A stale lease (wrong version) must be fenced off with a 409.
+        let err = sender
+            .task_fence_create(
+                &created.task.id,
+                created.task.version + 1,
+                PromiseCreateReq {
+                    id: "child".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::ServerError { code: 409, .. }),
+            "expected ServerError(409), got {err:?}"
+        );
+
+        // The fence must be a no-op: the child promise was never created.
+        let probe = sender.promise_get("child").await.unwrap_err();
+        assert!(
+            matches!(probe, Error::ServerError { code: 404, .. }),
+            "fenced-off create must not have written the promise, got {probe:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_fence_unknown_task_returns_not_found() {
+        let net = Arc::new(LocalNetwork::new(Some("pid1".into()), None));
+        let sender = test_sender(net);
+
+        // No task was ever created, so fencing against it must 404 — and apply
+        // nothing.
+        let err = sender
+            .task_fence_create(
+                "ghost-task",
+                0,
+                PromiseCreateReq {
+                    id: "child".into(),
+                    timeout_at: i64::MAX,
+                    param: Value::default(),
+                    tags: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::ServerError { code: 404, .. }),
+            "expected ServerError(404), got {err:?}"
+        );
+
+        let probe = sender.promise_get("child").await.unwrap_err();
+        assert!(
+            matches!(probe, Error::ServerError { code: 404, .. }),
+            "fence against a missing task must not write the promise, got {probe:?}"
+        );
     }
 
     #[tokio::test]

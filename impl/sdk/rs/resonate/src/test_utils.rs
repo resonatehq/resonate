@@ -86,6 +86,7 @@ impl StubNetwork {
             }
             "promise.create" => (200, self.handle_promise_create(&data)),
             "promise.settle" => (200, self.handle_promise_settle(&data)),
+            "task.fence" => self.handle_task_fence(&data),
             "task.acquire" => {
                 let task_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 if !self.tasks.contains_key(task_id) {
@@ -206,6 +207,46 @@ impl StubNetwork {
         serde_json::json!({
             "promise": promise_to_json(&record),
         })
+    }
+
+    /// Handle a `task.fence` request: unwrap the inner promise.create/settle
+    /// action, apply it, and wrap the result in the fence response shape
+    /// `{ action: { data: { promise } }, preload }`. Lease validation is
+    /// intentionally skipped — tests exercise the effects fence path without
+    /// staging a real task. Honors `fail_promise_create`.
+    fn handle_task_fence(&mut self, data: &serde_json::Value) -> (u16, serde_json::Value) {
+        let raw_action = data.get("action");
+        let action = raw_action.map(unwrap_sub_envelope).unwrap_or_default();
+        let sub_kind = raw_action
+            .and_then(|a| a.get("kind"))
+            .and_then(|k| k.as_str());
+        let is_settle = match sub_kind {
+            Some("promise.settle") => true,
+            Some("promise.create") => false,
+            _ => action.get("state").is_some(),
+        };
+
+        if !is_settle && self.fail_promise_create {
+            return (500, serde_json::json!("injected promise.create failure"));
+        }
+
+        let inner = if is_settle {
+            self.handle_promise_settle(&action)
+        } else {
+            self.handle_promise_create(&action)
+        };
+        let promise = inner
+            .get("promise")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        (
+            200,
+            serde_json::json!({
+                "action": { "data": { "promise": promise } },
+                "preload": [],
+            }),
+        )
     }
 
     fn handle_task_acquire(&self, task_id: &str) -> serde_json::Value {
@@ -447,8 +488,16 @@ impl TestHarness {
     }
 
     /// Build Effects from the stub, with optional preloaded promises.
+    /// Uses a fixed task lease — the stub's `task.fence` handler is lenient and
+    /// does not validate it, so the value is immaterial to the assertions.
     pub fn build_effects(&self, preload: Vec<PromiseRecord>) -> Effects {
-        Effects::new(self.build_sender(), test_codec(), preload)
+        Effects::new(
+            self.build_sender(),
+            test_codec(),
+            "__task__".to_string(),
+            0,
+            preload,
+        )
     }
 
     /// Return the sent requests as flattened JSON (for test assertions).
@@ -461,6 +510,22 @@ impl TestHarness {
             .iter()
             .map(|req| {
                 if req.get("head").is_some() && req.get("data").is_some() {
+                    // task.fence wraps a promise.create/settle action — surface
+                    // the inner action as a flattened request so tests can
+                    // inspect it as if the mutation were sent directly.
+                    if req.get("kind").and_then(|k| k.as_str()) == Some("task.fence") {
+                        if let Some(action) = req.get("data").and_then(|d| d.get("action")) {
+                            let inner_kind = action.get("kind").cloned();
+                            let mut flat = unwrap_sub_envelope(action)
+                                .as_object()
+                                .cloned()
+                                .unwrap_or_default();
+                            if let Some(k) = inner_kind {
+                                flat.insert("kind".to_string(), k);
+                            }
+                            return serde_json::Value::Object(flat);
+                        }
+                    }
                     // Envelope format — flatten for test convenience
                     let mut flat = req
                         .get("data")

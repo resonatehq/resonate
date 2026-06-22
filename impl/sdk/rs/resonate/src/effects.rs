@@ -9,26 +9,64 @@ use crate::types::{PromiseCreateReq, PromiseRecord, PromiseSettleReq, PromiseSta
 /// The two durable operations the SDK needs. Built from Sender + Codec.
 /// Maintains an internal cache of decoded PromiseRecords.
 /// Shared via Arc — all contexts in an execution tree use the same instance.
+///
+/// Every durable promise mutation is fenced on the active task's lease
+/// (`task_id` + `task_version`): both create and settle go through
+/// `task.fence`, so a worker whose lease has expired (and been re-acquired
+/// elsewhere) cannot clobber promise state — the server rejects the mutation
+/// with a 409 instead of producing a split-brain write.
 pub struct Effects {
     sender: Sender,
     codec: Codec,
+    task_id: String,
+    task_version: i64,
     cache: DashMap<String, PromiseRecord>,
 }
 
 impl Effects {
-    /// Build Effects from a Sender, Codec, and optional preloaded promises.
-    pub fn new(sender: Sender, codec: Codec, preload: Vec<PromiseRecord>) -> Self {
-        let map = DashMap::new();
-        for p in preload {
-            if let Ok(decoded) = codec.decode_promise(p) {
-                map.insert(decoded.id.clone(), decoded);
-            }
-        }
-
-        Self {
+    /// Build Effects from a Sender, Codec, the active task's lease
+    /// (`task_id`/`task_version`, used as the fencing token on every promise
+    /// mutation), and an optional preload of promise records to seed the cache.
+    pub fn new(
+        sender: Sender,
+        codec: Codec,
+        task_id: String,
+        task_version: i64,
+        preload: Vec<PromiseRecord>,
+    ) -> Self {
+        let effects = Self {
             sender,
             codec,
-            cache: map,
+            task_id,
+            task_version,
+            cache: DashMap::new(),
+        };
+        effects.absorb(preload);
+        effects
+    }
+
+    /// Insert a decoded record into the cache, preserving monotonicity:
+    /// promise state only moves Pending → terminal and then is immutable, so a
+    /// terminal cache entry is never overwritten by a (possibly stale) record.
+    fn insert_monotonic(&self, record: PromiseRecord) {
+        let is_terminal = self
+            .cache
+            .get(&record.id)
+            .is_some_and(|e| e.state != PromiseState::Pending);
+        if is_terminal {
+            return;
+        }
+        self.cache.insert(record.id.clone(), record);
+    }
+
+    /// Decode and merge server-provided records (e.g. a fence `preload`
+    /// snapshot of sibling promises) into the cache under the monotonic-write
+    /// rule. Undecodable records are skipped.
+    fn absorb(&self, records: Vec<PromiseRecord>) {
+        for rec in records {
+            if let Ok(decoded) = self.codec.decode_promise(rec) {
+                self.insert_monotonic(decoded);
+            }
         }
     }
 
@@ -60,12 +98,17 @@ impl Effects {
             "promise_create_request"
         );
 
-        // 3. Send request
-        let record = self.sender.promise_create(encoded_req).await?;
+        // 3. Send request — fenced on the active task lease. Absorb any
+        //    sibling promises the server preloaded alongside the response.
+        let res = self
+            .sender
+            .task_fence_create(&self.task_id, self.task_version, encoded_req)
+            .await?;
+        self.absorb(res.preload);
 
         // 4. Decode response, cache, return
-        let decoded = self.codec.decode_promise(record)?;
-        self.cache.insert(decoded.id.clone(), decoded.clone());
+        let decoded = self.codec.decode_promise(res.promise)?;
+        self.insert_monotonic(decoded.clone());
 
         tracing::info!(
             target: "resonate::validation",
@@ -112,17 +155,21 @@ impl Effects {
             state = ?req.state,
             "promise_settle_request"
         );
-        let record = self.sender.promise_settle(req).await?;
+        let res = self
+            .sender
+            .task_fence_settle(&self.task_id, self.task_version, req)
+            .await?;
+        self.absorb(res.preload);
 
         // 5. Decode response, cache, return
-        let decoded = self.codec.decode_promise(record)?;
+        let decoded = self.codec.decode_promise(res.promise)?;
         tracing::info!(
             target: "resonate::validation",
             promise_id = %decoded.id,
             state = ?decoded.state,
             "promise_settle_response"
         );
-        self.cache.insert(decoded.id.clone(), decoded.clone());
+        self.insert_monotonic(decoded.clone());
         Ok(decoded)
     }
 }

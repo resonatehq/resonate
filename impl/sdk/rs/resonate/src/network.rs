@@ -208,6 +208,15 @@ impl ServerState {
                 let id = pd.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
             }
+            "task.fence" => {
+                let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                self.try_auto_timeout(now, id);
+                let action = req.get("action").unwrap_or(&serde_json::Value::Null);
+                let ad = extract_action_data(action);
+                if let Some(aid) = ad.get("id").and_then(|v| v.as_str()) {
+                    self.try_auto_timeout(now, aid);
+                }
+            }
             "task.suspend" => {
                 let id = req.get("id").and_then(|v| v.as_str()).unwrap_or("");
                 self.try_auto_timeout(now, id);
@@ -237,6 +246,7 @@ impl ServerState {
             "task.acquire" => self.task_acquire(now, &corr_id, req),
             "task.release" => self.task_release(now, &corr_id, req),
             "task.fulfill" => self.task_fulfill(now, &corr_id, req),
+            "task.fence" => self.task_fence(now, &corr_id, req),
             "task.suspend" => self.task_suspend(now, &corr_id, req),
             "task.heartbeat" => self.task_heartbeat(now, &corr_id, req),
             "schedule.create" => self.schedule_create(now, &corr_id, req),
@@ -823,6 +833,69 @@ impl ServerState {
         Ok(serde_json::json!({
             "kind": "task.fulfill", "corrId": corr_id, "status": 200,
             "promise": promise_record,
+        }))
+    }
+
+    /// Run a promise.create or promise.settle action gated on the task's lease
+    /// (id, version). On a missing task or a lease mismatch (not acquired, or
+    /// version differs) returns 404/409 without applying the action — this is
+    /// the fence that prevents a stale worker from clobbering promise state.
+    fn task_fence(
+        &mut self,
+        now: i64,
+        corr_id: &serde_json::Value,
+        req: &serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, Error> {
+        let task_id = require_str(req, "id")?;
+        let version = req.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        match self.tasks.get(task_id) {
+            None => {
+                return Ok(serde_json::json!({
+                    "kind": "task.fence", "corrId": corr_id, "status": 404,
+                }))
+            }
+            Some(t) if t.state != TaskState::Acquired || t.version != version => {
+                return Ok(serde_json::json!({
+                    "kind": "task.fence", "corrId": corr_id, "status": 409,
+                }))
+            }
+            _ => {}
+        }
+
+        // action is a promise.create or promise.settle envelope
+        let action_raw = req.get("action").unwrap_or(&serde_json::Value::Null);
+        let sub_kind = action_raw
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .unwrap_or("");
+        let action_data = extract_action_data(action_raw);
+        let mut flat = action_data.as_object().cloned().unwrap_or_default();
+
+        let is_settle = match sub_kind {
+            "promise.settle" => true,
+            "promise.create" => false,
+            _ => action_data.get("state").is_some(),
+        };
+
+        let inner = if is_settle {
+            flat.insert("kind".to_string(), serde_json::json!("promise.settle"));
+            self.promise_settle(now, corr_id, &serde_json::Value::Object(flat))?
+        } else {
+            flat.insert("kind".to_string(), serde_json::json!("promise.create"));
+            self.promise_create(now, corr_id, &serde_json::Value::Object(flat))?
+        };
+
+        let promise = inner
+            .get("promise")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let preload = self.preload(task_id);
+
+        Ok(serde_json::json!({
+            "kind": "task.fence", "corrId": corr_id, "status": 200,
+            "action": { "data": { "promise": promise } },
+            "preload": preload,
         }))
     }
 
