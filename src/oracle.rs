@@ -261,7 +261,9 @@ impl Oracle {
                 );
             }
         } else {
-            self.set_p_timeout(&r.id, r.timeout_at);
+            if addr.is_some() {
+                self.set_p_timeout(&r.id, r.timeout_at);
+            }
             if let Some(ref addr) = addr {
                 self.tasks.insert(
                     r.id.clone(),
@@ -1145,7 +1147,9 @@ impl Oracle {
                             );
                         }
                     } else {
-                        self.set_p_timeout(&create_data.id, create_data.timeout_at);
+                        if addr.is_some() {
+                            self.set_p_timeout(&create_data.id, create_data.timeout_at);
+                        }
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 create_data.id.clone(),
@@ -1740,19 +1744,14 @@ impl Oracle {
             }
         }
 
-        // Collect expired promise timeouts — tick only settles promises with resonate:target
-        let expired_promises: Vec<(String, PromiseState, i64)> = self
+        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
+        // promises with resonate:target, and del_p_timeout is always called on settlement
+        // so all entries here are guaranteed to be Pending with a target.
+        let expired_promise_ids: Vec<String> = self
             .p_timeouts
             .iter()
             .filter(|pt| time >= pt.timeout)
-            .filter_map(|pt| {
-                self.promises
-                    .get(&pt.id)
-                    .filter(|p| {
-                        p.state == PromiseState::Pending && p.tags.contains_key("resonate:target")
-                    })
-                    .map(|p| (pt.id.clone(), Self::timeout_state(&p.tags), p.timeout_at))
-            })
+            .map(|pt| pt.id.clone())
             .collect();
 
         // Collect expired task lease timeouts
@@ -1782,18 +1781,22 @@ impl Oracle {
             .collect();
 
         // Phase 1: settle expired promises
-        for (id, state, timeout_at) in &expired_promises {
-            if let Some(p) = self.promises.get_mut(id) {
-                if p.state == PromiseState::Pending {
-                    p.state = *state;
-                    p.settled_at = Some(*timeout_at);
+        for id in &expired_promise_ids {
+            let computed = self
+                .promises
+                .get(id)
+                .map(|p| (Self::timeout_state(&p.tags), p.timeout_at));
+            if let Some((state, timeout_at)) = computed {
+                if let Some(p) = self.promises.get_mut(id) {
+                    p.state = state;
+                    p.settled_at = Some(timeout_at);
                 }
             }
             self.del_p_timeout(id);
         }
 
         // Phase 2+3: fulfill tasks, fire callbacks and listeners
-        for (id, _, _) in &expired_promises {
+        for id in &expired_promise_ids {
             self.trigger_settlement(id, time);
         }
 
@@ -1915,7 +1918,9 @@ impl Oracle {
                             );
                         }
                     } else {
-                        self.set_p_timeout(&promise_id, timeout_at);
+                        if addr.is_some() {
+                            self.set_p_timeout(&promise_id, timeout_at);
+                        }
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 promise_id.clone(),
@@ -2282,6 +2287,12 @@ impl Oracle {
         self.promises
             .values()
             .any(|p| p.state == PromiseState::Pending)
+    }
+
+    pub fn has_pending_promises_with_target(&self) -> bool {
+        self.promises
+            .values()
+            .any(|p| p.state == PromiseState::Pending && p.tags.contains_key("resonate:target"))
     }
 
     pub fn has_schedules(&self) -> bool {
