@@ -286,6 +286,52 @@ fn validate_promise_create_data(
         return Err(validator::ValidationError::new("null_bytes")
             .with_message("Promise ID must not contain null bytes".into()));
     }
+    if let Some(origin) = data.tags.get("resonate:origin") {
+        if origin.contains('.') {
+            return Err(validator::ValidationError::new("dot_in_origin")
+                .with_message("resonate:origin must not contain '.'".into()));
+        }
+        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}.", origin)) {
+            return Err(validator::ValidationError::new("origin_prefix")
+                .with_message("Promise ID must be prefixed by resonate:origin".into()));
+        }
+    }
+    if let Some(branch) = data.tags.get("resonate:branch") {
+        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}.", branch)) {
+            return Err(validator::ValidationError::new("branch_prefix")
+                .with_message("Promise ID must be prefixed by resonate:branch".into()));
+        }
+    }
+    if let Some(parent) = data.tags.get("resonate:parent") {
+        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}.", parent)) {
+            return Err(validator::ValidationError::new("parent_prefix")
+                .with_message("Promise ID must be prefixed by resonate:parent".into()));
+        }
+    }
+    if let Some(prefix) = data.tags.get("resonate:prefix") {
+        if prefix.contains('.') {
+            return Err(validator::ValidationError::new("dot_in_prefix")
+                .with_message("resonate:prefix must not contain '.'".into()));
+        }
+    }
+    if let Some(delay_str) = data.tags.get("resonate:delay") {
+        let delay: i64 = delay_str
+            .parse()
+            .ok()
+            .filter(|&v: &i64| v >= 0)
+            .ok_or_else(|| {
+                validator::ValidationError::new("invalid_delay")
+                    .with_message("resonate:delay must be a non-negative integer".into())
+            })?;
+        if delay >= data.timeout_at {
+            return Err(validator::ValidationError::new("delay_exceeds_timeout")
+                .with_message("resonate:delay must be less than timeoutAt".into()));
+        }
+        if !data.tags.contains_key("resonate:target") {
+            return Err(validator::ValidationError::new("delay_without_target")
+                .with_message("resonate:delay requires a resonate:target tag".into()));
+        }
+    }
     Ok(())
 }
 
@@ -307,12 +353,20 @@ pub struct PromiseRegisterCallbackData {
     pub awaiter: String,
 }
 
+fn origin(id: &str) -> &str {
+    id.split_once('.').map(|(prefix, _)| prefix).unwrap_or(id)
+}
+
 fn validate_callback_data(
     data: &PromiseRegisterCallbackData,
 ) -> Result<(), validator::ValidationError> {
     if data.awaited == data.awaiter {
         return Err(validator::ValidationError::new("awaited_equals_awaiter")
             .with_message("Awaited and awaiter must be different promises".into()));
+    }
+    if origin(&data.awaiter) != origin(&data.awaited) {
+        return Err(validator::ValidationError::new("origin_mismatch")
+            .with_message("Awaiter and awaited must belong to the same origin".into()));
     }
     Ok(())
 }
@@ -355,6 +409,10 @@ fn validate_task_create_data(data: &TaskCreateData) -> Result<(), validator::Val
     if !data.action.data.tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")
             .with_message("Action must have a resonate:target tag".into()));
+    }
+    if data.action.data.tags.contains_key("resonate:delay") {
+        return Err(validator::ValidationError::new("delay_in_task_action")
+            .with_message("Action must not have a resonate:delay tag".into()));
     }
     Ok(())
 }
@@ -420,6 +478,10 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
         if action.data.awaited == data.id {
             return Err(validator::ValidationError::new("awaited_is_self")
                 .with_message("Action awaited promise must not equal the task ID".into()));
+        }
+        if origin(&action.data.awaited) != origin(&data.id) {
+            return Err(validator::ValidationError::new("origin_mismatch")
+                .with_message("Awaited promise must belong to the same origin as the task".into()));
         }
     }
     Ok(())
@@ -491,17 +553,32 @@ fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::Valid
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskHeartbeatTask {
     pub id: String,
     pub version: i64,
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_heartbeat_data"))]
 pub struct TaskHeartbeatData {
     #[validate(length(min = 1, message = "Process ID is required"))]
     pub pid: String,
+    #[validate(length(min = 1, message = "Tasks array must not be empty"))]
     pub tasks: Vec<TaskHeartbeatTask>,
+}
+
+fn validate_task_heartbeat_data(data: &TaskHeartbeatData) -> Result<(), validator::ValidationError> {
+    if data.tasks.len() > 1 {
+        let first_origin = origin(&data.tasks[0].id);
+        for task in &data.tasks[1..] {
+            if origin(&task.id) != first_origin {
+                return Err(validator::ValidationError::new("origin_mismatch")
+                    .with_message("All tasks must belong to the same origin".into()));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -531,6 +608,7 @@ pub struct ScheduleGetData {
 }
 
 #[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_schedule_create_data"))]
 pub struct ScheduleCreateData {
     #[validate(length(min = 1, message = "Schedule ID is required"))]
     pub id: String,
@@ -546,6 +624,20 @@ pub struct ScheduleCreateData {
     pub promise_param: PromiseValue,
     #[serde(rename = "promiseTags", default)]
     pub promise_tags: std::collections::HashMap<String, String>,
+}
+
+fn validate_schedule_create_data(
+    data: &ScheduleCreateData,
+) -> Result<(), validator::ValidationError> {
+    if data.id.contains('.') {
+        return Err(validator::ValidationError::new("dot_in_schedule_id")
+            .with_message("Schedule ID must not contain '.'".into()));
+    }
+    if !data.promise_tags.contains_key("resonate:target") {
+        return Err(validator::ValidationError::new("missing_target")
+            .with_message("promiseTags must include a resonate:target tag".into()));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Validate)]

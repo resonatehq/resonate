@@ -1295,7 +1295,7 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
                     kind_str.clone(),
                     corr_id.clone(),
                     422,
-                    "Promise exists without a target task",
+                    "The promise does not have a resonate:target tag",
                 )),
                 _ => Ok(ResponseEnvelope::error(
                     kind_str.clone(),
@@ -2601,6 +2601,16 @@ async fn op_debug_tick(state: &Arc<Server>, req: &RequestEnvelope) -> ResponseEn
             )
         }
     };
+    if let Some(debug_time) = req.head.debug_time {
+        if debug_time != time {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                "resonate:debug_time must equal data.time",
+            );
+        }
+    }
 
     match state
         .storage
