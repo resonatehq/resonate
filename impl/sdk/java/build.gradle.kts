@@ -91,7 +91,7 @@ tasks.register<JavaExec>("runExample") {
 //   ORG_GRADLE_PROJECT_signingInMemoryKey
 //   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
 mavenPublishing {
-    publishToMavenCentral()
+    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
 
     coordinates(group.toString(), "resonate-sdk-java", version.toString())
