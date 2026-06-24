@@ -261,7 +261,9 @@ impl Oracle {
                 );
             }
         } else {
-            self.set_p_timeout(&r.id, r.timeout_at);
+            if addr.is_some() {
+                self.set_p_timeout(&r.id, r.timeout_at);
+            }
             if let Some(ref addr) = addr {
                 self.tasks.insert(
                     r.id.clone(),
@@ -273,8 +275,25 @@ impl Oracle {
                         resumes: HashSet::new(),
                     },
                 );
-                self.set_t_timeout(&r.id, TTimeoutKind::Retry, created_at + PENDING_RETRY_TTL);
-                self.send_execute(addr, &r.id, 0);
+                let delay_at = r
+                    .tags
+                    .get("resonate:delay")
+                    .and_then(|v| v.parse::<i64>().ok());
+                if let Some(delay_at) = delay_at {
+                    if now < delay_at {
+                        self.set_t_timeout(&r.id, TTimeoutKind::Retry, delay_at);
+                    } else {
+                        self.set_t_timeout(
+                            &r.id,
+                            TTimeoutKind::Retry,
+                            created_at + PENDING_RETRY_TTL,
+                        );
+                        self.send_execute(addr, &r.id, 0);
+                    }
+                } else {
+                    self.set_t_timeout(&r.id, TTimeoutKind::Retry, created_at + PENDING_RETRY_TTL);
+                    self.send_execute(addr, &r.id, 0);
+                }
             }
         }
         ResponseEnvelope::success(
@@ -673,7 +692,7 @@ impl Oracle {
                 req.kind.clone(),
                 req.head.corr_id.clone(),
                 422,
-                "Promise exists without a target task",
+                "The promise does not have a resonate:target tag",
             );
         }
 
@@ -778,14 +797,6 @@ impl Oracle {
                     req.head.corr_id.clone(),
                     404,
                     "Task not found",
-                )
-            }
-            Some(p) if p.state != PromiseState::Pending => {
-                return ResponseEnvelope::error(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    409,
-                    "Task is not pending",
                 )
             }
             Some(p) => Self::to_promise_record(now, &r.id, p),
@@ -1136,7 +1147,9 @@ impl Oracle {
                             );
                         }
                     } else {
-                        self.set_p_timeout(&create_data.id, create_data.timeout_at);
+                        if addr.is_some() {
+                            self.set_p_timeout(&create_data.id, create_data.timeout_at);
+                        }
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 create_data.id.clone(),
@@ -1148,12 +1161,33 @@ impl Oracle {
                                     resumes: HashSet::new(),
                                 },
                             );
-                            self.set_t_timeout(
-                                &create_data.id,
-                                TTimeoutKind::Retry,
-                                created_at + PENDING_RETRY_TTL,
-                            );
-                            self.send_execute(a, &create_data.id, 0);
+                            let delay_at = create_data
+                                .tags
+                                .get("resonate:delay")
+                                .and_then(|v| v.parse::<i64>().ok());
+                            if let Some(delay_at) = delay_at {
+                                if now < delay_at {
+                                    self.set_t_timeout(
+                                        &create_data.id,
+                                        TTimeoutKind::Retry,
+                                        delay_at,
+                                    );
+                                } else {
+                                    self.set_t_timeout(
+                                        &create_data.id,
+                                        TTimeoutKind::Retry,
+                                        created_at + PENDING_RETRY_TTL,
+                                    );
+                                    self.send_execute(a, &create_data.id, 0);
+                                }
+                            } else {
+                                self.set_t_timeout(
+                                    &create_data.id,
+                                    TTimeoutKind::Retry,
+                                    created_at + PENDING_RETRY_TTL,
+                                );
+                                self.send_execute(a, &create_data.id, 0);
+                            }
                         }
                     }
                     Some(record)
@@ -1261,14 +1295,7 @@ impl Oracle {
                 })
                 .and_then(|t| t.ttl);
             if let Some(ttl) = ttl {
-                let promise_pending = self
-                    .promises
-                    .get(&task_ref.id)
-                    .map(|p| p.state == PromiseState::Pending)
-                    .unwrap_or(false);
-                if promise_pending {
-                    self.set_t_timeout(&task_ref.id, TTimeoutKind::Lease, now + ttl);
-                }
+                self.set_t_timeout(&task_ref.id, TTimeoutKind::Lease, now + ttl);
             }
         }
         ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
@@ -1334,19 +1361,6 @@ impl Oracle {
             Some(t) => t.state,
         };
         if task_state != TaskState::Halted {
-            return ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                409,
-                "Task is not halted",
-            );
-        }
-        let promise_pending = self
-            .promises
-            .get(&r.id)
-            .map(|p| p.state == PromiseState::Pending)
-            .unwrap_or(false);
-        if !promise_pending {
             return ResponseEnvelope::error(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -1719,18 +1733,25 @@ impl Oracle {
                 )
             }
         };
+        if let Some(debug_time) = req.head.debug_time {
+            if debug_time != time {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "resonate:debug_time must equal data.time",
+                );
+            }
+        }
 
-        // Collect expired promise timeouts
-        let expired_promises: Vec<(String, PromiseState, i64)> = self
+        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
+        // promises with resonate:target, and del_p_timeout is always called on settlement
+        // so all entries here are guaranteed to be Pending with a target.
+        let expired_promise_ids: Vec<String> = self
             .p_timeouts
             .iter()
             .filter(|pt| time >= pt.timeout)
-            .filter_map(|pt| {
-                self.promises
-                    .get(&pt.id)
-                    .filter(|p| p.state == PromiseState::Pending)
-                    .map(|p| (pt.id.clone(), Self::timeout_state(&p.tags), p.timeout_at))
-            })
+            .map(|pt| pt.id.clone())
             .collect();
 
         // Collect expired task lease timeouts
@@ -1760,18 +1781,22 @@ impl Oracle {
             .collect();
 
         // Phase 1: settle expired promises
-        for (id, state, timeout_at) in &expired_promises {
-            if let Some(p) = self.promises.get_mut(id) {
-                if p.state == PromiseState::Pending {
-                    p.state = *state;
-                    p.settled_at = Some(*timeout_at);
+        for id in &expired_promise_ids {
+            let computed = self
+                .promises
+                .get(id)
+                .map(|p| (Self::timeout_state(&p.tags), p.timeout_at));
+            if let Some((state, timeout_at)) = computed {
+                if let Some(p) = self.promises.get_mut(id) {
+                    p.state = state;
+                    p.settled_at = Some(timeout_at);
                 }
             }
             self.del_p_timeout(id);
         }
 
         // Phase 2+3: fulfill tasks, fire callbacks and listeners
-        for (id, _, _) in &expired_promises {
+        for id in &expired_promise_ids {
             self.trigger_settlement(id, time);
         }
 
@@ -1893,7 +1918,9 @@ impl Oracle {
                             );
                         }
                     } else {
-                        self.set_p_timeout(&promise_id, timeout_at);
+                        if addr.is_some() {
+                            self.set_p_timeout(&promise_id, timeout_at);
+                        }
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 promise_id.clone(),
@@ -1908,7 +1935,7 @@ impl Oracle {
                             self.set_t_timeout(
                                 &promise_id,
                                 TTimeoutKind::Retry,
-                                created_at + PENDING_RETRY_TTL,
+                                time + PENDING_RETRY_TTL,
                             );
                             self.send_execute(a, &promise_id, 0);
                         }
@@ -2260,6 +2287,12 @@ impl Oracle {
         self.promises
             .values()
             .any(|p| p.state == PromiseState::Pending)
+    }
+
+    pub fn has_pending_promises_with_target(&self) -> bool {
+        self.promises
+            .values()
+            .any(|p| p.state == PromiseState::Pending && p.tags.contains_key("resonate:target"))
     }
 
     pub fn has_schedules(&self) -> bool {

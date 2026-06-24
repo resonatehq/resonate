@@ -472,10 +472,12 @@ impl<'a> Db for SqliteDb<'a> {
                 }
             } else {
                 // Promise timeout
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                    params![timeout_at, id],
-                )?;
+                if address.is_some() {
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
+                        params![timeout_at, id],
+                    )?;
+                }
                 // TaskInfraCreated
                 if let Some(addr) = address {
                     self.conn.execute(
@@ -1358,11 +1360,13 @@ impl<'a> Db for SqliteDb<'a> {
                     )?;
                 }
             } else {
-                // Step 6: Create promise_timeout
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                    params![promise_timeout_at, promise_id],
-                )?;
+                // Step 6: Create promise_timeout (only for promises with resonate:target)
+                if address.is_some() {
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
+                        params![promise_timeout_at, promise_id],
+                    )?;
+                }
 
                 // Step 7: Create task infrastructure if resonate:target is set
                 if let Some(addr) = &address {
@@ -1373,7 +1377,7 @@ impl<'a> Db for SqliteDb<'a> {
                     if self.conn.changes() > 0 {
                         self.conn.execute(
                             "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
-                            params![fired_at + self.task_retry_timeout, promise_id, self.task_retry_timeout],
+                            params![time + self.task_retry_timeout, promise_id, self.task_retry_timeout],
                         )?;
                         self.conn.execute(
                             "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
@@ -1418,43 +1422,38 @@ impl<'a> Db for SqliteDb<'a> {
 
     fn process_timeouts(&self, time: i64) -> StorageResult<()> {
         // Statement 1: Process expired promise timeouts
-        let mut stmt = self.conn.prepare(
-            "SELECT id, timer, timeout_at FROM promises WHERE state = 'pending' AND timeout_at <= ?1"
-        )?;
-        let expired: Vec<(String, bool, i64)> = {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM promise_timeouts WHERE timeout_at <= ?1")?;
+        let expired_ids: Vec<String> = {
             let mut rows = stmt.query(params![time])?;
             let mut r = Vec::new();
             while let Some(row) = rows.next()? {
-                r.push((row.get(0)?, row.get(1)?, row.get(2)?));
+                r.push(row.get(0)?);
             }
             r
         };
 
         // Phase 1: Settle all expired promises
         let mut fulfilled_ids = Vec::new();
-        for (id, timer, timeout_at) in &expired {
-            let new_state = if *timer {
-                "resolved"
-            } else {
-                "rejected_timedout"
-            };
+        for id in &expired_ids {
             self.conn.execute(
-                "UPDATE promises SET state = ?2, settled_at = ?3 WHERE id = ?1 AND state = 'pending'",
-                params![id, new_state, timeout_at],
+                "UPDATE promises SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END, settled_at = timeout_at WHERE id = ?1 AND state = 'pending'",
+                params![id],
             )?;
             self.conn
                 .execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
         }
 
         // Phase 2: SettlementEnqueued for all
-        for (id, _, _) in &expired {
+        for id in &expired_ids {
             if settlement_enqueued(self.conn, id)? {
                 fulfilled_ids.push(id.clone());
             }
         }
 
         // Phase 3: ResumptionEnqueued + ListenerUnblocked
-        for (id, _, _) in &expired {
+        for id in &expired_ids {
             resumption_enqueued(
                 self.conn,
                 id,
