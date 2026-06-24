@@ -281,7 +281,11 @@ impl Oracle {
                     if now < delay_at {
                         self.set_t_timeout(&r.id, TTimeoutKind::Retry, delay_at);
                     } else {
-                        self.set_t_timeout(&r.id, TTimeoutKind::Retry, created_at + PENDING_RETRY_TTL);
+                        self.set_t_timeout(
+                            &r.id,
+                            TTimeoutKind::Retry,
+                            created_at + PENDING_RETRY_TTL,
+                        );
                         self.send_execute(addr, &r.id, 0);
                     }
                 } else {

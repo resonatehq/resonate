@@ -1422,9 +1422,9 @@ impl<'a> Db for SqliteDb<'a> {
 
     fn process_timeouts(&self, time: i64) -> StorageResult<()> {
         // Statement 1: Process expired promise timeouts
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM promise_timeouts WHERE timeout_at <= ?1"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM promise_timeouts WHERE timeout_at <= ?1")?;
         let expired_ids: Vec<String> = {
             let mut rows = stmt.query(params![time])?;
             let mut r = Vec::new();
@@ -1441,7 +1441,8 @@ impl<'a> Db for SqliteDb<'a> {
                 "UPDATE promises SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END, settled_at = timeout_at WHERE id = ?1 AND state = 'pending'",
                 params![id],
             )?;
-            self.conn.execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
+            self.conn
+                .execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
         }
 
         // Phase 2: SettlementEnqueued for all

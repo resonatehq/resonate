@@ -480,8 +480,11 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
                 .with_message("Action awaited promise must not equal the task ID".into()));
         }
         if origin(&action.data.awaited) != origin(&data.id) {
-            return Err(validator::ValidationError::new("origin_mismatch")
-                .with_message("Awaited promise must belong to the same origin as the task".into()));
+            return Err(
+                validator::ValidationError::new("origin_mismatch").with_message(
+                    "Awaited promise must belong to the same origin as the task".into(),
+                ),
+            );
         }
     }
     Ok(())
@@ -568,7 +571,9 @@ pub struct TaskHeartbeatData {
     pub tasks: Vec<TaskHeartbeatTask>,
 }
 
-fn validate_task_heartbeat_data(data: &TaskHeartbeatData) -> Result<(), validator::ValidationError> {
+fn validate_task_heartbeat_data(
+    data: &TaskHeartbeatData,
+) -> Result<(), validator::ValidationError> {
     if data.tasks.len() > 1 {
         let first_origin = origin(&data.tasks[0].id);
         for task in &data.tasks[1..] {
