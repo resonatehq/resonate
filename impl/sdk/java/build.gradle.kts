@@ -9,11 +9,15 @@ plugins {
 
     // Apply Spotless for code formatting and linting.
     alias(libs.plugins.spotless)
+
+    // Publish to Maven Central via the Central Portal. Handles sources/javadoc
+    // jars, POM metadata, GPG signing, and upload in one plugin.
+    alias(libs.plugins.maven.publish)
 }
 
 group = "io.resonatehq"
 
-version = "0.7.0"
+version = "0.1.0"
 
 description = "Distributed Async Await by Resonate HQ, Inc"
 
@@ -78,6 +82,43 @@ tasks.register<JavaExec>("runExample") {
     mainClass.set(
         providers.gradleProperty("mainClass").orElse("io.resonatehq.examples.helloworld.HelloWorld"))
     providers.gradleProperty("exampleArgs").orNull?.let { args = it.split(" ").filter(String::isNotEmpty) }
+}
+
+// -- Publishing -------------------------------------------------------------
+// Central Portal upload + signing. Credentials come from env vars in CI:
+//   ORG_GRADLE_PROJECT_mavenCentralUsername
+//   ORG_GRADLE_PROJECT_mavenCentralPassword
+//   ORG_GRADLE_PROJECT_signingInMemoryKey
+//   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword
+mavenPublishing {
+    publishToMavenCentral()
+    signAllPublications()
+
+    coordinates(group.toString(), "resonate-sdk-java", version.toString())
+
+    pom {
+        name.set("resonate-sdk-java")
+        description.set(project.description)
+        url.set("https://github.com/resonatehq/resonate-sdk-java")
+        licenses {
+            license {
+                name.set("Apache License 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0")
+            }
+        }
+        developers {
+            developer {
+                id.set("resonatehq")
+                name.set("Resonate HQ, Inc")
+                url.set("https://resonatehq.io")
+            }
+        }
+        scm {
+            url.set("https://github.com/resonatehq/resonate-sdk-java")
+            connection.set("scm:git:git://github.com/resonatehq/resonate-sdk-java.git")
+            developerConnection.set("scm:git:ssh://git@github.com/resonatehq/resonate-sdk-java.git")
+        }
+    }
 }
 
 // Configure Spotless to format Java sources with Palantir Java Format.

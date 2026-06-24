@@ -1,11 +1,5 @@
 name: cd
 
-# TODO: missing publish step. Python pushed artifacts to PyPI via
-# pypa/gh-action-pypi-publish. The Java equivalent (push to Maven Central) is
-# not wired up: build.gradle has no `maven-publish`/`signing` plugins and no
-# Sonatype credentials. Add those plus a `./gradlew publish` step, and restore
-# `permissions: id-token: write` if using OIDC/trusted publishing.
-
 on:
   release:
     types: [released]
@@ -28,7 +22,11 @@ jobs:
       - name: setup gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # ponytail: build only for now. Replace/extend with `./gradlew publish`
-      # once Maven Central publishing is configured.
-      - name: build library
-        run: ./gradlew build
+      - name: publish to maven central
+        # --no-configuration-cache: vanniktech's publish task isn't CC-compatible yet.
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
