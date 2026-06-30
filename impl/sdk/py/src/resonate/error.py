@@ -75,6 +75,15 @@ class HttpError(ResonateError):
         return f"http error: {self.error}"
 
 
+class NatsError(ResonateError):
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        super().__init__(error)
+
+    def __str__(self) -> str:
+        return f"nats error: {self.error}"
+
+
 class Base64DecodeError(ResonateError):
     def __init__(self, error: Exception) -> None:
         self.error = error

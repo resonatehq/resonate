@@ -1,6 +1,6 @@
 [project]
 name = "resonate-sdk"
-version = "0.7.0"
+version = "0.7.1"
 description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
@@ -9,6 +9,9 @@ dependencies = [
     "aiohttp>=3.13.5",
     "msgspec>=0.21.1",
 ]
+
+[project.optional-dependencies]
+nats = ["nats-py>=2.6.0"]
 
 [project.urls]
 Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
