@@ -66,6 +66,12 @@ class HttpNetwork:
         self._session: aiohttp.ClientSession | None = None
         self._sse_handle: asyncio.Task[None] | None = None
         self._running: bool = False
+        # True only after :meth:`stop` is called. Distinct from ``_running``
+        # (which starts ``False`` before :meth:`start` fires) so that
+        # :meth:`send` and :meth:`_ensure_session` can tell "not yet started"
+        # from "explicitly stopped": the former is fine to proceed through,
+        # the latter must be refused to avoid leaking sessions after shutdown.
+        self._stopped: bool = False
         # Set on :meth:`stop` so a ``send`` parked in its retry backoff wakes
         # immediately instead of blocking shutdown.
         self._stop_event = asyncio.Event()
@@ -90,6 +96,7 @@ class HttpNetwork:
 
     async def stop(self) -> None:
         self._running = False
+        self._stopped = True
         # Wake any ``send`` parked in the retry backoff so the bounded join in
         # :meth:`~resonate.resonate.Resonate.stop` does not stall.
         self._stop_event.set()
@@ -121,7 +128,7 @@ class HttpNetwork:
         headers = self._auth_headers({"Content-Type": "application/json"})
         backoff: float = _INITIAL_BACKOFF_SECS
         while True:
-            if not self._running:
+            if self._stopped:
                 msg = "network has been stopped"
                 raise HttpError(RuntimeError(msg))
             session = self._ensure_session()
@@ -172,7 +179,7 @@ class HttpNetwork:
         will close.
         """
         if self._session is None:
-            if not self._running:
+            if self._stopped:
                 msg = "network has been stopped"
                 raise RuntimeError(msg)
             # Raise the connector cap above aiohttp's default 100 so heartbeat
