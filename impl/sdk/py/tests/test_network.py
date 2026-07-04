@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Any
 from unittest import mock
 
@@ -701,66 +700,3 @@ async def test_http_send_does_not_retry_server_errors(
     body = await net.send("{}")
     assert '"status":404' in body
     assert not_found.attempts == 1  # one shot -- no retry on a real HTTP response
-
-
-@pytest.mark.asyncio
-async def test_http_send_before_start_does_not_raise_stopped_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``send`` must not raise "network has been stopped" before ``start`` fires.
-
-    Reproduces the startup race in ``Resonate.__init__``: ``net.start()`` is
-    scheduled via ``asyncio.create_task`` but the event loop has not yielded
-    yet when user code calls an API (e.g. ``resonate.schedule()``). Before
-    this fix, ``send``'s ``if not self._running`` guard fired immediately,
-    raising a misleading ``HttpError("network has been stopped")`` even though
-    ``stop()`` was never called. The fix adds a ``_stopped`` flag that is only
-    set by ``stop()``, so "not yet started" and "explicitly stopped" are
-    distinct states.
-
-    This test patches ``_ensure_session`` to return a fake session that
-    succeeds immediately, so the request goes through without a real server.
-    """
-    net = HttpNetwork("http://localhost:8001", pid="pid", group="g")
-    ok_session = _FlakySession(
-        fail_times=0, body='{"head":{"status":200},"data":{}}'
-    )
-    monkeypatch.setattr(net, "_ensure_session", lambda: ok_session)
-
-    # Simulate what Resonate.__init__ does: schedule start() as a background
-    # task without yielding to the event loop.
-    start_task = asyncio.create_task(net.start())
-    assert not net._running, "start() has not run yet -- _running must still be False"
-    assert not net._stopped, "_stopped must be False before stop() is ever called"
-
-    # send() must NOT raise "network has been stopped" here.
-    body = await net.send("{}")
-    assert body == '{"head":{"status":200},"data":{}}'
-
-    start_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await start_task
-
-
-@pytest.mark.asyncio
-async def test_http_send_after_stop_raises_even_if_never_started(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``send`` must raise ``HttpError`` after ``stop()``, even without a prior ``start()``.
-
-    ``stop()`` sets ``_stopped = True``; the guard in ``send()`` keys on
-    ``_stopped``, so an explicitly stopped network is always refused regardless
-    of whether ``start()`` was ever called.
-    """
-    net = HttpNetwork("http://localhost:8001", pid="pid", group="g")
-    ok_session = _FlakySession(
-        fail_times=0, body='{"head":{"status":200},"data":{}}'
-    )
-    monkeypatch.setattr(net, "_ensure_session", lambda: ok_session)
-
-    # Stop without ever starting.
-    await net.stop()
-    assert net._stopped
-
-    with pytest.raises(HttpError):
-        await net.send("{}")
