@@ -1,13 +1,12 @@
-import { WallClock } from "./clock.js";
-import { Codec } from "./codec.js";
-import { Core } from "./core.js";
-import { type Encryptor, NoopEncryptor } from "./encryptor.js";
-import exceptions, { ResonateTimeoutException } from "./exceptions.js";
-import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat.js";
-import { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
-import { HttpNetwork, PollMessageSource } from "./network/http.js";
-import { LocalNetwork } from "./network/local.js";
-import type { Network } from "./network/network.js";
+import { WallClock } from "../clock.js";
+import { Codec } from "../codec.js";
+import { type Encryptor, NoopEncryptor } from "../encryptor.js";
+import exceptions, { ResonateTimeoutException } from "../exceptions.js";
+import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "../heartbeat.js";
+import { ConsoleLogger, type Logger, type LogLevel } from "../logger.js";
+import { HttpNetwork, PollMessageSource } from "../network/http.js";
+import { LocalNetwork } from "../network/local.js";
+import type { Network } from "../network/network.js";
 import {
   isConflict,
   isSuccess,
@@ -18,14 +17,16 @@ import {
   type PromiseRegisterListenerReq,
   type TaskCreateReq,
   type TaskRecord,
-} from "./network/types.js";
-import { type Options, OptionsBuilder } from "./options.js";
-import { delay, getEnv, randomUUID } from "./platform.js";
-import { Promises } from "./promises.js";
-import { Registry } from "./registry.js";
-import { Schedules } from "./schedules.js";
-import type { Func, ParamsWithOptions, Return, Send } from "./types.js";
-import * as util from "./util.js";
+} from "../network/types.js";
+import { type Options, OptionsBuilder } from "../options.js";
+import { delay, getEnv, randomUUID } from "../platform.js";
+import { Promises } from "../promises.js";
+import { Registry } from "../registry.js";
+import { Schedules } from "../schedules.js";
+import type { Func, Send } from "../types.js";
+import * as util from "../util.js";
+import type { AnyFunc, ParamsWithOptions, Return } from "./context.js";
+import { AsyncCore } from "./core.js";
 
 export interface ResonateHandle<T> {
   id: string;
@@ -33,11 +34,9 @@ export interface ResonateHandle<T> {
   done(): Promise<boolean>;
 }
 
-export interface ResonateFunc<F extends Func> {
-  run: (id: string, ...args: ParamsWithOptions<F>) => Promise<Return<F>>;
-  rpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<Return<F>>;
-  beginRun: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
-  beginRpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
+export interface AsyncResonateFunc<F extends AnyFunc> {
+  run: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
+  rpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
   options: (opts?: Partial<Options>) => Options;
 }
 
@@ -52,14 +51,18 @@ type SubscriptionEntry = {
   timeout: number;
 };
 
-export class Resonate {
+/**
+ * Opt-in entry point for the async/await execution engine. Lives alongside the
+ * generator-based `Resonate` and reuses the same network/codec/registry/task
+ * plumbing, routing execution through {@link AsyncCore}.
+ */
+export class AsyncResonate {
   private clock: WallClock;
-
   private pid: string;
   private ttl: number;
-  private idPrefix;
+  private idPrefix: string;
 
-  private core: Core;
+  private core: AsyncCore;
   private codec: Codec;
   private network: Network;
   private send: Send;
@@ -76,27 +79,6 @@ export class Resonate {
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
-  /**
-   * Creates a new Resonate client instance.
-   *
-   * @param options - Configuration options for the client.
-   * @param options.url - Resonate server URL. Falls back to `process.env.RESONATE_URL`.
-   *   If no URL is resolved, a local in-memory network is used.
-   * @param options.group - Worker group name. Defaults to `"default"`.
-   * @param options.pid - Process identifier for the client. Defaults to a random UUID.
-   * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
-   * @param options.token - Bearer token for authentication. Passed through to HttpNetwork
-   *   which falls back to `RESONATE_TOKEN` env var.
-   * @param options.timeout - Network request timeout. Passed through to HttpNetwork
-   *   which falls back to `RESONATE_TIMEOUT` env var (default: 10s).
-   * @param options.verbose - Enables verbose logging (shorthand for `logLevel: "debug"`). Defaults to `false`.
-   * @param options.logLevel - Log level for the default ConsoleLogger. Defaults to `"warn"`. Takes precedence over `verbose`.
-   * @param options.logger - Custom logger implementation. Defaults to {@link ConsoleLogger}.
-   * @param options.encryptor - Payload encryptor. Defaults to {@link NoopEncryptor}.
-   * @param options.network - Custom network implementation. Defaults to `undefined`.
-   * @param options.prefix - ID prefix applied to generated IDs. Defaults to
-   *   `process.env.RESONATE_PREFIX` when set.
-   */
   constructor({
     url = undefined,
     group = "default",
@@ -131,20 +113,12 @@ export class Resonate {
     const resolvedPrefix = prefix ?? getEnv("RESONATE_PREFIX");
     this.idPrefix = resolvedPrefix ? `${resolvedPrefix}:` : "";
 
-    // Resolve logger: explicit logger > ConsoleLogger with resolved level
-    // logLevel takes precedence over verbose; verbose: true -> "debug"
     const resolvedLogLevel: LogLevel = logLevel ?? (verbose ? "debug" : "warn");
     this.logger = logger ?? new ConsoleLogger(resolvedLogLevel);
 
-    this.subscribeEvery = 60 * 1000; // make this configurable
+    this.subscribeEvery = util.MIN;
 
-    // Determine the URL: url arg > RESONATE_URL env var
-    // Only used to decide between LocalNetwork and HttpNetwork.
-    // Full URL/bun fmt
-    // bun check
-    // /token/timeout env var resolution is HttpNetwork's responsibility (3.7).
     const resolvedUrl = url ?? (getEnv("RESONATE_URL") || undefined);
-
     this.pid = pid ?? randomUUID().replace(/-/g, "");
 
     let heartbeat: boolean;
@@ -181,10 +155,9 @@ export class Resonate {
 
     this.registry = new Registry();
     this.dependencies = new Map();
-
     this.optsBuilder = new OptionsBuilder({ match: this.network.match.bind(this.network), idPrefix: this.idPrefix });
 
-    this.core = new Core({
+    this.core = new AsyncCore({
       pid: this.pid,
       ttl: this.ttl,
       clock: this.clock,
@@ -200,109 +173,80 @@ export class Resonate {
     this.promises = new Promises(this.send);
     this.schedules = new Schedules(this.send);
 
-    // subscribe to network
     this.network.recv(this.onMessage.bind(this));
     this.network.init().catch((err) => {
       this.logger.error(
-        { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+        { component: "async-resonate", error: err instanceof Error ? err.message : String(err) },
         "Failed to start network",
       );
     });
-    // periodically refresh subscriptions
+
     this.intervalId = setInterval(async () => {
       for (const [id, sub] of this.subscriptions.entries()) {
         try {
-          const registerListenerReq: PromiseRegisterListenerReq = {
+          const res = await this.promiseRegisterListener({
             kind: "promise.register_listener",
             head: { corrId: randomUUID(), version: util.VERSION },
-            data: {
-              awaited: id,
-              address: this.network.unicast,
-            },
-          };
-
-          const res = await this.promiseRegisterListener(registerListenerReq);
+            data: { awaited: id, address: this.network.unicast },
+          });
           if (res.state !== "pending") {
             sub.resolve(res);
             this.subscriptions.delete(id);
           }
-        } catch {
-          // silently skip on error
+        } catch (err) {
+          this.logger.warn(
+            { component: "async-resonate", error: err instanceof Error ? err.message : String(err) },
+            "subscription poll failed",
+          );
         }
       }
     }, this.subscribeEvery);
   }
 
-  /**
-   * Registers a function with Resonate for execution and version control.
-   */
-  public register<F extends Func>(
-    name: string,
-    func: F,
-    options?: {
-      version?: number;
-    },
-  ): ResonateFunc<F>;
-  public register<F extends Func>(
-    func: F,
-    options?: {
-      version?: number;
-    },
-  ): ResonateFunc<F>;
-  public register<F extends Func>(
+  /** Registers an async function (leaf or workflow) for execution. */
+  public register<F extends AnyFunc>(name: string, func: F, options?: { version?: number }): AsyncResonateFunc<F>;
+  public register<F extends AnyFunc>(func: F, options?: { version?: number }): AsyncResonateFunc<F>;
+  public register<F extends AnyFunc>(
     nameOrFunc: string | F,
-    funcOrOptions?:
-      | F
-      | {
-          version?: number;
-        },
-    maybeOptions: {
-      version?: number;
-    } = {},
-  ): ResonateFunc<F> {
+    funcOrOptions?: F | { version?: number },
+    maybeOptions: { version?: number } = {},
+  ): AsyncResonateFunc<F> {
     const { version = 1 } = (typeof funcOrOptions === "object" ? funcOrOptions : maybeOptions) ?? {};
-    const func = typeof nameOrFunc === "function" ? nameOrFunc : (funcOrOptions as F);
+    const func = (typeof nameOrFunc === "function" ? nameOrFunc : (funcOrOptions as F)) as AnyFunc;
     const name = typeof nameOrFunc === "string" ? nameOrFunc : func.name;
 
-    this.registry.add(func, name, version);
+    this.registry.add(func as unknown as Func, name, version);
 
     // Re-flatten the split: spreading the [args, opts] tuple itself would pass
     // the args array as a single argument to the function.
-    const flatten = (args: ParamsWithOptions<F>): any[] => {
-      const [argu, opts] = this.getArgsAndOpts(args, version);
-      return [...argu, opts];
-    };
-
     return {
-      run: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.run(id, func, ...flatten(args)),
-      rpc: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.rpc(id, func, ...flatten(args)),
-      beginRun: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
-        this.beginRun(id, func, ...flatten(args)),
-      beginRpc: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
-        this.beginRpc(id, func, ...flatten(args)),
+      run: (id, ...args) => {
+        const [argu, opts] = this.getArgsAndOpts(args, version);
+        return this.run(id, func, ...argu, opts);
+      },
+      rpc: (id, ...args) => {
+        const [argu, opts] = this.getArgsAndOpts(args, version);
+        return this.rpc(id, func, ...argu, opts);
+      },
       options: this.options,
     };
   }
 
-  public async run<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
-  public async run<T>(id: string, name: string, ...args: any[]): Promise<T>;
-  public async run<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
-  public async run(id: string, funcOrName: Func | string, ...args: any[]): Promise<any> {
-    return (await this.beginRun(id, funcOrName, ...args)).result();
-  }
-
-  public async beginRun<F extends Func>(
+  /**
+   * Begins a workflow as a locally-executed root task and returns a handle.
+   * Await `.result()` for the value (delivered via the durable-promise
+   * subscription, never via the in-memory frame — see the GC rules).
+   */
+  public async run<F extends AnyFunc>(
     id: string,
     func: F,
     ...args: ParamsWithOptions<F>
   ): Promise<ResonateHandle<Return<F>>>;
-  public async beginRun<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
-  public async beginRun(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
-  public async beginRun(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
+  public async run<T>(id: string, funcOrName: AnyFunc | string, ...args: any[]): Promise<ResonateHandle<T>>;
+  public async run(id: string, funcOrName: AnyFunc | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
     const [args, opts] = this.getArgsAndOpts(argsWithOpts);
     const registered = this.registry.get(funcOrName, opts.version);
 
-    // function must be registered
     if (!registered) {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(
         typeof funcOrName === "string" ? funcOrName : funcOrName.name,
@@ -311,8 +255,8 @@ export class Resonate {
     }
 
     id = `${this.idPrefix}${id}`;
-
     util.assert(registered.version > 0, "function version must be greater than zero");
+
     const { promise, task } = await this.taskCreate({
       kind: "task.create",
       head: { corrId: randomUUID(), version: util.VERSION },
@@ -323,15 +267,10 @@ export class Resonate {
           kind: "promise.create",
           head: { corrId: randomUUID(), version: util.VERSION },
           data: {
-            id: id,
+            id,
             timeoutAt: Date.now() + opts.timeout,
             param: {
-              data: {
-                func: registered.name,
-                args: args,
-                retry: opts.retryPolicy?.encode(),
-                version: registered.version,
-              },
+              data: { func: registered.name, args, retry: opts.retryPolicy?.encode(), version: registered.version },
               headers: {},
             },
             tags: {
@@ -355,7 +294,7 @@ export class Resonate {
         .executeUntilBlocked(task, promise)
         .catch((err) =>
           this.logger.warn(
-            { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+            { component: "async-resonate", error: err instanceof Error ? err.message : String(err) },
             "executeUntilBlocked failed",
           ),
         );
@@ -364,48 +303,32 @@ export class Resonate {
     return this.createHandle(promise);
   }
 
-  public async rpc<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
-  public async rpc<T>(id: string, name: string, ...args: any[]): Promise<T>;
-  public async rpc<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
-  public async rpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<any> {
-    return (await this.beginRpc(id, funcOrName, ...args)).result();
-  }
-
-  public async beginRpc<F extends Func>(
+  /** Begins a workflow as a remote (globally-targeted) promise and returns a handle. */
+  public async rpc<F extends AnyFunc>(
     id: string,
     func: F,
     ...args: ParamsWithOptions<F>
   ): Promise<ResonateHandle<Return<F>>>;
-  public async beginRpc<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
-  public async beginRpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
-  public async beginRpc(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
+  public async rpc<T>(id: string, funcOrName: AnyFunc | string, ...args: any[]): Promise<ResonateHandle<T>>;
+  public async rpc(id: string, funcOrName: AnyFunc | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
     const [args, opts] = this.getArgsAndOpts(argsWithOpts);
     const registered = this.registry.get(funcOrName, opts.version);
 
-    // function must be registered if function pointer is provided
     if (typeof funcOrName === "function" && !registered) {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
     id = `${this.idPrefix}${id}`;
-
     const func = registered ? registered.name : (funcOrName as string);
     const version = registered ? registered.version : opts.version || 1;
+
     const promise = await this.promiseCreate({
       kind: "promise.create",
       head: { corrId: randomUUID(), version: util.VERSION },
       data: {
-        id: id,
+        id,
         timeoutAt: Date.now() + opts.timeout,
-        param: {
-          data: {
-            func,
-            args,
-            retry: opts.retryPolicy?.encode(),
-            version,
-          },
-          headers: {},
-        },
+        param: { data: { func, args, retry: opts.retryPolicy?.encode(), version }, headers: {} },
         tags: {
           ...opts.tags,
           "resonate:origin": id,
@@ -424,30 +347,11 @@ export class Resonate {
   }
 
   /**
-   * Creates a recurring schedule that invokes a registered function on a cron interval.
-   *
-   * The schedule is persisted on the Resonate Server and triggers a new durable promise
-   * for each cron tick. The generated promise IDs include the schedule name and timestamp
-   * to ensure uniqueness across invocations.
-   *
-   * If a function reference is provided, it must already be registered via {@link register}.
-   * Alternatively, a function name (string) can be used for remote dispatch.
-   *
-   * @param name - A unique name identifying this schedule.
-   * @param cron - A cron expression defining the recurrence interval (e.g., `"* * * * *"` for every minute).
-   * @param funcOrName - Either the registered function reference or its string name to invoke on each tick.
-   * @param args - Positional arguments and optional configuration parameters passed to the function.
-   *
-   * @returns A {@link ResonateSchedule} handle with a `delete()` method to remove the schedule.
-   *
-   * @example
-   * ```ts
-   * const schedule = await resonate.schedule("daily-report", "0 0 * * *", generateReport);
-   * // Later, to remove:
-   * await schedule.delete();
-   * ```
+   * Creates a recurring schedule that invokes a registered function on a cron
+   * interval. Each tick creates a fresh durable promise whose id embeds the
+   * schedule name and timestamp. Returns a handle with `delete()`.
    */
-  public async schedule<F extends Func>(
+  public async schedule<F extends AnyFunc>(
     name: string,
     cron: string,
     func: F,
@@ -457,21 +361,19 @@ export class Resonate {
   public async schedule(
     name: string,
     cron: string,
-    funcOrName: Func | string,
+    funcOrName: AnyFunc | string,
     ...argsWithOpts: any[]
   ): Promise<ResonateSchedule> {
     const [args, opts] = this.getArgsAndOpts(argsWithOpts);
     const registered = this.registry.get(funcOrName, opts.version);
 
-    // function must be registered if function pointer is provided
     if (typeof funcOrName === "function" && !registered) {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
-    // TODO: move this into the handler?
     const { headers, data } = this.codec.encode({
       func: registered ? registered.name : (funcOrName as string),
-      args: args,
+      args,
       version: registered ? registered.version : opts.version || 1,
     });
 
@@ -486,67 +388,36 @@ export class Resonate {
     };
   }
 
+  /** Returns a handle to an existing durable promise by id. */
   public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
     id = `${this.idPrefix}${id}`;
     const promise = await this.promiseGet({
       kind: "promise.get",
       head: { corrId: randomUUID(), version: util.VERSION },
-      data: {
-        id,
-      },
+      data: { id },
     });
 
     return this.createHandle(promise);
   }
 
-  /**
-   * Builds a resolved {@link Options} object by merging the provided partial options
-   * with the client's defaults.
-   *
-   * This is useful for inspecting the effective configuration that would be applied
-   * to a `run`, `rpc`, or `schedule` call, or for passing explicit options to the
-   * convenience methods on a {@link ResonateFunc} handle.
-   *
-   * @param opts - Partial options to merge. Supports `tags`, `target`, `timeout`,
-   *   `version`, and `retryPolicy`.
-   *
-   * @returns A fully resolved {@link Options} object.
-   */
   public options(
     opts: Partial<Pick<Options, "tags" | "target" | "timeout" | "version" | "retryPolicy">> = {},
   ): Options {
     return this.optsBuilder.build(opts);
   }
 
-  private getArgsAndOpts(args: any[], version?: number): [any[], Options] {
-    return util.splitArgsAndOpts(args, this.options({ version }));
-  }
-
-  /**
-   * Registers a named dependency that will be available to all Resonate functions
-   * via `context.getDependency(name)`.
-   *
-   * Use this to inject services, clients, or configuration objects into Resonate
-   * functions without tight coupling.
-   *
-   * @param name - A unique key identifying the dependency.
-   * @param obj - The dependency value (any object or primitive).
-   */
   public setDependency(name: string, obj: any): void {
     this.dependencies.set(name, obj);
   }
 
-  /**
-   * Stops the Resonate client, releasing all resources.
-   *
-   * This shuts down the underlying network transport and message source, stops the
-   * heartbeat loop, and clears the subscription refresh interval. After calling
-   * `stop()`, the client should not be used for further operations.
-   */
   public async stop(): Promise<void> {
     await this.network.stop();
     this.heartbeat.stop();
     clearInterval(this.intervalId);
+  }
+
+  private getArgsAndOpts(args: any[], version?: number): [any[], Options] {
+    return util.splitArgsAndOpts(args, this.options({ version }));
   }
 
   private async taskCreate(req: TaskCreateReq): Promise<{ promise: PromiseRecord; task?: TaskRecord }> {
@@ -555,20 +426,14 @@ export class Resonate {
     const res = await this.send(req);
 
     if (!isSuccess(res) && !isConflict(res)) {
-      throw exceptions.SERVER_ERROR(res.data, true, {
-        code: res.head.status,
-        message: res.data,
-      });
+      throw exceptions.SERVER_ERROR(res.data, true, { code: res.head.status, message: res.data });
     }
 
     if (isConflict(res)) {
       const promise = await this.promiseRegisterListener({
         kind: "promise.register_listener",
         head: { corrId: randomUUID(), version: util.VERSION },
-        data: {
-          awaited: req.data.action.data.id,
-          address: this.network.unicast,
-        },
+        data: { awaited: req.data.action.data.id, address: this.network.unicast },
       });
       return { promise, task: undefined };
     }
@@ -581,19 +446,15 @@ export class Resonate {
     req.data.param = this.codec.encode(req.data.param.data);
 
     const res = await this.send(req);
-
     if (!isSuccess(res)) {
-      throw exceptions.SERVER_ERROR(res.data, true, {
-        code: res.head.status,
-        message: res.data,
-      });
+      throw exceptions.SERVER_ERROR(res.data, true, { code: res.head.status, message: res.data });
     }
 
     return this.codec.decodePromise(res.data.promise);
   }
 
   private async promiseRegisterListener(req: PromiseRegisterListenerReq): Promise<PromiseRecord> {
-    const retryDelay = 5000;
+    const retryDelay = 5 * util.SEC;
     while (true) {
       try {
         const res = await this.send(req);
@@ -614,14 +475,9 @@ export class Resonate {
 
   private async promiseGet(req: PromiseGetReq): Promise<PromiseRecord> {
     const res = await this.send(req);
-
     if (!isSuccess(res)) {
-      throw exceptions.SERVER_ERROR(res.data, true, {
-        code: res.head.status,
-        message: res.data,
-      });
+      throw exceptions.SERVER_ERROR(res.data, true, { code: res.head.status, message: res.data });
     }
-
     return this.codec.decodePromise(res.data.promise);
   }
 
@@ -629,10 +485,7 @@ export class Resonate {
     const registerListenerReq: PromiseRegisterListenerReq = {
       kind: "promise.register_listener",
       head: { corrId: randomUUID(), version: util.VERSION },
-      data: {
-        awaited: promise.id,
-        address: this.network.unicast,
-      },
+      data: { awaited: promise.id, address: this.network.unicast },
     };
 
     return {
@@ -648,7 +501,7 @@ export class Resonate {
         .onMessage(msg)
         .catch((err) =>
           this.logger.warn(
-            { component: "resonate", error: err instanceof Error ? err.message : String(err) },
+            { component: "async-resonate", error: err instanceof Error ? err.message : String(err) },
             "onMessage failed",
           ),
         );
@@ -695,7 +548,6 @@ export class Resonate {
     let subscription = this.subscriptions.get(id);
     if (!subscription) {
       const { promise, resolve, reject } = Promise.withResolvers<PromiseRecord>();
-      // if no res, we cannot extract timeoutAt information. So we fallback to a large number
       subscription = { promise, resolve, reject, timeout: res ? res.timeoutAt : 100000000 };
       this.subscriptions.set(id, subscription);
     } else {

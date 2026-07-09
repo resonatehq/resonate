@@ -4,7 +4,7 @@ import { Core } from "../../src/core.js";
 import { NoopHeartbeat } from "../../src/heartbeat.js";
 import { ConsoleLogger } from "../../src/logger.js";
 import type { Network } from "../../src/network/network.js";
-import { isResponse, type Message, type Request, type Response } from "../../src/network/types.js";
+import { isMessage, isResponse, type Message, type Request, type Response } from "../../src/network/types.js";
 
 import { OptionsBuilder } from "../../src/options.js";
 import type { Registry } from "../../src/registry.js";
@@ -144,10 +144,12 @@ class SimulatedNetwork implements Network {
       } catch {
         return; // discard corrupted messages
       }
-      // Validate it's a proper Message
-      if (typeof parsed === "object" && parsed !== null && "kind" in parsed) {
+      // Validate at the trust boundary with the same guard production HTTP uses
+      // (src/network/http.ts); corrupted/malformed messages are dropped here
+      // instead of reaching the engine.
+      if (isMessage(parsed)) {
         for (const callback of this.subscribers) {
-          callback(parsed as Message);
+          callback(parsed);
         }
       }
     }
@@ -173,6 +175,16 @@ class SimulatedNetwork implements Network {
   }
 }
 
+// Both `Core` (generator engine) and `AsyncCore` (async engine) take the
+// identical dependency object and expose `onMessage`, so the worker is made
+// engine-agnostic by injecting a factory. This is the single swap point that
+// lets a (seed, workload, fault) triple run on either engine.
+export type EngineDeps = ConstructorParameters<typeof Core>[0];
+export type SimEngine = { onMessage(msg: Message): Promise<unknown> };
+export type EngineFactory = (deps: EngineDeps) => SimEngine;
+
+export const genEngine: EngineFactory = (deps) => new Core(deps);
+
 export class WorkerProcess extends Process {
   private clock: StepClock;
   private network: SimulatedNetwork;
@@ -184,12 +196,13 @@ export class WorkerProcess extends Process {
     { charFlipProb }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
+    engineFactory: EngineFactory = genEngine,
   ) {
     super(iaddr, gaddr);
     this.clock = clock;
     this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb }, unicast(iaddr), unicast("server"));
     const logger = new ConsoleLogger("error");
-    const core = new Core({
+    const core = engineFactory({
       pid: iaddr,
       ttl: 10000,
       clock: this.clock,

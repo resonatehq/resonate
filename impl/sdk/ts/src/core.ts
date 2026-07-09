@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Clock } from "./clock.js";
 import type { Codec } from "./codec.js";
 import { Computation, type Done, type Status } from "./computation.js";
@@ -7,6 +6,7 @@ import type { Heartbeat } from "./heartbeat.js";
 import type { Logger } from "./logger.js";
 import { isRedirect, isSuccess, type Message, type PromiseRecord, type TaskRecord } from "./network/types.js";
 import type { OptionsBuilder } from "./options.js";
+import { randomUUID } from "./platform.js";
 import type { Registry } from "./registry.js";
 import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries.js";
 import type { Effects, Send } from "./types.js";
@@ -186,8 +186,17 @@ export class Core {
     });
   }
 
-  public async onMessage(msg: Message): Promise<Status> {
-    util.assert(msg.kind === "execute");
+  public async onMessage(msg: Message): Promise<Status | undefined> {
+    // `msg` arrives off the network: an unexpected kind is an external
+    // condition (unhandled message type, corruption), not an internal
+    // invariant — drop it with a warning instead of asserting (which exits).
+    if (msg.kind !== "execute") {
+      this.logger.warn(
+        { component: "core", kind: (msg as { kind?: unknown }).kind },
+        "dropping message with unexpected kind",
+      );
+      return undefined;
+    }
 
     const task = msg.data.task;
     const res = await this.send({

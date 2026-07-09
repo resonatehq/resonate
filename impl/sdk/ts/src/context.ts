@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import type { Clock } from "./clock.js";
 import exceptions, { type ResonateError } from "./exceptions.js";
 import type { PromiseCreateReq } from "./network/types.js";
 import type { Options, OptionsBuilder } from "./options.js";
+import { randomUUID } from "./platform.js";
 import type { Registry } from "./registry.js";
 import { Exponential, Never, type RetryPolicy } from "./retries.js";
 import type { Func, ParamsWithOptions, Result, Return } from "./types.js";

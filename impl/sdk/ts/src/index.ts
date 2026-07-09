@@ -7,7 +7,7 @@ export { type Encryptor, NoopEncryptor } from "./encryptor.js";
 export { ResonateTimeoutException } from "./exceptions.js";
 export { AsyncHeartbeat, NoopHeartbeat } from "./heartbeat.js";
 export { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
-export { type HttpAdapter, HttpNetwork, PollMessageSource, PushMessageSource } from "./network/http.js";
+export { type HttpAdapter, HttpNetwork, PollMessageSource } from "./network/http.js";
 export { LocalNetwork } from "./network/local.js";
 export { NatsNetwork, type NatsNetworkConfig } from "./network/nats.js";
 export type { Network, Recv, Send } from "./network/network.js";
@@ -15,6 +15,7 @@ export * from "./network/types.js";
 export { OptionsBuilder } from "./options.js";
 export { Registry } from "./registry.js";
 export { Resonate, type ResonateFunc, type ResonateHandle } from "./resonate.js";
+export { Constant, Exponential, Linear, Never, type RetryPolicy } from "./retries.js";
 export {
   awaitThenResumeOrSuspend,
   blockIsSole,

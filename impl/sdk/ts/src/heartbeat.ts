@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import type { Logger } from "./logger.js";
+import { randomUUID } from "./platform.js";
 import type { Send } from "./types.js";
 import { VERSION } from "./util.js";
 

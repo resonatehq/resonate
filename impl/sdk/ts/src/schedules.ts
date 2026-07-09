@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import exceptions from "./exceptions.js";
 import { LocalNetwork } from "./network/local.js";
 import { isSuccess, type ScheduleRecord } from "./network/types.js";
+import { randomUUID } from "./platform.js";
 import type { Send } from "./types.js";
 import { VERSION } from "./util.js";
 

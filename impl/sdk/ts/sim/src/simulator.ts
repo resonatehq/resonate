@@ -225,12 +225,23 @@ export class Simulator {
     this.network = retained.concat(newMessages);
   }
 
+  // Yield at a MACROTASK boundary between ticks (not `await Promise.resolve()`,
+  // which yields a single microtask generation). This drains the entire
+  // microtask queue before the next tick — engine compute is instantaneous in
+  // sim-time, no matter how many promise-chain generations it needs — and lets
+  // engine `setImmediate`s fire (a microtask-only loop starves the macrotask
+  // phases entirely). Real timers (`setTimeout(ms > 0)`) remain off-limits in
+  // engine code: they are wall-clock, invisible to sim-time.
+  private boundary(): Promise<void> {
+    return new Promise((resolve) => setImmediate(resolve));
+  }
+
   async exec(steps: number): Promise<void> {
     let i = 0;
     while (i < steps) {
       this.runScheduled();
       this.tick();
-      await Promise.resolve();
+      await this.boundary();
       i++;
     }
   }
@@ -240,7 +251,7 @@ export class Simulator {
     while (i < steps) {
       this.runScheduled();
       this.tick();
-      await Promise.resolve();
+      await this.boundary();
       if (condition()) {
         return true;
       }

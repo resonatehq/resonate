@@ -238,3 +238,28 @@ export function isWellFormed(t: Trace): boolean {
     rootSpawn(t)
   );
 }
+
+/**
+ * Lifecycle subset of {@link isWellFormed}: every predicate EXCEPT
+ * `awaitThenResumeOrSuspend`.
+ *
+ * The async/await engine emits the full promise lifecycle (spawn/run/rpc/block/
+ * dedup/return/suspend) but cannot emit `await`/`resume`: the user's bare `await`
+ * on a durable handle is opaque to the engine (there is no yield to intercept).
+ * So its trace is validated against this subset — the promise lifecycle must
+ * still be well-formed, only the await→resume/suspend pairing is dropped.
+ */
+export function isWellFormedLifecycle(t: Trace): boolean {
+  return (
+    uniqueSpawn(t) &&
+    exclusiveLifecycle(t) &&
+    spawnIsFirst(t) &&
+    terminalIsLast(t) &&
+    blockIsSole(t) &&
+    dedupIsSole(t) &&
+    uniqueTerminal(t) &&
+    runHasCallee(t) &&
+    rpcHasCallee(t) &&
+    rootSpawn(t)
+  );
+}

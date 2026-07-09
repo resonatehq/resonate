@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import type { Context, InnerContext } from "./context.js";
 import { Decorator, type PromiseCompleted, type Value } from "./decorator.js";
 import type { Logger } from "./logger.js";
 import type { PromiseRecord } from "./network/types.js";
+import { randomUUID } from "./platform.js";
 import { Never } from "./retries.js";
 import type { TraceCollector } from "./trace.js";
 import type { Effects, Result, Yieldable } from "./types.js";

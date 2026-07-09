@@ -104,3 +104,63 @@ resonate tree countdown.1
 ```
 
 Now try killing the worker mid-countdown and restarting. **The countdown picks up right where it left off without missing a beat.**
+
+## Async/await
+
+The SDK also ships an async/await engine: the same durable model, written with ordinary `async` functions instead of generators. Import it from `@resonatehq/sdk/async`:
+
+```typescript
+import { AsyncResonate, type Context } from "@resonatehq/sdk/async";
+
+async function countdown(ctx: Context, count: number, delay: number) {
+  for (let i = count; i > 0; i--) {
+    // Run a function, persist its result
+    await ctx.run((ctx: Context) => console.log(`Countdown: ${i}`));
+    // Sleep
+    await ctx.sleep(delay * 1000);
+  }
+  console.log("Done!");
+}
+
+// Instantiate Resonate
+const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+// Register the function
+resonate.register(countdown);
+```
+
+Same server, same CLI, same durable promises — the rest of the quickstart is unchanged.
+
+One difference to know about: operations are **eager**. Calling `ctx.run(...)` starts the work immediately and returns an awaitable handle, so fan-out is ordinary promise code:
+
+```typescript
+async function checkout(ctx: Context) {
+  const payment = ctx.run(chargeCard);     // starts now
+  const inventory = ctx.run(reserveItems); // runs concurrently
+  return await Promise.all([payment, inventory]);
+}
+```
+
+## Migrating from generators
+
+Both engines live in the same package and speak the same protocol to the same server, so you can migrate one function at a time. The mechanical changes:
+
+| Generator engine | Async engine |
+| --- | --- |
+| `import { Resonate } from "@resonatehq/sdk"` | `import { AsyncResonate } from "@resonatehq/sdk/async"` |
+| `function* (context: Context, ...)` | `async function (ctx: Context, ...)` |
+| `yield* context.run(...)`, `yield* context.sleep(...)` | `await ctx.run(...)`, `await ctx.sleep(...)` |
+| `yield context.beginRun(...)`, later `yield future` | `const p = ctx.run(...)`, later `await p` — every op is eager |
+| `resonate.run(id, func, ...args)` → the result | `resonate.run(id, func, ...args)` → a handle; `await handle.result()` |
+| `resonate.beginRun(id, func, ...args)` → a handle | same call — there are no `begin*` variants, `run` *is* begin-run |
+
+Two things to watch:
+
+- **Retries are opt-in.** The generator engine retries plain functions with exponential backoff by default. The async engine never retries by default — an async workflow and a plain async function are indistinguishable at runtime, so there is no safe blanket default. To keep retry behavior, pass a policy explicitly:
+
+  ```typescript
+  import { Exponential } from "@resonatehq/sdk/async";
+
+  await ctx.run(chargeCard, ctx.options({ retryPolicy: new Exponential() }));
+  ```
+
+- **Only await durable promises inside a workflow.** A plain `await` on a timer or network call is invisible to the engine — the workflow may resume after its execution pass has ended and abort. Wrap side effects in `ctx.run`, the same rule as `context.run` in the generator engine.

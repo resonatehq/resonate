@@ -6,12 +6,10 @@
  *
  * 1. LocalNetwork.match   → `local://any@<target>`
  * 2. PollMessageSource.match → `poll://any@<target>`
- * 3. PushMessageSource.match → `this.anycast` (http://<host>:<port>), ignores target
- * 4. PushMessageSource.match before init() → assertion error (anycast is "")
- * 5. HttpNetwork.match    → delegates to its adapter
+ * 3. HttpNetwork.match    → delegates to its adapter
  */
 
-import { HttpNetwork, PollMessageSource, PushMessageSource } from "../../src/network/http.js";
+import { HttpNetwork, PollMessageSource } from "../../src/network/http.js";
 import { LocalNetwork } from "../../src/network/local.js";
 
 // ---------------------------------------------------------------------------
@@ -65,48 +63,6 @@ describe("PollMessageSource.match", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PushMessageSource
-// ---------------------------------------------------------------------------
-
-describe("PushMessageSource.match", () => {
-  let adapter: PushMessageSource;
-
-  afterEach(async () => {
-    try {
-      await adapter?.stop();
-    } catch {
-      // ignore cleanup errors
-    }
-  });
-
-  test("anycast is empty string before init() — calling match would violate the assert", () => {
-    adapter = new PushMessageSource();
-    // util.assert calls process.exit(1) in Node, so we verify the guard
-    // condition directly rather than calling match() and catching the exit.
-    expect(adapter.anycast).toBe("");
-  });
-
-  test("returns the http anycast address after init(), ignoring the target", async () => {
-    adapter = new PushMessageSource();
-    await adapter.init();
-
-    const result = adapter.match("ignored-target");
-
-    // Should be the worker's own HTTP address (same as anycast)
-    expect(result).toBe(adapter.anycast);
-    expect(result).toMatch(/^http:\/\//);
-  });
-
-  test("always returns the same address regardless of target string", async () => {
-    adapter = new PushMessageSource();
-    await adapter.init();
-
-    expect(adapter.match("group-a")).toBe(adapter.match("group-b"));
-    expect(adapter.match("group-a")).toBe(adapter.match("default"));
-  });
-});
-
-// ---------------------------------------------------------------------------
 // HttpNetwork — delegates to the adapter
 // ---------------------------------------------------------------------------
 
@@ -118,27 +74,5 @@ describe("HttpNetwork.match", () => {
     const network = new HttpNetwork({ adapter });
 
     expect(network.match("some-target")).toBe("poll://any@some-target");
-  });
-
-  test("delegates to PushMessageSource.match after init()", async () => {
-    const adapter = new PushMessageSource();
-    const network = new HttpNetwork({ adapter });
-    await network.init();
-
-    const result = network.match("ignored");
-    expect(result).toBe(adapter.anycast);
-    expect(result).toMatch(/^http:\/\//);
-
-    await network.stop();
-  });
-
-  test("PushMessageSource adapter anycast is empty before init() — calling match would violate the assert", () => {
-    const adapter = new PushMessageSource();
-    const network = new HttpNetwork({ adapter });
-
-    // util.assert calls process.exit(1) in Node so we cannot use toThrow().
-    // Verify the guard condition directly: anycast is still "" before init().
-    expect(adapter.anycast).toBe("");
-    expect(network.anycast).toBe("");
   });
 });

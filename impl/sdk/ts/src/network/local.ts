@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { CronExpressionParser } from "cron-parser";
+import { randomUUID } from "../platform.js";
 import { assert, VERSION } from "../util.js";
 import type { Network } from "./network.js";
 import { isResponse } from "./types.js";

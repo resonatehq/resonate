@@ -58,6 +58,20 @@ describe("Resonate usage tests", () => {
     );
   });
 
+  test("registered handle passes args through run/rpc/beginRun/beginRpc", async () => {
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+    const f = resonate.register("f", (_ctx: Context, a: number, b: string): string => `${b}:${a}`);
+
+    expect(await f.run("h1", 21, "x")).toBe("x:21");
+    expect(await f.rpc("h2", 22, "y")).toBe("y:22");
+    expect(await (await f.beginRun("h3", 23, "z")).result()).toBe("z:23");
+    expect(await (await f.beginRpc("h4", 24, "w")).result()).toBe("w:24");
+    // A trailing options argument is split off, not passed to the function.
+    expect(await f.run("h5", 25, "q", resonate.options({ version: 1 }))).toBe("q:25");
+
+    await resonate.stop();
+  });
+
   test("test lineage rfc", async () => {
     const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
     const f = resonate.register("f", function* foo(ctx: Context): Generator {
