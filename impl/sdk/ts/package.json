@@ -18,6 +18,11 @@
       "import": "./dist/async/index.js",
       "default": "./dist/async/index.js"
     },
+    "./nats": {
+      "types": "./dist/network/nats.d.ts",
+      "import": "./dist/network/nats.js",
+      "default": "./dist/network/nats.js"
+    },
     "./package.json": "./package.json"
   },
   "repository": {

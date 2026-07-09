@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import type { Msg, MsgHdrs, NatsConnection, Subscription } from "@nats-io/transport-node";
 import { ResonateTimeoutException } from "../exceptions.js";
 import type { Logger } from "../logger.js";
+import { randomUUID } from "../platform.js";
 import type { Network } from "./network.js";
 import { isMessage, isResponse, type Message, type Request, type Response } from "./types.js";
 
