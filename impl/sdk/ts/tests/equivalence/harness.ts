@@ -9,7 +9,7 @@
 // server-stored `func` and generated ids line up) with bodies that express the
 // same computation in each engine's idiom (`yield* ctx.run` vs `await ctx.run`).
 
-import { AsyncResonate } from "../../src/async/resonate.js";
+import { Resonate as AsyncResonate } from "../../src/async/resonate.js";
 import { Codec } from "../../src/codec.js";
 import { LocalNetwork } from "../../src/network/local.js";
 import { Resonate } from "../../src/resonate.js";

@@ -26,7 +26,7 @@ npx tsx examples/async/saga.ts --fail=charge
 ```
 
 To run fully in-process without a server, drop the `{ url: "..." }` from the
-`new AsyncResonate(...)` call — execution then routes through the in-memory
+`new Resonate(...)` call — execution then routes through the in-memory
 local network.
 
 ## Leaf vs. workflow

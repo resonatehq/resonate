@@ -14,7 +14,7 @@
 //
 //   npx tsx examples/async/fibonacci.ts --mode=rpc --n=10
 
-import { AsyncResonate, type Context } from "../../src/async/index.js";
+import { type Context, Resonate } from "../../src/async/index.js";
 
 async function fibRpc(ctx: Context, n: number): Promise<number> {
   if (n < 2) return n;
@@ -45,7 +45,7 @@ function flag(name: string, fallback: string): string {
 const mode = flag("mode", "run");
 const n = Number(flag("n", "10"));
 
-const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: "http://localhost:8001" });
 const fns: Record<string, ReturnType<typeof resonate.register>> = {
   rpc: resonate.register("fibRpc", fibRpc),
   run: resonate.register("fibRun", fibRun),

@@ -13,7 +13,7 @@
 //
 //   npx tsx examples/async/pipeline.ts
 
-import { AsyncResonate, type Context, type Info } from "../../src/async/index.js";
+import { type Context, type Info, Resonate } from "../../src/async/index.js";
 
 // merge is the one genuine join point that carries two distinct values; the
 // other stages just pass a string / string[] / number, so they need no types.
@@ -81,7 +81,7 @@ async function runPipeline(ctx: Context, url: string): Promise<string> {
 
 // ── main ────────────────────────────────────────────────────────────────
 
-const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: "http://localhost:8001" });
 
 const runFn = resonate.register("runPipeline", runPipeline);
 resonate.register("download", download);

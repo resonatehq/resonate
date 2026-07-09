@@ -19,7 +19,7 @@
 //                                                  # both compensations run in
 //                                                  # reverse order
 
-import { AsyncResonate, type Context, type Info } from "../../src/async/index.js";
+import { type Context, type Info, Resonate } from "../../src/async/index.js";
 
 type FailAt = "" | "hotel" | "charge";
 
@@ -137,7 +137,7 @@ function flag(name: string, fallback: string): string {
 
 const failAt = flag("fail", "") as FailAt;
 
-const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: "http://localhost:8001" });
 
 const bookFn = resonate.register("bookTrip", bookTrip);
 resonate.register("reserveFlight", reserveFlight);

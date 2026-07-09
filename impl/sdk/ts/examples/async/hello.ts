@@ -7,7 +7,7 @@
 //
 // (Omit the `url` below to run fully in-process against the local network.)
 
-import { AsyncResonate, type Info } from "../../src/async/index.js";
+import { type Info, Resonate } from "../../src/async/index.js";
 
 // greet is a leaf: it does its work and returns without spawning children, so
 // it takes `Info` (the read-only view) rather than the full `Context`.
@@ -15,7 +15,7 @@ async function greet(_info: Info, name: string): Promise<string> {
   return `hello, ${name}!`;
 }
 
-const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: "http://localhost:8001" });
 const greetFn = resonate.register("greet", greet);
 
 const id = `hello-${Date.now()}`;

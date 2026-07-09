@@ -1,13 +1,13 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Context, Info } from "../../src/async/index.js";
-import { AsyncResonate } from "../../src/async/index.js";
+import { Resonate } from "../../src/async/index.js";
 import { Codec } from "../../src/codec.js";
 import { LocalNetwork } from "../../src/network/local.js";
 import type { Network } from "../../src/network/network.js";
 import { Constant } from "../../src/retries.js";
 
-function newResonate(): AsyncResonate {
-  return new AsyncResonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+function newResonate(): Resonate {
+  return new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
 }
 
 // Wraps a network and records every durable promise.create issued — bare
@@ -48,8 +48,8 @@ class RecordingNetwork implements Network {
   recv: Network["recv"] = (cb) => this.inner.recv(cb);
 }
 
-describe("AsyncResonate — async/await engine", () => {
-  let resonate: AsyncResonate;
+describe("Resonate — async/await engine", () => {
+  let resonate: Resonate;
 
   afterEach(async () => {
     await resonate?.stop();
@@ -164,7 +164,7 @@ describe("AsyncResonate — async/await engine", () => {
 
   test("creation sequencer: concurrent fan-out creates promises in source order", async () => {
     const recording = new RecordingNetwork(new LocalNetwork({ pid: "default", group: "default" }));
-    resonate = new AsyncResonate({ network: recording, ttl: Number.MAX_SAFE_INTEGER });
+    resonate = new Resonate({ network: recording, ttl: Number.MAX_SAFE_INTEGER });
     resonate.register("noop", async (_info: Info, n: number): Promise<number> => n);
     const fanout = async (ctx: Context): Promise<number[]> => {
       const handles = [0, 1, 2, 3].map((n) => ctx.run<number>("noop", n));
@@ -309,7 +309,7 @@ describe("AsyncResonate — async/await engine", () => {
 
   test("resonate:prefix is set at the root and propagates to every child create", async () => {
     const recording = new RecordingNetwork(new LocalNetwork({ pid: "default", group: "default" }));
-    resonate = new AsyncResonate({ network: recording, ttl: Number.MAX_SAFE_INTEGER });
+    resonate = new Resonate({ network: recording, ttl: Number.MAX_SAFE_INTEGER });
     resonate.register("pchild", async (_info: Info, n: number): Promise<number> => n);
     resonate.register("pdet", async (_info: Info): Promise<void> => {});
     const wf = async (ctx: Context): Promise<number> => {

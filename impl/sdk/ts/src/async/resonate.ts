@@ -34,7 +34,7 @@ export interface ResonateHandle<T> {
   done(): Promise<boolean>;
 }
 
-export interface AsyncResonateFunc<F extends AnyFunc> {
+export interface ResonateFunc<F extends AnyFunc> {
   run: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
   rpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
   options: (opts?: Partial<Options>) => Options;
@@ -53,10 +53,10 @@ type SubscriptionEntry = {
 
 /**
  * Opt-in entry point for the async/await execution engine. Lives alongside the
- * generator-based `Resonate` and reuses the same network/codec/registry/task
- * plumbing, routing execution through {@link AsyncCore}.
+ * generator engine's `Resonate` (the package root export) and reuses the same
+ * network/codec/registry/task plumbing, routing execution through {@link AsyncCore}.
  */
-export class AsyncResonate {
+export class Resonate {
   private clock: WallClock;
   private pid: string;
   private ttl: number;
@@ -204,13 +204,13 @@ export class AsyncResonate {
   }
 
   /** Registers an async function (leaf or workflow) for execution. */
-  public register<F extends AnyFunc>(name: string, func: F, options?: { version?: number }): AsyncResonateFunc<F>;
-  public register<F extends AnyFunc>(func: F, options?: { version?: number }): AsyncResonateFunc<F>;
+  public register<F extends AnyFunc>(name: string, func: F, options?: { version?: number }): ResonateFunc<F>;
+  public register<F extends AnyFunc>(func: F, options?: { version?: number }): ResonateFunc<F>;
   public register<F extends AnyFunc>(
     nameOrFunc: string | F,
     funcOrOptions?: F | { version?: number },
     maybeOptions: { version?: number } = {},
-  ): AsyncResonateFunc<F> {
+  ): ResonateFunc<F> {
     const { version = 1 } = (typeof funcOrOptions === "object" ? funcOrOptions : maybeOptions) ?? {};
     const func = (typeof nameOrFunc === "function" ? nameOrFunc : (funcOrOptions as F)) as AnyFunc;
     const name = typeof nameOrFunc === "string" ? nameOrFunc : func.name;

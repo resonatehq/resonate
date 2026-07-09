@@ -110,7 +110,7 @@ Now try killing the worker mid-countdown and restarting. **The countdown picks u
 The SDK also ships an async/await engine: the same durable model, written with ordinary `async` functions instead of generators. Import it from `@resonatehq/sdk/async`:
 
 ```typescript
-import { AsyncResonate, type Context } from "@resonatehq/sdk/async";
+import { Resonate, type Context } from "@resonatehq/sdk/async";
 
 async function countdown(ctx: Context, count: number, delay: number) {
   for (let i = count; i > 0; i--) {
@@ -123,7 +123,7 @@ async function countdown(ctx: Context, count: number, delay: number) {
 }
 
 // Instantiate Resonate
-const resonate = new AsyncResonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: "http://localhost:8001" });
 // Register the function
 resonate.register(countdown);
 ```
@@ -146,7 +146,7 @@ Both engines live in the same package and speak the same protocol to the same se
 
 | Generator engine | Async engine |
 | --- | --- |
-| `import { Resonate } from "@resonatehq/sdk"` | `import { AsyncResonate } from "@resonatehq/sdk/async"` |
+| `import { Resonate } from "@resonatehq/sdk"` | `import { Resonate } from "@resonatehq/sdk/async"` |
 | `function* (context: Context, ...)` | `async function (ctx: Context, ...)` |
 | `yield* context.run(...)`, `yield* context.sleep(...)` | `await ctx.run(...)`, `await ctx.sleep(...)` |
 | `yield context.beginRun(...)`, later `yield future` | `const p = ctx.run(...)`, later `await p` — every op is eager |

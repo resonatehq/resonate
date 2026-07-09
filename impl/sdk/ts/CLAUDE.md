@@ -49,7 +49,7 @@ npm run fmt          # Biome formatter
 | `src/promises.ts` | Durable promise primitives |
 | `src/schedules.ts` | Schedule API |
 | `src/network/` | HTTP networking (remote server communication), shared by both engines |
-| `src/async/` | Async engine source (`@resonatehq/sdk/async`): `resonate.ts` (`AsyncResonate`), `context.ts` (eager ops, `DurablePromise`), `core.ts` (task driver) |
+| `src/async/` | Async engine source (`@resonatehq/sdk/async`): `resonate.ts` (`Resonate`), `context.ts` (eager ops, `DurablePromise`), `core.ts` (task driver) |
 | `tests/` | Jest unit and integration tests (`tests/async/` for the async engine, `tests/equivalence/` for cross-engine differential tests) |
 | `sim/` | Deterministic simulation (DST) for chaos/reliability testing |
 | `dist/` | Compiled output (not committed) |

@@ -10,8 +10,8 @@
 export { Constant, Exponential, Linear, Never, type RetryPolicy } from "../retries.js";
 export { type AnyFunc, type Context, type DetachedHandle, DurablePromise, type Info } from "./context.js";
 export {
-  AsyncResonate,
-  type AsyncResonateFunc,
+  Resonate,
+  type ResonateFunc,
   type ResonateHandle,
   type ResonateSchedule,
 } from "./resonate.js";

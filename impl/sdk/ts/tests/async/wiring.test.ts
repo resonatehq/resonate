@@ -1,5 +1,5 @@
 /**
- * AsyncResonate <-> Network wiring tests.
+ * Resonate <-> Network wiring tests.
  *
  * Mirrors tests/resonate-network-wiring.test.ts against the async engine:
  * 1. Injecting a custom Network via the constructor works end-to-end (send + recv)
@@ -13,7 +13,7 @@
 
 import { afterEach, describe, expect, test } from "@jest/globals";
 import type { Info } from "../../src/async/index.js";
-import { AsyncResonate } from "../../src/async/index.js";
+import { Resonate } from "../../src/async/index.js";
 import type { Network, Send } from "../../src/network/network.js";
 import type { Message, PromiseRecord, Request, Response } from "../../src/network/types.js";
 import * as util from "../../src/util.js";
@@ -50,7 +50,7 @@ class MockNetwork implements Network {
   // Records all parsed request objects sent via send()
   public sentRequests: any[] = [];
 
-  // The recv callback registered by AsyncResonate
+  // The recv callback registered by Resonate
   private recvCallback: ((msg: Message) => void) | null = null;
 
   // Response factory: given a parsed request, produce a response object
@@ -107,7 +107,7 @@ class MockNetwork implements Network {
     if (kind === "task.create") {
       const promiseData = req.data.action.data;
       const promise = makePromise(promiseData.id, "resolved", "mock-result", promiseData.tags ?? {});
-      // Use the param as-is from the request (it was already encoded by AsyncResonate)
+      // Use the param as-is from the request (it was already encoded by Resonate)
       promise.param = promiseData.param ?? { data: "", headers: {} };
       return {
         kind,
@@ -168,7 +168,7 @@ class MockNetwork implements Network {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("AsyncResonate <-> Network Wiring", () => {
+describe("Resonate <-> Network Wiring", () => {
   afterEach(async () => {
     // Allow microtasks to settle
     await new Promise((r) => setTimeout(r, 50));
@@ -180,7 +180,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       anycast: "custom://any@custom-group",
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "custom-pid",
       logLevel: "error",
@@ -239,7 +239,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       },
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "test-pid",
       logLevel: "error",
@@ -250,7 +250,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
     const result = await (await resonate.run("unicast-test-1", "myFunc")).result();
     expect(result).toBe("conflict-result");
 
-    // After the 409 conflict, AsyncResonate should have sent a promise.register_listener
+    // After the 409 conflict, Resonate should have sent a promise.register_listener
     // with the unicast address
     const listenerReqs = mockNet.sentRequests.filter((r: any) => r.kind === "promise.register_listener");
     expect(listenerReqs.length).toBeGreaterThan(0);
@@ -267,7 +267,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       anycast: ANYCAST_ADDR,
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "run-pid",
       logLevel: "error",
@@ -294,7 +294,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       anycast: "mock://any@rpc-group",
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "rpc-pid",
       logLevel: "error",
@@ -350,7 +350,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       },
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "recv-pid",
       logLevel: "error",
@@ -389,7 +389,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       anycast: "mock://any@wiring-group",
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       pid: "wiring-pid",
       logLevel: "error",
@@ -415,7 +415,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
     // it in the merge — the URL is never passed through match.
     const mockNet = new MockNetwork();
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       logLevel: "error",
     });
@@ -443,7 +443,7 @@ describe("AsyncResonate <-> Network Wiring", () => {
       originalRecv(callback);
     };
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       network: mockNet,
       logLevel: "error",
     });

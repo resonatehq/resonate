@@ -1,4 +1,4 @@
-// Top-level API tests for the async engine's AsyncResonate.
+// Top-level API tests for the async engine's Resonate.
 //
 // Mirrors tests/resonate.test.ts, adapted to the async idioms:
 // - `resonate.run`/`rpc` return a handle (there are no `begin*` forms — run IS
@@ -17,15 +17,15 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import type { Context, Info, ResonateHandle } from "../../src/async/index.js";
-import { AsyncResonate } from "../../src/async/index.js";
+import { Resonate } from "../../src/async/index.js";
 import { Codec } from "../../src/codec.js";
 import { Constant, Exponential, Linear, Never } from "../../src/retries.js";
 import * as util from "../../src/util.js";
 
 const codec = new Codec();
 
-function newResonate(): AsyncResonate {
-  return new AsyncResonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+function newResonate(): Resonate {
+  return new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
 }
 
 function rid(): string {
@@ -37,8 +37,8 @@ async function res<T>(hp: Promise<ResonateHandle<T>>): Promise<T> {
   return (await hp).result();
 }
 
-describe("AsyncResonate usage tests", () => {
-  let resonate: AsyncResonate | undefined;
+describe("Resonate usage tests", () => {
+  let resonate: Resonate | undefined;
 
   afterEach(async () => {
     await resonate?.stop();
@@ -341,7 +341,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Correctly sets options on inner functions", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     const g = async (_info: Info, msg: string): Promise<{ msg: string }> => {
       return { msg };
@@ -362,7 +362,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Correctly sets options on inner functions without defined opts", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     const g = async (_info: Info, msg: string): Promise<{ msg: string }> => {
       return { msg };
@@ -389,7 +389,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Correctly matches target", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     resonate.register("tbar", async (_info: Info): Promise<string> => "bar");
     resonate.register("tfoo", async (ctx: Context, target: string): Promise<string> => {
@@ -426,7 +426,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Basic human in the loop", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     const wf = async (ctx: Context): Promise<string> => {
       const fu = ctx.promise<string>();
@@ -450,7 +450,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Correctly sets timeout", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     const time = Date.now();
 
@@ -479,7 +479,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Basic Durable sleep", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     const time = Date.now();
     const wf = async (ctx: Context): Promise<string> => {
@@ -506,7 +506,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Basic use of dependencies", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
 
     const g = (info: Info, name: string): string => {
       const greeting = info.getDependency("greeting") as string;
@@ -526,7 +526,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Date", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
 
     // with default date
     const wf = async (ctx: Context): Promise<number> => ctx.date.now();
@@ -548,7 +548,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Math", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
 
     // with default math
     const wf = async (ctx: Context): Promise<number> => ctx.math.random();
@@ -571,7 +571,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Target is set to anycast without preference by default", async () => {
-    resonate = new AsyncResonate({ group: "test", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "test", pid: "0", ttl: 50_000 });
 
     resonate.register("tg", async (_info: Info, msg: string): Promise<{ msg: string }> => ({ msg }));
 
@@ -594,7 +594,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Target is set to the target option", async () => {
-    resonate = new AsyncResonate({ group: "test", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "test", pid: "0", ttl: 50_000 });
 
     resonate.register("tg", async (_info: Info, msg: string): Promise<{ msg: string }> => ({ msg }));
 
@@ -616,7 +616,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Target is set to the target option when it is a url", async () => {
-    resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 });
 
     resonate.register("tg", async (_info: Info, msg: string): Promise<{ msg: string }> => ({ msg }));
 
@@ -638,7 +638,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Target is set when using options in resonate class", async () => {
-    resonate = new AsyncResonate({ group: "test", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "test", pid: "0", ttl: 50_000 });
 
     resonate.register("tg", async (_info: Info, msg: string): Promise<{ msg: string }> => ({ msg }));
     const wf = async (ctx: Context): Promise<void> => {
@@ -660,7 +660,7 @@ describe("AsyncResonate usage tests", () => {
   });
 
   test("Target is set in root promise to anycast without preference by default", async () => {
-    resonate = new AsyncResonate({ group: "test", pid: "0", ttl: 50_000 });
+    resonate = new Resonate({ group: "test", pid: "0", ttl: 50_000 });
 
     resonate.register("tg", async (_info: Info, msg: string): Promise<{ msg: string }> => ({ msg }));
     const wf = async (ctx: Context): Promise<void> => {
@@ -837,7 +837,7 @@ describe("AsyncResonate usage tests", () => {
 
   test("Using prefix at Resonate class prefixes all the promises", async () => {
     const prefix = "myPrefix";
-    resonate = new AsyncResonate({ prefix });
+    resonate = new Resonate({ prefix });
 
     const qux = async (info: Info): Promise<string> => {
       expect(info.id.startsWith(prefix)).toBe(true);
@@ -873,7 +873,7 @@ describe("AsyncResonate usage tests", () => {
   });
 });
 
-describe("AsyncResonate environment variable initialization", () => {
+describe("Resonate environment variable initialization", () => {
   const originalEnv = process.env;
   const originalFetch = global.fetch;
 
@@ -905,7 +905,7 @@ describe("AsyncResonate environment variable initialization", () => {
       return new Promise(() => {});
     });
 
-    const resonate = new AsyncResonate({ url: "http://arg-url:3000", group: "default", pid: "0", ttl: 60_000 });
+    const resonate = new Resonate({ url: "http://arg-url:3000", group: "default", pid: "0", ttl: 60_000 });
     resonate.promises.create("test", 0);
 
     await p1.promise;
@@ -932,7 +932,7 @@ describe("AsyncResonate environment variable initialization", () => {
       return new Promise(() => {});
     });
 
-    const resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
     resonate.promises.create("test", 0);
 
     await p1.promise;
@@ -946,7 +946,7 @@ describe("AsyncResonate environment variable initialization", () => {
       throw new Error("Fetch should not be called for LocalNetwork");
     });
 
-    const resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
 
     // Should work without calling fetch
     const f = resonate.register("envf", async (_info: Info): Promise<string> => "result");
@@ -966,7 +966,7 @@ describe("AsyncResonate environment variable initialization", () => {
       throw new Error("Fetch should not be called for LocalNetwork");
     });
 
-    const resonate = new AsyncResonate({ group: "default", pid: "0", ttl: 60_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 });
 
     const f = resonate.register("envf", async (_info: Info): Promise<string> => "result");
     const result = await (await f.run("test")).result();
@@ -1003,7 +1003,7 @@ describe("Bearer token authentication", () => {
       return new Promise(() => {});
     });
 
-    const resonate = new AsyncResonate({
+    const resonate = new Resonate({
       url: "http://localhost:9999",
       group: "default",
       pid: "0",
@@ -1021,7 +1021,7 @@ describe("Bearer token authentication", () => {
 });
 
 describe("nonRetryableErrors", () => {
-  let resonate: AsyncResonate | undefined;
+  let resonate: Resonate | undefined;
 
   afterEach(async () => {
     await resonate?.stop();
