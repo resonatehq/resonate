@@ -139,11 +139,10 @@ def test_encode_error_produces_correct_shape() -> None:
 # as results in many different ways. The codec serializes via
 # ``msgspec.to_builtins`` and reshapes the decoded builtins via ``convert``
 # (``msgspec.convert``), so a style survives the durability boundary iff msgspec
-# supports it. These
-# tests pin which popular styles round-trip -- preserving both value and type --
-# and pin that pydantic (which msgspec does NOT support) fails loudly rather
-# than silently corrupting data. See also the end-to-end argument-coercion
-# variants in ``test_durable.py``.
+# supports it -- natively, or through the codec's enc/dec hooks (opt-in pydantic
+# support). These tests pin which popular styles round-trip -- preserving both
+# value and type. See also the end-to-end argument-coercion variants in
+# ``test_durable.py``.
 # =============================================================================
 
 

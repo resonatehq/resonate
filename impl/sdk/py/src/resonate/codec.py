@@ -24,7 +24,7 @@ else:
         BaseModel = None
 
 
-def _enc_hook(obj: Any) -> Any:
+def enc_hook(obj: Any) -> Any:
     """Serialize types msgspec can't handle natively (opt-in Pydantic support)."""
     if BaseModel is not None and isinstance(obj, BaseModel):
         return obj.model_dump(mode="json")
@@ -32,7 +32,7 @@ def _enc_hook(obj: Any) -> Any:
     raise TypeError(msg)
 
 
-def _dec_hook(expected: type, obj: Any) -> Any:
+def dec_hook(expected: type, obj: Any) -> Any:
     """Reshape decoded builtins into a Pydantic model when that's the target."""
     if (
         BaseModel is not None
@@ -86,7 +86,7 @@ class Codec:
         try:
             json_bytes = msgspec.json.encode(
                 _encode_error(value) if isinstance(value, Exception) else value,
-                enc_hook=_enc_hook,
+                enc_hook=enc_hook,
             )
         except (TypeError, ValueError, msgspec.MsgspecError) as exc:
             raise SerializationError(exc) from exc
@@ -122,7 +122,7 @@ class Codec:
         boundary: this only reshapes a value already on the Python side.
         """
         try:
-            return msgspec.convert(value, type, dec_hook=_dec_hook)
+            return msgspec.convert(value, type, dec_hook=dec_hook)
         except (TypeError, ValueError, msgspec.MsgspecError) as exc:
             raise SerializationError(exc) from exc
 

@@ -731,7 +731,7 @@ wheels = [
 
 [[package]]
 name = "resonate-sdk"
-version = "0.7.1"
+version = "0.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -741,6 +741,9 @@ dependencies = [
 [package.optional-dependencies]
 nats = [
     { name = "nats-py" },
+]
+pydantic = [
+    { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
@@ -759,9 +762,10 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.5" },
     { name = "msgspec", specifier = ">=0.21.1" },
-    { name = "nats-py", marker = "extra == 'nats'", specifier = ">=2.6.0" },
+    { name = "nats-py", marker = "extra == 'nats'", specifier = ">=2.6.0,<3" },
+    { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.0.0,<3" },
 ]
-provides-extras = ["nats"]
+provides-extras = ["nats", "pydantic"]
 
 [package.metadata.requires-dev]
 dev = [

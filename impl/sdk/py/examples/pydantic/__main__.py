@@ -13,9 +13,9 @@ Runs fully in-process (no server needed)::
 
     uv run python examples/pydantic
 
-Reconstruction to the model type happens at the top-level handle. Internal
-stages (``ctx.run``) return plain builtins (a ``dict`` here); the workflow's
-own return annotation is what rebuilds the model for the awaiter.
+Reconstruction happens at every durability boundary: an internal ``ctx.run``
+stage's declared return model is rebuilt on recovery just like the workflow's
+own return is at the top-level handle.
 """
 
 from __future__ import annotations
@@ -44,11 +44,16 @@ class Order(pydantic.BaseModel):
     total: float
 
 
-async def price_items(ctx: Context, items: list[dict]) -> dict:
-    # A leaf stage: settles once, so side effects and plain builtins live here.
+class Pricing(pydantic.BaseModel):
+    total: float
+
+
+async def price_items(ctx: Context, items: list[dict]) -> Pricing:
+    # A leaf stage: settles once, so side effects live here. Its declared
+    # return model is rebuilt from the settled value on recovery.
     total = sum(i["qty"] * i["unit_price"] for i in items)
     print(f"  [price_items] {len(items)} items -> total={total}")
-    return {"total": total}
+    return Pricing(total=total)
 
 
 async def create_order(ctx: Context, order_id: str, items: list[dict]) -> Order:
@@ -57,7 +62,7 @@ async def create_order(ctx: Context, order_id: str, items: list[dict]) -> Order:
     return Order(
         id=order_id,
         items=[LineItem(**i) for i in items],
-        total=priced["total"],
+        total=priced.total,
     )
 
 

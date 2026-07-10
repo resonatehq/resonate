@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Concatenate
 
 import msgspec
 
+from resonate.codec import dec_hook
 from resonate.error import ApplicationError, SerializationError
 from resonate.types import Args
 
@@ -245,7 +246,7 @@ class DurableFunction:
             return value
 
         try:
-            return msgspec.convert(value, annotation)
+            return msgspec.convert(value, annotation, dec_hook=dec_hook)
         except (TypeError, ValueError, msgspec.MsgspecError) as exc:
             error = SerializationError(exc)
             error.add_note(f"while binding arguments for {self.name}")

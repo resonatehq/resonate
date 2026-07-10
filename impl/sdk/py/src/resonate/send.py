@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import msgspec
 
 from resonate import PROTOCOL_VERSION, now_ms
+from resonate.codec import dec_hook
 from resonate.error import DecodingError, ServerError
 from resonate.types import (
     PromiseRecord,
@@ -385,7 +386,7 @@ def _normalize_record(raw: Any) -> Any:
 def _decode_or_raise[T](raw: Any, type_: type[T], what: str) -> T:
     """Convert parsed JSON into ``type_``, raising :class:`DecodingError` on failure."""
     try:
-        return msgspec.convert(_normalize_record(raw), type=type_)
+        return msgspec.convert(_normalize_record(raw), type=type_, dec_hook=dec_hook)
     except (TypeError, ValueError, msgspec.MsgspecError) as exc:
         msg = f"invalid {what}: {exc}"
         raise DecodingError(msg) from exc
@@ -399,7 +400,9 @@ def _decode_list[T](data: Any, key: str, type_: type[T]) -> list[T]:
     out: list[T] = []
     for v in arr:
         try:
-            out.append(msgspec.convert(_normalize_record(v), type=type_))
+            out.append(
+                msgspec.convert(_normalize_record(v), type=type_, dec_hook=dec_hook)
+            )
         except (TypeError, ValueError, msgspec.MsgspecError):
             continue
     return out

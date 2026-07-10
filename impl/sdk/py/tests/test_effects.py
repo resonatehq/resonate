@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import msgspec
 import pytest
 
-from resonate.codec import Codec, NoopEncryptor
+from resonate.codec import Codec, NoopEncryptor, dec_hook
 from resonate.effects import ResonateEffects
 from resonate.send import Sender
 from resonate.transport import Transport
@@ -37,7 +37,7 @@ def _test_codec() -> Codec:
 
 def _value_from_wire(raw: Any) -> Value:
     """Build a Value from a parsed-JSON ``{headers, data}`` object (or null)."""
-    return Value() if raw is None else msgspec.convert(raw, Value)
+    return Value() if raw is None else msgspec.convert(raw, Value, dec_hook=dec_hook)
 
 
 def _promise_to_json(p: PromiseRecord) -> dict[str, Any]:

@@ -820,14 +820,44 @@ async def sum_pydantic(ctx: Context, p: PydanticArg) -> int:
     return p.x + p.y
 
 
+async def make_pydantic(ctx: Context) -> PydanticArg:
+    return PydanticArg(x=3, y=4)
+
+
 @pytest.mark.asyncio
-async def test_pydantic_arg_coercion_is_unsupported() -> None:
-    # msgspec cannot build a pydantic model from the recovered dict, so coercion
-    # raises rather than handing the function an un-coerced mapping.
+async def test_pydantic_arg_coerced_from_builtins() -> None:
+    # On recovery the model arrives as its model_dump mapping and is rebuilt via
+    # the codec's dec_hook (opt-in pydantic support), same as at the top-level
+    # handle.
     df = DurableFunction(sum_pydantic)
     payload = Args(args=({"x": 3, "y": 4},), kwargs={})
+    assert await df.invoke(_context(), payload) == 7
+
+
+@pytest.mark.asyncio
+async def test_pydantic_arg_live_path_matches_replay() -> None:
+    # A freshly-packed model instance coerces to the same call as the recovered
+    # mapping, keeping the live and replay paths symmetric.
+    df = DurableFunction(sum_pydantic)
+    assert await df.invoke(_context(), df.pack_args(PydanticArg(x=3, y=4))) == 7
+
+
+def test_pydantic_result_coerced_from_builtins() -> None:
+    # The settled child value comes back as builtins on recovery and is rebuilt
+    # to the declared pydantic return type, so ``ctx.run`` awaiters observe the
+    # model on both the live and replay paths.
+    df = DurableFunction(make_pydantic)
+    out = df.coerce_result({"x": 3, "y": 4})
+    assert out == PydanticArg(x=3, y=4)
+    assert isinstance(out, PydanticArg)
+
+
+def test_pydantic_result_validation_failure_raises_serialization_error() -> None:
+    # A recovered payload that fails model validation surfaces as the same
+    # SerializationError any other coercion failure raises.
+    df = DurableFunction(make_pydantic)
     with pytest.raises(SerializationError):
-        await df.invoke(_context(), payload)
+        df.coerce_result({"x": "not-an-int", "y": 4})
 
 
 # =============================================================================
