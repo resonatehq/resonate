@@ -26,7 +26,7 @@ import { Schedules } from "../schedules.js";
 import type { Func, Send } from "../types.js";
 import * as util from "../util.js";
 import type { AnyFunc, ParamsWithOptions, Return } from "./context.js";
-import { AsyncCore } from "./core.js";
+import { Core } from "./core.js";
 
 export interface ResonateHandle<T> {
   id: string;
@@ -54,7 +54,7 @@ type SubscriptionEntry = {
 /**
  * Opt-in entry point for the async/await execution engine. Lives alongside the
  * generator engine's `Resonate` (the package root export) and reuses the same
- * network/codec/registry/task plumbing, routing execution through {@link AsyncCore}.
+ * network/codec/registry/task plumbing, routing execution through {@link Core}.
  */
 export class Resonate {
   private clock: WallClock;
@@ -62,7 +62,7 @@ export class Resonate {
   private ttl: number;
   private idPrefix: string;
 
-  private core: AsyncCore;
+  private core: Core;
   private codec: Codec;
   private network: Network;
   private send: Send;
@@ -157,7 +157,7 @@ export class Resonate {
     this.dependencies = new Map();
     this.optsBuilder = new OptionsBuilder({ match: this.network.match.bind(this.network), idPrefix: this.idPrefix });
 
-    this.core = new AsyncCore({
+    this.core = new Core({
       pid: this.pid,
       ttl: this.ttl,
       clock: this.clock,

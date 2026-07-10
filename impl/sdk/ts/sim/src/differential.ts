@@ -13,7 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
-import { AsyncCore } from "../../src/async/core.js";
+import { Core } from "../../src/async/core.js";
 import { StepClock } from "../../src/clock.js";
 import { Codec } from "../../src/codec.js";
 import type { Server } from "../../src/network/local.js";
@@ -26,7 +26,7 @@ import { type DeliveryOptions, Message, Random, Simulator, unicast } from "./sim
 import { type EngineFactory, genEngine, WorkerProcess } from "./worker.js";
 import { workloads } from "./workloads.js";
 
-const asyncEngine: EngineFactory = (deps) => new AsyncCore(deps);
+const asyncEngine: EngineFactory = (deps) => new Core(deps);
 
 const codec = new Codec();
 

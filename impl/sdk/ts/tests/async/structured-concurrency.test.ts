@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, test } from "@jest/globals";
-import { AsyncCore } from "../../src/async/core.js";
+import { Core } from "../../src/async/core.js";
 import type { Context, Info } from "../../src/async/index.js";
 import { WallClock } from "../../src/clock.js";
 import { Codec } from "../../src/codec.js";
@@ -32,7 +32,7 @@ const TTL = 60_000;
 const codec = new Codec();
 
 type AnyFunc = (...args: any[]) => any;
-type Status = Awaited<ReturnType<AsyncCore["executeUntilBlocked"]>>;
+type Status = Awaited<ReturnType<Core["executeUntilBlocked"]>>;
 
 function registryOf(fns: Record<string, AnyFunc>): Registry {
   const r = new Registry();
@@ -40,8 +40,8 @@ function registryOf(fns: Record<string, AnyFunc>): Registry {
   return r;
 }
 
-function newCore(registry: Registry, network: LocalNetwork): AsyncCore {
-  return new AsyncCore({
+function newCore(registry: Registry, network: LocalNetwork): Core {
+  return new Core({
     pid: PID,
     ttl: TTL,
     clock: new WallClock(),

@@ -9,7 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
-import { AsyncCore } from "../../src/async/core.js";
+import { Core } from "../../src/async/core.js";
 import type { Context, Info } from "../../src/async/index.js";
 import { WallClock } from "../../src/clock.js";
 import { Codec } from "../../src/codec.js";
@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 function buildCore(fns: Record<string, AnyFunc>): {
-  core: AsyncCore;
+  core: Core;
   network: LocalNetwork;
   sendHolder: { fn: Send };
 } {
@@ -50,7 +50,7 @@ function buildCore(fns: Record<string, AnyFunc>): {
   const registry = new Registry();
   for (const [name, fn] of Object.entries(fns)) registry.add(fn, name, 1);
 
-  const core = new AsyncCore({
+  const core = new Core({
     pid: PID,
     ttl: TTL,
     clock: new WallClock(),

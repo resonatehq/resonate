@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
-import { AsyncCore } from "../src/async/core.js";
+import { Core } from "../src/async/core.js";
 import { StepClock } from "../src/clock.js";
 import { Codec } from "../src/codec.js";
 import type { Context } from "../src/context.js";
@@ -12,7 +12,7 @@ import { Message, Random, Simulator, unicast } from "./src/simulator.js";
 import { type EngineFactory, genEngine, WorkerProcess } from "./src/worker.js";
 import { workloads } from "./src/workloads.js";
 
-const asyncEngine: EngineFactory = (deps) => new AsyncCore(deps);
+const asyncEngine: EngineFactory = (deps) => new Core(deps);
 
 // Function definition
 function* fibLfi(ctx: Context, n: number): Generator<any, number, any> {

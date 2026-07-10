@@ -26,7 +26,7 @@ export type Status = Done | Suspended;
  * folds the per-task driver in as `executeUntilBlockedInner`, following Rust's
  * `Core::execute_until_blocked_inner` (no separate `Computation` class).
  */
-export class AsyncCore {
+export class Core {
   private pid: string;
   private ttl: number;
   private clock: Clock;
