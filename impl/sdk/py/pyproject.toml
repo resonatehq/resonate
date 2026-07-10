@@ -11,7 +11,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-nats = ["nats-py>=2.6.0"]
+nats = ["nats-py>=2.6.0,<3"]
+pydantic = ["pydantic>=2.0.0,<3"]
 
 [project.urls]
 Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
