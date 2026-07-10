@@ -287,7 +287,7 @@ def test_roundtrip_list_of_dataclasses() -> None:
     assert all(isinstance(p, DataclassPoint) for p in out)
 
 
-# -- pydantic: unsupported by msgspec, must fail loudly -----------------------
+# -- pydantic: opt-in native support via enc_hook/dec_hook --------------------
 
 
 class PydanticPoint(pydantic.BaseModel):
@@ -295,30 +295,28 @@ class PydanticPoint(pydantic.BaseModel):
     y: str
 
 
-def test_pydantic_encode_is_unsupported() -> None:
-    # msgspec.to_builtins cannot encode a pydantic model: the codec must surface
-    # a SerializationError rather than silently dropping or mangling the value.
-    c = codec()
-    with pytest.raises(SerializationError):
-        c.encode(PydanticPoint(x=1, y="a"))
-
-
-def test_pydantic_decode_into_model_is_unsupported() -> None:
-    # msgspec cannot construct a pydantic model from builtins either: the decode
-    # succeeds to builtins, and the coercion step (convert) must fail loudly.
-    c = codec()
-    encoded = c.encode({"x": 1, "y": "a"})
-    with pytest.raises(SerializationError):
-        c.convert(c.decode(encoded), PydanticPoint)
-
-
-def test_pydantic_via_model_dump_roundtrips_as_dict() -> None:
-    # The supported escape hatch: dump the model to builtins yourself. The codec
-    # then round-trips it as a plain mapping (the SDK never reconstructs the
-    # model type for you).
+def test_pydantic_model_roundtrips_to_its_type() -> None:
+    # With pydantic installed the codec encodes a BaseModel (via model_dump) and
+    # reconstructs the exact model type when convert is given that type.
     p = PydanticPoint(x=1, y="a")
-    out = _roundtrip(p.model_dump(), Any)
-    assert out == {"x": 1, "y": "a"}
+    out = _roundtrip(p, PydanticPoint)
+    assert out == p
+    assert isinstance(out, PydanticPoint)
+
+
+def test_pydantic_model_encodes_to_plain_json() -> None:
+    # A BaseModel encodes to the same wire bytes as its model_dump mapping, so
+    # decoding without a target type yields plain builtins.
+    c = codec()
+    encoded = c.encode(PydanticPoint(x=1, y="a"))
+    assert c.decode(encoded) == {"x": 1, "y": "a"}
+
+
+def test_pydantic_model_nested_in_container() -> None:
+    # A model nested inside a normal container still serializes via the enc_hook.
+    c = codec()
+    encoded = c.encode({"pts": [PydanticPoint(x=1, y="a")]})
+    assert c.decode(encoded) == {"pts": [{"x": 1, "y": "a"}]}
 
 
 # =============================================================================

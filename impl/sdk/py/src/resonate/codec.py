@@ -4,7 +4,7 @@ import base64
 import binascii
 import contextlib
 import pickle
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import msgspec
 
@@ -14,6 +14,34 @@ from resonate.error import (
     SerializationError,
 )
 from resonate.types import PromiseRecord, Value
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+else:
+    try:
+        from pydantic import BaseModel
+    except ModuleNotFoundError:  # pydantic is an opt-in extra
+        BaseModel = None
+
+
+def _enc_hook(obj: Any) -> Any:
+    """Serialize types msgspec can't handle natively (opt-in Pydantic support)."""
+    if BaseModel is not None and isinstance(obj, BaseModel):
+        return obj.model_dump(mode="json")
+    msg = f"cannot encode object of type {type(obj).__name__}"
+    raise TypeError(msg)
+
+
+def _dec_hook(expected: type, obj: Any) -> Any:
+    """Reshape decoded builtins into a Pydantic model when that's the target."""
+    if (
+        BaseModel is not None
+        and isinstance(expected, type)
+        and issubclass(expected, BaseModel)
+    ):
+        return expected.model_validate(obj)
+    msg = f"cannot decode object of type {expected}"
+    raise TypeError(msg)
 
 
 class Encryptor(Protocol):
@@ -57,7 +85,8 @@ class Codec:
 
         try:
             json_bytes = msgspec.json.encode(
-                _encode_error(value) if isinstance(value, Exception) else value
+                _encode_error(value) if isinstance(value, Exception) else value,
+                enc_hook=_enc_hook,
             )
         except (TypeError, ValueError, msgspec.MsgspecError) as exc:
             raise SerializationError(exc) from exc
@@ -93,7 +122,7 @@ class Codec:
         boundary: this only reshapes a value already on the Python side.
         """
         try:
-            return msgspec.convert(value, type)
+            return msgspec.convert(value, type, dec_hook=_dec_hook)
         except (TypeError, ValueError, msgspec.MsgspecError) as exc:
             raise SerializationError(exc) from exc
 
