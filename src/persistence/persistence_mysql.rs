@@ -796,7 +796,7 @@ impl Db for MysqlDb<'_> {
         let was_created = res.rows_affected() > 0;
         if was_created {
             // New promise — set up timeout and optional task infrastructure
-            if !already_timedout {
+            if !already_timedout && address.is_some() {
                 rt_block_on(
                     sqlx::query(
                         "INSERT IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?, ?)",
@@ -1309,7 +1309,7 @@ impl Db for MysqlDb<'_> {
             )?;
 
             if res.rows_affected() > 0 {
-                if !already_timedout {
+                if !already_timedout && address.is_some() {
                     rt_block_on(
                         sqlx::query(
                             "INSERT IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?, ?)",
@@ -2034,15 +2034,17 @@ impl Db for MysqlDb<'_> {
                     )?;
                 }
             } else {
-                // 6a. Promise timeout
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?, ?)",
-                    )
-                    .bind(computed_timeout_at)
-                    .bind(&computed_promise_id)
-                    .execute(self.tx().as_mut()),
-                )?;
+                // 6a. Promise timeout (only for promises with resonate:target)
+                if address.is_some() {
+                    rt_block_on(
+                        sqlx::query(
+                            "INSERT IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?, ?)",
+                        )
+                        .bind(computed_timeout_at)
+                        .bind(&computed_promise_id)
+                        .execute(self.tx().as_mut()),
+                    )?;
+                }
 
                 // 6b. Task infrastructure if address is present
                 if let Some(ref addr) = address {
@@ -2055,7 +2057,7 @@ impl Db for MysqlDb<'_> {
                         rt_block_on(
                             sqlx::query(
                                 "INSERT IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?, ?, 0, ?)"
-                            ).bind(fired_at + trt).bind(&computed_promise_id).bind(trt)
+                            ).bind(time + trt).bind(&computed_promise_id).bind(trt)
                              .execute(self.tx().as_mut())
                         )?;
                         rt_block_on(
@@ -2094,9 +2096,9 @@ impl Db for MysqlDb<'_> {
     fn process_timeouts(&self, time: i64) -> StorageResult<()> {
         let trt = self.task_retry_timeout;
 
-        // Statement 1: Expire all pending promises with timeout_at <= time
+        // Statement 1: Expire all pending promises with timeout_at <= time (with resonate:target)
         let expired_rows = rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE state = 'pending' AND timeout_at <= ?")
+            sqlx::query("SELECT id FROM promise_timeouts WHERE timeout_at <= ?")
                 .bind(time)
                 .fetch_all(self.tx().as_mut()),
         )?;

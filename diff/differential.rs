@@ -625,9 +625,10 @@ fn pick_op(rng: &mut fastrand::Rng, oracle: &Oracle, covered: &HashMap<String, u
     let has_suspended = oracle.has_tasks_in_state(TaskState::Suspended);
     let has_halted = oracle.has_tasks_in_state(TaskState::Halted);
     let has_pending_p = oracle.has_pending_promises();
+    let has_pending_p_with_target = oracle.has_pending_promises_with_target();
     let has_schedules = oracle.has_schedules();
 
-    if uncovered("task.suspend") && has_acquired && has_pending_p {
+    if uncovered("task.suspend") && has_acquired && has_pending_p_with_target {
         return Op::TaskSuspend;
     }
     if uncovered("task.continue") && has_halted {
@@ -645,7 +646,10 @@ fn pick_op(rng: &mut fastrand::Rng, oracle: &Oracle, covered: &HashMap<String, u
     if uncovered("task.acquire") && has_pending_t {
         return Op::TaskAcquire;
     }
-    if uncovered("promise.register_callback") && has_pending_p && (has_acquired || has_pending_t) {
+    if uncovered("promise.register_callback")
+        && has_pending_p_with_target
+        && (has_acquired || has_pending_t)
+    {
         return Op::PromiseRegisterCallback;
     }
     if uncovered("promise.register_listener") && has_pending_p {
@@ -974,7 +978,7 @@ fn gen_schedule_create(rng: &mut fastrand::Rng, now: i64) -> RequestEnvelope {
             "promiseId": format!("sched-promise-{{{{.id}}}}-{{{{.timestamp}}}}"),
             "promiseTimeout": promise_timeout,
             "promiseParam": {},
-            "promiseTags": {}
+            "promiseTags": { "resonate:target": WORKER_URL }
         }),
     )
 }
@@ -1002,10 +1006,10 @@ fn gen_debug_tick(rng: &mut fastrand::Rng, now: i64) -> (RequestEnvelope, i64) {
 }
 
 fn promise_id(n: u32) -> String {
-    format!("p{n}")
+    format!("diff.p{n}")
 }
 fn task_id(n: u32) -> String {
-    format!("t{n}")
+    format!("diff.t{n}")
 }
 fn schedule_id(n: u32) -> String {
     format!("s{n}")

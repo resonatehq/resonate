@@ -523,7 +523,7 @@ impl Db for PostgresDb<'_> {
             inserted_or_skipped_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
               SELECT $6, $1
-              WHERE NOT $9 AND EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
+              WHERE NOT $9 AND $10::text IS NOT NULL AND EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
@@ -1037,7 +1037,7 @@ impl Db for PostgresDb<'_> {
             inserted_or_skipped_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
               SELECT $8, $3
-              WHERE NOT $11 AND EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
+              WHERE NOT $11 AND $12::text IS NOT NULL AND EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
@@ -1793,7 +1793,7 @@ impl Db for PostgresDb<'_> {
             inserted_or_skipped_ptimeout AS (
               INSERT INTO promise_timeouts (timeout_at, id)
               SELECT p.timeout_at, p.id FROM inserted_or_skipped_promise p
-              WHERE p.state = 'pending'
+              WHERE p.state = 'pending' AND p.target IS NOT NULL
               ON CONFLICT (id) DO NOTHING
               RETURNING id
             ),
@@ -1808,7 +1808,7 @@ impl Db for PostgresDb<'_> {
             ),
             inserted_or_skipped_ttimeout AS (
               INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl)
-              SELECT ($2 + {trt}), t.id, 0, {trt}
+              SELECT ($5 + {trt}), t.id, 0, {trt}
               FROM inserted_or_skipped_task t
               WHERE t.state = 'pending'
               ON CONFLICT (id) DO NOTHING
@@ -1872,7 +1872,7 @@ impl Db for PostgresDb<'_> {
               UPDATE promises p
               SET state = CASE WHEN p.timer THEN 'resolved' ELSE 'rejected_timedout' END,
                   settled_at = p.timeout_at
-              WHERE p.state = 'pending' AND p.timeout_at <= $1
+              WHERE p.id IN (SELECT id FROM promise_timeouts WHERE timeout_at <= $1)
               RETURNING *
             ),
             deleted_ptimeout AS (
