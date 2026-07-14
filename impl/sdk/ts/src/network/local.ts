@@ -1009,6 +1009,16 @@ export class Server {
   }
 
   private scheduleCreate(now: number, req: ScheduleCreateReq): { response: ScheduleCreateRes; changes: Change[] } {
+    // Mirror the server's create-time validation: every fired promise needs a
+    // routing target, so a schedule whose promiseTags lack resonate:target is
+    // rejected up front (same status and message as the real server).
+    if (!req.data.promiseTags || !("resonate:target" in req.data.promiseTags)) {
+      return {
+        response: this.response("schedule.create", 400, "promiseTags must include a resonate:target tag"),
+        changes: [],
+      };
+    }
+
     const existingSchedule = this.schedules.get(req.data.id);
     if (existingSchedule) {
       return {

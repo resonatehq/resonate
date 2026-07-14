@@ -330,6 +330,30 @@ describe("Resonate usage tests", () => {
     await resonate.stop();
   });
 
+  test("schedule create without resonate:target is rejected", async () => {
+    // The local network enforces the server's create-time validation.
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+
+    await expect(
+      resonate.schedules.create("untagged-schedule", "* * * * *", "untagged.{{.timestamp}}", 60_000),
+    ).rejects.toThrow("promiseTags must include a resonate:target tag");
+
+    await resonate.stop();
+  });
+
+  test("schedule stamps resonate:target on the schedule record", async () => {
+    const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
+
+    const scheduleId = `tagged-schedule-${crypto.randomUUID().replace(/-/g, "")}`;
+    const schedule = await resonate.schedule(scheduleId, "0 * * * *", "someFunc");
+
+    const record = await resonate.schedules.get(scheduleId);
+    expect(record.promiseTags["resonate:target"]).toBeDefined();
+
+    await schedule.delete();
+    await resonate.stop();
+  });
+
   test("concurrent execution must be concurrent", async () => {
     const resonate = new Resonate({ pid: "default", ttl: Number.MAX_SAFE_INTEGER });
 
