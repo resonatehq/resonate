@@ -12,6 +12,7 @@ import io.resonatehq.resonate.Send.ScheduleSearchResult;
 import io.resonatehq.resonate.Send.Sender;
 import io.resonatehq.resonate.Types.ScheduleRecord;
 import io.resonatehq.resonate.Types.Value;
+import java.util.Map;
 import java.util.concurrent.CompletionException;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +47,25 @@ class SchedulesTest {
         assertEquals("unit-s1", fetched.id());
 
         schedules.delete("unit-s1").join();
+    }
+
+    @Test
+    void createPassesPromiseTagsThrough() {
+        Schedules schedules = local();
+
+        ScheduleRecord created = schedules
+                .create(
+                        "unit-s-tags",
+                        "*/5 * * * *",
+                        "unit-s-tags.{{.timestamp}}",
+                        60_000,
+                        new Value(),
+                        Map.of("resonate:target", "poll://any@default", "custom", "x"))
+                .join();
+        assertEquals(Map.of("resonate:target", "poll://any@default", "custom", "x"), created.promiseTags());
+
+        ScheduleRecord fetched = schedules.get("unit-s-tags").join();
+        assertEquals("poll://any@default", fetched.promiseTags().get("resonate:target"));
     }
 
     @Test

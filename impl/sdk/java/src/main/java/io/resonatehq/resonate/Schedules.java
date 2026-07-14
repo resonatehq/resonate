@@ -25,11 +25,28 @@ public final class Schedules {
         this.codec = codec;
     }
 
-    /** Create a schedule. */
+    /** Create a schedule with no promise tags. */
     public CompletableFuture<ScheduleRecord> create(
             String id, String cron, String promiseId, long promiseTimeout, Value promiseParam) {
+        return create(id, cron, promiseId, promiseTimeout, promiseParam, Map.of());
+    }
+
+    /**
+     * Create a schedule.
+     *
+     * <p>{@code promiseTags} are stamped onto every promise the schedule fires. The server requires
+     * a {@code resonate:target} tag (the routing target for the fired promise) and rejects the
+     * create without one.
+     */
+    public CompletableFuture<ScheduleRecord> create(
+            String id,
+            String cron,
+            String promiseId,
+            long promiseTimeout,
+            Value promiseParam,
+            Map<String, String> promiseTags) {
         return sender.scheduleCreate(new ScheduleCreateReq(
-                id, cron, promiseId, promiseTimeout, codec.encode(promiseParam.data()), Map.of()));
+                id, cron, promiseId, promiseTimeout, codec.encode(promiseParam.data()), promiseTags));
     }
 
     /** Get a schedule by ID. */

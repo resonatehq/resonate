@@ -22,6 +22,7 @@ import io.resonatehq.resonate.Resonate.Builder;
 import io.resonatehq.resonate.Resonate.ResonateSchedule;
 import io.resonatehq.resonate.Retry.Never;
 import io.resonatehq.resonate.Types.PromiseRecord;
+import io.resonatehq.resonate.Types.ScheduleRecord;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.time.Duration;
@@ -887,6 +888,23 @@ class ResonateTest {
         ResonateSchedule schedule = r.schedule("my-schedule", "*/5 * * * *", "my-func", List.of(), Map.of(), null, 1);
         assertEquals("my-schedule", schedule.name());
         schedule.delete(); // does not raise
+    }
+
+    @Test
+    void scheduleInjectsResonateTargetTag() {
+        Resonate r = local();
+        r.schedule("tagged-schedule", "*/5 * * * *", "my-func", List.of(), Map.of(), null, 1);
+        ScheduleRecord record = r.schedules.get("tagged-schedule").join();
+        assertEquals("local://any@default", record.promiseTags().get("resonate:target"));
+    }
+
+    @Test
+    void scheduleResolvesTargetFromOptions() {
+        Resonate r = local();
+        r.options(new Opts().withTarget("workers"))
+                .schedule("targeted-schedule", "*/5 * * * *", "my-func", List.of(), Map.of(), null, 1);
+        ScheduleRecord record = r.schedules.get("targeted-schedule").join();
+        assertEquals("local://any@workers", record.promiseTags().get("resonate:target"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════

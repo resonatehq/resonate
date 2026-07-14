@@ -686,7 +686,15 @@ public final class Resonate {
         return new ResonateHandle<>(id, sub, codec, Object.class, CompletableFuture.completedFuture(null));
     }
 
-    /** Create a schedule for periodic function execution. */
+    /**
+     * Create a schedule for periodic function execution.
+     *
+     * <p>Every promise the schedule fires carries a {@code resonate:target} tag — the routing
+     * target the server dispatches the invocation to. The target comes from {@link #options}
+     * ({@code withTarget}), falling back to this handle's network group, and resolves through
+     * {@link #resolveTarget} exactly like {@code run}/{@code rpc}. The server rejects a schedule
+     * whose promise tags lack {@code resonate:target}.
+     */
     public ResonateSchedule schedule(
             String id,
             String cron,
@@ -697,9 +705,10 @@ public final class Resonate {
             int version) {
         Duration pt = promiseTimeout != null ? promiseTimeout : DEFAULT_TOP_LEVEL_TIMEOUT;
         Value param = new Value(null, new TaskData(args, kwargs, funcName, version));
+        Map<String, String> promiseTags = Map.of("resonate:target", resolveTarget(opts.target()));
         try {
             return schedules
-                    .create(id, cron, idPrefix + "{{.id}}.{{.timestamp}}", timeoutMs(pt), param)
+                    .create(id, cron, idPrefix + "{{.id}}.{{.timestamp}}", timeoutMs(pt), param, promiseTags)
                     .thenApply(record -> new ResonateSchedule(id, schedules))
                     .join();
         } catch (CompletionException exc) {
