@@ -543,12 +543,25 @@ async fn handle_spawn_and_result() {
 #[tokio::test]
 async fn schedule_create_and_delete() {
     let url = resonate_url();
-    let r = make_resonate(&url);
+    let group = unique_id("group");
+    let r = Resonate::new(ResonateConfig {
+        url: Some(url.to_string()),
+        pid: Some(unique_id("worker")),
+        group: Some(group.clone()),
+        ..Default::default()
+    });
 
     let name = unique_id("schedule");
     let schedule = with_timeout(r.schedule(&name, "*/5 * * * *", "add", (1_i64, 2_i64)))
         .await
         .unwrap();
+
+    // The created schedule must carry the routing tag the server requires.
+    let record = with_timeout(r.schedules.get(&name)).await.unwrap();
+    assert_eq!(
+        record.promise_tags.get("resonate:target"),
+        Some(&format!("poll://any@{group}"))
+    );
 
     let delete_result = with_timeout(schedule.delete()).await;
     assert!(
@@ -732,6 +745,10 @@ async fn schedules_create_and_get() {
         &promise_tpl,
         60_000,
         Value::default(),
+        HashMap::from([(
+            "resonate:target".to_string(),
+            "poll://any@default".to_string(),
+        )]),
     ))
     .await
     .unwrap();
@@ -741,6 +758,13 @@ async fn schedules_create_and_get() {
     let fetched = with_timeout(r.schedules.get(&id)).await.unwrap();
     assert_eq!(fetched.id, id);
     assert_eq!(fetched.cron, "*/5 * * * *");
+    assert_eq!(
+        fetched
+            .promise_tags
+            .get("resonate:target")
+            .map(String::as_str),
+        Some("poll://any@default")
+    );
 
     with_timeout(r.schedules.delete(&id)).await.unwrap();
     r.stop().await.unwrap();
@@ -768,10 +792,17 @@ async fn schedules_search() {
     let id = unique_id("sched-search");
     let promise_tpl = format!("{id}.{{{{.timestamp}}}}");
 
-    with_timeout(
-        r.schedules
-            .create(&id, "0 * * * *", &promise_tpl, 60_000, Value::default()),
-    )
+    with_timeout(r.schedules.create(
+        &id,
+        "0 * * * *",
+        &promise_tpl,
+        60_000,
+        Value::default(),
+        HashMap::from([(
+            "resonate:target".to_string(),
+            "poll://any@default".to_string(),
+        )]),
+    ))
     .await
     .unwrap();
 

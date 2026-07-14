@@ -511,6 +511,7 @@ impl Resonate {
     /// let schedule = resonate.schedule("name", "*/5 * * * *", "func", args)
     ///     .timeout(Duration::from_secs(300))
     ///     .version(2)
+    ///     .target("workers")
     ///     .await?;
     /// ```
     pub fn schedule<'a, Args: Serialize>(
@@ -528,6 +529,8 @@ impl Resonate {
             args,
             timeout: None,
             version: None,
+            tags: None,
+            target: None,
         }
     }
 
@@ -986,6 +989,8 @@ pub struct ResScheduleTask<'a, Args> {
     args: Args,
     timeout: Option<Duration>,
     version: Option<u32>,
+    tags: Option<HashMap<String, String>>,
+    target: Option<String>,
 }
 
 impl<'a, Args> ResScheduleTask<'a, Args> {
@@ -998,6 +1003,19 @@ impl<'a, Args> ResScheduleTask<'a, Args> {
     /// Set the function version.
     pub fn version(mut self, version: u32) -> Self {
         self.version = Some(version);
+        self
+    }
+
+    /// Set custom tags, stamped onto every promise the schedule fires.
+    pub fn tags(mut self, tags: HashMap<String, String>) -> Self {
+        self.tags = Some(tags);
+        self
+    }
+
+    /// Set the target the fired promises are routed to (defaults to this
+    /// instance's group).
+    pub fn target(mut self, target: &str) -> Self {
+        self.target = Some(target.to_string());
         self
     }
 }
@@ -1013,14 +1031,25 @@ impl<'a, Args: Serialize + Send + 'a> IntoFuture for ResScheduleTask<'a, Args> {
             let version = self.version.unwrap_or(defaults.version);
 
             let json_args = serde_json::to_value(self.args)?;
-            let param_data = serde_json::json!({
+            // Plaintext Value: Schedules::create owns the single encode
+            // boundary. Encoding here as well would double-wrap the param and
+            // leave workers unable to decode the fired promise.
+            let param = crate::types::Value::from_serializable(serde_json::json!({
                 "func": self.func_name,
                 "args": json_args,
                 "version": version,
-            });
-            let encoded_param = self.resonate.codec.encode(&param_data)?;
+            }))?;
 
             let template = format!("{}{{{{.id}}}}.{{{{.timestamp}}}}", self.resonate.id_prefix);
+
+            // Route the fired promises: resolve the target (explicit or this
+            // instance's group) and merge it into the promise tags, mirroring
+            // run/rpc. The server rejects a schedule without resonate:target.
+            let group = self.resonate.network.group();
+            let raw_target = self.target.as_deref().unwrap_or(group);
+            let resolved_target = resolve_target(&*self.resonate.network, raw_target);
+            let mut promise_tags = self.tags.unwrap_or_default();
+            promise_tags.insert("resonate:target".to_string(), resolved_target);
 
             self.resonate
                 .schedules
@@ -1029,7 +1058,8 @@ impl<'a, Args: Serialize + Send + 'a> IntoFuture for ResScheduleTask<'a, Args> {
                     self.cron,
                     &template,
                     timeout.as_millis() as i64,
-                    encoded_param,
+                    param,
+                    promise_tags,
                 )
                 .await?;
 
@@ -1401,6 +1431,44 @@ mod tests {
         // Deleting should not fail
         let result = schedule.delete().await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn schedule_injects_resonate_target_tag() {
+        let r = Resonate::local();
+        r.schedule("tagged-schedule", "*/5 * * * *", "my-func", ())
+            .await
+            .unwrap();
+        let record = r.schedules.get("tagged-schedule").await.unwrap();
+        assert_eq!(
+            record
+                .promise_tags
+                .get("resonate:target")
+                .map(String::as_str),
+            Some("local://any@default")
+        );
+    }
+
+    #[tokio::test]
+    async fn schedule_builder_resolves_target_and_merges_tags() {
+        let r = Resonate::local();
+        r.schedule("targeted-schedule", "*/5 * * * *", "my-func", ())
+            .target("workers")
+            .tags(HashMap::from([("custom".to_string(), "x".to_string())]))
+            .await
+            .unwrap();
+        let record = r.schedules.get("targeted-schedule").await.unwrap();
+        assert_eq!(
+            record
+                .promise_tags
+                .get("resonate:target")
+                .map(String::as_str),
+            Some("local://any@workers")
+        );
+        assert_eq!(
+            record.promise_tags.get("custom").map(String::as_str),
+            Some("x")
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════

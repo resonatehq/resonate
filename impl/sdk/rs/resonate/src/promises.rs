@@ -133,6 +133,10 @@ impl Schedules {
     }
 
     /// Create a schedule.
+    ///
+    /// `promise_tags` are stamped onto every promise the schedule fires. The
+    /// server requires a `resonate:target` tag (the routing target for the
+    /// fired promise) and rejects the create without one.
     pub async fn create(
         &self,
         id: &str,
@@ -140,6 +144,7 @@ impl Schedules {
         promise_id: &str,
         promise_timeout: i64,
         promise_param: Value,
+        promise_tags: HashMap<String, String>,
     ) -> Result<ScheduleRecord> {
         let encoded_param = encode_value(&self.codec, promise_param)?;
         self.sender
@@ -149,7 +154,7 @@ impl Schedules {
                 promise_id: promise_id.to_string(),
                 promise_timeout,
                 promise_param: encoded_param,
-                promise_tags: HashMap::new(),
+                promise_tags,
             })
             .await
     }
@@ -239,6 +244,10 @@ mod tests {
                 "unit-s1.{{.timestamp}}",
                 60_000,
                 Value::default(),
+                HashMap::from([(
+                    "resonate:target".to_string(),
+                    "poll://any@default".to_string(),
+                )]),
             )
             .await
             .unwrap();
@@ -247,6 +256,13 @@ mod tests {
 
         let fetched = r.schedules.get("unit-s1").await.unwrap();
         assert_eq!(fetched.id, "unit-s1");
+        assert_eq!(
+            fetched
+                .promise_tags
+                .get("resonate:target")
+                .map(String::as_str),
+            Some("poll://any@default")
+        );
 
         r.schedules.delete("unit-s1").await.unwrap();
     }
@@ -272,6 +288,10 @@ mod tests {
                 "unit-s-search.{{.timestamp}}",
                 60_000,
                 Value::default(),
+                HashMap::from([(
+                    "resonate:target".to_string(),
+                    "poll://any@default".to_string(),
+                )]),
             )
             .await
             .unwrap();
