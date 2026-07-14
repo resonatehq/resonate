@@ -33,7 +33,12 @@ async def test_schedules_create_get_delete_roundtrip() -> None:
     schedules = _local()
 
     created = await schedules.create(
-        "unit-s1", "*/5 * * * *", "unit-s1.{{.timestamp}}", 60_000, Value()
+        "unit-s1",
+        "*/5 * * * *",
+        "unit-s1.{{.timestamp}}",
+        60_000,
+        Value(),
+        promise_tags={"resonate:target": "poll://any@default"},
     )
     assert created.id == "unit-s1"
     assert created.cron == "*/5 * * * *"
@@ -42,6 +47,23 @@ async def test_schedules_create_get_delete_roundtrip() -> None:
     assert fetched.id == "unit-s1"
 
     await schedules.delete("unit-s1")
+
+
+@pytest.mark.asyncio
+async def test_schedules_create_without_target_tag_rejected() -> None:
+    """The local network enforces the server's create-time validation."""
+    schedules = _local()
+
+    with pytest.raises(ServerError) as exc_info:
+        await schedules.create(
+            "unit-s-untagged",
+            "*/5 * * * *",
+            "unit-s-untagged.{{.timestamp}}",
+            60_000,
+            Value(),
+        )
+    assert exc_info.value.code == 400
+    assert "resonate:target" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -82,6 +104,7 @@ async def test_schedules_search_returns_record() -> None:
         "unit-s-search.{{.timestamp}}",
         60_000,
         Value(),
+        promise_tags={"resonate:target": "poll://any@default"},
     )
 
     result = await schedules.search(None, 100, None)

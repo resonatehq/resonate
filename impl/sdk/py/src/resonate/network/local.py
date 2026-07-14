@@ -889,6 +889,18 @@ class ServerState:
 
     def schedule_create(self, now: int, corr_id: Any, req: Any) -> dict[str, Any]:
         schedule_id = require_str(req, "id")
+        # Mirror the server's create-time validation: every fired promise
+        # needs a routing target, so a schedule whose promiseTags lack
+        # resonate:target is rejected up front (same status and message as
+        # the real server).
+        tags_in = _get(req, "promiseTags")
+        if not isinstance(tags_in, dict) or "resonate:target" not in tags_in:
+            return {
+                "kind": "schedule.create",
+                "corrId": corr_id,
+                "status": 400,
+                "error": "promiseTags must include a resonate:target tag",
+            }
         existing = self.schedules.get(schedule_id)
         if existing is not None:
             return {
