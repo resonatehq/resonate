@@ -957,6 +957,24 @@ async def test_schedule_creates_and_deletes() -> None:
         await schedule.delete()
 
 
+@pytest.mark.asyncio
+async def test_schedule_injects_resonate_target_tag() -> None:
+    async with local() as r:
+        await r.schedule("tagged-schedule", "*/5 * * * *", "my-func")
+        record = await r.schedules.get("tagged-schedule")
+        assert record.promise_tags["resonate:target"] == "local://any@default"
+
+
+@pytest.mark.asyncio
+async def test_schedule_resolves_target_from_options() -> None:
+    async with local() as r:
+        await r.options(target="workers").schedule(
+            "targeted-schedule", "*/5 * * * *", "my-func"
+        )
+        record = await r.schedules.get("targeted-schedule")
+        assert record.promise_tags["resonate:target"] == "local://any@workers"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  stop
 # ═══════════════════════════════════════════════════════════════════════════

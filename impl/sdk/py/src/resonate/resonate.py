@@ -634,7 +634,15 @@ class Resonate:
         promise_timeout: timedelta | None = None,
         version: int = 1,
     ) -> ResonateSchedule:
-        """Create a schedule for periodic function execution."""
+        """Create a schedule for periodic function execution.
+
+        Every promise the schedule fires carries a ``resonate:target`` tag --
+        the routing target the server dispatches the invocation to. The target
+        comes from :meth:`options` (``target=``), falling back to this
+        handle's network group, and resolves through the same rules as
+        :meth:`rpc`. The server rejects a schedule whose promise tags lack
+        ``resonate:target``.
+        """
         promise_timeout = (
             promise_timeout
             if promise_timeout is not None
@@ -654,6 +662,9 @@ class Resonate:
                     version=version,
                 )
             ),
+            promise_tags={
+                "resonate:target": self._resolve_target(self.opts.target),
+            },
         )
         return ResonateSchedule(id, self.schedules)
 

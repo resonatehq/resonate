@@ -45,6 +45,27 @@ async def test_schedules_create_get_delete_roundtrip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_schedules_create_passes_promise_tags_through() -> None:
+    schedules = _local()
+
+    created = await schedules.create(
+        "unit-s-tags",
+        "*/5 * * * *",
+        "unit-s-tags.{{.timestamp}}",
+        60_000,
+        Value(),
+        promise_tags={"resonate:target": "poll://any@default", "custom": "x"},
+    )
+    assert created.promise_tags == {
+        "resonate:target": "poll://any@default",
+        "custom": "x",
+    }
+
+    fetched = await schedules.get("unit-s-tags")
+    assert fetched.promise_tags["resonate:target"] == "poll://any@default"
+
+
+@pytest.mark.asyncio
 async def test_schedules_delete_missing_returns_server_error() -> None:
     schedules = _local()
     with pytest.raises(ServerError):
