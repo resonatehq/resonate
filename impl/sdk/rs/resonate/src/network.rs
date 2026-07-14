@@ -1035,6 +1035,20 @@ impl ServerState {
         req: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, Error> {
         let id = require_str(req, "id")?.to_string();
+        // Mirror the server's create-time validation: every fired promise
+        // needs a routing target, so a schedule whose promiseTags lack
+        // resonate:target is rejected up front (same status and message as
+        // the real server).
+        let has_target = req
+            .get("promiseTags")
+            .and_then(|t| t.as_object())
+            .is_some_and(|t| t.contains_key("resonate:target"));
+        if !has_target {
+            return Ok(serde_json::json!({
+                "kind": "schedule.create", "corrId": corr_id, "status": 400,
+                "error": "promiseTags must include a resonate:target tag",
+            }));
+        }
         if let Some(existing) = self.schedules.get(&id) {
             return Ok(serde_json::json!({
                 "kind": "schedule.create", "corrId": corr_id, "status": 200,

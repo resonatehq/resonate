@@ -268,6 +268,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn schedules_create_without_target_tag_rejected() {
+        // The local network enforces the server's create-time validation.
+        let r = Resonate::local();
+        let err = r
+            .schedules
+            .create(
+                "unit-s-untagged",
+                "*/5 * * * *",
+                "unit-s-untagged.{{.timestamp}}",
+                60_000,
+                Value::default(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap_err();
+        match err {
+            Error::ServerError { code, message } => {
+                assert_eq!(code, 400);
+                assert!(message.contains("resonate:target"), "message: {message}");
+            }
+            other => panic!("expected ServerError, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn schedules_delete_missing_returns_server_error() {
         let r = Resonate::local();
         let err = r.schedules.delete("no-such-schedule").await.unwrap_err();
