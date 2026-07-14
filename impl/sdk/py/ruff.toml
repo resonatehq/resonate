@@ -45,7 +45,7 @@ combine-as-imports = true
 required-imports = ["from __future__ import annotations"]
 
 [lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["msgspec.Struct"]
+runtime-evaluated-base-classes = ["msgspec.Struct", "pydantic.BaseModel"]
 
 [lint.per-file-ignores]
 "tests/**/*.py" = ["SLF001"]

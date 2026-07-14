@@ -6,13 +6,17 @@ readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
 dependencies = [
-    "aiohttp>=3.13.5",
-    "msgspec>=0.21.1",
+    "aiohttp>=3.13.5,<4",
+    "msgspec>=0.21.1,<1",
 ]
 
 [project.optional-dependencies]
 nats = ["nats-py>=2.6.0,<3"]
 pydantic = ["pydantic>=2.0.0,<3"]
+pydantic-ai = [
+    "pydantic-ai-slim>=2.8,<3",
+    "pydantic>=2.0.0,<3",
+]
 
 [project.urls]
 Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
@@ -36,6 +40,8 @@ dev = [
     "pydantic>=2.0.0",
     "vulture>=2.16",
     "pytest-cov>=7.1.0",
+    "pydantic-ai-slim[mcp]>=2.8",
+    "aws-lambda-typing>=2.20.0",
 ]
 
 [tool.pytest.ini_options]

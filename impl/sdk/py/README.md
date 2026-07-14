@@ -147,3 +147,50 @@ uv run python examples/fibonacci --mode rpc --n 10
 | [`rpc`](./examples/rpc) | One worker dispatching to another by group |
 | [`versioning`](./examples/versioning) | Running several versions of one function side by side |
 | [`saga`](./examples/saga) | Compensating completed steps when a later step fails |
+| [`pydantic`](./examples/pydantic) | Pydantic `BaseModel` (de)serialization at the durability boundary |
+| [`pydantic-ai`](./examples/pydantic-ai) | Durable [Pydantic AI](https://ai.pydantic.dev) agent runs |
+
+## Integrations
+
+### Pydantic AI
+
+`resonate.ext.pydantic_ai` makes [Pydantic AI](https://ai.pydantic.dev) agent
+runs durable: wrap any agent in `ResonateAgent` and every `run()` executes as a
+durable workflow, with model requests and MCP server communication checkpointed
+as durable steps that are served from the journal on recovery instead of
+re-hitting the provider.
+
+```shell
+pip install "resonate-sdk[pydantic-ai]"
+```
+
+```python
+from pydantic_ai import Agent
+
+from resonate.ext.pydantic_ai import ResonateAgent
+from resonate.resonate import Resonate
+
+resonate = Resonate(url="http://localhost:8001")
+
+agent = Agent(
+    "openai:gpt-5.2",
+    instructions="You're an expert in geography.",
+    name="geography",
+)
+durable_agent = ResonateAgent(agent, resonate)
+
+
+async def main():
+    result = await durable_agent.run("What is the capital of Mexico?", id="capital-1")
+    print(result.output)
+```
+
+The optional `id` is the run's durable identity: retrying with the same id
+after a crash (or calling it twice) performs the work exactly once and returns
+the recovered result. Function tools run inline in the workflow body and are
+re-executed on replay; model and MCP steps are not. Because a crashed run
+recovers from its serialized parameters, run-time arguments that cannot be
+rebuilt from JSON (`model`, `toolsets`, `output_type`, callables) must be
+configured on the agent at construction time. Provider-level retries are best
+disabled in favor of Resonate's step retry policies (`model_retry_policy` /
+`mcp_retry_policy`).

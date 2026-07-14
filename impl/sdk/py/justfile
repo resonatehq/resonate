@@ -27,3 +27,4 @@ examples:
     uv run python examples/structured-concurrency
     uv run python examples/retries
     uv run python examples/pydantic
+    uv run python examples/pydantic-ai

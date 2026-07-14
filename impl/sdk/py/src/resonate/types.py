@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol, overload
 
 import msgspec
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Concatenate
+
+    from resonate.context import Context
+    from resonate.retry import RetryPolicy
 
 PromiseState = Literal[
     "pending",
@@ -111,3 +118,40 @@ class Info(msgspec.Struct, frozen=True, kw_only=True):
     timeout_at: int
     func_name: str
     tags: dict[str, str]
+
+
+class DurableRegistry(Protocol):
+    """Anywhere a durable function can be registered.
+
+    The structural contract shared by :class:`resonate.resonate.Resonate`
+    (the full client) and the serverless worker shims (e.g.
+    :class:`resonate.faas.aws.Resonate`). Code that only needs to *register*
+    durable functions -- making them executable by pushed tasks, on a
+    long-running worker and a serverless one alike -- accepts this protocol
+    instead of a concrete client. Dispatching new runs (``run``/``rpc``)
+    remains a full-client capability.
+
+    The overloads mirror the implementations exactly (bare decorator and
+    parameterized decorator), so both classes satisfy the protocol verbatim.
+    """
+
+    @overload
+    def register[**P, T](
+        self,
+        fn: Callable[Concatenate[Context, P], T],
+        *,
+        name: str | None = None,
+        version: int = 1,
+        retry_policy: RetryPolicy | None = None,
+    ) -> Callable[Concatenate[Context, P], T]: ...
+    @overload
+    def register[**P, T](
+        self,
+        fn: None = None,
+        *,
+        name: str | None = None,
+        version: int = 1,
+        retry_policy: RetryPolicy | None = None,
+    ) -> Callable[
+        [Callable[Concatenate[Context, P], T]], Callable[Concatenate[Context, P], T]
+    ]: ...
