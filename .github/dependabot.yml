@@ -9,7 +9,7 @@ updates:
     #   - "YOUR_USERNAME"
     # assignees:
     #   - "YOUR_USERNAME"
-    # open-pull-requests-limit: 5
+    # open-pull-requests-limit:10
 
     #  Optional: Group updates together to avoid opening too many PRs at once
     # groups:
