@@ -1,13 +1,13 @@
 [project]
 name = "resonate-sdk-aws"
-version = "0.7.3"
+version = "0.7.4"
 description = "AWS Lambda support for the Resonate SDK by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
 dependencies = [
     "msgspec>=0.21.1,<1",
-    "resonate-sdk==0.7.3",
+    "resonate-sdk==0.7.4",
 ]
 
 [project.urls]
