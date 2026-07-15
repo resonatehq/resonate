@@ -1,0 +1,12 @@
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # reviewers:
+    #   - "YOUR_USERNAME"
+    # assignees:
+    #   - "YOUR_USERNAME"
+    # open-pull-requests-limit: 5

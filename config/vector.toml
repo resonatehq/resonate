@@ -21,14 +21,6 @@ type = "prometheus_remote_write"
 inputs = ["metrics_scrape"]
 endpoint = "http://victoriametrics:8428/api/v1/write"
 
-[transforms.format_logs]
-type = "remap"
-inputs = ["server_logs"]
-source = """
-._msg = del(.message)
-._time = del(.timestamp)
-"""
-
 [sinks.victorialogs]
 type = "http"
 inputs = ["format_logs"]
@@ -36,3 +28,11 @@ uri = "http://victorialogs:9428/insert/jsonline?_stream_fields=container_name&_m
 encoding.codec = "json"
 framing.method = "newline_delimited"
 healthcheck.enabled = false
+
+[transforms.format_logs]
+type = "remap"
+inputs = ["server_logs"]
+source = """
+._msg = del(.message)
+._time = del(.timestamp)
+"""
