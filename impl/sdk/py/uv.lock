@@ -8,6 +8,12 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "resonate-sdk",
+    "resonate-sdk-aws",
+]
+
 [[package]]
 name = "aiofile"
 version = "3.11.1"
@@ -1541,6 +1547,21 @@ dev = [
     { name = "ruff", specifier = ">=0.15.14" },
     { name = "ty", specifier = ">=0.0.39" },
     { name = "vulture", specifier = ">=2.16" },
+]
+
+[[package]]
+name = "resonate-sdk-aws"
+version = "0.7.3"
+source = { editable = "packages/resonate-sdk-aws" }
+dependencies = [
+    { name = "msgspec" },
+    { name = "resonate-sdk" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "msgspec", specifier = ">=0.21.1,<1" },
+    { name = "resonate-sdk", editable = "." },
 ]
 
 [[package]]

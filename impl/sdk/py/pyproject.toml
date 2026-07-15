@@ -30,6 +30,9 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "resonate"
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
@@ -44,5 +47,5 @@ dev = [
     "aws-lambda-typing>=2.20.0",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.coverage.run]
+source = ["resonate", "resonate_aws"]

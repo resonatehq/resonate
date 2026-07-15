@@ -5,12 +5,12 @@ on:
     types: [released]
 
 jobs:
-  run:
-    name: release
-
-    permissions:
-      id-token: write
-
+  # Everything that can reject a bad release happens here, before any
+  # upload: every package must carry the tag's version, the test suite
+  # must pass from source and against the built artifacts, and those
+  # artifacts must resolve and import in a clean environment. The
+  # publish job ships exactly the artifacts this job built.
+  verify:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,15 +19,83 @@ jobs:
       - name: install uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: 0.5.23
+          version: 0.11.21
 
       - name: set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: build library
-        run: uv build
+      - name: verify versions are consistent and match the tag
+        run: uv run --no-project scripts/check-versions.py --tag "$GITHUB_REF_NAME"
 
-      - name: push build artifacts to PyPI
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      - name: run tests
+        run: uv run pytest
+
+      - name: build library
+        run: uv build --all-packages
+
+      # Installing from dist with the real resolver proves the wheels
+      # declare their runtime dependencies and the exact cross-package
+      # pin is satisfiable by the artifact set being shipped -- the dev
+      # environment has every dependency preinstalled, so the wheel test
+      # run below cannot catch a missing declaration.
+      - name: resolve and import the built artifacts in a clean environment
+        run: |
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke --find-links dist "resonate-sdk-aws==${GITHUB_REF_NAME#v}"
+          /tmp/smoke/bin/python -c "import resonate, resonate_aws"
+
+      # Replace the editable workspace installs with the built wheels so
+      # the suite exercises exactly the code that will be published.
+      - name: run tests against the built artifacts
+        run: |
+          uv pip install --force-reinstall --no-deps dist/*.whl
+          uv run --no-sync pytest
+
+      - name: upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: verify
+
+    permissions:
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # PyPI uploads are not atomic across files, so publish in
+      # dependency order: the root package first, then the members that
+      # pin it. A mid-publish failure can then only leave resonate-sdk
+      # released with the members not yet out -- a state that breaks no
+      # installs -- and skip-existing lets a re-run finish the release.
+      - name: split out the root package artifacts
+        run: |
+          mkdir dist-root
+          mv dist/resonate_sdk-* dist-root/
+
+      - name: push resonate-sdk to PyPI
         uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          packages-dir: dist-root/
+          skip-existing: true
+
+      - name: push workspace members to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          packages-dir: dist/
+          skip-existing: true

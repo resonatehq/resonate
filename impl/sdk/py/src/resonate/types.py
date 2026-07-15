@@ -125,7 +125,7 @@ class DurableRegistry(Protocol):
 
     The structural contract shared by :class:`resonate.resonate.Resonate`
     (the full client) and the serverless worker shims (e.g.
-    :class:`resonate.faas.aws.Resonate`). Code that only needs to *register*
+    :class:`resonate_aws.Resonate`). Code that only needs to *register*
     durable functions -- making them executable by pushed tasks, on a
     long-running worker and a serverless one alike -- accepts this protocol
     instead of a concrete client. Dispatching new runs (``run``/``rpc``)

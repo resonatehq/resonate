@@ -126,7 +126,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             wrapped: The agent to wrap.
             resonate: The Resonate instance to register the durable run
                 function on and to dispatch runs through. A serverless worker
-                shim (e.g. ``resonate.faas.aws.Resonate``) is also accepted:
+                shim (e.g. ``resonate_aws.Resonate``) is also accepted:
                 it registers -- and so executes -- the durable run function,
                 but cannot dispatch new runs, so ``run()`` outside a workflow
                 requires the full ``resonate.resonate.Resonate`` client.

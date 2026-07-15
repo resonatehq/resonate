@@ -1,4 +1,3 @@
-src = ["src", "tests"]
 target-version = "py312"
 
 [lint]
@@ -48,8 +47,6 @@ required-imports = ["from __future__ import annotations"]
 runtime-evaluated-base-classes = ["msgspec.Struct", "pydantic.BaseModel"]
 
 [lint.per-file-ignores]
-"tests/**/*.py" = ["SLF001"]
-# Examples are runnable CLI demos: they print to stdout, and their module
-# docstrings follow Go's multi-line package-comment style rather than the
-# imperative one-line summary the D rules expect.
+"**/tests/**/*.py" = ["SLF001"]
+"scripts/*.py" = ["S603", "S607"]
 "examples/**/*.py" = ["T201", "D205", "D400", "D415"]

@@ -15,6 +15,24 @@ on:
       - README.md
 
 jobs:
+  versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: check all packages share one version
+        run: uv run --no-project scripts/check-versions.py
+
+      - name: check the lockfile is up to date
+        run: uv lock --check
+
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -30,6 +48,8 @@ jobs:
 
       - name: install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
 
       - name: set up python
         uses: actions/setup-python@v5
@@ -37,7 +57,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: install
-        run: uv sync --all-extras
+        run: uv sync --locked --all-extras --all-packages
 
       - name: check linting
         run: uv run ruff check
@@ -63,6 +83,8 @@ jobs:
 
       - name: install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
 
       - name: set up python
         uses: actions/setup-python@v5
@@ -70,7 +92,7 @@ jobs:
           python-version: 3.12
 
       - name: install
-        run: uv sync --all-extras
+        run: uv sync --locked --all-extras --all-packages
 
       - name: install just
         uses: extractions/setup-just@v3
