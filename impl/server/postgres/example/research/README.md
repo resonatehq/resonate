@@ -5,34 +5,13 @@
 
 # Research on Supabase
 
-A durable research agent on resonate-pg using the [Anthropic SDK](https://docs.claude.com/en/api/overview). It turns a question into a search plan, then fans the searches out — each one runs on its own Edge Function invocation, all in parallel — and writes a cited report from what they find. While the searches run, the workflow that spawned them suspends: it holds no process, just a row in Postgres waiting on its children. When they all land it resumes in a fresh invocation to write the report. Every step is checkpointed, so the run survives crashes, redeploys, and the Edge Function wall-clock limit.
+A durable research agent that **streams to the browser in real time**. Ask a question: a durable workflow plans web searches and fans them out, each on its own Edge Function invocation, all in parallel. Every search *and* the final report stream back live, each on its own tile. While the searches run the workflow suspends, then resumes to write the report. Every step is checkpointed.
 
-```ts
-resonate.register(
-  "research",
-  async function research(ctx: Context, question: string) {
-    // 1 · plan · one LLM call turns the question into a strategy
-    const plan = await ctx.run(() => planSearches(question));
+![One question, five searches streaming in parallel, then the report](demo.gif)
 
-    // 2 · search · each runs on its own invocation; the parent suspends here.
-    //     a failed or slow search is skipped, not fatal (partial results).
-    const findings = await Promise.all(
-      plan.searches.map(async (s) => {
-        try {
-          return await ctx.rpc("search", s.query);
-        } catch {
-          return { query: s.query, text: "" };
-        }
-      }),
-    );
+The streaming is a tiny protocol multiplexed on **one** Supabase Realtime channel: the root workflow's origin (`context.originId`). Every message carries the **promise id** it belongs to, framed with begin/end markers, so one channel can carry many concurrent streams and the page demuxes them into tiles.
 
-    // 3 · report · write the cited report — one LLM call over the findings
-    return await ctx.run(() => report(question, findings));
-  },
-);
-```
-
-Full function: [`index.ts`](index.ts). Each `search` is one hosted web search with a per-call timeout, so a slow one fails fast and is skipped rather than stranding the run; the example keeps it lean at `max_uses: 1`.
+Full worker: [`index.ts`](index.ts). Frontend: [`page.ts`](page.ts).
 
 ## 1. Create the project
 
@@ -44,7 +23,7 @@ The command prompts for your org, region, and a database password, then prints t
 
 ## 2. Install the server
 
-Link the project once, then apply the extensions and `resonate.sql` — every step runs over the Management API, no connection string needed:
+Link the project once, then apply the extensions and `resonate.sql`. Every step runs over the Management API, no connection string needed:
 
 ```bash
 supabase link --project-ref <project-ref>
@@ -61,33 +40,25 @@ supabase functions deploy research --no-verify-jwt
 
 ## 4. Add your Anthropic key
 
-The function calls Claude for the plan, the searches, and the report, so it needs an API key:
-
 ```bash
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## 5. Start it
+## 5. Run the UI
+
+Supabase Edge Functions can't serve HTML (the platform forces `text/plain`), so [`page.ts`](page.ts) is a tiny local host that serves the page and starts runs. It still talks to the **real** remote Supabase for Realtime and to the deployed `research` worker:
 
 ```bash
-supabase db query --linked "
-  select resonate.invoke('research-1', 'research', '[\"What is Resonate Durable Execution?\"]'::jsonb,
-    'https://<project-ref>.functions.supabase.co/research');"
+SUPABASE_URL=https://<project-ref>.supabase.co \
+SUPABASE_ANON_KEY=<anon key> \
+RESEARCH_URL=https://<project-ref>.functions.supabase.co/research \
+DATABASE_URL='postgres://postgres.<project-ref>:<db-password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require' \
+  deno run -A example/research/page.ts
 ```
 
-## 6. Read the report
+Open **http://localhost:8890**, ask a question, and watch the tiles stream: searches fill in parallel, then the report.
 
-The run resolves in a couple of minutes. Its value is the report — read it from the resolved promise (the query returns nothing until then):
-
-```bash
-supabase db query --linked "
-  select (convert_from(decode(value_data, 'base64'), 'utf8'))::jsonb #>> '{}' as report
-  from resonate.promises where id = 'research-1' and state = 'resolved';"
-```
-
-## 7. Cleanup
-
-Delete the project:
+## 6. Cleanup
 
 ```bash
 supabase projects delete <project-ref>
