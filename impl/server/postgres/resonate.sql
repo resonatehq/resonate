@@ -169,6 +169,7 @@ CREATE OR REPLACE TRIGGER trg_outbox_notify
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ▐  SECTION 2 · HELPERS · projection, values, resume, settlement cascade, cron
 -- ═══════════════════════════════════════════════════════════════════════════
+
 SET search_path TO resonate, public;
 
 CREATE OR REPLACE FUNCTION _retry_timeout() RETURNS bigint
@@ -444,6 +445,13 @@ DECLARE
   vh jsonb := COALESCE(p_value->'headers', '{}'::jsonb);
   vd text  := p_value->>'data';
 BEGIN
+  -- Only these states are client-settable: 'pending' is not a settlement and
+  -- 'rejected_timedout' is server-owned (the timeout path writes it), so a
+  -- client can never forge one. Rejected before any state is consulted (400
+  -- precedes the 404 on a missing promise and the sticky terminal echo).
+  IF p_state IS NULL OR p_state NOT IN ('resolved','rejected','rejected_canceled') THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
   PERFORM _lock(p_id);
   SELECT * INTO p FROM promises WHERE id = p_id FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('status', 404); END IF;
@@ -489,6 +497,11 @@ CREATE OR REPLACE FUNCTION promise_register_listener(
   RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE pa promises;
 BEGIN
+  IF p_address IS NULL
+     OR NOT (p_address LIKE 'http://%' OR p_address LIKE 'https://%'
+             OR (p_address LIKE 'poll://%' AND position('@' IN p_address) > 0)) THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
   PERFORM _lock(p_awaited);
   SELECT * INTO pa FROM promises WHERE id = p_awaited FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('status', 404); END IF;
@@ -506,6 +519,7 @@ CREATE OR REPLACE FUNCTION promise_search(p_req jsonb, p_now bigint) RETURNS jso
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ▐  SECTION 4 · TASK ACTIONS · T-01 .. T-11
 -- ═══════════════════════════════════════════════════════════════════════════
+
 SET search_path TO resonate, public;
 
 CREATE OR REPLACE FUNCTION task_get(p_id text, p_now bigint) RETURNS jsonb
@@ -525,37 +539,44 @@ BEGIN
     'resumes', 0, 'ttl', NULL, 'pid', NULL));
 END $$;
 
-CREATE OR REPLACE FUNCTION task_create_typed(
-    p_pid text, p_ttl bigint, p_id text, p_timeout_at bigint,
-    p_param_headers jsonb, p_param_data text, p_tags jsonb, p_now bigint,
-    OUT o_status int, OUT o_version int, OUT o_task_state text, OUT o_ttl bigint, OUT o_pid text,
-    OUT o_p_state text, OUT o_p_param_headers jsonb, OUT o_p_param_data text,
-    OUT o_p_value_headers jsonb, OUT o_p_value_data text, OUT o_p_tags jsonb,
-    OUT o_p_timeout_at bigint, OUT o_p_created_at bigint, OUT o_p_settled_at bigint)
-  LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE p promises; t tasks; st text;
+DROP FUNCTION IF EXISTS task_create_typed(text, bigint, text, bigint, jsonb, text, jsonb, bigint);
+
+CREATE OR REPLACE FUNCTION task_create(
+    p_pid text, p_ttl bigint, p_action jsonb, p_now bigint)
+  RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  p promises; t tasks; st text;
+  a_id      text   := p_action->>'id';
+  a_toat    bigint := (p_action->>'timeoutAt')::bigint;
+  a_headers jsonb  := COALESCE(p_action#>'{param,headers}', '{}'::jsonb);
+  a_data    text   := p_action#>>'{param,data}';
+  a_tags    jsonb  := COALESCE(p_action->'tags', '{}'::jsonb);
 BEGIN
-  IF p_id IS NULL OR p_timeout_at IS NULL OR p_pid IS NULL OR p_ttl IS NULL THEN o_status := 400; RETURN; END IF;
-  PERFORM _lock(p_id);
-  SELECT * INTO p FROM promises WHERE id = p_id FOR UPDATE;
+  IF a_id IS NULL OR a_toat IS NULL OR p_pid IS NULL OR p_ttl IS NULL THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
+  IF NOT (a_tags ? 'resonate:target') THEN RETURN jsonb_build_object('status', 400); END IF;
+  PERFORM _lock(a_id);
+  SELECT * INTO p FROM promises WHERE id = a_id FOR UPDATE;
   IF NOT FOUND THEN
-    IF NOT (p_tags ? 'resonate:target') THEN o_status := 400; RETURN; END IF;
-    IF p_timeout_at > p_now THEN
+    IF a_toat > p_now THEN
       INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at)
-      VALUES (p_id, 'pending', p_param_headers, p_param_data, p_tags, p_timeout_at, p_now) RETURNING * INTO p;
+      VALUES (a_id, 'pending', a_headers, a_data, a_tags, a_toat, p_now) RETURNING * INTO p;
       INSERT INTO tasks (id, state, version, ttl, pid, timeout_at)
       VALUES (p.id, 'acquired', 1, p_ttl, p_pid, p_now + p_ttl) RETURNING * INTO t;
     ELSE
-      st := CASE WHEN COALESCE(p_tags->>'resonate:timer','') = 'true'
+      st := CASE WHEN COALESCE(a_tags->>'resonate:timer','') = 'true'
                  THEN 'resolved' ELSE 'rejected_timedout' END;
       INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
-      VALUES (p_id, st, p_param_headers, p_param_data, p_tags, p_timeout_at, p_timeout_at, p_timeout_at) RETURNING * INTO p;
+      VALUES (a_id, st, a_headers, a_data, a_tags, a_toat, a_toat, a_toat) RETURNING * INTO p;
       INSERT INTO tasks (id, state, version) VALUES (p.id, 'fulfilled', 0) RETURNING * INTO t;
     END IF;
   ELSE
-    IF NOT (p.tags ? 'resonate:target') THEN o_status := 400; RETURN; END IF;
+    -- The id names a plain promise (no resonate:target): not a malformed
+    -- request but an unprocessable target — 422, matching the spec (T-02).
+    IF NOT (p.tags ? 'resonate:target') THEN RETURN jsonb_build_object('status', 422); END IF;
     SELECT * INTO t FROM tasks WHERE id = p.id FOR UPDATE;
-    IF NOT FOUND THEN o_status := 409; RETURN; END IF;
+    IF NOT FOUND THEN RETURN jsonb_build_object('status', 409); END IF;
     IF t.state = 'fulfilled' THEN
       NULL;
     ELSIF t.state = 'pending' THEN
@@ -563,33 +584,11 @@ BEGIN
       UPDATE tasks SET state = 'acquired', version = version + 1, ttl = p_ttl, pid = p_pid,
                        timeout_at = p_now + p_ttl WHERE id = t.id RETURNING * INTO t;
     ELSE
-      o_status := 409; RETURN;
+      RETURN jsonb_build_object('status', 409);
     END IF;
   END IF;
-  o_status := 200;
-  o_version := t.version; o_task_state := t.state; o_ttl := t.ttl; o_pid := t.pid;
-  o_p_state := p.state; o_p_param_headers := p.param_headers; o_p_param_data := p.param_data;
-  o_p_value_headers := p.value_headers; o_p_value_data := p.value_data; o_p_tags := p.tags;
-  o_p_timeout_at := p.timeout_at; o_p_created_at := p.created_at; o_p_settled_at := p.settled_at;
-END $$;
-
-CREATE OR REPLACE FUNCTION task_create(
-    p_pid text, p_ttl bigint, p_action jsonb, p_now bigint)
-  RETURNS jsonb LANGUAGE plpgsql AS $$
-DECLARE r record; a_id text := p_action->>'id';
-BEGIN
-  r := task_create_typed(p_pid, p_ttl, a_id, (p_action->>'timeoutAt')::bigint,
-         COALESCE(p_action#>'{param,headers}', '{}'::jsonb), p_action#>>'{param,data}',
-         COALESCE(p_action->'tags', '{}'::jsonb), p_now);
-  IF r.o_status <> 200 THEN RETURN jsonb_build_object('status', r.o_status); END IF;
-  RETURN jsonb_build_object('status', 200,
-    'task', jsonb_build_object('id', a_id, 'state', r.o_task_state, 'version', r.o_version,
-              'resumes', 0, 'ttl', r.o_ttl, 'pid', r.o_pid),
-    'promise', jsonb_build_object('id', a_id, 'state', r.o_p_state,
-              'param', jsonb_build_object('headers', r.o_p_param_headers, 'data', r.o_p_param_data),
-              'value', jsonb_build_object('headers', r.o_p_value_headers, 'data', r.o_p_value_data),
-              'tags', r.o_p_tags, 'timeoutAt', r.o_p_timeout_at, 'createdAt', r.o_p_created_at,
-              'settledAt', r.o_p_settled_at));
+  RETURN jsonb_build_object('status', 200, 'task', _task_json(t),
+                            'promise', _promise_json_raw(p));
 END $$;
 
 CREATE OR REPLACE FUNCTION task_acquire(
@@ -621,6 +620,10 @@ CREATE OR REPLACE FUNCTION task_fence(
   RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE t tasks; p promises; r jsonb; kind text := p_action->>'kind'; req jsonb := p_action->'req';
 BEGIN
+  -- A fence aimed at its own promise makes no sense: settling yourself is
+  -- task.fulfill's job, and allowing it would fulfill the fencing task as a
+  -- side effect of its own action. Rejected before any state is consulted.
+  IF req->>'id' = p_id THEN RETURN jsonb_build_object('status', 400); END IF;
   PERFORM _lock(p_id);
   SELECT * INTO t FROM tasks WHERE id = p_id FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('status', 404); END IF;
@@ -666,6 +669,14 @@ CREATE OR REPLACE FUNCTION task_suspend(
   RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE t tasks; tp promises; missing int; settled bool;
 BEGIN
+  -- A task awaiting its own promise is a self-deadlock by construction: the
+  -- callback it registers could only be fired by its own completion. A
+  -- malformed request, rejected with highest precedence — before existence,
+  -- state, or version are consulted.
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_actions, '[]'::jsonb)) act
+             WHERE act->>'awaited' = p_id) THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
   PERFORM _lock(lid) FROM (
     SELECT p_id AS lid
     UNION
@@ -680,9 +691,6 @@ BEGIN
   IF t.state <> 'acquired' THEN RETURN jsonb_build_object('status', 409); END IF;
   IF tp.state <> 'pending' OR tp.timeout_at <= p_now THEN RETURN jsonb_build_object('status', 409); END IF;
   IF t.version IS DISTINCT FROM p_version THEN RETURN jsonb_build_object('status', 409); END IF;
-
-  IF EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_actions, '[]'::jsonb)) act
-             WHERE act->>'awaited' = t.id) THEN RETURN jsonb_build_object('status', 400); END IF;
 
   SELECT count(*) FILTER (WHERE pa.id IS NULL),
          COALESCE(bool_or(pa.state <> 'pending' OR pa.timeout_at <= p_now), false)
@@ -705,44 +713,34 @@ BEGIN
   RETURN jsonb_build_object('status', 200);
 END $$;
 
-CREATE OR REPLACE FUNCTION task_fulfill_typed(
-    p_id text, p_version int, p_state text, p_value_headers jsonb, p_value_data text, p_now bigint,
-    OUT o_status int, OUT o_p_state text, OUT o_p_param_headers jsonb, OUT o_p_param_data text,
-    OUT o_p_value_headers jsonb, OUT o_p_value_data text, OUT o_p_tags jsonb,
-    OUT o_p_timeout_at bigint, OUT o_p_created_at bigint, OUT o_p_settled_at bigint)
-  LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE t tasks; p promises;
-BEGIN
-  PERFORM _lock(p_id);
-  SELECT * INTO t FROM tasks WHERE id = p_id FOR UPDATE;
-  IF NOT FOUND THEN o_status := 404; RETURN; END IF;
-  SELECT * INTO p FROM promises WHERE id = t.id FOR UPDATE;
-  IF NOT FOUND THEN o_status := 409; RETURN; END IF;
-  IF t.state <> 'acquired' THEN o_status := 409; RETURN; END IF;
-  IF p.state <> 'pending' OR p.timeout_at <= p_now THEN o_status := 409; RETURN; END IF;
-  IF t.version IS DISTINCT FROM p_version THEN o_status := 409; RETURN; END IF;
-  UPDATE promises SET state = p_state, value_headers = p_value_headers, value_data = p_value_data,
-                      settled_at = p_now WHERE id = p.id RETURNING * INTO p;
-  PERFORM _cascade_settle(p, p_now);
-  o_status := 200; o_p_state := p.state; o_p_param_headers := p.param_headers; o_p_param_data := p.param_data;
-  o_p_value_headers := p.value_headers; o_p_value_data := p.value_data; o_p_tags := p.tags;
-  o_p_timeout_at := p.timeout_at; o_p_created_at := p.created_at; o_p_settled_at := p.settled_at;
-END $$;
+DROP FUNCTION IF EXISTS task_fulfill_typed(text, int, text, jsonb, text, bigint);
 
 CREATE OR REPLACE FUNCTION task_fulfill(
     p_id text, p_version int, p_action jsonb, p_now bigint)
   RETURNS jsonb LANGUAGE plpgsql AS $$
-DECLARE r record;
+DECLARE
+  t tasks; p promises;
+  a_state   text  := p_action->>'state';
+  a_headers jsonb := COALESCE(p_action#>'{value,headers}', '{}'::jsonb);
+  a_data    text  := p_action#>>'{value,data}';
 BEGIN
-  r := task_fulfill_typed(p_id, p_version, p_action->>'state',
-         COALESCE(p_action#>'{value,headers}', '{}'::jsonb), p_action#>>'{value,data}', p_now);
-  IF r.o_status <> 200 THEN RETURN jsonb_build_object('status', r.o_status); END IF;
-  RETURN jsonb_build_object('status', 200,
-    'promise', jsonb_build_object('id', p_id, 'state', r.o_p_state,
-      'param', jsonb_build_object('headers', r.o_p_param_headers, 'data', r.o_p_param_data),
-      'value', jsonb_build_object('headers', r.o_p_value_headers, 'data', r.o_p_value_data),
-      'tags', r.o_p_tags, 'timeoutAt', r.o_p_timeout_at, 'createdAt', r.o_p_created_at,
-      'settledAt', r.o_p_settled_at));
+  -- Same validation as promise_settle, same precedence: the carried settle
+  -- must name a client-settable state before anything else is considered.
+  IF a_state IS NULL OR a_state NOT IN ('resolved','rejected','rejected_canceled') THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
+  PERFORM _lock(p_id);
+  SELECT * INTO t FROM tasks WHERE id = p_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('status', 404); END IF;
+  SELECT * INTO p FROM promises WHERE id = t.id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('status', 409); END IF;
+  IF t.state <> 'acquired' THEN RETURN jsonb_build_object('status', 409); END IF;
+  IF p.state <> 'pending' OR p.timeout_at <= p_now THEN RETURN jsonb_build_object('status', 409); END IF;
+  IF t.version IS DISTINCT FROM p_version THEN RETURN jsonb_build_object('status', 409); END IF;
+  UPDATE promises SET state = a_state, value_headers = a_headers, value_data = a_data,
+                      settled_at = p_now WHERE id = p.id RETURNING * INTO p;
+  PERFORM _cascade_settle(p, p_now);
+  RETURN jsonb_build_object('status', 200, 'promise', _promise_json_raw(p));
 END $$;
 
 CREATE OR REPLACE FUNCTION task_release(p_id text, p_version int, p_now bigint) RETURNS jsonb
@@ -805,6 +803,7 @@ CREATE OR REPLACE FUNCTION task_search(p_req jsonb, p_now bigint) RETURNS jsonb
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ▐  SECTION 5 · SCHEDULE ACTIONS · S-01 .. S-04
 -- ═══════════════════════════════════════════════════════════════════════════
+
 SET search_path TO resonate, public;
 
 CREATE OR REPLACE FUNCTION schedule_get(p_id text, p_now bigint) RETURNS jsonb
@@ -864,6 +863,7 @@ CREATE OR REPLACE FUNCTION schedule_search(p_req jsonb, p_now bigint) RETURNS js
 -- ▐  SECTION 6 · INTERNAL TRANSITIONS · timeouts + process_timeouts driver
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Postgres has no timers -- timeouts are rows. Each on_* is the exact transition
+
 SET search_path TO resonate, public;
 
 CREATE OR REPLACE FUNCTION _on_promise_timeout(p_id text, p_now bigint) RETURNS void
@@ -997,6 +997,7 @@ CREATE OR REPLACE FUNCTION process_timeouts() RETURNS int
 -- ▐  SECTION 7 · WIRE DISPATCHER · resonate_rpc(jsonb) — resonate-sdk-ts protocol
 -- ═══════════════════════════════════════════════════════════════════════════
 -- The one entrypoint the SDK network layer calls. Request:
+
 SET search_path TO resonate, public;
 
 CREATE OR REPLACE FUNCTION _status_text(status int) RETURNS text
@@ -1167,21 +1168,16 @@ BEGIN
 END $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ▐  SECTION 8 · TEST/DEBUG SUPPORT — in test/debug/debug.sql (NOT deployed)
--- ═══════════════════════════════════════════════════════════════════════════
--- resonate_reset/apply/snapshot are dev/test-only; load test/debug/debug.sql on
-SET search_path TO resonate, public;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- ▐  SECTION 9 · pg_cron TIMER DRIVER
+-- ▐  SECTION 8 · pg_cron TIMER DRIVER
 -- ═══════════════════════════════════════════════════════════════════════════
 -- pg_cron is the sole timer driver: it polls process_timeouts() every 5s so
+
 DO $cron$
 DECLARE
   v_db text := current_database();
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
-    RAISE WARNING 'resonate: pg_cron not available -- timers will NOT fire until it is installed and scheduled (section 9)';
+    RAISE WARNING 'resonate: pg_cron not available -- timers will NOT fire until it is installed and scheduled (section 8)';
     RETURN;
   END IF;
 
@@ -1211,7 +1207,7 @@ END
 $cron$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ▐  SECTION 10 · DISPATCH · addressed outbox drain (execute + unblock)
+-- ▐  SECTION 9 · DISPATCH · addressed outbox drain (execute + unblock)
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Each dequeue is a destructive, addressed, ORDER BY seq, FOR UPDATE SKIP LOCKED
 
@@ -1248,16 +1244,17 @@ CREATE OR REPLACE FUNCTION dequeue_unblock(p_address text, p_limit int DEFAULT 1
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ▐  SECTION 11 · RETENTION · gc
+-- ▐  SECTION 10 · RETENTION · gc
 -- ═══════════════════════════════════════════════════════════════════════════
--- Terminal rows are marked, never auto-deleted. gc(settled_before, limit) deletes
 
 CREATE OR REPLACE FUNCTION gc(p_settled_before bigint, p_limit int DEFAULT 10000)
   RETURNS bigint LANGUAGE sql AS $$
   WITH doomed AS (
-    SELECT ctid FROM promises
-    WHERE state <> 'pending' AND settled_at <= p_settled_before
-    ORDER BY settled_at
+    SELECT p.ctid FROM promises p
+    WHERE p.state <> 'pending' AND p.settled_at <= p_settled_before
+      AND NOT EXISTS (SELECT 1 FROM promises r
+                      WHERE r.id = p.origin_id AND r.state = 'pending')
+    ORDER BY p.settled_at
     LIMIT p_limit),
   del AS (
     DELETE FROM promises WHERE ctid IN (SELECT ctid FROM doomed) RETURNING id),
@@ -1272,7 +1269,7 @@ CREATE OR REPLACE FUNCTION gc(p_settled_before bigint, p_limit int DEFAULT 10000
 $$;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- ▐  SECTION 12 · AUTHZ · least-privilege resonate_worker role
+-- ▐  SECTION 11 · AUTHZ · least-privilege resonate_worker role
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Lock EXECUTE (default PUBLIC) to one worker role. The wire entrypoints are
 
@@ -1308,8 +1305,6 @@ END $pin$;
 GRANT EXECUTE ON FUNCTION
   resonate_rpc(jsonb),
   get_schema_version(),
-  task_create_typed(text, bigint, text, bigint, jsonb, text, jsonb, bigint),
-  task_fulfill_typed(text, int, text, jsonb, text, bigint),
   invoke(text, text, jsonb, text, int, bigint),
   dequeue_execute(text, int),
   dequeue_unblock(text, int),
