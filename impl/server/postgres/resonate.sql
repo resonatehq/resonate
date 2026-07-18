@@ -35,10 +35,10 @@ CREATE TABLE IF NOT EXISTS promises (
   branch_id     TEXT GENERATED ALWAYS AS (tags->>'resonate:branch') STORED,
   is_timer      BOOLEAN NOT NULL
                   GENERATED ALWAYS AS (COALESCE(tags->>'resonate:timer','') = 'true') STORED,
-  kind          TEXT GENERATED ALWAYS AS (
-                  CASE WHEN tags->>'resonate:target' IS NOT NULL
-                         OR COALESCE(tags->>'resonate:timer','') = 'true'
-                       THEN 'external' ELSE 'internal' END) STORED,
+  external      BOOLEAN NOT NULL GENERATED ALWAYS AS (
+                  tags->>'resonate:target' IS NOT NULL
+                  OR COALESCE(tags->>'resonate:timer','')    = 'true'
+                  OR COALESCE(tags->>'resonate:external','') = 'true') STORED,
   timeout_at    BIGINT NOT NULL,
   created_at    BIGINT NOT NULL,
   settled_at    BIGINT
@@ -198,10 +198,12 @@ END $$;
 CREATE OR REPLACE FUNCTION _promise_json_raw(p promises) RETURNS jsonb
   LANGUAGE sql IMMUTABLE AS $$ SELECT _promise_json(p, -1) $$;
 
+-- Only external promises get their timeout enforced: someone outside this
+-- database drives them, so nobody here will settle them on their own. An
+-- internal promise settles as its own execution proceeds.
 CREATE OR REPLACE FUNCTION _promise_timed(p promises) RETURNS boolean
-  LANGUAGE sql STABLE AS $$
-  SELECT p.state = 'pending'
-     AND (p.is_timer OR EXISTS (SELECT 1 FROM tasks WHERE tasks.id = p.id));
+  LANGUAGE sql IMMUTABLE AS $$
+  SELECT p.state = 'pending' AND p.external;
 $$;
 
 CREATE OR REPLACE FUNCTION _task_json(t tasks) RETURNS jsonb
