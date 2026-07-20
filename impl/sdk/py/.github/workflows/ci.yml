@@ -15,7 +15,7 @@ on:
       - README.md
 
 jobs:
-  versions:
+  lockfile:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -26,9 +26,6 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.11.21
-
-      - name: check all packages share one version
-        run: uv run --no-project scripts/check-versions.py
 
       - name: check the lockfile is up to date
         run: uv lock --check

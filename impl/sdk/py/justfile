@@ -1,12 +1,6 @@
 default:
     just --list
 
-
-# set one version across the workspace; commit, then tag v<version> to release
-bump version:
-    uv run --no-project scripts/bump-version.py {{version}}
-
-
 examples:
     uv run python examples/hello-world
     uv run python examples/fibonacci --mode run --n 12

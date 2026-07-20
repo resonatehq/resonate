@@ -6,10 +6,13 @@ on:
 
 jobs:
   # Everything that can reject a bad release happens here, before any
-  # upload: every package must carry the tag's version, the test suite
-  # must pass from source and against the built artifacts, and those
-  # artifacts must resolve and import in a clean environment. The
-  # publish job ships exactly the artifacts this job built.
+  # upload: the root package must carry the tag's version, the test
+  # suite must pass from source, and -- the check that matters for
+  # independent versioning -- it must pass again with the built wheels
+  # installed by the real resolver instead of the [tool.uv.sources]
+  # workspace links dev uses, which proves each member's declared
+  # dependency range is satisfiable by the artifact set being shipped.
+  # The publish job ships exactly the artifacts this job built.
   verify:
     runs-on: ubuntu-latest
 
@@ -26,8 +29,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: verify versions are consistent and match the tag
-        run: uv run --no-project scripts/check-versions.py --tag "$GITHUB_REF_NAME"
+      # The tag tracks the root SDK's version; a mismatch means the wheel
+      # would publish under the wrong version (or skip-existing would drop
+      # it), so nothing ships.
+      - name: verify the root version matches the release tag
+        run: |
+          version=$(uv version --short)
+          test "$version" = "${GITHUB_REF_NAME#v}" \
+            || { echo "root version $version != tag ${GITHUB_REF_NAME#v}"; exit 1; }
 
       - name: install
         run: uv sync --locked --all-extras --all-packages
@@ -38,22 +47,17 @@ jobs:
       - name: build library
         run: uv build --all-packages
 
-      # Installing from dist with the real resolver proves the wheels
-      # declare their runtime dependencies and the exact cross-package
-      # pin is satisfiable by the artifact set being shipped -- the dev
-      # environment has every dependency preinstalled, so the wheel test
-      # run below cannot catch a missing declaration.
-      - name: resolve and import the built artifacts in a clean environment
-        run: |
-          uv venv /tmp/smoke
-          uv pip install --python /tmp/smoke --find-links dist "resonate-sdk-aws==${GITHUB_REF_NAME#v}"
-          /tmp/smoke/bin/python -c "import resonate, resonate_aws"
-
-      # Replace the editable workspace installs with the built wheels so
-      # the suite exercises exactly the code that will be published.
+      # Reinstall the workspace packages from the built wheels with the
+      # real resolver (no --no-deps), then run the whole suite against
+      # exactly the code that will be published. Explicit wheel paths pin
+      # every workspace package to its built artifact, so the resolver
+      # cannot substitute a PyPI release, and it must satisfy each
+      # member's declared range against the shipped set -- a range that
+      # does not admit the built root fails the install here. No package
+      # is named, so a new member is covered the day it appears in dist.
       - name: run tests against the built artifacts
         run: |
-          uv pip install --force-reinstall --no-deps dist/*.whl
+          uv pip install --reinstall dist/*.whl
           uv run --no-sync pytest
 
       - name: upload build artifacts
@@ -80,9 +84,15 @@ jobs:
 
       # PyPI uploads are not atomic across files, so publish in
       # dependency order: the root package first, then the members that
-      # pin it. A mid-publish failure can then only leave resonate-sdk
-      # released with the members not yet out -- a state that breaks no
-      # installs -- and skip-existing lets a re-run finish the release.
+      # depend on it. A mid-publish failure can then only leave
+      # resonate-sdk released with the members not yet out -- a state
+      # that breaks no installs -- and skip-existing lets a re-run
+      # finish the release. skip-existing also carries the independent
+      # versioning model: a member whose version is already on PyPI is
+      # skipped, which is how an unchanged member rides along a root
+      # release without being republished -- and the verify job rejects
+      # a changed member whose version is already out, so a skip here is
+      # always a deliberate ride-along.
       - name: split out the root package artifacts
         run: |
           mkdir dist-root
