@@ -11,9 +11,12 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
   | none =>
       return { status := 409 }
   | some p =>
-      if t.state != .pending then return { status := 409 }
-      if p.state != .pending ∨ p.timeoutAt ≤ now then return { status := 409 }
-      if t.version != req.version then return { status := 409 }
+      if t.state != .pending then
+        return { status := 409 }
+      if p.state != .pending ∨ p.timeoutAt ≤ now then
+        return { status := 409 }
+      if t.version != req.version then
+        return { status := 409 }
       let t := { t with state := .acquired, version := t.version + 1, ttl := some req.ttl, pid := some req.pid, resumes := [] }
       setTask t
       delTaskTimeout t.id

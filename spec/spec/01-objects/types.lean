@@ -289,4 +289,28 @@ structure TaskSearchRes where
   cursor : Option String := none
   deriving Repr
 
+structure ResumeReq where
+  awaited : String
+  awaiter : String
+  deriving Repr
+
+/-- Spec artifact for the oracle: a resume never serializes and nobody is
+    listening, but the drain has six distinct outcomes and `M Unit` would
+    leave it testable only by state diffing. An inductive, not a `Nat`:
+    there is no wire format to be compatible with, so name the cases.
+    `expired` vs `fulfilled` is the distinction TIMEOUT ALWAYS WINS
+    legislates -- representable here, invisible in a unit return. -/
+inductive ResumeOutcome
+  | resumed     -- suspended -> pending; execute emitted
+  | buffered    -- awaiter live but not suspended; trigger recorded
+  | duplicate   -- trigger already recorded
+  | expired     -- awaiter past its own deadline; the timeout path owns cleanup
+  | fulfilled   -- awaiter already settled
+  | absent      -- no task, or no promise, for the awaiter
+  deriving Repr, DecidableEq
+
+structure ResumeRes where
+  outcome : ResumeOutcome
+  deriving Repr
+
 end ServerModel

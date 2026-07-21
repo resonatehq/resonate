@@ -11,6 +11,13 @@ def Tags.has (t : Tags) (k : String) : Bool :=
 def Tags.isTimer (t : Tags) : Bool :=
   t.get? "resonate:timer" == some "true"
 
+/-- The terminal states a client may settle into. `pending` is not a
+    settlement, and `rejectedTimedout` is server-owned: only the timeout
+    path writes it, so a client can never forge one. -/
+def PromiseState.settable : PromiseState → Bool
+  | .resolved | .rejected | .rejectedCanceled => true
+  | _ => false
+
 structure PromiseObject where
   id        : String
   state     : PromiseState
@@ -31,8 +38,47 @@ def PromiseObject.toRecord (p : PromiseObject) : PromiseRecord :=
 
 def PromiseObject.isTimer (p : PromiseObject) : Bool := p.tags.isTimer
 
+/-- THE PROJECTION. The logical view of a promise at instant `now`: a
+    pending promise past its deadline is logically settled -- `resolved`
+    for timers, `rejectedTimedout` otherwise -- stamped AT THE DEADLINE,
+    so the projected record is byte-identical to the record the timeout
+    τ-step (`onPromiseTimeout`) eventually writes. Materialization is
+    memoization of this function.
+
+    The projection is total over PROMISE state: every promise-bearing
+    response and every guard that consults promise state consults the
+    projected view (`promiseSettle`'s live-check, `taskSuspend`'s
+    awaited-settled check, `taskGet`'s own-promise check). Stored-vs-
+    projected divergence is therefore nowhere observable, which is what
+    makes the materialization schedule unobservable, and hence
+    unspecified.
+
+    TASK state is deliberately NOT projected. Tasks are the material
+    coordination layer -- claims, leases, fencing tokens -- and their
+    guards (`taskAcquire`, `taskFence`, `taskFulfill`) must branch on
+    material state; that is what fencing means. A projected task state
+    would report an affordance (`.pending` = acquirable-now) that the
+    material machine does not yet offer. Projection reports facts, not
+    affordances; the one task projection that exists (`taskGet` serving
+    `.fulfilled` when the own promise is logically settled) is safe
+    precisely because `.fulfilled` is inert. -/
+def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
+  if p.state == .pending ∧ p.timeoutAt ≤ now then
+    if p.isTimer then
+      { p with state := .resolved, settledAt := some p.timeoutAt }
+    else
+      { p with state := .rejectedTimedout, settledAt := some p.timeoutAt }
+  else
+    p
+
+/-- External promises — explicitly tagged `resonate:external = "true"`,
+    targeted, or timers — may have awaiters and carry an armed (durable)
+    timeout; the timeout transition guarantees their awaiters are never
+    stranded. Internal promises must not have awaiters; their deadlines
+    are projection-only. -/
 def PromiseObject.external (p : PromiseObject) : Bool :=
-  p.tags.has "resonate:target" || p.isTimer
+  p.tags.get? "resonate:external" == some "true"
+    || p.tags.has "resonate:target" || p.isTimer
 
 def PromiseObject.addCallback (p : PromiseObject) (awaiterId : String) : PromiseObject :=
   if p.callbacks.contains awaiterId then
@@ -98,6 +144,7 @@ structure ServerState where
   promises         : List PromiseObject   := []
   tasks            : List TaskObject       := []
   schedules        : List Schedule         := []
+  deferred         : List ResumeReq        := []
   promiseTimeouts  : List PromiseTimeout   := []
   taskTimeouts     : List TaskTimeout       := []
   scheduleTimeouts : List ScheduleTimeout  := []
@@ -169,8 +216,23 @@ def setMessage (address : String) (msg : Message) : M Unit :=
     let key   := entry.key
     { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
 
-def delMessage (id : String) : M Unit :=
+/-- Record a resume obligation the server invokes on itself later. Keyed
+    collapse-on-set like `setMessage` and `setTaskTimeout` -- but here the
+    key is defensive rather than load-bearing: `addCallback` dedups, a
+    promise settles at most once, and a settled awaited is never
+    re-registered, so each pair is deferred at most once over any run.
+    No time field: all call sites would pass `now`, and *later* is not
+    *a time* -- the drain supplies its own clock to the deadline guard. -/
+def defer (r : ResumeReq) : M Unit :=
   modify fun s =>
-    { s with outbox := s.outbox.filter (fun e => e.key != id) }
+    { s with deferred :=
+        r :: s.deferred.filter (fun e =>
+          !(e.awaited == r.awaited && e.awaiter == r.awaiter)) }
+
+def undefer (r : ResumeReq) : M Unit :=
+  modify fun s =>
+    { s with deferred :=
+        s.deferred.filter (fun e =>
+          !(e.awaited == r.awaited && e.awaiter == r.awaiter)) }
 
 end ServerModel

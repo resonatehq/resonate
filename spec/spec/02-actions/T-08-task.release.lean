@@ -12,9 +12,12 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
   | none =>
       return { status := 409 }
   | some p =>
-      if t.state != .acquired then return { status := 409 }
-      if p.state != .pending ∨ p.timeoutAt ≤ now then return { status := 409 }
-      if t.version != req.version then return { status := 409 }
+      if t.state != .acquired then
+        return { status := 409 }
+      if p.state != .pending ∨ p.timeoutAt ≤ now then
+        return { status := 409 }
+      if t.version != req.version then
+        return { status := 409 }
       let t := { t with state := .pending, pid := none, ttl := none }
       setTask t
       delTaskTimeout t.id

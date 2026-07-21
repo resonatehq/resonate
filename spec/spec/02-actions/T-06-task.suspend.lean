@@ -3,6 +3,13 @@ import «01-objects».«state»
 open ServerModel
 
 def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
+  if req.actions.isEmpty then
+    return { status := 400 }
+  if req.actions.any (·.awaited == req.id) then
+    return { status := 400 }
+  let awaitedIds := req.actions.map (·.awaited)
+  if awaitedIds.eraseDups.length != awaitedIds.length then
+    return { status := 400 }
   match ← getTask req.id with
   | none =>
       return { status := 404 }
@@ -11,15 +18,20 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
   | none =>
       return { status := 409 }
   | some tp =>
-      if t.state != .acquired then return { status := 409 }
-      if tp.state != .pending ∨ tp.timeoutAt ≤ now then return { status := 409 }
-      if t.version != req.version then return { status := 409 }
+      if t.state != .acquired then
+        return { status := 409 }
+      if tp.state != .pending ∨ tp.timeoutAt ≤ now then
+        return { status := 409 }
+      if t.version != req.version then
+        return { status := 409 }
       let mut settled := false
       for action in req.actions do
         match ← getPromise action.awaited with
         | none =>
             return { status := 422 }
         | some pa =>
+            if !pa.external then
+              return { status := 422 }
             if pa.state != .pending ∨ pa.timeoutAt ≤ now then
               settled := true
       if settled then

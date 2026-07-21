@@ -4,6 +4,8 @@ open ServerModel
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
+  if !(a.tags.has "resonate:target") then
+    return { status := 400 }
   match ← getPromise a.id with
   | none =>
       if a.timeoutAt > now then

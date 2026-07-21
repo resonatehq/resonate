@@ -8,11 +8,14 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
   | none =>
       return { status := 404 }
   | some t =>
-      if t.state != .halted then return { status := 409 }
+      if t.state != .halted then
+        return { status := 409 }
       match ← getPromise t.id with
       | none =>
           return { status := 404 }
       | some p =>
+          if p.state != .pending || p.timeoutAt ≤ now then
+            return { status := 409 }
           let t := { t with state := .pending }
           setTask t
           setTaskTimeout t.id 0 (now + retryTimeout)
