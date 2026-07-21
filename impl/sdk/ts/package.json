@@ -23,6 +23,11 @@
       "import": "./dist/network/nats.js",
       "default": "./dist/network/nats.js"
     },
+    "./postgres": {
+      "types": "./dist/network/postgres.d.ts",
+      "import": "./dist/network/postgres.js",
+      "default": "./dist/network/postgres.js"
+    },
     "./package.json": "./package.json"
   },
   "repository": {
@@ -53,10 +58,14 @@
     "eventsource": "^4.0.0"
   },
   "peerDependencies": {
-    "@nats-io/transport-node": "^3.0.0"
+    "@nats-io/transport-node": "^3.0.0",
+    "pg": "^8.11.0"
   },
   "peerDependenciesMeta": {
     "@nats-io/transport-node": {
+      "optional": true
+    },
+    "pg": {
       "optional": true
     }
   },
@@ -73,7 +82,9 @@
     "tsx": "^4.20.5",
     "typedoc": "^0.28.18",
     "typedoc-material-theme": "^1.4.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "pg": "^8.13.1",
+    "@types/pg": "^8.11.10"
   },
   "engines": {
     "node": ">= 22"
