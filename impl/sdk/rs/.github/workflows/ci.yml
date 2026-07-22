@@ -73,3 +73,43 @@ jobs:
       - name: Stop Resonate server
         if: always()
         run: docker rm -f resonate || true
+
+  e2e-postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate-pg
+          path: resonate-pg
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Start Postgres and apply the resonate-pg schema
+        run: |
+          docker run -d --name resonate-pg \
+            -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            postgres:16
+          for i in $(seq 1 60); do
+            if docker exec resonate-pg pg_isready -U postgres >/dev/null 2>&1; then
+              echo "Postgres is up."
+              break
+            fi
+            sleep 1
+          done
+          docker exec -i resonate-pg psql -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 -f - < resonate-pg/resonate.sql
+
+      - name: Run postgres e2e tests
+        env:
+          RESONATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: cargo test -p resonate-sdk-postgres --test e2e
+
+      - name: Dump Postgres logs on failure
+        if: failure()
+        run: docker logs resonate-pg || true
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f resonate-pg || true

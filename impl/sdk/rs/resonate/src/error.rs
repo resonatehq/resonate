@@ -24,6 +24,9 @@ pub enum Error {
     #[error("http error: {0}")]
     HttpError(#[from] reqwest::Error),
 
+    #[error("network error: {0}")]
+    NetworkError(String),
+
     #[error("base64 decode error: {0}")]
     Base64DecodeError(#[from] base64::DecodeError),
 
