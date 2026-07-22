@@ -5,15 +5,15 @@ on:
     types: [released]
 
 jobs:
-  # Everything that can reject a bad release happens here, before any
-  # upload: the root package must carry the tag's version, the test
-  # suite must pass from source, and -- the check that matters for
-  # independent versioning -- it must pass again with the built wheels
-  # installed by the real resolver instead of the [tool.uv.sources]
-  # workspace links dev uses, which proves each member's declared
-  # dependency range is satisfiable by the artifact set being shipped.
-  # The publish job ships exactly the artifacts this job built.
-  verify:
+  # One job: every check that can reject a bad release (version == tag, tests
+  # from source, and -- the check that matters for independent versioning --
+  # tests against the built wheels) runs before the publish step, so nothing
+  # ships if any of them fail. The publish step ships exactly the dist/ this
+  # job built and tested.
+  release:
+    permissions:
+      id-token: write
+
     runs-on: ubuntu-latest
 
     steps:
@@ -30,8 +30,7 @@ jobs:
           python-version: "3.12"
 
       # The tag tracks the root SDK's version; a mismatch means the wheel
-      # would publish under the wrong version (or skip-existing would drop
-      # it), so nothing ships.
+      # would publish under the wrong version, so nothing ships.
       - name: verify the root version matches the release tag
         run: |
           version=$(uv version --short)
@@ -60,52 +59,11 @@ jobs:
           uv pip install --reinstall dist/*.whl
           uv run --no-sync pytest
 
-      - name: upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          if-no-files-found: error
-
-  publish:
-    needs: verify
-
-    permissions:
-      id-token: write
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-      # PyPI uploads are not atomic across files, so publish in
-      # dependency order: the root package first, then the members that
-      # depend on it. A mid-publish failure can then only leave
-      # resonate-sdk released with the members not yet out -- a state
-      # that breaks no installs -- and skip-existing lets a re-run
-      # finish the release. skip-existing also carries the independent
-      # versioning model: a member whose version is already on PyPI is
-      # skipped, which is how an unchanged member rides along a root
-      # release without being republished -- and the verify job rejects
-      # a changed member whose version is already out, so a skip here is
-      # always a deliberate ride-along.
-      - name: split out the root package artifacts
-        run: |
-          mkdir dist-root
-          mv dist/resonate_sdk-* dist-root/
-
-      - name: push resonate-sdk to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.13.0
-        with:
-          packages-dir: dist-root/
-          skip-existing: true
-
-      - name: push workspace members to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.13.0
-        with:
-          packages-dir: dist/
-          skip-existing: true
+      # --check-url skips any package whose version is already on PyPI, so an
+      # unchanged member rides along a root release without republishing and a
+      # re-run finishes a partial publish. The checks above reject a changed
+      # member whose version is already out, so a skip here is always a
+      # deliberate ride-along. Trusted publishing (OIDC) is picked up
+      # automatically from the id-token permission.
+      - name: publish to PyPI
+        run: uv publish --check-url https://pypi.org/simple/

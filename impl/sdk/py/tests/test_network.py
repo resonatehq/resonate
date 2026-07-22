@@ -722,9 +722,7 @@ async def test_http_send_before_start_does_not_raise_stopped_error(
     succeeds immediately, so the request goes through without a real server.
     """
     net = HttpNetwork("http://localhost:8001", pid="pid", group="g")
-    ok_session = _FlakySession(
-        fail_times=0, body='{"head":{"status":200},"data":{}}'
-    )
+    ok_session = _FlakySession(fail_times=0, body='{"head":{"status":200},"data":{}}')
     monkeypatch.setattr(net, "_ensure_session", lambda: ok_session)
 
     # Simulate what Resonate.__init__ does: schedule start() as a background
@@ -753,9 +751,7 @@ async def test_http_send_after_stop_raises_even_if_never_started(
     of whether ``start()`` was ever called.
     """
     net = HttpNetwork("http://localhost:8001", pid="pid", group="g")
-    ok_session = _FlakySession(
-        fail_times=0, body='{"head":{"status":200},"data":{}}'
-    )
+    ok_session = _FlakySession(fail_times=0, body='{"head":{"status":200},"data":{}}')
     monkeypatch.setattr(net, "_ensure_session", lambda: ok_session)
 
     # Stop without ever starting.
