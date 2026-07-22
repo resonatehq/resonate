@@ -482,6 +482,10 @@ BEGIN
   SELECT * INTO pw FROM promises WHERE id = p_awaiter;
   IF NOT FOUND THEN RETURN jsonb_build_object('status', 422); END IF;
   IF NOT (pw.tags ? 'resonate:target') THEN RETURN jsonb_build_object('status', 422); END IF;
+  -- An INTERNAL awaited must not have awaiters: its timeout is not enforced
+  -- (nobody outside this database settles it), so an awaiter could be
+  -- stranded forever. Only external promises are awaitable.
+  IF NOT pa.external THEN RETURN jsonb_build_object('status', 422); END IF;
 
   IF pa.state = 'pending' THEN
     IF pa.timeout_at > p_now THEN
@@ -669,14 +673,25 @@ END $$;
 CREATE OR REPLACE FUNCTION task_suspend(
     p_id text, p_version int, p_actions jsonb, p_now bigint)
   RETURNS jsonb LANGUAGE plpgsql AS $$
-DECLARE t tasks; tp promises; missing int; settled bool;
+DECLARE t tasks; tp promises; missing int; internal bool; settled bool;
 BEGIN
-  -- A task awaiting its own promise is a self-deadlock by construction: the
-  -- callback it registers could only be fired by its own completion. A
-  -- malformed request, rejected with highest precedence — before existence,
-  -- state, or version are consulted.
-  IF EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_actions, '[]'::jsonb)) act
+  -- Malformed requests are rejected with highest precedence — before
+  -- existence, state, or version are consulted (spec T-06 guard order):
+  -- 1. EMPTY actions: parking with no awaited would strand the task forever
+  --    (nothing could ever resume it).
+  -- 2. Self-await: a self-deadlock by construction — the callback it
+  --    registers could only be fired by its own completion.
+  -- 3. DUPLICATE awaited ids in one payload (re-registration ACROSS requests
+  --    stays idempotent; within one payload it is malformed).
+  IF jsonb_array_length(COALESCE(p_actions, '[]'::jsonb)) = 0 THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_actions) act
              WHERE act->>'awaited' = p_id) THEN
+    RETURN jsonb_build_object('status', 400);
+  END IF;
+  IF (SELECT count(act->>'awaited') <> count(DISTINCT act->>'awaited')
+      FROM jsonb_array_elements(p_actions) act) THEN
     RETURN jsonb_build_object('status', 400);
   END IF;
   PERFORM _lock(lid) FROM (
@@ -695,12 +710,16 @@ BEGIN
   IF t.version IS DISTINCT FROM p_version THEN RETURN jsonb_build_object('status', 409); END IF;
 
   SELECT count(*) FILTER (WHERE pa.id IS NULL),
+         COALESCE(bool_or(NOT pa.external), false),
          COALESCE(bool_or(pa.state <> 'pending' OR pa.timeout_at <= p_now), false)
-    INTO missing, settled
+    INTO missing, internal, settled
   FROM jsonb_array_elements(COALESCE(p_actions, '[]'::jsonb)) act
   LEFT JOIN promises pa ON pa.id = act->>'awaited';
 
   IF missing > 0 THEN RETURN jsonb_build_object('status', 422); END IF;
+  -- An INTERNAL awaited must not have awaiters (no enforced timeout →
+  -- the suspended task could be stranded forever) → 422.
+  IF internal THEN RETURN jsonb_build_object('status', 422); END IF;
   IF settled THEN
     DELETE FROM task_resumes WHERE task_id = t.id;
     RETURN jsonb_build_object('status', 300);
