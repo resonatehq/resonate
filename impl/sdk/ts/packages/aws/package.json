@@ -1,0 +1,35 @@
+{
+  "name": "@resonatehq/aws",
+  "version": "0.2.0",
+  "description": "Resonate FaaS handler for AWS Lambda Functions (TypeScript)",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/resonatehq/resonate-sdk-ts.git",
+    "directory": "packages/aws"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "resonate",
+    "faas",
+    "aws",
+    "aws-lambda",
+    "durable-execution"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@resonatehq/sdk": "^0.11.3"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.9.3"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.156"
+  }
+}

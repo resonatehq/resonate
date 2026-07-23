@@ -81,7 +81,7 @@ async function runPipeline(ctx: Context, url: string): Promise<string> {
 
 // ── main ────────────────────────────────────────────────────────────────
 
-const resonate = new Resonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: process.env.RESONATE_URL ?? "http://localhost:8001" });
 
 const runFn = resonate.register("runPipeline", runPipeline);
 resonate.register("download", download);

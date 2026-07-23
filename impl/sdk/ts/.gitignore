@@ -1,13 +1,46 @@
-.DS_Store
+# dependencies
 node_modules/
+jspm_packages/
+
+# output
 out/
 dist/
+*.tgz
 *.tsbuildinfo
-docs/
+
+# coverage
 coverage/
-.next/
-bun.lock
-public/
+*.lcov
+.nyc_output
+
+# logs
+logs
 *.log
+
+# caches
+.cache
+.parcel-cache
+.eslintcache
+.stylelintcache
+.next/
+.svelte-kit/
+.docusaurus
+
+# env
+.env
+.env.*
+!.env.example
+
+# terraform / db / locks / wrangler
+.terraform
+*.db
 *.lock
-package-lock.json
+bun.lockb
+*.wrangler
+
+# editors / OS
+.idea
+.DS_Store
+
+# docs
+docs/

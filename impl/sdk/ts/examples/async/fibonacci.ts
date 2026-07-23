@@ -45,7 +45,7 @@ function flag(name: string, fallback: string): string {
 const mode = flag("mode", "run");
 const n = Number(flag("n", "10"));
 
-const resonate = new Resonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: process.env.RESONATE_URL ?? "http://localhost:8001" });
 const fns: Record<string, ReturnType<typeof resonate.register>> = {
   rpc: resonate.register("fibRpc", fibRpc),
   run: resonate.register("fibRun", fibRun),

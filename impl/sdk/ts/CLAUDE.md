@@ -37,11 +37,33 @@ npm run check:fix    # Biome linter check with auto-fix
 npm run fmt          # Biome formatter
 ```
 
+## Monorepo layout
+
+This is an npm-workspaces monorepo. The root package **is** the core SDK
+(`@resonatehq/sdk`, source in `src/`), mirroring the Python SDK where the
+workspace root is the core package. Platform FaaS shims live under `packages/*`
+and each publish independently:
+
+| Package | Dir | Runtime | Publishes as |
+|---------|-----|---------|--------------|
+| core | `.` (root) | Node | `@resonatehq/sdk` |
+| aws | `packages/aws` | Node (Lambda) | `@resonatehq/aws` |
+| gcp | `packages/gcp` | Node (Cloud Functions) | `@resonatehq/gcp` |
+| cloudflare | `packages/cloudflare` | Cloudflare Workers | `@resonatehq/cloudflare` |
+
+Shims declare a normal semver dep on `@resonatehq/sdk` (publishable). For local
+dev, the root `overrides` field (`"@resonatehq/sdk": "file:."`) symlinks that dep
+to the local core so shims build against local source, not the registry — this
+is npm's stand-in for uv's `workspace = true` (npm won't self-link the root as
+a workspace member). Run `npm install` at the root; build core first
+(`npm run build`) since shims resolve it via `dist/`.
+
 ## Key directories
 
 | Path | Purpose |
 |------|---------|
 | `src/` | Generator engine source (`@resonatehq/sdk`) |
+| `packages/` | Platform FaaS shims (see Monorepo layout above) |
 | `src/resonate.ts` | Main `Resonate` class — entry point for users |
 | `src/context.ts` | `Context` type passed to every Resonate function |
 | `src/core.ts` | Execution engine |

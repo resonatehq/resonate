@@ -15,7 +15,7 @@ async function greet(_info: Info, name: string): Promise<string> {
   return `hello, ${name}!`;
 }
 
-const resonate = new Resonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: process.env.RESONATE_URL ?? "http://localhost:8001" });
 const greetFn = resonate.register("greet", greet);
 
 const id = `hello-${Date.now()}`;

@@ -5,28 +5,35 @@
   "author": "Resonate Developers",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "workspaces": [
+    "packages/*"
+  ],
+  "overrides": {
+    "@resonatehq/sdk": "file:.",
+    "uuid": "^11.1.1"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
     },
     "./async": {
-      "types": "./dist/async/index.d.ts",
-      "import": "./dist/async/index.js",
-      "default": "./dist/async/index.js"
+      "types": "./dist/src/async/index.d.ts",
+      "import": "./dist/src/async/index.js",
+      "default": "./dist/src/async/index.js"
     },
     "./nats": {
-      "types": "./dist/network/nats.d.ts",
-      "import": "./dist/network/nats.js",
-      "default": "./dist/network/nats.js"
+      "types": "./dist/src/network/nats.d.ts",
+      "import": "./dist/src/network/nats.js",
+      "default": "./dist/src/network/nats.js"
     },
     "./postgres": {
-      "types": "./dist/network/postgres.d.ts",
-      "import": "./dist/network/postgres.js",
-      "default": "./dist/network/postgres.js"
+      "types": "./dist/src/network/postgres.d.ts",
+      "import": "./dist/src/network/postgres.js",
+      "default": "./dist/src/network/postgres.js"
     },
     "./package.json": "./package.json"
   },
@@ -38,20 +45,22 @@
     "provenance": true
   },
   "files": [
-    "dist"
+    "dist/src"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json",
-    "check": "npx @biomejs/biome check ./",
-    "check:fix": "npx @biomejs/biome check ./ --write",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "biome check ./",
+    "check:fix": "biome check ./ --write",
+    "check:all": "npm run build && npm run check && npm run type-check && npm test",
     "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
-    "docs": "npx typedoc ./src --githubPages",
-    "dst": "npx tsx sim/main.ts",
-    "dst:diff": "npx tsx sim/src/differential.ts",
-    "fmt": "npx @biomejs/biome format ./ --write",
+    "docs": "typedoc ./src --githubPages",
+    "dst": "tsx sim/main.ts",
+    "dst:diff": "tsx sim/src/differential.ts",
+    "fmt": "biome format ./ --write",
     "prepare": "npm run build",
-    "test": "npx jest --config jest.config.cjs",
-    "type-check": "npx tsc --noEmit"
+    "release": "tsx scripts/release.ts",
+    "test": "jest --config jest.config.cjs",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "cron-parser": "^5.3.0",
@@ -75,18 +84,19 @@
     "@nats-io/nats-core": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@types/jest": "30.0.0",
-    "@types/node": "^25.0.3",
+    "@types/node": "^25.9.5",
+    "@types/pg": "^8.11.10",
     "commander": "^14.0.0",
     "esbuild": "^0.28.0",
+    "pg": "^8.13.1",
     "ts-jest": "^29.4.9",
     "tsx": "^4.20.5",
     "typedoc": "^0.28.18",
     "typedoc-material-theme": "^1.4.0",
-    "typescript": "^6.0.2",
-    "pg": "^8.13.1",
-    "@types/pg": "^8.11.10"
+    "typescript": "^6.0.2"
   },
   "engines": {
-    "node": ">= 22"
+    "node": ">= 22",
+    "npm": ">= 10"
   }
 }

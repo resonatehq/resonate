@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**/*.ts", "**/*.js", "!**/dist/*", "!**/node_modules/*", "!**/coverage/*"]
+    "includes": ["**/*.ts", "**/*.js", "!**/dist/*", "!**/node_modules/*", "!**/coverage/*", "!**/.wrangler/*"]
   },
   "formatter": {
     "enabled": true,
@@ -41,5 +41,16 @@
     "formatter": {
       "quoteStyle": "double"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "useAwait": "error" },
+          "complexity": { "useOptionalChain": "error" }
+        }
+      }
+    }
+  ]
 }

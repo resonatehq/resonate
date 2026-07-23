@@ -1,0 +1,98 @@
+name: cd
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  # One job: every check that can reject a bad release (version == tag, lint,
+  # types, tests, build of core + shims) runs before the publish step, so
+  # nothing ships if any of them fail. npm has no skip-existing, so the publish
+  # loop checks the registry per package, in dependency order (root first).
+  release:
+    permissions:
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # The tag tracks the root SDK's version (vX.Y.Z); a mismatch means a
+      # package would publish under the wrong version, so nothing ships.
+      - name: verify the root version matches the release tag
+        run: |
+          version=$(npm pkg get version | tr -d '"')
+          test "$version" = "${GITHUB_REF_NAME#v}" \
+            || { echo "root version $version != tag ${GITHUB_REF_NAME#v}"; exit 1; }
+
+      - name: install
+        run: npm ci
+
+      - name: check linting
+        run: npm run check
+
+      - name: check types
+        run: npm run type-check
+
+      - name: run tests
+        run: npm test
+
+      - name: build core and shims
+        run: |
+          npm run build
+          npm run build --workspaces --if-present
+
+      # Mirror of the py SDK's "run tests against the built artifacts", in npm
+      # terms: pack every non-private package, install the tarballs together into
+      # a clean dir with the real resolver (no `overrides: file:.`), and import
+      # the core entry points. This proves the packed tarball is complete
+      # (`files`/`exports`, dist present), the code imports at runtime, and the
+      # shim -> core dependency range resolves against the just-built core -- all
+      # BEFORE publish, so a bad build blocks the release instead of shipping and
+      # alerting after. Shims target FaaS runtimes and aren't imported under Node;
+      # packing + installing them is what exercises their packaging and dep range.
+      - name: verify built artifacts install and import
+        run: |
+          work=$(mktemp -d)
+          tarballs=""
+          for dir in . packages/*; do
+            [ -f "$dir/package.json" ] || continue
+            private=$(node -p "!!require('./$dir/package.json').private")
+            [ "$private" = true ] && continue
+            tgz=$(cd "$dir" && npm pack --silent --pack-destination "$work" | tail -1)
+            tarballs="$tarballs $work/$tgz"
+          done
+          (cd "$work" && npm init -y >/dev/null && npm install $tarballs)
+          (cd "$work" && node --input-type=module -e "
+            await import('@resonatehq/sdk');
+            await import('@resonatehq/sdk/async');
+            console.log('core entry points import cleanly from the packed tarballs');
+          ")
+
+      # Root first (shims depend on it), then every packages/* discovered on
+      # disk -- a new shim is covered the day it lands, no name hardcoded.
+      # npm has no skip-existing: check the registry per package. An unchanged
+      # package whose version is already on npm rides along without
+      # republishing, and a re-run can finish a partial release. Private
+      # packages are skipped (npm publish would error on them, not skip).
+      - name: publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in . packages/*; do
+            [ -f "$dir/package.json" ] || continue
+            read -r pkg private < <(node -p "const p=require('./$dir/package.json'); p.name+'@'+p.version+' '+!!p.private")
+            [ "$private" = true ] && { echo "skip $pkg (private)"; continue; }
+            if npm view "$pkg" version >/dev/null 2>&1; then
+              echo "skip $pkg (already published)"
+            else
+              (cd "$dir" && npm publish --provenance --access public)
+            fi
+          done

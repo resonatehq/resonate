@@ -34,6 +34,6 @@ describe("DurablePromise", () => {
 
   test("awaiting a rejected handle throws the wrapped rejection", async () => {
     const bad = new DurablePromise<number>("bad-id", Promise.reject(new Error("kaboom")));
-    await expect(async () => bad.then((v) => v)).rejects.toThrow("kaboom");
+    await expect(bad.then((v) => v)).rejects.toThrow("kaboom");
   });
 });

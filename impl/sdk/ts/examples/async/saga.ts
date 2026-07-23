@@ -137,7 +137,7 @@ function flag(name: string, fallback: string): string {
 
 const failAt = flag("fail", "") as FailAt;
 
-const resonate = new Resonate({ url: "http://localhost:8001" });
+const resonate = new Resonate({ url: process.env.RESONATE_URL ?? "http://localhost:8001" });
 
 const bookFn = resonate.register("bookTrip", bookTrip);
 resonate.register("reserveFlight", reserveFlight);
