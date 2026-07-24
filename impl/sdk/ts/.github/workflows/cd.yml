@@ -83,8 +83,6 @@ jobs:
       # republishing, and a re-run can finish a partial release. Private
       # packages are skipped (npm publish would error on them, not skip).
       - name: publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for dir in . packages/*; do
             [ -f "$dir/package.json" ] || continue

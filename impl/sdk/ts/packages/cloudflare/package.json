@@ -1,6 +1,6 @@
 {
   "name": "@resonatehq/cloudflare",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Resonate FaaS handler for Cloudflare Workers (TypeScript)",
   "type": "module",
   "repository": {
