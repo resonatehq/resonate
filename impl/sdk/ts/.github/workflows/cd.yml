@@ -24,6 +24,12 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      # Trusted publishing (OIDC) auth needs npm >= 11.5.1; node 22 ships npm
+      # 10.9.7. Pin 11.11 as a workaround for npm/cli#9151: 10.9.7 cannot upgrade
+      # directly to 11.12+ (missing promise-retry). 11.11.x is a known-good hop.
+      - name: upgrade npm for trusted publishing
+        run: npm install -g npm@11.11
+
       # The tag tracks the root SDK's version (vX.Y.Z); a mismatch means a
       # package would publish under the wrong version, so nothing ships.
       - name: verify the root version matches the release tag
