@@ -1,35 +1,28 @@
-import «02-actions».«P-02-promise.create»
+import «02-actions-m».«P-02-promise.create»
 
 open ServerModel
 
+namespace Materialized
 namespace Timeouts
 
-def onPromiseTimeout (id : String) (_now : Nat) : M Unit := do
-  match ← getPromise id with
-  | none =>
-      pure ()
-  | some p =>
-      if p.state != .pending then
-        pure ()
-      else
-        let listeners := p.listeners
-        let callbacks := p.callbacks
-        let p := { p.project p.timeoutAt with callbacks := [], listeners := [] }
-        setPromise p
-        delPromiseTimeout p.id
-        match ← getTask p.id with
-        | some t =>
-            setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
-            delTaskTimeout t.id
-        | none =>
-            pure ()
-        for address in listeners do
-          setMessage address (.unblock p.toRecord)
-        for awaiterId in callbacks do
-          defer { awaited := p.id, awaiter := awaiterId }
+/-- Materialization IS the timeout transition: -m's promise timeout is
+    a touch, discarded. (`touchPromise`'s body is -p's
+    `onPromiseTimeout`, so the two τs are the same transition.) -/
+def onPromiseTimeout (id : String) (now : Nat) : M Unit := do
+  let _ ← touchPromise id now
 
+/-- Retry and lease are material rules, verbatim from -p: the read
+    discipline concerns projected facts, and these consult only their
+    own timers, material task state, and immutable tags. -/
 def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
+  match ← getTaskTimeout id 0 with
+  | none =>
+      pure ()
+  | some tt =>
+  if tt.timeout > now then
+    pure ()
+  else
   match ← getTask id with
   | none =>
       pure ()
@@ -47,6 +40,13 @@ def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
 
 def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
+  match ← getTaskTimeout id 1 with
+  | none =>
+      pure ()
+  | some tt =>
+  if tt.timeout > now then
+    pure ()
+  else
   match ← getTask id with
   | none =>
       pure ()
@@ -80,9 +80,13 @@ def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
   | none =>
       pure ()
   | some s0 =>
-      let s ← catchUp now s0
-      setSchedule s
-      delScheduleTimeout s.id
-      setScheduleTimeout s.id s.nextRunAt
+      if s0.nextRunAt > now then
+        pure ()
+      else
+        let s ← catchUp now s0
+        setSchedule s
+        delScheduleTimeout s.id
+        setScheduleTimeout s.id s.nextRunAt
 
 end Timeouts
+end Materialized

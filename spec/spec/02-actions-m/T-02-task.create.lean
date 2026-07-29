@@ -1,12 +1,14 @@
-import «01-objects».«state»
+import «02-actions-m».«00-touch»
 
 open ServerModel
+
+namespace Materialized
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
   if !(a.tags.has "resonate:target") then
     return { status := 400 }
-  match ← getPromise a.id with
+  match ← touchPromise a.id now with
   | none =>
       if a.timeoutAt > now then
         let p : PromiseObject :=
@@ -38,17 +40,28 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   | some p =>
       if !(p.tags.has "resonate:target") then
         return { status := 422 }
-      match ← getTask p.id with
-      | some t =>
-          if t.state == .fulfilled then
-            return { status := 200, task := some t.toRecord, promise := some p.toRecord }
-          else if t.state == .pending then
-            let t := { t with state := .acquired, version := t.version + 1, ttl := some req.ttl, pid := some req.pid, resumes := [] }
-            setTask t
-            delTaskTimeout t.id
-            setTaskTimeout t.id 1 (now + req.ttl)
-            return { status := 200, task := some t.toRecord, promise := some p.toRecord }
-          else
+      if p.state == .pending ∧ p.timeoutAt > now then
+        match ← getTask p.id with
+        | some t =>
+            if t.state == .fulfilled then
+              return { status := 200, task := some t.toRecord, promise := some p.toRecord }
+            else if t.state == .pending then
+              let t := { t with state := .acquired, version := t.version + 1, ttl := some req.ttl, pid := some req.pid, resumes := [] }
+              setTask t
+              delTaskTimeout t.id
+              setTaskTimeout t.id 1 (now + req.ttl)
+              return { status := 200, task := some t.toRecord, promise := some p.toRecord }
+            else
+              return { status := 409 }
+        | none =>
             return { status := 409 }
-      | none =>
-          return { status := 409 }
+      else
+        match ← getTask p.id with
+        | some t =>
+            return { status := 200,
+                     task := some ({ t with state := .fulfilled, pid := none, ttl := none, resumes := [] }).toRecord,
+                     promise := some p.toRecord }
+        | none =>
+            return { status := 409 }
+
+end Materialized

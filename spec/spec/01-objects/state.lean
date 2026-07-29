@@ -164,6 +164,12 @@ def setPromise (p : PromiseObject) : M Unit :=
 def getTask (id : String) : M (Option TaskObject) :=
   return (← get).tasks.find? (·.id == id)
 
+/-- Read an armed task timer. The timeout transitions consult their own
+    due entry before acting: an armed timer means NOT BEFORE, and the
+    machine enforces it rather than trusting the environment. -/
+def getTaskTimeout (id : String) (kind : Nat) : M (Option TaskTimeout) :=
+  return (← get).taskTimeouts.find? (fun t => t.id == id && t.kind == kind)
+
 def setTask (t : TaskObject) : M Unit :=
   modify fun s => { s with tasks := t :: s.tasks.filter (·.id != t.id) }
 
@@ -234,5 +240,17 @@ def undefer (r : ResumeReq) : M Unit :=
     { s with deferred :=
         s.deferred.filter (fun e =>
           !(e.awaited == r.awaited && e.awaiter == r.awaiter)) }
+
+/-- The promise id a fenced action operates on. -/
+def TaskFenceAction.targetId : TaskFenceAction → String
+  | .create r => r.id
+  | .settle r => r.id
+
+/-- A deliverable listener address: `http(s)://…`, or `poll://…` carrying an
+    `@group` (e.g. `poll://any@default` — a bare `poll://default` names no
+    group and could never be routed). -/
+def addressValid (a : String) : Bool :=
+  a.startsWith "http://" || a.startsWith "https://" ||
+  (a.startsWith "poll://" && a.contains '@')
 
 end ServerModel

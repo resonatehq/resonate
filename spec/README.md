@@ -1,6 +1,13 @@
 # Resonate Specification
 
-The Resonate protocol, specified as an executable **abstract machine** in Lean 4: a state, a set of effects (atomic operations on the state) and a set of request handlers (transitions composed from effects). 
+The Resonate protocol, specified as an executable **abstract machine** in Lean 4: a state, a set of effects (atomic operations on the state) and a set of request handlers (transitions composed from effects).
+
+The machine comes in **twin variants** over one state and one wire surface, differing only in read discipline:
+
+- **`-p`, the projected machine** ([`spec/02-actions-p`](spec/02-actions-p)) — a read serves the *projection* of a timed-out object and writes nothing; the timeout transition persists the fact later.
+- **`-m`, the materialized machine** ([`spec/02-actions-m`](spec/02-actions-m)) — a read *materializes* first, by firing the anticipated timeout transition at the moment of observation, then serves stored state. Handlers are line-aligned with `-p`: reads become touches, `project` disappears from responses, the extra writes hide inside the touch.
+
+The two are **observationally equivalent**: identical responses on every trace, states equal after τ-closure. See [`spec/03-equivalence`](spec/03-equivalence), where the claim is machine-checked over a trace battery covering every projection-sensitive path. 
 
 ## The Machine
 
@@ -58,44 +65,44 @@ Conventions the whole model leans on:
 
 | | Handler | Transition |
 |---|---|---|
-| P-01 | [`promise.get`](spec/02-actions/P-01-promise.get.lean) | Read a promise (with timeout projection). |
-| P-02 | [`promise.create`](spec/02-actions/P-02-promise.create.lean) | Create a pending promise; a `resonate:target` tag also spawns a task and an `execute` message, optionally delayed. |
-| P-03 | [`promise.settle`](spec/02-actions/P-03-promise.settle.lean) | Settle a pending promise: fulfill its task, notify listeners, resume awaiters. |
-| P-04 | [`promise.register_callback`](spec/02-actions/P-04-promise.register_callback.lean) | Subscribe an awaiter promise for resume when the awaited promise settles. |
-| P-05 | [`promise.register_listener`](spec/02-actions/P-05-promise.register_listener.lean) | Subscribe an address for an `unblock` message when the promise settles. |
-| P-06 | [`promise.search`](spec/02-actions/P-06-promise.search.lean) | Not yet specified (`501`). |
+| P-01 | [`promise.get`](spec/02-actions-p/P-01-promise.get.lean) | Read a promise (with timeout projection). |
+| P-02 | [`promise.create`](spec/02-actions-p/P-02-promise.create.lean) | Create a pending promise; a `resonate:target` tag also spawns a task and an `execute` message, optionally delayed. |
+| P-03 | [`promise.settle`](spec/02-actions-p/P-03-promise.settle.lean) | Settle a pending promise: fulfill its task, notify listeners, resume awaiters. |
+| P-04 | [`promise.register_callback`](spec/02-actions-p/P-04-promise.register_callback.lean) | Subscribe an awaiter promise for resume when the awaited promise settles. |
+| P-05 | [`promise.register_listener`](spec/02-actions-p/P-05-promise.register_listener.lean) | Subscribe an address for an `unblock` message when the promise settles. |
+| P-06 | [`promise.search`](spec/02-actions-p/P-06-promise.search.lean) | Not yet specified (`501`). |
 
 ### Tasks
 
 | | Handler | Transition |
 |---|---|---|
-| T-01 | [`task.get`](spec/02-actions/T-01-task.get.lean) | Read a task (projected `fulfilled` once its promise is no longer pending). |
-| T-02 | [`task.create`](spec/02-actions/T-02-task.create.lean) | Create a promise with an immediately-acquired task, or re-acquire an existing pending task. |
-| T-03 | [`task.acquire`](spec/02-actions/T-03-task.acquire.lean) | Worker claims a pending task: bump version, arm the lease. |
-| T-04 | [`task.fence`](spec/02-actions/T-04-task.fence.lean) | Run a `promise.create`/`promise.settle` guarded by the task's fencing token. |
-| T-05 | [`task.heartbeat`](spec/02-actions/T-05-task.heartbeat.lean) | Extend the leases of a worker's acquired tasks. |
-| T-06 | [`task.suspend`](spec/02-actions/T-06-task.suspend.lean) | Park an acquired task on awaited promises; `300` if any is already settled. |
-| T-07 | [`task.fulfill`](spec/02-actions/T-07-task.fulfill.lean) | Settle the task's promise and fulfill the task in one transition. |
-| T-08 | [`task.release`](spec/02-actions/T-08-task.release.lean) | Return an acquired task to pending and re-enqueue its `execute`. |
-| T-09 | [`task.halt`](spec/02-actions/T-09-task.halt.lean) | Take a task out of circulation. |
-| T-10 | [`task.continue`](spec/02-actions/T-10-task.continue.lean) | Return a halted task to pending and re-enqueue its `execute`. |
-| T-11 | [`task.search`](spec/02-actions/T-11-task.search.lean) | Not yet specified (`501`). |
+| T-01 | [`task.get`](spec/02-actions-p/T-01-task.get.lean) | Read a task (projected `fulfilled` once its promise is no longer pending). |
+| T-02 | [`task.create`](spec/02-actions-p/T-02-task.create.lean) | Create a promise with an immediately-acquired task, or re-acquire an existing pending task. |
+| T-03 | [`task.acquire`](spec/02-actions-p/T-03-task.acquire.lean) | Worker claims a pending task: bump version, arm the lease. |
+| T-04 | [`task.fence`](spec/02-actions-p/T-04-task.fence.lean) | Run a `promise.create`/`promise.settle` guarded by the task's fencing token. |
+| T-05 | [`task.heartbeat`](spec/02-actions-p/T-05-task.heartbeat.lean) | Extend the leases of a worker's acquired tasks. |
+| T-06 | [`task.suspend`](spec/02-actions-p/T-06-task.suspend.lean) | Park an acquired task on awaited promises; `300` if any is already settled. |
+| T-07 | [`task.fulfill`](spec/02-actions-p/T-07-task.fulfill.lean) | Settle the task's promise and fulfill the task in one transition. |
+| T-08 | [`task.release`](spec/02-actions-p/T-08-task.release.lean) | Return an acquired task to pending and re-enqueue its `execute`. |
+| T-09 | [`task.halt`](spec/02-actions-p/T-09-task.halt.lean) | Take a task out of circulation. |
+| T-10 | [`task.continue`](spec/02-actions-p/T-10-task.continue.lean) | Return a halted task to pending and re-enqueue its `execute`. |
+| T-11 | [`task.search`](spec/02-actions-p/T-11-task.search.lean) | Not yet specified (`501`). |
 
 ### Schedules
 
 | | Handler | Transition |
 |---|---|---|
-| S-01 | [`schedule.get`](spec/02-actions/S-01-schedule.get.lean) | Read a schedule. |
-| S-02 | [`schedule.create`](spec/02-actions/S-02-schedule.create.lean) | Create a schedule and arm its first fire. |
-| S-03 | [`schedule.delete`](spec/02-actions/S-03-schedule.delete.lean) | Delete a schedule and disarm its timeout. |
-| S-04 | [`schedule.search`](spec/02-actions/S-04-schedule.search.lean) | Not yet specified (`501`). |
+| S-01 | [`schedule.get`](spec/02-actions-p/S-01-schedule.get.lean) | Read a schedule. |
+| S-02 | [`schedule.create`](spec/02-actions-p/S-02-schedule.create.lean) | Create a schedule and arm its first fire. |
+| S-03 | [`schedule.delete`](spec/02-actions-p/S-03-schedule.delete.lean) | Delete a schedule and disarm its timeout. |
+| S-04 | [`schedule.search`](spec/02-actions-p/S-04-schedule.search.lean) | Not yet specified (`501`). |
 
 ### Internal Transitions
 
 | Handler | Transition |
 |---|---|
-| [`resume`](spec/02-actions/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
-| [`timeouts`](spec/02-actions/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). |
+| [`resume`](spec/02-actions-p/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
+| [`timeouts`](spec/02-actions-p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*, enforced by the machine, not trusted to the environment. |
 
 ## Build
 

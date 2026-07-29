@@ -1,12 +1,7 @@
-import «02-actions».«P-02-promise.create»
-import «02-actions».«P-03-promise.settle»
+import «02-actions-p».«P-02-promise.create»
+import «02-actions-p».«P-03-promise.settle»
 
 open ServerModel
-
-/-- The promise id the fenced action operates on. -/
-def ServerModel.TaskFenceAction.targetId : TaskFenceAction → String
-  | .create r => r.id
-  | .settle r => r.id
 
 def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
   if req.action.targetId == req.id then

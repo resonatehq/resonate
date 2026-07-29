@@ -8,4 +8,5 @@ package «resonate-spec» where
 lean_lib «spec» where
   srcDir := "."
   roots  := #[]
-  globs  := #[.submodules `«01-objects», .submodules `«02-actions»]
+  globs  := #[.submodules `«01-objects», .submodules `«02-actions-p»,
+              .submodules `«02-actions-m», .submodules `«03-equivalence»]

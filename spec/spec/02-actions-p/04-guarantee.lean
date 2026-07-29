@@ -1,8 +1,8 @@
 import «01-objects».«state»
-import «02-actions».«P-03-promise.settle»
-import «02-actions».«02-timeouts»
-import «02-actions».«03-resume»
-import «02-actions».«T-01-task.get»
+import «02-actions-p».«P-03-promise.settle»
+import «02-actions-p».«02-timeouts»
+import «02-actions-p».«03-resume»
+import «02-actions-p».«T-01-task.get»
 
 open ServerModel
 
