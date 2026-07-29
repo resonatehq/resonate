@@ -47,10 +47,12 @@ not yet persisted — the closure discharges precisely that lag, on both
 sides (it is idempotent on -m's already-materialized objects).
 
 `equivalent` runs a trace through both machines from the empty state
-and checks both halves executably. `02-traces.lean` is the battery;
-a full proof would be an induction showing each handler pair commutes
-with the closure — the shape `close ∘ handlerP = close ∘ handlerM` on
-projection-closed states.
+and checks both halves executably. The claim is stated formally and
+proved exhaustively within a small scope in `03-theorem.lean`;
+`02-traces.lean` is a battery of targeted deep traces beyond that
+scope. Every check is kernel `decide` — the spec's string scans are
+structurally recursive precisely so that no proof needs
+`native_decide`.
 
 Schedules are omitted from traces only because `nextCron` is opaque
 (nothing to evaluate under `decide`); the schedule handlers are

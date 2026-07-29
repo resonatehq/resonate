@@ -29,7 +29,7 @@ def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := d
                 setMessage target (.execute t.id t.version)
                 return { status := 200, promise := some p.toRecord }
             | some delayStr =>
-                let delay := delayStr.toNat!
+                let delay := parseNat delayStr
                 if delay > now then
                   setTaskTimeout t.id 0 delay
                   return { status := 200, promise := some p.toRecord }

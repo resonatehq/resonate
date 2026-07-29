@@ -66,8 +66,7 @@ def t3 : List Op :=
 example : equivalent t3 240 := by decide
 
 /-! ### T4 — a timer promise past its deadline: read, late listener
-registration, late settle, duplicate create. (`native_decide`: the
-address validation's string scans do not reduce in the kernel.) -/
+registration, late settle, duplicate create. -/
 
 def t4 : List Op :=
   [ .promiseCreate { id := "tm", timeoutAt := 300, param := {}, tags := timerTags } 100,
@@ -76,7 +75,7 @@ def t4 : List Op :=
     .promiseSettle { id := "tm", state := .rejected, value := {} } 500,
     .promiseCreate { id := "tm", timeoutAt := 9999, param := {}, tags := [] } 600 ]
 
-example : equivalent t4 600 := by native_decide
+example : equivalent t4 600 := by decide
 
 /-! ### T5 — registration and suspension against an expired awaited:
 callback refused-by-projection, suspend answers `300`. -/
@@ -129,8 +128,7 @@ def t7 : List Op :=
 example : equivalent t7 2500 := by decide
 
 /-! ### T8 — delayed dispatch: no emission before the delay, retry-τ
-refused early, fired at the delay. (`native_decide`: the delay tag's
-`String.toNat!` does not reduce in the kernel.) -/
+refused early, fired at the delay. -/
 
 def t8 : List Op :=
   [ .promiseCreate { id := "d", timeoutAt := 9000, param := {},
@@ -139,7 +137,7 @@ def t8 : List Op :=
     .tauRetry "d" 800,
     .taskGet { id := "d" } 900 ]
 
-example : equivalent t8 900 := by native_decide
+example : equivalent t8 900 := by decide
 
 /-! ### T9 — absences and request-level validation. -/
 

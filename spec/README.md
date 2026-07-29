@@ -7,7 +7,7 @@ The machine comes in **twin variants** over one state and one wire surface, diff
 - **`-p`, the projected machine** ([`spec/02-actions-p`](spec/02-actions-p)) — a read serves the *projection* of a timed-out object and writes nothing; the timeout transition persists the fact later.
 - **`-m`, the materialized machine** ([`spec/02-actions-m`](spec/02-actions-m)) — a read *materializes* first, by firing the anticipated timeout transition at the moment of observation, then serves stored state. Handlers are line-aligned with `-p`: reads become touches, `project` disappears from responses, the extra writes hide inside the touch.
 
-The two are **observationally equivalent**: identical responses on every trace, states equal after τ-closure. See [`spec/03-equivalence`](spec/03-equivalence), where the claim is machine-checked over a trace battery covering every projection-sensitive path. 
+The two are **observationally equivalent**: identical responses on every trace with a monotone clock, states equal after τ-closure. See [`spec/03-equivalence`](spec/03-equivalence): the claim is stated formally (`EquivalenceTheorem`), proved exhaustively for every trace up to length 4 over an 8-operation alphabet (4 681 traces), and checked on a battery of deeper targeted traces — all by kernel `decide`; the spec's string scans are structurally recursive precisely so no proof needs `native_decide`. 
 
 ## The Machine
 
