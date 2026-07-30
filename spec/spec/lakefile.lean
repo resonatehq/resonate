@@ -9,4 +9,5 @@ lean_lib «spec» where
   srcDir := "."
   roots  := #[]
   globs  := #[.submodules `«01-objects», .submodules `«02-actions-p»,
+              .submodules `«04-abstract», .submodules `«05-abstraction»,
               .submodules `«02-actions-m», .submodules `«03-equivalence»]
