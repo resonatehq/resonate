@@ -11,6 +11,8 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : M P
   | none =>
       return { status := 404 }
   | some pAwaited =>
+      if !pAwaited.external then
+        return { status := 422 }
       if pAwaited.state == .pending ∧ pAwaited.timeoutAt > now then
         setPromise (pAwaited.addListener req.address)
         return { status := 200, promise := some pAwaited.toRecord }

@@ -34,12 +34,10 @@ One scoping note, inherited from the machines themselves: an INTERNAL
 promise past its deadline is settled by -m's touch but has no armed τ
 for -p to fire — its settlement is projection-only in -p, forever.
 Responses cannot tell (projection and materialization serve the same
-bytes), but stored states differ there, and a listener registered on
-an internal promise (which `promise.register_listener`, unlike
-`register_callback`, fails to refuse — a base-spec wrinkle flagged
-here) would make the message channels differ too. The scripts below
-keep listeners on external promises, where the base spec's own
-invariant places them.  -/
+bytes), but stored states differ there. Listeners and callbacks
+attach only to external promises — enforced by `422` in every machine
+— so the fact-lag on internal promises carries no obligations and is
+invisible to both channels.  -/
 
 namespace Equivalence
 

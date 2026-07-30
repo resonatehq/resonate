@@ -116,6 +116,25 @@ def AMRefinesAP : Prop :=
 
 def IndistinguishableAbstract : Prop := APRefinesAM ∧ AMRefinesAP
 
+/-- **The sharper theorem, unique to the abstract level: response
+    lockstep.** Feed the SAME schedule — every step, adversarial rule
+    firings included — to both disciplines, and the response streams
+    are pointwise identical. No ∃, no re-indexing, no silence: the
+    universal synchronous form, strictly stronger than the response
+    half of the bisimulation, and exactly the statement that is FALSE
+    for the concrete twins (`lockstep.lean`). It cannot be extended to
+    the message channel — the witness below (`wLag`) pins that
+    boundary. Evidence: the exhaustive adversarial sweep
+    (`respLockstepSweep`) and the battery; the unbounded claim's
+    induction is open, like its siblings. -/
+def ResponseLockstepAbstract : Prop :=
+  ∀ (trP trM : ATrace),
+    ValidAP trP → ValidA trM →
+    (trP 0).state = AbstractModel.ServerState.init →
+    (trM 0).state = AbstractModel.ServerState.init →
+    (∀ t, (trP t).req = (trM t).req ∧ (trP t).now = (trM t).now) →
+    ∀ t, (trP t).res = (trM t).res
+
 /-! ### Instruments -/
 
 def runFinAP (w : List (AStep × Nat)) : List Response × AbstractModel.ServerState :=

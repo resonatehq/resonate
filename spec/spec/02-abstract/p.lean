@@ -124,6 +124,8 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
   | none =>
       return { status := 404 }
   | some pAwaited =>
+      if !pAwaited.external then
+        return { status := 422 }
       if pAwaited.state == .pending then
         setPromise (pAwaited.addListener req.address)
         return { status := 200, promise := some pAwaited.toRecord }
