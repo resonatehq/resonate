@@ -73,15 +73,30 @@ def SameMessages (tr tr' : Trace) : Prop :=
     eqSet (quiesced (tr N).now (tr N).state).outbox
           (quiesced (tr' N').now (tr' N').state).outbox = true
 
+/-- **REFINEMENT, concrete into abstract.** The projected machine is
+    the abstract model — it serves logical views and persists no
+    bookkeeping; the materialized machine is the concrete one — it
+    persists what an implementation persists. `MRefinesP`: every
+    behavior of the concrete machine is a behavior of the abstract one.
+    The constructive witness is the EAGER schedule (`05-refinement`):
+    -p fires, as explicit τs, exactly the materializations -m performs
+    inside its touches. -/
+def MRefinesP : Prop :=
+  ∀ tr, ValidM tr → (tr 0).state = ServerModel.ServerState.init →
+    ∃ tr', ValidP tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
+      SameObservation tr tr' ∧ SameMessages tr tr'
+
+/-- The converse direction: the abstract machine's behaviors are also
+    concrete behaviors — -m can run lazily (`04-simulation`), so no
+    behavior is lost by materializing. This is what upgrades the
+    refinement to an equivalence. -/
+def PRefinesM : Prop :=
+  ∀ tr, ValidP tr → (tr 0).state = ServerModel.ServerState.init →
+    ∃ tr', ValidM tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
+      SameObservation tr tr' ∧ SameMessages tr tr'
+
 /-- **THE CLAIM: the projected and the materialized machine are weakly
-    bisimilar.** Every behavior of one is a behavior of the other, up
-    to the machine's own internal scheduling. -/
-def Indistinguishable : Prop :=
-  (∀ tr, ValidP tr → (tr 0).state = ServerModel.ServerState.init →
-     ∃ tr', ValidM tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
-       SameObservation tr tr' ∧ SameMessages tr tr') ∧
-  (∀ tr, ValidM tr → (tr 0).state = ServerModel.ServerState.init →
-     ∃ tr', ValidP tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
-       SameObservation tr tr' ∧ SameMessages tr tr')
+    bisimilar** — refinement in both directions. -/
+def Indistinguishable : Prop := PRefinesM ∧ MRefinesP
 
 end Equivalence
