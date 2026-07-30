@@ -1,7 +1,7 @@
 import «03-equivalence».«01-trace»
-import «04-abstract».«05-rules»
-import «04-abstract».«03-tasks»
-import «04-abstract».«04-schedules»
+import «04-abstract».«rules»
+import «04-abstract».«handlers»
+
 
 /-!  # Abstraction — the map from the concrete machine to the abstract one
 

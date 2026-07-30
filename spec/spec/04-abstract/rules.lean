@@ -1,4 +1,4 @@
-import «04-abstract».«02-promises»
+import «04-abstract».«handlers»
 
 /-!  # The coalesced machine — internal rules
 

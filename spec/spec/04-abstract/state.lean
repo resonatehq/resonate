@@ -36,7 +36,7 @@ involved), and touching applies them:
 Everything else — waking awaiters, notifying listeners, expiring leases,
 dispatching executes, firing schedules — is a scheduling CHOICE, and
 choices are never applied on touch: they are the internal rules of
-`05-rules.lean`, fired by the environment at its own pace.
+`rules.lean`, fired by the environment at its own pace.
 
 Retaining awaiters and listeners across settlement is what makes
 materialization-on-touch sound: flipping a promise's state on a read

@@ -1,6 +1,147 @@
-import «04-abstract».«02-promises»
+import «04-abstract».«state»
 
-/-!  # The coalesced machine — task handlers
+/-!  # The coalesced machine — handlers
+
+All protocol handlers of the abstract machine, in one place: promises,
+tasks, schedules. Handlers write objects and return responses; they
+emit no messages and record no auxiliary state — dispatching an
+`execute`, notifying a listener, waking an awaiter is the rules' job
+(`rules.lean`).  -/
+
+namespace AbstractModel
+
+/-!  ## Promise handlers
+
+* `promiseCreate` of a targeted promise creates the task and stops —
+  the dispatch rule emits the `execute`. The `resonate:delay` tag is
+  consumed at creation: it seeds the task's `retryAt`, so the
+  create-side delay machinery of the base spec collapses to one field
+  initialization.
+* `promiseSettle` writes THE PROMISE ONLY. The task is fulfilled by
+  fact T (on the next touch, or by `Rules.taskFulfillment`); awaiters
+  and listeners stay on the promise for the batch rules.  -/
+
+
+open ServerModel (PromiseState
+                  PromiseGetReq PromiseGetRes
+                  PromiseCreateReq PromiseCreateRes
+                  PromiseSettleReq PromiseSettleRes
+                  PromiseRegisterCallbackReq PromiseRegisterCallbackRes
+                  PromiseRegisterListenerReq PromiseRegisterListenerRes
+                  PromiseSearchReq PromiseSearchRes)
+
+def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
+  match ← touchPromise req.id now with
+  | none =>
+      return { status := 404 }
+  | some p =>
+      return { status := 200, promise := some p.toRecord }
+
+def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  match ← touchPromise req.id now with
+  | some p =>
+      return { status := 200, promise := some p.toRecord }
+  | none =>
+      if req.timeoutAt > now then
+        let p : PromiseObject :=
+          { id := req.id
+            state := .pending
+            param := req.param
+            tags := req.tags
+            timeoutAt := req.timeoutAt
+            createdAt := now }
+        setPromise p
+        if p.tags.has "resonate:target" then
+          -- The delay tag seeds `retryAt`: the first dispatch is due at
+          -- the delay if it is still ahead, immediately otherwise.
+          let due :=
+            match p.tags.get? "resonate:delay" with
+            | some d => max (ServerModel.parseNat d) now
+            | none => now
+          setTask { id := p.id, state := .pending, version := 0,
+                    retryAt := some due }
+        return { status := 200, promise := some p.toRecord }
+      else
+        -- Born past its deadline: fact P holds at birth, so the promise
+        -- is written settled and its task (if targeted) fulfilled.
+        let state :=
+          if req.tags.isTimer then
+            PromiseState.resolved
+          else
+            PromiseState.rejectedTimedout
+        let p : PromiseObject :=
+          { id := req.id
+            state := state
+            param := req.param
+            tags := req.tags
+            timeoutAt := req.timeoutAt
+            createdAt := req.timeoutAt
+            settledAt := some req.timeoutAt }
+        setPromise p
+        if p.tags.has "resonate:target" then
+          setTask { id := p.id, state := .fulfilled, version := 0 }
+        return { status := 200, promise := some p.toRecord }
+
+def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
+  if !req.state.settable then
+    return { status := 400 }
+  match ← touchPromise req.id now with
+  | none =>
+      return { status := 404 }
+  | some p =>
+      if p.state == .pending then
+        let p := { p with state := req.state, value := req.value, settledAt := some now }
+        setPromise p
+        return { status := 200, promise := some p.toRecord }
+      else
+        return { status := 200, promise := some p.toRecord }
+
+def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
+    M PromiseRegisterCallbackRes := do
+  if req.awaited == req.awaiter then
+    return { status := 400 }
+  match ← touchPromise req.awaited now with
+  | none =>
+      return { status := 404 }
+  | some pAwaited =>
+  match ← touchPromise req.awaiter now with
+  | none =>
+      return { status := 422 }
+  | some pAwaiter =>
+      if !(pAwaiter.tags.has "resonate:target") then
+        return { status := 422 }
+      if !pAwaited.external then
+        return { status := 422 }
+      if pAwaited.state == .pending then
+        if pAwaiter.state == .pending then
+          setPromise (pAwaited.addCallback req.awaiter)
+        return { status := 200, promise := some pAwaited.toRecord }
+      else
+        return { status := 200, promise := some pAwaited.toRecord }
+
+/-- Registration on an already-settled promise returns the record without
+    registering, exactly as in the base spec — even though this machine's
+    retained-listener drain could naturally serve a late registration,
+    admitting one would produce an `unblock` the base machine never
+    sends. -/
+def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
+    M PromiseRegisterListenerRes := do
+  if !ServerModel.addressValid req.address then
+    return { status := 400 }
+  match ← touchPromise req.awaited now with
+  | none =>
+      return { status := 404 }
+  | some pAwaited =>
+      if pAwaited.state == .pending then
+        setPromise (pAwaited.addListener req.address)
+        return { status := 200, promise := some pAwaited.toRecord }
+      else
+        return { status := 200, promise := some pAwaited.toRecord }
+
+def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
+  return { status := 501 }
+
+/-!  ## Task handlers
 
 Every handler that consults a task's promise goes through `touchTask`,
 so its guards branch on materialized state: the base spec's compound
@@ -14,7 +155,6 @@ consult the promise (halting a task whose own promise is settled is
 `409` — its state is `.fulfilled`, which is what `taskGet` reports),
 and the abstract halt materializes the same fact through the touch.  -/
 
-namespace AbstractModel
 
 open ServerModel (TaskGetReq TaskGetRes
                   TaskCreateReq TaskCreateRes
@@ -266,6 +406,54 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
           return { status := 200 }
 
 def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
+  return { status := 501 }
+
+/-!  ## Schedule handlers
+
+A schedule's `nextRunAt` is its alarm: `Rules.scheduleFire` guards on it
+directly, so creation arms nothing and deletion disarms nothing.  -/
+
+
+open ServerModel (Schedule nextCron
+                  ScheduleGetReq ScheduleGetRes
+                  ScheduleCreateReq ScheduleCreateRes
+                  ScheduleDeleteReq ScheduleDeleteRes
+                  ScheduleSearchReq ScheduleSearchRes)
+
+def scheduleGet (req : ScheduleGetReq) (_now : Nat) : M ScheduleGetRes := do
+  match ← getSchedule req.id with
+  | none =>
+      return { status := 404 }
+  | some s =>
+      return { status := 200, schedule := some s }
+
+def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+  match ← getSchedule req.id with
+  | some s =>
+      return { status := 200, schedule := some s }
+  | none =>
+      let s : Schedule :=
+        { id := req.id
+          cron := req.cron
+          promiseId := req.promiseId
+          promiseTimeout := req.promiseTimeout
+          promiseParam := req.promiseParam
+          promiseTags := req.promiseTags
+          createdAt := now
+          nextRunAt := nextCron req.cron now
+          lastRunAt := none }
+      setSchedule s
+      return { status := 200, schedule := some s }
+
+def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : M ScheduleDeleteRes := do
+  match ← getSchedule req.id with
+  | none =>
+      return { status := 404 }
+  | some s =>
+      delSchedule s.id
+      return { status := 200 }
+
+def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : M ScheduleSearchRes := do
   return { status := 501 }
 
 end AbstractModel
