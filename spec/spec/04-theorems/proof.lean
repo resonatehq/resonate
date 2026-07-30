@@ -312,5 +312,244 @@ theorem agrees_scheduleSearch (req) : Agrees (.api (.scheduleSearch req)) := by
   intro n sP sM h
   exact ⟨rfl, h⟩
 
+/-! ### 5a. Effect runs — every effect is a pure pair, by `rfl` -/
+
+theorem run_getPromise (id : String) (s : ServerState) :
+    (getPromise id).run s = (s.promises.find? (·.id == id), s) := rfl
+
+theorem run_getTask (id : String) (s : ServerState) :
+    (getTask id).run s = (s.tasks.find? (·.id == id), s) := rfl
+
+theorem run_getSchedule (id : String) (s : ServerState) :
+    (getSchedule id).run s = (s.schedules.find? (·.id == id), s) := rfl
+
+theorem run_setPromise (p : PromiseObject) (s : ServerState) :
+    (setPromise p).run s
+      = ((), { s with promises := p :: s.promises.filter (·.id != p.id) }) := rfl
+
+theorem run_setTask (t : TaskObject) (s : ServerState) :
+    (setTask t).run s
+      = ((), { s with tasks := t :: s.tasks.filter (·.id != t.id) }) := rfl
+
+theorem run_setSchedule (sch : ServerModel.Schedule) (s : ServerState) :
+    (setSchedule sch).run s
+      = ((), { s with schedules := sch :: s.schedules.filter (·.id != sch.id) }) := rfl
+
+theorem run_delSchedule (id : String) (s : ServerState) :
+    (delSchedule id).run s
+      = ((), { s with schedules := s.schedules.filter (·.id != id) }) := rfl
+
+theorem run_viewPromise (id : String) (n : Nat) (s : ServerState) :
+    (viewPromise id n).run s
+      = ((s.promises.find? (·.id == id)).map (·.project n), s) := rfl
+
+/-- The touch, characterized: `viewPromise`'s value, plus the
+    conditional write of exactly the projected form. -/
+theorem run_touchPromise (id : String) (n : Nat) (s : ServerState) :
+    (touchPromise id n).run s =
+      match s.promises.find? (·.id == id) with
+      | none => (none, s)
+      | some p =>
+          (some (p.project n),
+            if ((p.project n).state != p.state) = true then
+              { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+            else s) := by
+  cases hf : s.promises.find? (·.id == id) with
+  | none =>
+      simp only [touchPromise, run_bind, run_getPromise, hf, run_pure]
+  | some p =>
+      by_cases hst : (((p.project n).state != p.state) = true)
+      · simp only [touchPromise, run_bind, run_getPromise, hf, if_pos hst,
+                   run_setPromise, run_pure]
+      · simp only [touchPromise, run_bind, run_getPromise, hf, if_neg hst, run_pure]
+
+/-! ### 5b. More keyed-list lemmas: erasure, satisfaction -/
+
+theorem find?_sat {α} (p : α → Bool) (l : List α) (a : α)
+    (h : l.find? p = some a) : p a = true := by
+  induction l with
+  | nil => cases h
+  | cons x l ih =>
+      cases hx : p x with
+      | true =>
+          have hc : (x :: l).find? p = some x := by simp [List.find?, hx]
+          rw [hc] at h
+          cases h
+          exact hx
+      | false =>
+          have hc : (x :: l).find? p = l.find? p := by simp [List.find?, hx]
+          rw [hc] at h
+          exact ih h
+
+theorem find?_filter_self {α} (idOf : α → String) (a : String) (l : List α) :
+    (l.filter (fun y => idOf y != a)).find? (fun y => idOf y == a) = none := by
+  induction l with
+  | nil => rfl
+  | cons x l ih =>
+      cases hx : (idOf x == a) with
+      | true =>
+          have h1 : (idOf x != a) = false := by simp [bne, hx]
+          simp [List.filter_cons, h1, ih]
+      | false =>
+          have h1 : (idOf x != a) = true := by simp [bne, hx]
+          simp [List.filter_cons, h1, List.find?, hx, ih]
+
+/-- Lookup through the keyed erasure used by the deletes. -/
+theorem find?_erase {α} (idOf : α → String) (a b : String) (l : List α) :
+    (l.filter (fun y => idOf y != a)).find? (fun y => idOf y == b)
+      = if (a == b) = true then none else l.find? (fun y => idOf y == b) := by
+  cases hab : (a == b) with
+  | true =>
+      rw [if_pos rfl]
+      have hba : a = b := eq_of_beq hab
+      subst hba
+      exact find?_filter_self idOf a l
+  | false =>
+      rw [if_neg (by simp)]
+      exact find?_filter_ne idOf a b l hab
+
+/-! ### 5c. Write congruences: what each write does to the lookups -/
+
+/-- Persisting the projection of a stored promise is invisible to
+    `pLook` — materialization is memoization. -/
+theorem pLook_materialize (n : Nat) (s : ServerState) (p : PromiseObject)
+    (hf : s.promises.find? (·.id == p.id) = some p) (id : String) :
+    pLook n { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) } id
+      = pLook n s id := by
+  show (((p.project n) :: s.promises.filter (fun y => y.id != (p.project n).id)).find? (fun y => y.id == id)).map (·.project n)
+      = (s.promises.find? (fun y => y.id == id)).map (·.project n)
+  rw [find?_upsert PromiseObject.id (p.project n) s.promises id]
+  cases hxb : ((p.project n).id == id) with
+  | true =>
+      have hpid : (p.id == id) = true := by rw [← project_id p n]; exact hxb
+      have hid : p.id = id := eq_of_beq hpid
+      rw [if_pos rfl, ← hid, hf]
+      simp [project_absorb p (Nat.le_refl n)]
+  | false =>
+      rw [if_neg (by simp)]
+
+theorem tLook_ext {n : Nat} {s s' : ServerState}
+    (hp : ∀ id, pLook n s' id = pLook n s id)
+    (htasks : s'.tasks = s.tasks) (id : String) :
+    tLook n s' id = tLook n s id := by
+  unfold tLook
+  rw [htasks, hp id]
+
+theorem sLook_ext {s s' : ServerState}
+    (hsched : s'.schedules = s.schedules) (id : String) :
+    sLook s' id = sLook s id := by
+  unfold sLook
+  rw [hsched]
+
+/-- The touch write is invisible to the WHOLE invariant: an `REq`
+    partner absorbs a materialization on the other side. This is the
+    formal content of "materialization is memoization of projection". -/
+theorem REq_touchWrite {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
+    (p : PromiseObject) (hf : sM.promises.find? (·.id == p.id) = some p) :
+    REq n sP { sM with promises := (p.project n) :: sM.promises.filter (·.id != (p.project n).id) } :=
+  ⟨fun id => (h.1 id).trans (pLook_materialize n sM p hf id).symm,
+   fun id => (h.2.1 id).trans (tLook_ext (pLook_materialize n sM p hf) rfl id).symm,
+   fun id => (h.2.2 id).trans (sLook_ext (s := sM) rfl id).symm⟩
+
+/-- The same schedule upsert on both sides preserves the invariant. -/
+theorem REq_setSchedule {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
+    (sch : ServerModel.Schedule) :
+    REq n { sP with schedules := sch :: sP.schedules.filter (·.id != sch.id) }
+          { sM with schedules := sch :: sM.schedules.filter (·.id != sch.id) } := by
+  obtain ⟨hp, ht, hs⟩ := h
+  refine ⟨hp, ht, fun id => ?_⟩
+  show ((sch :: sP.schedules.filter (fun y => y.id != sch.id)).find? (fun y => y.id == id))
+      = ((sch :: sM.schedules.filter (fun y => y.id != sch.id)).find? (fun y => y.id == id))
+  rw [find?_upsert ServerModel.Schedule.id sch sP.schedules id,
+      find?_upsert ServerModel.Schedule.id sch sM.schedules id,
+      show sP.schedules.find? (fun y => y.id == id) = sM.schedules.find? (fun y => y.id == id) from hs id]
+
+/-- The same schedule erasure on both sides preserves the invariant. -/
+theorem REq_delSchedule {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
+    (a : String) :
+    REq n { sP with schedules := sP.schedules.filter (·.id != a) }
+          { sM with schedules := sM.schedules.filter (·.id != a) } := by
+  obtain ⟨hp, ht, hs⟩ := h
+  refine ⟨hp, ht, fun id => ?_⟩
+  show (sP.schedules.filter (fun y => y.id != a)).find? (fun y => y.id == id)
+      = (sM.schedules.filter (fun y => y.id != a)).find? (fun y => y.id == id)
+  rw [find?_erase ServerModel.Schedule.id a id sP.schedules,
+      find?_erase ServerModel.Schedule.id a id sM.schedules,
+      show sP.schedules.find? (fun y => y.id == id) = sM.schedules.find? (fun y => y.id == id) from hs id]
+
+/-! ### 5d. The schedule handlers — no facts, shared code, `sLook` only -/
+
+theorem agrees_scheduleGet (req) : Agrees (.api (.scheduleGet req)) := by
+  intro n sP sM h
+  have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
+    h.2.2 req.id
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleGet, AbstractModel.scheduleGet,
+             run_map, run_bind, run_getSchedule, run_pure, Id.run]
+  rw [hsid]
+  cases hfM : sM.schedules.find? (·.id == req.id) with
+  | none => exact ⟨rfl, h⟩
+  | some sch => exact ⟨rfl, h⟩
+
+theorem agrees_scheduleCreate (req) : Agrees (.api (.scheduleCreate req)) := by
+  intro n sP sM h
+  have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
+    h.2.2 req.id
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleCreate, AbstractModel.scheduleCreate,
+             run_map, run_bind, run_getSchedule, run_setSchedule, run_pure, Id.run]
+  rw [hsid]
+  cases hfM : sM.schedules.find? (·.id == req.id) with
+  | some sch => exact ⟨rfl, h⟩
+  | none => exact ⟨rfl, REq_setSchedule h _⟩
+
+theorem agrees_scheduleDelete (req) : Agrees (.api (.scheduleDelete req)) := by
+  intro n sP sM h
+  have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
+    h.2.2 req.id
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleDelete, AbstractModel.scheduleDelete,
+             run_map, run_bind, run_getSchedule, run_delSchedule, run_pure, Id.run]
+  rw [hsid]
+  cases hfM : sM.schedules.find? (·.id == req.id) with
+  | none => exact ⟨rfl, h⟩
+  | some sch => exact ⟨rfl, REq_delSchedule h _⟩
+
+/-! ### 5e. `promiseGet` — THE TEMPLATE: view served vs view persisted
+
+The P side answers from `pLook` and writes nothing; the M side answers
+from the same `pLook` (the touch serves the projection it persists)
+and its write is `REq_touchWrite`-invisible. Every remaining promise
+and task handler is this argument, composed with more effects. -/
+
+theorem agrees_promiseGet (req) : Agrees (.api (.promiseGet req)) := by
+  intro n sP sM h
+  have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
+      = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseGet, AbstractModel.promiseGet,
+             run_map, run_bind, run_viewPromise, run_touchPromise, run_pure, Id.run]
+  cases hfP : sP.promises.find? (·.id == req.id) with
+  | none =>
+      cases hfM : sM.promises.find? (·.id == req.id) with
+      | none => exact ⟨rfl, h⟩
+      | some pM => rw [hfP, hfM] at hpi; simp at hpi
+  | some pP =>
+      cases hfM : sM.promises.find? (·.id == req.id) with
+      | none => rw [hfP, hfM] at hpi; simp at hpi
+      | some pM =>
+          rw [hfP, hfM] at hpi
+          simp only [Option.map] at hpi
+          have hproj : pP.project n = pM.project n := Option.some.inj hpi
+          have hpm : (pM.id == req.id) = true :=
+            find?_sat (fun x => x.id == req.id) sM.promises pM hfM
+          have hpe : pM.id = req.id := eq_of_beq hpm
+          have hf' : sM.promises.find? (·.id == pM.id) = some pM := by
+            rw [hpe]; exact hfM
+          simp only [Option.map, run_pure]
+          refine ⟨?_, ?_⟩
+          · rw [hproj]
+          · by_cases hc : (((pM.project n).state != pM.state) = true)
+            · rw [if_pos hc]
+              exact REq_touchWrite h pM hf'
+            · rw [if_neg hc]
+              exact h
+
 end Proof
 end Abstraction
