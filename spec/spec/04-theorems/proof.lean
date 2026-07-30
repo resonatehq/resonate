@@ -220,6 +220,16 @@ def REq (n : Nat) (sP sM : ServerState) : Prop :=
 theorem REq.refl (n : Nat) (s : ServerState) : REq n s s :=
   ⟨fun _ => rfl, fun _ => rfl, fun _ => rfl⟩
 
+/-- The invariant is pointwise equality of lookups, so it is symmetric
+    and transitive — the rules' shared code composes through it. -/
+theorem REq.symm {n : Nat} {sP sM : ServerState} (h : REq n sP sM) : REq n sM sP :=
+  ⟨fun id => (h.1 id).symm, fun id => (h.2.1 id).symm, fun id => (h.2.2 id).symm⟩
+
+theorem REq.trans {n : Nat} {a b c : ServerState}
+    (h1 : REq n a b) (h2 : REq n b c) : REq n a c :=
+  ⟨fun id => (h1.1 id).trans (h2.1 id), fun id => (h1.2.1 id).trans (h2.2.1 id),
+   fun id => (h1.2.2 id).trans (h2.2.2 id)⟩
+
 theorem pLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : String) :
     pLook n' s id = (pLook n s id).map (·.project n') := by
   unfold pLook
@@ -1448,6 +1458,284 @@ theorem agrees_taskFulfill (req) : Agrees (.api (.taskFulfill req)) := by
                     rw [hpid, hrP, hrM]
                   exact ⟨rfl, REq_setPromise h'
                     ({ pv with state := req.action.state, value := req.action.value, settledAt := some n } : PromiseObject) htq⟩
+
+/-! ### 5m. The touches are self-invisible
+
+Instantiating the absorption lemmas at `REq.refl` says each touch is
+invisible to the invariant RELATIVE TO ITS OWN STATE. With symmetry
+and transitivity, the fact rules R1 and R2 — which BOTH machines run
+identically — need no case analysis at all. -/
+
+theorem REq_touchPromise_self (id : String) (n : Nat) (s : ServerState) :
+    REq n s ((touchPromise id n).run s).2 := by
+  rw [run_touchPromise]
+  cases hf : s.promises.find? (·.id == id) with
+  | none => exact REq.refl n s
+  | some p =>
+      have hf' : s.promises.find? (·.id == p.id) = some p := by
+        rw [eq_of_beq (find?_sat (fun x => x.id == id) s.promises p hf)]; exact hf
+      dsimp only
+      by_cases hc : (((p.project n).state != p.state) = true)
+      · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n s) p hf'
+      · simp only [if_neg hc]; exact REq.refl n s
+
+theorem REq_touchTask_self (id : String) (n : Nat) (s : ServerState) :
+    REq n s ((touchTask id n).run s).2 := by
+  rw [run_touchTask]
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => exact REq.refl n s
+  | some t =>
+      have htid : t.id = id := eq_of_beq (find?_sat (fun y => y.id == id) s.tasks t hf)
+      dsimp only
+      cases hp : s.promises.find? (·.id == t.id) with
+      | none => exact REq.refl n s
+      | some p =>
+          have hp' : s.promises.find? (·.id == p.id) = some p := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == t.id) s.promises p hp)]; exact hp
+          have hplid : pLook n s id = some (p.project n) := by
+            unfold pLook; rw [← htid, hp]; rfl
+          by_cases hcond : (((p.project n).state != PromiseState.pending) = true
+              ∧ (t.state != TaskState.fulfilled) = true)
+          · simp only [if_pos hcond]
+            have hfM1 : (if (((p.project n).state != p.state) = true) then
+                  { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+                else s).tasks.find? (·.id == id) = some t := by
+              by_cases hc : (((p.project n).state != p.state) = true)
+              · simp only [if_pos hc]; exact hf
+              · simp only [if_neg hc]; exact hf
+            generalize hsM1 : (if (((p.project n).state != p.state) = true) then
+                  { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+                else s) = s1
+            rw [hsM1] at hfM1
+            have h1 : REq n s s1 := by
+              rw [← hsM1]
+              by_cases hc : (((p.project n).state != p.state) = true)
+              · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n s) p hp'
+              · simp only [if_neg hc]; exact REq.refl n s
+            have hpl1 : pLook n s1 id = some (p.project n) := by
+              rw [← h1.1 id]; exact hplid
+            exact h1.trans (REq_touchTaskWrite (REq.refl n s1) t id hfM1 (p.project n) hpl1
+              (beq_false_of_bne hcond.1) (beq_false_of_bne hcond.2))
+          · simp only [if_neg hcond]
+            by_cases hc : (((p.project n).state != p.state) = true)
+            · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n s) p hp'
+            · simp only [if_neg hc]; exact REq.refl n s
+
+/-! ### 5n. The fact rules R1 and R2 -/
+
+theorem agrees_r1 (id : String) : Agrees (.r1 id) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.promiseTimeout,
+             run_bind, run_pure, Id.run]
+  exact ⟨trivial, ((REq_touchPromise_self id n sP).symm.trans h).trans
+    (REq_touchPromise_self id n sM)⟩
+
+theorem agrees_r2 (id : String) : Agrees (.r2 id) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.taskFulfillment,
+             run_bind, run_pure, Id.run]
+  exact ⟨trivial, ((REq_touchTask_self id n sP).symm.trans h).trans
+    (REq_touchTask_self id n sM)⟩
+
+/-! ### 5o. The choice rules R5 and R6
+
+Both read the TASK raw — but their decisions go through the view, and
+that is exactly what makes them agree: under a PENDING view the raw
+tasks coincide (`tLook_pending`), so the sides make the same choice
+with the same record; under a settled or absent view neither side
+writes — TIMEOUT ALWAYS WINS extends to redispatch, mechanized. -/
+
+theorem run_leaseExpiry (id : String) (n : Nat) (s : ServerState) :
+    (Rules.leaseExpiry id n).run s = ((),
+      match s.tasks.find? (·.id == id) with
+      | none => s
+      | some t =>
+        match t.expiresAt with
+        | none => s
+        | some d =>
+          if ((t.state == TaskState.acquired) = true ∧ d ≤ n) then
+            match (s.promises.find? (·.id == t.id)).map (·.project n) with
+            | none => s
+            | some p =>
+                if (p.state == PromiseState.pending) = true then
+                  { s with tasks := ({ t with state := TaskState.pending, pid := none, ttl := none, expiresAt := none, retryAt := some n } : TaskObject) :: s.tasks.filter (·.id != ({ t with state := TaskState.pending, pid := none, ttl := none, expiresAt := none, retryAt := some n } : TaskObject).id) }
+                else s
+          else s) := by
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, run_pure]
+  | some t =>
+      cases he : t.expiresAt with
+      | none => simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, run_pure]
+      | some d =>
+          by_cases hg : ((t.state == TaskState.acquired) = true ∧ d ≤ n)
+          · cases hp : s.promises.find? (·.id == t.id) with
+            | none =>
+                simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                           run_viewPromise, hp, Option.map, run_pure]
+            | some p0 =>
+                by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
+                · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                             run_viewPromise, hp, Option.map, if_pos hpe, run_setTask, run_pure]
+                · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                             run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
+          · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+
+theorem run_dispatch (id : String) (next : Nat) (n : Nat) (s : ServerState) :
+    (Rules.dispatch id next n).run s = ((),
+      match s.tasks.find? (·.id == id) with
+      | none => s
+      | some t =>
+        match t.retryAt with
+        | none => s
+        | some due =>
+          if ((t.state == TaskState.pending) = true ∧ due ≤ n) then
+            match (s.promises.find? (·.id == t.id)).map (·.project n) with
+            | none => s
+            | some p =>
+                if (p.state == PromiseState.pending) = true then
+                  { { s with tasks := ({ t with retryAt := some next } : TaskObject) :: s.tasks.filter (·.id != ({ t with retryAt := some next } : TaskObject).id) } with
+                    outbox := (ServerModel.OutboxEntry.mk ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)) :: ({ s with tasks := ({ t with retryAt := some next } : TaskObject) :: s.tasks.filter (·.id != ({ t with retryAt := some next } : TaskObject).id) } : ServerState).outbox.filter (fun e => e.key != (ServerModel.OutboxEntry.mk ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)).key) }
+                else s
+          else s) := by
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => simp only [Rules.dispatch, run_bind, run_getTask, hf, run_pure]
+  | some t =>
+      cases he : t.retryAt with
+      | none => simp only [Rules.dispatch, run_bind, run_getTask, hf, he, run_pure]
+      | some due =>
+          by_cases hg : ((t.state == TaskState.pending) = true ∧ due ≤ n)
+          · cases hp : s.promises.find? (·.id == t.id) with
+            | none =>
+                simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                           run_viewPromise, hp, Option.map, run_pure]
+            | some p0 =>
+                by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
+                · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                             run_viewPromise, hp, Option.map, if_pos hpe, run_setTask,
+                             setMessage, run_modify, run_pure]
+                · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                             run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
+          · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+
+theorem agrees_r5 (id : String) : Agrees (.r5 id) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, run_bind, run_pure, Id.run,
+             run_leaseExpiry]
+  refine ⟨trivial, ?_⟩
+  have hti : (sP.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sP id))
+      = (sM.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sM id)) := h.2.1 id
+  cases hfP : sP.tasks.find? (·.id == id) with
+  | none =>
+      cases hfM : sM.tasks.find? (·.id == id) with
+      | none => exact h
+      | some tM => rw [hfP, hfM] at hti; simp at hti
+  | some tP =>
+      cases hfM : sM.tasks.find? (·.id == id) with
+      | none => rw [hfP, hfM] at hti; simp at hti
+      | some tM =>
+          have htPid : tP.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sP.tasks tP hfP)
+          have htMid : tM.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sM.tasks tM hfM)
+          dsimp only
+          rw [htPid, htMid]
+          have hpp : (sP.promises.find? (·.id == id)).map (·.project n)
+              = (sM.promises.find? (·.id == id)).map (·.project n) := h.1 id
+          cases hpP : sP.promises.find? (·.id == id) with
+          | none =>
+              cases hpM : sM.promises.find? (·.id == id) with
+              | some pM0 => rw [hpP, hpM] at hpp; simp at hpp
+              | none =>
+                  simp only [Option.map]
+                  cases tP.expiresAt <;> cases tM.expiresAt <;> simp only [ite_self] <;> exact h
+          | some pP0 =>
+              cases hpM : sM.promises.find? (·.id == id) with
+              | none => rw [hpP, hpM] at hpp; simp at hpp
+              | some pM0 =>
+                  rw [hpP, hpM] at hpp
+                  simp only [Option.map] at hpp
+                  have hpv : pP0.project n = pM0.project n := Option.some.inj hpp
+                  simp only [Option.map]
+                  rw [hpv]
+                  by_cases hpe : (((pM0.project n).state == PromiseState.pending) = true)
+                  · have hplP' : pLook n sP id = some (pM0.project n) := by
+                      unfold pLook; rw [hpP]; simp only [Option.map]; rw [hpv]
+                    have hplM : pLook n sM id = some (pM0.project n) := by
+                      unfold pLook; rw [hpM]; rfl
+                    have htt : tP = tM := Option.some.inj (by
+                      rw [← hfP, ← hfM, ← tLook_pending hplP' hpe, ← tLook_pending hplM hpe]
+                      exact h.2.1 id)
+                    subst htt
+                    cases he : tP.expiresAt with
+                    | none => exact h
+                    | some d =>
+                        by_cases hg : ((tP.state == TaskState.acquired) = true ∧ d ≤ n)
+                        · simp only [if_pos hg, if_pos hpe]
+                          exact REq_setTask h _
+                        · simp only [if_neg hg]
+                          exact h
+                  · simp only [if_neg hpe]
+                    cases tP.expiresAt <;> cases tM.expiresAt <;> simp only [ite_self] <;> exact h
+
+theorem agrees_r6 (id : String) (next : Nat) : Agrees (.r6 id next) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, run_bind, run_pure, Id.run,
+             run_dispatch]
+  refine ⟨trivial, ?_⟩
+  have hti : (sP.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sP id))
+      = (sM.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sM id)) := h.2.1 id
+  cases hfP : sP.tasks.find? (·.id == id) with
+  | none =>
+      cases hfM : sM.tasks.find? (·.id == id) with
+      | none => exact h
+      | some tM => rw [hfP, hfM] at hti; simp at hti
+  | some tP =>
+      cases hfM : sM.tasks.find? (·.id == id) with
+      | none => rw [hfP, hfM] at hti; simp at hti
+      | some tM =>
+          have htPid : tP.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sP.tasks tP hfP)
+          have htMid : tM.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sM.tasks tM hfM)
+          dsimp only
+          rw [htPid, htMid]
+          have hpp : (sP.promises.find? (·.id == id)).map (·.project n)
+              = (sM.promises.find? (·.id == id)).map (·.project n) := h.1 id
+          cases hpP : sP.promises.find? (·.id == id) with
+          | none =>
+              cases hpM : sM.promises.find? (·.id == id) with
+              | some pM0 => rw [hpP, hpM] at hpp; simp at hpp
+              | none =>
+                  simp only [Option.map]
+                  cases tP.retryAt <;> cases tM.retryAt <;> simp only [ite_self] <;> exact h
+          | some pP0 =>
+              cases hpM : sM.promises.find? (·.id == id) with
+              | none => rw [hpP, hpM] at hpp; simp at hpp
+              | some pM0 =>
+                  rw [hpP, hpM] at hpp
+                  simp only [Option.map] at hpp
+                  have hpv : pP0.project n = pM0.project n := Option.some.inj hpp
+                  simp only [Option.map]
+                  rw [hpv]
+                  by_cases hpe : (((pM0.project n).state == PromiseState.pending) = true)
+                  · have hplP' : pLook n sP id = some (pM0.project n) := by
+                      unfold pLook; rw [hpP]; simp only [Option.map]; rw [hpv]
+                    have hplM : pLook n sM id = some (pM0.project n) := by
+                      unfold pLook; rw [hpM]; rfl
+                    have htt : tP = tM := Option.some.inj (by
+                      rw [← hfP, ← hfM, ← tLook_pending hplP' hpe, ← tLook_pending hplM hpe]
+                      exact h.2.1 id)
+                    subst htt
+                    cases he : tP.retryAt with
+                    | none => exact h
+                    | some due =>
+                        by_cases hg : ((tP.state == TaskState.pending) = true ∧ due ≤ n)
+                        · simp only [if_pos hg, if_pos hpe]
+                          exact REq_setTask h _
+                        · simp only [if_neg hg]
+                          exact h
+                  · simp only [if_neg hpe]
+                    cases tP.retryAt <;> cases tM.retryAt <;> simp only [ite_self] <;> exact h
 
 /-! ### 5l. `taskCreate` — a promise read, creation, or the inner task
     read; every piece already built. -/
