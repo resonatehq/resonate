@@ -22,17 +22,15 @@ directions:
     under ANY shared schedule — checked exhaustively below, with the
     adversarial rules (R5, R6) in the alphabet.
 
-  * **Message lockstep still fails.** R5 and R6 read raw task state —
-    lease expiry and dispatch are choices, not facts, and are never
-    applied on touch. On a fact-lagged task (promise dead, fulfillment
-    unpersisted) the projected machine's stored `.acquired` lets R5
-    re-pend and R6 emit a doomed `execute` that the materialized
-    machine — whose touch already fulfilled the task — can no longer
-    produce at that point. The witness is below; the repair is the
-    usual one: under its OWN schedule the materialized machine fires
-    R5 and R6 at the same instant BEFORE the touching read, and the
-    channels agree again. Hence the ∃-quantified schedules in the
-    statement, needed here for the message channel alone.  -/
+  * **Message lockstep holds too.** R5 and R6 read the TASK raw
+    (choices are never forced by observation) but DECIDE through the
+    view — no rule creates new work for a logically dead task. With
+    that, no rule's effect depends on fact-lag at all, and the twins
+    lockstep on both channels: `LockstepAbstract`. The script that
+    refuted message lockstep when R5/R6 decided raw (`wLag` — the
+    projected machine re-pended a fact-lagged task and emitted a
+    doomed `execute` the materialized machine could not) now
+    locksteps; it is kept below as the regression witness.  -/
 
 namespace Abstraction
 
@@ -122,11 +120,9 @@ def IndistinguishableAbstract : Prop := APRefinesAM ∧ AMRefinesAP
     are pointwise identical. No ∃, no re-indexing, no silence: the
     universal synchronous form, strictly stronger than the response
     half of the bisimulation, and exactly the statement that is FALSE
-    for the concrete twins (`lockstep.lean`). It cannot be extended to
-    the message channel — the witness below (`wLag`) pins that
-    boundary. Evidence: the exhaustive adversarial sweep
-    (`respLockstepSweep`) and the battery; the unbounded claim's
-    induction is open, like its siblings. -/
+    for the concrete twins (`lockstep.lean`). Evidence: the exhaustive
+    adversarial sweep (`lockstepSweep`) and the battery; the unbounded
+    claim's induction is open, like its siblings. -/
 def ResponseLockstepAbstract : Prop :=
   ∀ (trP trM : ATrace),
     ValidAP trP → ValidA trM →
@@ -134,6 +130,19 @@ def ResponseLockstepAbstract : Prop :=
     (trM 0).state = AbstractModel.ServerState.init →
     (∀ t, (trP t).req = (trM t).req ∧ (trP t).now = (trM t).now) →
     ∀ t, (trP t).res = (trM t).res
+
+/-- **Full lockstep: both channels, any shared schedule.** Responses
+    pointwise identical AND messages equal at quiescence. Holds because
+    every decision in either machine — handler or rule — goes through
+    the view, so no effect depends on fact-lag; only the stored bytes
+    differ, and quiescence closes them. -/
+def LockstepAbstract : Prop :=
+  ∀ (trP trM : ATrace),
+    ValidAP trP → ValidA trM →
+    (trP 0).state = AbstractModel.ServerState.init →
+    (trM 0).state = AbstractModel.ServerState.init →
+    (∀ t, (trP t).req = (trM t).req ∧ (trP t).now = (trM t).now) →
+    (∀ t, (trP t).res = (trM t).res) ∧ SameMessagesAA trP trM
 
 /-! ### Instruments -/
 
@@ -154,13 +163,16 @@ def twinCheckA (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-/-! ### The message-channel witness
+/-! ### The regression witness
 
-Task `x`, deadline 250, lease 200. At 300 the read runs: the
-materialized machine persists facts, the projected one serves them.
-Then R5 and R6 fire on the fact-lagged task: the projected machine's
-stored `.acquired` re-pends and emits; the materialized machine's
-fulfilled task cannot. Responses never differ — only the outbox. -/
+Task `x`, deadline 250, lease 200. At 300 the read runs (the
+materialized machine persists facts, the projected one serves them),
+then R5 and R6 fire on the fact-lagged task. When R5/R6 decided on raw
+task state alone, the projected machine re-pended and emitted a doomed
+`execute` here while the materialized one could not — the script
+refuted message lockstep. With decisions through the view, both
+machines refuse (no new work for the dead), and the script locksteps
+on both channels. -/
 
 def wLag : List (AStep × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
@@ -169,21 +181,7 @@ def wLag : List (AStep × Nat) :=
     (.r6 "x" 5300, 300) ]
 
 example : respLockstepA wLag = true := by decide
-example : twinCheckA wLag 400 = false := by decide
-
-/-- The repair, under the materialized machine's own schedule: R5 and
-    R6 fire at the same instant BEFORE the touching read. External
-    observations and quiesced states agree again. -/
-def wLag' : List (AStep × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
-    (.r5 "x", 300),
-    (.r6 "x" 5300, 300),
-    (.api (.taskGet { id := "x" }), 300) ]
-
-example :
-    (extResponsesA wLag (runFinAP wLag).1 == extResponsesA wLag' (runFinA wLag').1
-      && absStateEq (absQuiesced 400 (runFinAP wLag).2)
-                    (absQuiesced 400 (runFinA wLag').2)) = true := by decide
+example : twinCheckA wLag 400 = true := by decide
 
 /-! ### The battery -/
 
@@ -234,14 +232,12 @@ def b5 : List (AStep × Nat) :=
 
 example : twinCheckA b5 2500 := by decide
 
-/-! ### The sweeps
+/-! ### The sweep
 
-Response lockstep is checked over the ADVERSARIAL alphabet — the raw
-choice-rules R5 and R6 included — because the claim is that no shared
-schedule, however hostile, splits the responses. Full lockstep
-(quiesced states) is checked over the fact-rule alphabet, where it
-holds; R5/R6 on fact-lagged tasks are exactly the witnessed exception,
-owned by the ∃-schedule in the statement. -/
+Full lockstep — responses pointwise, quiesced states and outboxes —
+over the ADVERSARIAL alphabet, the choice-rules R5 and R6 included:
+no shared schedule, however hostile, splits the twins on either
+channel. -/
 
 def kernelsResp : List AStep :=
   [ .api (.promiseCreate { id := "a", timeoutAt := 250, param := {}, tags := extTags }),
@@ -256,8 +252,6 @@ def kernelsResp : List AStep :=
     .r5 "x",
     .r6 "x" 9000 ]
 
-def kernelsState : List AStep := kernelsResp.take 9
-
 def seqsLenA (ks : List AStep) : Nat → List (List AStep)
   | 0 => [[]]
   | n + 1 => (seqsLenA ks n).flatMap (fun s => ks.map (fun k => s ++ [k]))
@@ -269,15 +263,9 @@ def instantiateA (ks : List AStep) : List (AStep × Nat) :=
   ks.mapIdx (fun i st => (st, 100 * (i + 1)))
 
 /-- Every script up to length 3 over the 11-request adversarial
-    alphabet: the twins' responses never split — 1 464 scripts. -/
-theorem respLockstepSweep :
-    ((seqsUpToA kernelsResp 3).map instantiateA).all respLockstepA = true := by
-  decide
-
-/-- Every script up to length 3 over the 9-request fact-rule alphabet:
-    full lockstep, quiesced states included — 820 scripts. -/
-theorem twinLockstepSweep :
-    ((seqsUpToA kernelsState 3).map instantiateA).all
+    alphabet: full lockstep — 1 464 scripts, none hand-picked. -/
+theorem lockstepSweep :
+    ((seqsUpToA kernelsResp 3).map instantiateA).all
       (fun w => twinCheckA w 500) = true := by
   decide
 

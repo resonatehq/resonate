@@ -47,13 +47,18 @@ def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
       if t.state != .pending then
         pure ()
       else
-        delTaskTimeout t.id
-        setTaskTimeout t.id 0 (now + retryTimeout)
         match ← getPromise t.id with
         | none =>
             pure ()
         | some p =>
-            setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
+            -- TIMEOUT ALWAYS WINS, extended to redispatch: a retry
+            -- consults the projected promise state and creates no new
+            -- work for a logically dead task — its cleanup is owned by
+            -- the promise-timeout transition.
+            if p.state == .pending ∧ p.timeoutAt > now then
+              delTaskTimeout t.id
+              setTaskTimeout t.id 0 (now + retryTimeout)
+              setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
 def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
@@ -71,15 +76,19 @@ def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
       if t.state != .acquired then
         pure ()
       else
-        let t := { t with state := .pending, pid := none, ttl := none }
-        setTask t
-        delTaskTimeout t.id
-        setTaskTimeout t.id 0 (now + retryTimeout)
         match ← getPromise t.id with
         | none =>
             pure ()
         | some p =>
-            setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
+            -- TIMEOUT ALWAYS WINS, extended to reassignment: an
+            -- expired lease of a logically dead task is not returned
+            -- to circulation — there is no circulation left.
+            if p.state == .pending ∧ p.timeoutAt > now then
+              let t := { t with state := .pending, pid := none, ttl := none }
+              setTask t
+              delTaskTimeout t.id
+              setTaskTimeout t.id 0 (now + retryTimeout)
+              setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
 partial def catchUp (now : Nat) (s : Schedule) : M Schedule := do
   if s.nextRunAt ≤ now then
