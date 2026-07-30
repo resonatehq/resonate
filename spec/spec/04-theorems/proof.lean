@@ -1449,5 +1449,89 @@ theorem agrees_taskFulfill (req) : Agrees (.api (.taskFulfill req)) := by
                   exact ⟨rfl, REq_setPromise h'
                     ({ pv with state := req.action.state, value := req.action.value, settledAt := some n } : PromiseObject) htq⟩
 
+/-! ### 5l. `taskCreate` — a promise read, creation, or the inner task
+    read; every piece already built. -/
+
+theorem agrees_taskCreate (req) : Agrees (.api (.taskCreate req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskCreate,
+             AbstractModel.taskCreate, run_map, Id.run]
+  by_cases htag0 : (!req.action.tags.has "resonate:target") = true
+  · simp only [if_pos htag0]; exact ⟨rfl, h⟩
+  · simp only [if_neg htag0, run_pureUnit_bind]
+    simp only [run_bind, run_viewPromise, run_touchPromise, run_pure]
+    have hpi : (sP.promises.find? (·.id == req.action.id)).map (·.project n)
+        = (sM.promises.find? (·.id == req.action.id)).map (·.project n) := h.1 req.action.id
+    cases hfP : sP.promises.find? (·.id == req.action.id) with
+    | none =>
+        cases hfM : sM.promises.find? (·.id == req.action.id) with
+        | some pM => rw [hfP, hfM] at hpi; simp at hpi
+        | none =>
+            have hplP : pLook n sP req.action.id = none := by unfold pLook; rw [hfP]; rfl
+            have hplM : pLook n sM req.action.id = none := by unfold pLook; rw [hfM]; rfl
+            have htq : sP.tasks.find? (·.id == req.action.id)
+                = sM.tasks.find? (·.id == req.action.id) := by
+              rw [← tLook_raw hplP, ← tLook_raw hplM]; exact h.2.1 req.action.id
+            simp only [Option.map]
+            by_cases hto : req.action.timeoutAt > n
+            · simp only [if_pos hto]
+              exact ⟨rfl, REq_setTask (REq_setPromise h
+                ({ id := req.action.id, state := PromiseState.pending, param := req.action.param,
+                   tags := req.action.tags, timeoutAt := req.action.timeoutAt, createdAt := n } : PromiseObject) htq) _⟩
+            · simp only [if_neg hto]
+              exact ⟨rfl, REq_setTask (REq_setPromise h
+                ({ id := req.action.id,
+                   state := if req.action.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout,
+                   param := req.action.param, tags := req.action.tags, timeoutAt := req.action.timeoutAt,
+                   createdAt := req.action.timeoutAt, settledAt := some req.action.timeoutAt } : PromiseObject) htq) _⟩
+    | some pP =>
+        cases hfM : sM.promises.find? (·.id == req.action.id) with
+        | none => rw [hfP, hfM] at hpi; simp at hpi
+        | some pM =>
+            rw [hfP, hfM] at hpi
+            simp only [Option.map] at hpi
+            have hproj : pP.project n = pM.project n := Option.some.inj hpi
+            have hpm : (pM.id == req.action.id) = true :=
+              find?_sat (fun x => x.id == req.action.id) sM.promises pM hfM
+            have hf' : sM.promises.find? (·.id == pM.id) = some pM := by
+              rw [eq_of_beq hpm]; exact hfM
+            simp only [Option.map]
+            rw [hproj]
+            by_cases htag2 : (!(pM.project n).tags.has "resonate:target") = true
+            · simp only [if_pos htag2]
+              refine ⟨rfl, ?_⟩
+              by_cases hc : (((pM.project n).state != pM.state) = true)
+              · simp only [if_pos hc]; exact REq_touchWrite h pM hf'
+              · simp only [if_neg hc]; exact h
+            · simp only [if_neg htag2, run_pureUnit_bind]
+              -- absorb the promise touch, then the inner task read
+              generalize hsM1 : (if (((pM.project n).state != pM.state) = true) then
+                    { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+                  else sM) = sM1
+              have h1 : REq n sP sM1 := by
+                rw [← hsM1]
+                by_cases hc : (((pM.project n).state != pM.state) = true)
+                · simp only [if_pos hc]; exact REq_touchWrite h pM hf'
+                · simp only [if_neg hc]; exact h
+              refine And.imp (congrArg Equivalence.Response.taskCreate) (fun x => x)
+                (bind_taskRead_agrees (pM.project n).id n _ _ h1 ?_)
+              intro v sP' sM' h' hf
+              cases v with
+              | none => exact ⟨rfl, h'⟩
+              | some pair =>
+                  obtain ⟨t, po⟩ := pair
+                  cases po with
+                  | none => exact ⟨rfl, h'⟩
+                  | some pv =>
+                      dsimp only
+                      by_cases hg1 : (t.state == TaskState.fulfilled) = true
+                      · simp only [if_pos hg1]; exact ⟨rfl, h'⟩
+                      · simp only [if_neg hg1, run_pureUnit_bind]
+                        by_cases hg2 : (t.state == TaskState.pending) = true
+                        · simp only [if_pos hg2]
+                          exact ⟨rfl, REq_setTask h' _⟩
+                        · simp only [if_neg hg2, run_pureUnit_bind]
+                          exact ⟨rfl, h'⟩
+
 end Proof
 end Abstraction
