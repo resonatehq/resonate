@@ -26,13 +26,28 @@ anywhere in this file):
   4. **The reduction** (`responseLockstep_of_stepAgreement`): if every
      single step agrees (`StepAgreement`), the unbounded theorem
      follows, by induction over the trace.
-  5. Per-step agreement (`Agrees st`), case by case. Discharged so
-     far: `idle`, the three searches, the three schedule handlers,
-     and ALL FIVE promise handlers — get, create, settle, and both
-     registrations (`promiseGet` is the template; the registrations
-     compose two touch absorptions via an opaque intermediate state).
-     Open: the task handlers and the seven rules — the same argument
-     over `tLook` in place of `pLook`.
+  5. Per-step agreement (`Agrees st`), case by case. DISCHARGED:
+     `idle`; the three searches; the three schedule handlers; all five
+     promise handlers (get, create, settle, both registrations); the
+     task handlers get, create, acquire, fulfill, release, halt, and
+     continue (via `bind_taskRead_agrees`, the task read proven once);
+     and rules R1–R6 (R1/R2 by touch self-invisibility plus
+     symmetry/transitivity of the invariant; R5/R6 are the
+     doomed-dispatch fix mechanized — under a pending view the raw
+     tasks coincide, under a settled view neither side writes; R3/R4
+     by the settled-upsert congruence and the value/state split of the
+     touch). OPEN, and why:
+       - `taskHeartbeat`, `taskSuspend` — `forIn` loops; need a loop
+         invariant by list induction. Routine, not yet written.
+       - `taskFence` — composes with the promise handlers; needs their
+         agreement restated at the run level for reuse.
+       - R7 `scheduleFire` — BLOCKED on the spec: `catchUp` is
+         `partial`, hence opaque to the kernel — nothing can be proven
+         about it by unfolding. It needs fuel or a termination measure
+         (`nextCron` strictly increasing) to become provable; that is
+         a spec decision, not a proof step.
+     Once these close, `StepAgreement` assembles by cases on `AStep`
+     and the reduction yields `ResponseLockstepAbstract` outright.
 
 `LockstepAbstract`'s message half additionally needs quiescence
 congruence (`absQuiesced` agrees on `REq`-related states); same
@@ -1736,6 +1751,345 @@ theorem agrees_r6 (id : String) (next : Nat) : Agrees (.r6 id next) := by
                           exact h
                   · simp only [if_neg hpe]
                     cases tP.retryAt <;> cases tM.retryAt <;> simp only [ite_self] <;> exact h
+
+/-! ### 5p. R3 — notify. The write is a SETTLED promise (drop one
+    listener): a settled upsert needs no task-agreement side condition,
+    because the view against any settled promise is the same
+    fulfill-or-identity. -/
+
+theorem view_congr_settled (t : TaskObject) {p1 p2 : PromiseObject}
+    (h1 : (p1.state == PromiseState.pending) = false)
+    (h2 : (p2.state == PromiseState.pending) = false) :
+    t.view p1 = t.view p2 := by
+  unfold TaskObject.view
+  by_cases ht : (t.state == TaskState.fulfilled) = true
+  · rw [if_neg (fun hx => absurd hx.2 (by simp [bne, ht])),
+        if_neg (fun hx => absurd hx.2 (by simp [bne, ht]))]
+  · rw [if_pos ⟨bne_true_of_beq_false h1, bne_true_of_beq_false (toFalse ht)⟩,
+        if_pos ⟨bne_true_of_beq_false h2, bne_true_of_beq_false (toFalse ht)⟩]
+
+/-- The same SETTLED upsert on both sides preserves the invariant —
+    no side condition: views against a settled promise cannot tell the
+    raw tasks apart any better than views against the old lookup. -/
+theorem REq_setPromise_settled {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
+    (q : PromiseObject) (hq : (q.state == PromiseState.pending) = false) :
+    REq n { sP with promises := q :: sP.promises.filter (·.id != q.id) }
+          { sM with promises := q :: sM.promises.filter (·.id != q.id) } := by
+  obtain ⟨hp, ht, hs⟩ := h
+  have hqp : q.project n = q := project_not_pending q n hq
+  have hpu : ∀ (s : ServerState) (id : String),
+      pLook n { s with promises := q :: s.promises.filter (·.id != q.id) } id
+        = if (q.id == id) = true then some (q.project n) else pLook n s id := by
+    intro s id
+    show ((q :: s.promises.filter (fun y => y.id != q.id)).find? (fun y => y.id == id)).map (·.project n)
+        = if (q.id == id) = true then some (q.project n) else pLook n s id
+    rw [find?_upsert PromiseObject.id q s.promises id]
+    by_cases hc : (q.id == id) = true
+    · rw [if_pos hc, if_pos hc]; rfl
+    · rw [if_neg hc, if_neg hc]; rfl
+  refine ⟨fun id => ?_, fun id => ?_, hs⟩
+  · rw [hpu sP id, hpu sM id]
+    by_cases hc : (q.id == id) = true
+    · rw [if_pos hc, if_pos hc]
+    · rw [if_neg hc, if_neg hc]; exact hp id
+  · show (sP.tasks.find? (fun y => y.id == id)).map
+          (fun t => applyView t (pLook n { sP with promises := q :: sP.promises.filter (·.id != q.id) } id))
+        = (sM.tasks.find? (fun y => y.id == id)).map
+          (fun t => applyView t (pLook n { sM with promises := q :: sM.promises.filter (·.id != q.id) } id))
+    rw [hpu sP id, hpu sM id]
+    by_cases hc : (q.id == id) = true
+    · rw [if_pos hc, if_pos hc, hqp]
+      have htid := ht id
+      unfold tLook at htid
+      cases hplo : pLook n sP id with
+      | none =>
+          have hplo' : pLook n sM id = none := by rw [← hp id]; exact hplo
+          rw [hplo] at htid
+          rw [hplo'] at htid
+          cases hrP : sP.tasks.find? (fun y => y.id == id) with
+          | none =>
+              cases hrM : sM.tasks.find? (fun y => y.id == id) with
+              | none => rfl
+              | some b => rw [hrP, hrM] at htid; simp [applyView] at htid
+          | some a =>
+              cases hrM : sM.tasks.find? (fun y => y.id == id) with
+              | none => rw [hrP, hrM] at htid; simp [applyView] at htid
+              | some b =>
+                  rw [hrP, hrM] at htid
+                  simp only [Option.map, applyView] at htid
+                  simp only [Option.map, applyView]
+                  rw [Option.some.inj htid]
+      | some pv =>
+          have hplo' : pLook n sM id = some pv := by rw [← hp id]; exact hplo
+          rw [hplo] at htid
+          rw [hplo'] at htid
+          cases hrP : sP.tasks.find? (fun y => y.id == id) with
+          | none =>
+              cases hrM : sM.tasks.find? (fun y => y.id == id) with
+              | none => rfl
+              | some b => rw [hrP, hrM] at htid; simp [applyView] at htid
+          | some a =>
+              cases hrM : sM.tasks.find? (fun y => y.id == id) with
+              | none => rw [hrP, hrM] at htid; simp [applyView] at htid
+              | some b =>
+                  rw [hrP, hrM] at htid
+                  simp only [Option.map, applyView] at htid
+                  have hab : a.view pv = b.view pv := Option.some.inj htid
+                  simp only [Option.map, applyView]
+                  by_cases hpvp : (pv.state == PromiseState.pending) = true
+                  · have haa : a = b := by
+                      rw [← view_of_pending a pv hpvp, ← view_of_pending b pv hpvp]
+                      exact hab
+                    rw [haa]
+                  · rw [view_congr_settled a hq (toFalse hpvp), hab,
+                        ← view_congr_settled b hq (toFalse hpvp)]
+    · rw [if_neg hc, if_neg hc, hp id]
+      have ht' := ht id
+      unfold tLook at ht'
+      rw [hp id] at ht'
+      exact ht'
+
+theorem agrees_r3 (id address : String) : Agrees (.r3 id address) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.notify,
+             run_bind, run_touchPromise, run_pure, setMessage, run_modify, Id.run]
+  refine ⟨trivial, ?_⟩
+  have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
+      = (sM.promises.find? (·.id == id)).map (·.project n) := h.1 id
+  cases hfP : sP.promises.find? (·.id == id) with
+  | none =>
+      cases hfM : sM.promises.find? (·.id == id) with
+      | none => exact h
+      | some pM => rw [hfP, hfM] at hpi; simp at hpi
+  | some pP =>
+      cases hfM : sM.promises.find? (·.id == id) with
+      | none => rw [hfP, hfM] at hpi; simp at hpi
+      | some pM =>
+          rw [hfP, hfM] at hpi
+          simp only [Option.map] at hpi
+          have hproj : pP.project n = pM.project n := Option.some.inj hpi
+          have hfP' : sP.promises.find? (·.id == pP.id) = some pP := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == id) sP.promises pP hfP)]; exact hfP
+          have hfM' : sM.promises.find? (·.id == pM.id) = some pM := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == id) sM.promises pM hfM)]; exact hfM
+          dsimp only
+          rw [hproj]
+          -- absorb both touch writes
+          have hP0 : REq n sP (if (((pM.project n).state != pP.state) = true) then
+                { sP with promises := (pM.project n) :: sP.promises.filter (·.id != (pM.project n).id) }
+              else sP) := by
+            by_cases hc : (((pM.project n).state != pP.state) = true)
+            · simp only [if_pos hc]
+              have := REq_touchWrite (REq.refl n sP) pP hfP'
+              rw [hproj] at this
+              exact this
+            · simp only [if_neg hc]; exact REq.refl n sP
+          generalize hsP1 : (if (((pM.project n).state != pP.state) = true) then
+                { sP with promises := (pM.project n) :: sP.promises.filter (·.id != (pM.project n).id) }
+              else sP) = sP1
+          rw [hsP1] at hP0
+          have hM0 : REq n sM (if (((pM.project n).state != pM.state) = true) then
+                { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+              else sM) := by
+            by_cases hc : (((pM.project n).state != pM.state) = true)
+            · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n sM) pM hfM'
+            · simp only [if_neg hc]; exact REq.refl n sM
+          generalize hsM1 : (if (((pM.project n).state != pM.state) = true) then
+                { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+              else sM) = sM1
+          rw [hsM1] at hM0
+          have h1 : REq n sP1 sM1 := (hP0.symm.trans h).trans hM0
+          by_cases hpend : (((pM.project n).state == PromiseState.pending) = true)
+          · simp only [if_pos hpend]; exact h1
+          · simp only [if_neg hpend]
+            by_cases hlc : ((pM.project n).listeners.contains address) = true
+            · simp only [if_pos hlc]
+              exact REq_setPromise_settled h1 _ (toFalse hpend)
+            · simp only [if_neg hlc]; exact h1
+
+/-! ### 5q. R4 — resume. The touch's VALUE is the view pair, its STATE
+    is self-invisible; splitting the two lets the shared `resumeOne`
+    compose through the invariant without expanding the touch. -/
+
+theorem touchTask_val (id : String) (n : Nat) (s : ServerState) :
+    ((touchTask id n).run s).1 =
+      match s.tasks.find? (·.id == id) with
+      | none => none
+      | some t =>
+        match (s.promises.find? (·.id == t.id)).map (·.project n) with
+        | none => some (t, none)
+        | some pv => some (t.view pv, some pv) := by
+  rw [run_touchTask]
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => rfl
+  | some t =>
+      dsimp only
+      cases hp : s.promises.find? (·.id == t.id) with
+      | none => rfl
+      | some p0 =>
+          simp only [Option.map]
+          by_cases hcond : (((p0.project n).state != PromiseState.pending) = true
+              ∧ (t.state != TaskState.fulfilled) = true)
+          · simp only [if_pos hcond]
+            rw [view_settles t (p0.project n) (beq_false_of_bne hcond.1)
+                (beq_false_of_bne hcond.2)]
+          · simp only [if_neg hcond]
+            have hvm : t.view (p0.project n) = t := by
+              by_cases hA : ((p0.project n).state == PromiseState.pending) = true
+              · exact view_of_pending t _ hA
+              · by_cases hB : (t.state == TaskState.fulfilled) = true
+                · exact view_of_fulfilled t _ hB
+                · exact absurd ⟨bne_true_of_beq_false (toFalse hA),
+                    bne_true_of_beq_false (toFalse hB)⟩ hcond
+            rw [hvm]
+
+theorem touchTask_val_agrees (id : String) (n : Nat) {sA sB : ServerState}
+    (h : REq n sA sB) :
+    ((touchTask id n).run sA).1 = ((touchTask id n).run sB).1 := by
+  rw [touchTask_val, touchTask_val]
+  have hti : (sA.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sA id))
+      = (sB.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sB id)) := h.2.1 id
+  cases hfA : sA.tasks.find? (·.id == id) with
+  | none =>
+      cases hfB : sB.tasks.find? (·.id == id) with
+      | none => rfl
+      | some tB => rw [hfA, hfB] at hti; simp at hti
+  | some tA =>
+      cases hfB : sB.tasks.find? (·.id == id) with
+      | none => rw [hfA, hfB] at hti; simp at hti
+      | some tB =>
+          rw [hfA, hfB] at hti
+          simp only [Option.map] at hti
+          have hvv0 : applyView tA (pLook n sA id) = applyView tB (pLook n sB id) :=
+            Option.some.inj hti
+          have htAid : tA.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sA.tasks tA hfA)
+          have htBid : tB.id = id :=
+            eq_of_beq (find?_sat (fun y => y.id == id) sB.tasks tB hfB)
+          dsimp only
+          rw [htAid, htBid]
+          have hpp : (sA.promises.find? (·.id == id)).map (·.project n)
+              = (sB.promises.find? (·.id == id)).map (·.project n) := h.1 id
+          cases hpA : sA.promises.find? (·.id == id) with
+          | none =>
+              cases hpB : sB.promises.find? (·.id == id) with
+              | some pB0 => rw [hpA, hpB] at hpp; simp at hpp
+              | none =>
+                  have hplA : pLook n sA id = none := by unfold pLook; rw [hpA]; rfl
+                  have hplB : pLook n sB id = none := by unfold pLook; rw [hpB]; rfl
+                  rw [hplA, hplB] at hvv0
+                  simp only [applyView] at hvv0
+                  simp only [Option.map]
+                  rw [hvv0]
+          | some pA0 =>
+              cases hpB : sB.promises.find? (·.id == id) with
+              | none => rw [hpA, hpB] at hpp; simp at hpp
+              | some pB0 =>
+                  rw [hpA, hpB] at hpp
+                  simp only [Option.map] at hpp
+                  have hpv : pA0.project n = pB0.project n := Option.some.inj hpp
+                  have hplA : pLook n sA id = some (pA0.project n) := by
+                    unfold pLook; rw [hpA]; rfl
+                  have hplB : pLook n sB id = some (pB0.project n) := by
+                    unfold pLook; rw [hpB]; rfl
+                  rw [hplA, hplB, ← hpv] at hvv0
+                  simp only [applyView] at hvv0
+                  simp only [Option.map]
+                  rw [hpv] at hvv0 ⊢
+                  rw [hvv0]
+
+/-- The shared wake step: same value on both sides, write derived from
+    the view, touch state absorbed. -/
+theorem agrees_resumeOne (awaited awaiter : String) (n : Nat) {sA sB : ServerState}
+    (h : REq n sA sB) :
+    REq n ((Rules.resumeOne awaited awaiter n).run sA).2
+          ((Rules.resumeOne awaited awaiter n).run sB).2 := by
+  have h1 : REq n ((touchTask awaiter n).run sA).2 ((touchTask awaiter n).run sB).2 :=
+    ((REq_touchTask_self awaiter n sA).symm.trans h).trans (REq_touchTask_self awaiter n sB)
+  have hv := touchTask_val_agrees awaiter n h
+  simp only [Rules.resumeOne, run_bind]
+  rw [hv]
+  cases hvB : ((touchTask awaiter n).run sB).1 with
+  | none => exact h1
+  | some pair =>
+      obtain ⟨t, po⟩ := pair
+      cases po with
+      | none => exact h1
+      | some pv =>
+          dsimp only
+          cases t.state with
+          | suspended => exact REq_setTask h1 _
+          | fulfilled => exact h1
+          | pending =>
+              by_cases hcont : (!(t.resumes.contains awaited)) = true
+              · simp only [if_pos hcont]; exact REq_setTask h1 _
+              · simp only [if_neg hcont]; exact h1
+          | acquired =>
+              by_cases hcont : (!(t.resumes.contains awaited)) = true
+              · simp only [if_pos hcont]; exact REq_setTask h1 _
+              · simp only [if_neg hcont]; exact h1
+          | halted =>
+              by_cases hcont : (!(t.resumes.contains awaited)) = true
+              · simp only [if_pos hcont]; exact REq_setTask h1 _
+              · simp only [if_neg hcont]; exact h1
+
+theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.resume,
+             run_bind, run_touchPromise, run_setPromise, run_pure, Id.run]
+  refine ⟨trivial, ?_⟩
+  have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
+      = (sM.promises.find? (·.id == id)).map (·.project n) := h.1 id
+  cases hfP : sP.promises.find? (·.id == id) with
+  | none =>
+      cases hfM : sM.promises.find? (·.id == id) with
+      | none => exact h
+      | some pM => rw [hfP, hfM] at hpi; simp at hpi
+  | some pP =>
+      cases hfM : sM.promises.find? (·.id == id) with
+      | none => rw [hfP, hfM] at hpi; simp at hpi
+      | some pM =>
+          rw [hfP, hfM] at hpi
+          simp only [Option.map] at hpi
+          have hproj : pP.project n = pM.project n := Option.some.inj hpi
+          have hfP' : sP.promises.find? (·.id == pP.id) = some pP := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == id) sP.promises pP hfP)]; exact hfP
+          have hfM' : sM.promises.find? (·.id == pM.id) = some pM := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == id) sM.promises pM hfM)]; exact hfM
+          dsimp only
+          rw [hproj]
+          have hP0 : REq n sP (if (((pM.project n).state != pP.state) = true) then
+                { sP with promises := (pM.project n) :: sP.promises.filter (·.id != (pM.project n).id) }
+              else sP) := by
+            by_cases hc : (((pM.project n).state != pP.state) = true)
+            · simp only [if_pos hc]
+              have := REq_touchWrite (REq.refl n sP) pP hfP'
+              rw [hproj] at this
+              exact this
+            · simp only [if_neg hc]; exact REq.refl n sP
+          generalize hsP1 : (if (((pM.project n).state != pP.state) = true) then
+                { sP with promises := (pM.project n) :: sP.promises.filter (·.id != (pM.project n).id) }
+              else sP) = sP1
+          rw [hsP1] at hP0
+          have hM0 : REq n sM (if (((pM.project n).state != pM.state) = true) then
+                { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+              else sM) := by
+            by_cases hc : (((pM.project n).state != pM.state) = true)
+            · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n sM) pM hfM'
+            · simp only [if_neg hc]; exact REq.refl n sM
+          generalize hsM1 : (if (((pM.project n).state != pM.state) = true) then
+                { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+              else sM) = sM1
+          rw [hsM1] at hM0
+          have h1 : REq n sP1 sM1 := (hP0.symm.trans h).trans hM0
+          by_cases hpend : (((pM.project n).state == PromiseState.pending) = true)
+          · simp only [if_pos hpend]; exact h1
+          · simp only [if_neg hpend]
+            by_cases hcb : ((pM.project n).callbacks.contains awaiter) = true
+            · simp only [if_pos hcb]
+              exact agrees_resumeOne (pM.project n).id awaiter n
+                (REq_setPromise_settled h1 _ (toFalse hpend))
+            · simp only [if_neg hcb]; exact h1
 
 /-! ### 5l. `taskCreate` — a promise read, creation, or the inner task
     read; every piece already built. -/
