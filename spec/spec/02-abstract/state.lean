@@ -91,13 +91,17 @@ def PromiseObject.addListener (p : PromiseObject) (address : String) : PromiseOb
   else
     { p with listeners := p.listeners ++ [address] }
 
-/-- Fact P. The same function the base machine calls `project` — but here
-    its result is always persisted (`touchPromise`), never merely served.
-    Stamped AT THE DEADLINE, so the record is byte-identical to the one
-    the base machine's timeout transition writes. Awaiters and listeners
-    are untouched: settlement records the fact, the batch rules discharge
-    the obligations. -/
-def PromiseObject.materialize (p : PromiseObject) (now : Nat) : PromiseObject :=
+/-- Fact P, as a pure function — the PROJECTION, same formula as the
+    concrete machine's. Stamped AT THE DEADLINE, so the record is
+    byte-identical to the one the concrete timeout transition writes.
+    Awaiters and listeners are untouched: settlement records the fact,
+    the drain rules discharge the obligations.
+
+    The two read disciplines are the two uses of this one function:
+    the projected handlers (`p.lean`) SERVE it, the materialized
+    handlers (`m.lean`) PERSIST it (`touchPromise`). Materialization is
+    projection, written down. -/
+def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
   if p.state == .pending ∧ p.timeoutAt ≤ now then
     if p.isTimer then
       { p with state := .resolved, settledAt := some p.timeoutAt }
@@ -137,6 +141,12 @@ def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
   { t with state := .fulfilled, pid := none, ttl := none,
            expiresAt := none, retryAt := none, resumes := [] }
+
+/-- Fact T, as a pure function: the task of a settled promise, read as
+    fulfilled. Served by the projected discipline, persisted by
+    `touchTask`. -/
+def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
+  if p.state != .pending ∧ t.state != .fulfilled then t.fulfill else t
 
 /-- Four components. No config (no retry cadence — dispatch is a rule the
     environment fires at will), no timeout sets, no deferred queue. -/
@@ -186,15 +196,29 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
   match ← getPromise id with
   | none => return none
   | some p =>
-      let p' := p.materialize now
+      let p' := p.project now
       if p'.state != p.state then
         setPromise p'
       return some p'
 
+/-- THE PROJECTED READ, promise side: fact P served, nothing stored. -/
+def viewPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
+  return (← getPromise id).map (·.project now)
+
+/-- THE PROJECTED READ, task side: fact P then fact T, served. -/
+def viewTask (id : String) (now : Nat) :
+    M (Option (TaskObject × Option PromiseObject)) := do
+  match ← getTask id with
+  | none => return none
+  | some t =>
+  match ← getPromise t.id with
+  | none => return some (t, none)
+  | some p =>
+      let p := p.project now
+      return some (t.view p, some p)
+
 /-- THE TOUCH, task side: read a task together with its promise and
-    materialize fact P then fact T. A task read WITHOUT its promise
-    (`taskHalt` is the one case) sees raw state — fact T is a joint fact
-    and cannot be derived from the task alone. -/
+    materialize fact P then fact T — `viewTask`, persisted. -/
 def touchTask (id : String) (now : Nat) :
     M (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
