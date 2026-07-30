@@ -4,10 +4,20 @@ open Lake DSL
 package «resonate-spec» where
   -- pure Lean core; no external dependencies
 
+/-- The specification: protocol surface and the two machines.
+    `lake build spec` for the fast development loop. -/
 @[default_target]
 lean_lib «spec» where
   srcDir := "."
   roots  := #[]
-  globs  := #[.submodules `«01-objects», .submodules `«02-actions-p»,
-              .submodules `«04-abstract», .submodules `«05-abstraction»,
-              .submodules `«02-actions-m», .submodules `«03-equivalence»]
+  globs  := #[.submodules `«01-protocol», .submodules `«02-abstract»,
+              .submodules `«03-concrete»]
+
+/-- The relations between machines — equivalence, refinement — with
+    their exhaustive sweeps, which run under kernel `decide` at build
+    time (minutes). `lake build` runs everything. -/
+@[default_target]
+lean_lib «theorems» where
+  srcDir := "."
+  roots  := #[]
+  globs  := #[.submodules `«04-theorems»]
