@@ -1,6 +1,6 @@
 import «04-theorems».«trace»
 import «02-abstract».«rules»
-import «02-abstract».«handlers»
+import «02-abstract».«m»
 
 
 /-!  # Abstraction — the map from the concrete machine to the abstract one

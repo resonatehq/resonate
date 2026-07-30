@@ -1,4 +1,4 @@
-import «02-abstract».«handlers»
+import «02-abstract».«m»
 
 /-!  # The coalesced machine — internal rules
 
