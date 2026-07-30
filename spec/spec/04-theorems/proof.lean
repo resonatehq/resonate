@@ -51,6 +51,16 @@ theorem toFalse {b : Bool} (h : ¬(b = true)) : b = false := by
   · rfl
   · exact absurd rfl h
 
+theorem beq_false_of_bne {α} [BEq α] {a b : α} (h : (a != b) = true) : (a == b) = false := by
+  cases hab : (a == b) with
+  | false => rfl
+  | true =>
+      rw [show (a != b) = !(a == b) from rfl, hab] at h
+      cases h
+
+theorem bne_true_of_beq_false {α} [BEq α] {a b : α} (h : (a == b) = false) : (a != b) = true := by
+  rw [show (a != b) = !(a == b) from rfl, h]; rfl
+
 /-! ### 1. Pure lemmas -/
 
 theorem project_id (p : PromiseObject) (n : Nat) : (p.project n).id = p.id := by
@@ -934,6 +944,192 @@ theorem agrees_promiseRegisterCallback (req) :
                             exact ⟨rfl, h2⟩
                         · simp only [if_neg hpend]
                           exact ⟨rfl, h2⟩
+
+/-! ### 5i. The task read, characterized
+
+`viewTask` serves the pair (fact-T task, fact-P promise); `touchTask`
+serves the SAME pair and persists both facts — the promise touch and,
+where the view fulfills, the fulfilled task. Note both consult the
+promise at `t.id` — the task's own id, which the find guarantees equals
+the requested id only propositionally. -/
+
+theorem run_viewTask (id : String) (n : Nat) (s : ServerState) :
+    (viewTask id n).run s =
+      (match s.tasks.find? (·.id == id) with
+       | none => (none, s)
+       | some t =>
+           match s.promises.find? (·.id == t.id) with
+           | none => (some (t, none), s)
+           | some p => (some (t.view (p.project n), some (p.project n)), s)) := by
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => simp only [viewTask, run_bind, run_getTask, hf, run_pure]
+  | some t =>
+      cases hp : s.promises.find? (·.id == t.id) with
+      | none => simp only [viewTask, run_bind, run_getTask, hf, run_getPromise, hp, run_pure]
+      | some p => simp only [viewTask, run_bind, run_getTask, hf, run_getPromise, hp, run_pure]
+
+theorem run_touchTask (id : String) (n : Nat) (s : ServerState) :
+    (touchTask id n).run s =
+      match s.tasks.find? (·.id == id) with
+      | none => (none, s)
+      | some t =>
+        match s.promises.find? (·.id == t.id) with
+        | none => (some (t, none), s)
+        | some p =>
+            if (((p.project n).state != PromiseState.pending) = true
+                  ∧ (t.state != TaskState.fulfilled) = true) then
+              (some (t.fulfill, some (p.project n)),
+               { (if (((p.project n).state != p.state) = true) then
+                    { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+                  else s) with
+                 tasks := t.fulfill :: (if (((p.project n).state != p.state) = true) then
+                    { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+                  else s).tasks.filter (·.id != t.fulfill.id) })
+            else
+              (some (t, some (p.project n)),
+               (if (((p.project n).state != p.state) = true) then
+                  { s with promises := (p.project n) :: s.promises.filter (·.id != (p.project n).id) }
+                else s)) := by
+  cases hf : s.tasks.find? (·.id == id) with
+  | none => simp only [touchTask, run_bind, run_getTask, hf, run_pure]
+  | some t =>
+      cases hp : s.promises.find? (·.id == t.id) with
+      | none =>
+          simp only [touchTask, run_bind, run_getTask, hf, run_touchPromise, hp, run_pure]
+      | some p =>
+          by_cases hcond : (((p.project n).state != PromiseState.pending) = true
+              ∧ (t.state != TaskState.fulfilled) = true)
+          · simp only [touchTask, run_bind, run_getTask, hf, run_touchPromise, hp,
+                       if_pos hcond, run_setTask, run_pure]
+          · simp only [touchTask, run_bind, run_getTask, hf, run_touchPromise, hp,
+                       if_neg hcond, run_pure]
+
+/-- The touch's task-side write is invisible to the invariant: where
+    the view already fulfills, persisting the fulfilled form changes
+    no lookup. -/
+theorem REq_touchTaskWrite {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
+    (t : TaskObject) (id : String)
+    (hf : sM.tasks.find? (·.id == id) = some t)
+    (pv : PromiseObject) (hpl : pLook n sM id = some pv)
+    (hset : (pv.state == PromiseState.pending) = false)
+    (htf : (t.state == TaskState.fulfilled) = false) :
+    REq n sP { sM with tasks := t.fulfill :: sM.tasks.filter (·.id != t.fulfill.id) } := by
+  have htid : t.id = id := eq_of_beq (find?_sat (fun y => y.id == id) sM.tasks t hf)
+  obtain ⟨hp, ht, hs⟩ := h
+  have key : ∀ id', tLook n { sM with tasks := t.fulfill :: sM.tasks.filter (·.id != t.fulfill.id) } id'
+      = tLook n sM id' := by
+    intro id'
+    show ((t.fulfill :: sM.tasks.filter (fun y => y.id != t.fulfill.id)).find? (fun y => y.id == id')).map
+          (fun tt => applyView tt (pLook n sM id'))
+        = tLook n sM id'
+    rw [find?_upsert TaskObject.id t.fulfill sM.tasks id']
+    by_cases hc : (t.fulfill.id == id') = true
+    · have hid' : t.id = id' := eq_of_beq hc
+      rw [if_pos hc, ← hid', htid, hpl]
+      unfold tLook
+      rw [hf, hpl]
+      simp only [Option.map, applyView]
+      rw [view_of_fulfilled t.fulfill pv rfl, view_settles t pv hset htf]
+    · rw [if_neg hc]
+      rfl
+  exact ⟨hp, fun id' => (ht id').trans (key id').symm, hs⟩
+
+/-! ### 5j. `taskGet` — the task-side template -/
+
+theorem agrees_taskGet (req) : Agrees (.api (.taskGet req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskGet, AbstractModel.taskGet,
+             run_map, run_bind, run_viewTask, run_touchTask, run_pure, Id.run]
+  have hti : (sP.tasks.find? (·.id == req.id)).map (fun t => applyView t (pLook n sP req.id))
+      = (sM.tasks.find? (·.id == req.id)).map (fun t => applyView t (pLook n sM req.id)) :=
+    h.2.1 req.id
+  cases hfP : sP.tasks.find? (·.id == req.id) with
+  | none =>
+      cases hfM : sM.tasks.find? (·.id == req.id) with
+      | none => exact ⟨rfl, h⟩
+      | some tM => rw [hfP, hfM] at hti; simp at hti
+  | some tP =>
+      cases hfM : sM.tasks.find? (·.id == req.id) with
+      | none => rw [hfP, hfM] at hti; simp at hti
+      | some tM =>
+          rw [hfP, hfM] at hti
+          simp only [Option.map] at hti
+          have hvv : applyView tP (pLook n sP req.id) = applyView tM (pLook n sM req.id) :=
+            Option.some.inj hti
+          have htPid : tP.id = req.id :=
+            eq_of_beq (find?_sat (fun y => y.id == req.id) sP.tasks tP hfP)
+          have htMid : tM.id = req.id :=
+            eq_of_beq (find?_sat (fun y => y.id == req.id) sM.tasks tM hfM)
+          dsimp only
+          rw [htPid, htMid]
+          have hpp : (sP.promises.find? (·.id == req.id)).map (·.project n)
+              = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
+          cases hpP : sP.promises.find? (·.id == req.id) with
+          | none =>
+              cases hpM : sM.promises.find? (·.id == req.id) with
+              | none => exact ⟨rfl, h⟩
+              | some pM0 => rw [hpP, hpM] at hpp; simp at hpp
+          | some pP0 =>
+              cases hpM : sM.promises.find? (·.id == req.id) with
+              | none => rw [hpP, hpM] at hpp; simp at hpp
+              | some pM0 =>
+                  rw [hpP, hpM] at hpp
+                  simp only [Option.map] at hpp
+                  have hpv : pP0.project n = pM0.project n := Option.some.inj hpp
+                  have hplP : pLook n sP req.id = some (pP0.project n) := by
+                    unfold pLook; rw [hpP]; rfl
+                  have hplM : pLook n sM req.id = some (pM0.project n) := by
+                    unfold pLook; rw [hpM]; rfl
+                  rw [hplP, hplM, ← hpv] at hvv
+                  simp only [applyView] at hvv
+                  -- hvv : tP.view (pP0.project n) = tM.view (pP0.project n)
+                  simp only [Option.map]
+                  rw [hpv] at hvv ⊢
+                  -- Absorb the M-side touch writes.
+                  have hfM' : sM.promises.find? (·.id == pM0.id) = some pM0 := by
+                    rw [eq_of_beq (find?_sat (fun x => x.id == req.id) sM.promises pM0 hpM)]
+                    exact hpM
+                  by_cases hcond : (((pM0.project n).state != PromiseState.pending) = true
+                      ∧ (tM.state != TaskState.fulfilled) = true)
+                  · simp only [if_pos hcond]
+                    have hset : ((pM0.project n).state == PromiseState.pending) = false :=
+                      beq_false_of_bne hcond.1
+                    have htf' : (tM.state == TaskState.fulfilled) = false :=
+                      beq_false_of_bne hcond.2
+                    refine ⟨?_, ?_⟩
+                    · rw [hvv, view_settles tM (pM0.project n) hset htf']; rfl
+                    · -- promise touch then task fulfill, both absorbed
+                      have hfM1 : (if (((pM0.project n).state != pM0.state) = true) then
+                            { sM with promises := (pM0.project n) :: sM.promises.filter (·.id != (pM0.project n).id) }
+                          else sM).tasks.find? (·.id == req.id) = some tM := by
+                        by_cases hc : (((pM0.project n).state != pM0.state) = true)
+                        · simp only [if_pos hc]; exact hfM
+                        · simp only [if_neg hc]; exact hfM
+                      generalize hsM1 : (if (((pM0.project n).state != pM0.state) = true) then
+                            { sM with promises := (pM0.project n) :: sM.promises.filter (·.id != (pM0.project n).id) }
+                          else sM) = sM1
+                      rw [hsM1] at hfM1
+                      have h1 : REq n sP sM1 := by
+                        rw [← hsM1]
+                        by_cases hc : (((pM0.project n).state != pM0.state) = true)
+                        · simp only [if_pos hc]; exact REq_touchWrite h pM0 hfM'
+                        · simp only [if_neg hc]; exact h
+                      have hplM1 : pLook n sM1 req.id = some (pM0.project n) := by
+                        rw [← h1.1 req.id, hplP, hpv]
+                      exact REq_touchTaskWrite h1 tM req.id hfM1 (pM0.project n) hplM1 hset htf'
+                  · simp only [if_neg hcond]
+                    have hvm : tM.view (pM0.project n) = tM := by
+                      by_cases hA : ((pM0.project n).state == PromiseState.pending) = true
+                      · exact view_of_pending tM _ hA
+                      · by_cases hB : (tM.state == TaskState.fulfilled) = true
+                        · exact view_of_fulfilled tM _ hB
+                        · exact absurd ⟨bne_true_of_beq_false (toFalse hA),
+                            bne_true_of_beq_false (toFalse hB)⟩ hcond
+                    refine ⟨?_, ?_⟩
+                    · rw [hvv, hvm]; rfl
+                    · by_cases hc : (((pM0.project n).state != pM0.state) = true)
+                      · simp only [if_pos hc]; exact REq_touchWrite h pM0 hfM'
+                      · simp only [if_neg hc]; exact h
 
 end Proof
 end Abstraction
