@@ -90,16 +90,20 @@ def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
               setTaskTimeout t.id 0 (now + retryTimeout)
               setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
-partial def catchUp (now : Nat) (s : Schedule) : M Schedule := do
-  if s.nextRunAt ≤ now then
-    let cronTime := s.nextRunAt
-    let promiseId := expand s.promiseId s.id cronTime
-    let _ ← promiseCreate
-      { id := promiseId, timeoutAt := cronTime + s.promiseTimeout,
-        param := s.promiseParam, tags := s.promiseTags } cronTime
-    catchUp now { s with lastRunAt := some cronTime, nextRunAt := nextCron s.cron cronTime }
-  else
-    return s
+/-- One occurrence: create the promise AS OF ITS OWN CRON TIME — a
+    backlogged occurrence is born settled, exactly as if it had been
+    created on time. Idempotent: the expanded id is per-occurrence, so
+    a re-fire finds the promise and writes nothing. -/
+def fireOccurrence (s : Schedule) (t : Nat) : M Unit := do
+  let _ ← promiseCreate
+    { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
+      param := s.promiseParam, tags := s.promiseTags } t
+
+def fireAll (s : Schedule) : List Nat → M Unit
+  | [] => pure ()
+  | t :: ts => do
+      fireOccurrence s t
+      fireAll s ts
 
 def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
   match ← getSchedule id with
@@ -109,7 +113,13 @@ def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
       if s0.nextRunAt > now then
         pure ()
       else
-        let s ← catchUp now s0
+        let ts := (occurrences s0.cron s0.nextRunAt now).filter (· ≤ now)
+        fireAll s0 ts
+        let s :=
+          match ts.getLast? with
+          | some last => { s0 with lastRunAt := some last,
+                                   nextRunAt := nextCron s0.cron last }
+          | none => s0
         setSchedule s
         delScheduleTimeout s.id
         setScheduleTimeout s.id s.nextRunAt

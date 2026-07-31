@@ -40,7 +40,7 @@ delivery.  -/
 namespace AbstractModel
 namespace Rules
 
-open ServerModel (nextCron expand Schedule)
+open ServerModel (nextCron occurrences expand Schedule)
 
 /-- R1: materialize fact P on a promise of the environment's choosing. -/
 def promiseTimeout (id : String) (now : Nat) : M Unit := do
@@ -138,27 +138,37 @@ def dispatch (id : String) (next : Nat) (now : Nat) : M Unit := do
                   setMessage ((p.tags.get? "resonate:target").getD "")
                     (.execute t.id t.version)
 
-/-- Create every occurrence due at or before `now`, advancing the
-    schedule past them. -/
-partial def catchUp (now : Nat) (s : Schedule) : M Schedule := do
-  if s.nextRunAt ≤ now then
-    let cronTime := s.nextRunAt
-    let promiseId := expand s.promiseId s.id cronTime
-    let _ ← promiseCreate
-      { id := promiseId, timeoutAt := cronTime + s.promiseTimeout,
-        param := s.promiseParam, tags := s.promiseTags } cronTime
-    catchUp now { s with lastRunAt := some cronTime,
-                         nextRunAt := nextCron s.cron cronTime }
-  else
-    return s
+/-- One occurrence: create the promise AS OF ITS OWN CRON TIME — a
+    backlogged occurrence is born settled, exactly as if it had been
+    created on time. Idempotent: the expanded id is per-occurrence, so
+    a re-fire finds the promise and writes nothing. -/
+def fireOccurrence (s : Schedule) (t : Nat) : M Unit := do
+  let _ ← promiseCreate
+    { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
+      param := s.promiseParam, tags := s.promiseTags } t
 
-/-- R7: fire a schedule past `nextRunAt` (with catch-up). -/
+def fireAll (s : Schedule) : List Nat → M Unit
+  | [] => pure ()
+  | t :: ts => do
+      fireOccurrence s t
+      fireAll s ts
+
+/-- R7: fire a schedule past `nextRunAt` (with catch-up): create every
+    occurrence due at or before `now`, then advance the schedule past
+    the last one. The occurrence list is the opaque `occurrences` —
+    calendar math, like `nextCron` itself — filtered by due-ness: the
+    machine takes only what is due, whatever the calendar says. -/
 def scheduleFire (id : String) (now : Nat) : M Unit := do
   match ← getSchedule id with
   | none => pure ()
-  | some s0 =>
-      let s ← catchUp now s0
-      setSchedule s
+  | some s =>
+      let ts := (occurrences s.cron s.nextRunAt now).filter (· ≤ now)
+      fireAll s ts
+      match ts.getLast? with
+      | some last =>
+          setSchedule { s with lastRunAt := some last,
+                               nextRunAt := nextCron s.cron last }
+      | none => pure ()
 
 end Rules
 end AbstractModel

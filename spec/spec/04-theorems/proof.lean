@@ -31,21 +31,22 @@ anywhere in this file):
      promise handlers (get, create, settle, both registrations); the
      task handlers get, create, acquire, fulfill, release, halt, and
      continue (via `bind_taskRead_agrees`, the task read proven once);
-     and rules R1–R6 (R1/R2 by touch self-invisibility plus
-     symmetry/transitivity of the invariant; R5/R6 are the
+     and ALL SEVEN RULES. R1/R2: touch self-invisibility plus
+     symmetry/transitivity of the invariant. R5/R6: the
      doomed-dispatch fix mechanized — under a pending view the raw
-     tasks coincide, under a settled view neither side writes; R3/R4
-     by the settled-upsert congruence and the value/state split of the
-     touch). OPEN, and why:
+     tasks coincide, under a settled view neither side writes. R3/R4:
+     the settled-upsert congruence and the value/state split of the
+     touch. R7: after the `catchUp` refactor (the occurrence list is
+     one OPAQUE pure term — `ServerModel.occurrences` — shared by both
+     sides, filtered by due-ness), the rule is a list induction of
+     `promiseCreate` steps run as of past instants; a touch write made
+     at an earlier time is still invisible at the current clock
+     because facts are stable under monotone time
+     (`REq_touchWrite_le`). OPEN:
        - `taskHeartbeat`, `taskSuspend` — `forIn` loops; need a loop
          invariant by list induction. Routine, not yet written.
        - `taskFence` — composes with the promise handlers; needs their
          agreement restated at the run level for reuse.
-       - R7 `scheduleFire` — BLOCKED on the spec: `catchUp` is
-         `partial`, hence opaque to the kernel — nothing can be proven
-         about it by unfolding. It needs fuel or a termination measure
-         (`nextCron` strictly increasing) to become provable; that is
-         a spec decision, not a proof step.
      Once these close, `StepAgreement` assembles by cases on `AStep`
      and the reduction yields `ResponseLockstepAbstract` outright.
 
@@ -2090,6 +2091,141 @@ theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
               exact agrees_resumeOne (pM.project n).id awaiter n
                 (REq_setPromise_settled h1 _ (toFalse hpend))
             · simp only [if_neg hcb]; exact h1
+
+/-! ### 5r. R7 — scheduleFire. The occurrence list is one opaque pure
+    term shared by both sides (schedules agree, the clock is shared),
+    so the rule is a list induction of `promiseCreate` steps. Each
+    step runs AS OF a past cron time `t ≤ now` — and a touch write
+    made at an earlier instant is still invisible at the current
+    clock, because facts are stable under monotone time
+    (`project_absorb`). -/
+
+theorem pLook_materialize_le {t n : Nat} (ht : t ≤ n) (s : ServerState) (p : PromiseObject)
+    (hf : s.promises.find? (·.id == p.id) = some p) (id : String) :
+    pLook n { s with promises := (p.project t) :: s.promises.filter (·.id != (p.project t).id) } id
+      = pLook n s id := by
+  show (((p.project t) :: s.promises.filter (fun y => y.id != (p.project t).id)).find? (fun y => y.id == id)).map (·.project n)
+      = (s.promises.find? (fun y => y.id == id)).map (·.project n)
+  rw [find?_upsert PromiseObject.id (p.project t) s.promises id]
+  cases hxb : ((p.project t).id == id) with
+  | true =>
+      have hpid : (p.id == id) = true := by rw [← project_id p t]; exact hxb
+      have hid : p.id = id := eq_of_beq hpid
+      rw [if_pos rfl, ← hid, hf]
+      simp [project_absorb p ht]
+  | false =>
+      rw [if_neg (by simp)]
+
+theorem REq_touchWrite_le {t n : Nat} (ht : t ≤ n) {sP sM : ServerState} (h : REq n sP sM)
+    (p : PromiseObject) (hf : sM.promises.find? (·.id == p.id) = some p) :
+    REq n sP { sM with promises := (p.project t) :: sM.promises.filter (·.id != (p.project t).id) } :=
+  ⟨fun id => (h.1 id).trans (pLook_materialize_le ht sM p hf id).symm,
+   fun id => (h.2.1 id).trans (tLook_ext (pLook_materialize_le ht sM p hf) rfl id).symm,
+   fun id => (h.2.2 id).trans (sLook_ext (s := sM) rfl id).symm⟩
+
+/-- The SAME `promiseCreate`, run by both machines at a past instant
+    `t ≤ n`, preserves the invariant AT the current clock. -/
+theorem REq_promiseCreateMM (req : ServerModel.PromiseCreateReq) {t n : Nat} (ht : t ≤ n)
+    {sA sB : ServerState} (h : REq n sA sB) :
+    REq n ((AbstractModel.promiseCreate req t).run sA).2
+          ((AbstractModel.promiseCreate req t).run sB).2 := by
+  simp only [AbstractModel.promiseCreate, run_bind, run_touchPromise, run_pure]
+  have hpi : (sA.promises.find? (·.id == req.id)).map (·.project n)
+      = (sB.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
+  cases hfA : sA.promises.find? (·.id == req.id) with
+  | some pA =>
+      cases hfB : sB.promises.find? (·.id == req.id) with
+      | none => rw [hfA, hfB] at hpi; simp at hpi
+      | some pB =>
+          have hfA' : sA.promises.find? (·.id == pA.id) = some pA := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == req.id) sA.promises pA hfA)]; exact hfA
+          have hfB' : sB.promises.find? (·.id == pB.id) = some pB := by
+            rw [eq_of_beq (find?_sat (fun x => x.id == req.id) sB.promises pB hfB)]; exact hfB
+          dsimp only
+          have hA0 : REq n sA (if (((pA.project t).state != pA.state) = true) then
+                { sA with promises := (pA.project t) :: sA.promises.filter (·.id != (pA.project t).id) }
+              else sA) := by
+            by_cases hc : (((pA.project t).state != pA.state) = true)
+            · simp only [if_pos hc]; exact REq_touchWrite_le ht (REq.refl n sA) pA hfA'
+            · simp only [if_neg hc]; exact REq.refl n sA
+          have hB0 : REq n sB (if (((pB.project t).state != pB.state) = true) then
+                { sB with promises := (pB.project t) :: sB.promises.filter (·.id != (pB.project t).id) }
+              else sB) := by
+            by_cases hc : (((pB.project t).state != pB.state) = true)
+            · simp only [if_pos hc]; exact REq_touchWrite_le ht (REq.refl n sB) pB hfB'
+            · simp only [if_neg hc]; exact REq.refl n sB
+          exact (hA0.symm.trans h).trans hB0
+  | none =>
+      cases hfB : sB.promises.find? (·.id == req.id) with
+      | some pB => rw [hfA, hfB] at hpi; simp at hpi
+      | none =>
+          have hplA : pLook n sA req.id = none := by unfold pLook; rw [hfA]; rfl
+          have hplB : pLook n sB req.id = none := by unfold pLook; rw [hfB]; rfl
+          have htq : sA.tasks.find? (·.id == req.id) = sB.tasks.find? (·.id == req.id) := by
+            rw [← tLook_raw hplA, ← tLook_raw hplB]; exact h.2.1 req.id
+          dsimp only
+          by_cases hto : req.timeoutAt > t
+          · simp only [if_pos hto]
+            by_cases htag : (req.tags.has "resonate:target") = true
+            · simp only [if_pos htag]
+              exact REq_setTask (REq_setPromise h
+                ({ id := req.id, state := PromiseState.pending, param := req.param,
+                   tags := req.tags, timeoutAt := req.timeoutAt, createdAt := t } : PromiseObject) htq) _
+            · simp only [if_neg htag]
+              exact REq_setPromise h
+                ({ id := req.id, state := PromiseState.pending, param := req.param,
+                   tags := req.tags, timeoutAt := req.timeoutAt, createdAt := t } : PromiseObject) htq
+          · simp only [if_neg hto]
+            by_cases htag : (req.tags.has "resonate:target") = true
+            · simp only [if_pos htag]
+              exact REq_setTask (REq_setPromise h
+                ({ id := req.id,
+                   state := if req.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout,
+                   param := req.param, tags := req.tags, timeoutAt := req.timeoutAt,
+                   createdAt := req.timeoutAt, settledAt := some req.timeoutAt } : PromiseObject) htq) _
+            · simp only [if_neg htag]
+              exact REq_setPromise h
+                ({ id := req.id,
+                   state := if req.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout,
+                   param := req.param, tags := req.tags, timeoutAt := req.timeoutAt,
+                   createdAt := req.timeoutAt, settledAt := some req.timeoutAt } : PromiseObject) htq
+
+/-- The catch-up loop, by induction over the (shared) occurrence
+    list. -/
+theorem REq_fireAll (s0 : ServerModel.Schedule) {n : Nat} (ts : List Nat)
+    (hle : ∀ t ∈ ts, t ≤ n) :
+    ∀ {sA sB : ServerState}, REq n sA sB →
+      REq n ((Rules.fireAll s0 ts).run sA).2 ((Rules.fireAll s0 ts).run sB).2 := by
+  induction ts with
+  | nil =>
+      intro sA sB h
+      simp only [Rules.fireAll, run_pure]
+      exact h
+  | cons t ts ih =>
+      intro sA sB h
+      simp only [Rules.fireAll, Rules.fireOccurrence, run_bind, run_pure]
+      exact ih (fun x hx => hle x (List.mem_cons_of_mem _ hx))
+        (REq_promiseCreateMM _ (hle t List.mem_cons_self) h)
+
+theorem agrees_r7 (id : String) : Agrees (.r7 id) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.scheduleFire,
+             run_bind, run_getSchedule, run_pure, Id.run]
+  refine ⟨trivial, ?_⟩
+  have hs : sP.schedules.find? (·.id == id) = sM.schedules.find? (·.id == id) := h.2.2 id
+  rw [hs]
+  cases hsch : sM.schedules.find? (·.id == id) with
+  | none => exact h
+  | some s0 =>
+      dsimp only
+      simp only [run_bind, run_pure]
+      have hle : ∀ t ∈ (ServerModel.occurrences s0.cron s0.nextRunAt n).filter (· ≤ n), t ≤ n := by
+        intro t htm
+        exact of_decide_eq_true (List.mem_filter.mp htm).2
+      have hloop := REq_fireAll s0 _ hle h
+      cases hlast : ((ServerModel.occurrences s0.cron s0.nextRunAt n).filter (· ≤ n)).getLast? with
+      | none => exact hloop
+      | some last => exact REq_setSchedule hloop _
 
 /-! ### 5l. `taskCreate` — a promise read, creation, or the inner task
     read; every piece already built. -/
