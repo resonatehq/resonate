@@ -37,12 +37,37 @@ CONSTANTS
     Ttl,          \* lease TTL handed to acquire
 
     (***********************************************************************)
-    (* CONFORMANCE SWITCHES.  TRUE = the specification's behaviour.         *)
+    (* SWITCHES.  These are NOT all of one kind, and the difference matters *)
+    (* for how the profiles should be read:                                 *)
+    (*                                                                      *)
+    (*   (a) CONFORMANCE GUARDS.  TRUE is the specification; FALSE is a     *)
+    (*       DEFECT.  These are a to-do list -- every one should become     *)
+    (*       TRUE in every implementation, at which point that              *)
+    (*       implementation's profile becomes identical to MC_spec.cfg and  *)
+    (*       can be deleted.                                                *)
+    (*   (b) IMPLEMENTATION LATITUDE.  Choices the specification does not   *)
+    (*       dictate.  These are permanent; they never collapse.            *)
+    (*   (c) ENVIRONMENT.  Not about the server at all.                     *)
+    (*                                                                      *)
+    (* There is exactly ONE specification.  The implementation profiles are *)
+    (* not rival specifications -- they are executable descriptions of      *)
+    (* known bugs, kept because a property that never fails cannot be       *)
+    (* distinguished from a vacuous one, and because a fix should be        *)
+    (* verified by flipping a switch rather than argued.                    *)
     (***********************************************************************)
+
+    \* (b) LATITUDE -- or (a)?  UNRESOLVED.  The specification arms a
+    \* timeout only for external promises; convex arms one for every
+    \* promise, which over-arms rather than under-guards, and under the
+    \* projection discipline an observer may not be able to tell.  Being
+    \* checked directly: MC_armpolicy.cfg is the spec profile with
+    \* ArmPolicy = "all" and every conformance guard left TRUE.  If it
+    \* holds, this belongs in (b) and is not a defect.
     ArmPolicy,             \* which promises the timeout rule may fire on:
                            \*   "external" - spec / resonate-pg
                            \*   "target"   - resonate @ c8d7c7b
                            \*   "all"      - resonate-on-convex
+    \* (a) CONFORMANCE GUARDS -- FALSE is a defect in every case below.
     CallbackExternalGuard, \* P-04 refuses an internal awaited (422)
     ListenerExternalGuard, \* P-05 refuses an internal awaited (422)
     PromiseLivenessGuard,  \* T-02 claim / T-09 halt / T-10 continue gate on
@@ -51,10 +76,16 @@ CONSTANTS
     ResumeLivenessGuard,   \* R4 resume skips an awaiter that is itself
                            \* logically dead  (TIMEOUT ALWAYS WINS)
     HeartbeatGuard,        \* T-05 gates on the projected promise
-    SequencedDriver,       \* the promise-timeout loop drains before the
-                           \* task-timeout loop (resonate-pg's driver)
-    ProjectedResponses,    \* every response carrying a promise record serves
-                           \* the PROJECTED record, never the raw stored row
+    ProjectedResponses,    \* (a) every response carrying a promise record
+                           \* serves the PROJECTED record, not the raw row
+
+    \* (b) LATITUDE.  resonate-pg's driver drains the promise-timeout loop
+    \* before the task-timeout loop.  This only RESTRICTS behaviour, so it
+    \* can never introduce a violation -- it is a masking mechanism, not a
+    \* defect.  It is a switch so the model can show what it masks.
+    SequencedDriver,
+
+    \* (c) ENVIRONMENT.
     FaultsOn               \* message loss and worker crashes are enabled
 
 NoAddr   == "-"
