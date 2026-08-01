@@ -63,17 +63,21 @@ CONSTANTS
     (* verified by flipping a switch rather than argued.                    *)
     (***********************************************************************)
 
-    \* (b) LATITUDE -- or (a)?  UNRESOLVED.  The specification arms a
-    \* timeout only for external promises; convex arms one for every
-    \* promise, which over-arms rather than under-guards, and under the
-    \* projection discipline an observer may not be able to tell.  Being
-    \* checked directly: MC_armpolicy.cfg is the spec profile with
-    \* ArmPolicy = "all" and every conformance guard left TRUE.  If it
-    \* holds, this belongs in (b) and is not a defect.
+    \* (a) CONFORMANCE GUARD.  Arming is EXTERNAL-ONLY.  Anything else is a
+    \* defect, in both directions:
+    \*
+    \*   "target" under-arms  - an external-but-untargeted promise gets no
+    \*     timeout, so an obligation recorded against it can never be
+    \*     discharged.  Caught by ObligationsAreDischargeable.
+    \*   "all"    over-arms   - an INTERNAL promise gets a durable timeout
+    \*     it should not have.  Caught by ArmingIsExternalOnly.
+    \*
+    \* The two properties pin arming from opposite sides; neither catches
+    \* the other's failure, so both are needed.
     ArmPolicy,             \* which promises the timeout rule may fire on:
-                           \*   "external" - spec / resonate-pg
-                           \*   "target"   - resonate @ c8d7c7b
-                           \*   "all"      - resonate-on-convex
+                           \*   "external" - the specification (correct)
+                           \*   "target"   - resonate @ c8d7c7b   (under-arms)
+                           \*   "all"      - resonate-on-convex   (over-arms)
     \* (a) CONFORMANCE GUARDS -- FALSE is a defect in every case below.
     CallbackExternalGuard, \* P-04 refuses an internal awaited (422)
     ListenerExternalGuard, \* P-05 refuses an internal awaited (422)
@@ -879,6 +883,27 @@ ObligationsAreDischargeable ==
     /\ \A l \in listeners : Armed(l[1])
 
 (*-------------------------------------------------------------------------
+  THE OTHER HALF OF ARMING.  `ObligationsAreDischargeable` catches
+  UNDER-arming -- an obligation recorded where no timeout will fire.  It
+  says nothing about OVER-arming, because an over-armed machine discharges
+  every obligation it accepts.
+
+  Arming is external-only: an internal promise's deadline is
+  projection-only by design, and giving it a durable timeout makes the
+  server settle a promise the protocol says it must merely project.  This
+  is the specification's `NonExternalPromiseHasNoTimeout`.
+
+  Note what this property can and cannot do.  Under `ArmPolicy =
+  "external"` it is TRUE BY THE DEFINITION of `Armed`, so it cannot fail in
+  the specification profile and is not evidence about it.  Its entire job is
+  to fail for the other two settings -- and since `target` is a subset of
+  `external` it fails only for `"all"`.  That is the intended division of
+  labour with the property above, not an oversight.
+ -------------------------------------------------------------------------*)
+ArmingIsExternalOnly ==
+    \A i \in Ids : Armed(i) => External(i)
+
+(*-------------------------------------------------------------------------
   CLASS 2 -- NO NEW WORK FOR THE DEAD.  TIMEOUT ALWAYS WINS, at every site.
  -------------------------------------------------------------------------*)
 
@@ -981,6 +1006,7 @@ Structural ==
 Safety ==
     /\ Structural
     /\ ObligationsAreDischargeable
+    /\ ArmingIsExternalOnly
     /\ NoDeadDispatch
     /\ NoHaltOnDead
     /\ Stickiness

@@ -16,7 +16,7 @@ between runs — one module, one `Next`, six configurations.
 
 | constant | `TRUE` (specification) | `FALSE` (as shipped somewhere) |
 |---|---|---|
-| `ArmPolicy` | `"external"` — only external promises carry an armed timeout | `"target"` (resonate), `"all"` (convex) |
+| `ArmPolicy` | **conformance guard.** `"external"` is correct; both other settings are defects | `"target"` (resonate) **under-arms**; `"all"` (convex) **over-arms** |
 | `MaterialiseOnRead` | latitude: a read materialises (`-m`) or projects (`-p`) | pg projects; resonate and convex materialise |
 | `WorkerLayer` | model detail: is there a delivery stage before acquire? | only resonate has one |
 | `TTLs` | the lease TTLs a worker may present; a task carries its own | `{Ttl}` in every model config |
@@ -46,8 +46,14 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 | `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 799 distinct |
 | `MC_pg_task_response` | listener, promise, timeout, resume | `TaskResponsesNeverRegress` | **violated**, 5 200 distinct |
 | `MC_pg_task_projection` | as above | `TaskResponsesAreProjected` | **violated**, 873 distinct |
+| `MC_armpolicy` | spec + `ArmPolicy = "all"` | `ArmingIsExternalOnly` | **violated**, 21 distinct |
+| `MC_convex_arming` | convex profile | `ArmingIsExternalOnly` | **violated**, 21 distinct |
 | `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | ⏳ re-running |
-| `MC_armpolicy` | spec + `ArmPolicy = "all"` | `Safety` — is over-arming a defect? | ⏳ re-running |
+
+Distinct-state counts for a VIOLATED property are "states explored before the
+violation was found", which depends on BFS scheduling and worker count — they
+are not canonical. The depth at which a violation appears is the stable
+figure. Counts for a property that HOLDS are exhaustive and canonical.
 
 Every number in the table above is from the CURRENT module. That matters:
 trace validation forced four changes to the model after the first pass
@@ -76,6 +82,39 @@ Each violation maps to a finding the three Specula runs reported independently:
 | `MC_pg` → `NoHaltOnDead` | resonate-pg BUG-4 — `task.halt` returns 200 on a task `task.get` already reports `fulfilled` |
 | `MC_resume_gap` → `NoDeadDispatch` | **the divergence all three models contained and none of the three probed** (see below) |
 | `MC_pg_response` → `ResponsesNeverRegress` | resonate-pg BUG-2, **response half** — `task.create` serves `_promise_json_raw`, so `promise.get` answers `rejected_timedout` and a later `task.create` answers `pending`, for the same promise |
+
+## Arming is external-only — a decision, not a discovery
+
+`ArmPolicy` was carried for a while as possible LATITUDE, on the reasoning
+that convex over-arms rather than under-guards and that an observer under the
+projection discipline might not be able to tell. **That reading was wrong.**
+Arming external-only is the correct behaviour; every other setting is a defect
+to be addressed.
+
+So the model now pins arming from BOTH sides, because the two failures are
+different and neither property catches the other:
+
+| setting | who | failure | caught by |
+|---|---|---|---|
+| `"external"` | specification, resonate-pg | — | — |
+| `"target"` | resonate @ `c8d7c7b` | **under-arms** — an external-but-untargeted promise gets no timeout, so an obligation against it can never be discharged | `ObligationsAreDischargeable` |
+| `"all"` | resonate-on-convex | **over-arms** — an internal promise gets a durable timeout it should not have; its deadline is projection-only by design | `ArmingIsExternalOnly` |
+
+`ArmingIsExternalOnly` is the specification's `NonExternalPromiseHasNoTimeout`,
+which the first comparison had already flagged as worth adopting.
+
+Two honest notes on what it proves. Under `ArmPolicy = "external"` the
+property is TRUE BY THE DEFINITION of `Armed`, so it cannot fail in the
+specification profile and is **not evidence about it** — its whole job is to
+fail for the other settings. And since `"target"` is a subset of `"external"`,
+it fails only for `"all"`; under-arming needs the other property. That
+division of labour is deliberate.
+
+**This makes resonate-on-convex's second defect explicit.** Its profile
+previously carried over-arming as an unresolved question, so nothing fired.
+It now violates `ArmingIsExternalOnly` in 21 states — the shortest
+counterexample in the whole suite, because creating one plain promise is
+already enough.
 
 ## The row that justifies the exercise
 

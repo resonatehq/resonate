@@ -1,15 +1,15 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=40381 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 32 and seed 5749063959347902481 with 2 workers on 4 cores with 2731MB heap and 64MB offheap memory [pid: 9728] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 58 and seed 552145701210562910 with 2 workers on 4 cores with 2731MB heap and 64MB offheap memory [pid: 6930] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/MC.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-11688527403615982235/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-11688527403615982235/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-11688527403615982235/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-11688527403615982235/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-11688527403615982235/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-11688527403615982235/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-11688527403615982235/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-5007178553783717321/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5007178553783717321/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5007178553783717321/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5007178553783717321/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5007178553783717321/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5007178553783717321/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-5007178553783717321/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -23,49 +23,144 @@ Linting of module Unified
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module MC
-Starting... (2026-08-01 21:45:29)
+Starting... (2026-08-01 23:18:21)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 21:45:29.
-Progress(7) at 2026-08-01 21:45:32: 54,715 states generated (54,715 s/min), 19,331 distinct states found (19,331 ds/min), 14,943 states left on queue.
-Progress(11) at 2026-08-01 21:46:32: 3,925,175 states generated (3,870,460 s/min), 808,019 distinct states found (788,688 ds/min), 412,833 states left on queue.
-Progress(12) at 2026-08-01 21:47:32: 7,800,269 states generated (3,875,094 s/min), 1,475,775 distinct states found (667,756 ds/min), 687,526 states left on queue.
-Progress(12) at 2026-08-01 21:48:32: 11,461,689 states generated (3,661,420 s/min), 2,052,312 distinct states found (576,537 ds/min), 900,568 states left on queue.
-Progress(13) at 2026-08-01 21:49:32: 15,266,845 states generated (3,805,156 s/min), 2,653,160 distinct states found (600,848 ds/min), 1,108,473 states left on queue.
-Progress(13) at 2026-08-01 21:50:32: 18,929,717 states generated (3,662,872 s/min), 3,195,130 distinct states found (541,970 ds/min), 1,291,005 states left on queue.
-Progress(14) at 2026-08-01 21:51:32: 22,396,282 states generated (3,466,565 s/min), 3,703,759 distinct states found (508,629 ds/min), 1,425,377 states left on queue.
-Progress(14) at 2026-08-01 21:52:32: 25,953,487 states generated (3,557,205 s/min), 4,224,849 distinct states found (521,090 ds/min), 1,574,135 states left on queue.
-Progress(14) at 2026-08-01 21:53:32: 29,873,663 states generated (3,920,176 s/min), 4,759,734 distinct states found (534,885 ds/min), 1,716,663 states left on queue.
-Progress(14) at 2026-08-01 21:54:32: 33,817,659 states generated (3,943,996 s/min), 5,304,666 distinct states found (544,932 ds/min), 1,851,453 states left on queue.
-Progress(15) at 2026-08-01 21:55:32: 37,907,065 states generated (4,089,406 s/min), 5,872,940 distinct states found (568,274 ds/min), 1,971,678 states left on queue.
-Progress(15) at 2026-08-01 21:56:32: 41,575,968 states generated (3,668,903 s/min), 6,349,012 distinct states found (476,072 ds/min), 2,066,712 states left on queue.
-Progress(15) at 2026-08-01 21:57:32: 45,322,577 states generated (3,746,609 s/min), 6,830,769 distinct states found (481,757 ds/min), 2,147,457 states left on queue.
-Progress(15) at 2026-08-01 21:58:32: 49,205,050 states generated (3,882,473 s/min), 7,341,591 distinct states found (510,822 ds/min), 2,240,797 states left on queue.
-Progress(15) at 2026-08-01 21:59:32: 53,103,544 states generated (3,898,494 s/min), 7,833,558 distinct states found (491,967 ds/min), 2,345,703 states left on queue.
-Progress(16) at 2026-08-01 22:00:33: 57,099,064 states generated (3,995,520 s/min), 8,342,315 distinct states found (508,757 ds/min), 2,398,282 states left on queue.
-Progress(16) at 2026-08-01 22:01:33: 60,571,354 states generated (3,472,290 s/min), 8,756,003 distinct states found (413,688 ds/min), 2,448,722 states left on queue.
-Progress(16) at 2026-08-01 22:02:33: 64,289,481 states generated (3,718,127 s/min), 9,188,545 distinct states found (432,542 ds/min), 2,460,324 states left on queue.
-Progress(16) at 2026-08-01 22:03:33: 67,800,961 states generated (3,511,480 s/min), 9,643,429 distinct states found (454,884 ds/min), 2,580,912 states left on queue.
-Progress(16) at 2026-08-01 22:04:33: 70,746,287 states generated (2,945,326 s/min), 9,994,321 distinct states found (350,892 ds/min), 2,596,873 states left on queue.
-Progress(16) at 2026-08-01 22:05:33: 74,349,623 states generated (3,603,336 s/min), 10,413,679 distinct states found (419,358 ds/min), 2,646,144 states left on queue.
-Progress(17) at 2026-08-01 22:06:33: 78,091,323 states generated (3,741,700 s/min), 10,851,769 distinct states found (438,090 ds/min), 2,659,544 states left on queue.
-Progress(17) at 2026-08-01 22:07:33: 81,678,942 states generated (3,587,619 s/min), 11,254,541 distinct states found (402,772 ds/min), 2,656,043 states left on queue.
-Progress(17) at 2026-08-01 22:08:33: 84,896,988 states generated (3,218,046 s/min), 11,600,819 distinct states found (346,278 ds/min), 2,668,610 states left on queue.
-Progress(17) at 2026-08-01 22:09:33: 88,125,340 states generated (3,228,352 s/min), 11,965,843 distinct states found (365,024 ds/min), 2,674,330 states left on queue.
-Progress(17) at 2026-08-01 22:10:33: 91,834,686 states generated (3,709,346 s/min), 12,419,506 distinct states found (453,663 ds/min), 2,744,189 states left on queue.
-Progress(17) at 2026-08-01 22:11:33: 95,370,321 states generated (3,535,635 s/min), 12,801,886 distinct states found (382,380 ds/min), 2,736,012 states left on queue.
-Progress(17) at 2026-08-01 22:12:33: 99,284,332 states generated (3,914,011 s/min), 13,217,776 distinct states found (415,890 ds/min), 2,718,606 states left on queue.
-Progress(18) at 2026-08-01 22:13:33: 102,788,782 states generated (3,504,450 s/min), 13,593,210 distinct states found (375,434 ds/min), 2,695,337 states left on queue.
-Progress(18) at 2026-08-01 22:14:33: 106,550,222 states generated (3,761,440 s/min), 13,969,125 distinct states found (375,915 ds/min), 2,652,089 states left on queue.
-Checkpointing of run states/26-08-01-21-45-28.684
-Checkpointing completed at (2026-08-01 22:15:33)
-Progress(18) at 2026-08-01 22:15:33: 110,557,882 states generated (4,007,660 s/min), 14,353,271 distinct states found (384,146 ds/min), 2,583,550 states left on queue.
-Progress(18) at 2026-08-01 22:16:33: 114,220,098 states generated (3,662,216 s/min), 14,788,496 distinct states found (435,225 ds/min), 2,639,386 states left on queue.
-Progress(18) at 2026-08-01 22:17:33: 118,104,090 states generated (3,883,992 s/min), 15,198,804 distinct states found (410,308 ds/min), 2,597,058 states left on queue.
-Progress(18) at 2026-08-01 22:18:33: 121,802,416 states generated (3,698,326 s/min), 15,570,028 distinct states found (371,224 ds/min), 2,585,362 states left on queue.
-Progress(19) at 2026-08-01 22:19:33: 125,572,933 states generated (3,770,517 s/min), 15,933,770 distinct states found (363,742 ds/min), 2,509,747 states left on queue.
-Progress(19) at 2026-08-01 22:20:33: 129,490,762 states generated (3,917,829 s/min), 16,288,856 distinct states found (355,086 ds/min), 2,418,616 states left on queue.
-Progress(19) at 2026-08-01 22:21:33: 133,411,468 states generated (3,920,706 s/min), 16,633,382 distinct states found (344,526 ds/min), 2,324,227 states left on queue.
-Progress(19) at 2026-08-01 22:22:33: 137,063,464 states generated (3,651,996 s/min), 17,030,498 distinct states found (397,116 ds/min), 2,320,816 states left on queue.
-Progress(19) at 2026-08-01 22:23:33: 140,900,424 states generated (3,836,960 s/min), 17,407,265 distinct states found (376,767 ds/min), 2,242,530 states left on queue.
-Progress(19) at 2026-08-01 22:24:33: 144,557,281 states generated (3,656,857 s/min), 17,745,765 distinct states found (338,500 ds/min), 2,191,246 states left on queue.
-Progress(20) at 2026-08-01 22:25:33: 148,383,660 states generated (3,826,379 s/min), 18,067,154 distinct states found (321,389 ds/min), 2,066,098 states left on queue.
+Finished computing initial states: 1 distinct state generated at 2026-08-01 23:18:21.
+Error: Invariant ArmingIsExternalOnly is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ resUnprojected = {}
+/\ callbacks = {}
+/\ tasks = ( a :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> FALSE,
+        pid |-> "-",
+        timerKind |-> "none",
+        timerAt |-> 0,
+        ttl |-> 0 ] @@
+  b :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> FALSE,
+        pid |-> "-",
+        timerKind |-> "none",
+        timerAt |-> 0,
+        ttl |-> 0 ] )
+/\ badHalt = {}
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ promises = ( a :>
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ] @@
+  b :>
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ] )
+/\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
+/\ badDispatch = {}
+/\ outbox = {}
+/\ listeners = {}
+/\ resumes = {}
+/\ resTRegress = {}
+/\ claim = (wA :> [version |-> 0, task |-> "-"])
+/\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
+
+State 2: <Next line 789, col 9 to line 789, col 25 of module Unified>
+/\ resUnprojected = {}
+/\ callbacks = {}
+/\ tasks = ( a :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> TRUE,
+        pid |-> "-",
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        ttl |-> 0 ] @@
+  b :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> FALSE,
+        pid |-> "-",
+        timerKind |-> "none",
+        timerAt |-> 0,
+        ttl |-> 0 ] )
+/\ badHalt = {}
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ promises = ( a :>
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 1,
+        kind |-> "target" ] @@
+  b :>
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ] )
+/\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
+/\ badDispatch = {}
+/\ outbox = {[version |-> 0, kind |-> "execute", id |-> a, addr |-> "-"]}
+/\ listeners = {}
+/\ resumes = {}
+/\ resTRegress = {}
+/\ claim = (wA :> [version |-> 0, task |-> "-"])
+/\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
+
+State 3: <Next line 789, col 9 to line 789, col 25 of module Unified>
+/\ resUnprojected = {}
+/\ callbacks = {}
+/\ tasks = ( a :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> TRUE,
+        pid |-> "-",
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        ttl |-> 0 ] @@
+  b :>
+      [ version |-> 0,
+        state |-> "pending",
+        exists |-> FALSE,
+        pid |-> "-",
+        timerKind |-> "none",
+        timerAt |-> 0,
+        ttl |-> 0 ] )
+/\ badHalt = {}
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ promises = ( a :>
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 1,
+        kind |-> "target" ] @@
+  b :>
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 1,
+        kind |-> "plain" ] )
+/\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
+/\ badDispatch = {}
+/\ outbox = {[version |-> 0, kind |-> "execute", id |-> a, addr |-> "-"]}
+/\ listeners = {}
+/\ resumes = {}
+/\ resTRegress = {}
+/\ claim = (wA :> [version |-> 0, task |-> "-"])
+/\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
+
+21 states generated, 21 distinct states found, 17 states left on queue.
+The depth of the complete state graph search is 3.
+Finished in 01s at (2026-08-01 23:18:21)
+Trace exploration spec path: ./MC_TTrace_1785626300.tla

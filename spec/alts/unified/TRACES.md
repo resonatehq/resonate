@@ -98,8 +98,10 @@ because a per-implementation model has that implementation's choices baked
 into its profile.
 
 Note what it does NOT say for convex: nobody is stranded there. Under
-`ArmPolicy = "all"` the awaiter is woken, so it is a conformance divergence,
-not a liveness bug. For `resonate` the same divergence IS the liveness bug,
+`ArmPolicy = "all"` the awaiter is woken, so this particular divergence costs
+convex no liveness. That is not a defence of the arming policy itself —
+arming is external-only, and convex's `"all"` is a separate defect that
+`ArmingIsExternalOnly` now catches directly. For `resonate` the same divergence IS the liveness bug,
 because `ArmPolicy = "target"` means the awaited promise is never settled
 unattended. Same rule, same trace shape, different consequence — which is the
 argument for stating the rule structurally rather than per-implementation.
