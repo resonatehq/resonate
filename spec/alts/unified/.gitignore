@@ -6,4 +6,5 @@ states/
 UTrace.cfg
 # TLC logs for the long runs are committed only once the run has COMPLETED --
 # a half-written log is noise, and worse, it looks like evidence.
-output/*.partial
+# IN FLIGHT (remove the line when the run lands and commit the final log):
+output/spec_p.out
