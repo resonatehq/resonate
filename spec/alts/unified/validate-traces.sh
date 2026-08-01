@@ -37,6 +37,14 @@ for t in "$HERE"/traces/*.ndjson; do
     HeartbeatGuard        = TRUE
     ProjectedResponses    = FALSE
     ArmPolicy             = "external"' ;;
+      resonate-on-convex) GUARDS='CallbackExternalGuard = FALSE
+    ListenerExternalGuard = FALSE
+    PromiseLivenessGuard  = TRUE
+    TimeoutLivenessGuard  = TRUE
+    ResumeLivenessGuard   = FALSE
+    HeartbeatGuard        = TRUE
+    ProjectedResponses    = TRUE
+    ArmPolicy             = "all"' ;;
       *) echo "no profile for impl=$impl"; exit 2 ;;
     esac
   fi
@@ -45,17 +53,39 @@ for t in "$HERE"/traces/*.ndjson; do
   addrs="$(python3 -c "import json;print('{'+','.join('\"%s\"'%i for i in json.loads(open('$t').readline())['config']['addrs'])+'}')")"
   retry="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['retry'])")"
   ttl="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['ttl'])")"
+  # workers come from the trace when the harness names them: the convex
+  # `crash` scenario needs the SECOND worker, because the first died holding
+  # its claim and nothing in the recorded trace ever frees it
+  workers="$(python3 -c "
+import json
+c=json.loads(open('$t').readline())['config']
+p=c.get('pids') or ['w1']
+print('{'+','.join('\"%s\"'%i for i in p)+'}')")"
+  # every lease TTL this trace exhibits, so the model can offer the one the
+  # worker actually presented
+  ttls="$(python3 - "$t" "$ttl" <<'PYX'
+import json,sys
+vals={int(sys.argv[2])}
+for line in open(sys.argv[1]):
+    d=json.loads(line)
+    if d.get("tag")!="trace": continue
+    for tk in d["event"]["state"].get("tasks",{}).values():
+        if "ttl" in tk: vals.add(int(tk["ttl"]))
+print("{"+",".join(str(v) for v in sorted(vals))+"}")
+PYX
+)"
 
   cat > "$HERE/UTrace.cfg" <<CFG
 SPECIFICATION TraceSpec
 CONSTANTS
     Ids     = $ids
     Addrs   = $addrs
-    Workers = {"w1"}
+    Workers = $workers
     MaxTime    = 64
     MaxVersion = 16
     Retry = $retry
     Ttl   = $ttl
+    TTLs  = $ttls
     $GUARDS
     SequencedDriver = FALSE
     WorkerLayer     = FALSE

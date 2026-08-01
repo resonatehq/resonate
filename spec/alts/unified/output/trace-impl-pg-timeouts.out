@@ -1,16 +1,16 @@
 Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 92 and seed 2953009026262767413 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 26825] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 72 and seed -8387956947600404214 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 4570] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-5459751266698811247/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-5459751266698811247/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-5459751266698811247/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-5459751266698811247/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
-Parsing file /tmp/tlc-5459751266698811247/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-5459751266698811247/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-5459751266698811247/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-5459751266698811247/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-17794649998022068417/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-17794649998022068417/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-17794649998022068417/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-17794649998022068417/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-17794649998022068417/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-17794649998022068417/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-17794649998022068417/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-17794649998022068417/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -26,9 +26,9 @@ Linting of module Json
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module UTrace
-Starting... (2026-08-01 22:09:10)
+Starting... (2026-08-01 22:30:11)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 22:09:11.
+Finished computing initial states: 1 distinct state generated at 2026-08-01 22:30:12.
 Error: Invariant NotReplayed is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -40,6 +40,7 @@ State 1: <Initial predicate>
         version |-> 0,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -47,6 +48,7 @@ State 1: <Initial predicate>
         version |-> 0,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -74,7 +76,7 @@ State 1: <Initial predicate>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 2: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 2: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 2
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -83,6 +85,7 @@ State 2: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "retry",
         timerAt |-> 1,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -90,6 +93,7 @@ State 2: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -117,7 +121,7 @@ State 2: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 3: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 3: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -126,6 +130,7 @@ State 3: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "retry",
         timerAt |-> 1,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -133,6 +138,7 @@ State 3: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "retry",
         timerAt |-> 1,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -161,7 +167,7 @@ State 3: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 4: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 4: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 4
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -170,6 +176,7 @@ State 4: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "lease",
         timerAt |-> 1,
+        ttl |-> 1,
         pid |-> "w1" ],
   b |->
       [ state |-> "pending",
@@ -177,6 +184,7 @@ State 4: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "retry",
         timerAt |-> 1,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -205,7 +213,7 @@ State 4: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 5: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 5: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 5
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -214,6 +222,7 @@ State 5: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -221,6 +230,7 @@ State 5: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 0,
         timerKind |-> "retry",
         timerAt |-> 1,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -249,7 +259,7 @@ State 5: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 6: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 6: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 6
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -258,6 +268,7 @@ State 6: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "acquired",
@@ -265,6 +276,7 @@ State 6: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "lease",
         timerAt |-> 1,
+        ttl |-> 1,
         pid |-> "w1" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -293,7 +305,7 @@ State 6: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 7: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 7: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 6
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -302,6 +314,7 @@ State 7: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "acquired",
@@ -309,6 +322,7 @@ State 7: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "lease",
         timerAt |-> 1,
+        ttl |-> 1,
         pid |-> "w1" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -337,7 +351,7 @@ State 7: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 8: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 8: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 7
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -346,6 +360,7 @@ State 8: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -353,6 +368,7 @@ State 8: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 2,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -381,7 +397,7 @@ State 8: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 9: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 9: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 7
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -390,6 +406,7 @@ State 9: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -397,6 +414,7 @@ State 9: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 2,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -425,7 +443,7 @@ State 9: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 10: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 10: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 8
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -434,6 +452,7 @@ State 10: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -441,6 +460,7 @@ State 10: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 3,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -469,7 +489,7 @@ State 10: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 11: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 11: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 8
 /\ callbacks = {<<"b", "a">>}
 /\ tasks = [ a |->
@@ -478,6 +498,7 @@ State 11: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "pending",
@@ -485,6 +506,7 @@ State 11: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 3,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "none"]
 /\ resumes = {}
@@ -513,7 +535,7 @@ State 11: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 12: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 12: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 9
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -522,6 +544,7 @@ State 12: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 4,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "fulfilled",
@@ -529,6 +552,7 @@ State 12: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "rejected_timedout"]
 /\ resumes = {<<"a", "b">>}
@@ -556,7 +580,7 @@ State 12: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 13: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 13: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 9
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -565,6 +589,7 @@ State 13: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 4,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "fulfilled",
@@ -572,6 +597,7 @@ State 13: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "rejected_timedout"]
 /\ resumes = {<<"a", "b">>}
@@ -599,7 +625,7 @@ State 13: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 /\ obsRes = [a |-> "none", b |-> "none"]
 /\ obsResT = [a |-> "none", b |-> "none"]
 
-State 14: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+State 14: <TraceNext line 214, col 5 to line 220, col 36 of module UTrace>
 /\ l = 10
 /\ callbacks = {}
 /\ tasks = [ a |->
@@ -608,6 +634,7 @@ State 14: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "retry",
         timerAt |-> 5,
+        ttl |-> 0,
         pid |-> "-" ],
   b |->
       [ state |-> "fulfilled",
@@ -615,6 +642,7 @@ State 14: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
         version |-> 1,
         timerKind |-> "none",
         timerAt |-> 0,
+        ttl |-> 0,
         pid |-> "-" ] ]
 /\ obs = [a |-> "none", b |-> "rejected_timedout"]
 /\ resumes = {<<"a", "b">>}
@@ -644,5 +672,5 @@ State 14: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
 
 14 states generated, 14 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 14.
-Finished in 02s at (2026-08-01 22:09:12)
-Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785622149.tla
+Finished in 00s at (2026-08-01 22:30:12)
+Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785623411.tla

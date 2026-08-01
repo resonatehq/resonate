@@ -34,7 +34,14 @@ CONSTANTS
     MaxTime,      \* time horizon
     MaxVersion,   \* bound on task.version
     Retry,        \* pending-retry TTL
-    Ttl,          \* lease TTL handed to acquire
+    Ttl,          \* default lease TTL
+    TTLs,         \* the lease TTLs a worker may present on acquire.  A task
+                  \* carries its OWN ttl -- the specification puts `ttl` on
+                  \* TaskRecord and a heartbeat refreshes by it.  The unified
+                  \* model lacked this until resonate-on-convex's `crash`
+                  \* trace, which acquires with a short lease, could not be
+                  \* replayed.  Model configs set TTLs = {Ttl}, so the state
+                  \* space is unchanged.
 
     (***********************************************************************)
     (* SWITCHES.  These are NOT all of one kind, and the difference matters *)
@@ -164,7 +171,7 @@ NoPromise == [exists |-> FALSE, state |-> "pending", timeoutAt |-> 0,
               kind |-> "plain"]
 
 NoTask == [exists |-> FALSE, state |-> "pending", version |-> 0,
-           pid |-> NoWorker, timerKind |-> "none", timerAt |-> 0]
+           pid |-> NoWorker, timerKind |-> "none", timerAt |-> 0, ttl |-> 0]
 
 NoClaim == [task |-> NoAddr, version |-> 0]
 
@@ -312,10 +319,11 @@ CascadeTasks(i) ==
     [j \in Ids |->
         IF j = i /\ tasks[j].exists
           THEN [tasks[j] EXCEPT !.state = "fulfilled", !.pid = NoWorker,
-                                !.timerKind = "none", !.timerAt = 0]
+                                !.timerKind = "none", !.timerAt = 0, !.ttl = 0]
         ELSE IF j \in SuspAwaiters(i)
           THEN [tasks[j] EXCEPT !.state = "pending", !.pid = NoWorker,
-                                !.timerKind = "retry", !.timerAt = now + Retry]
+                                !.timerKind = "retry", !.timerAt = now + Retry,
+                                !.ttl = 0]
         ELSE tasks[j]]
 
 CascadeResumes(i) ==
@@ -364,7 +372,7 @@ PromiseCreate(i, toat, k) ==
                                        [exists |-> TRUE, state |-> "pending",
                                         version |-> 0, pid |-> NoWorker,
                                         timerKind |-> "retry",
-                                        timerAt |-> now + Retry]]
+                                        timerAt |-> now + Retry, ttl |-> 0]]
                        /\ outbox' = PutExec(outbox, i, 0)
                   ELSE UNCHANGED <<tasks, outbox>>
           ELSE \* created already settled
@@ -375,7 +383,8 @@ PromiseCreate(i, toat, k) ==
                   THEN tasks' = [tasks EXCEPT ![i] =
                                     [exists |-> TRUE, state |-> "fulfilled",
                                      version |-> 0, pid |-> NoWorker,
-                                     timerKind |-> "none", timerAt |-> 0]]
+                                     timerKind |-> "none", timerAt |-> 0,
+                                     ttl |-> 0]]
                   ELSE UNCHANGED tasks
                /\ UNCHANGED outbox
     /\ UNCHANGED <<now, callbacks, listeners, resumes, delivered, claim,
@@ -419,7 +428,7 @@ RegisterListener(aw, ad) ==
 
 \* T-02 task.create, re-claim branch: an existing pending task is claimed
 \* directly, without going through the outbox.
-TaskClaim(i, w) ==
+TaskClaim(i, w, ttl) ==
     /\ claim[w].task = NoAddr
     /\ promises[i].exists
     /\ Targeted(i)
@@ -431,7 +440,7 @@ TaskClaim(i, w) ==
                                 ![i].version = tasks[i].version + 1,
                                 ![i].pid = w,
                                 ![i].timerKind = "lease",
-                                ![i].timerAt = now + Ttl]
+                                ![i].timerAt = now + ttl, ![i].ttl = ttl]
     /\ resumes' = {r \in resumes : r[1] # i}
     /\ claim'   = [claim EXCEPT ![w] = [task |-> i,
                                         version |-> tasks[i].version + 1]]
@@ -446,7 +455,7 @@ TaskClaim(i, w) ==
 
 \* T-03 task.acquire.  The worker presents a message it was handed; the
 \* version CAS is the fencing token.
-TaskAcquire(w, m) ==
+TaskAcquire(w, m, ttl) ==
     /\ claim[w].task = NoAddr
     \* The ONLY thing WorkerLayer changes is where the message comes from.
     \* Every guard below is unconditional, so WorkerLayer = TRUE is exactly
@@ -464,7 +473,7 @@ TaskAcquire(w, m) ==
                                    ![i].version = m.version + 1,
                                    ![i].pid = w,
                                    ![i].timerKind = "lease",
-                                   ![i].timerAt = now + Ttl]
+                                   ![i].timerAt = now + ttl, ![i].ttl = ttl]
        /\ resumes' = {r \in resumes : r[1] # i}
        /\ claim'   = [claim EXCEPT ![w] = [task |-> i, version |-> m.version + 1]]
        /\ delivered' = delivered \ {m}
@@ -495,7 +504,7 @@ TaskSuspend(i, S) ==
             /\ tasks'     = [tasks EXCEPT ![i].state = "suspended",
                                           ![i].pid = NoWorker,
                                           ![i].timerKind = "none",
-                                          ![i].timerAt = 0]
+                                          ![i].timerAt = 0, ![i].ttl = 0]
             /\ claim'     = [w \in Workers |->
                                IF claim[w].task = i THEN NoClaim ELSE claim[w]]
     /\ UNCHANGED <<now, promises, listeners, outbox, delivered,
@@ -516,7 +525,8 @@ TaskRelease(i) ==
     /\ promises[i].exists
     /\ Live(i)                                  \* 409
     /\ tasks'  = [tasks EXCEPT ![i].state = "pending", ![i].pid = NoWorker,
-                               ![i].timerKind = "retry", ![i].timerAt = now + Retry]
+                               ![i].timerKind = "retry", ![i].timerAt = now + Retry,
+                               ![i].ttl = 0]
     /\ outbox' = IF Targeted(i) THEN PutExec(outbox, i, tasks[i].version)
                                 ELSE outbox
     /\ claim'  = [w \in Workers |->
@@ -535,7 +545,7 @@ TaskHeartbeat(w) ==
        /\ tasks[i].version = claim[w].version
        /\ HeartbeatGuard => Live(i)             \* spec T-05
        /\ tasks' = [tasks EXCEPT ![i].timerKind = "lease",
-                                 ![i].timerAt = now + Ttl]
+                                 ![i].timerAt = now + tasks[i].ttl]
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, outbox,
                    delivered, claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected, resTVars>>
 
@@ -545,7 +555,8 @@ TaskHalt(i) ==
     /\ tasks[i].state \notin {"fulfilled", "halted"}
     /\ PromiseLivenessGuard => Live(i)          \* spec T-09
     /\ tasks' = [tasks EXCEPT ![i].state = "halted", ![i].pid = NoWorker,
-                              ![i].timerKind = "none", ![i].timerAt = 0]
+                              ![i].timerKind = "none", ![i].timerAt = 0,
+                              ![i].ttl = 0]
     /\ claim' = [w \in Workers |->
                    IF claim[w].task = i THEN NoClaim ELSE claim[w]]
     \* task.get already reports this task `fulfilled`; halt-on-fulfilled is 409
@@ -642,7 +653,8 @@ OnTaskLeaseTimeout(i) ==
     /\ SequencedDriver => NoPromiseTimeoutDue
     /\ TimeoutLivenessGuard => Live(i)
     /\ tasks'  = [tasks EXCEPT ![i].state = "pending", ![i].pid = NoWorker,
-                               ![i].timerKind = "retry", ![i].timerAt = now + Retry]
+                               ![i].timerKind = "retry", ![i].timerAt = now + Retry,
+                               ![i].ttl = 0]
     /\ outbox' = IF promises[i].exists /\ Targeted(i)
                  THEN PutExec(outbox, i, tasks[i].version) ELSE outbox
     /\ badDispatch' = IF promises[i].exists /\ Targeted(i) /\ ~Live(i)
@@ -714,8 +726,8 @@ Step ==
     \/ \E aw \in Ids, ad \in Addrs                    : RegisterListener(aw, ad)
     \/ \E i \in Ids                                   : PromiseGet(i)
     \/ \E i \in Ids                                   : TaskGet(i)
-    \/ \E i \in Ids, w \in Workers                    : TaskClaim(i, w)
-    \/ \E w \in Workers, m \in delivered              : TaskAcquire(w, m)
+    \/ \E i \in Ids, w \in Workers, t \in TTLs         : TaskClaim(i, w, t)
+    \/ \E w \in Workers, m \in delivered, t \in TTLs   : TaskAcquire(w, m, t)
     \/ \E i \in Ids, S \in SUBSET Ids                 : TaskSuspend(i, S)
     \/ \E i \in Ids, st \in ClientSettable            : TaskFulfill(i, st)
     \/ \E i \in Ids                                   : TaskRelease(i)

@@ -85,6 +85,8 @@ TaskOK ==
         /\ tasks'[i].version   = r.version
         /\ tasks'[i].timerKind = r.timerKind
         /\ tasks'[i].timerKind # "none" => tasks'[i].timerAt = r.timerAt
+        \* per-task lease TTL, where the harness records it
+        /\ "ttl" \in DOMAIN r => tasks'[i].ttl = r.ttl
     \* and nothing the model invented that the system did not have
     /\ \A i \in Ids : tasks'[i].exists => i \in RecordedTaskIds
 
@@ -155,11 +157,15 @@ TRegisterListener ==
           \E aw \in RecordedIds, ad \in Addrs : RegisterListener(aw, ad))
 
 TTaskClaim ==
-    TStep("TaskClaim", \E i \in RecordedIds, w \in Workers : TaskClaim(i, w))
+    TStep("TaskClaim",
+          \E i \in RecordedIds, w \in Workers, t \in TTLs : TaskClaim(i, w, t))
 
+\* The ttl is whatever the worker presented, so it is drawn from the
+\* recorded post-state rather than from a constant.
 TTaskAcquire ==
     TStep("TaskAcquire",
-          \E w \in Workers, m \in outbox \cup delivered : TaskAcquire(w, m))
+          \E w \in Workers, m \in outbox \cup delivered, t \in TTLs :
+              TaskAcquire(w, m, t))
 
 TTaskSuspend ==
     TStep("TaskSuspend",
@@ -182,6 +188,13 @@ TOnTaskLeaseTimeout ==
     TStep("OnTaskLeaseTimeout", \E i \in RecordedIds : OnTaskLeaseTimeout(i))
 
 TDeliver == TStep("Deliver", \E m \in outbox : Deliver(m))
+
+\* A scheduler job that fired and found nothing to do.  Convex's deadline
+\* jobs run whenever the scheduler runs them and let the HANDLER decide, so
+\* the harness records genuine no-ops; the unified model's rules are guarded
+\* and cannot fire when not due.  The adapter marks such an event, and it
+\* replays as a stutter that still checks the recorded state.
+TNoOp == TStep("NoOp", UNCHANGED <<now, core, ghosts, resVars, resTVars>>)
 TAdvance == TStep("AdvanceClock", AdvanceClock)
 
 \* The clock is not an event in most harnesses: it is read per action.  A
@@ -204,7 +217,7 @@ TraceNext ==
     \/ TTaskClaim \/ TTaskAcquire \/ TTaskSuspend \/ TTaskFulfill
     \/ TTaskRelease \/ TTaskHalt \/ TTaskContinue \/ THeartbeat
     \/ TOnPromiseTimeout \/ TOnTaskRetryTimeout \/ TOnTaskLeaseTimeout
-    \/ TDeliver \/ TAdvance
+    \/ TDeliver \/ TAdvance \/ TNoOp
 
 TraceSpec == TraceInit /\ [][TraceNext]_tvars
 
