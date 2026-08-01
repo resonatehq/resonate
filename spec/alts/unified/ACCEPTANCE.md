@@ -33,7 +33,7 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 
 | profile | switches off | property checked | result |
 |---|---|---|---|
-| `MC_spec` | *none* | `Safety` (all 19) | ⏳ re-running with the response channel |
+| `MC_spec` | *none* | `Safety` (all 19) | **holds** — 6 779 134 distinct states, depth 27, exhaustive |
 | `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 153 states, depth 4 |
 | `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 17 792 states, depth 7 |
 | `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 819 states, depth 5 |
@@ -41,14 +41,17 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 | `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 15 201 states, depth 7 |
 | `MC_pg_response` | + `ProjectedResponses` | `ResponsesNeverRegress` | **violated**, 3 872 states, depth 6 |
 | `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 788 states |
-| `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | **holds**, complete state space |
+| `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | **holds** on the 17-property module; re-running with the response channel |
 
-Before the response channel was added, `MC_spec` was exhaustive and clean:
-21 874 654 states generated, 2 469 914 distinct, 0 left on queue, depth 25,
-faults on, all 17 properties. Adding the response channel adds two properties
-and three variables, so that run is being repeated; **until it finishes, the
-19-property spec profile is not claimed.** The `MC_liveness` row is on the
-17-property module.
+The `MC_spec` run is exhaustive: 56 912 514 states generated, 6 779 134
+distinct, 0 left on queue, complete state graph depth 27, faults on, all 19
+properties. Every guard switched on closes every defect the seven violation
+rows expose — which is the half of the test that says the switches are the
+*right* switches, not merely switches that happen to toggle a probe.
+
+For the record, the same profile before the response channel was added:
+2 469 914 distinct, depth 25, 17 properties, also clean. The channel adds
+three variables and roughly 2.7x the reachable space.
 
 Reproduce:
 
