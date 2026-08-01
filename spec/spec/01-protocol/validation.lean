@@ -77,6 +77,16 @@ def OutboxEntry.key : OutboxEntry → String
 /-- Next cron fire time strictly after the given instant. -/
 opaque nextCron : (cron : String) → (after : Nat) → Nat
 
+/-- All cron occurrence instants in `[since, now]`, in order — the
+    `nextCron` chain restricted to the window. Opaque like `nextCron`
+    itself: WHICH instants a cron expression denotes is calendar math,
+    outside the protocol. The window is finite, so this function
+    exists totally — no machine walks the chain recursively; and no
+    machine trusts it either: every consumer re-checks due-ness on
+    each element, so an occurrence means NOT BEFORE, enforced by the
+    machine, not by the calendar. -/
+opaque occurrences : (cron : String) → (since now : Nat) → List Nat
+
 /-- Expand a schedule's promise-id template against one occurrence. -/
 opaque expand : (template id : String) → (timestamp : Nat) → String
 

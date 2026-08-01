@@ -65,8 +65,10 @@ def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
 /-- External promises — explicitly tagged `resonate:external = "true"`,
     targeted, or timers — may have awaiters and carry an armed (durable)
     timeout; the timeout transition guarantees their awaiters are never
-    stranded. Internal promises must not have awaiters; their deadlines
-    are projection-only. -/
+    stranded. Internal promises must not have awaiters — ENFORCED: both
+    registration paths (`register_callback`, `register_listener`) refuse
+    internal promises with `422` — their deadlines are projection-only,
+    so an obligation recorded on one could never be discharged. -/
 def PromiseObject.external (p : PromiseObject) : Bool :=
   p.tags.get? "resonate:external" == some "true"
     || p.tags.has "resonate:target" || p.isTimer

@@ -42,11 +42,12 @@ reconciles the lag. `translate` is syntactic (it reads requests, not
 runs); it is the canonical schedule for these scripts, while the
 theorem's ∃ admits run-dependent schedules in general.
 
-Scoping notes, both flagged before: internal promises past their
-deadline are settled by touches but have no armed τ concrete-side —
-scripts keep expired promises external; and a listener on an internal
-promise (unrefused by `promise.register_listener`, a base wrinkle)
-would strand concrete-side, so scripts keep listeners external too.  -/
+Scoping note: internal promises past their deadline are settled by
+touches but have no armed τ concrete-side; the fact-lag is closed by
+the normalizing comparator of `square.lean`, and the once-flagged
+listener wrinkle is gone — every machine now refuses listeners and
+callbacks on internal promises (`422`), so no obligation can attach
+where no discharge path exists.  -/
 
 namespace Abstraction
 

@@ -132,6 +132,8 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
   | none =>
       return { status := 404 }
   | some pAwaited =>
+      if !pAwaited.external then
+        return { status := 422 }
       if pAwaited.state == .pending then
         setPromise (pAwaited.addListener req.address)
         return { status := 200, promise := some pAwaited.toRecord }
@@ -250,13 +252,8 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
       setTask t
       return { status := 200, task := some t.toRecord, promise := some p.toRecord }
 
-/-- The promise id the fenced action operates on. -/
-def fenceTarget : TaskFenceAction → String
-  | .create r => r.id
-  | .settle r => r.id
-
 def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
-  if fenceTarget req.action == req.id then
+  if req.action.targetId == req.id then
     return { status := 400 }
   match ← touchTask req.id now with
   | none =>
@@ -278,16 +275,51 @@ def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
           let res ← promiseSettle r now
           return { status := 200, action := some (.settle res) }
 
+def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : M Unit := do
+  match ← touchTask ref.id now with
+  | some (t, some p) =>
+      if t.state == .acquired ∧ t.version == ref.version
+          ∧ t.pid == some pid ∧ p.state == .pending then
+        setTask { t with expiresAt := some (now + t.ttl.getD 0) }
+  | _ =>
+      pure ()
+
+def heartbeatAll (pid : String) (now : Nat) : List ServerModel.TaskRef → M Unit
+  | [] => pure ()
+  | ref :: refs => do
+      heartbeatOne pid ref now
+      heartbeatAll pid now refs
+
 def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := do
-  for ref in req.tasks do
-    match ← touchTask ref.id now with
-    | some (t, some p) =>
-        if t.state == .acquired ∧ t.version == ref.version
-            ∧ t.pid == some req.pid ∧ p.state == .pending then
-          setTask { t with expiresAt := some (now + t.ttl.getD 0) }
-    | _ =>
-        pure ()
+  heartbeatAll req.pid now req.tasks
   return { status := 200 }
+
+/-- Pass 1 over the awaited set, in order, stopping at the first
+    undischargeable waiter: `none` is a 422 (missing or internal),
+    `some settled` reports whether any awaited promise is already
+    settled. -/
+def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
+  | [] => return some false
+  | action :: rest => do
+      match ← touchPromise action.awaited now with
+      | none => return none
+      | some pa =>
+          if !pa.external then
+            return none
+          else
+            match ← checkAwaited now rest with
+            | none => return none
+            | some settled => return some (settled || pa.state != .pending)
+
+/-- Pass 2: park the awaiter on every awaited promise. -/
+def registerAwaited (awaiter : String) (now : Nat) :
+    List PromiseRegisterCallbackReq → M Unit
+  | [] => pure ()
+  | action :: rest => do
+      match ← touchPromise action.awaited now with
+      | some pa => setPromise (pa.addCallback awaiter)
+      | none => pure ()
+      registerAwaited awaiter now rest
 
 def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
   if req.actions.isEmpty then
@@ -309,29 +341,17 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
         return { status := 409 }
       if t.version != req.version then
         return { status := 409 }
-      let mut settled := false
-      for action in req.actions do
-        match ← touchPromise action.awaited now with
-        | none =>
-            return { status := 422 }
-        | some pa =>
-            if !pa.external then
-              return { status := 422 }
-            if pa.state != .pending then
-              settled := true
-      if settled then
-        setTask { t with resumes := [] }
-        return { status := 300 }
-      else
-        for action in req.actions do
-          match ← touchPromise action.awaited now with
-          | some pa =>
-              setPromise (pa.addCallback req.id)
-          | none =>
-              pure ()
-        setTask { t with state := .suspended, pid := none, ttl := none,
-                         expiresAt := none, retryAt := none, resumes := [] }
-        return { status := 200 }
+      match ← checkAwaited now req.actions with
+      | none =>
+          return { status := 422 }
+      | some true =>
+          setTask { t with resumes := [] }
+          return { status := 300 }
+      | some false =>
+          registerAwaited req.id now req.actions
+          setTask { t with state := .suspended, pid := none, ttl := none,
+                           expiresAt := none, retryAt := none, resumes := [] }
+          return { status := 200 }
 
 /-- Settles the promise; the task's fulfillment is fact T, materialized
     on the next touch or by `Rules.taskFulfillment` — observably
