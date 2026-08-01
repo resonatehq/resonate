@@ -26,33 +26,32 @@ anywhere in this file):
   4. **The reduction** (`responseLockstep_of_stepAgreement`): if every
      single step agrees (`StepAgreement`), the unbounded theorem
      follows, by induction over the trace.
-  5. Per-step agreement (`Agrees st`), case by case. DISCHARGED:
-     `idle`; the three searches; the three schedule handlers; all five
-     promise handlers (get, create, settle, both registrations); the
-     task handlers get, create, acquire, fulfill, release, halt, and
-     continue (via `bind_taskRead_agrees`, the task read proven once);
-     and ALL SEVEN RULES. R1/R2: touch self-invisibility plus
-     symmetry/transitivity of the invariant. R5/R6: the
-     doomed-dispatch fix mechanized — under a pending view the raw
-     tasks coincide, under a settled view neither side writes. R3/R4:
-     the settled-upsert congruence and the value/state split of the
-     touch. R7: after the `catchUp` refactor (the occurrence list is
-     one OPAQUE pure term — `ServerModel.occurrences` — shared by both
-     sides, filtered by due-ness), the rule is a list induction of
-     `promiseCreate` steps run as of past instants; a touch write made
-     at an earlier time is still invisible at the current clock
-     because facts are stable under monotone time
-     (`REq_touchWrite_le`). OPEN:
-       - `taskHeartbeat`, `taskSuspend` — `forIn` loops; need a loop
-         invariant by list induction. Routine, not yet written.
-       - `taskFence` — composes with the promise handlers; needs their
-         agreement restated at the run level for reuse.
-     Once these close, `StepAgreement` assembles by cases on `AStep`
-     and the reduction yields `ResponseLockstepAbstract` outright.
+  5. Per-step agreement (`Agrees st`) — ALL CASES DISCHARGED: `idle`,
+     the searches, the schedule handlers, the five promise handlers,
+     the ten task handlers, and the seven rules. The recurring
+     arguments: the task read proven once (`bind_taskRead_agrees`);
+     touch self-invisibility plus symmetry/transitivity of the
+     invariant (R1/R2); the doomed-dispatch fix mechanized — under a
+     pending view the raw tasks coincide, under a settled view
+     neither side writes (R5/R6); the settled-upsert congruence and
+     the value/state split of the touch (R3/R4); the loop handlers by
+     list induction over their request-shared lists; `taskFence`
+     through the run-level promise-handler agreements; and R7 as a
+     list induction over the opaque, shared occurrence term, its
+     past-time writes absorbed because facts are stable under
+     monotone time (`REq_touchWrite_le`).
+  6. **The assembly**: `stepAgreement` by cases on `AStep`, and
 
-`LockstepAbstract`'s message half additionally needs quiescence
-congruence (`absQuiesced` agrees on `REq`-related states); same
-architecture, on top of these lemmas.  -/
+       `responseLockstepAbstract : ResponseLockstepAbstract`
+
+     — closed, unconditional, checked by the kernel; `#print axioms`
+     reports only `propext`, `Classical.choice`, `Quot.sound`.
+
+What remains for full `LockstepAbstract` is the MESSAGE half:
+extend the invariant with outbox equality (every agreeing step writes
+the same messages, so it is carried mechanically) and quiescence
+congruence for `absQuiesced` — same architecture, on top of these
+lemmas.  -/
 
 namespace Abstraction
 namespace Proof
@@ -622,6 +621,10 @@ theorem addCallback_id (p : PromiseObject) (a : String) :
 theorem addListener_id (p : PromiseObject) (a : String) :
     (p.addListener a).id = p.id := by
   unfold PromiseObject.addListener; split <;> rfl
+
+theorem addCallback_state (p : PromiseObject) (a : String) :
+    (p.addCallback a).state = p.state := by
+  unfold PromiseObject.addCallback; split <;> rfl
 
 /-- Where `pLook` is empty, `tLook` is the raw find. -/
 theorem tLook_raw {n : Nat} {s : ServerState} {id : String}
@@ -2106,6 +2109,219 @@ theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
                 (REq_setPromise_settled h1 _ (toFalse hpend))
             · simp only [if_neg hcb]; exact h1
 
+/-! ### 5t. The loop handlers — `taskHeartbeat` and `taskSuspend`,
+    by induction over their (request-shared) lists, the invariant
+    carried element by element. -/
+
+theorem runAgrees_heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (n : Nat)
+    {sP sM : ServerState} (h : REq n sP sM) :
+    REq n ((Projected.heartbeatOne pid ref n).run sP).2
+          ((AbstractModel.heartbeatOne pid ref n).run sM).2 := by
+  simp only [Projected.heartbeatOne, AbstractModel.heartbeatOne]
+  refine (bind_taskRead_agrees ref.id n _ _ h ?_).2
+  intro v sP' sM' h' hf
+  cases v with
+  | none => exact ⟨rfl, h'⟩
+  | some pair =>
+      obtain ⟨t, po⟩ := pair
+      cases po with
+      | none => exact ⟨rfl, h'⟩
+      | some pv =>
+          dsimp only
+          by_cases hg : ((t.state == TaskState.acquired) = true
+              ∧ (t.version == ref.version) = true
+              ∧ (t.pid == some pid) = true
+              ∧ (pv.state == PromiseState.pending) = true)
+          · simp only [if_pos hg]; exact ⟨trivial, REq_setTask h' _⟩
+          · simp only [if_neg hg]; exact ⟨trivial, h'⟩
+
+theorem REq_heartbeatAll (pid : String) (n : Nat) (refs : List ServerModel.TaskRef) :
+    ∀ {sP sM : ServerState}, REq n sP sM →
+      REq n ((Projected.heartbeatAll pid n refs).run sP).2
+            ((AbstractModel.heartbeatAll pid n refs).run sM).2 := by
+  induction refs with
+  | nil =>
+      intro sP sM h
+      simp only [Projected.heartbeatAll, AbstractModel.heartbeatAll, run_pure]
+      exact h
+  | cons ref refs ih =>
+      intro sP sM h
+      simp only [Projected.heartbeatAll, AbstractModel.heartbeatAll, run_bind]
+      exact ih (runAgrees_heartbeatOne pid ref n h)
+
+theorem agrees_taskHeartbeat (req) : Agrees (.api (.taskHeartbeat req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskHeartbeat,
+             AbstractModel.taskHeartbeat, run_map, run_bind, run_pure, Id.run]
+  exact ⟨trivial, REq_heartbeatAll req.pid n req.tasks h⟩
+
+theorem runAgrees_checkAwaited (n : Nat)
+    (actions : List ServerModel.PromiseRegisterCallbackReq) :
+    ∀ {sP sM : ServerState}, REq n sP sM →
+      ((Projected.checkAwaited n actions).run sP).1
+          = ((AbstractModel.checkAwaited n actions).run sM).1
+        ∧ REq n ((Projected.checkAwaited n actions).run sP).2
+                ((AbstractModel.checkAwaited n actions).run sM).2 := by
+  induction actions with
+  | nil =>
+      intro sP sM h
+      simp only [Projected.checkAwaited, AbstractModel.checkAwaited, run_pure]
+      exact ⟨trivial, h⟩
+  | cons action rest ih =>
+      intro sP sM h
+      simp only [Projected.checkAwaited, AbstractModel.checkAwaited, run_bind,
+                 run_viewPromise, run_touchPromise, run_pure]
+      have hpi : (sP.promises.find? (·.id == action.awaited)).map (·.project n)
+          = (sM.promises.find? (·.id == action.awaited)).map (·.project n) :=
+        h.1 action.awaited
+      cases hfP : sP.promises.find? (·.id == action.awaited) with
+      | none =>
+          cases hfM : sM.promises.find? (·.id == action.awaited) with
+          | none => exact ⟨rfl, h⟩
+          | some pM => rw [hfP, hfM] at hpi; simp at hpi
+      | some pP =>
+          cases hfM : sM.promises.find? (·.id == action.awaited) with
+          | none => rw [hfP, hfM] at hpi; simp at hpi
+          | some pM =>
+              rw [hfP, hfM] at hpi
+              simp only [Option.map] at hpi
+              have hproj : pP.project n = pM.project n := Option.some.inj hpi
+              have hfM' : sM.promises.find? (·.id == pM.id) = some pM := by
+                rw [eq_of_beq (find?_sat (fun x => x.id == action.awaited) sM.promises pM hfM)]
+                exact hfM
+              simp only [Option.map]
+              rw [hproj]
+              generalize hsM1 :
+                (if (((pM.project n).state != pM.state) = true) then
+                  { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+                else sM) = sM1
+              have h1 : REq n sP sM1 := by
+                rw [← hsM1]
+                by_cases hc : (((pM.project n).state != pM.state) = true)
+                · simp only [if_pos hc]; exact REq_touchWrite h pM hfM'
+                · simp only [if_neg hc]; exact h
+              by_cases hext : (!(pM.project n).external) = true
+              · simp only [if_pos hext]; exact ⟨rfl, h1⟩
+              · simp only [if_neg hext, run_bind]
+                obtain ⟨hval, hst⟩ := ih h1
+                rw [hval]
+                cases hrec : ((AbstractModel.checkAwaited n rest).run sM1).1 with
+                | none => exact ⟨rfl, hst⟩
+                | some settled => exact ⟨rfl, hst⟩
+
+theorem runAgrees_registerAwaited (awaiter : String) (n : Nat)
+    (actions : List ServerModel.PromiseRegisterCallbackReq) :
+    ∀ {sP sM : ServerState}, REq n sP sM →
+      REq n ((Projected.registerAwaited awaiter n actions).run sP).2
+            ((AbstractModel.registerAwaited awaiter n actions).run sM).2 := by
+  induction actions with
+  | nil =>
+      intro sP sM h
+      simp only [Projected.registerAwaited, AbstractModel.registerAwaited, run_pure]
+      exact h
+  | cons action rest ih =>
+      intro sP sM h
+      simp only [Projected.registerAwaited, AbstractModel.registerAwaited, run_bind,
+                 run_viewPromise, run_touchPromise, run_pure, run_setPromise]
+      have hpi : (sP.promises.find? (·.id == action.awaited)).map (·.project n)
+          = (sM.promises.find? (·.id == action.awaited)).map (·.project n) :=
+        h.1 action.awaited
+      cases hfP : sP.promises.find? (·.id == action.awaited) with
+      | none =>
+          cases hfM : sM.promises.find? (·.id == action.awaited) with
+          | none => exact ih h
+          | some pM => rw [hfP, hfM] at hpi; simp at hpi
+      | some pP =>
+          cases hfM : sM.promises.find? (·.id == action.awaited) with
+          | none => rw [hfP, hfM] at hpi; simp at hpi
+          | some pM =>
+              rw [hfP, hfM] at hpi
+              simp only [Option.map] at hpi
+              have hproj : pP.project n = pM.project n := Option.some.inj hpi
+              have hpm : (pM.id == action.awaited) = true :=
+                find?_sat (fun x => x.id == action.awaited) sM.promises pM hfM
+              have hfM' : sM.promises.find? (·.id == pM.id) = some pM := by
+                rw [eq_of_beq hpm]; exact hfM
+              simp only [Option.map]
+              rw [hproj]
+              generalize hsM1 :
+                (if (((pM.project n).state != pM.state) = true) then
+                  { sM with promises := (pM.project n) :: sM.promises.filter (·.id != (pM.project n).id) }
+                else sM) = sM1
+              have h1 : REq n sP sM1 := by
+                rw [← hsM1]
+                by_cases hc : (((pM.project n).state != pM.state) = true)
+                · simp only [if_pos hc]; exact REq_touchWrite h pM hfM'
+                · simp only [if_neg hc]; exact h
+              by_cases hpend : (((pM.project n).state == PromiseState.pending) = true)
+              · -- pending: the view is the raw record on both sides
+                have hpp : pM.project n = pM := project_of_pending hpend
+                rw [hpp] at hpend ⊢
+                have hplP : pLook n sP action.awaited = some pM := by
+                  unfold pLook; rw [hfP]; simp only [Option.map]; rw [hproj, hpp]
+                have hplM1 : pLook n sM1 action.awaited = some pM := by
+                  rw [← h1.1 action.awaited]; exact hplP
+                have htq0 : sP.tasks.find? (·.id == action.awaited)
+                    = sM1.tasks.find? (·.id == action.awaited) := by
+                  rw [← tLook_pending hplP hpend, ← tLook_pending hplM1 hpend]
+                  exact h1.2.1 action.awaited
+                have htq : sP.tasks.find? (·.id == (pM.addCallback awaiter).id)
+                    = sM1.tasks.find? (·.id == (pM.addCallback awaiter).id) := by
+                  rw [addCallback_id, eq_of_beq hpm]; exact htq0
+                exact ih (REq_setPromise h1 (pM.addCallback awaiter) htq)
+              · -- settled: the settled-upsert congruence needs no side condition
+                exact ih (REq_setPromise_settled h1 ((pM.project n).addCallback awaiter)
+                  (by rw [addCallback_state]; exact toFalse hpend))
+
+theorem agrees_taskSuspend (req) : Agrees (.api (.taskSuspend req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskSuspend,
+             AbstractModel.taskSuspend, run_map, Id.run]
+  by_cases hg0 : (req.actions.isEmpty) = true
+  · simp only [if_pos hg0]; exact ⟨rfl, h⟩
+  · simp only [if_neg hg0, run_pureUnit_bind]
+    by_cases hg1 : (req.actions.any (·.awaited == req.id)) = true
+    · simp only [if_pos hg1]; exact ⟨rfl, h⟩
+    · simp only [if_neg hg1, run_pureUnit_bind]
+      by_cases hg2 : ((req.actions.map (·.awaited)).eraseDups.length
+          != (req.actions.map (·.awaited)).length) = true
+      · simp only [if_pos hg2]; exact ⟨rfl, h⟩
+      · simp only [if_neg hg2, run_pureUnit_bind]
+        refine And.imp (congrArg Equivalence.Response.taskSuspend) (fun x => x)
+          (bind_taskRead_agrees req.id n _ _ h ?_)
+        intro v sP' sM' h' hf
+        cases v with
+        | none => exact ⟨rfl, h'⟩
+        | some pair =>
+            obtain ⟨t, po⟩ := pair
+            cases po with
+            | none => exact ⟨rfl, h'⟩
+            | some pv =>
+                dsimp only
+                by_cases hs1 : (t.state != TaskState.acquired) = true
+                · simp only [if_pos hs1]; exact ⟨rfl, h'⟩
+                · simp only [if_neg hs1, run_pureUnit_bind]
+                  by_cases hs2 : (pv.state != PromiseState.pending) = true
+                  · simp only [if_pos hs2]; exact ⟨rfl, h'⟩
+                  · simp only [if_neg hs2, run_pureUnit_bind]
+                    by_cases hs3 : (t.version != req.version) = true
+                    · simp only [if_pos hs3]; exact ⟨rfl, h'⟩
+                    · simp only [if_neg hs3, run_pureUnit_bind]
+                      simp only [run_bind]
+                      obtain ⟨hval, hst⟩ := runAgrees_checkAwaited n req.actions h'
+                      rw [hval]
+                      cases hchk : ((AbstractModel.checkAwaited n req.actions).run sM').1 with
+                      | none => exact ⟨rfl, hst⟩
+                      | some settled =>
+                          cases settled with
+                          | true =>
+                              simp only [run_bind, run_setTask, run_pure]
+                              exact ⟨trivial, REq_setTask hst _⟩
+                          | false =>
+                              simp only [run_bind, run_setTask, run_pure]
+                              exact ⟨trivial, REq_setTask
+                                (runAgrees_registerAwaited req.id n req.actions hst) _⟩
+
 /-! ### 5s. `taskFence` — a task read guarding an inner promise
     handler; the run-level agreements compose directly. -/
 
@@ -2366,6 +2582,57 @@ theorem agrees_taskCreate (req) : Agrees (.api (.taskCreate req)) := by
                           exact ⟨rfl, REq_setTask h' _⟩
                         · simp only [if_neg hg2, run_pureUnit_bind]
                           exact ⟨rfl, h'⟩
+
+/-! ### 6. Assembly: every step agrees, and the theorem falls out -/
+
+theorem stepAgreement : StepAgreement := by
+  intro st
+  cases st with
+  | api rq =>
+      cases rq with
+      | promiseGet req => exact agrees_promiseGet req
+      | promiseCreate req => exact agrees_promiseCreate req
+      | promiseSettle req => exact agrees_promiseSettle req
+      | promiseRegisterCallback req => exact agrees_promiseRegisterCallback req
+      | promiseRegisterListener req => exact agrees_promiseRegisterListener req
+      | promiseSearch req => exact agrees_promiseSearch req
+      | scheduleGet req => exact agrees_scheduleGet req
+      | scheduleCreate req => exact agrees_scheduleCreate req
+      | scheduleDelete req => exact agrees_scheduleDelete req
+      | scheduleSearch req => exact agrees_scheduleSearch req
+      | taskGet req => exact agrees_taskGet req
+      | taskCreate req => exact agrees_taskCreate req
+      | taskAcquire req => exact agrees_taskAcquire req
+      | taskFence req => exact agrees_taskFence req
+      | taskHeartbeat req => exact agrees_taskHeartbeat req
+      | taskSuspend req => exact agrees_taskSuspend req
+      | taskFulfill req => exact agrees_taskFulfill req
+      | taskRelease req => exact agrees_taskRelease req
+      | taskHalt req => exact agrees_taskHalt req
+      | taskContinue req => exact agrees_taskContinue req
+      | taskSearch req => exact agrees_taskSearch req
+      | τPromiseTimeout id => exact fun n sP sM h => ⟨rfl, h⟩
+      | τTaskRetryTimeout id => exact fun n sP sM h => ⟨rfl, h⟩
+      | τTaskLeaseTimeout id => exact fun n sP sM h => ⟨rfl, h⟩
+      | τScheduleTimeout id => exact fun n sP sM h => ⟨rfl, h⟩
+      | τResume req => exact fun n sP sM h => ⟨rfl, h⟩
+      | idle => exact fun n sP sM h => ⟨rfl, h⟩
+  | r1 id => exact agrees_r1 id
+  | r2 id => exact agrees_r2 id
+  | r3 id address => exact agrees_r3 id address
+  | r4 id awaiter => exact agrees_r4 id awaiter
+  | r5 id => exact agrees_r5 id
+  | r6 id next => exact agrees_r6 id next
+  | r7 id => exact agrees_r7 id
+  | idle => exact agrees_idle
+
+/-- **THE THEOREM, UNCONDITIONALLY.** Feed the same schedule — every
+    step, adversarial rule firings included — to both read disciplines
+    from the same initial state, and the response streams are
+    pointwise identical. Projection and materialization are the same
+    machine, on the synchronous channel, at every step, forever. -/
+theorem responseLockstepAbstract : ResponseLockstepAbstract :=
+  responseLockstep_of_stepAgreement stepAgreement
 
 end Proof
 end Abstraction

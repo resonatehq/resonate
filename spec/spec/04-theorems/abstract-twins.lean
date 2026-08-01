@@ -120,9 +120,10 @@ def IndistinguishableAbstract : Prop := APRefinesAM ∧ AMRefinesAP
     are pointwise identical. No ∃, no re-indexing, no silence: the
     universal synchronous form, strictly stronger than the response
     half of the bisimulation, and exactly the statement that is FALSE
-    for the concrete twins (`lockstep.lean`). Evidence: the exhaustive
-    adversarial sweep (`lockstepSweep`) and the battery; the unbounded
-    claim's induction is open, like its siblings. -/
+    for the concrete twins (`lockstep.lean`). PROVEN — the full
+    mechanized induction is `Proof.responseLockstepAbstract`
+    (`proof.lean`); the exhaustive adversarial sweep (`lockstepSweep`)
+    and the battery remain as executable spot-checks. -/
 def ResponseLockstepAbstract : Prop :=
   ∀ (trP trM : ATrace),
     ValidAP trP → ValidA trM →
