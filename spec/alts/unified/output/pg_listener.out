@@ -1,15 +1,15 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=40381 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 105 and seed -6576399929876642553 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 15917] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 11 and seed 4810833948508542599 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 3639] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/MC.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-14156524840275641968/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-14156524840275641968/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-14156524840275641968/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-14156524840275641968/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-14156524840275641968/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-14156524840275641968/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-14156524840275641968/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-3903092098804270100/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-3903092098804270100/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-3903092098804270100/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-3903092098804270100/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-3903092098804270100/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-3903092098804270100/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-3903092098804270100/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -23,12 +23,13 @@ Linting of module Unified
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module MC
-Starting... (2026-08-01 20:57:22)
+Starting... (2026-08-01 23:08:09)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 20:57:22.
+Finished computing initial states: 1 distinct state generated at 2026-08-01 23:08:09.
 Error: Invariant ObligationsAreDischargeable is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
+/\ resUnprojected = {}
 /\ callbacks = {}
 /\ tasks = ( a :>
       [ version |-> 0,
@@ -36,16 +37,19 @@ State 1: <Initial predicate>
         exists |-> FALSE,
         pid |-> "-",
         timerKind |-> "none",
-        timerAt |-> 0 ] @@
+        timerAt |-> 0,
+        ttl |-> 0 ] @@
   b :>
       [ version |-> 0,
         state |-> "pending",
         exists |-> FALSE,
         pid |-> "-",
         timerKind |-> "none",
-        timerAt |-> 0 ] )
+        timerAt |-> 0,
+        ttl |-> 0 ] )
 /\ badHalt = {}
 /\ delivered = {}
+/\ resTUnprojected = {}
 /\ promises = ( a :>
       [ state |-> "pending",
         exists |-> FALSE,
@@ -57,14 +61,19 @@ State 1: <Initial predicate>
         timeoutAt |-> 0,
         kind |-> "plain" ] )
 /\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
 /\ badDispatch = {}
 /\ outbox = {}
 /\ listeners = {}
 /\ resumes = {}
+/\ resTRegress = {}
 /\ claim = (wA :> [version |-> 0, task |-> "-"])
 /\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
 
-State 2: <Next line 561, col 5 to line 566, col 29 of module Unified>
+State 2: <Next line 785, col 9 to line 785, col 25 of module Unified>
+/\ resUnprojected = {}
 /\ callbacks = {}
 /\ tasks = ( a :>
       [ version |-> 0,
@@ -72,16 +81,19 @@ State 2: <Next line 561, col 5 to line 566, col 29 of module Unified>
         exists |-> FALSE,
         pid |-> "-",
         timerKind |-> "none",
-        timerAt |-> 0 ] @@
+        timerAt |-> 0,
+        ttl |-> 0 ] @@
   b :>
       [ version |-> 0,
         state |-> "pending",
-        exists |-> TRUE,
+        exists |-> FALSE,
         pid |-> "-",
-        timerKind |-> "retry",
-        timerAt |-> 1 ] )
+        timerKind |-> "none",
+        timerAt |-> 0,
+        ttl |-> 0 ] )
 /\ badHalt = {}
 /\ delivered = {}
+/\ resTUnprojected = {}
 /\ promises = ( a :>
       [ state |-> "pending",
         exists |-> FALSE,
@@ -91,16 +103,21 @@ State 2: <Next line 561, col 5 to line 566, col 29 of module Unified>
       [ state |-> "pending",
         exists |-> TRUE,
         timeoutAt |-> 1,
-        kind |-> "target" ] )
+        kind |-> "plain" ] )
 /\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
 /\ badDispatch = {}
-/\ outbox = {[version |-> 0, kind |-> "execute", id |-> b, addr |-> "-"]}
+/\ outbox = {}
 /\ listeners = {}
 /\ resumes = {}
+/\ resTRegress = {}
 /\ claim = (wA :> [version |-> 0, task |-> "-"])
 /\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
 
-State 3: <Next line 561, col 5 to line 566, col 29 of module Unified>
+State 3: <Next line 785, col 9 to line 785, col 25 of module Unified>
+/\ resUnprojected = {}
 /\ callbacks = {}
 /\ tasks = ( a :>
       [ version |-> 0,
@@ -108,71 +125,42 @@ State 3: <Next line 561, col 5 to line 566, col 29 of module Unified>
         exists |-> FALSE,
         pid |-> "-",
         timerKind |-> "none",
-        timerAt |-> 0 ] @@
+        timerAt |-> 0,
+        ttl |-> 0 ] @@
   b :>
-      [ version |-> 0,
-        state |-> "pending",
-        exists |-> TRUE,
-        pid |-> "-",
-        timerKind |-> "retry",
-        timerAt |-> 1 ] )
-/\ badHalt = {}
-/\ delivered = {}
-/\ promises = ( a :>
-      [ state |-> "pending",
-        exists |-> TRUE,
-        timeoutAt |-> 1,
-        kind |-> "plain" ] @@
-  b :>
-      [ state |-> "pending",
-        exists |-> TRUE,
-        timeoutAt |-> 1,
-        kind |-> "target" ] )
-/\ now = 0
-/\ badDispatch = {}
-/\ outbox = {[version |-> 0, kind |-> "execute", id |-> b, addr |-> "-"]}
-/\ listeners = {}
-/\ resumes = {}
-/\ claim = (wA :> [version |-> 0, task |-> "-"])
-/\ obs = (a :> "none" @@ b :> "none")
-
-State 4: <Next line 561, col 5 to line 566, col 29 of module Unified>
-/\ callbacks = {}
-/\ tasks = ( a :>
       [ version |-> 0,
         state |-> "pending",
         exists |-> FALSE,
         pid |-> "-",
         timerKind |-> "none",
-        timerAt |-> 0 ] @@
-  b :>
-      [ version |-> 0,
-        state |-> "pending",
-        exists |-> TRUE,
-        pid |-> "-",
-        timerKind |-> "retry",
-        timerAt |-> 1 ] )
+        timerAt |-> 0,
+        ttl |-> 0 ] )
 /\ badHalt = {}
 /\ delivered = {}
+/\ resTUnprojected = {}
 /\ promises = ( a :>
       [ state |-> "pending",
-        exists |-> TRUE,
-        timeoutAt |-> 1,
+        exists |-> FALSE,
+        timeoutAt |-> 0,
         kind |-> "plain" ] @@
   b :>
       [ state |-> "pending",
         exists |-> TRUE,
         timeoutAt |-> 1,
-        kind |-> "target" ] )
+        kind |-> "plain" ] )
 /\ now = 0
+/\ obsRes = (a :> "none" @@ b :> "none")
+/\ resRegress = {}
 /\ badDispatch = {}
-/\ outbox = {[version |-> 0, kind |-> "execute", id |-> b, addr |-> "-"]}
-/\ listeners = {<<a, L>>}
+/\ outbox = {}
+/\ listeners = {<<b, L>>}
 /\ resumes = {}
+/\ resTRegress = {}
 /\ claim = (wA :> [version |-> 0, task |-> "-"])
 /\ obs = (a :> "none" @@ b :> "none")
+/\ obsResT = (a :> "none" @@ b :> "none")
 
-337 states generated, 321 distinct states found, 293 states left on queue.
+300 states generated, 212 distinct states found, 189 states left on queue.
 The depth of the complete state graph search is 4.
-Finished in 00s at (2026-08-01 20:57:22)
-Trace exploration spec path: ./MC_TTrace_1785617841.tla
+Finished in 01s at (2026-08-01 23:08:10)
+Trace exploration spec path: ./MC_TTrace_1785625688.tla

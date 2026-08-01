@@ -17,6 +17,9 @@ between runs — one module, one `Next`, six configurations.
 | constant | `TRUE` (specification) | `FALSE` (as shipped somewhere) |
 |---|---|---|
 | `ArmPolicy` | `"external"` — only external promises carry an armed timeout | `"target"` (resonate), `"all"` (convex) |
+| `MaterialiseOnRead` | latitude: a read materialises (`-m`) or projects (`-p`) | pg projects; resonate and convex materialise |
+| `WorkerLayer` | model detail: is there a delivery stage before acquire? | only resonate has one |
+| `TTLs` | the lease TTLs a worker may present; a task carries its own | `{Ttl}` in every model config |
 | `CallbackExternalGuard` | P-04 refuses an internal awaited (422) | accepts any awaited |
 | `ListenerExternalGuard` | P-05 refuses an internal awaited (422) | accepts any awaited |
 | `PromiseLivenessGuard` | T-02 claim / T-09 halt / T-10 continue gate on the projection | ungated |
@@ -33,23 +36,29 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 
 | profile | switches off | property checked | result |
 |---|---|---|---|
-| `MC_spec` | *none* | `Safety` (all 21) | ⏳ re-running with the task channel |
-| `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 153 states, depth 4 |
-| `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 17 792 states, depth 7 |
-| `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 819 states, depth 5 |
-| `MC_pg_listener` | as above | `ObligationsAreDischargeable` | **violated**, 321 states, depth 4 |
-| `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 15 201 states, depth 7 |
-| `MC_pg_response` | + `ProjectedResponses` | `ResponsesNeverRegress` | **violated**, 3 872 states, depth 6 |
-| `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 788 states |
-| `MC_pg_task_response` | listener, promise, timeout, resume | `TaskResponsesNeverRegress` | **violated**, 4 343 states |
-| `MC_pg_task_projection` | as above | `TaskResponsesAreProjected` | **violated**, 1 117 states |
-| `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | **holds** on the 17-property module; re-running with the response channel |
+| `MC_spec` | *none* | `Safety` (all 21) | ⏳ re-running |
+| `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 118 distinct |
+| `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 21 510 distinct |
+| `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 1 035 distinct |
+| `MC_pg_listener` | as above | `ObligationsAreDischargeable` | **violated**, 212 distinct |
+| `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 26 478 distinct |
+| `MC_pg_response` | + `ProjectedResponses` | `ResponsesNeverRegress` | **violated**, 5 110 distinct |
+| `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 799 distinct |
+| `MC_pg_task_response` | listener, promise, timeout, resume | `TaskResponsesNeverRegress` | **violated**, 5 200 distinct |
+| `MC_pg_task_projection` | as above | `TaskResponsesAreProjected` | **violated**, 873 distinct |
+| `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | ⏳ re-running |
+| `MC_armpolicy` | spec + `ArmPolicy = "all"` | `Safety` — is over-arming a defect? | ⏳ re-running |
 
-The specification profile has been clean at each stage so far — 17 properties
-(2 469 914 distinct, depth 25) and 19 properties with the promise channel
-(6 779 134 distinct, depth 27), both exhaustive with faults on. The task
-channel adds three more variables and two more properties, so it is being
-re-run; **until it finishes the 21-property row is not claimed.**
+Every number in the table above is from the CURRENT module. That matters:
+trace validation forced four changes to the model after the first pass
+(per-task `ttl`, clearing `ttl` when the lease ends, splitting `TouchPromise`
+out of `OnPromiseTimeout`, and the `WorkerLayer` switch), so every earlier
+figure was stale and has been replaced rather than carried forward.
+
+The specification profile has been clean at each earlier stage — 17 properties
+(2 469 914 distinct, depth 25) and 19 with the promise channel (6 779 134
+distinct, depth 27), both exhaustive with faults on. It is re-running against
+the current module; **until it finishes the 21-property row is not claimed.**
 
 Reproduce:
 
