@@ -4,3 +4,6 @@ states/
 *_TTrace_*
 .tla-lib/
 UTrace.cfg
+# TLC logs for the long runs are committed only once the run has COMPLETED --
+# a half-written log is noise, and worse, it looks like evidence.
+output/*.partial
