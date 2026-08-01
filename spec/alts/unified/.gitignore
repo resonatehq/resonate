@@ -1,4 +1,6 @@
 states/
 *.st
 *.fp
-MC_TTrace_*
+*_TTrace_*
+.tla-lib/
+UTrace.cfg

@@ -85,6 +85,15 @@ CONSTANTS
     \* defect.  It is a switch so the model can show what it masks.
     SequencedDriver,
 
+    \* (d) MODEL DETAIL.  Does this implementation have a distinct delivery
+    \* stage between the outbox and task.acquire?  resonate does (the
+    \* fire-and-forget transport: outbox -> delivered -> acquire).
+    \* resonate-pg and resonate-on-convex do not -- acquire is an RPC and the
+    \* outbox is drained separately -- so with WorkerLayer = FALSE a worker
+    \* may acquire against a message still queued.  This is not a defect on
+    \* either setting; it is a difference in what the implementation HAS.
+    WorkerLayer,
+
     \* (c) ENVIRONMENT.
     FaultsOn               \* message loss and worker crashes are enabled
 
@@ -439,7 +448,10 @@ TaskClaim(i, w) ==
 \* version CAS is the fencing token.
 TaskAcquire(w, m) ==
     /\ claim[w].task = NoAddr
-    /\ m \in delivered
+    \* The ONLY thing WorkerLayer changes is where the message comes from.
+    \* Every guard below is unconditional, so WorkerLayer = TRUE is exactly
+    \* the previous behaviour.
+    /\ IF WorkerLayer THEN m \in delivered ELSE m \in outbox \cup delivered
     /\ m.kind = "execute"
     /\ LET i == m.id IN
        /\ tasks[i].exists

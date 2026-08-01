@@ -1,0 +1,515 @@
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+TLC2 Version 2026.07.31.184830 (rev: 30cc360)
+Running breadth-first search Model-Checking with fp 26 and seed 3536976490229639941 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 26791] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
+Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
+Parsing file /tmp/tlc-9657732208960994512/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-9657732208960994512/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-9657732208960994512/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-9657732208960994512/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-9657732208960994512/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-9657732208960994512/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-9657732208960994512/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-9657732208960994512/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module Unified
+Semantic processing of module TLC
+Semantic processing of module Json
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module UTrace
+Linting of module Unified
+Linting of module Json
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module UTrace
+Starting... (2026-08-01 22:09:07)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-08-01 22:09:08.
+Error: Invariant NotReplayed is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ l = 1
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        version |-> 0,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        version |-> 0,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 0
+/\ outbox = {}
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 2: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 2
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        version |-> 0,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> FALSE,
+        timeoutAt |-> 0,
+        kind |-> "plain" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 0
+/\ outbox = {[kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"]}
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 3: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 3
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 0
+/\ outbox = { [kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"],
+  [kind |-> "execute", version |-> 0, id |-> "b", addr |-> "-"] }
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 4: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 4
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "acquired",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "lease",
+        timerAt |-> 1,
+        pid |-> "w1" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 0
+/\ outbox = { [kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"],
+  [kind |-> "execute", version |-> 0, id |-> "b", addr |-> "-"] }
+/\ claim = [w1 |-> [version |-> 1, task |-> "a"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 5: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 5
+/\ callbacks = {<<"b", "a">>}
+/\ tasks = [ a |->
+      [ state |-> "suspended",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 0
+/\ outbox = { [kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"],
+  [kind |-> "execute", version |-> 0, id |-> "b", addr |-> "-"] }
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 6: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 5
+/\ callbacks = {<<"b", "a">>}
+/\ tasks = [ a |->
+      [ state |-> "suspended",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 0,
+        timerKind |-> "retry",
+        timerAt |-> 1,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 1
+/\ outbox = { [kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"],
+  [kind |-> "execute", version |-> 0, id |-> "b", addr |-> "-"] }
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 7: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 6
+/\ callbacks = {<<"b", "a">>}
+/\ tasks = [ a |->
+      [ state |-> "suspended",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "acquired",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "lease",
+        timerAt |-> 2,
+        pid |-> "w1" ] ]
+/\ obs = [a |-> "none", b |-> "none"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 1
+/\ outbox = { [kind |-> "execute", version |-> 0, id |-> "a", addr |-> "-"],
+  [kind |-> "execute", version |-> 0, id |-> "b", addr |-> "-"] }
+/\ claim = [w1 |-> [version |-> 1, task |-> "b"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 8: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 7
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "retry",
+        timerAt |-> 2,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "fulfilled",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "resolved"]
+/\ resumes = {<<"a", "b">>}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "resolved",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 1
+/\ outbox = {[kind |-> "execute", version |-> 1, id |-> "a", addr |-> "-"]}
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 9: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 7
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "retry",
+        timerAt |-> 2,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "fulfilled",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "resolved"]
+/\ resumes = {<<"a", "b">>}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "resolved",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 2
+/\ outbox = {[kind |-> "execute", version |-> 1, id |-> "a", addr |-> "-"]}
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 10: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 8
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "acquired",
+        exists |-> TRUE,
+        version |-> 2,
+        timerKind |-> "lease",
+        timerAt |-> 3,
+        pid |-> "w1" ],
+  b |->
+      [ state |-> "fulfilled",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "none", b |-> "resolved"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "pending",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "resolved",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 2
+/\ outbox = {[kind |-> "execute", version |-> 1, id |-> "a", addr |-> "-"]}
+/\ claim = [w1 |-> [version |-> 2, task |-> "a"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+State 11: <TraceNext line 201, col 5 to line 207, col 27 of module UTrace>
+/\ l = 9
+/\ callbacks = {}
+/\ tasks = [ a |->
+      [ state |-> "fulfilled",
+        exists |-> TRUE,
+        version |-> 2,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ],
+  b |->
+      [ state |-> "fulfilled",
+        exists |-> TRUE,
+        version |-> 1,
+        timerKind |-> "none",
+        timerAt |-> 0,
+        pid |-> "-" ] ]
+/\ obs = [a |-> "resolved", b |-> "resolved"]
+/\ resumes = {}
+/\ badDispatch = {}
+/\ resRegress = {}
+/\ promises = [ a |->
+      [ state |-> "resolved",
+        exists |-> TRUE,
+        timeoutAt |-> 9,
+        kind |-> "target" ],
+  b |->
+      [ state |-> "resolved",
+        exists |-> TRUE,
+        timeoutAt |-> 8,
+        kind |-> "target" ] ]
+/\ delivered = {}
+/\ resTUnprojected = {}
+/\ listeners = {}
+/\ now = 2
+/\ outbox = {}
+/\ claim = [w1 |-> [version |-> 0, task |-> "-"]]
+/\ badHalt = {}
+/\ resTRegress = {}
+/\ resUnprojected = {}
+/\ obsRes = [a |-> "none", b |-> "none"]
+/\ obsResT = [a |-> "none", b |-> "none"]
+
+11 states generated, 11 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 11.
+Finished in 02s at (2026-08-01 22:09:08)
+Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785622146.tla
