@@ -51,32 +51,65 @@ would throw that attribution away — which is the only thing a mutation
 experiment is for. (The first run of this suite reported `Safety` for every
 mutation, which was useless.)
 
-| mutation | property that fails | states in counterexample |
+| mutation (= a defect some implementation has) | property that catches it | states |
 |---|---|---|
-| drop TIMEOUT-WINS from the cascade | `NoDeadDispatch` | 7 |
-| over-arm (arm every promise) | `ArmingIsExternalOnly` | 3 |
+| resume a dead awaiter | `NoDeadDispatch` | 7 |
+| under-arm: arm only targeted | `ObligationsAreDischargeable` | 4 |
+| over-arm: arm every promise | `ArmingIsExternalOnly` | 3 |
+| listener on an internal promise | `ObligationsAreDischargeable` | 3 |
+| callback on an internal promise | `ObligationsAreDischargeable` | 5 |
+| ungate `task.create` claim | `NoDeadDispatch` | 4 |
 | ungate `task.halt` | `NoHaltOnDead` | 4 |
-| `task.create` serves the raw row | ⏳ not yet run | |
-| ungate `task.continue` | ⏳ not yet run | |
-| drop the external guard on callbacks | ⏳ not yet run | |
+| ungate `task.continue` | `NoDeadDispatch` | 5 |
+| redispatch a dead task (R6) | `NoDeadDispatch` | 4 |
+| `task.create` serves the raw row | `ResponsesAreProjected` | 4 |
 
-The first three are from an actual run against this model. The remaining
-three are queued, not assumed — they are not claimed until they have run.
+**No mutation survives.** Every one is caught by a named property, in 3-7
+states.
+
+### A correction worth keeping
+
+The first run of this suite silently produced three WRONG rows. Three anchors
+failed to match (bad escaping), and `mut` then ran TLC against the *previous*
+mutation's file and reported that verdict under the new mutation's name — so
+`under-arm`, `over-arm` and `task.create serves the raw row` all reported
+`NoDeadDispatch`. Two of those were plausible enough to believe, which is what
+made it dangerous.
+
+`mut` now prints `!! ANCHOR DID NOT APPLY` and restores the pristine module.
+**An unapplied mutation is an error, never a data point.**
 
 ## The gap this does not close
 
-Thirteen of the model's properties have never failed under any mutation
-recorded here:
+Five properties do the catching: `NoDeadDispatch`,
+`ObligationsAreDischargeable`, `NoHaltOnDead`, `ArmingIsExternalOnly`,
+`ResponsesAreProjected`. **Sixteen have still never failed under any
+mutation**, so nothing yet distinguishes them from properties with a typo in
+them:
 
 `TypeOK`, `TaskHasPromise`, `TaskHasAtMostOneTimer`, `NonAcquiredTaskHasNoPid`,
 `CallbackNotSelfReferential`, `SuspendedTaskHasCallback`,
 `SettledPromiseHasNoSubscriptions`, `Stickiness`, `NoStrandedListener`,
 `NoStrandedTask`, `TaskPromiseCoherence`, `AtMostOneValidClaim`,
-`OutboxNeverAhead`
+`OutboxNeverAhead`, `ResponsesNeverRegress`, `TaskResponsesNeverRegress`,
+`TaskResponsesAreProjected`
 
-A property that never fails cannot be told apart from one with a typo in it.
-Both source models mutation-tested their own checks — resonate-on-convex ran
-five mutants, resonate-pg injected two faults — and this model has not been
-tested that way. `AtMostOneValidClaim` is the most important of the thirteen,
-because it is the only property in this family that states at-most-once
-execution at all.
+`ResponsesNeverRegress` is a near-miss rather than untested: the raw-row
+mutation does violate it, but `ResponsesAreProjected` fails first and TLC
+stops there.
+
+`AtMostOneValidClaim` is the most important of the sixteen, because it is the
+only property in this family that states at-most-once execution at all — and
+no mutation here targets fencing.
+
+## What a mutation does NOT establish
+
+A mutation shows the model **has a property that would catch a defect class**.
+It says nothing about any implementation's code. Detecting a bug in a real
+implementation needs a recorded trace that exercises it (`TRACES.md`) — and
+the 14 traces currently in hand exercise only the external-waiter class.
+
+This is the cost of dropping the profiles, stated plainly: the old
+`MC_pg.cfg` model-checked resonate-pg's *semantics* exhaustively and found
+`NoHaltOnDead` across the whole reachable space. Nothing does that now,
+because the model no longer has a way to express "resonate-pg's semantics".
