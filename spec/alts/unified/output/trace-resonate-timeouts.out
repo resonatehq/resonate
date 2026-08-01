@@ -1,16 +1,16 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=37803 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=40381 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 65 and seed -2482870383559617661 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 8407] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 4 and seed 2402250274884176673 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 13753] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-14542619164321398771/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-14542619164321398771/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-14542619164321398771/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-14542619164321398771/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-14542619164321398771/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
-Parsing file /tmp/tlc-14542619164321398771/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-14542619164321398771/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-14542619164321398771/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-5690270582736391860/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5690270582736391860/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5690270582736391860/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5690270582736391860/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5690270582736391860/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-5690270582736391860/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5690270582736391860/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-5690270582736391860/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -26,54 +26,10 @@ Linting of module Json
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module UTrace
-Starting... (2026-08-01 22:55:18)
+Starting... (2026-08-01 23:32:59)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 22:55:18.
-<<"AT", 1, "AdvanceClock", "END">>
-<<"AT", 2, "PromiseCreate", "END">>
-<<"AT", 3, "Deliver", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 5, "WorkerCrash", "END">>
-<<"AT", 6, "AdvanceClock", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 8, "DropMsg", "END">>
-<<"AT", 9, "AdvanceClock", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 11, "Deliver", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 13, "TaskRelease", "END">>
-<<"AT", 14, "Deliver", "END">>
-<<"AT", 15, "PromiseCreate", "END">>
-<<"AT", 16, "Deliver", "END">>
-<<"AT", 17, "AdvanceClock", "END">>
-<<"AT", 18, "Batch", "END">>
-<<"AT", 18, "Batch", "END">>
+Finished computing initial states: 1 distinct state generated at 2026-08-01 23:33:00.
 Error: Invariant NotReplayed is violated.
-<<"AT", 1, "AdvanceClock", "END">>
-<<"AT", 2, "PromiseCreate", "END">>
-<<"AT", 3, "Deliver", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 5, "WorkerCrash", "END">>
-<<"AT", 6, "AdvanceClock", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 8, "DropMsg", "END">>
-<<"AT", 9, "AdvanceClock", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 11, "Deliver", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 13, "TaskRelease", "END">>
-<<"AT", 14, "Deliver", "END">>
-<<"AT", 15, "PromiseCreate", "END">>
-<<"AT", 16, "Deliver", "END">>
-<<"AT", 17, "AdvanceClock", "END">>
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
 /\ l = 1
@@ -146,7 +102,7 @@ State 1: <Initial predicate>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 2: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 2: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 1
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -217,7 +173,7 @@ State 2: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 3: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 3: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 2
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -288,7 +244,7 @@ State 3: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 4: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 4: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -359,7 +315,7 @@ State 4: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 5: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 5: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 4
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -430,7 +386,7 @@ State 5: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 6: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 6: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 5
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -501,7 +457,7 @@ State 6: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 7: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 7: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 6
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -572,7 +528,7 @@ State 7: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 8: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 8: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 6
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -643,7 +599,7 @@ State 8: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 9: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 9: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 7
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -714,7 +670,7 @@ State 9: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 10: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 10: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 7
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -785,7 +741,7 @@ State 10: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 11: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 11: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 8
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -856,7 +812,7 @@ State 11: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 12: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 12: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 9
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -927,7 +883,7 @@ State 12: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 13: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 13: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 9
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -998,7 +954,7 @@ State 13: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 14: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 14: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 10
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1069,7 +1025,7 @@ State 14: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 15: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 15: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 10
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1140,7 +1096,7 @@ State 15: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 16: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 16: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 11
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1211,7 +1167,7 @@ State 16: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 17: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 17: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 12
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1282,7 +1238,7 @@ State 17: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 18: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 18: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 13
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1353,7 +1309,7 @@ State 18: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 19: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 19: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 14
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1424,7 +1380,7 @@ State 19: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 20: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 20: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 15
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1495,7 +1451,7 @@ State 20: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 21: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 21: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 16
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1566,7 +1522,7 @@ State 21: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 22: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 22: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 17
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1638,7 +1594,7 @@ State 22: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 23: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 23: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 17
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1710,7 +1666,7 @@ State 23: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-State 24: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 24: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 18
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1785,8 +1741,7 @@ State 24: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-<<"AT", 18, "Batch", "END">>
-State 25: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 25: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 18
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1861,8 +1816,7 @@ State 25: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-<<"AT", 18, "Batch", "END">>
-State 26: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
+State 26: <TraceNext line 274, col 5 to line 281, col 31 of module UTrace>
 /\ l = 19
 /\ callbacks = {}
 /\ tasks = ( "wf1" :>
@@ -1937,30 +1891,7 @@ State 26: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ obsRes = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 /\ obsResT = ("wf1" :> "none" @@ "wf1.a" :> "none" @@ "wf1.b" :> "none" @@ "wf2" :> "none")
 
-<<"AT", 1, "AdvanceClock", "END">>
-<<"AT", 2, "PromiseCreate", "END">>
-<<"AT", 3, "Deliver", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 4, "TaskAcquire", "END">>
-<<"AT", 5, "WorkerCrash", "END">>
-<<"AT", 6, "AdvanceClock", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 7, "Batch", "END">>
-<<"AT", 8, "DropMsg", "END">>
-<<"AT", 9, "AdvanceClock", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 10, "Batch", "END">>
-<<"AT", 11, "Deliver", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 12, "TaskAcquire", "END">>
-<<"AT", 13, "TaskRelease", "END">>
-<<"AT", 14, "Deliver", "END">>
-<<"AT", 15, "PromiseCreate", "END">>
-<<"AT", 16, "Deliver", "END">>
-<<"AT", 17, "AdvanceClock", "END">>
-<<"AT", 18, "Batch", "END">>
-<<"AT", 18, "Batch", "END">>
 26 states generated, 26 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 26.
-Finished in 00s at (2026-08-01 22:55:18)
-Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785624918.tla
+Finished in 00s at (2026-08-01 23:33:00)
+Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785627179.tla

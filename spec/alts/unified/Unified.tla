@@ -13,17 +13,32 @@
 (*                                      (time: unpunctual scheduler,        *)
 (*                                       fairness, liveness).               *)
 (*                                                                          *)
-(* THE CENTRAL IDEA.  The three implementation models are not competitors;  *)
-(* they are three quotients of one machine.  So the merge is not textual.   *)
-(* Every place where an implementation diverges from the specification       *)
-(* becomes a named boolean CONSTANT, and each implementation is a PROFILE — *)
-(* an assignment of those constants.  Divergence becomes configuration.     *)
+(* THIS MODEL IS THE SPECIFICATION.  One configuration, no profiles.        *)
 (*                                                                          *)
-(* Setting every guard TRUE is the specification.  Each implementation      *)
-(* profile must then reproduce that implementation's known defects as       *)
-(* violations of named properties, and the spec profile must clear them     *)
-(* all.  That is the acceptance test for this model, and it is what makes   *)
-(* "winning" checkable rather than argued.  See ACCEPTANCE.md.              *)
+(* An earlier version carried a boolean CONSTANT for every place an         *)
+(* implementation diverged, so each implementation had a "profile".  That    *)
+(* was self-defeating and the evidence showed it: `MC_convex.cfg` set        *)
+(* CallbackExternalGuard = FALSE, which TELLS the model that suspending on   *)
+(* an internal promise is expected -- so nothing fired, and the divergence   *)
+(* was found only by replaying a real trace against the specification.  A    *)
+(* switch that encodes a defect cannot detect that defect.                   *)
+(*                                                                          *)
+(* So the design is now:                                                    *)
+(*                                                                          *)
+(*   VALID BEHAVIOUR  is the transition relation.  Every guard the          *)
+(*     specification requires is hard-wired.  Where the specification       *)
+(*     genuinely PERMITS several behaviours -- the read discipline, whether *)
+(*     there is a delivery stage, the order the environment fires its rules *)
+(*     -- the model offers all of them as NONDETERMINISM, not as            *)
+(*     configuration.  One model covers every valid implementation.         *)
+(*                                                                          *)
+(*   INVALID BEHAVIOUR  is anything the relation cannot produce.  A         *)
+(*     recorded trace that will not replay IS the detection, and it names   *)
+(*     the exact event.  See UTrace.tla.                                    *)
+(*                                                                          *)
+(* The invariants below are properties of the specification.  They hold by  *)
+(* construction; their job is to catch errors in THIS MODEL, and to be the  *)
+(* vocabulary a mutation experiment reports against (see MUTATIONS.md).     *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
@@ -44,76 +59,9 @@ CONSTANTS
                   \* space is unchanged.
 
     (***********************************************************************)
-    (* SWITCHES.  These are NOT all of one kind, and the difference matters *)
-    (* for how the profiles should be read:                                 *)
-    (*                                                                      *)
-    (*   (a) CONFORMANCE GUARDS.  TRUE is the specification; FALSE is a     *)
-    (*       DEFECT.  These are a to-do list -- every one should become     *)
-    (*       TRUE in every implementation, at which point that              *)
-    (*       implementation's profile becomes identical to MC_spec.cfg and  *)
-    (*       can be deleted.                                                *)
-    (*   (b) IMPLEMENTATION LATITUDE.  Choices the specification does not   *)
-    (*       dictate.  These are permanent; they never collapse.            *)
-    (*   (c) ENVIRONMENT.  Not about the server at all.                     *)
-    (*                                                                      *)
-    (* There is exactly ONE specification.  The implementation profiles are *)
-    (* not rival specifications -- they are executable descriptions of      *)
-    (* known bugs, kept because a property that never fails cannot be       *)
-    (* distinguished from a vacuous one, and because a fix should be        *)
-    (* verified by flipping a switch rather than argued.                    *)
+    (* There are no behaviour switches.  What remains are SCOPE parameters  *)
+    (* and the fault toggle.                                                *)
     (***********************************************************************)
-
-    \* (a) CONFORMANCE GUARD.  Arming is EXTERNAL-ONLY.  Anything else is a
-    \* defect, in both directions:
-    \*
-    \*   "target" under-arms  - an external-but-untargeted promise gets no
-    \*     timeout, so an obligation recorded against it can never be
-    \*     discharged.  Caught by ObligationsAreDischargeable.
-    \*   "all"    over-arms   - an INTERNAL promise gets a durable timeout
-    \*     it should not have.  Caught by ArmingIsExternalOnly.
-    \*
-    \* The two properties pin arming from opposite sides; neither catches
-    \* the other's failure, so both are needed.
-    ArmPolicy,             \* which promises the timeout rule may fire on:
-                           \*   "external" - the specification (correct)
-                           \*   "target"   - resonate @ c8d7c7b   (under-arms)
-                           \*   "all"      - resonate-on-convex   (over-arms)
-    \* (a) CONFORMANCE GUARDS -- FALSE is a defect in every case below.
-    CallbackExternalGuard, \* P-04 refuses an internal awaited (422)
-    ListenerExternalGuard, \* P-05 refuses an internal awaited (422)
-    PromiseLivenessGuard,  \* T-02 claim / T-09 halt / T-10 continue gate on
-                           \* the projected promise
-    TimeoutLivenessGuard,  \* R5 lease expiry / R6 dispatch gate on it too
-    ResumeLivenessGuard,   \* R4 resume skips an awaiter that is itself
-                           \* logically dead  (TIMEOUT ALWAYS WINS)
-    HeartbeatGuard,        \* T-05 gates on the projected promise
-    ProjectedResponses,    \* (a) every response carrying a promise record
-                           \* serves the PROJECTED record, not the raw row
-
-    \* (b) LATITUDE.  resonate-pg's driver drains the promise-timeout loop
-    \* before the task-timeout loop.  This only RESTRICTS behaviour, so it
-    \* can never introduce a violation -- it is a masking mechanism, not a
-    \* defect.  It is a switch so the model can show what it masks.
-    SequencedDriver,
-
-    \* (d) MODEL DETAIL.  Does this implementation have a distinct delivery
-    \* stage between the outbox and task.acquire?  resonate does (the
-    \* fire-and-forget transport: outbox -> delivered -> acquire).
-    \* resonate-pg and resonate-on-convex do not -- acquire is an RPC and the
-    \* outbox is drained separately -- so with WorkerLayer = FALSE a worker
-    \* may acquire against a message still queued.  This is not a defect on
-    \* either setting; it is a difference in what the implementation HAS.
-    WorkerLayer,
-
-    \* (b) LATITUDE.  Does a read MATERIALISE the timeout it observes, or
-    \* only project it?  resonate (`try_timeout`) and resonate-on-convex
-    \* (`tryEagerTimeout`) materialise; resonate-pg projects and writes
-    \* nothing.  The specification proves the two disciplines
-    \* indistinguishable -- these are its `-m` and `-p` twins -- so neither
-    \* setting is a defect.
-    MaterialiseOnRead,
-
-    \* (c) ENVIRONMENT.
     FaultsOn               \* message loss and worker crashes are enabled
 
 NoAddr   == "-"
@@ -217,9 +165,11 @@ Live(i) == Proj(i) = "pending"
 \* only be recorded where the timeout rule can discharge it.
 Armed(i) ==
     /\ promises[i].exists
-    /\ CASE ArmPolicy = "all"      -> TRUE
-         [] ArmPolicy = "target"   -> Targeted(i)
-         [] OTHER                  -> External(i)
+    \* EXTERNAL-ONLY.  An internal promise's deadline is projection-only;
+    \* giving it a durable timeout would settle a promise the protocol says
+    \* must merely be projected, and refusing one where an obligation was
+    \* accepted would strand that obligation.
+    /\ External(i)
 
 \* task.get reports a task `fulfilled` the moment its promise is no longer
 \* logically pending, whatever the stored row says (T-01).
@@ -313,7 +263,8 @@ Awaiters(i)     == {j \in Ids : <<i, j>> \in callbacks}
 LAddrs(i)       == {a \in Addrs : <<i, a>> \in listeners}
 
 \* awaiters eligible to be woken / to buffer the trigger
-Eligible(j)     == ResumeLivenessGuard => Live(j)
+\* TIMEOUT ALWAYS WINS: an awaiter past its own deadline is dead weight.
+Eligible(j)     == Live(j)
 
 SuspAwaiters(i) == {j \in Awaiters(i) : tasks[j].exists
                                      /\ tasks[j].state = "suspended"
@@ -415,7 +366,7 @@ RegisterCallback(aw, ar) ==
     /\ promises[aw].exists                      \* 404
     /\ promises[ar].exists                      \* 422
     /\ Targeted(ar)                             \* 422 awaiter must be routable
-    /\ CallbackExternalGuard => External(aw)    \* 422 external-only waiters
+    /\ External(aw)                             \* 422 external-only waiters
     /\ promises[aw].state = "pending" /\ promises[aw].timeoutAt > now
     /\ promises[ar].state = "pending" /\ promises[ar].timeoutAt > now
     /\ <<aw, ar>> \notin callbacks
@@ -426,7 +377,7 @@ RegisterCallback(aw, ar) ==
 \* P-05 promise.register_listener
 RegisterListener(aw, ad) ==
     /\ promises[aw].exists                      \* 404
-    /\ ListenerExternalGuard => External(aw)    \* 422 external-only waiters
+    /\ External(aw)                             \* 422 external-only waiters
     /\ promises[aw].state = "pending" /\ promises[aw].timeoutAt > now
     /\ <<aw, ad>> \notin listeners
     /\ listeners' = listeners \cup {<<aw, ad>>}
@@ -446,7 +397,7 @@ TaskClaim(i, w, ttl) ==
     /\ Targeted(i)
     /\ tasks[i].exists
     /\ tasks[i].state = "pending"
-    /\ PromiseLivenessGuard => Live(i)
+    /\ Live(i)                                  \* 409 -- spec T-02
     /\ tasks[i].version < MaxVersion
     /\ tasks'   = [tasks EXCEPT ![i].state = "acquired",
                                 ![i].version = tasks[i].version + 1,
@@ -459,7 +410,7 @@ TaskClaim(i, w, ttl) ==
     /\ badDispatch' = IF Live(i) THEN badDispatch ELSE badDispatch \cup {i}
     \* T-02's response.  The specification serves `(p.project now).toRecord`;
     \* resonate.sql serves `_promise_json_raw(p)`, deliberately unprojected.
-    /\ RespondP(i, IF ProjectedResponses THEN Proj(i) ELSE promises[i].state)
+    /\ RespondP(i, promises[i].state)
     \* T-02 also answers a task record: the task it just acquired.
     /\ RespondT(i, "acquired")
     /\ UNCHANGED <<now, promises, callbacks, listeners, outbox, delivered,
@@ -469,10 +420,10 @@ TaskClaim(i, w, ttl) ==
 \* version CAS is the fencing token.
 TaskAcquire(w, m, ttl) ==
     /\ claim[w].task = NoAddr
-    \* The ONLY thing WorkerLayer changes is where the message comes from.
-    \* Every guard below is unconditional, so WorkerLayer = TRUE is exactly
-    \* the previous behaviour.
-    /\ IF WorkerLayer THEN m \in delivered ELSE m \in outbox \cup delivered
+    \* NONDETERMINISM, not configuration: an implementation may or may not
+    \* have a delivery stage between the outbox and acquire.  Both are
+    \* valid, so the model permits either source.
+    /\ m \in outbox \cup delivered
     /\ m.kind = "execute"
     /\ LET i == m.id IN
        /\ tasks[i].exists
@@ -503,7 +454,7 @@ TaskSuspend(i, S) ==
     /\ promises[i].exists
     /\ Live(i)                                  \* 409
     /\ \A j \in S : promises[j].exists           \* 422
-    /\ \A j \in S : CallbackExternalGuard => External(j)  \* 422
+    /\ \A j \in S : External(j)                  \* 422 external-only waiters
     \* T-06 answers the task: still acquired on the 300 re-check path,
     \* parked on the parking path.
     /\ RespondT(i, IF \E j \in S : ~Live(j) THEN "acquired" ELSE "suspended")
@@ -555,7 +506,7 @@ TaskHeartbeat(w) ==
        /\ tasks[i].exists
        /\ tasks[i].state = "acquired"
        /\ tasks[i].version = claim[w].version
-       /\ HeartbeatGuard => Live(i)             \* spec T-05
+       /\ Live(i)                               \* spec T-05
        /\ tasks' = [tasks EXCEPT ![i].timerKind = "lease",
                                  ![i].timerAt = now + tasks[i].ttl]
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, outbox,
@@ -565,7 +516,7 @@ TaskHeartbeat(w) ==
 TaskHalt(i) ==
     /\ tasks[i].exists
     /\ tasks[i].state \notin {"fulfilled", "halted"}
-    /\ PromiseLivenessGuard => Live(i)          \* spec T-09
+    /\ Live(i)                                  \* spec T-09
     /\ tasks' = [tasks EXCEPT ![i].state = "halted", ![i].pid = NoWorker,
                               ![i].timerKind = "none", ![i].timerAt = 0,
                               ![i].ttl = 0]
@@ -585,7 +536,7 @@ TaskContinue(i) ==
     /\ tasks[i].exists
     /\ tasks[i].state = "halted"
     /\ promises[i].exists
-    /\ PromiseLivenessGuard => Live(i)          \* spec T-10
+    /\ Live(i)                                  \* spec T-10
     /\ tasks'  = [tasks EXCEPT ![i].state = "pending",
                                ![i].timerKind = "retry", ![i].timerAt = now + Retry]
     /\ outbox' = IF Targeted(i) THEN PutExec(outbox, i, tasks[i].version)
@@ -625,12 +576,6 @@ TaskGet(i) ==
 (* firing is harmless: the rule re-checks its own due time.                 *)
 (***************************************************************************)
 
-\* resonate-pg's driver drains the promise loop to a fixpoint first; that
-\* ordering is what masks the dead-dispatch defect in the shipped server.
-NoPromiseTimeoutDue ==
-    \A j \in Ids : ~(Armed(j) /\ promises[j].state = "pending"
-                     /\ promises[j].timeoutAt <= now)
-
 (***************************************************************************)
 (* MATERIALISATION vs. ARMING -- two different things, and conflating them  *)
 (* was a real defect in this model until resonate's `timer_gate` trace      *)
@@ -660,7 +605,11 @@ OnPromiseTimeout(i) == Armed(i) /\ TouchPromise(i)
 \* square), so this is latitude, not a defect: resonate's `try_timeout` and
 \* convex's `tryEagerTimeout` materialise; resonate-pg projects and writes
 \* nothing.
-ClientTouch(i) == MaterialiseOnRead /\ TouchPromise(i)
+\* NONDETERMINISM, not configuration: the specification's twins.  A read may
+\* materialise the timeout it observes (`-m`) or merely project it (`-p`).
+\* Both are valid -- the square theorem proves them indistinguishable -- so
+\* the model simply permits the materialising step at any time.
+ClientTouch(i) == TouchPromise(i)
 
 \* R6 -- dispatch
 OnTaskRetryTimeout(i) ==
@@ -668,8 +617,7 @@ OnTaskRetryTimeout(i) ==
     /\ tasks[i].state = "pending"
     /\ tasks[i].timerKind = "retry"
     /\ tasks[i].timerAt <= now
-    /\ SequencedDriver => NoPromiseTimeoutDue
-    /\ TimeoutLivenessGuard => Live(i)
+    /\ Live(i)                    \* no new work for the dead (R6)
     /\ tasks'  = [tasks EXCEPT ![i].timerAt = now + Retry]
     /\ outbox' = IF promises[i].exists /\ Targeted(i)
                  THEN PutExec(outbox, i, tasks[i].version) ELSE outbox
@@ -685,8 +633,7 @@ OnTaskLeaseTimeout(i) ==
     /\ tasks[i].state = "acquired"
     /\ tasks[i].timerKind = "lease"
     /\ tasks[i].timerAt <= now
-    /\ SequencedDriver => NoPromiseTimeoutDue
-    /\ TimeoutLivenessGuard => Live(i)
+    /\ Live(i)                    \* no new work for the dead (R6)
     /\ tasks'  = [tasks EXCEPT ![i].state = "pending", ![i].pid = NoWorker,
                                ![i].timerKind = "retry", ![i].timerAt = now + Retry,
                                ![i].ttl = 0]

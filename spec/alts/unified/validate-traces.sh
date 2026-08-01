@@ -1,88 +1,31 @@
 #!/usr/bin/env bash
-# Replay every adapted trace through the unified model.
+# Replay every adapted trace through THE model.
 #
-#   ./validate-traces.sh [PROFILE]
+#   ./validate-traces.sh
 #
-# PROFILE defaults to `impl` -- replay each trace under its OWN
-# implementation's profile, which asks "does the model describe the
-# implementation?".  Pass `spec` to replay under the specification profile
-# instead, which asks "was this recorded execution conformant?".
+# There is no profile to choose.  The model is the specification, so a trace
+# either replays -- the recorded execution was conformant -- or it does not,
+# and the run names the event where it stopped.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="${TLA_LIB:-$HERE/.tla-lib}"
-PROFILE="${1:-impl}"
 OUT="$HERE/output"; mkdir -p "$OUT"
 
 fail=0
 for t in "$HERE"/traces/*.ndjson; do
   name="$(basename "$t" .ndjson)"
-  impl="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['impl'])")"
-
-  if [ "$PROFILE" = spec ]; then
-    GUARDS='CallbackExternalGuard = TRUE
-    ListenerExternalGuard = TRUE
-    PromiseLivenessGuard  = TRUE
-    TimeoutLivenessGuard  = TRUE
-    ResumeLivenessGuard   = TRUE
-    HeartbeatGuard        = TRUE
-    ProjectedResponses    = TRUE
-    ArmPolicy             = "external"'
-  else
-    case "$impl" in
-      resonate-pg) GUARDS='CallbackExternalGuard = TRUE
-    ListenerExternalGuard = FALSE
-    PromiseLivenessGuard  = FALSE
-    TimeoutLivenessGuard  = FALSE
-    ResumeLivenessGuard   = FALSE
-    HeartbeatGuard        = TRUE
-    ProjectedResponses    = FALSE
-    ArmPolicy             = "external"' ;;
-      resonate-on-convex) GUARDS='CallbackExternalGuard = FALSE
-    ListenerExternalGuard = FALSE
-    PromiseLivenessGuard  = TRUE
-    TimeoutLivenessGuard  = TRUE
-    ResumeLivenessGuard   = FALSE
-    HeartbeatGuard        = TRUE
-    ProjectedResponses    = TRUE
-    ArmPolicy             = "all"' ;;
-      resonate) GUARDS='CallbackExternalGuard = FALSE
-    ListenerExternalGuard = FALSE
-    PromiseLivenessGuard  = FALSE
-    TimeoutLivenessGuard  = FALSE
-    ResumeLivenessGuard   = FALSE
-    HeartbeatGuard        = FALSE
-    ProjectedResponses    = TRUE
-    ArmPolicy             = "target"' ;;
-      *) echo "no profile for impl=$impl"; exit 2 ;;
-    esac
-  fi
-
-  if [ "$impl" = resonate ]; then wl=TRUE; else wl=FALSE; fi
-  # resonate-pg projects and writes nothing; the other two materialise
-  if [ "$impl" = resonate-pg ]; then mor=FALSE; else mor=TRUE; fi
-  ids="$(python3 -c "import json;print('{'+','.join('\"%s\"'%i for i in json.loads(open('$t').readline())['config']['ids'])+'}')")"
-  addrs="$(python3 -c "import json;print('{'+','.join('\"%s\"'%i for i in json.loads(open('$t').readline())['config']['addrs'])+'}')")"
-  retry="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['retry'])")"
-  ttl="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['ttl'])")"
-  # workers come from the trace when the harness names them: the convex
-  # `crash` scenario needs the SECOND worker, because the first died holding
-  # its claim and nothing in the recorded trace ever frees it
-  workers="$(python3 -c "
-import json
-c=json.loads(open('$t').readline())['config']
-p=c.get('pids') or ['w1']
-print('{'+','.join('\"%s\"'%i for i in p)+'}')")"
-  # every lease TTL this trace exhibits, so the model can offer the one the
-  # worker actually presented
-  ttls="$(python3 - "$t" "$ttl" <<'PYX'
+  read -r ids addrs workers retry ttl ttls <<<"$(python3 - "$t" <<'PYX'
 import json,sys
-vals={int(sys.argv[2])}
-for line in open(sys.argv[1]):
-    d=json.loads(line)
+lines=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+c=lines[0]["config"]
+def st(xs): return "{"+",".join('"%s"'%x for x in xs)+"}"
+vals={int(c["ttl"])}
+for d in lines:
     if d.get("tag")!="trace": continue
     for tk in d["event"]["state"].get("tasks",{}).values():
         if "ttl" in tk: vals.add(int(tk["ttl"]))
-print("{"+",".join(str(v) for v in sorted(vals))+"}")
+print(st(c["ids"]), st(c["addrs"]), st(c.get("pids") or ["w1"]),
+      c["retry"], c["ttl"], "{"+",".join(str(v) for v in sorted(vals))+"}")
 PYX
 )"
 
@@ -97,11 +40,7 @@ CONSTANTS
     Retry = $retry
     Ttl   = $ttl
     TTLs  = $ttls
-    $GUARDS
-    SequencedDriver = FALSE
-    WorkerLayer     = $wl
-    MaterialiseOnRead = $mor
-    FaultsOn        = TRUE
+    FaultsOn = TRUE
     TraceFile = "$t"
 CHECK_DEADLOCK FALSE
 INVARIANT NotReplayed
@@ -109,14 +48,14 @@ CFG
 
   java -XX:+UseParallelGC -cp "$LIB/tla2tools.jar:$LIB/CommunityModules-deps.jar" \
        tlc2.TLC -config "$HERE/UTrace.cfg" -workers 1 "$HERE/UTrace.tla" \
-       > "$OUT/trace-$PROFILE-$name.out" 2>&1
+       > "$OUT/trace-$name.out" 2>&1
 
   events=$(python3 -c "import json;print(sum(1 for l in open('$t') if l.strip() and json.loads(l)['tag']=='trace'))")
   # a full replay VIOLATES NotReplayed -- see the header of UTrace.tla
-  if grep -q "Invariant NotReplayed is violated" "$OUT/trace-$PROFILE-$name.out"; then
-    printf "  %-28s REPLAYED  %2s events\n" "$name" "$events"
+  if grep -q "Invariant NotReplayed is violated" "$OUT/trace-$name.out"; then
+    printf "  %-28s CONFORMANT      %2s events\n" "$name" "$events"
   else
-    printf "  %-28s NOT REPLAYED  %2s events -- output/trace-%s-%s.out\n" "$name" "$events" "$PROFILE" "$name"
+    printf "  %-28s NOT CONFORMANT  %2s events -- output/trace-%s.out\n" "$name" "$events" "$name"
     fail=1
   fi
 done
