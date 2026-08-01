@@ -53,6 +53,8 @@ CONSTANTS
     HeartbeatGuard,        \* T-05 gates on the projected promise
     SequencedDriver,       \* the promise-timeout loop drains before the
                            \* task-timeout loop (resonate-pg's driver)
+    ProjectedResponses,    \* every response carrying a promise record serves
+                           \* the PROJECTED record, never the raw stored row
     FaultsOn               \* message loss and worker crashes are enabled
 
 NoAddr   == "-"
@@ -85,7 +87,17 @@ VARIABLES
     (* history variables -- observation channel, from resonate-pg *)
     obs,          \* first non-pending projection ever observable per promise
     badDispatch,  \* ids given a lease or an execute while logically dead
-    badHalt       \* ids halted while task.get would already report fulfilled
+    badHalt,      \* ids halted while task.get would already report fulfilled
+
+    (* THE RESPONSE CHANNEL.  Everything above observes STATE.  These observe
+       what a handler actually ANSWERED -- the one channel none of the three
+       source models had, and the channel the specification's own stability
+       theorem is stated on. *)
+    obsRes,          \* first settled promise state ever RETURNED, per promise
+    resRegress,      \* promises for which a later response answered `pending`
+                     \* after some response had already answered settled
+    resUnprojected   \* promises answered with a record that is not the
+                     \* projection at the answering instant
 
 core    == <<promises, tasks, callbacks, listeners, resumes, outbox,
              delivered, claim>>
@@ -93,9 +105,13 @@ core    == <<promises, tasks, callbacks, listeners, resumes, outbox,
 \* UNCHANGED list: it is written by `Next` alone.  An action that also
 \* constrained it would be DISABLED exactly when that step newly exposes an
 \* expiry -- silently pruning the states this model exists to reach.
-ghosts  == <<badDispatch, badHalt>>
+ghosts  == <<badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
+\* Unlike `obs`, these ARE written by the actions, so every action must
+\* mention them -- either by responding or by leaving them alone.
+resVars == <<obsRes, resRegress, resUnprojected>>
 vars    == <<now, promises, tasks, callbacks, listeners, resumes, outbox,
-             delivered, claim, obs, badDispatch, badHalt>>
+             delivered, claim, obs, badDispatch, badHalt,
+             obsRes, resRegress, resUnprojected>>
 
 NoPromise == [exists |-> FALSE, state |-> "pending", timeoutAt |-> 0,
               kind |-> "plain"]
@@ -138,6 +154,47 @@ Armed(i) ==
     /\ CASE ArmPolicy = "all"      -> TRUE
          [] ArmPolicy = "target"   -> Targeted(i)
          [] OTHER                  -> External(i)
+
+\* task.get reports a task `fulfilled` the moment its promise is no longer
+\* logically pending, whatever the stored row says (T-01).
+ProjTask(i) ==
+    IF ~tasks[i].exists THEN "none"
+    ELSE IF ~Live(i)   THEN "fulfilled"
+    ELSE tasks[i].state
+
+(***************************************************************************)
+(* THE RESPONSE CHANNEL.                                                    *)
+(*                                                                          *)
+(* `RespondP(i, ps)` records that a handler answered, about promise i, a    *)
+(* record whose state field is `ps`.  Two things are then observable that   *)
+(* no amount of state inspection can see:                                   *)
+(*                                                                          *)
+(*   resRegress      a response answered `pending` for a promise some       *)
+(*                   earlier response had already answered settled.  This   *)
+(*                   is settled-promise stability, ON THE WIRE -- the       *)
+(*                   client-visible statement, which does not presuppose    *)
+(*                   the projection discipline.                             *)
+(*   resUnprojected  a response carried a record that is not the projection *)
+(*                   at the answering instant -- the discipline itself.     *)
+(*                                                                          *)
+(* `ps` is evaluated in the PRE-state, so only handlers that do not         *)
+(* themselves settle the promise may use this; settling handlers answer     *)
+(* with the state they just wrote, which is projection-equal by             *)
+(* construction.                                                            *)
+(***************************************************************************)
+RespondP(i, ps) ==
+    /\ obsRes' = [j \in Ids |->
+                    IF j = i /\ obsRes[j] = "none" /\ ps \notin {"none", "pending"}
+                    THEN ps ELSE obsRes[j]]
+    /\ resRegress' = IF obsRes[i] # "none" /\ ps = "pending"
+                     THEN resRegress \cup {i} ELSE resRegress
+    /\ resUnprojected' = IF ps # "none" /\ ps # Proj(i)
+                         THEN resUnprojected \cup {i} ELSE resUnprojected
+
+NoResponse ==
+    /\ obsRes' = obsRes
+    /\ resRegress' = resRegress
+    /\ resUnprojected' = resUnprojected
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -219,7 +276,7 @@ DoSettle(i, st) ==
     /\ claim'     = [w \in Workers |->
                        IF claim[w].task = i THEN NoClaim ELSE claim[w]]
     /\ badDispatch' = badDispatch \cup DeadResumed(i)
-    /\ UNCHANGED <<now, delivered, badHalt>>
+    /\ UNCHANGED <<now, delivered, badHalt, obsRes, resRegress, resUnprojected>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -253,7 +310,7 @@ PromiseCreate(i, toat, k) ==
                   ELSE UNCHANGED tasks
                /\ UNCHANGED outbox
     /\ UNCHANGED <<now, callbacks, listeners, resumes, delivered, claim,
-                   badDispatch, badHalt>>
+                   badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* P-03 promise.settle
 PromiseSettle(i, st) ==
@@ -274,7 +331,7 @@ RegisterCallback(aw, ar) ==
     /\ <<aw, ar>> \notin callbacks
     /\ callbacks' = callbacks \cup {<<aw, ar>>}
     /\ UNCHANGED <<now, promises, tasks, listeners, resumes, outbox,
-                   delivered, claim, badDispatch, badHalt>>
+                   delivered, claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* P-05 promise.register_listener
 RegisterListener(aw, ad) ==
@@ -284,7 +341,7 @@ RegisterListener(aw, ad) ==
     /\ <<aw, ad>> \notin listeners
     /\ listeners' = listeners \cup {<<aw, ad>>}
     /\ UNCHANGED <<now, promises, tasks, callbacks, resumes, outbox,
-                   delivered, claim, badDispatch, badHalt>>
+                   delivered, claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -310,6 +367,9 @@ TaskClaim(i, w) ==
     /\ claim'   = [claim EXCEPT ![w] = [task |-> i,
                                         version |-> tasks[i].version + 1]]
     /\ badDispatch' = IF Live(i) THEN badDispatch ELSE badDispatch \cup {i}
+    \* T-02's response.  The specification serves `(p.project now).toRecord`;
+    \* resonate.sql serves `_promise_json_raw(p)`, deliberately unprojected.
+    /\ RespondP(i, IF ProjectedResponses THEN Proj(i) ELSE promises[i].state)
     /\ UNCHANGED <<now, promises, callbacks, listeners, outbox, delivered,
                    badHalt>>
 
@@ -335,7 +395,7 @@ TaskAcquire(w, m) ==
        /\ claim'   = [claim EXCEPT ![w] = [task |-> i, version |-> m.version + 1]]
        /\ delivered' = delivered \ {m}
     /\ UNCHANGED <<now, promises, callbacks, listeners, outbox,
-                   badDispatch, badHalt>>
+                   badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* T-06 task.suspend
 TaskSuspend(i, S) ==
@@ -360,7 +420,7 @@ TaskSuspend(i, S) ==
             /\ claim'     = [w \in Workers |->
                                IF claim[w].task = i THEN NoClaim ELSE claim[w]]
     /\ UNCHANGED <<now, promises, listeners, outbox, delivered,
-                   badDispatch, badHalt>>
+                   badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* T-07 task.fulfill
 TaskFulfill(i, st) ==
@@ -383,7 +443,7 @@ TaskRelease(i) ==
     /\ claim'  = [w \in Workers |->
                     IF claim[w].task = i THEN NoClaim ELSE claim[w]]
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, delivered,
-                   badDispatch, badHalt>>
+                   badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* T-05 task.heartbeat
 TaskHeartbeat(w) ==
@@ -396,7 +456,7 @@ TaskHeartbeat(w) ==
        /\ tasks' = [tasks EXCEPT ![i].timerKind = "lease",
                                  ![i].timerAt = now + Ttl]
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, outbox,
-                   delivered, claim, badDispatch, badHalt>>
+                   delivered, claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* T-09 task.halt
 TaskHalt(i) ==
@@ -410,7 +470,7 @@ TaskHalt(i) ==
     \* task.get already reports this task `fulfilled`; halt-on-fulfilled is 409
     /\ badHalt' = IF Live(i) THEN badHalt ELSE badHalt \cup {i}
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, outbox,
-                   delivered, badDispatch>>
+                   delivered, badDispatch, obsRes, resRegress, resUnprojected>>
 
 \* T-10 task.continue
 TaskContinue(i) ==
@@ -425,7 +485,22 @@ TaskContinue(i) ==
     /\ badDispatch' = IF Live(i) \/ ~Targeted(i) THEN badDispatch
                                                  ELSE badDispatch \cup {i}
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, delivered,
-                   claim, badHalt>>
+                   claim, badHalt, obsRes, resRegress, resUnprojected>>
+
+\* P-01 promise.get -- a pure observation.  The reference endpoint: it always
+\* serves the projection, so it is what every other answer is measured against.
+PromiseGet(i) ==
+    /\ promises[i].exists
+    /\ RespondP(i, Proj(i))
+    /\ UNCHANGED <<now, promises, tasks, callbacks, listeners, resumes,
+                   outbox, delivered, claim, badDispatch, badHalt>>
+
+\* T-01 task.get is NOT modelled here.  `RespondP` records promise records
+\* only, so a task.get action would answer `Proj(i)` -- identical to
+\* promise.get, modelling nothing extra.  The task-side wire contradiction
+\* (task.get says `fulfilled`, task.halt returns 200) is carried by the
+\* `badHalt` ghost instead.  A real task response channel needs `ProjTask`
+\* on its own axis; see ACCEPTANCE.md.
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -464,7 +539,7 @@ OnTaskRetryTimeout(i) ==
     /\ badDispatch' = IF promises[i].exists /\ Targeted(i) /\ ~Live(i)
                       THEN badDispatch \cup {i} ELSE badDispatch
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, delivered,
-                   claim, badHalt>>
+                   claim, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* R5 -- lease expiry.  The version is NOT bumped: the fence token survives
 \* the lease, in the specification and in all three implementations.
@@ -482,7 +557,7 @@ OnTaskLeaseTimeout(i) ==
     /\ badDispatch' = IF promises[i].exists /\ Targeted(i) /\ ~Live(i)
                       THEN badDispatch \cup {i} ELSE badDispatch
     /\ UNCHANGED <<now, promises, callbacks, listeners, resumes, delivered,
-                   claim, badHalt>>
+                   claim, badHalt, obsRes, resRegress, resUnprojected>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -496,7 +571,7 @@ Deliver(m) ==
     /\ outbox' = outbox \ {m}
     /\ delivered' = IF m.kind = "execute" THEN delivered \cup {m} ELSE delivered
     /\ UNCHANGED <<now, promises, tasks, callbacks, listeners, resumes,
-                   claim, badDispatch, badHalt>>
+                   claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* fault: the message is lost between the delete and the send
 DropMsg(m) ==
@@ -504,7 +579,7 @@ DropMsg(m) ==
     /\ m \in outbox
     /\ outbox' = outbox \ {m}
     /\ UNCHANGED <<now, promises, tasks, callbacks, listeners, resumes,
-                   delivered, claim, badDispatch, badHalt>>
+                   delivered, claim, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 \* fault: a worker dies holding a claim.  Server state is untouched; the
 \* lease timer is what eventually reclaims the task.
@@ -513,12 +588,12 @@ WorkerCrash(w) ==
     /\ claim[w].task # NoAddr
     /\ claim' = [claim EXCEPT ![w] = NoClaim]
     /\ UNCHANGED <<now, promises, tasks, callbacks, listeners, resumes,
-                   outbox, delivered, badDispatch, badHalt>>
+                   outbox, delivered, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 Tick ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ UNCHANGED <<core, badDispatch, badHalt>>
+    /\ UNCHANGED <<core, badDispatch, badHalt, obsRes, resRegress, resUnprojected>>
 
 -----------------------------------------------------------------------------
 Init ==
@@ -534,12 +609,16 @@ Init ==
     /\ obs         = [i \in Ids |-> "none"]
     /\ badDispatch = {}
     /\ badHalt     = {}
+    /\ obsRes      = [i \in Ids |-> "none"]
+    /\ resRegress  = {}
+    /\ resUnprojected = {}
 
 Step ==
     \/ \E i \in Ids, toat \in 1..MaxTime, k \in Kinds : PromiseCreate(i, toat, k)
     \/ \E i \in Ids, st \in ClientSettable            : PromiseSettle(i, st)
     \/ \E aw, ar \in Ids                              : RegisterCallback(aw, ar)
     \/ \E aw \in Ids, ad \in Addrs                    : RegisterListener(aw, ad)
+    \/ \E i \in Ids                                   : PromiseGet(i)
     \/ \E i \in Ids, w \in Workers                    : TaskClaim(i, w)
     \/ \E w \in Workers, m \in delivered              : TaskAcquire(w, m)
     \/ \E i \in Ids, S \in SUBSET Ids                 : TaskSuspend(i, S)
@@ -698,6 +777,21 @@ TaskPromiseCoherence ==
             => tasks[i].state = "fulfilled"
 
 (*-------------------------------------------------------------------------
+  CLASS 3b -- THE WIRE.  Stated on what handlers ANSWERED, not on state.
+  These are the properties no state-only model can express, and the ones
+  the specification's own stability theorem is about.
+ -------------------------------------------------------------------------*)
+
+\* Settled-promise stability on the wire: once any response has answered
+\* settled for a promise, no later response may answer `pending` for it.
+ResponsesNeverRegress == resRegress = {}
+
+\* The projection discipline: every response carries the projection at the
+\* answering instant.  Strictly stronger than the above, and the form the
+\* specification states.
+ResponsesAreProjected == resUnprojected = {}
+
+(*-------------------------------------------------------------------------
   CLASS 4 -- FENCING.  At-most-once execution.  Only expressible because
   the model carries worker-side state; no other artifact in this family
   states it.
@@ -750,5 +844,7 @@ Safety ==
     /\ TaskPromiseCoherence
     /\ AtMostOneValidClaim
     /\ OutboxNeverAhead
+    /\ ResponsesNeverRegress
+    /\ ResponsesAreProjected
 
 =============================================================================

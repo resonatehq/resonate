@@ -1,15 +1,15 @@
 Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 55 and seed -7610782258364161212 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 17450] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 127 and seed 2369878127842595151 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 29464] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/MC.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-16163045643874710263/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-16163045643874710263/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-16163045643874710263/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-16163045643874710263/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-16163045643874710263/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-16163045643874710263/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-16163045643874710263/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-16695632825215364351/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-16695632825215364351/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-16695632825215364351/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-16695632825215364351/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-16695632825215364351/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-16695632825215364351/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-16695632825215364351/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -23,19 +23,7 @@ Linting of module Unified
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module MC
-Starting... (2026-08-01 20:58:31)
+Starting... (2026-08-01 21:25:31)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 20:58:32.
-Progress(8) at 2026-08-01 20:58:35: 125,037 states generated (125,037 s/min), 39,126 distinct states found (39,126 ds/min), 25,171 states left on queue.
-Progress(14) at 2026-08-01 20:59:35: 6,293,606 states generated (6,168,569 s/min), 1,000,038 distinct states found (960,912 ds/min), 301,111 states left on queue.
-Progress(16) at 2026-08-01 21:00:35: 12,662,400 states generated (6,368,794 s/min), 1,722,101 distinct states found (722,063 ds/min), 328,234 states left on queue.
-Progress(18) at 2026-08-01 21:01:35: 19,166,247 states generated (6,503,847 s/min), 2,301,497 distinct states found (579,396 ds/min), 176,607 states left on queue.
-Model checking completed. No error has been found.
-  Estimates of the probability that TLC did not check all reachable states
-  because two distinct states had the same fingerprint:
-  calculated (optimistic):  val = 2.6E-6
-  based on the actual fingerprints:  val = 7.3E-7
-21874654 states generated, 2469914 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 25.
-The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 19 and the 95th percentile is 3).
-Finished in 03min 30s at (2026-08-01 21:02:01)
+Finished computing initial states: 1 distinct state generated at 2026-08-01 21:25:32.
+Progress(8) at 2026-08-01 21:25:35: 77,907 states generated (77,907 s/min), 26,270 distinct states found (26,270 ds/min), 19,398 states left on queue.
