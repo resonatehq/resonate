@@ -27,3 +27,5 @@ Starting... (2026-08-01 21:41:48)
 Computing initial states...
 Finished computing initial states: 1 distinct state generated at 2026-08-01 21:41:49.
 Progress(6) at 2026-08-01 21:41:52: 32,266 states generated (32,266 s/min), 12,392 distinct states found (12,392 ds/min), 9,913 states left on queue.
+Progress(10) at 2026-08-01 21:42:52: 3,574,881 states generated (3,542,615 s/min), 732,673 distinct states found (720,281 ds/min), 385,070 states left on queue.
+Progress(11) at 2026-08-01 21:43:52: 7,366,520 states generated (3,791,639 s/min), 1,382,154 distinct states found (649,481 ds/min), 662,710 states left on queue.
