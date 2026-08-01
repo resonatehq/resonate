@@ -33,23 +33,18 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 
 | profile | switches off | property checked | result |
 |---|---|---|---|
-| `MC_spec` | *none* | `Safety` (all 17) | ⏳ **run not yet complete** — see below |
+| `MC_spec` | *none* | `Safety` (all 17) | **holds** — 2 469 914 distinct states, depth 25, exhaustive |
 | `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 153 states, depth 4 |
 | `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 17 792 states, depth 7 |
 | `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 819 states, depth 5 |
 | `MC_pg_listener` | as above | `ObligationsAreDischargeable` | **violated**, 321 states, depth 4 |
 | `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 15 201 states, depth 7 |
 
-> **Status of the `MC_spec` row.** The five implementation-profile rows are
-> complete and reproducible. The specification-profile run — the half of the
-> acceptance test that says the guards, all switched on, actually close every
-> defect — had **not finished** when this file was written; the partial log is
-> in `output/spec.out`. Until it completes, this model has demonstrated that it
-> *detects* all five divergences, and has **not** demonstrated that the
-> specification profile is clean. Do not read the table as if it had. The
-> earlier claim that it was clean came from a run whose state space was
-> silently truncated (see "corrections" below), so it carries no weight and is
-> not repeated here.
+The `MC_spec` run is exhaustive: 21 874 654 states generated, 2 469 914
+distinct, 0 left on queue, complete state graph depth 25, faults on. Every
+guard switched on closes every defect the other five rows expose — which is
+the half of the test that says the switches are the *right* switches, not
+merely switches that happen to toggle a probe.
 
 Reproduce:
 
@@ -123,8 +118,17 @@ result of this exercise:
 - **Atomic handlers.** Each action is one atomic step. That reflects the
   advisory-lock / transaction discipline of the implementations rather than
   verifying it.
-- **Liveness is checked separately** (`MC_liveness.cfg`, `FairSpec` +
-  `TasksConverge`) and is weaker than it looks, for the reason the convex run
+- **Liveness is not yet reported.** `MC_liveness.cfg` (`FairSpec` +
+  `TasksConverge`) exists and the module carries the fairness constraints, but
+  no liveness result is claimed here yet. The first attempt was discarded
+  rather than reported: the fairness sub-actions were written as
+  `A /\ Next`, which expands `A` against every disjunct of `Step`, so one
+  action's `UNCHANGED` contradicted another's assignments and TLC warned on
+  each pair. Those conjuncts are semantically `FALSE`, so the formulation was
+  merely wrong rather than unsound — but a liveness result computed through it
+  is not worth reporting. `Next` now factors as `Step /\ ObsUpdate` and the
+  sub-actions conjoin `ObsUpdate` alone.
+- **When it is reported, read it narrowly.** For the reason the convex run
   documented: within a bounded horizon every promise eventually times out, so
-  the timeout rule alone discharges the "eventually". It is evidence that
-  deadlines converge a workflow, not that redelivery works.
+  the timeout rule alone discharges the "eventually". `TasksConverge` is
+  evidence that deadlines converge a workflow, not that redelivery works.

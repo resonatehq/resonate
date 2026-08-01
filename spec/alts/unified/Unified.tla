@@ -557,13 +557,14 @@ Step ==
 
 \* `obs` records, for each promise, the first non-pending state any client
 \* could have read through promise.get.  History variable only.
-Next ==
-    /\ Step
-    /\ obs' = [i \in Ids |->
-                 IF obs[i] = "none"
-                    /\ ProjOf(promises', now', i) \notin {"none", "pending"}
-                 THEN ProjOf(promises', now', i)
-                 ELSE obs[i]]
+ObsUpdate ==
+    obs' = [i \in Ids |->
+              IF obs[i] = "none"
+                 /\ ProjOf(promises', now', i) \notin {"none", "pending"}
+              THEN ProjOf(promises', now', i)
+              ELSE obs[i]]
+
+Next == Step /\ ObsUpdate
 
 Spec == Init /\ [][Next]_vars
 
@@ -574,11 +575,11 @@ Spec == Init /\ [][Next]_vars
 (* forms: "a rule that actually has work to do eventually does it".         *)
 (***************************************************************************)
 
-PromiseTimeoutFires(i) == OnPromiseTimeout(i) /\ Next
-RetryFires(i)          == OnTaskRetryTimeout(i) /\ Next
-LeaseFires(i)          == OnTaskLeaseTimeout(i) /\ Next
-DeliverFires           == (\E m \in outbox : Deliver(m)) /\ Next
-TickFires              == Tick /\ Next
+PromiseTimeoutFires(i) == OnPromiseTimeout(i) /\ ObsUpdate
+RetryFires(i)          == OnTaskRetryTimeout(i) /\ ObsUpdate
+LeaseFires(i)          == OnTaskLeaseTimeout(i) /\ ObsUpdate
+DeliverFires           == (\E m \in outbox : Deliver(m)) /\ ObsUpdate
+TickFires              == Tick /\ ObsUpdate
 
 FairSpec ==
     /\ Spec
