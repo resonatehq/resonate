@@ -252,13 +252,8 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
       setTask t
       return { status := 200, task := some t.toRecord, promise := some p.toRecord }
 
-/-- The promise id the fenced action operates on. -/
-def fenceTarget : TaskFenceAction → String
-  | .create r => r.id
-  | .settle r => r.id
-
 def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
-  if fenceTarget req.action == req.id then
+  if req.action.targetId == req.id then
     return { status := 400 }
   match ← touchTask req.id now with
   | none =>

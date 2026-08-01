@@ -709,13 +709,14 @@ theorem REq_setTask {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
 
 /-! ### 5h. The writing promise handlers -/
 
-theorem agrees_promiseCreate (req) : Agrees (.api (.promiseCreate req)) := by
-  intro n sP sM h
+theorem runAgrees_promiseCreate (req : ServerModel.PromiseCreateReq) (n : Nat)
+    {sP sM : ServerState} (h : REq n sP sM) :
+    ((Projected.promiseCreate req n).run sP).1 = ((AbstractModel.promiseCreate req n).run sM).1
+      ∧ REq n ((Projected.promiseCreate req n).run sP).2 ((AbstractModel.promiseCreate req n).run sM).2 := by
   have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
       = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseCreate,
-             AbstractModel.promiseCreate, run_map, run_bind, run_viewPromise,
-             run_touchPromise, run_pure, Id.run]
+  simp only [Projected.promiseCreate, AbstractModel.promiseCreate, run_bind,
+             run_viewPromise, run_touchPromise, run_pure]
   cases hfP : sP.promises.find? (·.id == req.id) with
   | some pP =>
       cases hfM : sM.promises.find? (·.id == req.id) with
@@ -768,10 +769,11 @@ theorem agrees_promiseCreate (req) : Agrees (.api (.promiseCreate req)) := by
                    param := req.param, tags := req.tags, timeoutAt := req.timeoutAt,
                    createdAt := req.timeoutAt, settledAt := some req.timeoutAt } : PromiseObject) htq⟩
 
-theorem agrees_promiseSettle (req) : Agrees (.api (.promiseSettle req)) := by
-  intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseSettle,
-             AbstractModel.promiseSettle, run_map, Id.run]
+theorem runAgrees_promiseSettle (req : ServerModel.PromiseSettleReq) (n : Nat)
+    {sP sM : ServerState} (h : REq n sP sM) :
+    ((Projected.promiseSettle req n).run sP).1 = ((AbstractModel.promiseSettle req n).run sM).1
+      ∧ REq n ((Projected.promiseSettle req n).run sP).2 ((AbstractModel.promiseSettle req n).run sM).2 := by
+  simp only [Projected.promiseSettle, AbstractModel.promiseSettle]
   by_cases hset : (!req.state.settable) = true
   · simp only [if_pos hset]; exact ⟨rfl, h⟩
   · simp only [if_neg hset]
@@ -817,6 +819,18 @@ theorem agrees_promiseSettle (req) : Agrees (.api (.promiseSettle req)) := by
               by_cases hc : (((pM.project n).state != pM.state) = true)
               · rw [if_pos hc]; exact REq_touchWrite h pM hf'
               · rw [if_neg hc]; exact h
+
+theorem agrees_promiseCreate (req) : Agrees (.api (.promiseCreate req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, run_map, Id.run]
+  exact And.imp (congrArg Equivalence.Response.promiseCreate) (fun x => x)
+    (runAgrees_promiseCreate req n h)
+
+theorem agrees_promiseSettle (req) : Agrees (.api (.promiseSettle req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, run_map, Id.run]
+  exact And.imp (congrArg Equivalence.Response.promiseSettle) (fun x => x)
+    (runAgrees_promiseSettle req n h)
 
 theorem agrees_promiseRegisterListener (req) :
     Agrees (.api (.promiseRegisterListener req)) := by
@@ -2091,6 +2105,48 @@ theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
               exact agrees_resumeOne (pM.project n).id awaiter n
                 (REq_setPromise_settled h1 _ (toFalse hpend))
             · simp only [if_neg hcb]; exact h1
+
+/-! ### 5s. `taskFence` — a task read guarding an inner promise
+    handler; the run-level agreements compose directly. -/
+
+theorem agrees_taskFence (req) : Agrees (.api (.taskFence req)) := by
+  intro n sP sM h
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskFence,
+             AbstractModel.taskFence, run_map, Id.run]
+  by_cases hg0 : (req.action.targetId == req.id) = true
+  · simp only [if_pos hg0]; exact ⟨rfl, h⟩
+  · simp only [if_neg hg0, run_pureUnit_bind]
+    refine And.imp (congrArg Equivalence.Response.taskFence) (fun x => x)
+      (bind_taskRead_agrees req.id n _ _ h ?_)
+    intro v sP' sM' h' hf
+    cases v with
+    | none => exact ⟨rfl, h'⟩
+    | some pair =>
+        obtain ⟨t, po⟩ := pair
+        cases po with
+        | none => exact ⟨rfl, h'⟩
+        | some pv =>
+            dsimp only
+            by_cases hg1 : (t.state != TaskState.acquired) = true
+            · simp only [if_pos hg1]; exact ⟨rfl, h'⟩
+            · simp only [if_neg hg1, run_pureUnit_bind]
+              by_cases hg2 : (pv.state != PromiseState.pending) = true
+              · simp only [if_pos hg2]; exact ⟨rfl, h'⟩
+              · simp only [if_neg hg2, run_pureUnit_bind]
+                by_cases hg3 : (t.version != req.version) = true
+                · simp only [if_pos hg3]; exact ⟨rfl, h'⟩
+                · simp only [if_neg hg3, run_pureUnit_bind]
+                  cases hact : req.action with
+                  | create r =>
+                      simp only [run_bind, run_pure]
+                      obtain ⟨hval, hst⟩ := runAgrees_promiseCreate r n h'
+                      refine ⟨?_, hst⟩
+                      rw [hval]
+                  | settle r =>
+                      simp only [run_bind, run_pure]
+                      obtain ⟨hval, hst⟩ := runAgrees_promiseSettle r n h'
+                      refine ⟨?_, hst⟩
+                      rw [hval]
 
 /-! ### 5r. R7 — scheduleFire. The occurrence list is one opaque pure
     term shared by both sides (schedules agree, the clock is shared),
