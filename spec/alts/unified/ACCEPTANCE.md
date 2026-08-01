@@ -33,7 +33,7 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 
 | profile | switches off | property checked | result |
 |---|---|---|---|
-| `MC_spec` | *none* | `Safety` (all 19) | **holds** — 6 779 134 distinct states, depth 27, exhaustive |
+| `MC_spec` | *none* | `Safety` (all 21) | ⏳ re-running with the task channel |
 | `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 153 states, depth 4 |
 | `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 17 792 states, depth 7 |
 | `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 819 states, depth 5 |
@@ -41,17 +41,15 @@ address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
 | `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 15 201 states, depth 7 |
 | `MC_pg_response` | + `ProjectedResponses` | `ResponsesNeverRegress` | **violated**, 3 872 states, depth 6 |
 | `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 788 states |
+| `MC_pg_task_response` | listener, promise, timeout, resume | `TaskResponsesNeverRegress` | **violated**, 4 343 states |
+| `MC_pg_task_projection` | as above | `TaskResponsesAreProjected` | **violated**, 1 117 states |
 | `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | **holds** on the 17-property module; re-running with the response channel |
 
-The `MC_spec` run is exhaustive: 56 912 514 states generated, 6 779 134
-distinct, 0 left on queue, complete state graph depth 27, faults on, all 19
-properties. Every guard switched on closes every defect the seven violation
-rows expose — which is the half of the test that says the switches are the
-*right* switches, not merely switches that happen to toggle a probe.
-
-For the record, the same profile before the response channel was added:
-2 469 914 distinct, depth 25, 17 properties, also clean. The channel adds
-three variables and roughly 2.7x the reachable space.
+The specification profile has been clean at each stage so far — 17 properties
+(2 469 914 distinct, depth 25) and 19 properties with the promise channel
+(6 779 134 distinct, depth 27), both exhaustive with faults on. The task
+channel adds three more variables and two more properties, so it is being
+re-run; **until it finishes the 21-property row is not claimed.**
 
 Reproduce:
 
@@ -117,13 +115,41 @@ claim branch answers `Proj(i)` or the raw stored row according to
 Two endpoints, one promise, one instant, contradictory answers — reproduced
 from the model rather than from reading the spec.
 
-**What the channel does not yet cover.** It records promise records only. A
-`task.get` action would answer `Proj(i)` — identical to `promise.get` —
-modelling nothing extra, so it is deliberately absent; the task-side wire
-contradiction (`task.get` says `fulfilled` while `task.halt` returns 200) is
-still carried by the `badHalt` ghost rather than by a response. A real task
-response channel needs `ProjTask` on its own axis, and status codes are not
-modelled at all. So this is one axis of the response surface, not the surface.
+### The task axis
+
+`RespondT(i, ts)` is the same construction on `ProjTask`: a task reads
+`fulfilled` the moment its promise stops being logically pending (T-01), so
+answering any live state at such an instant is unprojected, and answering it
+after some response already said `fulfilled` is a regression.
+
+`task.get` is the reference endpoint. Every handler that writes a task state
+answers with what it wrote: `task.create` and `task.acquire` answer
+`acquired`, `task.release` and `task.continue` answer `pending`, `task.halt`
+answers `halted`, `task.suspend` answers `suspended` — or `acquired` on the
+300 re-check path.
+
+Under the resonate-pg profile both task properties violate. The shortest
+counterexample TLC finds goes through `task.create`, not `task.halt`:
+
+| # | | |
+|---|---|---|
+| ≤4 | create `b` (targeted, `timeoutAt=1`), `Tick` → `now = 1` | `b` is logically dead |
+| 4 | `task.get(b)` | answers **`fulfilled`**, `obsResT[b]` set |
+| 5 | `task.create(b)` — ungated, claims it | answers **`acquired`** → `resTRegress = {b}` |
+
+`task.halt` reaches the same violation (that is BUG-4's exact shape:
+`task.get` says `fulfilled`, halt returns 200 and answers `halted`, and
+halt-on-fulfilled is 409); both sites are ungated by the same
+`PromiseLivenessGuard`, and TLC reports whichever it reaches first. The
+`badHalt` ghost is now redundant with `TaskResponsesNeverRegress` on the halt
+site, and is kept because it attributes the violation to halt specifically.
+
+**What is still not covered.** Status codes are not modelled — a handler's
+answer is its record, not its `2xx`/`4xx`. `preload`, search results, and
+`task.fence`'s inner response are absent. `task.fulfill` settles and answers
+via the promise channel only; it does not record the `fulfilled` task
+observation, which is conservative (it can only miss regressions, never
+invent them).
 
 ## Two corrections the model forced on itself
 

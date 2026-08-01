@@ -1,15 +1,15 @@
 Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 127 and seed 2369878127842595151 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 29464] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 108 and seed -3990643667497256309 with 4 workers on 4 cores with 3641MB heap and 64MB offheap memory [pid: 6383] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/MC.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-16695632825215364351/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-16695632825215364351/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-16695632825215364351/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-16695632825215364351/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-16695632825215364351/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-16695632825215364351/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-16695632825215364351/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-9173113754635589289/_TLCTrace.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-9173113754635589289/Naturals.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-9173113754635589289/FiniteSets.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-9173113754635589289/Sequences.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-9173113754635589289/TLC.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-9173113754635589289/TLCExt.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-9173113754635589289/Integers.tla (jar:file:/tmp/claude-0/-home-user/86be85a0-b3ce-5940-920c-93b52aeb36e6/scratchpad/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -23,23 +23,7 @@ Linting of module Unified
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module MC
-Starting... (2026-08-01 21:25:31)
+Starting... (2026-08-01 21:41:48)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 21:25:32.
-Progress(8) at 2026-08-01 21:25:35: 77,907 states generated (77,907 s/min), 26,270 distinct states found (26,270 ds/min), 19,398 states left on queue.
-Progress(13) at 2026-08-01 21:26:35: 7,474,935 states generated (7,397,028 s/min), 1,322,690 distinct states found (1,296,420 ds/min), 510,378 states left on queue.
-Progress(15) at 2026-08-01 21:27:35: 15,452,639 states generated (7,977,704 s/min), 2,452,601 distinct states found (1,129,911 ds/min), 769,968 states left on queue.
-Progress(16) at 2026-08-01 21:28:35: 22,828,073 states generated (7,375,434 s/min), 3,398,151 distinct states found (945,550 ds/min), 876,736 states left on queue.
-Progress(17) at 2026-08-01 21:29:35: 30,542,317 states generated (7,714,244 s/min), 4,309,136 distinct states found (910,985 ds/min), 893,114 states left on queue.
-Progress(18) at 2026-08-01 21:30:35: 37,974,308 states generated (7,431,991 s/min), 5,119,907 distinct states found (810,771 ds/min), 814,973 states left on queue.
-Progress(19) at 2026-08-01 21:31:35: 45,886,662 states generated (7,912,354 s/min), 5,907,878 distinct states found (787,971 ds/min), 612,939 states left on queue.
-Progress(20) at 2026-08-01 21:32:35: 53,615,159 states generated (7,728,497 s/min), 6,573,012 distinct states found (665,134 ds/min), 264,906 states left on queue.
-Model checking completed. No error has been found.
-  Estimates of the probability that TLC did not check all reachable states
-  because two distinct states had the same fingerprint:
-  calculated (optimistic):  val = 1.8E-5
-  based on the actual fingerprints:  val = 6.1E-7
-56912514 states generated, 6779134 distinct states found, 0 states left on queue.
-The depth of the complete state graph search is 27.
-The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 19 and the 95th percentile is 3).
-Finished in 07min 30s at (2026-08-01 21:33:02)
+Finished computing initial states: 1 distinct state generated at 2026-08-01 21:41:49.
+Progress(6) at 2026-08-01 21:41:52: 32,266 states generated (32,266 s/min), 12,392 distinct states found (12,392 ds/min), 9,913 states left on queue.
