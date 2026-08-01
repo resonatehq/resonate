@@ -30,9 +30,40 @@ implementation's actual behaviour was conformant on that run.
 |---|---|---|---|---|
 | resonate-pg | `adapters/from_pg.py` | 5 (39 transitions) | **all replay** | **all replay** |
 | resonate-on-convex | `adapters/from_convex.py` | 5 (32 transitions) | **all replay** | **2 of 5 REFUSED** |
-| resonate | — | — | — | — |
+| resonate | `adapters/from_resonate.py` | 4 (50 transitions) | **all replay** | **2 of 4 REFUSED** |
 
-## The two convex traces the specification refuses
+All three implementations, 14 traces, **121 transitions**, replay under their
+own profiles.
+
+## Four traces the specification refuses — and all four for the same reason
+
+`convex-normal`, `convex-timeout`, `resonate-suspend_resume` and
+`resonate-timer_gate` replay perfectly under their own profiles and are then
+refused by the specification. **All four stop at `task.suspend`, and all four
+for the same rule** — in two implementations built independently, in different
+languages, on different storage.
+
+Every one of them suspends a task on an awaited promise created with **no
+`resonate:target` and no timer**:
+
+```
+resonate            convex
+CreatePromise wf1   tgt=true      CreateRooted p1     kind = target
+CreatePromise wf1.a tgt=false     CreatePlain  p2     kind = plain   <- internal
+Suspend wf1 on wf1.a              Suspend p1 on p2
+```
+
+The specification refuses that with `422`: external-only waiters
+(`6ddfab7`). Only external promises carry an armed timeout, so only they can
+discharge an obligation.
+
+For `resonate` this is sharper still: that IS the setup of its own confirmed
+BUG-1 — a suspended task waiting on a target-less promise that the scheduler
+will never settle. Trace validation reproduces the bug's precondition from a
+recorded execution, independently of the model checker that originally found
+it.
+
+## The convex traces in detail
 
 `convex-normal` and `convex-timeout` replay perfectly under convex's own
 profile and are then **refused by the specification** — at `task.suspend`,
@@ -54,21 +85,24 @@ discharge an obligation.
 
 **This is a divergence the model-checking profiles did not report**, and the
 reason is worth recording. `MC_convex.cfg` sets
-`CallbackExternalGuard = FALSE` — the profile ENCODES convex's behaviour as
-expected, so no property fires. And `ObligationsAreDischargeable` does not
-fire either, because convex arms a timeout for *every* promise
-(`ArmPolicy = "all"`), so the obligation really is dischargeable there. The
-defect is invisible to the state properties and visible only when a real
-execution is measured against the specification.
+`CallbackExternalGuard = FALSE` — the profile ENCODES the implementation's
+behaviour as expected, so no property fires. For convex,
+`ObligationsAreDischargeable` does not fire either, because it arms a timeout
+for *every* promise (`ArmPolicy = "all"`), so the obligation really is
+dischargeable there. The defect is invisible to the state properties and
+visible only when a real execution is measured against the specification.
 
 That is the argument for this whole apparatus in one example: replaying real
 traces against the spec asks a question no per-implementation model asks,
 because a per-implementation model has that implementation's choices baked
 into its profile.
 
-Note what it does NOT say: convex is not stranding anyone. Under
-`ArmPolicy = "all"` the awaiter is woken. The finding is a protocol-conformance
-divergence, not a liveness bug.
+Note what it does NOT say for convex: nobody is stranded there. Under
+`ArmPolicy = "all"` the awaiter is woken, so it is a conformance divergence,
+not a liveness bug. For `resonate` the same divergence IS the liveness bug,
+because `ArmPolicy = "target"` means the awaited promise is never settled
+unattended. Same rule, same trace shape, different consequence — which is the
+argument for stating the rule structurally rather than per-implementation.
 
 **Read the spec-profile result correctly.** That all five resonate-pg traces
 replay under the specification means those five recorded executions were
@@ -84,20 +118,36 @@ No harness records everything the unified model carries. The adapter declares
 the components its implementation observes, and the validator checks exactly
 those and no more:
 
-| component | resonate-pg | resonate-on-convex |
-|---|---|---|
-| promises (state, timeoutAt, kind) | ✓ | ✓ |
-| tasks (state, version, timerKind) | ✓ | ✓ |
-| task `timerAt` | ✓ only when the task has a timer | ✓ same |
-| task `ttl` | ✗ | ✓ |
-| task `pid` | ✗ | ✗ (recorded, not yet compared) |
-| callbacks / resumes / outbox | ✓ | ✓ |
-| listeners | ✓ | ✗ — convex has none |
-| worker claims, delivery stage | ✗ | ✗ |
-| responses | ✗ — no harness records what an RPC returned | ✗ |
+| component | resonate-pg | resonate-on-convex | resonate |
+|---|---|---|---|
+| promises (state, timeoutAt, kind) | ✓ | ✓ | ✓ (settled family collapsed) |
+| tasks (state, version, timerKind) | ✓ | ✓ | ✓ |
+| task `timerAt` | ✓ only when the task has a timer | ✓ same | ✓ same |
+| task `ttl` | ✗ | ✓ | ✗ |
+| task `pid` | ✗ | ✗ | ✗ (via `claim` instead) |
+| callbacks / outbox | ✓ | ✓ | ✓ |
+| resumes | ✓ (pairs) | ✓ (pairs) | ✓ **counts only** |
+| listeners | ✓ | ✗ — none | ✗ — none |
+| **worker claims, delivery stage** | ✗ | ✗ | **✓ — only resonate has them** |
+| responses | ✗ | ✗ | ✗ — no harness records what an RPC returned |
 
 Stating the set is the point. A validator that silently compares a subset is
 indistinguishable from one that compares everything, and worth much less.
+
+### resonate: two things the trace under-determines
+
+* **The settled family.** resonate's model collapses resolved / rejected /
+  rejected_canceled into one `settled`, so the adapter maps it to `resolved`
+  and the distinction is NOT checked for this implementation. Every settled
+  state is terminal and non-pending, so no modelled behaviour turns on it.
+* **Resume counts, not pairs.** resonate records the NUMBER of buffered
+  resumes per task, not which promise triggered each. That is checked as a
+  cardinality — and it is also exactly the wire-level view, since the
+  specification's `TaskRecord` carries `resumes : Nat`.
+
+Against that, resonate is the only implementation whose traces constrain
+`claim` and `delivered`, so it is the only one whose recorded executions can
+check the fencing layer.
 
 ### The one deliberate relaxation
 
@@ -115,6 +165,17 @@ Trace validation found three fidelity gaps in the unified model. All three are
 places where the model was *sloppier than the specification*, which is what
 this phase is for.
 
+0. **Materialisation is not arming.** The model gated promise settlement on
+   `Armed(i)` everywhere, so an unarmed promise could never settle. But
+   `Armed` should gate only the UNATTENDED rule R1: a read that NAMES an
+   expired promise materialises it whether or not the environment would have.
+   That is the specification's fact P, and its `-m` machine touches any
+   promise. `resonate`'s `timer_gate` trace could not be replayed until
+   `TouchPromise` was split out from `OnPromiseTimeout` — and this is exactly
+   what makes resonate's BUG-1 sharp: the API reports the promise timed out,
+   and the read is what unblocks the awaiter. A new `MaterialiseOnRead`
+   switch carries the read discipline (`-m` vs `-p`), which the specification
+   proves indistinguishable, so it is latitude and not a defect.
 1. **Per-task `ttl`.** The model had a single `Ttl` constant; convex's `crash`
    scenario acquires with a short lease (300ms) and then a long one (60s), and
    could not be replayed. The specification puts `ttl` on `TaskRecord` — the

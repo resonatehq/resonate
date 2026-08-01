@@ -45,10 +45,21 @@ for t in "$HERE"/traces/*.ndjson; do
     HeartbeatGuard        = TRUE
     ProjectedResponses    = TRUE
     ArmPolicy             = "all"' ;;
+      resonate) GUARDS='CallbackExternalGuard = FALSE
+    ListenerExternalGuard = FALSE
+    PromiseLivenessGuard  = FALSE
+    TimeoutLivenessGuard  = FALSE
+    ResumeLivenessGuard   = FALSE
+    HeartbeatGuard        = FALSE
+    ProjectedResponses    = TRUE
+    ArmPolicy             = "target"' ;;
       *) echo "no profile for impl=$impl"; exit 2 ;;
     esac
   fi
 
+  if [ "$impl" = resonate ]; then wl=TRUE; else wl=FALSE; fi
+  # resonate-pg projects and writes nothing; the other two materialise
+  if [ "$impl" = resonate-pg ]; then mor=FALSE; else mor=TRUE; fi
   ids="$(python3 -c "import json;print('{'+','.join('\"%s\"'%i for i in json.loads(open('$t').readline())['config']['ids'])+'}')")"
   addrs="$(python3 -c "import json;print('{'+','.join('\"%s\"'%i for i in json.loads(open('$t').readline())['config']['addrs'])+'}')")"
   retry="$(python3 -c "import json;print(json.loads(open('$t').readline())['config']['retry'])")"
@@ -88,8 +99,9 @@ CONSTANTS
     TTLs  = $ttls
     $GUARDS
     SequencedDriver = FALSE
-    WorkerLayer     = FALSE
-    FaultsOn        = FALSE
+    WorkerLayer     = $wl
+    MaterialiseOnRead = $mor
+    FaultsOn        = TRUE
     TraceFile = "$t"
 CHECK_DEADLOCK FALSE
 INVARIANT NotReplayed

@@ -1,16 +1,16 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=37803 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 85 and seed -6711116393642514512 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 5777] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 45 and seed 7057591254614509775 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 8037] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-2806533520527314792/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-2806533520527314792/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-2806533520527314792/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-2806533520527314792/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
-Parsing file /tmp/tlc-2806533520527314792/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-2806533520527314792/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-2806533520527314792/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-2806533520527314792/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-7504842161797702794/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7504842161797702794/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7504842161797702794/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7504842161797702794/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7504842161797702794/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-7504842161797702794/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-7504842161797702794/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-7504842161797702794/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -26,80 +26,15 @@ Linting of module Json
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module UTrace
-Starting... (2026-08-01 22:30:51)
+Starting... (2026-08-01 22:55:07)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 22:30:51.
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "OnTaskRetryTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+Finished computing initial states: 1 distinct state generated at 2026-08-01 22:55:07.
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
+<<"AT", 3, "OnTaskRetryTimeout", "END">>
 Error: Invariant NotReplayed is violated.
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
 /\ l = 1
@@ -146,7 +81,7 @@ State 1: <Initial predicate>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 2: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 2: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 2
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -191,7 +126,7 @@ State 2: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 3: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 3: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -236,7 +171,7 @@ State 3: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 4: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 4: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -281,21 +216,8 @@ State 4: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-<< "AT",
-   3,
-   "OnTaskRetryTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-State 5: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+<<"AT", 3, "OnTaskRetryTimeout", "END">>
+State 5: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 4
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -340,49 +262,10 @@ State 5: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "OnTaskRetryTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
+<<"AT", 3, "OnTaskRetryTimeout", "END">>
 5 states generated, 5 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 5.
-Finished in 00s at (2026-08-01 22:30:51)
-Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785623450.tla
+Finished in 00s at (2026-08-01 22:55:07)
+Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785624906.tla

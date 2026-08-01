@@ -1,16 +1,16 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=37803 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 28 and seed -1332773293368988757 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 5703] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 33 and seed -2659106063117667566 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 7963] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-4948552902217939584/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-4948552902217939584/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-4948552902217939584/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-4948552902217939584/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
-Parsing file /tmp/tlc-4948552902217939584/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-4948552902217939584/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-4948552902217939584/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-4948552902217939584/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-2344134428113494987/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-2344134428113494987/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-2344134428113494987/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-2344134428113494987/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-2344134428113494987/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-2344134428113494987/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-2344134428113494987/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-2344134428113494987/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -26,458 +26,42 @@ Linting of module Json
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module UTrace
-Starting... (2026-08-01 22:30:48)
+Starting... (2026-08-01 22:55:05)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 22:30:48.
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "OnTaskLeaseTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "OnTaskLeaseTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   7,
-   "TaskFulfill",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+Finished computing initial states: 1 distinct state generated at 2026-08-01 22:55:05.
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 4, "OnTaskLeaseTimeout", "END">>
+<<"AT", 4, "OnTaskLeaseTimeout", "END">>
+<<"AT", 5, "Deliver", "END">>
+<<"AT", 5, "Deliver", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 7, "TaskFulfill", "END">>
 Error: Invariant NotReplayed is violated.
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "OnTaskLeaseTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 4, "OnTaskLeaseTimeout", "END">>
+<<"AT", 5, "Deliver", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
 /\ l = 1
@@ -524,7 +108,7 @@ State 1: <Initial predicate>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 2: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 2: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 1
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -569,7 +153,7 @@ State 2: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 3: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 3: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 2
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -614,7 +198,7 @@ State 3: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 4: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 4: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 2
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -659,7 +243,7 @@ State 4: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 5: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 5: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -704,7 +288,7 @@ State 5: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 6: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 6: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 3
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -749,7 +333,7 @@ State 6: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 7: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 7: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 4
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -794,7 +378,7 @@ State 7: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 8: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 8: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 4
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -839,7 +423,7 @@ State 8: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 9: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 9: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 5
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -884,7 +468,7 @@ State 9: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 10: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 10: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 5
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -929,7 +513,7 @@ State 10: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 11: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 11: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 6
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -974,7 +558,7 @@ State 11: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 12: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 12: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 6
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -1019,7 +603,7 @@ State 12: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 13: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 13: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 7
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -1064,7 +648,7 @@ State 13: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-State 14: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+State 14: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 7
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -1109,21 +693,8 @@ State 14: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-<< "AT",
-   7,
-   "TaskFulfill",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-State 15: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
+<<"AT", 7, "TaskFulfill", "END">>
+State 15: <TraceNext line 275, col 5 to line 282, col 31 of module UTrace>
 /\ l = 8
 /\ callbacks = {}
 /\ tasks = [ p1 |->
@@ -1168,203 +739,21 @@ State 15: <TraceNext line 220, col 5 to line 226, col 36 of module UTrace>
 /\ obsRes = [p1 |-> "none", p2 |-> "none"]
 /\ obsResT = [p1 |-> "none", p2 |-> "none"]
 
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "OnTaskLeaseTimeout",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   6,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   7,
-   "TaskFulfill",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "Deliver", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 3, "TaskAcquire", "END">>
+<<"AT", 4, "OnTaskLeaseTimeout", "END">>
+<<"AT", 5, "Deliver", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 6, "TaskAcquire", "END">>
+<<"AT", 7, "TaskFulfill", "END">>
 23 states generated, 23 distinct states found, 1 states left on queue.
 The depth of the complete state graph search is 15.
-Finished in 00s at (2026-08-01 22:30:48)
-Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785623447.tla
+Finished in 00s at (2026-08-01 22:55:05)
+Trace exploration spec path: /home/user/resonate-specification/alts/unified/UTrace_TTrace_1785624904.tla

@@ -1,16 +1,16 @@
-Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=36327 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
+Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/root/.ccr/java-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=37803 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|anthropic.com|*.anthropic.com|*.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=
 TLC2 Version 2026.07.31.184830 (rev: 30cc360)
-Running breadth-first search Model-Checking with fp 30 and seed 2742020389058900061 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 5740] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 64 and seed -2365442988811880151 with 1 worker on 4 cores with 3573MB heap and 64MB offheap memory [pid: 8000] (Linux 6.18.5 amd64, Ubuntu 21.0.10 64bit, MSBDiskFPSet, DiskStateQueue).
 Parsing file /home/user/resonate-specification/alts/unified/UTrace.tla
 Parsing file /home/user/resonate-specification/alts/unified/Unified.tla
-Parsing file /tmp/tlc-8082010198811506937/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /tmp/tlc-8082010198811506937/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /tmp/tlc-8082010198811506937/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /tmp/tlc-8082010198811506937/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
-Parsing file /tmp/tlc-8082010198811506937/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /tmp/tlc-8082010198811506937/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /tmp/tlc-8082010198811506937/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /tmp/tlc-8082010198811506937/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-1319870213089827045/Sequences.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-1319870213089827045/Naturals.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-1319870213089827045/FiniteSets.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-1319870213089827045/TLC.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-1319870213089827045/Json.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Json.tla)
+Parsing file /tmp/tlc-1319870213089827045/_TLCTrace.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-1319870213089827045/TLCExt.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-1319870213089827045/Integers.tla (jar:file:/home/user/resonate-specification/alts/unified/.tla-lib/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -26,135 +26,18 @@ Linting of module Json
 Linting of module TLCExt
 Linting of module _TLCTrace
 Linting of module UTrace
-Starting... (2026-08-01 22:30:49)
+Starting... (2026-08-01 22:55:06)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-08-01 22:30:50.
-<< "AT",
-   1,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   2,
-   "PromiseCreate",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   3,
-   "Deliver",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   FALSE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   4,
-   "TaskAcquire",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "TaskHeartbeat",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
-<< "AT",
-   5,
-   "TaskHeartbeat",
-   "p",
-   TRUE,
-   "t",
-   TRUE,
-   "c",
-   TRUE,
-   "r",
-   TRUE,
-   "o",
-   TRUE,
-   "END" >>
+Finished computing initial states: 1 distinct state generated at 2026-08-01 22:55:06.
+<<"AT", 1, "PromiseCreate", "END">>
+<<"AT", 2, "PromiseCreate", "END">>
+<<"AT", 3, "Deliver", "END">>
+<<"AT", 4, "TaskAcquire", "END">>
+<<"AT", 4, "TaskAcquire", "END">>
+<<"AT", 4, "TaskAcquire", "END">>
+<<"AT", 4, "TaskAcquire", "END">>
+<<"AT", 5, "TaskHeartbeat", "END">>
+<<"AT", 5, "TaskHeartbeat", "END">>
 Model checking completed. No error has been found.
   Estimates of the probability that TLC did not check all reachable states
   because two distinct states had the same fingerprint:
@@ -162,4 +45,4 @@ Model checking completed. No error has been found.
 16 states generated, 16 distinct states found, 0 states left on queue.
 The depth of the complete state graph search is 12.
 The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 2 and the 95th percentile is 2).
-Finished in 00s at (2026-08-01 22:30:50)
+Finished in 00s at (2026-08-01 22:55:06)

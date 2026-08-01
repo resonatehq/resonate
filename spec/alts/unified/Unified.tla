@@ -101,6 +101,14 @@ CONSTANTS
     \* either setting; it is a difference in what the implementation HAS.
     WorkerLayer,
 
+    \* (b) LATITUDE.  Does a read MATERIALISE the timeout it observes, or
+    \* only project it?  resonate (`try_timeout`) and resonate-on-convex
+    \* (`tryEagerTimeout`) materialise; resonate-pg projects and writes
+    \* nothing.  The specification proves the two disciplines
+    \* indistinguishable -- these are its `-m` and `-p` twins -- so neither
+    \* setting is a defect.
+    MaterialiseOnRead,
+
     \* (c) ENVIRONMENT.
     FaultsOn               \* message loss and worker crashes are enabled
 
@@ -619,13 +627,36 @@ NoPromiseTimeoutDue ==
     \A j \in Ids : ~(Armed(j) /\ promises[j].state = "pending"
                      /\ promises[j].timeoutAt <= now)
 
-\* R1 -- promise timeout.  The ONLY unattended path by which a promise
-\* reaches its deadline; `Armed` decides which promises have one.
-OnPromiseTimeout(i) ==
-    /\ Armed(i)
+(***************************************************************************)
+(* MATERIALISATION vs. ARMING -- two different things, and conflating them  *)
+(* was a real defect in this model until resonate's `timer_gate` trace      *)
+(* could not be replayed.                                                   *)
+(*                                                                          *)
+(* `TouchPromise` is the specification's fact P: a pending promise past its *)
+(* deadline IS settled, and touching it writes that down.  The `-m` machine *)
+(* touches ANY promise a request names, armed or not.                       *)
+(*                                                                          *)
+(* `Armed` gates only the UNATTENDED rule R1 -- which promises the          *)
+(* environment will settle with nobody asking.  A promise that is not armed *)
+(* can still be settled by a read that names it, which is precisely why     *)
+(* resonate's BUG-1 is so sharp: the API reports the promise timed out, and *)
+(* the read is what unblocks the awaiter.                                   *)
+(***************************************************************************)
+TouchPromise(i) ==
+    /\ promises[i].exists
     /\ promises[i].state = "pending"
     /\ promises[i].timeoutAt <= now
     /\ DoSettle(i, IF IsTimer(i) THEN "resolved" ELSE "rejected_timedout")
+
+\* R1 -- the unattended path.  `Armed` decides which promises have one.
+OnPromiseTimeout(i) == Armed(i) /\ TouchPromise(i)
+
+\* P-01 / T-01 on an implementation that MATERIALISES rather than projects.
+\* The specification proves the two read disciplines indistinguishable (the
+\* square), so this is latitude, not a defect: resonate's `try_timeout` and
+\* convex's `tryEagerTimeout` materialise; resonate-pg projects and writes
+\* nothing.
+ClientTouch(i) == MaterialiseOnRead /\ TouchPromise(i)
 
 \* R6 -- dispatch
 OnTaskRetryTimeout(i) ==
@@ -735,6 +766,7 @@ Step ==
     \/ \E i \in Ids                                   : TaskHalt(i)
     \/ \E i \in Ids                                   : TaskContinue(i)
     \/ \E i \in Ids                                   : OnPromiseTimeout(i)
+    \/ \E i \in Ids                                   : ClientTouch(i)
     \/ \E i \in Ids                                   : OnTaskRetryTimeout(i)
     \/ \E i \in Ids                                   : OnTaskLeaseTimeout(i)
     \/ \E m \in outbox                                : Deliver(m) \/ DropMsg(m)

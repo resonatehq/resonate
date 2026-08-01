@@ -28,7 +28,7 @@
 (* Trace.tla uses.  If no witness reproduces the recorded state, the step   *)
 (* is unsatisfiable and TLC stops exactly there.                            *)
 (***************************************************************************)
-EXTENDS Unified, Sequences, Naturals, TLC, Json
+EXTENDS Unified, Sequences, Naturals, FiniteSets, TLC, Json
 
 CONSTANT TraceFile
 
@@ -94,6 +94,26 @@ CallbacksOK == callbacks' = { <<c[1], c[2]>> : c \in ToSet(logline.state.callbac
 ListenersOK == listeners' = { <<c[1], c[2]>> : c \in ToSet(logline.state.listeners) }
 ResumesOK   == resumes'   = { <<c[1], c[2]>> : c \in ToSet(logline.state.resumes) }
 
+\* Only `resonate` has a delivery stage and worker-side claims, so only its
+\* traces constrain these.  They are what let a recorded execution check the
+\* fencing layer -- at-most-once execution -- which no other harness can.
+DeliveredOK ==
+    delivered' = { [kind |-> "execute", id |-> m.id, version |-> m.version,
+                    addr |-> NoAddr] : m \in ToSet(logline.state.delivered) }
+
+ClaimOK ==
+    \A w \in Workers :
+        /\ claim'[w].task    = logline.state.claim[w].task
+        /\ claim'[w].version = logline.state.claim[w].version
+
+\* `resonate` records the NUMBER of buffered resumes per task, not which
+\* promise triggered them -- and that is exactly the wire-level view: the
+\* specification's TaskRecord carries `resumes : Nat` (Cardinality of the
+\* set).  So the count is compared, which is all the trace determines.
+ResumeCountsOK ==
+    \A i \in DOMAIN logline.state.resumeCounts :
+        Cardinality({ r \in resumes' : r[1] = i }) = logline.state.resumeCounts[i]
+
 OutboxOK ==
     outbox' = { [kind |-> m.kind, id |-> m.id, version |-> m.version, addr |-> m.addr]
                   : m \in ToSet(logline.state.outbox) }
@@ -105,6 +125,9 @@ StateOK ==
     /\ Observed("listeners") => ListenersOK
     /\ Observed("resumes")   => ResumesOK
     /\ Observed("outbox")    => OutboxOK
+    /\ Observed("delivered") => DeliveredOK
+    /\ Observed("claim")     => ClaimOK
+    /\ Observed("resumeCounts") => ResumeCountsOK
 
 (***************************************************************************)
 (* Unified.tla's Next conjoins ObsUpdate; the wrappers below call the raw   *)
@@ -187,7 +210,44 @@ TOnTaskRetryTimeout ==
 TOnTaskLeaseTimeout ==
     TStep("OnTaskLeaseTimeout", \E i \in RecordedIds : OnTaskLeaseTimeout(i))
 
-TDeliver == TStep("Deliver", \E m \in outbox : Deliver(m))
+TDeliver     == TStep("Deliver",  \E m \in outbox : Deliver(m))
+TDropMsg     == TStep("DropMsg",  \E m \in outbox : DropMsg(m))
+TWorkerCrash == TStep("WorkerCrash", \E w \in Workers : WorkerCrash(w))
+
+(***************************************************************************)
+(* BATCH EVENTS.                                                            *)
+(*                                                                          *)
+(* `resonate`'s harness records `process_timeouts` as ONE event, though it   *)
+(* runs three SQL statements and may settle several promises and re-arm      *)
+(* several tasks.  The unified model has three separate rules, so one        *)
+(* recorded event corresponds to a SEQUENCE of model steps.                  *)
+(*                                                                          *)
+(* `TBatchStep` fires one internal rule WITHOUT advancing the cursor;        *)
+(* `TBatchDone` consumes the event once the state agrees.  Together TLC      *)
+(* explores "fire rules until the recorded state is reached, then move on".  *)
+(* Each rule disarms its own guard (a re-armed timer is pushed past `now`),  *)
+(* so the batch always terminates.                                           *)
+(***************************************************************************)
+\* Two batch kinds.  `Batch` is the unattended driver (`process_timeouts`),
+\* which only settles ARMED promises.  `Touch` is a read that materialises
+\* whatever it names, armed or not.
+IsBatch == logline.name \in {"Batch", "Touch"}
+
+TBatchStep ==
+    /\ IsBatch
+    /\ now = logline.now
+    /\ \E i \in RecordedIds :
+           IF logline.name = "Touch"
+           THEN TouchPromise(i)
+           ELSE \/ OnPromiseTimeout(i)
+                \/ OnTaskRetryTimeout(i)
+                \/ OnTaskLeaseTimeout(i)
+    /\ TObsUpdate
+    /\ UNCHANGED l
+
+TBatchDone ==
+    \/ TStep("Batch", UNCHANGED <<now, core, ghosts, resVars, resTVars>>)
+    \/ TStep("Touch", UNCHANGED <<now, core, ghosts, resVars, resTVars>>)
 
 \* A scheduler job that fired and found nothing to do.  Convex's deadline
 \* jobs run whenever the scheduler runs them and let the HANDLER decide, so
@@ -217,7 +277,8 @@ TraceNext ==
     \/ TTaskClaim \/ TTaskAcquire \/ TTaskSuspend \/ TTaskFulfill
     \/ TTaskRelease \/ TTaskHalt \/ TTaskContinue \/ THeartbeat
     \/ TOnPromiseTimeout \/ TOnTaskRetryTimeout \/ TOnTaskLeaseTimeout
-    \/ TDeliver \/ TAdvance \/ TNoOp
+    \/ TDeliver \/ TAdvance \/ TNoOp \/ TDropMsg \/ TWorkerCrash
+    \/ TBatchStep \/ TBatchDone
 
 TraceSpec == TraceInit /\ [][TraceNext]_tvars
 
