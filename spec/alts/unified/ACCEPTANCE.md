@@ -1,0 +1,252 @@
+# The unified model — acceptance record
+
+`Unified.tla` claims to be strictly stronger than the three implementation
+models it was derived from. That claim is only worth something if it is
+falsifiable, so it is stated as a test:
+
+> **The specification profile must clear every property. Each implementation
+> profile must reproduce that implementation's known defects, as violations of
+> *named* properties, without any bespoke instrumentation.**
+
+Every implementation's divergence from the specification is a named boolean
+CONSTANT; a profile is an assignment of those constants. Nothing else changes
+between runs — one module, one `Next`, six configurations.
+
+## The switches
+
+| constant | `TRUE` (specification) | `FALSE` (as shipped somewhere) |
+|---|---|---|
+| `ArmPolicy` | **conformance guard.** `"external"` is correct; both other settings are defects | `"target"` (resonate) **under-arms**; `"all"` (convex) **over-arms** |
+| `MaterialiseOnRead` | latitude: a read materialises (`-m`) or projects (`-p`) | pg projects; resonate and convex materialise |
+| `WorkerLayer` | model detail: is there a delivery stage before acquire? | only resonate has one |
+| `TTLs` | the lease TTLs a worker may present; a task carries its own | `{Ttl}` in every model config |
+| `CallbackExternalGuard` | P-04 refuses an internal awaited (422) | accepts any awaited |
+| `ListenerExternalGuard` | P-05 refuses an internal awaited (422) | accepts any awaited |
+| `PromiseLivenessGuard` | T-02 claim / T-09 halt / T-10 continue gate on the projection | ungated |
+| `TimeoutLivenessGuard` | R5 lease expiry / R6 dispatch gate on the projection | ungated |
+| `ResumeLivenessGuard` | R4 resume skips an awaiter that is itself logically dead | resumes it anyway |
+| `HeartbeatGuard` | T-05 gates on the projection | ungated |
+| `SequencedDriver` | — | promise-timeout loop drains before the task-timeout loop |
+| `FaultsOn` | message loss + worker crashes enabled | — |
+
+## Results
+
+TLC 1.8.0 (`2026.07.31`), 4 workers. Scope for every run: 2 ids, 1 listener
+address, 1 worker, horizon 2, versions ≤ 2, `Retry = Ttl = 1`, faults on.
+
+| profile | switches off | property checked | result |
+|---|---|---|---|
+| `MC_spec` | *none* | `Safety` (all 21) | ⏳ re-running |
+| `MC_server` | arm=`target`, callback, listener, promise, timeout, resume, heartbeat | `ObligationsAreDischargeable` | **violated**, 118 distinct |
+| `MC_convex` | arm=`all`, callback, listener, resume | `NoDeadDispatch` | **violated**, 21 510 distinct |
+| `MC_pg` | listener, promise, timeout, resume (+`SequencedDriver`) | `NoHaltOnDead` | **violated**, 1 035 distinct |
+| `MC_pg_listener` | as above | `ObligationsAreDischargeable` | **violated**, 212 distinct |
+| `MC_resume_gap` | **resume only** | `NoDeadDispatch` | **violated**, 26 478 distinct |
+| `MC_pg_response` | + `ProjectedResponses` | `ResponsesNeverRegress` | **violated**, 5 110 distinct |
+| `MC_pg_projection` | + `ProjectedResponses` | `ResponsesAreProjected` | **violated**, 799 distinct |
+| `MC_pg_task_response` | listener, promise, timeout, resume | `TaskResponsesNeverRegress` | **violated**, 5 200 distinct |
+| `MC_pg_task_projection` | as above | `TaskResponsesAreProjected` | **violated**, 873 distinct |
+| `MC_armpolicy` | spec + `ArmPolicy = "all"` | `ArmingIsExternalOnly` | **violated**, 21 distinct |
+| `MC_convex_arming` | convex profile | `ArmingIsExternalOnly` | **violated**, 21 distinct |
+| `MC_liveness` | *none* | `TasksConverge` under `FairSpec` | ⏳ re-running |
+
+Distinct-state counts for a VIOLATED property are "states explored before the
+violation was found", which depends on BFS scheduling and worker count — they
+are not canonical. The depth at which a violation appears is the stable
+figure. Counts for a property that HOLDS are exhaustive and canonical.
+
+Every number in the table above is from the CURRENT module. That matters:
+trace validation forced four changes to the model after the first pass
+(per-task `ttl`, clearing `ttl` when the lease ends, splitting `TouchPromise`
+out of `OnPromiseTimeout`, and the `WorkerLayer` switch), so every earlier
+figure was stale and has been replaced rather than carried forward.
+
+The specification profile has been clean at each earlier stage — 17 properties
+(2 469 914 distinct, depth 25) and 19 with the promise channel (6 779 134
+distinct, depth 27), both exhaustive with faults on. It is re-running against
+the current module; **until it finishes the 21-property row is not claimed.**
+
+Reproduce:
+
+```bash
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -workers 4 -config MC_<profile>.cfg MC
+```
+
+Each violation maps to a finding the three Specula runs reported independently:
+
+| violation | the finding it reproduces |
+|---|---|
+| `MC_server` → `ObligationsAreDischargeable` | resonate BUG-1 — `c8d7c7b` gated `promise_timeouts` on `resonate:target` while leaving registration open, so a suspended task waits on a promise nothing will ever settle |
+| `MC_pg_listener` → `ObligationsAreDischargeable` | resonate-pg BUG-1 — `promise_register_listener` has no `external` guard |
+| `MC_convex` → `NoDeadDispatch` | resonate-on-convex BUG-1 — `triggerCallbacks` resurrects and dispatches a timed-out workflow |
+| `MC_pg` → `NoHaltOnDead` | resonate-pg BUG-4 — `task.halt` returns 200 on a task `task.get` already reports `fulfilled` |
+| `MC_resume_gap` → `NoDeadDispatch` | **the divergence all three models contained and none of the three probed** (see below) |
+| `MC_pg_response` → `ResponsesNeverRegress` | resonate-pg BUG-2, **response half** — `task.create` serves `_promise_json_raw`, so `promise.get` answers `rejected_timedout` and a later `task.create` answers `pending`, for the same promise |
+
+## Arming is external-only — a decision, not a discovery
+
+`ArmPolicy` was carried for a while as possible LATITUDE, on the reasoning
+that convex over-arms rather than under-guards and that an observer under the
+projection discipline might not be able to tell. **That reading was wrong.**
+Arming external-only is the correct behaviour; every other setting is a defect
+to be addressed.
+
+So the model now pins arming from BOTH sides, because the two failures are
+different and neither property catches the other:
+
+| setting | who | failure | caught by |
+|---|---|---|---|
+| `"external"` | specification, resonate-pg | — | — |
+| `"target"` | resonate @ `c8d7c7b` | **under-arms** — an external-but-untargeted promise gets no timeout, so an obligation against it can never be discharged | `ObligationsAreDischargeable` |
+| `"all"` | resonate-on-convex | **over-arms** — an internal promise gets a durable timeout it should not have; its deadline is projection-only by design | `ArmingIsExternalOnly` |
+
+`ArmingIsExternalOnly` is the specification's `NonExternalPromiseHasNoTimeout`,
+which the first comparison had already flagged as worth adopting.
+
+Two honest notes on what it proves. Under `ArmPolicy = "external"` the
+property is TRUE BY THE DEFINITION of `Armed`, so it cannot fail in the
+specification profile and is **not evidence about it** — its whole job is to
+fail for the other settings. And since `"target"` is a subset of `"external"`,
+it fails only for `"all"`; under-arming needs the other property. That
+division of labour is deliberate.
+
+**This makes resonate-on-convex's second defect explicit.** Its profile
+previously carried over-arming as an unresolved question, so nothing fired.
+It now violates `ArmingIsExternalOnly` in 21 states — the shortest
+counterexample in the whole suite, because creating one plain promise is
+already enough.
+
+## The row that justifies the exercise
+
+`MC_resume_gap` is the specification profile with **one** switch flipped:
+`ResumeLivenessGuard = FALSE`. Everything else is spec-conformant. It violates
+`NoDeadDispatch` at depth 7.
+
+That switch corresponds to a line that is missing from **all three**
+implementation models: server's `SettleChain` computes
+`resumed == suspended awaiters \ selfFulfilled`, convex's `TriggerSettlement`
+uses `Suspenders(st, i)`, and pg's `CascadeTasks` uses `SuspAwaiters(i)` —
+none consults the awaiter's *own* deadline, where the specification's
+`ResumeTasks` requires `ps[id].timeoutAt > tnow`. Only the convex run
+instrumented for the consequence, so only the convex run reported it. In the
+unified model it is one named property, checked in every profile at once.
+
+## The response channel
+
+Everything else in this model observes STATE. The three source models all did,
+and resonate-pg's report names the consequence precisely:
+
+> The model could not have found BUG-2's response half. `obs` records `Proj(i)`,
+> not what each handler actually returned, so a handler serving an unprojected
+> record is invisible to it.
+
+`RespondP(i, ps)` closes that. It records, per promise, what a handler
+**answered**:
+
+- `resRegress` — a response answered `pending` for a promise some earlier
+  response had already answered settled. This is settled-promise stability *on
+  the wire*: the client-visible statement, which does not presuppose the
+  projection discipline.
+- `resUnprojected` — a response carried a record that is not the projection at
+  the answering instant. The discipline itself; strictly stronger.
+
+`promise.get` is the reference endpoint (always projected), and `task.create`'s
+claim branch answers `Proj(i)` or the raw stored row according to
+`ProjectedResponses`. The counterexample is 6 states:
+
+| # | | |
+|---|---|---|
+| 2-3 | `promise.create(a, timeoutAt=1, target)`, claim it | |
+| 4 | `Tick` → `now = 1`; `promise.get(a)` | answers `rejected_timedout`, `obsRes[a]` set |
+| 5 | `task.create(a)` — ungated, serves the raw row | answers **`pending`** → `resRegress = {a}` |
+
+Two endpoints, one promise, one instant, contradictory answers — reproduced
+from the model rather than from reading the spec.
+
+### The task axis
+
+`RespondT(i, ts)` is the same construction on `ProjTask`: a task reads
+`fulfilled` the moment its promise stops being logically pending (T-01), so
+answering any live state at such an instant is unprojected, and answering it
+after some response already said `fulfilled` is a regression.
+
+`task.get` is the reference endpoint. Every handler that writes a task state
+answers with what it wrote: `task.create` and `task.acquire` answer
+`acquired`, `task.release` and `task.continue` answer `pending`, `task.halt`
+answers `halted`, `task.suspend` answers `suspended` — or `acquired` on the
+300 re-check path.
+
+Under the resonate-pg profile both task properties violate. The shortest
+counterexample TLC finds goes through `task.create`, not `task.halt`:
+
+| # | | |
+|---|---|---|
+| ≤4 | create `b` (targeted, `timeoutAt=1`), `Tick` → `now = 1` | `b` is logically dead |
+| 4 | `task.get(b)` | answers **`fulfilled`**, `obsResT[b]` set |
+| 5 | `task.create(b)` — ungated, claims it | answers **`acquired`** → `resTRegress = {b}` |
+
+`task.halt` reaches the same violation (that is BUG-4's exact shape:
+`task.get` says `fulfilled`, halt returns 200 and answers `halted`, and
+halt-on-fulfilled is 409); both sites are ungated by the same
+`PromiseLivenessGuard`, and TLC reports whichever it reaches first. The
+`badHalt` ghost is now redundant with `TaskResponsesNeverRegress` on the halt
+site, and is kept because it attributes the violation to halt specifically.
+
+**What is still not covered.** Status codes are not modelled — a handler's
+answer is its record, not its `2xx`/`4xx`. `preload`, search results, and
+`task.fence`'s inner response are absent. `task.fulfill` settles and answers
+via the promise channel only; it does not record the `fulfilled` task
+observation, which is conservative (it can only miss regressions, never
+invent them).
+
+## Two corrections the model forced on itself
+
+Recorded because both were found by running it, and both invalidated an earlier
+result of this exercise:
+
+1. **`obs` must not appear in any action's `UNCHANGED` list.** `obs` is a
+   history variable written by `Next`. When it was also listed in each action's
+   `UNCHANGED`, `Tick` became *disabled* in exactly those states where advancing
+   the clock would newly expose an expiry — because the two conjuncts
+   contradicted. The first spec-profile run reported 1 004 962 distinct states
+   and "no error"; that number was an artifact. After the fix the reachable
+   space is larger and the convex/resume-gap violations appear (they were
+   unreachable before). A "no violation" result over a silently truncated state
+   space is the worst outcome a model can produce, and nothing in TLC's output
+   flags it — the reachability probe (`NoDeadSuspender`, kept in `MC.tla`) is
+   what exposed it.
+
+2. **`SuspendedTaskHasCallback` needed a liveness qualifier.** Stated as *every
+   suspended task has a callback*, it fails on the **specification** profile at
+   depth 7: when a promise settles it scrubs its callback rows while
+   deliberately not resuming an awaiter that is itself past its deadline. That
+   awaiter is dead weight owned by the promise-timeout rule, which will fulfil
+   it — so it legitimately sits suspended with no callback. The property is
+   correct only as *every suspended task **that is still logically alive** has a
+   callback*. This is TIMEOUT ALWAYS WINS showing up as a constraint on what the
+   invariant is allowed to say.
+
+## What this model does not do
+
+- **Only one axis of the response surface.** Promise records on `promise.get`
+  and `task.create`; no task records, no status codes, no `preload`. See "The
+  response channel" above for what that leaves out.
+- **No schedules** (S-01..S-04, R7), and no `task.fence` (T-04).
+- **Small scope.** 2 ids / horizon 2 is enough for every violation above to
+  appear at depth ≤ 7, but the negative result (`MC_spec`) is bounded evidence,
+  not a proof. The specification's own theorems are the proof; this is a check.
+- **Atomic handlers.** Each action is one atomic step. That reflects the
+  advisory-lock / transaction discipline of the implementations rather than
+  verifying it.
+- **Read the liveness result narrowly.** `TasksConverge` holds under
+  `FairSpec` over the complete state space (2 469 914 distinct; temporal check
+  over 4 939 828 branches; 16m42s), with zero `UNCHANGED` warnings. The first
+  attempt was discarded rather than reported: the fairness sub-actions were
+  written `A /\ Next`, which expands `A` against every disjunct of `Step`, so
+  one action's `UNCHANGED` contradicted another's assignments and TLC warned on
+  each pair. Those conjuncts are semantically `FALSE`, so the formulation was
+  wrong rather than unsound — but a liveness result computed through it is not
+  worth reporting. `Next` now factors as `Step /\ ObsUpdate`. For the reason the convex run
+  documented: within a bounded horizon every promise eventually times out, so
+  the timeout rule alone discharges the "eventually". `TasksConverge` is
+  evidence that deadlines converge a workflow, not that redelivery works.
