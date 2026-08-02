@@ -409,8 +409,10 @@ TaskClaim(i, w, ttl) ==
                                         version |-> tasks[i].version + 1]]
     /\ badDispatch' = IF Live(i) THEN badDispatch ELSE badDispatch \cup {i}
     \* T-02's response.  The specification serves `(p.project now).toRecord`;
-    \* resonate.sql serves `_promise_json_raw(p)`, deliberately unprojected.
-    /\ RespondP(i, promises[i].state)
+    \* resonate.sql serves `_promise_json_raw(p)`, deliberately unprojected --
+    \* that is resonate-pg BUG-2's response half, and it is NOT what the
+    \* specification does.
+    /\ RespondP(i, Proj(i))
     \* T-02 also answers a task record: the task it just acquired.
     /\ RespondT(i, "acquired")
     /\ UNCHANGED <<now, promises, callbacks, listeners, outbox, delivered,
@@ -701,28 +703,14 @@ Init ==
     /\ resTRegress = {}
     /\ resTUnprojected = {}
 
-Step ==
-    \/ \E i \in Ids, toat \in 1..MaxTime, k \in Kinds : PromiseCreate(i, toat, k)
-    \/ \E i \in Ids, st \in ClientSettable            : PromiseSettle(i, st)
-    \/ \E aw, ar \in Ids                              : RegisterCallback(aw, ar)
-    \/ \E aw \in Ids, ad \in Addrs                    : RegisterListener(aw, ad)
-    \/ \E i \in Ids                                   : PromiseGet(i)
-    \/ \E i \in Ids                                   : TaskGet(i)
-    \/ \E i \in Ids, w \in Workers, t \in TTLs         : TaskClaim(i, w, t)
-    \/ \E w \in Workers, m \in delivered, t \in TTLs   : TaskAcquire(w, m, t)
-    \/ \E i \in Ids, S \in SUBSET Ids                 : TaskSuspend(i, S)
-    \/ \E i \in Ids, st \in ClientSettable            : TaskFulfill(i, st)
-    \/ \E i \in Ids                                   : TaskRelease(i)
-    \/ \E w \in Workers                               : TaskHeartbeat(w)
-    \/ \E i \in Ids                                   : TaskHalt(i)
-    \/ \E i \in Ids                                   : TaskContinue(i)
-    \/ \E i \in Ids                                   : OnPromiseTimeout(i)
-    \/ \E i \in Ids                                   : ClientTouch(i)
-    \/ \E i \in Ids                                   : OnTaskRetryTimeout(i)
-    \/ \E i \in Ids                                   : OnTaskLeaseTimeout(i)
-    \/ \E m \in outbox                                : Deliver(m) \/ DropMsg(m)
-    \/ \E w \in Workers                               : WorkerCrash(w)
-    \/ Tick
+(***************************************************************************)
+(* Each action is a NAMED top-level operator, and `Next` is their bare      *)
+(* disjunction.  That is not cosmetic: with `Next == Step /\ ObsUpdate`     *)
+(* TLC attributed every step of every counterexample to the line of the     *)
+(* conjunction, so error traces read "line 736" throughout and said nothing *)
+(* about WHICH action fired.  Named disjuncts make TLC print the action's   *)
+(* name, which is what turns a counterexample into a scenario.              *)
+(***************************************************************************)
 
 \* `obs` records, for each promise, the first non-pending state any client
 \* could have read through promise.get.  History variable only.
@@ -733,7 +721,36 @@ ObsUpdate ==
               THEN ProjOf(promises', now', i)
               ELSE obs[i]]
 
-Next == Step /\ ObsUpdate
+APromiseCreate    == (\E i \in Ids, toat \in 1..MaxTime, k \in Kinds : PromiseCreate(i, toat, k)) /\ ObsUpdate
+APromiseSettle    == (\E i \in Ids, st \in ClientSettable : PromiseSettle(i, st)) /\ ObsUpdate
+ARegisterCallback == (\E aw, ar \in Ids : RegisterCallback(aw, ar)) /\ ObsUpdate
+ARegisterListener == (\E aw \in Ids, ad \in Addrs : RegisterListener(aw, ad)) /\ ObsUpdate
+APromiseGet       == (\E i \in Ids : PromiseGet(i)) /\ ObsUpdate
+ATaskGet          == (\E i \in Ids : TaskGet(i)) /\ ObsUpdate
+ATaskCreate       == (\E i \in Ids, w \in Workers, t \in TTLs : TaskClaim(i, w, t)) /\ ObsUpdate
+ATaskAcquire      == (\E w \in Workers, m \in delivered, t \in TTLs : TaskAcquire(w, m, t)) /\ ObsUpdate
+ATaskSuspend      == (\E i \in Ids, S \in SUBSET Ids : TaskSuspend(i, S)) /\ ObsUpdate
+ATaskFulfill      == (\E i \in Ids, st \in ClientSettable : TaskFulfill(i, st)) /\ ObsUpdate
+ATaskRelease      == (\E i \in Ids : TaskRelease(i)) /\ ObsUpdate
+ATaskHeartbeat    == (\E w \in Workers : TaskHeartbeat(w)) /\ ObsUpdate
+ATaskHalt         == (\E i \in Ids : TaskHalt(i)) /\ ObsUpdate
+ATaskContinue     == (\E i \in Ids : TaskContinue(i)) /\ ObsUpdate
+AOnPromiseTimeout == (\E i \in Ids : OnPromiseTimeout(i)) /\ ObsUpdate
+AClientTouch      == (\E i \in Ids : ClientTouch(i)) /\ ObsUpdate
+AOnTaskRetry      == (\E i \in Ids : OnTaskRetryTimeout(i)) /\ ObsUpdate
+AOnTaskLease      == (\E i \in Ids : OnTaskLeaseTimeout(i)) /\ ObsUpdate
+ADeliver          == (\E m \in outbox : Deliver(m)) /\ ObsUpdate
+ADropMsg          == (\E m \in outbox : DropMsg(m)) /\ ObsUpdate
+AWorkerCrash      == (\E w \in Workers : WorkerCrash(w)) /\ ObsUpdate
+ATick             == Tick /\ ObsUpdate
+
+Next ==
+    \/ APromiseCreate  \/ APromiseSettle  \/ ARegisterCallback \/ ARegisterListener
+    \/ APromiseGet     \/ ATaskGet
+    \/ ATaskCreate     \/ ATaskAcquire    \/ ATaskSuspend      \/ ATaskFulfill
+    \/ ATaskRelease    \/ ATaskHeartbeat  \/ ATaskHalt         \/ ATaskContinue
+    \/ AOnPromiseTimeout \/ AClientTouch  \/ AOnTaskRetry      \/ AOnTaskLease
+    \/ ADeliver        \/ ADropMsg        \/ AWorkerCrash      \/ ATick
 
 Spec == Init /\ [][Next]_vars
 

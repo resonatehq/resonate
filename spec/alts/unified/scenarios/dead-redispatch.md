@@ -1,0 +1,19 @@
+# Scenario: dead-redispatch
+
+Model-generated from the counterexample that violates `NoDeadDispatch`.
+2 steps. Run this against a real implementation, record the
+trace, and replay it: a conformant server cannot produce it.
+
+| # | call | why |
+|---|---|---|
+| 1 | `promise.create id=b timeoutAt=1 tags=resonate:target` |  |
+| 2 | `wait until now = 1` | promise is logically dead: b |
+| 3 | `(background) task retry id=b` | **this is the call that must be refused** |
+
+**Violates** `NoDeadDispatch` at step 3.
+
+The recorded prefix is in `traces/gen-dead-redispatch.ndjson`; it stops
+one step short because TLC's JSON dump omits the violating state.
+Run the full call list against a real server and record ITS trace --
+that is the artifact worth replaying, because its states come from
+the implementation rather than from the model.

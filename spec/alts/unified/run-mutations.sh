@@ -6,6 +6,9 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="${TLA_LIB:-$HERE/.tla-lib}"
+# Serialise: two concurrent runs would race on Unified.tla and leave a
+# mutation applied.  That happened once and silently poisoned the module.
+exec 9>"$HERE/.mutate.lock"; flock -n 9 || { echo "another mutation run holds the lock"; exit 2; }
 cp "$HERE/Unified.tla" "$HERE/.Unified.orig"
 trap 'cp "$HERE/.Unified.orig" "$HERE/Unified.tla"; rm -f "$HERE/.Unified.orig"' EXIT
 

@@ -210,6 +210,13 @@ TOnTaskRetryTimeout ==
 TOnTaskLeaseTimeout ==
     TStep("OnTaskLeaseTimeout", \E i \in RecordedIds : OnTaskLeaseTimeout(i))
 
+\* Pure reads.  No harness records them yet, but a MODEL-GENERATED scenario
+\* does (see gen-scenarios.py): a read is how a client observes the
+\* contradiction that several of these bugs produce.
+TPromiseGet  == TStep("PromiseGet", \E i \in RecordedIds : PromiseGet(i))
+TTaskGet     == TStep("TaskGet",    \E i \in RecordedIds : TaskGet(i))
+TClientTouch == TStep("ClientTouch",\E i \in RecordedIds : ClientTouch(i))
+
 TDeliver     == TStep("Deliver",  \E m \in outbox : Deliver(m))
 TDropMsg     == TStep("DropMsg",  \E m \in outbox : DropMsg(m))
 TWorkerCrash == TStep("WorkerCrash", \E w \in Workers : WorkerCrash(w))
@@ -278,6 +285,7 @@ TraceNext ==
     \/ TTaskRelease \/ TTaskHalt \/ TTaskContinue \/ THeartbeat
     \/ TOnPromiseTimeout \/ TOnTaskRetryTimeout \/ TOnTaskLeaseTimeout
     \/ TDeliver \/ TAdvance \/ TNoOp \/ TDropMsg \/ TWorkerCrash
+    \/ TPromiseGet \/ TTaskGet \/ TClientTouch
     \/ TBatchStep \/ TBatchDone
 
 TraceSpec == TraceInit /\ [][TraceNext]_tvars

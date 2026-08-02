@@ -62,10 +62,27 @@ mutation, which was useless.)
 | ungate `task.halt` | `NoHaltOnDead` | 4 |
 | ungate `task.continue` | `NoDeadDispatch` | 5 |
 | redispatch a dead task (R6) | `NoDeadDispatch` | 4 |
-| `task.create` serves the raw row | `ResponsesAreProjected` | 4 |
+| `task.create` ungated **and** serving the raw row | `ResponsesAreProjected` | see note |
 
 **No mutation survives.** Every one is caught by a named property, in 3-7
 states.
+
+### The two halves of resonate-pg BUG-2 are not independent
+
+Serving the raw promise row from `task.create` is **unobservable on its
+own**. T-02's liveness guard means the handler only fires when the promise is
+live, and for a live promise the stored row EQUALS the projection — so the
+"defect" changes no answer. Mutating only the response yields no violation;
+TLC searches the entire space and finds nothing.
+
+It becomes observable only in combination with the missing liveness guard,
+which is how `resonate.sql` actually ships. The mutation therefore applies
+both, and `gen`/`mut` accept several specs for exactly this reason.
+
+An earlier row here claimed this mutation violated `ResponsesAreProjected` in
+4 states. That was wrong twice over: the anchor had matched `PromiseGet`
+rather than `TaskClaim`, so it mutated the wrong site — and the site it
+should have mutated could not have violated anything by itself.
 
 ### A correction worth keeping
 
