@@ -98,8 +98,8 @@ def SameMessagesAA (tr tr' : ATrace) : Prop :=
     (∀ t, N ≤ t → (tr t).req = .idle) →
     (∀ t, N' ≤ t → (tr' t).req = .idle) →
     (tr N).now = (tr' N').now →
-    eqSet (absQuiesced (tr N).now (tr N).state).outbox
-          (absQuiesced (tr' N').now (tr' N').state).outbox = true
+    eqSet (absQuiesced defaultRetry (tr N).now (tr N).state).outbox
+          (absQuiesced defaultRetry (tr' N').now (tr' N').state).outbox = true
 
 /-- **The abstract twins are weakly bisimilar.** -/
 def APRefinesAM : Prop :=
@@ -158,8 +158,8 @@ def respLockstepA (w : List (AStep × Nat)) : Bool :=
 /-- Full lockstep: responses plus quiesced states. -/
 def twinCheckA (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
   respLockstepA w
-    && absStateEq (absQuiesced horizon (runFinAP w).2)
-                  (absQuiesced horizon (runFinA w).2)
+    && absStateEq (absQuiesced defaultRetry horizon (runFinAP w).2)
+                  (absQuiesced defaultRetry horizon (runFinA w).2)
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000

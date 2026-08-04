@@ -72,7 +72,7 @@ def SameMessagesAC (tr : ATrace) (tr' : Equivalence.Trace) : Prop :=
     (∀ t, N ≤ t → (tr t).req = .idle) →
     (∀ t, N' ≤ t → (tr' t).req = .idle) →
     (tr N).now = (tr' N').now →
-    eqSet (absQuiesced (tr N).now (tr N).state).outbox
+    eqSet (absQuiesced defaultRetry (tr N).now (tr N).state).outbox
           (Equivalence.quiesced (tr' N').now (tr' N').state).outbox = true
 
 /-- **The reverse refinement: the abstract machine's behaviors are
@@ -120,10 +120,10 @@ example : lastStatus (runFinAP wListenA).1 = some 422 := by decide
     object-guarded fact rules and the drains — absorbing the harmless
     fact-lag on internal promises. -/
 def normC (h : Nat) (s : ServerModel.ServerState) : AbstractModel.ServerState :=
-  absQuiesced h (alpha (Equivalence.quiesced h s))
+  absQuiesced defaultRetry h (alpha (Equivalence.quiesced h s))
 
 def normA (h : Nat) (s : AbstractModel.ServerState) : AbstractModel.ServerState :=
-  absQuiesced h s
+  absQuiesced defaultRetry h s
 
 /-- One abstract script realized by one concrete script: equal external
     observations, normalized states equal. Symmetric evidence — read

@@ -53,6 +53,16 @@ namespace Abstraction
 
 open Equivalence (Request Response eqSet)
 
+/-- The re-arm cadence, READ rather than written: the concrete
+    machine's own configured retry timeout. The translation is
+    sensitive to it — the abstract `retryAt` must equal what the
+    concrete machine actually armed (`now + config.retryTimeout`), so a
+    literal here would silently make the refinement false at any other
+    configuration. Quiescence closure is insensitive to it (R6's re-arm
+    parameter never changes the message it emits), but it takes the
+    same value so the two never drift apart. -/
+abbrev defaultRetry : Nat := ServerModel.ServerState.init.config.retryTimeout
+
 /-- The abstract machine's alphabet: the same external requests, plus
     its seven rules with their scheduler-chosen parameters. -/
 inductive AStep
@@ -146,7 +156,7 @@ def SameObservationCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
     objects), then drain every retained obligation (R3 per listener,
     R4 per awaiter — each wake immediately dispatched, mirroring the
     concrete drain's inline emission). -/
-def absQuiesce (now : Nat) : AbstractModel.M Unit := do
+def absQuiesce (retry : Nat) (now : Nat) : AbstractModel.M Unit := do
   let pids := (← get).promises.map (·.id)
   for id in pids do
     AbstractModel.Rules.promiseTimeout id now
@@ -160,10 +170,11 @@ def absQuiesce (now : Nat) : AbstractModel.M Unit := do
         AbstractModel.Rules.notify p.id a now
       for c in p.callbacks do
         AbstractModel.Rules.resume p.id c now
-        AbstractModel.Rules.dispatch c (now + 5000) now
+        AbstractModel.Rules.dispatch c (now + retry) now
 
-def absQuiesced (now : Nat) (s : AbstractModel.ServerState) : AbstractModel.ServerState :=
-  (Id.run ((absQuiesce now).run s)).2
+def absQuiesced (retry : Nat) (now : Nat) (s : AbstractModel.ServerState) :
+    AbstractModel.ServerState :=
+  (Id.run ((absQuiesce retry now).run s)).2
 
 /-- The asynchronous channel across the machines: equal outboxes at
     matching quiescent points. -/
@@ -173,7 +184,7 @@ def SameMessagesCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
     (∀ t, N' ≤ t → (tr' t).req = .idle) →
     (tr N).now = (tr' N').now →
     eqSet (Equivalence.quiesced (tr N).now (tr N).state).outbox
-          (absQuiesced (tr' N').now (tr' N').state).outbox = true
+          (absQuiesced defaultRetry (tr' N').now (tr' N').state).outbox = true
 
 /-- **THE CLAIM: the concrete machine refines the abstract machine.**
     (Stated at -m; -p inherits it through the twins' bisimulation.) -/
@@ -186,27 +197,27 @@ def ConcreteRefinesAbstract : Prop :=
 
 /-- Rule translation: the abstract steps a concrete step discharges.
     Purely syntactic. -/
-def translate (rq : Request) (n : Nat) : List (AStep × Nat) :=
+def translate (retry : Nat) (rq : Request) (n : Nat) : List (AStep × Nat) :=
   match rq with
   | .τPromiseTimeout id   => [(.r1 id, n)]
-  | .τResume r            => [(.r4 r.awaited r.awaiter, n), (.r6 r.awaiter (n + 5000), n)]
-  | .τTaskRetryTimeout id => [(.r6 id (n + 5000), n)]
-  | .τTaskLeaseTimeout id => [(.r5 id, n), (.r6 id (n + 5000), n)]
+  | .τResume r            => [(.r4 r.awaited r.awaiter, n), (.r6 r.awaiter (n + retry), n)]
+  | .τTaskRetryTimeout id => [(.r6 id (n + retry), n)]
+  | .τTaskLeaseTimeout id => [(.r5 id, n), (.r6 id (n + retry), n)]
   | .τScheduleTimeout id  => [(.r7 id, n)]
   | .idle                 => []
   | .promiseCreate r      =>
       (AStep.api rq, n) ::
         (if r.tags.has "resonate:target" then
           match r.tags.get? "resonate:delay" with
-          | some d => if ServerModel.parseNat d > n then [] else [(.r6 r.id (n + 5000), n)]
-          | none => [(.r6 r.id (n + 5000), n)]
+          | some d => if ServerModel.parseNat d > n then [] else [(.r6 r.id (n + retry), n)]
+          | none => [(.r6 r.id (n + retry), n)]
         else [])
-  | .taskRelease r        => [(.api rq, n), (.r6 r.id (n + 5000), n)]
-  | .taskContinue r       => [(.api rq, n), (.r6 r.id (n + 5000), n)]
+  | .taskRelease r        => [(.api rq, n), (.r6 r.id (n + retry), n)]
+  | .taskContinue r       => [(.api rq, n), (.r6 r.id (n + retry), n)]
   | _                     => [(.api rq, n)]
 
-def eagerScheduleA (w : List (Request × Nat)) : List (AStep × Nat) :=
-  w.flatMap fun (rq, n) => translate rq n
+def eagerScheduleA (retry : Nat) (w : List (Request × Nat)) : List (AStep × Nat) :=
+  w.flatMap fun (rq, n) => translate retry rq n
 
 def runFinA (w : List (AStep × Nat)) : List Response × AbstractModel.ServerState :=
   Id.run ((w.mapM (fun (st, n) => handleA st n)).run AbstractModel.ServerState.init)
@@ -221,10 +232,10 @@ def extResponsesA (w : List (AStep × Nat)) (rs : List Response) : List Response
     of the quiesced concrete state. -/
 def refCheckCA (w : List (Request × Nat)) (horizon : Nat) : Bool :=
   let (rsC, sC) := Equivalence.runFin Equivalence.handleM w
-  let wA := eagerScheduleA w
+  let wA := eagerScheduleA defaultRetry w
   let (rsA, sA) := runFinA wA
   Equivalence.extResponses w rsC == extResponsesA wA rsA
-    && absStateEq (alpha (Equivalence.quiesced horizon sC)) (absQuiesced horizon sA)
+    && absStateEq (alpha (Equivalence.quiesced horizon sC)) (absQuiesced defaultRetry horizon sA)
 
 /-! ### The battery, refined into the abstract machine -/
 
