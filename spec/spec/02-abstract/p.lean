@@ -88,7 +88,8 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
   | some p =>
       if p.state == .pending then
         let p := { p with state := req.state, value := req.value, settledAt := some now }
-        setPromise p
+        -- coupled: the co-keyed task is fulfilled in the same step
+        setSettled p
         return { status := 200, promise := some p.toRecord }
       else
         return { status := 200, promise := some p.toRecord }
@@ -344,7 +345,7 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
         return { status := 409 }
       let p := { p with state := req.action.state, value := req.action.value,
                         settledAt := some now }
-      setPromise p
+      setSettled p
       return { status := 200, promise := some p.toRecord }
 
 def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
