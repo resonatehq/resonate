@@ -11,7 +11,7 @@ lean_lib «spec» where
   srcDir := "."
   roots  := #[]
   globs  := #[.submodules `«01-protocol», .submodules `«02-abstract»,
-              .submodules `«03-concrete»]
+              .submodules `«03-concrete», .submodules `«05-sqlite»]
 
 /-- The relations between machines — equivalence, refinement — with
     their exhaustive sweeps, which run under kernel `decide` at build
