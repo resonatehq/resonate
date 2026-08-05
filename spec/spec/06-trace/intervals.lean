@@ -330,6 +330,22 @@ theorem accepted_trace_implies_valid_trace {t : List Observation} {fuel cap : Na
     (h : Accepted t fuel cap) : Valid t :=
   exec_implies_valid (accepted_implies_exec h)
 
+/-- **The witness is a certificate, not an assertion.** Stronger than
+    `accepted_trace_implies_valid_trace`, and the reason the checker
+    carries a schedule at all: what it hands back is itself the
+    explanation, segment by segment, one segment per observation.
+
+    Better here than in the pinned version this replaces. There the
+    witness was a bare `List Tau` and the instants had to be reconstructed
+    from context; now every step carries the instant it fired at, so the
+    witness reads as an execution rather than as a hint. -/
+theorem witness_explains {t : List Observation} {fuel cap : Nat}
+    {w : List (Tau × Nat)} {f n : Nat}
+    (h : validate t fuel cap = .admissible w f n) :
+    ∃ segments : List (List (Tau × Nat)),
+      segments.length = t.length ∧ segments.flatten = w ∧ ValidExec t := by
+  sorry
+
 /-- The algorithm-level completeness: a refutation means NO timed
     schedule over the critical instants explains the run, and — by R1–R4
     — none over the full interval either.

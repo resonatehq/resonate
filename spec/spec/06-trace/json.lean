@@ -208,8 +208,9 @@ def decodeEvent (j : Json) : D Observation := do
   let data := (obj? res "data").toOption.getD (Json.mkObj [])
   return { req, res := ← decodeResponse kind status data, now }
 
-def loadTrace (path : System.FilePath) : IO (List Observation) := do
-  let text ← IO.FS.readFile path
+/-- Decode NDJSON text into observations. One event per line; blank
+    lines are skipped so a trailing newline is not an error. -/
+def parseTrace (text : String) : IO (List Observation) := do
   let mut out : List Observation := []
   let mut i := 0
   for line in text.splitOn "\n" do
@@ -222,5 +223,18 @@ def loadTrace (path : System.FilePath) : IO (List Observation) := do
       | .error e => throw (IO.userError s!"line {i}: {e}")
       | .ok o    => out := out ++ [o]
   return out
+
+def loadTrace (path : System.FilePath) : IO (List Observation) := do
+  parseTrace (← IO.FS.readFile path)
+
+/-- Read the whole of stdin, so a trace can be piped. -/
+def loadTraceStdin : IO (List Observation) := do
+  let stdin ← IO.getStdin
+  let mut text := ""
+  let mut done := false
+  while !done do
+    let chunk ← stdin.getLine
+    if chunk.isEmpty then done := true else text := text ++ chunk
+  parseTrace text
 
 end TraceCheck.Json
