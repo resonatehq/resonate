@@ -1,5 +1,5 @@
 import Lean.Data.Json
-import «06-trace».validator
+import «valid».validator
 
 /-!  # Decoding a recorded run
 

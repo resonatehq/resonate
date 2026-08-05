@@ -1,5 +1,5 @@
-import «06-trace».json
-import «06-trace».intervals
+import «valid».json
+import «valid».intervals
 
 /-!  # `check <trace.ndjson>`
 

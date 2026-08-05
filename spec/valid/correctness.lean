@@ -1,4 +1,4 @@
-import «06-trace».validator
+import «valid».validator
 
 /-!  # What the checker is supposed to be
 
@@ -119,7 +119,7 @@ def Valid (obs : List Observation) : Prop :=
 `ValidPinned` is what an earlier checker searched: every hidden step fires
 AT the instant of the observation it precedes. It is no longer anything's
 definition of validity, and no checker computes it — but it is not dead
-code either. `06-trace/schedules.lean` proves that the gap between it and
+code either. `valid/schedules.lean` proves that the gap between it and
 `Valid` cannot be closed, and that result has to be stated against
 something. Deleting these would delete the record of why the design
 changed. -/
@@ -141,7 +141,7 @@ def ValidPinned (obs : List Observation) : Prop :=
   Admissible ServerState.init obs
 
 /-- The hypothesis the pinned checker needed and never got. Not merely
-    unproved: `06-trace/schedules.lean` shows it is INDEPENDENT, because
+    unproved: `valid/schedules.lean` shows it is INDEPENDENT, because
     `occurrences` is `opaque` with no value, so both it and its negation
     are consistent. No test could ever have settled it — which is why the
     checker was rebuilt to carry intervals instead of assuming this. -/
@@ -154,10 +154,10 @@ This file is the SEMANTICS only: what a valid run is, said in the
 specification's vocabulary. It deliberately knows nothing about how the
 checker computes.
 
-* `06-trace/executions.lean` refines `Valid` into `ValidExec`, which
+* `valid/executions.lean` refines `Valid` into `ValidExec`, which
   carries the INTERVAL between observations rather than a single instant,
   and proves `valid_implies_exec` outright.
-* `06-trace/intervals.lean` is the checker, and states the two theorems —
+* `valid/intervals.lean` is the checker, and states the two theorems —
   `accepted_trace_implies_valid_trace` and
   `rejected_trace_implies_not_valid_trace` — against `Valid` as defined
   here.

@@ -1,8 +1,8 @@
-import «06-trace».intervals
+import «valid».intervals
 
 /-!  # The gap, measured properly
 
-`06-trace/instants.lean` asked whether firing a τ off the observation
+`valid/instants.lean` asked whether firing a τ off the observation
 grid can break the pinned checker, and answered "4112 scripts, 0
 counterexamples". Two things are wrong with that answer as EVIDENCE, and
 this file fixes both before re-running.

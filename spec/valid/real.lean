@@ -1,4 +1,4 @@
-import «06-trace».intervals
+import «valid».intervals
 
 /-!  # A trace from a real resonate server, checked against the spec
 

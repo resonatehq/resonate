@@ -1,9 +1,9 @@
-import «06-trace».executions
+import «valid».executions
 
 /-!  # `InstantsSuffice` is not merely unproved — it is not provable
 
-`06-trace/correctness.lean` records `InstantsSuffice` as "unproved and
-possibly FALSE", and `06-trace/instants.lean` hunted for a counterexample
+`valid/correctness.lean` records `InstantsSuffice` as "unproved and
+possibly FALSE", and `valid/instants.lean` hunted for a counterexample
 among promise timeouts, leases and resumes and found none. That hunt was
 looking in the wrong place, and the reason is structural rather than
 empirical.
@@ -55,7 +55,7 @@ Consequently:
 
 So `InstantsSuffice` is independent of the specification as written. No
 amount of searching decides it. That is the verdict on Route B, and it is
-why `06-trace/instants.lean`'s "0 counterexamples" was never going to be
+why `valid/instants.lean`'s "0 counterexamples" was never going to be
 evidence one way or the other: its own header says "(3) is untestable
 here — `occurrences` and `nextCron` are `opaque`, so a schedule script
 does not execute at all", and then it draws a conclusion as if the
@@ -73,7 +73,7 @@ Not to prove the specification wrong — a cron that fires is correct
 behaviour. It is to fix the SCOPE of any completeness claim. Two
 responses are available and both are honest:
 
-1. **Restrict.** `06-trace/intervals.lean` declines any trace that
+1. **Restrict.** `valid/intervals.lean` declines any trace that
    mentions a schedule. Completeness is then unconditional on the traces
    the checker judges, which is the discipline the file already applies
    to fuel and to the candidate cap.

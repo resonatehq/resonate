@@ -1,8 +1,8 @@
-import «06-trace».executions
+import «valid».executions
 
 /-!  # The checker, searching intervals instead of instants
 
-`06-trace/executions.lean` proves that `ValidExec` — schedules whose τs
+`valid/executions.lean` proves that `ValidExec` — schedules whose τs
 carry their own instants, non-decreasing, inside `[prev, o.now]` — is
 implied by `Valid`, with no hypothesis. That fixes the SEMANTICS. This
 file fixes the ALGORITHM so that it decides the wider notion, and states
@@ -48,7 +48,7 @@ The first four are thresholds against stored numbers, so on an interval
 the behaviour is piecewise constant with breakpoints exactly at those
 numbers. `onScheduleTimeout` is not: it passes `now` itself to an opaque
 function. That is not a gap in the argument, it is the reason the checker
-below refuses schedule traces outright — see `06-trace/schedules.lean`,
+below refuses schedule traces outright — see `valid/schedules.lean`,
 where a faithful `occurrences` REFUTES `InstantsSuffice`.
 
 ## The re-armed deadline, which is the objection that has to be answered
@@ -74,7 +74,7 @@ It does not need to. Read the handlers rather than the prose:
   response channel entirely — provided a `.pending` task never carries a
   LEASE timer, since `delTaskTimeout` deletes both kinds. That proviso is
   `PendingHasNoLease` below, and it is checked empirically at every
-  intermediate state of every script in `06-trace/gap.lean` (0
+  intermediate state of every script in `valid/gap.lean` (0
   violations).
 
 So the instant-dependent VALUES written anywhere in the machine are

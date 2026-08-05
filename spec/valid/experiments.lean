@@ -1,4 +1,4 @@
-import «06-trace».intervals
+import «valid».intervals
 
 /-!  # How far does it go?
 

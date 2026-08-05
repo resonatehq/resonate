@@ -1,8 +1,8 @@
-import «06-trace».correctness
+import «valid».correctness
 
 /-!  # Deleting `InstantsSuffice` by making the search space exact
 
-`06-trace/correctness.lean` carries an unproved, possibly false
+`valid/correctness.lean` carries an unproved, possibly false
 hypothesis:
 
 ```lean
@@ -15,7 +15,7 @@ instant with `now` monotone. The hypothesis is the distance between the
 two.
 
 The move made here is not to prove that hypothesis — it is FALSE, see
-`06-trace/schedules.lean` — but to make it unnecessary, by widening the
+`valid/schedules.lean` — but to make it unnecessary, by widening the
 notion the checker searches until it EXACTLY characterises `Valid`. Then
 there is no gap left to hypothesise about.
 

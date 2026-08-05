@@ -6,7 +6,7 @@ build, **SQLite** backend:
 ```bash
 RESONATE_DEBUG=true RESONATE_STORE__TYPE=sqlite resonate serve
 N=200 OUT=trace.ndjson python3 capture.py
-lake exe checktrace trace.ndjson
+lake exe checktrace < trace.ndjson
 ```
 
 One JSON object per external call — `req` is the `data` the client sent,
