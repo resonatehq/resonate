@@ -65,6 +65,22 @@ def fanoutFiredScript (n : Nat) : List (Request × Nat) :=
   ++ (List.range n).map (fun i => (Request.τPromiseTimeout s!"a{i}", 500))
   ++ [ (.promiseGet { id := "a0" }, 500) ]
 
+/-- **Regression.** `a` expires on its own; that expiry defers a resume
+    for `x`, which wakes it. The first cone keyed relevance on the object
+    a τ NAMES — `touches (τPromiseTimeout "a") = ["a"]` — so it refused to
+    fire the timeout when the observed request read `x`, and reported this
+    conforming trace REFUTED. `affects` plus a transitive closure fixed
+    it. Kept because nothing else in the suite has a τ whose consequences
+    land on a different object. -/
+def crossObjectScript : List (Request × Nat) :=
+  [ (.promiseCreate { id := "a", timeoutAt := 30, param := {}, tags := ext }, 10)
+  , (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }, 10)
+  , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 50 }, 10)
+  , (.taskSuspend   { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }, 12)
+  , (.τPromiseTimeout "a", 40)                            -- hidden
+  , (.τResume { awaited := "a", awaiter := "x" }, 40)      -- hidden
+  , (.taskGet { id := "x" }, 50) ]
+
 /-! ## Running -/
 
 structure Result where
@@ -118,7 +134,8 @@ def main : IO Unit := do
   -- not just imprecision.
   let mut allAgree := true
   for n in [1, 2, 3, 4, 5, 6, 7, 8] do
-    for (tag, t) in [("honest", recordFrom (fanoutFiredScript n)),
+    for (tag, t) in [("cross ", recordFrom crossObjectScript),
+                     ("honest", recordFrom (fanoutFiredScript n)),
                      ("lied  ", corrupt (recordFrom (fanoutFiredScript n))),
                      ("workfl", recordFrom (lengthScript (min n 4))),
                      ("wf-lie", corruptLast (recordFrom (lengthScript (min n 4))))] do
