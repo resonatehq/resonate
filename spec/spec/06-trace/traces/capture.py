@@ -27,6 +27,7 @@ def rpc(kind, now, data):
     events.append({"kind": kind, "now": now, "req": data, "res": res})
     return res
 
+post("debug.start", {})   # THIS is what pauses the background loops
 post("debug.reset", {})
 
 for i in range(N):

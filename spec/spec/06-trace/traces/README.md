@@ -17,7 +17,8 @@ invented here.
 | file | events | verdict |
 |---|---|---|
 | `resonate-sqlite-50wf.ndjson` | 550 | ADMISSIBLE, 50 τ recovered, 29 ms |
-| `resonate-sqlite-200wf.ndjson` | 2200 | **REFUTED at event 886** |
+| `resonate-sqlite-200wf.ndjson` | 2200 | **REFUTED at event 886** (capture error, see below) |
+| `resonate-sqlite-200wf-debugstart.ndjson` | 2200 | ADMISSIBLE, 200 τ recovered, 1986 ms |
 
 ## What the 550-event run shows
 
@@ -29,42 +30,65 @@ leaves that schedule free, so the checker has to supply the missing steps
 itself — which is the whole reason to ask for admissibility rather than
 for reproduction.
 
-## What the 2200-event run shows
+## What the 2200-event run shows — and the cause, verified in the source
 
-Refuted at event 886, and the cause is worth recording.
+`resonate-sqlite-200wf.ndjson` is REFUTED at event 886:
 
 ```
 880  promise.create o80.x @9000 -> 200  timeoutAt 900000, pending
-884  task.suspend   o80.x @9020 -> 200
 886  task.get       o80.x @9040 -> 200  state "fulfilled"      <- refuted here
 889  promise.get    o80.x @9070 -> 200  "rejected_timedout", settledAt 900000
 ```
 
 The promise's deadline is 900000 and every observation carries a
-`resonate:debug_time` below 20000, yet the server reports it timed out —
-stamped at its own deadline, which is what the timeout transition writes.
-Under the specification no schedule explains a promise expiring 890
-seconds before its deadline, so the trace is refuted.
+`resonate:debug_time` below 20000, yet the server reports it timed out,
+stamped at its own deadline. No schedule explains that.
 
-Exactly two of two hundred workflows are affected, `o80` and `o178`,
-about 98 apart, and their log lines are ~0.6 s apart in wall clock. The
-server reports `timeout_poll_interval_ms=1000`. So the shape is a
-periodic background sweep firing roughly once a second and judging
-deadlines against the REAL clock, while the requests are driven by
-`resonate:debug_time`. The startup banner says "Debug mode enabled —
-background loops paused"; something is evidently not paused, and it
-leaves no log line.
+The cause is a **capture error**, and it is worth stating exactly,
+because the first guess ("the banner says loops are paused, so something
+is leaking") was wrong about the mechanism:
 
-**This is a clock-mixing artifact of the harness, not a protocol
-violation.** It says a debug-time capture is corrupted at about 1 Hz,
-which matters if you intend to build a conformance suite this way — but
-it is not evidence that resonate mishandles timeouts under a single
-consistent clock. Confirming that needs either a server whose sweep
-honours `debug_time`, or a capture driven by wall-clock time throughout.
+```rust
+// server.rs:54     — starts FALSE
+debug_mode: AtomicBool::new(false),
+// server.rs:450    — ONLY this sets it
+"debug.start" => state.debug_mode.store(true, Ordering::SeqCst),
 
-The trace is kept refuting rather than trimmed to the clean prefix,
-because it is the only end-to-end demonstration that the checker refutes
-real traffic at the right event.
+// processing_timeouts.rs:30
+if state.debug_mode.load(SeqCst) { continue; }
+let now = util::system_time_ms();   // :34 — WALL CLOCK
+```
+
+`RESONATE_DEBUG=true` enables debug OPERATIONS (without it they answer
+`403`) and lets `resonate:debug_time` through `resolve_time`. It pauses
+nothing. The startup banner — "Debug mode enabled — background loops
+paused" — prints unconditionally from `main.rs:140` and is simply
+misleading: pausing requires a `debug.start` call, which emits its own
+`"Debug mode started — background loops paused"` log line.
+
+The first capture never sent `debug.start`. So the timeout loop ran
+throughout at `poll_interval` = 1000 ms, judging deadlines against
+`system_time_ms()` ≈ 1.75e12 while promises carried `timeout_at` = 900000
+— expiring whatever was pending when it happened to fire. Two of two
+hundred workflows were caught, ~0.6 s apart in wall clock, which is the
+1 Hz signature.
+
+`resonate-sqlite-200wf-debugstart.ndjson` is the same workload with
+`debug.start` sent first:
+
+```
+loaded 2200 events
+ADMISSIBLE   events=2200 maxFanout=1 witnessTaus=200   1986ms
+```
+
+Clean. So resonate is NOT mishandling timeouts under a single consistent
+clock; the refutation was mixed clocks, caused by the harness. Both files
+are kept — the refuting one because it is the only end-to-end evidence
+that the checker refutes real traffic at the right event, and the clean
+one because it is the actual conformance result.
+
+**If you build a suite this way, send `debug.start`.** The banner will
+tell you loops are paused before they are.
 
 ## Two places resonate is stricter than the specification
 
