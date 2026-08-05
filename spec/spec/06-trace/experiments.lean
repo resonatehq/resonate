@@ -74,10 +74,10 @@ structure Result where
   ms      : Nat
 
 def run (label : String) (script : List (Request × Nat))
-    (fuel : Nat := 16) (cap : Nat := 4000) : IO Result := do
+    (coned : Bool := true) (fuel : Nat := 16) (cap : Nat := 200000) : IO Result := do
   let trace := recordFrom script
   let t0 ← IO.monoMsNow
-  let v := validate trace fuel cap
+  let v := validateBy coned trace fuel cap
   -- FORCE it: `let` is call-by-need, so without this the timer measures
   -- the construction of a thunk and the work happens later, in `report`.
   let line := verdictLine v
@@ -105,24 +105,45 @@ end TraceCheck.Experiments
 
 open TraceCheck TraceCheck.Experiments in
 def main : IO Unit := do
-  IO.eprintln "── discrimination ─────────────────────────────────────────────"
+  IO.eprintln "── discrimination (cone on) ───────────────────────────────────"
   let good := recordFrom (lengthScript 1)
   IO.eprintln s!"honest trace          {verdictLine (validate good)}"
   IO.eprintln s!"first response lied   {verdictLine (validate (corrupt good))}"
   IO.eprintln s!"last response lied    {verdictLine (validate (corruptLast good))}"
-  (← IO.getStdout).flush
 
   IO.eprintln ""
-  IO.eprintln "── length (one obligation live at a time) ─────────────────────"
-  for k in [4, 8, 16, 32, 48] do
-    report (← run s!"workflows={k}" (lengthScript k))
+  IO.eprintln "── the reduction agrees with the unreduced checker ────────────"
+  -- honest traces, and corrupted ones. The dangerous direction is a
+  -- cone that turns REFUTED into ADMISSIBLE: that would be unsoundness,
+  -- not just imprecision.
+  let mut allAgree := true
+  for n in [1, 2, 3, 4, 5, 6, 7, 8] do
+    for (tag, t) in [("honest", recordFrom (fanoutFiredScript n)),
+                     ("lied  ", corrupt (recordFrom (fanoutFiredScript n))),
+                     ("workfl", recordFrom (lengthScript (min n 4))),
+                     ("wf-lie", corruptLast (recordFrom (lengthScript (min n 4))))] do
+      let a := verdictKind (validateBy true  t 16 200000)
+      let b := verdictKind (validateBy false t 16 200000)
+      if a != b then allAgree := false
+      IO.eprintln s!"  n={n} {tag}  cone={a}  full={b}  {if a == b then "AGREE" else "*** DIFFER ***"}"
+  IO.eprintln s!"  --> {if allAgree then "all agree" else "DISAGREEMENT FOUND"}"
 
   IO.eprintln ""
-  IO.eprintln "── fanout (n obligations armed at once, none fired) ───────────"
-  for n in [6, 8, 9, 10, 11, 12] do
-    report (← run s!"armed={n}" (fanoutScript n))
+  IO.eprintln "── fanout, cone OFF (the old wall) ────────────────────────────"
+  for n in [8, 10, 11, 12] do
+    report (← run s!"armed={n}" (fanoutScript n) false)
 
   IO.eprintln ""
-  IO.eprintln "── fanout (n armed AND fired in the hidden part) ──────────────"
-  for n in [6, 8, 9, 10] do
-    report (← run s!"fired={n}" (fanoutFiredScript n))
+  IO.eprintln "── fanout, cone ON ────────────────────────────────────────────"
+  for n in [8, 16, 32, 64, 128, 256, 512] do
+    report (← run s!"armed={n}" (fanoutScript n) true)
+
+  IO.eprintln ""
+  IO.eprintln "── fanout FIRED, cone ON ──────────────────────────────────────"
+  for n in [8, 16, 32, 64, 128] do
+    report (← run s!"fired={n}" (fanoutFiredScript n) true)
+
+  IO.eprintln ""
+  IO.eprintln "── length, cone ON ────────────────────────────────────────────"
+  for k in [16, 64, 128, 256] do
+    report (← run s!"workflows={k}" (lengthScript k) true)
