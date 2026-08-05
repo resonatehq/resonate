@@ -37,3 +37,7 @@ lean_exe «tracecheck_exe» where
 lean_exe «realtrace_exe» where
   srcDir := "."
   root   := `«06-trace».real
+
+lean_exe «checktrace» where
+  srcDir := "."
+  root   := `«06-trace».check
