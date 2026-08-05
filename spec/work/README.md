@@ -1,7 +1,8 @@
 # Canonical workloads
 
-Two programs that differ in exactly one word, so that diffing their traces
-isolates what that word costs.
+Three programs. The first two differ in exactly one word, so that diffing
+their traces isolates what that word costs; the third uses both words in one
+tree, which separates things the first two cannot.
 
 ```
 W1  index1.ts   foo calls bar n times with ctx.run    — LOCAL
@@ -9,7 +10,7 @@ W2  index2.ts   foo calls bar n times with ctx.rpc    — REMOTE
 W3  index3.ts   foo recurses, alternating both by parity of n
 ```
 
-Both take the root invocation id from the command line, so a run is
+Each takes the root invocation id from the command line, so a run is
 reproducible and an id can be pointed at afterwards with `resonate.get`.
 
 ```
@@ -22,8 +23,8 @@ RESONATE_URL=http://localhost:8001 npx tsx index1.ts demo 3
 
 `--via` chooses how the **root** is started — `resonate.run` claims it in this
 process, `resonate.rpc` asks the server to dispatch it — and is orthogonal to
-what the body does. All four combinations are expected to produce the same
-result and the same ids.
+what the body does. Both entry points are expected to produce the same result
+and the same ids.
 
 ## What they show
 
