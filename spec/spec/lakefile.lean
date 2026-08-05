@@ -21,3 +21,15 @@ lean_lib «theorems» where
   srcDir := "."
   roots  := #[]
   globs  := #[.submodules `«04-theorems»]
+
+/-- The trace-admissibility shell. Imports `04-theorems`'s trace
+    framework, modifies nothing in the specification. -/
+@[default_target]
+lean_lib «tracecheck» where
+  srcDir := "."
+  roots  := #[]
+  globs  := #[.submodules `«06-trace»]
+
+lean_exe «tracecheck_exe» where
+  srcDir := "."
+  root   := `«06-trace».experiments
