@@ -25,7 +25,7 @@ def main (args : List String) : IO UInt32 := do
     | .admissible w _ _ =>
         IO.eprintln s!"witness: {w.length} internal steps the server never reported"
         for (r, t) in w.take 20 do
-          IO.eprintln s!"  @{t}  {repr r}"
+          IO.eprintln s!"  @{t}  {r}"
         if w.length > 20 then IO.eprintln s!"  … and {w.length - 20} more"
         return 0
     | .refuted i _ =>

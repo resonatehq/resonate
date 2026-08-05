@@ -168,5 +168,5 @@ def main : IO Unit := do
   | .admissible w _ _ =>
       IO.eprintln "  witness — the internal steps the server never told us about:"
       for (r, t) in w do
-        IO.eprintln s!"    @{t}  {repr r}"
+        IO.eprintln s!"    @{t}  {r}"
   | v => IO.eprintln s!"  no witness: {verdictLine v}"
