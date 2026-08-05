@@ -8,6 +8,7 @@ tree, which separates things the first two cannot.
 W1  index1.ts   foo calls bar n times with ctx.run    — LOCAL
 W2  index2.ts   foo calls bar n times with ctx.rpc    — REMOTE
 W3  index3.ts   foo recurses, alternating both by parity of n
+M1  manual1.ts  W1 again, driven by hand with no SDK
 ```
 
 Each takes the root invocation id from the command line, so a run is
@@ -17,6 +18,7 @@ reproducible and an id can be pointed at afterwards with `resonate.get`.
 npx tsx index1.ts <id> [n] [--via run|rpc]
 npx tsx index2.ts <id> [n] [--via run|rpc]
 npx tsx index3.ts <id> [n] [m] [--via run|rpc]
+npx tsx manual1.ts <id> [n]
 
 RESONATE_URL=http://localhost:8001 npx tsx index1.ts demo 3
 ```
@@ -114,6 +116,47 @@ branch. The promise's tags record the real edge in both cases.
 So: the tags are the tree; the Context fields are the execution. An
 implementation that reconstructs lineage must read the tags, and anything that
 tests lineage through the client will agree with the tree only for local calls.
+
+## M1 — the same thing without an SDK
+
+`manual1.ts` is `index1.ts` with the library removed: same promises, same ids,
+same tags, same result, produced by raw protocol calls and a `fetch`. The
+sequence is not invented — it was captured from `index1.ts` through a logging
+proxy and reproduced:
+
+```
+task.create                            root promise + claim, version 1
+task.fence ( promise.create <id>.0 )   \
+task.fence ( promise.settle <id>.0 )   |  once per iteration
+task.fence ( promise.create <id>.1 )   |  of the loop
+task.fence ( promise.settle <id>.1 )   /
+task.fulfill( promise.settle <id>  )   the root's own result
+promise.get                            read it back
+```
+
+Running both and normalising the root id, the resulting server state is
+**identical** — 4 promises, 1 task, same states, same tags, same encoded
+values — differing only in the random pid inside the target address.
+
+Three things it makes concrete:
+
+- **`task.create` claims what it creates.** The task comes back `acquired` at
+  version 1 and no `execute` is dispatched, because the caller already holds
+  it. That is `T-02`'s fresh path, and an implementation that reuses its
+  `promise.create` path here will emit a dispatch nobody wants. *(Found
+  exactly that way: the trace showed the spurious message.)*
+- **The version never moves.** `task.create` acquires at 1, and nothing in the
+  loop bumps it — only a claim does. Every fence in the run presents 1.
+- **This can only be written for W1.** The children are local, so nothing is
+  ever dispatched and the driver need not be reachable. A manual driver for W2
+  would have to hold a poll connection and service `execute` messages — which
+  is precisely the work the SDK's transport layer does, and precisely what
+  `ctx.run` avoids.
+
+Every write after the claim goes through `task.fence`, which is what makes a
+hand-written driver safe: the fencing token is checked in the same transaction
+as the write, so a driver that lost its lease is refused rather than quietly
+corrupting the tree.
 
 ## Tags on the wire
 
