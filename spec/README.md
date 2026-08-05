@@ -108,6 +108,10 @@ Conventions the whole model leans on:
 | [`resume`](spec/03-concrete/p/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
 | [`timeouts`](spec/03-concrete/p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*, enforced by the machine, not trusted to the environment. |
 
+## Implementing the protocol
+
+Every implementation answers the same questions, and the ones answered badly are recorded in [`COVERAGE.md`](alts/unified/COVERAGE.md) under their bug numbers. [`docs/implementation-questions.md`](docs/implementation-questions.md) is the catalogue: the conformance questions that have exactly one right answer, each paired with the property that fires when it is answered otherwise; the latitude the machines genuinely permit; and the platform questions the specification is silent about but every substrate forces. It carries an answer sheet, one column per implementation.
+
 ## Build
 
 ```
