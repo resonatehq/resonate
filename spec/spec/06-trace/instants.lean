@@ -2,6 +2,26 @@ import «06-trace».validator
 
 /-!  # Hunting a counterexample to `InstantsSuffice`
 
+**SUPERSEDED — read `06-trace/gap.lean` instead.** Two of this file's
+measurements do not measure what they claim, and its conclusion about
+schedules is wrong on the facts:
+
+* `effectiveTaus` counts off-grid τs that CHANGED THE STATE. The question
+  is whether a τ's effect DIFFERS from firing it at the instant the
+  checker would use. `gap.lean`'s `discriminating` counts that instead,
+  and it is roughly half the size.
+* the pinned instant is not "the next grid point". `Admissible` fires
+  each event's schedule BEFORE that event, so a τ at an observation's own
+  instant but AFTER it is attributed to the NEXT observation. Every τ in
+  this file sits strictly between grid points, so that case is untested
+  here.
+* "(3) is untestable here — `occurrences` and `nextCron` are `opaque`, so
+  a schedule script does not execute at all" is FALSE. An opaque constant
+  compiles to the type's default: `nextCron` returns `0`, `occurrences`
+  returns `[]`. Schedule scripts run; they run against a calendar in
+  which nothing ever happens. See `06-trace/schedules.lean`, where a
+  calendar that does something refutes `InstantsSuffice` outright.
+
 `ValidPinned` fires every hidden step at an observation's own instant.
 `ValidM` lets an execution fire them ANYWHERE in between. `InstantsSuffice`
 says the difference is invisible. This file tries to break it.

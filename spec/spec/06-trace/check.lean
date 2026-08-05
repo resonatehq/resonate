@@ -1,11 +1,12 @@
 import «06-trace».json
+import «06-trace».intervals
 
 /-!  # `check <trace.ndjson>`
 
 Load a recorded run and ask the specification whether any schedule of
 internal steps explains it. -/
 
-open TraceCheck TraceCheck.Json in
+open TraceCheck TraceCheck.Json TraceCheck.Intervals in
 def main (args : List String) : IO UInt32 := do
   match args with
   | [] => IO.eprintln "usage: check <trace.ndjson> [cap]"; return 2
@@ -20,7 +21,16 @@ def main (args : List String) : IO UInt32 := do
     -- measure thunk construction and always report 0ms
     if line.length == 0 then IO.eprintln "" else pure ()
     let t1 ← IO.monoMsNow
-    IO.eprintln s!"{line}   {t1 - t0}ms"
+    IO.eprintln s!"pinned   {line}   {t1 - t0}ms"
+    -- the same question of the INTERVAL checker, whose completeness needs
+    -- no `InstantsSuffice`: τs may fire at any critical instant in the gap
+    let t2 ← IO.monoMsNow
+    let viv := validateIv trace 16 cap
+    let liv := verdictLine viv
+    if liv.length == 0 then IO.eprintln "" else pure ()
+    let t3 ← IO.monoMsNow
+    IO.eprintln s!"interval {liv}   {t3 - t2}ms"
+    IO.eprintln s!"agree: {verdictKind v == verdictKind viv}"
     match v with
     | .admissible w _ _ =>
         IO.eprintln s!"witness: {w.length} internal steps the server never reported"
