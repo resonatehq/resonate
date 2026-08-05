@@ -224,17 +224,10 @@ def parseTrace (text : String) : IO (List Observation) := do
       | .ok o    => out := out ++ [o]
   return out
 
-def loadTrace (path : System.FilePath) : IO (List Observation) := do
-  parseTrace (← IO.FS.readFile path)
-
-/-- Read the whole of stdin, so a trace can be piped. -/
+/-- The checker reads stdin and nothing else. Pointing it at a file is
+    the shell's job — `validate.sh` redirects — which keeps the `Option`
+    plumbing and the "which source?" dispatch out of Lean entirely. -/
 def loadTraceStdin : IO (List Observation) := do
-  let stdin ← IO.getStdin
-  let mut text := ""
-  let mut done := false
-  while !done do
-    let chunk ← stdin.getLine
-    if chunk.isEmpty then done := true else text := text ++ chunk
-  parseTrace text
+  parseTrace (← (← IO.getStdin).readToEnd)
 
 end TraceCheck.Json

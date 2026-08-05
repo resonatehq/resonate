@@ -45,4 +45,17 @@ if [[ ! -x "$bin" || -n "$newest_src" ]]; then
   (cd "$spec" && lake build checktrace >&2)
 fi
 
-exec "$bin" "${@:--}"
+# A FILE argument is redirected here rather than parsed in Lean: the
+# checker reads stdin and nothing else, which keeps the source dispatch
+# out of the verified code and costs two lines of bash.
+case "${1:-}" in
+  -h|--help) exec "$bin" --help ;;
+  ""|-)      shift 2>/dev/null || true
+             exec "$bin" "$@" ;;
+  -*)        echo "validate.sh: unknown option $1" >&2; exit 2 ;;
+  [0-9]*)    exec "$bin" "$@" ;;                       # bare cap, still stdin
+  *)         file="$1"; shift
+             [[ -r "$file" ]] || { echo "validate.sh: cannot read $file" >&2; exit 2; }
+             echo "validate.sh: $file" >&2
+             exec "$bin" "$@" < "$file" ;;
+esac

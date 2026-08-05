@@ -7,10 +7,10 @@ Load a recorded run and ask the specification whether any schedule of
 internal steps explains it. -/
 
 def usage : String :=
-  "usage: checktrace [FILE|-] [cap]\n\n\
+  "usage: checktrace [cap]   (reads the trace on stdin)\n\n\
    Reads a recorded run as NDJSON — one {kind, now, req, res} object per\n\
    line — and asks the specification whether ANY schedule of internal\n\
-   steps explains it. With no FILE, or with `-`, reads stdin.\n\n\
+   steps explains it.\n\n\
    exit 0  ADMISSIBLE   some execution the spec permits has these events\n\
    exit 1  REFUTED      no execution does; the offending event is printed\n\
    exit 3  INCONCLUSIVE the search hit a bound, or the trace uses schedules\n\
@@ -20,19 +20,12 @@ open TraceCheck TraceCheck.Json TraceCheck.Intervals in
 def main (args : List String) : IO UInt32 := do
   if args.contains "-h" || args.contains "--help" then
     IO.println usage; return 0
-  let (src, rest) :=
-    match args with
-    | []            => (none, [])
-    | "-" :: r      => (none, r)
-    | p :: r        => (some p, r)
-  let cap := (rest.head?.bind (·.toNat?)).getD 20000
-  let loaded ← (match src with
-                | none   => loadTraceStdin
-                | some p => loadTrace p).toBaseIO
+  let cap := (args.head?.bind (·.toNat?)).getD 20000
+  let loaded ← loadTraceStdin.toBaseIO
   let trace ← match loaded with
               | .error e => do IO.eprintln s!"checktrace: {e}"; return 2
               | .ok tr   => pure tr
-  IO.eprintln s!"loaded {trace.length} events from {src.getD "<stdin>"}"
+  IO.eprintln s!"loaded {trace.length} events"
   let t0 ← IO.monoMsNow
   let v := validate trace 16 cap
   let line := verdictLine v
