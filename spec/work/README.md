@@ -9,6 +9,7 @@ W1  index1.ts   foo calls bar n times with ctx.run    — LOCAL
 W2  index2.ts   foo calls bar n times with ctx.rpc    — REMOTE
 W3  index3.ts   foo recurses, alternating both by parity of n
 M1  manual1.ts  W1 again, driven by hand with no SDK
+M2  manual2.ts  W2 again, driven by hand — and what that costs
 ```
 
 Each takes the root invocation id from the command line, so a run is
@@ -19,6 +20,7 @@ npx tsx index1.ts <id> [n] [--via run|rpc]
 npx tsx index2.ts <id> [n] [--via run|rpc]
 npx tsx index3.ts <id> [n] [m] [--via run|rpc]
 npx tsx manual1.ts <id> [n]
+npx tsx manual2.ts <id> [n]
 
 RESONATE_URL=http://localhost:8001 npx tsx index1.ts demo 3
 ```
@@ -160,6 +162,68 @@ Every write after the claim goes through `task.fence`, which is what makes a
 hand-written driver safe: the fencing token is checked in the same transaction
 as the write, so a driver that lost its lease is refused rather than quietly
 corrupting the tree.
+
+## M2 — the same again, remotely, and what it costs
+
+`manual1.ts` is a straight line of calls. `manual2.ts` cannot be, and the
+difference is the point of having both. W2's children are remote, so:
+
+- a **poll connection must be open before anything is created** — dispatch is
+  at-most-once, so a child created first would have its `execute` dropped;
+- work **arrives** rather than being called, so there is an event loop;
+- a resumed invocation **replays from the top**, re-creating children it
+  already made and relying on `promise.create` being idempotent by id;
+- and **every resume bumps the version**, so it has to be tracked.
+
+That list is not a description of the file so much as a description of what an
+SDK is. M1 shows the protocol can be driven with `fetch`; M2 shows where that
+stops being comfortable.
+
+The captured shape for n = 2, reproduced exactly by the driver:
+
+```
+turn 1   task.create  root          claim at v1
+         task.fence   v1            promise.create root.0 (global, targeted)
+         task.suspend v1            park on root.0
+turn 2   task.acquire root.0  v0->v1
+         task.fulfill root.0  v1    resolved 0        -> resumes the root
+turn 3   task.acquire root   v1->v2   RESUME IS A RE-CLAIM
+         task.fence   v2            replay root.0, create root.1
+         task.suspend v2
+turn 4   task.acquire root.1 v0->v1
+         task.fulfill root.1 v1     resolved 1
+turn 5   task.acquire root   v2->v3
+         task.fence   v3            replay both
+         task.fulfill root   v3     resolved 2
+```
+
+**The root ends at version `1 + n`**, and turns come to `1 + 2n`. Those are
+the two numbers to check: a resume is not a continuation, it is a re-claim,
+and the version says so.
+
+### The bug this found
+
+Running M2 against a long-lived server hung — no dispatch ever arrived. It
+reproduces in three lines: open a few SSE connections, kill the clients, then
+dispatch. Everything is swallowed.
+
+The cause was in `resonate-on-do`'s gateway, and the fix is in the addressing
+rather than in liveness detection, because **liveness is not detectable here**:
+after a client disappears, the writer's `closed` promise does not settle,
+`write()` does not throw, and `desiredSize` stays at 1 — the runtime keeps
+draining the response body into a void. A dead stream is indistinguishable
+from a live one.
+
+What saves it is reading the reference more carefully. `PollRegistry::send_poll`
+treats an **anycast address as a preference, not a free choice**: for
+`poll://any@<group>/<pid>` it delivers to the connection whose id is `<pid>`
+and only falls back to another member of the group if that one is absent.
+Since a dispatch address carries the pid of the worker that asked for the
+work, the preferred connection is nearly always right — and picking an
+arbitrary group member instead is exactly how one abandoned connection
+swallows every message for everyone.
+
+"Anycast" reads like "pick any". It is not.
 
 ## Tags on the wire
 
