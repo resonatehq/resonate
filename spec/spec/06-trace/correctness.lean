@@ -36,7 +36,8 @@ used to return its partial `seen` set when fuel ran out, indistinguishably
 from having reached a fixpoint, so a REFUTED verdict could rest on a
 closure that was simply cut short. It now reports saturation and
 `validate` downgrades a truncated step to `.inconclusive`, which is why
-`refuted_implies_not_conformant` below needs no fuel side-condition. -/
+`rejected_trace_implies_not_valid_trace` below needs no fuel
+side-condition. -/
 
 namespace TraceCheck.Correctness
 
@@ -61,80 +62,124 @@ inductive Admissible : ServerState → List Observation → Prop
   | nil  {s} : Admissible s []
   | cons {s s' o rest} : Explains o s s' → Admissible s' rest → Admissible s (o :: rest)
 
-/-- The claim a conformance suite actually wants to make about a server. -/
-def Conformant (t : List Observation) : Prop :=
+/-- A trace is VALID when the specification can explain it. This is the
+    claim a conformance suite actually wants to make about a server, and
+    it is BINARY: a trace either is or is not explainable, with or
+    without anyone running a checker.
+
+    The three-valuedness below lives one level up, in what `validate`
+    ESTABLISHED — never in the truth itself. -/
+def Valid (t : List Observation) : Prop :=
   Admissible ServerState.init t
 
-/-! ## The two theorems
+/-! ## Accepting, rejecting, and declining
 
-The pair one WANTS to write is
+`Valid` is binary. `validate`'s verdict is not: it ACCEPTS or REJECTS —
+two positive judgements, not each other's negation — or it does neither.
+
+So the map from verdict to truth is PARTIAL:
 
 ```
-theorem admissible_implies_conformant :  verdict = admissible → Conformant t
-theorem not_admissible_implies_not_conformant : verdict ≠ admissible → ¬ Conformant t
+accepted   ↦  Valid
+rejected   ↦  ¬ Valid
+undecided  ↦  (nothing)
 ```
 
-The first is right. The second is **false**, and not by a technicality:
-`.inconclusive` is not `.admissible`, but a trace that exhausted the fuel
-bound may be perfectly conformant — the checker simply did not finish
-looking. Stating completeness against "not admissible" would demand that
-running out of budget proves nonconformance.
+Three verdicts, two truths, one verdict with no image. Everything below
+is bookkeeping on that picture, and it is why the first attempt at these
+theorems fails. Written with a negation:
 
-So completeness is stated against `.refuted` specifically. That is why
-the verdict type has three constructors and not a `Bool`: the checker
-needs a way to decline, and the theorems need a name for it. Together the
-two say: **whenever the verdict is not `.inconclusive`, it is right.**
+```
+accepted  → valid          -- true
+¬accepted → ¬valid         -- FALSE
+```
 
-The equivalence the pair adds up to is `conformant_iff` below, which is
-the two-sided statement — and it is conditional exactly where it must be.
+`¬accepted` is total, so it swallows the declined case along with the
+rejected one — and a declined trace may be perfectly valid, since the
+search hit its bound and stopped looking, which is not evidence of
+anything. Written with two positive judgements, both hold:
 
-`admissible_implies_conformant` is the one that matters for trusting a
-green suite: it says a pass is not vacuous. `refuted_implies_not_conformant`
-is the one that matters for trusting a bug report: it says a refutation is
-not a false alarm, which is exactly the direction the cone got wrong
-before `affects` was introduced. -/
+```
+accepted → valid
+rejected → ¬valid
+```
 
-/-- **SOUNDNESS.** An `admissible` verdict is not a false pass: some
-    schedule really does explain the run. -/
-theorem admissible_implies_conformant {t : List Observation} {fuel cap : Nat}
-    {w : List (Tau × Nat)} {f n : Nat}
-    (h : validate t fuel cap = .admissible w f n) :
-    Conformant t := by
+Nothing about the logic changed between those two displays. The
+vocabulary changed, and the vocabulary is what was wrong.
+
+`Undecided` is therefore a first-class notion here rather than a leftover
+`else`. `verdict_trichotomy` records that the three are exhaustive and
+disjoint, which is what lets `valid_iff_accepted` recover the equivalence
+on the traces the checker actually decided. -/
+
+/-- The checker ACCEPTED the trace: it found a schedule. -/
+def Accepted (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ w f n, validate t fuel cap = .admissible w f n
+
+/-- The checker REJECTED the trace: it searched to saturation and found
+    no schedule. A positive claim, not the failure of `Accepted`. -/
+def Rejected (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ i k, validate t fuel cap = .refuted i k
+
+/-- The checker DECLINED: it ran out of budget. Carries no claim about
+    the trace at all, which is exactly why it needs its own name. -/
+def Undecided (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ i r, validate t fuel cap = .inconclusive i r
+
+/-! ## The two theorems -/
+
+/-- **SOUNDNESS — an accepted trace is a valid trace.** A pass is not
+    vacuous: some schedule really does explain the run. -/
+theorem accepted_trace_implies_valid_trace {t : List Observation} {fuel cap : Nat}
+    (h : Accepted t fuel cap) :
+    Valid t := by
   sorry
 
-/-- **COMPLETENESS.** A `refuted` verdict is not a false alarm: no
-    schedule explains the run.
+/-- **COMPLETENESS — a rejected trace is not a valid trace.** A refutation
+    is not a false alarm: no schedule explains the run. This is the
+    direction the cone got wrong before `affects` was introduced.
 
-    Note the hypothesis is `.refuted`, not `≠ .admissible`. The weaker
-    form is what one reaches for first and it does not hold — see the
-    section comment.
-
-    Unconditional otherwise, but only because `validate` now refuses to
-    return `.refuted` from a truncated closure — a step that hit the fuel
-    bound yields `.inconclusive` instead. Without that, even this
-    statement would be false, and the checker would report false alarms
-    whenever a τ chain ran deeper than `fuel`. -/
-theorem refuted_implies_not_conformant {t : List Observation} {fuel cap i k : Nat}
-    (h : validate t fuel cap = .refuted i k) :
-    ¬ Conformant t := by
+    Unconditional, but only because `validate` refuses to REJECT from a
+    truncated closure — a step that hit the fuel bound DECLINES instead.
+    Without that separation this statement would be false, and the checker
+    would raise false alarms whenever a τ chain ran deeper than `fuel`. -/
+theorem rejected_trace_implies_not_valid_trace {t : List Observation} {fuel cap : Nat}
+    (h : Rejected t fuel cap) :
+    ¬ Valid t := by
   sorry
 
-/-- **THE TWO SIDES TOGETHER.** Conformance and an `admissible` verdict
-    coincide — given that the checker reached a decision at all.
+/-! ## What makes them add up -/
 
-    This is the statement "the checker is correct and complete", and the
-    hypothesis is the honest price of a bounded search: it says nothing
-    about traces the checker declined to decide, and it cannot, because
-    for those the answer genuinely is unknown.
+/-- The three judgements partition the outcomes: every run lands in
+    exactly one. Without this, the two theorems above would not compose —
+    "not rejected" would not narrow anything down. -/
+theorem verdict_trichotomy (t : List Observation) (fuel cap : Nat) :
+    (Accepted t fuel cap ∨ Rejected t fuel cap ∨ Undecided t fuel cap)
+    ∧ ¬(Accepted t fuel cap ∧ Rejected t fuel cap)
+    ∧ ¬(Accepted t fuel cap ∧ Undecided t fuel cap)
+    ∧ ¬(Rejected t fuel cap ∧ Undecided t fuel cap) := by
+  unfold Accepted Rejected Undecided
+  cases validate t fuel cap <;> simp
 
-    It follows from the two theorems above plus the fact that the three
-    verdicts are exhaustive and mutually exclusive. -/
-theorem conformant_iff {t : List Observation} {fuel cap : Nat}
-    (hdecided : ∀ i r, validate t fuel cap ≠ .inconclusive i r) :
-    Conformant t ↔ ∃ w f n, validate t fuel cap = .admissible w f n := by
-  sorry
+/-- **THE TWO SIDES TOGETHER.** On the traces it decided, the checker's
+    answer and the truth coincide — "correct and complete".
 
-/-- Stronger than `admissible_implies_conformant`, and the reason the
+    The hypothesis is the honest price of a bounded search. It says
+    nothing about declined traces and it cannot, because for those the
+    answer genuinely is unknown. Follows from the two theorems plus
+    `verdict_trichotomy`. -/
+theorem valid_iff_accepted {t : List Observation} {fuel cap : Nat}
+    (hdecided : ¬ Undecided t fuel cap) :
+    Valid t ↔ Accepted t fuel cap := by
+  constructor
+  · intro hvalid
+    rcases (verdict_trichotomy t fuel cap).1 with hacc | hrej | hund
+    · exact hacc
+    · exact absurd hvalid (rejected_trace_implies_not_valid_trace hrej)
+    · exact absurd hund hdecided
+  · exact accepted_trace_implies_valid_trace
+
+/-- Stronger than `accepted_trace_implies_valid_trace`, and the reason the
     checker carries a schedule at all: the witness it returns is itself an
     explanation, so a pass comes with a certificate rather than an
     assertion. -/
@@ -142,7 +187,7 @@ theorem witness_explains {t : List Observation} {fuel cap : Nat}
     {w : List (Tau × Nat)} {f n : Nat}
     (h : validate t fuel cap = .admissible w f n) :
     ∃ schedules : List (List Tau),
-      schedules.flatten = w.map (·.fst) ∧ Conformant t := by
+      schedules.flatten = w.map (·.fst) ∧ Valid t := by
   sorry
 
 /-! ## The three obligations the proofs rest on
