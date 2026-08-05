@@ -6,7 +6,8 @@
   "description": "The canonical workloads the specification refers to",
   "scripts": {
     "w1": "tsx index1.ts",
-    "w2": "tsx index2.ts"
+    "w2": "tsx index2.ts",
+    "w3": "tsx index3.ts"
   },
   "dependencies": {
     "@resonatehq/sdk": "^0.11.4"
