@@ -206,7 +206,7 @@ private def name : P String
 
 private def RESERVED : List String :=
   ["FROM","WHERE","JOIN","ON","SET","VALUES","SELECT","INSERT","UPDATE",
-   "DELETE","INTO","CONFLICT","DO","NOTHING","DISTINCT","AND","OR","IN",
+   "DELETE","INTO","CONFLICT","DO","NOTHING","DISTINCT","AND","OR","IN","IS","NOT",
    "NULL","TRUE","FALSE","EXCLUDED"]
 
 /-- An identifier that is not a keyword — used for table aliases, where
@@ -234,17 +234,47 @@ private def pExprTail : Nat → Expr → P Expr
       | some (_, ts) => do let (r, ts) ← pCmp fuel ts; pExprTail fuel (.bin "OR" l r) ts
       | none => some (l, ts)
 
-private def pCmp : Nat → P Expr
+/-- Additive level, between comparison and atom: `version + 1`. -/
+private def pAdd : Nat → P Expr
   | 0,      _  => none
   | fuel+1, ts => do
     let (l, ts) ← pAtom fuel ts
+    pAddTail fuel l ts
+
+private def pAddTail : Nat → Expr → P Expr
+  | 0,      _, _  => none
+  | fuel+1, l, ts =>
+    match ts with
+    | .punct o :: ts' =>
+        if o == "+" || o == "-" then do
+          let (r, ts'') ← pAtom fuel ts'
+          pAddTail fuel (.bin o l r) ts''
+        else some (l, ts)
+    | _ => some (l, ts)
+
+private def pCmp : Nat → P Expr
+  | 0,      _  => none
+  | fuel+1, ts => do
+    let (l, ts) ← pAdd fuel ts
     match ts with
     | .punct o :: ts' =>
         if o == "=" || o == "!=" || o == "<" || o == "<=" || o == ">" || o == ">=" then do
-          let (r, ts'') ← pAtom fuel ts'
+          let (r, ts'') ← pAdd fuel ts'
           some (.bin o l r, ts'')
         else some (l, ts)
     | _ =>
+      match kw "IS" ts with
+      | some (_, ts') =>
+          -- `IS NULL` / `IS NOT NULL`: the only null test SQL has, since
+          -- `= NULL` is NULL rather than true.
+          (match kw "NOT" ts' with
+           | some (_, ts'') => do
+               let (_, ts'') ← kw "NULL" ts''
+               some (.bin "ISNOT" l (.lit .null), ts'')
+           | none => do
+               let (_, ts'') ← kw "NULL" ts'
+               some (.bin "IS" l (.lit .null), ts''))
+      | none =>
       match kw "IN" ts with
       | some (_, ts') => do
           let (_, ts') ← pun "(" ts'
@@ -470,6 +500,11 @@ private def evalExpr : Nat → Store → List SqlValue → Row → Row → Expr 
         match op with
         | "AND" => if truthy a && truthy b then .int 1 else .int 0
         | "OR"  => if truthy a || truthy b then .int 1 else .int 0
+        -- `IS NULL` is total: it is the one test that does not propagate
+        | "IS"    => if a == .null then .int 1 else .int 0
+        | "ISNOT" => if a == .null then .int 0 else .int 1
+        | "+" => (match a, b with | .int x, .int y => .int (x + y) | _, _ => .null)
+        | "-" => (match a, b with | .int x, .int y => .int (x - y) | _, _ => .null)
         -- SQLite three-valued logic: any comparison with NULL is NULL,
         -- and NULL is not truthy, so a WHERE on it excludes the row.
         | _ =>
