@@ -33,3 +33,7 @@ lean_lib «tracecheck» where
 lean_exe «tracecheck_exe» where
   srcDir := "."
   root   := `«06-trace».experiments
+
+lean_exe «realtrace_exe» where
+  srcDir := "."
+  root   := `«06-trace».real
