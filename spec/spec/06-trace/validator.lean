@@ -279,12 +279,7 @@ partial def tauClosureBy (pick : ServerState → List Tau)
         go fuel (seen ++ fresh) fresh
   go fuel (dedup cs) (dedup cs)
 
-/-- The unreduced closure: every enabled τ. Kept so the reduction can be
-    checked against it rather than trusted. -/
-def tauClosure (now : Nat) (fuel : Nat) (cs : List Cand) : List Cand × Bool :=
-  tauClosureBy (fun st => enabledTaus st now) now fuel cs
-
-/-! ## Observations and the step -/
+/-! ## Observations -/
 
 structure Observation where
   req : Request
@@ -292,63 +287,17 @@ structure Observation where
   now : Nat
   deriving Repr
 
-/-- One observed event. Close under τs, apply the request, keep only the
-    candidates that produce the response that was actually seen. That
-    filter is the strongest pruning signal in the algorithm — and it is
-    the channel `TRACES.md` records as observed by no existing harness. -/
-def stepObservedBy (coned : Bool) (fuel : Nat) (o : Observation) (cs : List Cand) : List Cand × Bool :=
-  let pick : ServerState → List Tau :=
-    if coned then (fun st => relevantTaus o.req st o.now)
-    else (fun st => enabledTaus st o.now)
-  let (closed, sat) := tauClosureBy pick o.now fuel cs
-  (dedup <| closed.filterMap fun c =>
-    let (r, s') := Equivalence.stepOf Equivalence.handleM o.req o.now c.state
-    if r == o.res then some (mkCand s' c.schedule) else none, sat)
+/-! ## The verdict
 
-def stepObserved (fuel : Nat) (o : Observation) (cs : List Cand) : List Cand × Bool :=
-  stepObservedBy true fuel o cs
+Three constructors, not a `Bool`. A bounded search must be able to say "I
+stopped early" as an answer distinct from "I found nothing", or a
+refutation could rest on a closure that was merely cut short. -/
 
 inductive Verdict
   | admissible   (witness : List (Tau × Nat)) (maxFanout : Nat) (steps : Nat)
   | refuted      (atEvent : Nat) (survivorsBefore : Nat)
   | inconclusive (atEvent : Nat) (reason : String)
   deriving Repr
-
-/-- Walk the trace. `fuel` bounds the τ-closure depth; `cap` bounds the
-    candidate set, so an explosion is reported rather than endured. -/
-def validateBy (coned : Bool) (trace : List Observation)
-    (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  let rec go (i : Nat) (maxF : Nat) (cs : List Cand) : List Observation → Verdict
-    | [] =>
-        match cs with
-        | []     => .refuted i 0
-        | c :: _ => .admissible c.schedule maxF i
-    | o :: rest =>
-        let before := cs.length
-        let (cs', sat) := stepObservedBy coned fuel o cs
-        if !sat then
-          -- the closure was cut short; neither verdict is earned
-          .inconclusive i s!"τ-closure hit the fuel bound ({fuel})"
-        else if cs'.isEmpty then
-          .refuted i before
-        else if cs'.length > cap then
-          .inconclusive i s!"candidate set exceeded cap ({cs'.length})"
-        else
-          go (i + 1) (max maxF cs'.length) cs' rest
-  go 0 1 [mkCand ServerState.init []] trace
-
-/-- Callers use this. The cone is not optional in normal use — it is the
-    difference between flat and `2^n` — and `validateBy` exists only so
-    the agreement test can run both and diff them. -/
-def validate (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  validateBy true trace fuel cap
-
-/-- The unreduced checker: every enabled τ, every subset. Exponential in
-    the number of simultaneously-armed obligations, so it is a REFERENCE
-    for validating the reduction, not something to point at a real trace.
-    Keeping it is what caught the cone being unsound the first time. -/
-def validateFull (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  validateBy false trace fuel cap
 
 /-! ## Producing traces
 

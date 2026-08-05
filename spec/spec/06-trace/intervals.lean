@@ -9,7 +9,7 @@ file fixes the ALGORITHM so that it decides the wider notion, and states
 the completeness theorem the challenge asked for:
 
 ```lean
-theorem rejectedIv_implies_not_valid (h : RejectedIv t fuel cap) : ¬ Valid t
+theorem rejected_trace_implies_not_valid_trace (h : Rejected t fuel cap) : ¬ Valid t
 ```
 
 No `InstantsSuffice`, no side condition on the trace.
@@ -145,7 +145,7 @@ Processing the critical instants in ASCENDING order and running the
 ordinary τ-closure at each generates exactly the non-decreasing timed
 schedules over that instant set — which is the shape `Timed` asks for. -/
 
-def tauClosureIv (pick : ServerState → Nat → List Tau) (instants : List Nat)
+def tauClosureIn (pick : ServerState → Nat → List Tau) (instants : List Nat)
     (fuel : Nat) (cs : List Cand) : List Cand × Bool :=
   instants.foldl
     (fun (acc : List Cand × Bool) n =>
@@ -174,22 +174,22 @@ def noNewInGapDeadline (a b : Nat) (instants : List Nat) (cs : List Cand) : Bool
 def allInstants (a b : Nat) : List Nat :=
   if b < a then [b] else (List.range (b + 1 - a)).map (a + ·)
 
-def stepObservedIvBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
+def stepObservedBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
     (o : Observation) (cs : List Cand) : List Cand × Bool :=
   let instants :=
     if exhaustive then allInstants a o.now else criticalInstants a o.now (cs.map (·.state))
   let pick : ServerState → Nat → List Tau :=
     if coned then (fun st n => relevantTaus o.req st n)
     else (fun st n => enabledTaus st n)
-  let (closed, sat) := tauClosureIv pick instants fuel cs
+  let (closed, sat) := tauClosureIn pick instants fuel cs
   let sat := sat && (exhaustive || noNewInGapDeadline a o.now instants closed)
   (dedup <| closed.filterMap fun c =>
     let (r, s') := Equivalence.stepOf Equivalence.handleM o.req o.now c.state
     if r == o.res then some (mkCand s' c.schedule) else none, sat)
 
-def stepObservedIv (coned : Bool) (fuel : Nat) (a : Nat) (o : Observation)
+def stepObserved (coned : Bool) (fuel : Nat) (a : Nat) (o : Observation)
     (cs : List Cand) : List Cand × Bool :=
-  stepObservedIvBy false coned fuel a o cs
+  stepObservedBy false coned fuel a o cs
 
 /-! ## The verdict
 
@@ -207,7 +207,7 @@ def mentionsSchedule : Request → Bool
   | .scheduleGet _ | .scheduleCreate _ | .scheduleDelete _ | .scheduleSearch _ => true
   | _ => false
 
-def validateIvBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
+def validateBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
     (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
   if trace.any (fun o => mentionsSchedule o.req) then
     .inconclusive 0 "trace mentions schedules; `occurrences` is opaque (see schedules.lean)"
@@ -224,7 +224,7 @@ def validateIvBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
             .refuted i cs.length
           else
             let before := cs.length
-            let (cs', sat) := stepObservedIvBy exhaustive coned fuel a o cs
+            let (cs', sat) := stepObservedBy exhaustive coned fuel a o cs
             if !sat then
               .inconclusive i s!"interval closure not saturated (fuel {fuel})"
             else if cs'.isEmpty then
@@ -235,36 +235,30 @@ def validateIvBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
               go (i + 1) o.now (max maxF cs'.length) cs' rest
     go 0 0 1 [mkCand ServerState.init []] trace
 
-def validateIv (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  validateIvBy false true trace fuel cap
+def validate (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
+  validateBy false true trace fuel cap
 
-def validateIvFull (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  validateIvBy false false trace fuel cap
-
-/-- The reduction's reference implementation: every instant in every gap,
-    every enabled τ. This is what `validateIv` claims to be equivalent to,
-    and the claim is R3. Only usable on toy instants. -/
-def validateIvBrute (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
-  validateIvBy true false trace fuel cap
+def validateFull (trace : List Observation) (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
+  validateBy false false trace fuel cap
 
 /-! ## The judgements -/
 
-def AcceptedIv (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ w f n, validateIv t fuel cap = .admissible w f n
+def Accepted (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ w f n, validate t fuel cap = .admissible w f n
 
-def RejectedIv (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ i k, validateIv t fuel cap = .refuted i k
+def Rejected (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ i k, validate t fuel cap = .refuted i k
 
-def UndecidedIv (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ i r, validateIv t fuel cap = .inconclusive i r
+def Undecided (t : List Observation) (fuel cap : Nat) : Prop :=
+  ∃ i r, validate t fuel cap = .inconclusive i r
 
-theorem verdictIv_trichotomy (t : List Observation) (fuel cap : Nat) :
-    (AcceptedIv t fuel cap ∨ RejectedIv t fuel cap ∨ UndecidedIv t fuel cap)
-    ∧ ¬(AcceptedIv t fuel cap ∧ RejectedIv t fuel cap)
-    ∧ ¬(AcceptedIv t fuel cap ∧ UndecidedIv t fuel cap)
-    ∧ ¬(RejectedIv t fuel cap ∧ UndecidedIv t fuel cap) := by
-  unfold AcceptedIv RejectedIv UndecidedIv
-  cases validateIv t fuel cap <;> simp
+theorem verdict_trichotomy (t : List Observation) (fuel cap : Nat) :
+    (Accepted t fuel cap ∨ Rejected t fuel cap ∨ Undecided t fuel cap)
+    ∧ ¬(Accepted t fuel cap ∧ Rejected t fuel cap)
+    ∧ ¬(Accepted t fuel cap ∧ Undecided t fuel cap)
+    ∧ ¬(Rejected t fuel cap ∧ Undecided t fuel cap) := by
+  unfold Accepted Rejected Undecided
+  cases validate t fuel cap <;> simp
 
 /-! ## The obligations the reduction rests on
 
@@ -326,15 +320,15 @@ theorem schedules_stay_empty {s : ServerState} {req : Request} {now : Nat}
     by some timed schedule. Rests on `canon_congruence` / `canon_step`
     from `correctness.lean` (dedup must not discard a live branch) and, in
     the coned mode, on `cone_independence` / `cone_commute`. -/
-theorem acceptedIv_implies_exec {t : List Observation} {fuel cap : Nat}
-    (h : AcceptedIv t fuel cap) : ValidExec t := by
+theorem accepted_implies_exec {t : List Observation} {fuel cap : Nat}
+    (h : Accepted t fuel cap) : ValidExec t := by
   sorry
 
 /-- **SOUNDNESS.** Unchanged in character from the old file: the checker
     only ever exhibits schedules, and schedules are executions. -/
-theorem acceptedIv_implies_valid {t : List Observation} {fuel cap : Nat}
-    (h : AcceptedIv t fuel cap) : Valid t :=
-  exec_implies_valid (acceptedIv_implies_exec h)
+theorem accepted_trace_implies_valid_trace {t : List Observation} {fuel cap : Nat}
+    (h : Accepted t fuel cap) : Valid t :=
+  exec_implies_valid (accepted_implies_exec h)
 
 /-- The algorithm-level completeness: a refutation means NO timed
     schedule over the critical instants explains the run, and — by R1–R4
@@ -343,8 +337,8 @@ theorem acceptedIv_implies_valid {t : List Observation} {fuel cap : Nat}
     This is the only place the reduction is used, and it is used for
     COMPLETENESS alone. If R1–R4 were false, this theorem would fail and
     soundness would still stand. -/
-theorem rejectedIv_implies_not_exec {t : List Observation} {fuel cap : Nat}
-    (h : RejectedIv t fuel cap) : ¬ ValidExec t := by
+theorem rejected_implies_not_exec {t : List Observation} {fuel cap : Nat}
+    (h : Rejected t fuel cap) : ¬ ValidExec t := by
   sorry
 
 /-- **COMPLETENESS, unconditionally.** A rejection means no execution the
@@ -355,22 +349,22 @@ theorem rejectedIv_implies_not_exec {t : List Observation} {fuel cap : Nat}
     gone, and it is gone because `valid_implies_exec` — proved, not
     assumed — says the widened search space is everything `Valid` can
     offer. -/
-theorem rejectedIv_implies_not_valid {t : List Observation} {fuel cap : Nat}
-    (h : RejectedIv t fuel cap) : ¬ Valid t :=
-  fun hv => rejectedIv_implies_not_exec h (valid_implies_exec hv)
+theorem rejected_trace_implies_not_valid_trace {t : List Observation} {fuel cap : Nat}
+    (h : Rejected t fuel cap) : ¬ Valid t :=
+  fun hv => rejected_implies_not_exec h (valid_implies_exec hv)
 
 /-- **CORRECT AND COMPLETE**, for real validity, with no hypothesis
     beyond the checker having decided. This is the statement the old file
     could only get by assuming `InstantsSuffice`. -/
-theorem valid_iff_acceptedIv {t : List Observation} {fuel cap : Nat}
-    (hdecided : ¬ UndecidedIv t fuel cap) :
-    Valid t ↔ AcceptedIv t fuel cap := by
+theorem valid_iff_accepted {t : List Observation} {fuel cap : Nat}
+    (hdecided : ¬ Undecided t fuel cap) :
+    Valid t ↔ Accepted t fuel cap := by
   constructor
   · intro hvalid
-    rcases (verdictIv_trichotomy t fuel cap).1 with hacc | hrej | hund
+    rcases (verdict_trichotomy t fuel cap).1 with hacc | hrej | hund
     · exact hacc
-    · exact absurd hvalid (rejectedIv_implies_not_valid hrej)
+    · exact absurd hvalid (rejected_trace_implies_not_valid_trace hrej)
     · exact absurd hund hdecided
-  · exact acceptedIv_implies_valid
+  · exact accepted_trace_implies_valid_trace
 
 end TraceCheck.Intervals

@@ -21,16 +21,7 @@ def main (args : List String) : IO UInt32 := do
     -- measure thunk construction and always report 0ms
     if line.length == 0 then IO.eprintln "" else pure ()
     let t1 ← IO.monoMsNow
-    IO.eprintln s!"pinned   {line}   {t1 - t0}ms"
-    -- the same question of the INTERVAL checker, whose completeness needs
-    -- no `InstantsSuffice`: τs may fire at any critical instant in the gap
-    let t2 ← IO.monoMsNow
-    let viv := validateIv trace 16 cap
-    let liv := verdictLine viv
-    if liv.length == 0 then IO.eprintln "" else pure ()
-    let t3 ← IO.monoMsNow
-    IO.eprintln s!"interval {liv}   {t3 - t2}ms"
-    IO.eprintln s!"agree: {verdictKind v == verdictKind viv}"
+    IO.eprintln s!"{line}   {t1 - t0}ms"
     match v with
     | .admissible w _ _ =>
         IO.eprintln s!"witness: {w.length} internal steps the server never reported"

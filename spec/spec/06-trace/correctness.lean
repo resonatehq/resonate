@@ -114,227 +114,59 @@ def ExternalsAre (tr : Trace) (obs : List Observation) : Prop :=
 def Valid (obs : List Observation) : Prop :=
   ∃ tr : Trace, ValidM tr ∧ (tr 0).state = ServerState.init ∧ ExternalsAre tr obs
 
-/-! ## The restricted notion the checker actually searches -/
+/-! ## The abandoned notion, kept on purpose
 
-/-- Run a schedule of internal steps at one instant. Nothing external can
-    appear in `σ`: the type forbids it. -/
+`ValidPinned` is what an earlier checker searched: every hidden step fires
+AT the instant of the observation it precedes. It is no longer anything's
+definition of validity, and no checker computes it — but it is not dead
+code either. `06-trace/schedules.lean` proves that the gap between it and
+`Valid` cannot be closed, and that result has to be stated against
+something. Deleting these would delete the record of why the design
+changed. -/
+
+/-- Run a schedule of internal steps at ONE instant. -/
 def fireAll (σ : List Tau) (now : Nat) (s : ServerState) : ServerState :=
   σ.foldl (fun st t => t.step now st) s
 
-/-- One observed event is EXPLAINED from `s`, landing in `s'`, when some
-    internal schedule fired AT `o.now` makes the request produce exactly
-    the response that was observed.
-
-    The instant is pinned. That is the restriction; see `InstantsSuffice`. -/
+/-- One observed event explained by a schedule pinned to `o.now`. -/
 def Explains (o : Observation) (s s' : ServerState) : Prop :=
   ∃ σ : List Tau,
     stepOf handleM o.req o.now (fireAll σ o.now s) = (o.res, s')
 
-/-- The whole run is explained, event by event, from a starting state. -/
 inductive Admissible : ServerState → List Observation → Prop
   | nil  {s} : Admissible s []
   | cons {s s' o rest} : Explains o s s' → Admissible s' rest → Admissible s (o :: rest)
 
-/-- Validity RESTRICTED to schedules whose τs fire at observation
-    instants. Proof-friendly — an inductive with one case per event —
-    which is why the checker theorems are proved through it. -/
 def ValidPinned (obs : List Observation) : Prop :=
   Admissible ServerState.init obs
 
-/-! ## The bridge, and the gap -/
-
-/-- **The bridge.** A pinned explanation IS an execution: interleave each
-    event's schedule before it, all at that event's instant, and pad with
-    `.idle`. Clock monotonicity is immediate because instants only ever
-    come from the observations, which are ordered.
-
-    ONE-DIRECTIONAL by design. -/
-theorem pinned_implies_valid {obs : List Observation} (h : ValidPinned obs) :
-    Valid obs := by
-  sorry
-
-/-- **The converse — NOT a theorem.** Naming it as a proposition instead
-    of proving it is the point: it may well be FALSE.
-
-    `ValidM` constrains instants only by `(tr t).now ≤ (tr (t+1)).now`, so
-    an execution may fire a τ strictly between two observations. The
-    checker never tries that. For the difference to be invisible, every
-    internal step would have to be insensitive to WHICH instant in the gap
-    it fired at — and `onTaskRetryTimeout` re-arms at `now + retryTimeout`,
-    which is directly instant-sensitive and observable at any later event
-    that straddles the re-armed deadline.
-
-    Whether an actual counterexample trace exists is open. Until it is
-    settled, every statement that needs "the checker searched everything"
-    carries this as a hypothesis. -/
+/-- The hypothesis the pinned checker needed and never got. Not merely
+    unproved: `06-trace/schedules.lean` shows it is INDEPENDENT, because
+    `occurrences` is `opaque` with no value, so both it and its negation
+    are consistent. No test could ever have settled it — which is why the
+    checker was rebuilt to carry intervals instead of assuming this. -/
 def InstantsSuffice : Prop :=
   ∀ obs : List Observation, Valid obs → ValidPinned obs
 
-/-! ## Accepting, rejecting, and declining
+/-! ## Where the rest of the story lives
 
-`Valid` is binary. `validate`'s verdict is not: it ACCEPTS or REJECTS —
-two positive judgements, not each other's negation — or it does neither.
+This file is the SEMANTICS only: what a valid run is, said in the
+specification's vocabulary. It deliberately knows nothing about how the
+checker computes.
 
-So the map from verdict to truth is PARTIAL:
+* `06-trace/executions.lean` refines `Valid` into `ValidExec`, which
+  carries the INTERVAL between observations rather than a single instant,
+  and proves `valid_implies_exec` outright.
+* `06-trace/intervals.lean` is the checker, and states the two theorems —
+  `accepted_trace_implies_valid_trace` and
+  `rejected_trace_implies_not_valid_trace` — against `Valid` as defined
+  here.
 
-```
-accepted   ↦  Valid
-rejected   ↦  ¬ Valid
-undecided  ↦  (nothing)
-```
-
-Three verdicts, two truths, one verdict with no image. Everything below
-is bookkeeping on that picture, and it is why the first attempt at these
-theorems fails. Written with a negation:
-
-```
-accepted  → valid          -- true
-¬accepted → ¬valid         -- FALSE
-```
-
-`¬accepted` is total, so it swallows the declined case along with the
-rejected one — and a declined trace may be perfectly valid, since the
-search hit its bound and stopped looking, which is not evidence of
-anything. Written with two positive judgements, both hold:
-
-```
-accepted → valid
-rejected → ¬valid
-```
-
-Nothing about the logic changed between those two displays. The
-vocabulary changed, and the vocabulary is what was wrong.
-
-`Undecided` is therefore a first-class notion here rather than a leftover
-`else`. `verdict_trichotomy` records that the three are exhaustive and
-disjoint, which is what lets `valid_iff_accepted` recover the equivalence
-on the traces the checker actually decided. -/
-
-/-- The checker ACCEPTED the trace: it found a schedule. -/
-def Accepted (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ w f n, validate t fuel cap = .admissible w f n
-
-/-- The checker REJECTED the trace: it searched to saturation and found
-    no schedule. A positive claim, not the failure of `Accepted`. -/
-def Rejected (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ i k, validate t fuel cap = .refuted i k
-
-/-- The checker DECLINED: it ran out of budget. Carries no claim about
-    the trace at all, which is exactly why it needs its own name. -/
-def Undecided (t : List Observation) (fuel cap : Nat) : Prop :=
-  ∃ i r, validate t fuel cap = .inconclusive i r
-
-/-! ## The two theorems -/
-
-/-- The checker's core obligation, and the one place the ALGORITHM has to
-    be right: if it accepted, the schedule it walked really does explain
-    every event. Everything else in this section is bookkeeping on top.
-
-    Rests on `canon_congruence` and `canon_step` (dedup must not discard a
-    branch that would have explained a later event) and, when the cone is
-    on, `cone_independence` and `cone_commute`. -/
-theorem accepted_implies_pinned {t : List Observation} {fuel cap : Nat}
-    (h : Accepted t fuel cap) :
-    ValidPinned t := by
-  sorry
-
-/-- **SOUNDNESS — an accepted trace is a valid trace.** A pass is not
-    vacuous: some execution the specification calls valid really does have
-    exactly these external steps.
-
-    Unaffected by the instants gap. The checker only ever exhibits pinned
-    schedules, and pinned schedules ARE executions — that direction is
-    `pinned_implies_valid`, and it is the direction that holds. -/
-theorem accepted_trace_implies_valid_trace {t : List Observation} {fuel cap : Nat}
-    (h : Accepted t fuel cap) :
-    Valid t :=
-  pinned_implies_valid (accepted_implies_pinned h)
-
-/-- **COMPLETENESS, at the level the checker searches.** A rejection means
-    no schedule with τs AT OBSERVATION INSTANTS explains the run.
-
-    This is the honest unconditional statement, and it is the direction the
-    cone got wrong before `affects` was introduced.
-
-    Unconditional in `fuel` only because `validate` refuses to REJECT from
-    a truncated closure — a step that hit the bound DECLINES instead. -/
-theorem rejected_trace_implies_not_pinned_valid_trace
-    {t : List Observation} {fuel cap : Nat}
-    (h : Rejected t fuel cap) :
-    ¬ ValidPinned t := by
-  sorry
-
-/-- **COMPLETENESS, at the level anyone actually cares about** — and it
-    does not come for free.
-
-    Rejecting means the checker found no PINNED schedule. Concluding that
-    no execution whatsoever explains the run needs `InstantsSuffice`, which
-    is unproved and may be false. The hypothesis is the gap, made
-    impossible to overlook: anyone invoking this theorem must first
-    discharge it.
-
-    This is what the file previously claimed unconditionally, by defining
-    validity to be the pinned notion. -/
-theorem rejected_trace_implies_not_valid_trace
-    {t : List Observation} {fuel cap : Nat}
-    (hgap : InstantsSuffice)
-    (h : Rejected t fuel cap) :
-    ¬ Valid t :=
-  fun hvalid => rejected_trace_implies_not_pinned_valid_trace h (hgap t hvalid)
-
-/-! ## What makes them add up -/
-
-/-- The three judgements partition the outcomes: every run lands in
-    exactly one. Without this, the theorems above would not compose —
-    "not rejected" would not narrow anything down. -/
-theorem verdict_trichotomy (t : List Observation) (fuel cap : Nat) :
-    (Accepted t fuel cap ∨ Rejected t fuel cap ∨ Undecided t fuel cap)
-    ∧ ¬(Accepted t fuel cap ∧ Rejected t fuel cap)
-    ∧ ¬(Accepted t fuel cap ∧ Undecided t fuel cap)
-    ∧ ¬(Rejected t fuel cap ∧ Undecided t fuel cap) := by
-  unfold Accepted Rejected Undecided
-  cases validate t fuel cap <;> simp
-
-/-- **CORRECT AND COMPLETE, unconditionally** — for the notion the checker
-    actually decides. On the runs it did not decline, accepting and being
-    pinned-valid are the same thing. No gap, no hypothesis. -/
-theorem pinned_valid_iff_accepted {t : List Observation} {fuel cap : Nat}
-    (hdecided : ¬ Undecided t fuel cap) :
-    ValidPinned t ↔ Accepted t fuel cap := by
-  constructor
-  · intro hpinned
-    rcases (verdict_trichotomy t fuel cap).1 with hacc | hrej | hund
-    · exact hacc
-    · exact absurd hpinned (rejected_trace_implies_not_pinned_valid_trace hrej)
-    · exact absurd hund hdecided
-  · exact accepted_implies_pinned
-
-/-- **CORRECT AND COMPLETE, for real validity** — and the extra hypothesis
-    is the price. `InstantsSuffice` is what closes the distance between
-    "the checker searched everything it searches" and "the checker
-    searched everything".
-
-    Compare `pinned_valid_iff_accepted`: same proof, one fewer assumption,
-    weaker conclusion. The pair is the clearest statement of what this
-    checker does and does not establish. -/
-theorem valid_iff_accepted {t : List Observation} {fuel cap : Nat}
-    (hgap : InstantsSuffice)
-    (hdecided : ¬ Undecided t fuel cap) :
-    Valid t ↔ Accepted t fuel cap := by
-  constructor
-  · intro hvalid; exact (pinned_valid_iff_accepted hdecided).mp (hgap t hvalid)
-  · exact accepted_trace_implies_valid_trace
-
-/-- Stronger than `accepted_trace_implies_valid_trace`, and the reason the
-    checker carries a schedule at all: the witness it returns is itself an
-    explanation, so a pass comes with a certificate rather than an
-    assertion. -/
-theorem witness_explains {t : List Observation} {fuel cap : Nat}
-    {w : List (Tau × Nat)} {f n : Nat}
-    (h : validate t fuel cap = .admissible w f n) :
-    ∃ schedules : List (List Tau),
-      schedules.flatten = w.map (·.fst) ∧ ValidPinned t := by
-  sorry
+An earlier version defined validity itself as "hidden steps fire at the
+observation's own instant", which is what the checker searched. That made
+completeness true by construction and hid a real gap. The definition above
+is the specification's; the checker now has to meet it rather than the
+other way round. -/
 
 /-! ## The obligations the proofs rest on
 

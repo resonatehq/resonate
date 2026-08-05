@@ -42,9 +42,6 @@ lean_exe «checktrace» where
   srcDir := "."
   root   := `«06-trace».check
 
-lean_exe «instants» where
-  srcDir := "."
-  root   := `«06-trace».instants
 
 lean_exe «gap» where
   srcDir := "."

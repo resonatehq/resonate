@@ -1,4 +1,4 @@
-import «06-trace».validator
+import «06-trace».intervals
 
 /-!  # A trace from a real resonate server, checked against the spec
 
@@ -155,7 +155,7 @@ def tampered2 : List Observation :=
 
 end TraceCheck.Real
 
-open TraceCheck TraceCheck.Real in
+open TraceCheck TraceCheck.Intervals TraceCheck.Real in
 def main : IO Unit := do
   IO.eprintln "── a real resonate trace, against the specification ───────────"
   IO.eprintln s!"  events            {trace.length}"

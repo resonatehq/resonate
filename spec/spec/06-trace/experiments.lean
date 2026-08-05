@@ -1,4 +1,4 @@
-import «06-trace».validator
+import «06-trace».intervals
 
 /-!  # How far does it go?
 
@@ -23,7 +23,7 @@ regardless of how long the trace is. -/
 
 namespace TraceCheck.Experiments
 
-open ServerModel Equivalence TraceCheck
+open ServerModel Equivalence TraceCheck TraceCheck.Intervals
 
 def ext : Tags := [("resonate:external", "true")]
 def tgt : Tags := [("resonate:target", "w1")]
@@ -93,7 +93,7 @@ def run (label : String) (script : List (Request × Nat))
     (coned : Bool := true) (fuel : Nat := 16) (cap : Nat := 200000) : IO Result := do
   let trace := recordFrom script
   let t0 ← IO.monoMsNow
-  let v := validateBy coned trace fuel cap
+  let v := validateBy false coned trace fuel cap
   -- FORCE it: `let` is call-by-need, so without this the timer measures
   -- the construction of a thunk and the work happens later, in `report`.
   let line := verdictLine v
@@ -119,7 +119,7 @@ def corruptLast (trace : List Observation) : List Observation :=
 
 end TraceCheck.Experiments
 
-open TraceCheck TraceCheck.Experiments in
+open TraceCheck TraceCheck.Intervals TraceCheck.Experiments in
 def main : IO Unit := do
   IO.eprintln "── discrimination (cone on) ───────────────────────────────────"
   let good := recordFrom (lengthScript 1)
@@ -139,8 +139,8 @@ def main : IO Unit := do
                      ("lied  ", corrupt (recordFrom (fanoutFiredScript n))),
                      ("workfl", recordFrom (lengthScript (min n 4))),
                      ("wf-lie", corruptLast (recordFrom (lengthScript (min n 4))))] do
-      let a := verdictKind (validateBy true  t 16 200000)
-      let b := verdictKind (validateBy false t 16 200000)
+      let a := verdictKind (validateBy false true  t 16 200000)
+      let b := verdictKind (validateBy false false t 16 200000)
       if a != b then allAgree := false
       IO.eprintln s!"  n={n} {tag}  cone={a}  full={b}  {if a == b then "AGREE" else "*** DIFFER ***"}"
   IO.eprintln s!"  --> {if allAgree then "all agree" else "DISAGREEMENT FOUND"}"

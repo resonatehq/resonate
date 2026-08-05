@@ -52,6 +52,14 @@ namespace TraceCheck.Gap
 
 open ServerModel Equivalence TraceCheck TraceCheck.Intervals
 
+/-- The reduction's reference implementation: every instant in every gap,
+    every enabled τ. `validate` claims to be equivalent to this — that
+    claim is R3 — so it lives here, in the harness that checks it, rather
+    than in the checker's API. Only usable on toy instants. -/
+def validateBrute (trace : List Observation)
+    (fuel : Nat := 16) (cap : Nat := 4096) : Verdict :=
+  validateBy true false trace fuel cap
+
 /-! ## Projections -/
 
 /-- The state modulo what no response can project: the outbox, and the
@@ -136,35 +144,25 @@ def mono (w : List (Request × Nat)) : List (Request × Nat) :=
 def ext : Tags := [("resonate:external", "true")]
 def tgt : Tags := [("resonate:target", "w1")]
 
-/-- Refuted means the recorded run — which IS valid, the script witnesses
-    it — cannot be explained by any pinned schedule. -/
-def refuted (obs : List Observation) : Bool :=
+/-- **The soundness check.** A recorded run is `Valid` BY CONSTRUCTION —
+    the script that produced it is the execution that explains it. So if
+    the checker refutes one, that is a soundness bug in `validate`, full
+    stop. This used to be the counterexample hunt against the PINNED
+    checker; with the interval checker it is a safety net instead, and it
+    is the single most important number in this file. -/
+def refutesValidRun (obs : List Observation) : Bool :=
   match validate obs 24 200000 with
   | .refuted _ _ => true
   | _            => false
 
-/-- The same question of the INTERVAL checker: does the widened search
-    still refuse this run? A recorded run is `Valid` by construction, so
-    a refutation here would be a soundness bug in `validateIv`, not a
-    counterexample to anything. -/
-def refutedIv (obs : List Observation) : Bool :=
-  match validateIv obs 24 200000 with
-  | .refuted _ _ => true
-  | _            => false
-
-/-- Did widening the search change the answer? `verdictKind` drops the
-    cost metrics, which are expected to differ; the ANSWER is not. -/
-def divergent (obs : List Observation) : Bool :=
-  verdictKind (validate obs 24 200000) != verdictKind (validateIv obs 24 200000)
-
-/-- **The reduction, tested.** `validateIv` searches one representative
-    per equivalence class of instants; `validateIvBrute` searches EVERY
+/-- **The reduction, tested.** `validate` searches one representative
+    per equivalence class of instants; `validateBrute` searches EVERY
     instant in every gap. R3 says they decide the same question. A
     disagreement here is a counterexample to the reduction — which is why
     the instant pools above are kept small enough for brute force to run
     at all. -/
 def reductionDisagrees (obs : List Observation) : Bool :=
-  verdictKind (validateIv obs 24 200000) != verdictKind (validateIvBrute obs 24 200000)
+  verdictKind (validate obs 24 200000) != verdictKind (validateBrute obs 24 200000)
 
 /-- Is the recording explainable with NO internal steps at all? If it is,
     the checker was never asked to recover anything and the script tests
@@ -380,7 +378,7 @@ def chainGrid : List (List (Request × Nat)) :=
 
 end TraceCheck.Gap
 
-open Equivalence TraceCheck TraceCheck.Gap in
+open Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
 def runFamily (name : String) (ws : List (List (Request × Nat))) : IO Nat := do
   let mut cov : Coverage := {}
   let mut broke := 0
@@ -400,34 +398,30 @@ def runFamily (name : String) (ws : List (List (Request × Nat))) : IO Nat := do
     if anyPendingHasLease w then badInv := badInv + 1
     let obs := recordFrom w
     if !tauFree obs then forcedTau := forcedTau + 1
-    if refutedIv obs then ivBroke := ivBroke + 1
-    if divergent obs then diverged := diverged + 1
     if reductionDisagrees obs then redDisagree := redDisagree + 1
-    if refuted obs then
+    if refutesValidRun obs then
       broke := broke + 1
       if shown < 2 then
         shown := shown + 1
-        IO.eprintln s!"  *** COUNTEREXAMPLE in {name} ***"
+        IO.eprintln s!"  *** SOUNDNESS BUG in {name}: valid run refuted ***"
         for (rq, n) in w do IO.eprintln s!"      @{n}  {repr rq}"
   IO.eprintln s!"  {name}"
   IO.eprintln s!"    scripts                                  : {ws.length}"
   IO.eprintln s!"    internal steps                           : {cov.taus}"
-  IO.eprintln s!"      …fired off the PINNED instant          : {cov.offPinned}"
+  IO.eprintln s!"      …fired off the observation's instant   : {cov.offPinned}"
   IO.eprintln s!"      …that changed state  (old metric)      : {cov.changed}"
-  IO.eprintln s!"      …DISCRIMINATING vs the pinned firing   : {cov.discriminating}"
+  IO.eprintln s!"      …DISCRIMINATING vs firing at it        : {cov.discriminating}"
   IO.eprintln s!"      …discriminating in a VISIBLE component : {cov.visibleDiscr}"
   IO.eprintln s!"      …after the last observation (unmodelled): {cov.unmodellable}"
   IO.eprintln s!"    scripts with >=1 discriminating τ        : {withDiscr}/{ws.length}"
   IO.eprintln s!"    scripts with >=1 VISIBLY discriminating τ: {withVis}/{ws.length}"
   IO.eprintln s!"    recordings NOT explainable τ-free        : {forcedTau}/{ws.length}"
   IO.eprintln s!"    states with a pending task holding a lease: {badInv}"
-  IO.eprintln s!"    counterexamples (pinned checker refuted) : {broke}"
-  IO.eprintln s!"    interval checker refuted (would be a BUG) : {ivBroke}"
-  IO.eprintln s!"    verdicts where interval ≠ pinned          : {diverged}"
+  IO.eprintln s!"    valid run REFUTED (soundness bug)        : {broke}"
   IO.eprintln s!"    critical instants ≠ BRUTE FORCE (R3 fails): {redDisagree}"
   return broke
 
-open Equivalence TraceCheck TraceCheck.Gap in
+open Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
 def main : IO Unit := do
   IO.eprintln "══ the gap, measured properly ═════════════════════════════════"
   IO.eprintln ""
