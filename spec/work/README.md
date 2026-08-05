@@ -63,38 +63,36 @@ not in **identity**.
 ```
 foo(n, m):  n == 0  ->  1
             n even  ->  sum of m LOCAL  calls to foo(n-1, m)
-            n odd   ->  sum of n REMOTE calls to foo(n-1, m)
+            n odd   ->  sum of m REMOTE calls to foo(n-1, m)
 ```
 
-Note the asymmetry — the even branch fans out `m` times, the odd branch `n`
-times — which is as specified rather than a slip in transcription. It means
-remote fan-out shrinks as the recursion descends while local fan-out stays
-fixed. Say if that was meant to be `m` on both sides; the workload is written
-to the spec as given.
-
-Closed forms, which the program computes and asserts against:
+Fan-out is `m` on both sides, so the **shape is fixed and known** — a full
+m-ary tree of depth n — and the only thing varying with depth is whether the
+edge was local or remote. That is what makes it a clean probe rather than two
+variables at once.
 
 ```
-value(n,m) = 1                        n = 0
-             m * value(n-1, m)        n even
-             n * value(n-1, m)        n odd
-
-size(n,m)  = 1 + k * size(n-1, m)     k = m if n even, n if n odd
+value(n,m)  = m^n                    each level multiplies by m
+size(n,m)   = 1 + m + ... + m^n      a full m-ary tree of depth n
+remote(n,m) = 1 + sum of m^d over the levels reached by an rpc edge
 ```
+
+`remote` is the interesting one: a task exists **iff** the promise carries a
+target, so it should equal the task count exactly. Levels alternate, so it is
+the root plus every other level.
 
 Observed, against `resonate-on-do`:
 
-| n | m | result | promises | tasks | pending |
-|---|---|---|---|---|---|
-| 4 | 2 | 12 (= 3m²) | **33** = 1+4m+6m² | 19 | 0 |
-| 5 | 1 | 15 (= 15m²) | **56** | 36 | 0 |
+| n | m | result | promises | expected | tasks | expected |
+|---|---|---|---|---|---|---|
+| 4 | 2 | 16 = 2⁴ | 31 | 1+2+4+8+16 | 21 | 1+4+16 |
+| 3 | 3 | 27 = 3³ | 40 | 1+3+9+27 | 31 | 1+3+27 |
 
-For n=4, m=2 the tree is exactly `1 + 2 + 6 + 12 + 12`: one root, two local
-`foo(3)`, six remote `foo(2)`, twelve local `foo(1)`, twelve remote `foo(0)`.
-The 19 tasks are precisely the remote ones — `1 + 6 + 12` — because a task
-exists if and only if the promise carries a target. **That correspondence is
-the cheapest conformance check in this folder**: count the promises, count the
-tasks, and both are closed forms.
+Every figure predicted before the run and matched after it, via both
+`resonate.run` and `resonate.rpc`, with nothing left pending. **Counting
+promises and counting tasks is the cheapest conformance check in this folder**
+— two closed forms, and an implementation that creates a task where it should
+not, or misses one, fails on the count alone.
 
 ### What only W3 shows
 
@@ -103,9 +101,9 @@ invocation was started* from *where it sits in the tree*. W3 alternates, and
 the two come apart:
 
 ```
-                        Context reports          promise tag says
-w3a.0    local child    parent=w3a               resonate:parent=w3a
-w3a.0.2  remote child   parent=w3a.0.2  (itself) resonate:parent=w3a.0
+                        Context reports            promise tag says
+w3a.0    local child    parent=w3a                 resonate:parent=w3a
+w3a.0.2  remote child   parent=w3a.0.2  (itself)   resonate:parent=w3a.0
 ```
 
 A **locally** run child executes inline, so its `Context` inherits the running

@@ -2,7 +2,7 @@
 //
 //   foo(n, m):  n == 0  ->  1
 //               n even  ->  sum of m LOCAL  calls to foo(n-1, m)
-//               n odd   ->  sum of n REMOTE calls to foo(n-1, m)
+//               n odd   ->  sum of m REMOTE calls to foo(n-1, m)
 //
 // W1 and W2 each use one invocation kind throughout. W3 alternates them
 // *within a single call tree*, so local and remote children interleave in one
@@ -11,16 +11,13 @@
 // id on an odd one, so a sibling group is not a property of the tree, it is a
 // property of how each edge was made.
 //
-// NOTE THE ASYMMETRY, which is as specified rather than a typo on our part:
-// the even branch fans out `m` times, the odd branch fans out `n` times. So
-// remote fan-out shrinks as the recursion descends while local fan-out stays
-// fixed.
+// Fan-out is `m` on both sides, so the tree is a uniform m-ary tree of depth n
+// and only the EDGE KIND alternates. That is what makes it a clean probe: the
+// shape is fixed and known, and the only thing varying with depth is whether
+// the edge was local or remote.
 //
-//   value(n, m):   value(0,m) = 1
-//                  n even     = m * value(n-1, m)
-//                  n odd      = n * value(n-1, m)
-//
-//   size(n, m):    invocations in the tree, 1 + k*size(n-1,m), k = m or n
+//   value(n, m) = m^n                       (each level multiplies by m)
+//   size(n, m)  = 1 + m + ... + m^n         (a full m-ary tree of depth n)
 //
 // Usage:
 //   npx tsx index3.ts <id> [n] [m] [--via run|rpc]
@@ -38,23 +35,37 @@ async function foo(ctx: Context, n: number, m: number): Promise<number> {
       r = r + (await ctx.run<number>("foo", n - 1, m));
     }
   } else {
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < m; i++) {
       r = r + (await ctx.rpc<number>("foo", n - 1, m));
     }
   }
   return r;
 }
 
-/** The same recursion without durability, to check the answer. */
+/** The same recursion without durability, to check the answer: m^n. */
 function value(n: number, m: number): number {
   if (n === 0) return 1;
-  return (n % 2 === 0 ? m : n) * value(n - 1, m);
+  return m * value(n - 1, m);
 }
 
-/** Invocations in the tree, for comparing against the promise count. */
+/** Invocations in the tree: a full m-ary tree of depth n. */
 function size(n: number, m: number): number {
   if (n === 0) return 1;
-  return 1 + (n % 2 === 0 ? m : n) * size(n - 1, m);
+  return 1 + m * size(n - 1, m);
+}
+
+/**
+ * Invocations reached by a REMOTE edge, which is exactly the number of tasks:
+ * the root (dispatched by task.create) plus every level whose parent was odd.
+ * Levels alternate, so it is every other level counting up from the leaves.
+ */
+function remote(n: number, m: number): number {
+  let total = 1;                       // the root
+  for (let d = 1; d <= n; d++) {
+    // level d was created by a parent at n-d+1; that parent used rpc iff odd
+    if ((n - d + 1) % 2 === 1) total += m ** d;
+  }
+  return total;
 }
 
 function report(ctx: Context, n: number, m: number): void {
@@ -94,7 +105,8 @@ resonate.register("foo", foo);
 
 console.log(
   `W3  mixed  id=${id}  n=${n}  m=${m}  via=resonate.${via}` +
-  `   expect value=${value(n, m)} over ${size(n, m)} invocations\n`,
+  `   expect value=${value(n, m)} over ${size(n, m)} invocations` +
+  ` (${remote(n, m)} remote)\n`,
 );
 
 const handle = via === "rpc"
