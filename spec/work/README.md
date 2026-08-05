@@ -143,8 +143,11 @@ Three things it makes concrete:
 - **`task.create` claims what it creates.** The task comes back `acquired` at
   version 1 and no `execute` is dispatched, because the caller already holds
   it. That is `T-02`'s fresh path, and an implementation that reuses its
-  `promise.create` path here will emit a dispatch nobody wants. *(Found
-  exactly that way: the trace showed the spurious message.)*
+  `promise.create` path here will emit a dispatch nobody wants — carrying
+  version 0, while the task is already at 1, so it is stale the moment it is
+  sent. *(`resonate-on-do` did exactly that. Writing this driver is what
+  surfaced it: deciding whether a hand-driven client needs a poll connection
+  forces you to say what `task.create` does with the target.)*
 - **The version never moves.** `task.create` acquires at 1, and nothing in the
   loop bumps it — only a claim does. Every fence in the run presents 1.
 - **This can only be written for W1.** The children are local, so nothing is
