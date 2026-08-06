@@ -1,0 +1,177 @@
+// Command lincheck runs a recorded Resonate trace through the porcupine
+// linearizability checker against BOTH read disciplines of the abstract
+// machine — -p (projected) and -m (materialized).
+//
+//	go run ./cmd/lincheck < ../valid/traces/resonate-sqlite-50wf.ndjson
+//
+// Exit 0 both linearize, 1 one or both do not, 2 usage/parse error,
+// 3 inconclusive (a rule closure hit its fuel bound).
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/anishathalye/porcupine"
+	model "github.com/resonatehq/resonate-specification/porcupine"
+)
+
+func main() {
+	concurrent := flag.Int("concurrent", 1, "operations per overlapping window (1 = sequential history)")
+	timeout := flag.Duration("timeout", 60*time.Second, "per-discipline check timeout")
+	quiet := flag.Bool("quiet", false, "suppress the witness")
+	partition := flag.Bool("partition", true, "check each resonate:origin independently (verified sound first)")
+	flag.Parse()
+
+	ops, resps, err := model.LoadTrace(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "lincheck:", err)
+		os.Exit(2)
+	}
+	if len(ops) == 0 {
+		fmt.Fprintln(os.Stderr, "lincheck: empty trace on stdin")
+		os.Exit(2)
+	}
+	if *partition {
+		if err := model.CheckPartitionable(ops); err != nil {
+			fmt.Fprintln(os.Stderr, "lincheck: cannot partition:", err)
+			fmt.Fprintln(os.Stderr, "           re-run with -partition=false")
+			os.Exit(2)
+		}
+	}
+	partitioned = *partition
+	fmt.Printf("loaded %d events   history: %s   partition: %v\n\n",
+		len(ops), historyDesc(*concurrent), *partition)
+
+	failed, inconclusive := false, false
+	for _, d := range []model.Discipline{model.Projected, model.Materialized} {
+		var sat model.Saturation
+		nm := model.NondeterministicModel(d, &sat, *partition)
+		hist := buildHistory(ops, resps, *concurrent)
+
+		start := time.Now()
+		res, _ := porcupine.CheckOperationsVerbose(nm.ToModel(), hist, *timeout)
+		elapsed := time.Since(start)
+
+		label := fmt.Sprintf("%-18s", d.String())
+		switch {
+		case res == porcupine.Ok && !sat.OK():
+			fmt.Printf("%s INCONCLUSIVE  linearizable, but a rule closure hit the fuel bound  %v\n", label, elapsed)
+			inconclusive = true
+		case res == porcupine.Ok:
+			fmt.Printf("%s LINEARIZABLE  %v\n", label, elapsed)
+			if !*quiet {
+				printWitness(d, ops, resps)
+			}
+		case res == porcupine.Illegal && !sat.OK():
+			fmt.Printf("%s INCONCLUSIVE  not linearizable, but a closure was cut short — no conclusion  %v\n", label, elapsed)
+			inconclusive = true
+		case res == porcupine.Illegal:
+			fmt.Printf("%s NOT LINEARIZABLE  %v\n", label, elapsed)
+			reportFirstFailure(d, ops, resps)
+			failed = true
+		default:
+			fmt.Printf("%s TIMEOUT after %v\n", label, elapsed)
+			inconclusive = true
+		}
+	}
+
+	switch {
+	case failed:
+		os.Exit(1)
+	case inconclusive:
+		os.Exit(3)
+	}
+}
+
+func historyDesc(c int) string {
+	if c <= 1 {
+		return "sequential (each call returns before the next begins)"
+	}
+	return fmt.Sprintf("%d-way overlap — porcupine must find an order", c)
+}
+
+// buildHistory turns the recorded events into porcupine operations.
+//
+// A capture is SEQUENTIAL: one call at a time, each with a single
+// instant. With non-overlapping intervals, linearizability degenerates to
+// "the model accepts this sequence" — still the question worth asking of
+// a nondeterministic model, but not a concurrency test. `-concurrent=k`
+// widens the intervals so k consecutive calls overlap, which puts
+// porcupine to work finding an order and is a genuinely harder question
+// than the Lean checker answers.
+func buildHistory(ops []model.Op, resps []model.Response, concurrent int) []porcupine.Operation {
+	if concurrent < 1 {
+		concurrent = 1
+	}
+	hist := make([]porcupine.Operation, len(ops))
+	for i := range ops {
+		call := int64(i) * 2
+		ret := call + 1
+		if concurrent > 1 {
+			ret = call + int64(2*concurrent)
+		}
+		hist[i] = porcupine.Operation{
+			ClientId: i % concurrent,
+			Input:    ops[i],
+			Call:     call,
+			Output:   resps[i],
+			Return:   ret,
+		}
+	}
+	return hist
+}
+
+// partitioned mirrors the -partition flag for the witness pass.
+var partitioned = true
+
+func replay(d model.Discipline, ops []model.Op, resps []model.Response, part bool) ([]string, int, bool) {
+	if part {
+		return model.ReplayPartitioned(d, ops, resps)
+	}
+	return model.Replay(d, ops, resps)
+}
+
+func printWitness(d model.Discipline, ops []model.Op, resps []model.Response) {
+	w, _, ok := replay(d, ops, resps, partitioned)
+	if !ok {
+		fmt.Println("     (no sequential witness — the history linearizes only out of order)")
+		return
+	}
+	if len(w) == 0 {
+		fmt.Println("     witness: no internal rules needed")
+		return
+	}
+	fmt.Printf("     witness: %d internal rule firings the server never reported\n", len(w))
+	for i, r := range w {
+		if i == 8 {
+			fmt.Printf("       … and %d more\n", len(w)-8)
+			break
+		}
+		fmt.Printf("       %s\n", r)
+	}
+}
+
+// reportFirstFailure replays sequentially to name the event the model
+// cannot explain. porcupine says WHETHER; this says WHERE.
+func reportFirstFailure(d model.Discipline, ops []model.Op, resps []model.Response) {
+	_, at, ok := replay(d, ops, resps, partitioned)
+	if ok {
+		fmt.Println("     (sequentially explainable — the failure is an ordering one)")
+		return
+	}
+	fmt.Printf("     first unexplainable event: %d  %v\n", at, ops[at])
+	fmt.Printf("       observed: status %d", resps[at].Status)
+	if s := resps[at].PromiseState; s != nil {
+		fmt.Printf("  promise %v", *s)
+	}
+	if s := resps[at].TaskState; s != nil {
+		fmt.Printf("  task %v", *s)
+	}
+	if s := resps[at].SettledAt; s != nil {
+		fmt.Printf("  settledAt %d", *s)
+	}
+	fmt.Println()
+}
