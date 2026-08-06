@@ -174,17 +174,30 @@ the only one of the two that is a claim about the server.
 ### Results
 
 ```
-Lean, 400 events, return order      ADMISSIBLE   43ms   0 hidden steps
-porcupine, 40 events, real intervals  LINEARIZABLE (both disciplines)   1ms
-porcupine, 80 events                  LINEARIZABLE (both disciplines) 126ms
-porcupine, 160+ events                does not finish in 180s
+Lean,      400 events, return order    ADMISSIBLE  43ms  0 hidden steps
+porcupine,  40 events, real intervals  LINEARIZABLE both disciplines    1ms
+porcupine,  80 events                  LINEARIZABLE both disciplines  126ms
+porcupine, 160 events                  TIMEOUT (see below)
+porcupine, 400 events                  did not finish
 ```
 
 The scaling wall is real and worth naming: partitioning is by origin and
 each client owns its origin, but a client's operations still interleave
 with the RULE nondeterminism, and porcupine's power-set construction over
-a 21-deep overlap does not close. 80 concurrent events is the current
-ceiling.
+a 25-deep overlap does not close. **80 concurrent events is the ceiling.**
+
+Two details that matter more than the numbers:
+
+* At 160 events the SEQUENTIAL question still answers instantly —
+  `recorded order alone also explains it`. So the cheap question is
+  decidable at a size where the expensive one is not, and a green Lean
+  run at 400 events says strictly less than a green porcupine run at 80.
+* The 160-event check was given `-timeout=180s` and ran for **6m25s**.
+  porcupine checks its deadline between operations, so a single expensive
+  step overruns it. `porcupine.Model` has a `StepContext` field for
+  exactly this — "allowing the checker to stop work promptly when a
+  timeout expires" — and this wiring does not set it. The timeout is
+  therefore advisory, not a bound.
 
 ### What this run actually found
 
