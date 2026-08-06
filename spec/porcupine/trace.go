@@ -123,6 +123,7 @@ func decodeReq(e wireEvent) (Op, error) {
 		} `json:"action"`
 		Awaited string `json:"awaited"`
 		Awaiter string `json:"awaiter"`
+		Address string `json:"address"`
 	}
 	if err := json.Unmarshal(e.Req, &r); err != nil {
 		return op, err
@@ -151,6 +152,17 @@ func decodeReq(e wireEvent) (Op, error) {
 		}
 	case "promise.register_callback":
 		op.ID, op.Awaiter = r.Awaited, r.Awaiter
+	case "promise.register_listener":
+		// The request field is `awaited`, not `id`, and the address is in
+		// `address`. Missing this made every recorded listener decode as
+		// `PromiseRegisterListener("", "")` — 400 for a bad address where
+		// the server had said 404 for a missing promise.
+		//
+		// The differential fuzzer could not see it: there the Go side uses
+		// the generated `Op` values directly and only the LEAN side reads
+		// the file, so a bug in this decoder is invisible by construction.
+		// It took traffic recorded from a real server to surface.
+		op.ID, op.PID = r.Awaited, r.Address
 	}
 	return op, nil
 }

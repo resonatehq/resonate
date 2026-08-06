@@ -135,6 +135,72 @@ if err := model.CheckPartitionable(ops); err != nil {
 and `-partition=false` turns it off. `TestPartitioningAgrees` confirms the
 verdicts match with and without.
 
+## Concurrent traffic from a real server — `cmd/loadgen`, `cmd/conccheck`
+
+```
+RESONATE_DEBUG=true RESONATE_STORE__TYPE=sqlite resonate serve &
+go run ./cmd/loadgen -clients 8 -ops 400 -out run
+go run ./cmd/conccheck < run.history       # porcupine, real intervals
+../.lake/build/bin/checktrace < run.ndjson # Lean, one fixed order
+```
+
+Against `resonatehq/resonate` v0.9.8 (commit `c8d7c7b`), release build,
+SQLite, `debug.start` sent:
+
+```
+400 events (0 transport errors) from 8 clients
+  overlapping pairs: 2751   max concurrency: 32
+```
+
+**The clock is the hard part.** The Lean checker requires a monotone
+clock, and a concurrent run has no single instant per operation. Every
+request carries an explicit `resonate:debug_time` from a counter that only
+advances, and operations in a batch SHARE an instant — ties are legal,
+`ValidM` says non-decreasing. The file is then ordered by return time,
+which respects the real-time partial order and is therefore a legal
+linearization candidate — but only ONE of them.
+
+That is the whole difference between the two tools:
+
+| | question |
+|---|---|
+| Lean `checktrace` | does some schedule explain THIS ORDER |
+| porcupine `conccheck` | does some schedule explain SOME order consistent with the intervals |
+
+So `porcupine LINEARIZABLE + Lean REFUTED` would mean the server is fine
+and the harness guessed the order wrong. `porcupine NOT LINEARIZABLE` is
+the only one of the two that is a claim about the server.
+
+### Results
+
+```
+Lean, 400 events, return order      ADMISSIBLE   43ms   0 hidden steps
+porcupine, 40 events, real intervals  LINEARIZABLE (both disciplines)   1ms
+porcupine, 80 events                  LINEARIZABLE (both disciplines) 126ms
+porcupine, 160+ events                does not finish in 180s
+```
+
+The scaling wall is real and worth naming: partitioning is by origin and
+each client owns its origin, but a client's operations still interleave
+with the RULE nondeterminism, and porcupine's power-set construction over
+a 21-deep overlap does not close. 80 concurrent events is the current
+ceiling.
+
+### What this run actually found
+
+A bug in **this repository's NDJSON decoder**, not in resonate.
+`promise.register_listener` was ported to the model and to the emitter but
+never to `decodeReq`, so a recorded listener registration read its id from
+`id` (absent — the field is `awaited`) and its address from nowhere. The
+model computed `400 bad address` where the server had said
+`404 promise not found`, and the first concurrent history refuted at event
+4 because of it.
+
+The differential fuzzer **cannot** catch this, by construction: there the
+Go side uses generated `Op` values in memory and only the Lean side reads
+a file, so a bug in the Go decoder is invisible. It took traffic recorded
+from a real server to surface — which is the argument for doing both.
+
 ## Sequential histories, and what that costs
 
 A capture is sequential — one call at a time, each with a single instant.
