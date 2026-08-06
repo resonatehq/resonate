@@ -284,8 +284,25 @@ func agree(a, b verdict) bool {
 	return a == b
 }
 
+// goVerdict replays the trace against the Go model.
+//
+// Partitioned WHEN THAT IS SOUND, and only then: `CheckPartitionable`
+// scans for any event linking two `resonate:origin`s — a suspend, a
+// callback or a fence reaching across — and the split is used only if it
+// finds none. A recorded run from work/go is a dozen independent
+// workflows interleaved across four clients, and replaying it as one
+// state makes the candidate set the PRODUCT of the per-workflow sets: the
+// first corpus run over four such captures reached 8.7 GB and had still
+// not finished a single file.
+//
+// The verdict is the same either way. That is the point of verifying the
+// split rather than assuming it.
 func goVerdict(ops []model.Op, resps []model.Response) verdict {
-	if _, _, ok := model.Replay(model.Materialized, ops, resps); ok {
+	replay := model.Replay
+	if err := model.CheckPartitionable(ops); err == nil {
+		replay = model.ReplayPartitioned
+	}
+	if _, _, ok := replay(model.Materialized, ops, resps); ok {
 		return accept
 	}
 	return refute

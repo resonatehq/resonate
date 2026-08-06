@@ -61,7 +61,16 @@ var disciplines = []Discipline{Projected, Materialized}
 // bug in this port, and this test is a differential check of the Go
 // against a proven property of the Lean.
 func TestCleanTracesLinearize(t *testing.T) {
-	for _, name := range []string{"resonate-sqlite-50wf.ndjson", "resonate-sqlite-200wf-debugstart.ndjson"} {
+	// The four `resonate-sdk-*` captures come from work/go driving the Go
+	// SDK against a real server, so they exercise the kinds the
+	// hand-written load generators never sent: `task.create`,
+	// `task.fence` and `promise.register_listener`. Two of the four are
+	// suspend/resume runs, which is the only way R4 gets reached at all.
+	for _, name := range []string{
+		"resonate-sqlite-50wf.ndjson", "resonate-sqlite-200wf-debugstart.ndjson",
+		"resonate-sdk-simple-run.ndjson", "resonate-sdk-simple-rpc.ndjson",
+		"resonate-sdk-simple-sleep.ndjson", "resonate-sdk-fan-out.ndjson",
+	} {
 		ops, resps := load(t, name)
 		for _, d := range disciplines {
 			if got := check(t, d, ops, resps, 1, true); got != porcupine.Ok {

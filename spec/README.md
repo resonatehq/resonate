@@ -133,6 +133,15 @@ Input is NDJSON, one event per line, as [`capture.py`](valid/traces/capture.py)
 tees it — `req` is the data the client sent, `res` the whole envelope the
 server returned. Internal steps are **not** in the file and must not be.
 
+[`valid/traces`](valid/traces) holds the recorded runs. The four
+`resonate-sdk-*` files come from [`work/go`](work/go), which drives the
+Go SDK's own durable functions — `simple-run`, `simple-rpc`,
+`simple-sleep`, `fan-out` — against a real server with several clients
+racing for the same workflow origins. They matter because they are the
+only captures that carry what the SDK actually sends: `task.create`,
+`task.fence` and `promise.register_listener`, which no hand-written load
+generator here ever emitted.
+
 ### Why this is not a replay harness
 
 The specification deliberately does not say *when* internal transitions

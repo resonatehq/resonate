@@ -369,9 +369,25 @@ func (s *ServerState) Key() string {
 		ls := append([]string(nil), p.Listeners...)
 		sort.Strings(cb)
 		sort.Strings(ls)
-		fmt.Fprintf(&b, "P|%s|%d|%d|%s|%s|%s|%s\n",
-			p.ID, p.State, p.TimeoutAt, u64s(p.SettledAt),
-			strings.Join(cb, ","), strings.Join(ls, ","), p.Tags.key())
+		// EVERY field, not the observable ones.
+		//
+		// This is the dedup key, and dedup DISCARDS: two candidates with
+		// the same key collapse to whichever arrived first. So a field
+		// left out of the key is a field along which distinct states are
+		// silently merged, and if it is observable — `createdAt` is, it
+		// is in `PromiseRecord` and `matches` compares it — the survivor
+		// may be the one that fails to match a later event while the one
+		// that would have matched was thrown away. That is a false
+		// REFUTE: the checker rejecting a run the specification permits.
+		//
+		// valid/validator.lean's `canon` sorts and compares the WHOLE
+		// state for exactly this reason. Matching it here costs a longer
+		// string and removes the obligation to keep proving which fields
+		// happen to be unobservable today.
+		fmt.Fprintf(&b, "P|%s|%d|%d|%d|%s|%s|%s|%s|%s|%s\n",
+			p.ID, p.State, p.TimeoutAt, p.CreatedAt, u64s(p.SettledAt),
+			strings.Join(cb, ","), strings.Join(ls, ","), p.Tags.key(),
+			canonValue(p.Param), canonValue(p.Value))
 	}
 	ts := append([]*Task(nil), s.Tasks...)
 	sort.Slice(ts, func(i, j int) bool { return ts[i].ID < ts[j].ID })

@@ -195,12 +195,20 @@ func decodeReq(e wireEvent) (Op, error) {
 		if fa.Tags == nil {
 			fa.Tags = Tags{}
 		}
-		if r.Action.Kind == "promise.settle" {
+		switch r.Action.Kind {
+		case "promise.create":
+		case "promise.settle":
 			st, ok := promiseStates[r.Action.Data.State]
 			if !ok {
 				return op, fmt.Errorf("task.fence: unknown promise state %q", r.Action.Data.State)
 			}
 			fa.State = st
+		default:
+			// `TaskFenceAction` is a two-constructor inductive: there is no
+			// third action. valid/json.lean throws here, so this must too —
+			// otherwise a corrupt file is a decode error to one checker and
+			// a 400 to the other, and they "disagree" over nothing.
+			return op, fmt.Errorf("task.fence: unsupported action kind %q", r.Action.Kind)
 		}
 		op.Action = fa
 	case "promise.register_listener":
@@ -214,6 +222,18 @@ func decodeReq(e wireEvent) (Op, error) {
 		// the file, so a bug in this decoder is invisible by construction.
 		// It took traffic recorded from a real server to surface.
 		op.ID, op.PID = r.Awaited, r.Address
+	case "promise.get", "promise.create",
+		"task.get", "task.acquire", "task.release", "task.halt", "task.continue",
+		"promise.search", "task.search", "schedule.search":
+		// decoded entirely from the shared fields above
+	default:
+		// valid/json.lean throws `unsupported request kind` here. Without
+		// this the kind falls through to an `Op` whose `apply` returns
+		// status -1, which matches nothing — so the file is REFUTED by
+		// this checker and a decode ERROR to the other. Both reject, but
+		// a differential run would score that as a disagreement, and the
+		// honest report is "neither checker knows this kind".
+		return op, fmt.Errorf("unsupported request kind: %s", e.Kind)
 	}
 	return op, nil
 }
@@ -283,5 +303,52 @@ func decodeRes(e wireEvent) (Response, error) {
 				TTL: t.TTL, PID: t.PID, Resumes: make([]string, t.Resumes)}
 		}
 	}
-	return res, nil
+	return project(e.Kind, res), nil
+}
+
+// project drops response fields the SPECIFICATION's response type for
+// this kind does not carry.
+//
+// Each handler in spec/02-abstract/p.lean returns a kind-specific record:
+// `TaskGetRes` has a task and no promise, `TaskSuspendRes` has neither,
+// `TaskFulfillRes` has a promise and no task. valid/json.lean decodes
+// exactly those fields and ignores the rest of the payload.
+//
+// Without this, a server that returns MORE than the specification models
+// — a promise alongside a `task.get`, a task alongside a `task.suspend` —
+// is compared against a model response that cannot carry it, and the Go
+// checker refutes a trace the Lean checker accepts. The two checkers
+// would then disagree about what the EVIDENCE is, which is worse than
+// disagreeing about a verdict: it is not a divergence in the server, only
+// in what the two readers chose to look at.
+func project(kind string, r Response) Response {
+	keep := func(promise, task, inner bool) Response {
+		out := Response{Status: r.Status}
+		if promise {
+			out.Promise = r.Promise
+		}
+		if task {
+			out.Task = r.Task
+		}
+		if inner {
+			out.Inner = r.Inner
+		}
+		return out
+	}
+	switch kind {
+	case "promise.get", "promise.create", "promise.settle",
+		"promise.register_callback", "promise.register_listener",
+		"task.fulfill":
+		return keep(true, false, false)
+	case "task.get":
+		return keep(false, true, false)
+	case "task.create", "task.acquire":
+		return keep(true, true, false)
+	case "task.fence":
+		return keep(false, false, true)
+	default:
+		// task.suspend, task.release, task.halt, task.continue,
+		// task.heartbeat and the three searches are status-only.
+		return keep(false, false, false)
+	}
 }

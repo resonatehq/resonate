@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 
 	"github.com/anishathalye/porcupine"
@@ -98,32 +99,25 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 
 // matches compares a computed response against the recorded one.
 //
-// Only what the wire format actually reports is compared. A field the
-// capture does not carry is not evidence, and demanding agreement on it
-// would refute traces for a difference nobody could have observed.
+// A record the capture does not carry at all is not evidence and is not
+// demanded — but a record it DOES carry is compared in full, field for
+// field, exactly as valid/json.lean compares its decoded records. The
+// two checkers must look at the same evidence before their verdicts mean
+// anything together.
 func matches(got, want Response) bool {
 	if got.Status != want.Status {
 		return false
 	}
-	if want.Promise != nil {
-		p := got.Promise
-		if p == nil || p.ID != want.Promise.ID || p.State != want.Promise.State ||
-			p.TimeoutAt != want.Promise.TimeoutAt || p.CreatedAt != want.Promise.CreatedAt ||
-			!eqU64(p.SettledAt, want.Promise.SettledAt) {
-			return false
-		}
+	if want.Promise != nil && !samePromiseRecord(got.Promise, want.Promise) {
+		return false
 	}
 	if want.Inner != nil {
 		g := got.Inner
 		if g == nil || g.Kind != want.Inner.Kind || g.Status != want.Inner.Status {
 			return false
 		}
-		if want.Inner.Promise != nil {
-			p := g.Promise
-			if p == nil || p.ID != want.Inner.Promise.ID || p.State != want.Inner.Promise.State ||
-				!eqU64(p.SettledAt, want.Inner.Promise.SettledAt) {
-				return false
-			}
+		if want.Inner.Promise != nil && !samePromiseRecord(g.Promise, want.Inner.Promise) {
+			return false
 		}
 	}
 	if want.Task != nil {
@@ -135,6 +129,77 @@ func matches(got, want Response) bool {
 		}
 	}
 	return true
+}
+
+// samePromiseRecord compares the WHOLE `PromiseRecord`.
+//
+// `spec/02-abstract/state.lean:71` is
+//
+//	{ id, state, param, value, tags, timeoutAt, createdAt, settledAt }
+//
+// and valid/json.lean decodes every one of those and compares them. This
+// used to compare five of the eight, skipping `param`, `value` and
+// `tags` — so a server that returned the wrong VALUE on a settle was
+// caught by the Lean checker and waved through here. Two checkers that
+// disagree about how much to check are not two checks.
+func samePromiseRecord(got, want *Promise) bool {
+	if got == nil {
+		return false
+	}
+	return got.ID == want.ID && got.State == want.State &&
+		got.TimeoutAt == want.TimeoutAt && got.CreatedAt == want.CreatedAt &&
+		eqU64(got.SettledAt, want.SettledAt) &&
+		got.Tags.key() == want.Tags.key() &&
+		sameJSON(got.Param, want.Param) && sameJSON(got.Value, want.Value)
+}
+
+// sameJSON compares two payloads as the specification's `Value`, not as
+// bytes.
+//
+//	structure Value where
+//	  headers : Tags          := []
+//	  data    : Option String := none
+//
+// (spec/01-protocol/types.lean:5) — TWO fields, and nothing else in the
+// JSON is part of the value. valid/json.lean's `valueOf` reads exactly
+// those two and ignores the rest, so this must too, or the checkers
+// disagree over payload shape rather than over the protocol.
+//
+// It is also why byte comparison is wrong: resonate emits a bare `{}`
+// where no value is set, and `{}`, `null` and an absent field are all
+// `Value.default`. Comparing bytes refuted every `task.create` in the
+// SDK captures on that alone.
+func sameJSON(a, b []byte) bool {
+	return canonValue(a) == canonValue(b)
+}
+
+func canonValue(raw []byte) string {
+	if len(raw) == 0 {
+		return "|"
+	}
+	var v struct {
+		Headers map[string]string `json:"headers"`
+		Data    *string           `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		// Not the value shape at all — compare verbatim rather than
+		// declaring an agreement that cannot be justified.
+		return "raw:" + string(raw)
+	}
+	ks := make([]string, 0, len(v.Headers))
+	for k := range v.Headers {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	var b strings.Builder
+	for _, k := range ks {
+		fmt.Fprintf(&b, "%s=%s;", k, v.Headers[k])
+	}
+	b.WriteString("|")
+	if v.Data != nil {
+		b.WriteString(*v.Data)
+	}
+	return b.String()
 }
 
 func eqU64(a, b *uint64) bool {

@@ -135,10 +135,17 @@ type rule struct {
 //
 // Rules are total, so firing a disabled one is harmless — but generating
 // only the ones whose guard holds is what keeps the closure finite and
-// small. R6's `next` parameter is the scheduler's cadence choice; the two
-// representatives below are the only ones that matter, because `next`
-// affects nothing until a later instant compares against it, and no
-// response projects `retryAt`.
+// small.
+//
+// R6's `next` is the scheduler's cadence choice, so the specification
+// admits every value of it; ONE representative is fired here, `next =
+// now`. That is sound rather than convenient: `next` is written to
+// `retryAt`, `TaskRecord` is `{id, state, version, resumes, ttl, pid}`
+// (spec/02-abstract/state.lean:135) and carries no `retryAt`, and no
+// handler returns the outbox — so the states a different `next` would
+// reach differ only in fields no response can report. Firing `next = now`
+// also keeps R6 enabled at every later instant, which is the permissive
+// choice: it never removes a firing a larger `next` would have allowed.
 func enabledRules(s *ServerState, now uint64) []rule {
 	var rs []rule
 	for _, p := range s.Promises {
