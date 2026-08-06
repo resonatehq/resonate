@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"strings"
@@ -32,7 +33,13 @@ type Op struct {
 	State     PromiseState
 	Awaited   []string
 	Awaiter   string
-	Action    *FenceAction // task.fence only
+	Action    *FenceAction // task.fence, task.create
+	Refs      []TaskRef    // task.heartbeat
+	// Param and Value are the request's payloads, carried verbatim and
+	// never interpreted. The Lean checker compares full records, so a
+	// re-emitted trace that dropped them refuted a file it had accepted.
+	Param json.RawMessage
+	Value json.RawMessage
 }
 
 func (o Op) String() string {
@@ -46,9 +53,9 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 	case "promise.get":
 		return s.PromiseGet(d, o.ID, o.Now)
 	case "promise.create":
-		return s.PromiseCreate(d, PromiseCreateReq{o.ID, o.TimeoutAt, o.Tags}, o.Now)
+		return s.PromiseCreate(d, PromiseCreateReq{o.ID, o.TimeoutAt, o.Tags, o.Param}, o.Now)
 	case "promise.settle":
-		return s.PromiseSettle(d, o.ID, o.State, o.Now)
+		return s.PromiseSettle(d, o.ID, o.State, o.Value, o.Now)
 	case "promise.register_callback":
 		return s.PromiseRegisterCallback(d, o.ID, o.Awaiter, o.Now)
 	case "task.get":
@@ -58,11 +65,13 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 	case "task.suspend":
 		return s.TaskSuspend(d, o.ID, o.Version, o.Awaited, o.Now)
 	case "task.fulfill":
-		return s.TaskFulfill(d, o.ID, o.Version, o.State, o.Now)
+		return s.TaskFulfill(d, o.ID, o.Version, o.State, o.Value, o.Now)
 	case "task.release":
 		return s.TaskRelease(d, o.ID, o.Version, o.Now)
 	case "task.heartbeat":
-		return s.TaskHeartbeat(d, o.PID, o.Now)
+		return s.TaskHeartbeat(d, o.PID, o.Refs, o.Now)
+	case "promise.search", "task.search", "schedule.search":
+		return s.Search()
 	case "promise.register_listener":
 		return s.PromiseRegisterListener(d, o.ID, o.PID, o.Now)
 	case "task.halt":
@@ -74,7 +83,7 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 			return Response{Status: -1}
 		}
 		return s.TaskCreate(d, o.PID, o.TTL,
-			PromiseCreateReq{o.Action.ID, o.Action.TimeoutAt, o.Action.Tags}, o.Now)
+			PromiseCreateReq{o.Action.ID, o.Action.TimeoutAt, o.Action.Tags, o.Action.Param}, o.Now)
 	case "task.fence":
 		if o.Action == nil {
 			return Response{Status: -1}

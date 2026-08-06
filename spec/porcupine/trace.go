@@ -30,11 +30,14 @@ type wireRes struct {
 }
 
 type wirePromise struct {
-	ID        string  `json:"id"`
-	State     string  `json:"state"`
-	TimeoutAt uint64  `json:"timeoutAt"`
-	CreatedAt uint64  `json:"createdAt"`
-	SettledAt *uint64 `json:"settledAt"`
+	ID        string            `json:"id"`
+	State     string            `json:"state"`
+	TimeoutAt uint64            `json:"timeoutAt"`
+	CreatedAt uint64            `json:"createdAt"`
+	SettledAt *uint64           `json:"settledAt"`
+	Tags      map[string]string `json:"tags"`
+	Param     json.RawMessage   `json:"param"`
+	Value     json.RawMessage   `json:"value"`
 }
 
 type wireTask struct {
@@ -79,7 +82,7 @@ func LoadTrace(r io.Reader) ([]Op, []Response, error) {
 		if err := json.Unmarshal([]byte(text), &e); err != nil {
 			return nil, nil, fmt.Errorf("line %d: %w", line, err)
 		}
-		if strings.HasPrefix(e.Kind, "schedule.") {
+		if strings.HasPrefix(e.Kind, "schedule.") && e.Kind != "schedule.search" {
 			return nil, nil, fmt.Errorf(
 				"line %d: trace mentions %s; `occurrences` and `nextCron` are opaque in the "+
 					"specification, so there is no calendar to check against (see valid/schedules.lean)",
@@ -122,17 +125,26 @@ func decodeReq(e wireEvent) (Op, error) {
 				TimeoutAt uint64            `json:"timeoutAt"`
 				Tags      map[string]string `json:"tags"`
 				State     string            `json:"state"`
+				Param     json.RawMessage   `json:"param"`
+				Value     json.RawMessage   `json:"value"`
 			} `json:"data"`
 		} `json:"action"`
-		Awaited string `json:"awaited"`
-		Awaiter string `json:"awaiter"`
-		Address string `json:"address"`
+		Awaited string          `json:"awaited"`
+		Awaiter string          `json:"awaiter"`
+		Address string          `json:"address"`
+		Param   json.RawMessage `json:"param"`
+		Value   json.RawMessage `json:"value"`
+		Tasks   []struct {
+			ID      string `json:"id"`
+			Version uint64 `json:"version"`
+		} `json:"tasks"`
 	}
 	if err := json.Unmarshal(e.Req, &r); err != nil {
 		return op, err
 	}
 	op.ID, op.TimeoutAt, op.Version, op.PID, op.TTL = r.ID, r.TimeoutAt, r.Version, r.PID, r.TTL
 	op.Tags = Tags(r.Tags)
+	op.Param, op.Value = r.Param, r.Value
 	if op.Tags == nil {
 		op.Tags = Tags{}
 	}
@@ -149,17 +161,23 @@ func decodeReq(e wireEvent) (Op, error) {
 			return op, fmt.Errorf("unknown promise state %q", r.Action.Data.State)
 		}
 		op.State = st
+		op.Value = r.Action.Data.Value
 	case "task.suspend":
 		for _, a := range r.Actions {
 			op.Awaited = append(op.Awaited, a.Data.Awaited)
 		}
 	case "promise.register_callback":
 		op.ID, op.Awaiter = r.Awaited, r.Awaiter
+	case "task.heartbeat":
+		for _, t := range r.Tasks {
+			op.Refs = append(op.Refs, TaskRef{ID: t.ID, Version: t.Version})
+		}
 	case "task.create":
 		// Same `{kind, head, data}` envelope as task.fence and task.suspend
 		// carry, so the shared `Action` struct decodes it directly.
 		op.Action = &FenceAction{Kind: "promise.create", ID: r.Action.Data.ID,
-			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags)}
+			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags),
+			Param: r.Action.Data.Param}
 		// task.create carries no top-level `id`; the object it creates is
 		// the action's. Without this `op.ID` stays empty, `originOf("")`
 		// puts every creation in its own partition, and the promise is
@@ -172,7 +190,8 @@ func decodeReq(e wireEvent) (Op, error) {
 		// The action envelope is `{kind, head, data}`, like task.suspend's
 		// and task.fulfill's. `State` is only meaningful for a settle.
 		fa := &FenceAction{Kind: r.Action.Kind, ID: r.Action.Data.ID,
-			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags)}
+			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags),
+			Param: r.Action.Data.Param, Value: r.Action.Data.Value}
 		if fa.Tags == nil {
 			fa.Tags = Tags{}
 		}
@@ -230,7 +249,8 @@ func decodeRes(e wireEvent) (Response, error) {
 				return res, fmt.Errorf("unknown promise state %q", p.State)
 			}
 			res.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
-				CreatedAt: p.CreatedAt, SettledAt: p.SettledAt}
+				CreatedAt: p.CreatedAt, SettledAt: p.SettledAt,
+				Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}
 		}
 	}
 	if d.Action != nil {
@@ -246,7 +266,8 @@ func decodeRes(e wireEvent) (Response, error) {
 					return res, fmt.Errorf("task.fence action: unknown promise state %q", p.State)
 				}
 				inner.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
-					CreatedAt: p.CreatedAt, SettledAt: p.SettledAt}
+					CreatedAt: p.CreatedAt, SettledAt: p.SettledAt,
+					Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}
 			}
 		}
 		res.Inner = inner

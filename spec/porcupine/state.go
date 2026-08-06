@@ -23,6 +23,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -106,6 +107,14 @@ type Promise struct {
 	SettledAt *uint64
 	Callbacks []string
 	Listeners []string
+	// Param and Value are carried as raw JSON and never interpreted. The
+	// model does not reason about payloads, but the LEAN checker compares
+	// full `PromiseRecord`s including them — so dropping them here made
+	// re-emitting a recorded trace lossy, and the Lean side refuted a file
+	// it had just accepted. Found by running the fuzzer over a real SDK
+	// capture.
+	Param json.RawMessage
+	Value json.RawMessage
 }
 
 func (p *Promise) clone() *Promise {

@@ -201,6 +201,13 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
         out := out ++ [{ id := tid, version := tv }]
       let pid ← str d "pid"
       return Request.taskHeartbeat { pid := pid, tasks := out }
+  -- P-06, T-11 and S-04 are `501` in the specification. Decoded so a
+  -- trace containing one is CHECKED rather than refused: 501 is a
+  -- response like any other, and a server answering something else to a
+  -- search is a divergence worth catching.
+  | "promise.search"  => return Request.promiseSearch {}
+  | "task.search"     => return Request.taskSearch {}
+  | "schedule.search" => return Request.scheduleSearch {}
   | k => throw s!"unsupported request kind: {k}"
 
 /-! ## Responses -/
@@ -252,6 +259,9 @@ def decodeResponse (kind : String) (status : Nat) (d : Json) : D Response := do
   | "task.halt"      => return Response.taskHalt { status := status }
   | "task.continue"  => return Response.taskContinue { status := status }
   | "task.heartbeat" => return Response.taskHeartbeat { status := status }
+  | "promise.search"  => return Response.promiseSearch { status := status }
+  | "task.search"     => return Response.taskSearch { status := status }
+  | "schedule.search" => return Response.scheduleSearch { status := status }
   | k => throw s!"unsupported response kind: {k}"
 
 /-! ## Events -/

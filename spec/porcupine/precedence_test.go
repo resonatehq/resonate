@@ -26,11 +26,11 @@ func TestValidationOutranksExistence(t *testing.T) {
 	}{
 		{"promise.settle to a non-settable state",
 			func(s *ServerState, d Discipline) Response {
-				return s.PromiseSettle(d, ghost, Pending, 100)
+				return s.PromiseSettle(d, ghost, Pending, nil, 100)
 			}},
 		{"promise.settle to rejected_timedout (server-owned)",
 			func(s *ServerState, d Discipline) Response {
-				return s.PromiseSettle(d, ghost, RejectedTimedout, 100)
+				return s.PromiseSettle(d, ghost, RejectedTimedout, nil, 100)
 			}},
 		{"promise.register_callback awaiting itself",
 			func(s *ServerState, d Discipline) Response {
@@ -54,7 +54,7 @@ func TestValidationOutranksExistence(t *testing.T) {
 			}},
 		{"task.fulfill to a non-settable state",
 			func(s *ServerState, d Discipline) Response {
-				return s.TaskFulfill(d, ghost, 0, Pending, 100)
+				return s.TaskFulfill(d, ghost, 0, Pending, nil, 100)
 			}},
 	}
 
@@ -84,7 +84,7 @@ func TestWellFormedRequestsStillReport404(t *testing.T) {
 			return s.PromiseGet(d, ghost, 100)
 		}, 404},
 		{"promise.settle to resolved", func(s *ServerState, d Discipline) Response {
-			return s.PromiseSettle(d, ghost, Resolved, 100)
+			return s.PromiseSettle(d, ghost, Resolved, nil, 100)
 		}, 404},
 		{"promise.register_listener with a valid address", func(s *ServerState, d Discipline) Response {
 			return s.PromiseRegisterListener(d, ghost, "poll://any@w1", 100)
@@ -96,7 +96,7 @@ func TestWellFormedRequestsStillReport404(t *testing.T) {
 			return s.TaskSuspend(d, ghost, 0, []string{"o.a"}, 100)
 		}, 404},
 		{"task.fulfill to resolved", func(s *ServerState, d Discipline) Response {
-			return s.TaskFulfill(d, ghost, 0, Resolved, 100)
+			return s.TaskFulfill(d, ghost, 0, Resolved, nil, 100)
 		}, 404},
 	}
 

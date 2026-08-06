@@ -55,6 +55,8 @@ func main() {
 	fuel := flag.Int("fuel", 64, "fuel passed to the Lean checker")
 	cap_ := flag.Int("cap", 200000, "candidate cap passed to the Lean checker")
 	jumpy := flag.Bool("jumpy", true, "allow large clock jumps (reaches the timeout rules; raises the Lean decline rate)")
+	maxMut := flag.Int("mutants", 40, "corpus mode: mutants sampled per trace (0 = every event)")
+	corpus := flag.String("corpus", "", "check RECORDED traces (comma-separated .ndjson) instead of generated ones")
 	keep := flag.String("keep", "", "directory to write disagreeing traces to")
 	flag.Parse()
 
@@ -66,6 +68,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "fuzz: Lean checker not found at %s\n", leanBin)
 		fmt.Fprintln(os.Stderr, "      build it with: (cd .. && lake build checktrace)")
 		os.Exit(2)
+	}
+
+	if *corpus != "" {
+		os.Exit(runCorpus(strings.Split(*corpus, ","), leanBin, *cap_, *fuel, *maxMut, *keep))
 	}
 
 	var (
@@ -145,6 +151,125 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("\n  no disagreements")
+}
+
+// runCorpus applies the differential check to RECORDED traces.
+//
+// Generated traces exercise what the generator thought to write. A capture
+// exercises what the SDK and server actually do — which is how `task.fence`
+// turned out to be 60% of a real trace and absent from both checkers. So
+// the same two properties are run over real traffic:
+//
+//	the trace as recorded    both checkers must agree (and a real capture
+//	                         from a conforming server should be ACCEPTed)
+//	one response corrupted   both must agree, and should REFUTE
+//
+// Every event is mutated in turn rather than one per file, because a
+// capture is a single sample and one mutation would test one handler.
+func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep string) int {
+	disagree := 0
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fuzz:", err)
+			return 2
+		}
+		ops, resps, err := model.LoadTrace(f)
+		f.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fuzz: %s: %v\n", path, err)
+			return 2
+		}
+		kinds := map[string]int{}
+		for _, o := range ops {
+			kinds[o.Kind]++
+		}
+
+		gv := goVerdict(ops, resps)
+		lv := leanVerdict(leanBin, model.Emit(ops, resps), cap, fuel)
+		base := "agree"
+		if !agree(gv, lv) {
+			base = "*** DISAGREE ***"
+			disagree++
+		}
+		fmt.Printf("%s\n  %d events   go=%v lean=%v   %s\n",
+			filepath.Base(path), len(ops), gv, lv, base)
+		fmt.Printf("  kinds: %s\n", sortedCounts(kinds))
+
+		// Every event mutated in turn, or a spread sample. Each mutant
+		// costs a Lean subprocess (~2s), so exhausting a 2200-event capture
+		// is an hour; `-mutants 0` does it anyway when that is what you
+		// want.
+		stride := 1
+		if maxMut > 0 && len(resps) > maxMut {
+			stride = (len(resps) + maxMut - 1) / maxMut
+		}
+		var mAgree, mDis, mAcceptedAnyway, mTried int
+		for i := range resps {
+			if i%stride != 0 {
+				continue
+			}
+			mTried++
+			mops, mresps := mutateAt(i, ops, resps)
+			mg := goVerdict(mops, mresps)
+			ml := leanVerdict(leanBin, model.Emit(mops, mresps), cap, fuel)
+			if agree(mg, ml) {
+				mAgree++
+				if mg == accept {
+					mAcceptedAnyway++
+				}
+			} else {
+				mDis++
+				disagree++
+				report(keep, int64(i), "CORPUS-MUTANT", model.Emit(mops, mresps), mg, ml, mops, mresps)
+			}
+		}
+		fmt.Printf("  mutants: %d/%d sampled — %d agree, %d DISAGREE", mTried, len(resps), mAgree, mDis)
+		if mAcceptedAnyway > 0 {
+			fmt.Printf("   (%d mutants both checkers still explain — the model admits them)", mAcceptedAnyway)
+		}
+		fmt.Println()
+		fmt.Println()
+	}
+	if disagree > 0 {
+		fmt.Printf("*** %d DISAGREEMENTS ***\n", disagree)
+		return 1
+	}
+	fmt.Println("no disagreements")
+	return 0
+}
+
+// mutateAt corrupts event i, preferring the record channel over the status
+// channel because records are where the two checkers could differ subtly.
+func mutateAt(i int, ops []model.Op, resps []model.Response) ([]model.Op, []model.Response) {
+	out := append([]model.Response(nil), resps...)
+	r := out[i]
+	switch {
+	case r.Task != nil:
+		t := *r.Task
+		t.Version++
+		out[i] = model.Response{Status: r.Status, Promise: r.Promise, Task: &t, Inner: r.Inner}
+	case r.Promise != nil:
+		p := *r.Promise
+		if p.State == model.Pending {
+			p.State = model.Resolved
+		} else {
+			p.State = model.Pending
+			p.SettledAt = nil
+		}
+		out[i] = model.Response{Status: r.Status, Promise: &p, Inner: r.Inner}
+	case r.Inner != nil:
+		in := *r.Inner
+		in.Status = 404
+		in.Promise = nil
+		out[i] = model.Response{Status: r.Status, Inner: &in}
+	case r.Status == 200:
+		out[i] = model.Response{Status: 404}
+	default:
+		out[i] = model.Response{Status: 200}
+	}
+	return ops, out
 }
 
 // agree treats DECLINE as agreeing with anything: a checker that declined

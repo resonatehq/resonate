@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Protocol handlers, ported from spec/02-abstract/{p,m}.lean.
 //
@@ -50,6 +53,7 @@ type PromiseCreateReq struct {
 	ID        string
 	TimeoutAt uint64
 	Tags      Tags
+	Param     json.RawMessage
 }
 
 func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint64) Response {
@@ -58,7 +62,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 	}
 	if req.TimeoutAt > now {
 		p := &Promise{ID: req.ID, State: Pending, Tags: req.Tags,
-			TimeoutAt: req.TimeoutAt, CreatedAt: now}
+			TimeoutAt: req.TimeoutAt, CreatedAt: now, Param: req.Param}
 		s.SetPromise(p)
 		if p.Tags.Has("resonate:target") {
 			// The delay tag seeds `retryAt`: the first dispatch is due at
@@ -80,7 +84,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 		st = Resolved
 	}
 	p := &Promise{ID: req.ID, State: st, Tags: req.Tags, TimeoutAt: req.TimeoutAt,
-		CreatedAt: req.TimeoutAt, SettledAt: u64p(req.TimeoutAt)}
+		CreatedAt: req.TimeoutAt, SettledAt: u64p(req.TimeoutAt), Param: req.Param}
 	s.SetPromise(p)
 	if p.Tags.Has("resonate:target") {
 		s.SetTask(&Task{ID: p.ID, State: TaskFulfilled, Version: 0})
@@ -88,7 +92,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 	return Response{Status: 200, Promise: p}
 }
 
-func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, now uint64) Response {
+func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, val json.RawMessage, now uint64) Response {
 	if !st.Settable() {
 		return Response{Status: 400}
 	}
@@ -100,6 +104,7 @@ func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, no
 		q := p.clone()
 		q.State = st
 		q.SettledAt = u64p(now)
+		q.Value = val
 		// The promise ONLY. The task is fulfilled by fact T; the awaiters
 		// and listeners stay on the promise for the batch rules. This is
 		// the line that makes the model nondeterministic.
@@ -222,7 +227,7 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 	return Response{Status: 200}
 }
 
-func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st PromiseState, now uint64) Response {
+func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st PromiseState, val json.RawMessage, now uint64) Response {
 	if !st.Settable() {
 		return Response{Status: 400}
 	}
@@ -239,6 +244,7 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 	q := p.clone()
 	q.State = st
 	q.SettledAt = u64p(now)
+	q.Value = val
 	// The promise only — the task is fulfilled by fact T on the next
 	// touch, or by R2. Observably indistinguishable, since every task read
 	// that could report it goes through the view.
@@ -265,24 +271,50 @@ func (s *ServerState) TaskRelease(d Discipline, id string, version uint64, now u
 	return Response{Status: 200}
 }
 
-func (s *ServerState) TaskHeartbeat(d Discipline, pid string, now uint64) Response {
-	for _, t := range append([]*Task(nil), s.Tasks...) {
-		u, p := s.readTask(d, t.ID, now)
-		if u == nil || p == nil {
+// TaskRef is one (id, version) a heartbeat names.
+type TaskRef struct {
+	ID      string
+	Version uint64
+}
+
+// TaskHeartbeat is T-05, from spec/02-abstract/p.lean:252.
+//
+// It extends the lease of the REFERENCED tasks only, and only when the
+// version matches — `heartbeatOne` checks
+// `t.version == ref.version ∧ t.pid == some pid`.
+//
+// An earlier version here swept every acquired task belonging to the pid
+// and ignored both the request's task list and the version. That is
+// invisible on the response channel, which always answers 200, but it
+// writes `expiresAt` on tasks the request never named — and `expiresAt`
+// is what R5 `leaseExpiry` guards on. A checker built on it would accept
+// runs the specification forbids.
+func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
+	for _, ref := range refs {
+		t, p := s.readTask(d, ref.ID, now)
+		if t == nil || p == nil {
 			continue
 		}
-		if u.State == TaskAcquired && u.PID != nil && *u.PID == pid && p.State == Pending {
-			v := u.clone()
+		if t.State == TaskAcquired && t.Version == ref.Version &&
+			t.PID != nil && *t.PID == pid && p.State == Pending {
+			u := t.clone()
 			ttl := uint64(0)
-			if u.TTL != nil {
-				ttl = *u.TTL
+			if t.TTL != nil {
+				ttl = *t.TTL
 			}
-			v.ExpiresAt = u64p(now + ttl)
-			s.SetTask(v)
+			u.ExpiresAt = u64p(now + ttl)
+			s.SetTask(u)
 		}
 	}
 	return Response{Status: 200}
 }
+
+// The three search handlers are `501` in the specification — P-06, T-11
+// and S-04 are all "not yet specified". Modelled so that a trace
+// containing one is CHECKED rather than rejected by the loader: a 501 is
+// a response like any other, and a server answering something else to a
+// search is a divergence worth catching.
+func (s *ServerState) Search() Response { return Response{Status: 501} }
 
 func parseNat(s string) uint64 {
 	var n uint64
@@ -367,6 +399,8 @@ type FenceAction struct {
 	TimeoutAt uint64
 	Tags      Tags
 	State     PromiseState
+	Param     json.RawMessage
+	Value     json.RawMessage
 }
 
 // TargetID is `TaskFenceAction.targetId` — the promise the action
@@ -408,10 +442,10 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 	}
 	switch act.Kind {
 	case "promise.create":
-		r := s.PromiseCreate(d, PromiseCreateReq{act.ID, act.TimeoutAt, act.Tags}, now)
+		r := s.PromiseCreate(d, PromiseCreateReq{act.ID, act.TimeoutAt, act.Tags, act.Param}, now)
 		return Response{Status: 200}, &InnerResponse{act.Kind, r.Status, r.Promise}
 	case "promise.settle":
-		r := s.PromiseSettle(d, act.ID, act.State, now)
+		r := s.PromiseSettle(d, act.ID, act.State, act.Value, now)
 		return Response{Status: 200}, &InnerResponse{act.Kind, r.Status, r.Promise}
 	}
 	return Response{Status: 400}, nil
@@ -435,7 +469,7 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 	if p == nil {
 		if act.TimeoutAt > now {
 			np := &Promise{ID: act.ID, State: Pending, Tags: act.Tags,
-				TimeoutAt: act.TimeoutAt, CreatedAt: now}
+				TimeoutAt: act.TimeoutAt, CreatedAt: now, Param: act.Param}
 			s.SetPromise(np)
 			nt := &Task{ID: np.ID, State: TaskAcquired, Version: 1,
 				TTL: u64p(ttl), PID: strp(pid), ExpiresAt: u64p(now + ttl)}
@@ -448,7 +482,7 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 			st = Resolved
 		}
 		np := &Promise{ID: act.ID, State: st, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
-			CreatedAt: act.TimeoutAt, SettledAt: u64p(act.TimeoutAt)}
+			CreatedAt: act.TimeoutAt, SettledAt: u64p(act.TimeoutAt), Param: act.Param}
 		s.SetPromise(np)
 		nt := &Task{ID: np.ID, State: TaskFulfilled, Version: 0}
 		s.SetTask(nt)

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -133,6 +134,18 @@ func (g *Gen) Script(n int) []step {
 		}
 		ttl := uint64(100 + g.r.Intn(600)) // short leases make R5 reachable
 		plan = append(plan,
+			// task.create is how the SDK starts every root workflow, and
+			// task.fence how it does every fenced create/settle. Both were
+			// absent from this corpus while they were absent from the
+			// checkers; generating them is what keeps the fuzzer honest
+			// about the traffic that actually exists.
+			Op{Kind: "task.create", ID: x, PID: "p0", TTL: 500,
+				Action: &FenceAction{Kind: "promise.create", ID: x, TimeoutAt: now + 30000, Tags: tgt}},
+			Op{Kind: "task.fence", ID: x, Version: 1,
+				Action: &FenceAction{Kind: "promise.create", ID: a, TimeoutAt: now + 30000, Tags: ext}},
+			Op{Kind: "task.heartbeat", PID: "p0", Refs: []TaskRef{{ID: x, Version: 1}}},
+			Op{Kind: "task.fence", ID: x, Version: 1,
+				Action: &FenceAction{Kind: "promise.settle", ID: a, State: Resolved}},
 			Op{Kind: "promise.create", ID: a, TimeoutAt: aTo, Tags: aTags},
 			Op{Kind: "promise.create", ID: x, TimeoutAt: xTo, Tags: tgt},
 			Op{Kind: "task.get", ID: x},
@@ -306,11 +319,30 @@ func emitReq(o Op) string {
 	switch o.Kind {
 	case "promise.create":
 		add(`"timeoutAt":%d`, o.TimeoutAt)
-		add(`"param":{}`)
+		add(`"param":%s`, rawOr(o.Param))
 		add(`"tags":%s`, emitTags(o.Tags))
 	case "promise.settle":
 		add(`"state":%q`, promiseWire[o.State])
-		add(`"value":{}`)
+		add(`"value":%s`, rawOr(o.Value))
+	case "task.create":
+		f = []string{fmt.Sprintf(`"pid":%q,"ttl":%d,"action":{"kind":"promise.create","head":{},"data":%s}`,
+			o.PID, o.TTL, emitPromiseCreate(o.Action))}
+	case "task.fence":
+		var inner string
+		if o.Action != nil && o.Action.Kind == "promise.settle" {
+			inner = fmt.Sprintf(`{"id":%q,"state":%q,"value":%s}`, o.Action.ID,
+				promiseWire[o.Action.State], rawOr(o.Action.Value))
+		} else {
+			inner = emitPromiseCreate(o.Action)
+		}
+		f = append(f, fmt.Sprintf(`"version":%d`, o.Version))
+		f = append(f, fmt.Sprintf(`"action":{"kind":%q,"head":{},"data":%s}`, o.Action.Kind, inner))
+	case "task.heartbeat":
+		var ts []string
+		for _, r := range o.Refs {
+			ts = append(ts, fmt.Sprintf(`{"id":%q,"version":%d}`, r.ID, r.Version))
+		}
+		f = []string{fmt.Sprintf(`"pid":%q,"tasks":[%s]`, o.PID, strings.Join(ts, ","))}
 	case "promise.register_callback":
 		f = []string{fmt.Sprintf(`"awaited":%q,"awaiter":%q`, o.ID, o.Awaiter)}
 	case "promise.register_listener":
@@ -329,12 +361,29 @@ func emitReq(o Op) string {
 		add(`"actions":[%s]`, strings.Join(as, ","))
 	case "task.fulfill":
 		add(`"version":%d`, o.Version)
-		add(`"action":{"kind":"promise.settle","head":{},"data":{"id":%q,"state":%q,"value":{}}}`,
-			o.ID, promiseWire[o.State])
+		add(`"action":{"kind":"promise.settle","head":{},"data":{"id":%q,"state":%q,"value":%s}}`,
+			o.ID, promiseWire[o.State], rawOr(o.Value))
 	case "task.release":
 		add(`"version":%d`, o.Version)
 	}
 	return "{" + strings.Join(f, ",") + "}"
+}
+
+// rawOr preserves a payload verbatim, or emits `{}` when the trace was
+// generated rather than recorded.
+func rawOr(r json.RawMessage) string {
+	if len(r) == 0 {
+		return "{}"
+	}
+	return string(r)
+}
+
+func emitPromiseCreate(a *FenceAction) string {
+	if a == nil {
+		return "{}"
+	}
+	return fmt.Sprintf(`{"id":%q,"timeoutAt":%d,"param":%s,"tags":%s}`,
+		a.ID, a.TimeoutAt, rawOr(a.Param), emitTags(a.Tags))
 }
 
 func emitTags(t Tags) string {
@@ -357,8 +406,27 @@ func emitData(r Response) string {
 			settled = fmt.Sprintf(`,"settledAt":%d`, *p.SettledAt)
 		}
 		f = append(f, fmt.Sprintf(
-			`"promise":{"id":%q,"state":%q,"param":{},"value":{},"tags":%s,"timeoutAt":%d,"createdAt":%d%s}`,
-			p.ID, promiseWire[p.State], emitTags(p.Tags), p.TimeoutAt, p.CreatedAt, settled))
+			`"promise":{"id":%q,"state":%q,"param":%s,"value":%s,"tags":%s,"timeoutAt":%d,"createdAt":%d%s}`,
+			p.ID, promiseWire[p.State], rawOr(p.Param), rawOr(p.Value),
+			emitTags(p.Tags), p.TimeoutAt, p.CreatedAt, settled))
+	}
+	if r.Inner != nil {
+		in := r.Inner
+		var pd string
+		if in.Promise != nil {
+			p := in.Promise
+			settled := ""
+			if p.SettledAt != nil {
+				settled = fmt.Sprintf(`,"settledAt":%d`, *p.SettledAt)
+			}
+			pd = fmt.Sprintf(`{"promise":{"id":%q,"state":%q,"param":%s,"value":%s,"tags":%s,"timeoutAt":%d,"createdAt":%d%s}}`,
+				p.ID, promiseWire[p.State], rawOr(p.Param), rawOr(p.Value),
+				emitTags(p.Tags), p.TimeoutAt, p.CreatedAt, settled)
+		} else {
+			pd = `"Promise not found"`
+		}
+		f = append(f, fmt.Sprintf(`"action":{"kind":%q,"head":{"status":%d},"data":%s}`,
+			in.Kind, in.Status, pd))
 	}
 	if r.Task != nil {
 		t := r.Task
