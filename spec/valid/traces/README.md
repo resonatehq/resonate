@@ -104,3 +104,46 @@ checker:
 Neither rule is in `01-protocol/validation.lean`. Both are extra `400`s,
 so they never appear in an accepted trace — a suite that only replays
 accepted traffic is structurally unable to see them.
+
+
+## A conformance divergence, found by probing validation precedence
+
+`resonate-duplicate-awaited.ndjson` is REFUTED by both checkers at event 3,
+and the refutation is correct: it records resonate answering **200** to a
+`task.suspend` whose awaited list contains the same promise twice.
+
+`spec/02-abstract/p.lean:304` (and the concrete machine likewise):
+
+```lean
+let awaitedIds := req.actions.map (·.awaited)
+if awaitedIds.eraseDups.length != awaitedIds.length then
+  return { status := 400 }
+```
+
+Duplicate awaited is a VALIDATION error, so it outranks existence, state
+and version. resonate v0.9.8 (commit `c8d7c7b`) does not implement the
+check at all — with the task present and the version correct it returns
+`200`; with a wrong version it falls through to `409`; with the task
+missing, `404`.
+
+`probe-validation-precedence.py` walks every 400 the abstract machine can
+return, each aimed at an object that does not exist, so a `404` answer
+means existence was consulted before validation. Against v0.9.8:
+
+| case | spec | server |
+|---|---|---|
+| `promise.settle` to a non-settable state | 400 | 400 |
+| `promise.settle` to `rejected_timedout` | 400 | 400 |
+| `promise.register_callback` awaiting itself | 400 | 400 |
+| `promise.register_listener` with an undeliverable address | 400 | 400 |
+| `task.suspend` with an empty awaited list | 400 | 400 |
+| `task.suspend` awaiting itself | 400 | 400 |
+| **`task.suspend` with a duplicate awaited** | **400** | **404 / 200** |
+| `task.fulfill` to a non-settable state | 400 | 400 |
+
+Seven of eight agree, including the ordering — so this is one missing
+check, not a different precedence discipline.
+
+Both checkers catch it from a recorded trace with no probe at all: the
+response is one no schedule of internal steps can produce, which is
+exactly what they are for.
