@@ -241,6 +241,36 @@ NOTE: the Lean checker DECLINED 18/30 (60%). A decline agrees with
 then real, at the cost of reaching the timeout rules less often. Both
 settings are worth running, for opposite reasons.
 
+## The run
+
+```
+$ go run ./cmd/fuzz -n 150 -steps 50 -jumpy=false
+
+150 traces, 150 mutants, 11m5s
+  go   ACCEPT=150
+  lean ACCEPT=150
+  mutants:  go REFUTE=150 | lean REFUTE=150
+  rule firings that changed state: R1=11 R2=8 R3=82 R4=30 R5=7 R6=22
+  response statuses generated:     200=3563 300=63 400=558 404=312 409=1042
+
+  no disagreements
+```
+
+300 comparisons, none vacuous, both directions: every valid trace accepted
+by both checkers, every mutant refuted by both. Compare the captures — 7
+handler kinds, status 200 only, one rule.
+
+Most of the 11 minutes is process spawn: 300 launches of a 118 MB Lean
+binary at ~1.9 s each. The checking itself is milliseconds.
+
+**What this still does not establish.** Both checkers were written from
+the same specification by the same author, so a common-mode misreading
+would agree with itself; only porcupine's SEARCH is genuinely foreign
+code. And R1, R2 and R5 fire only 7-11 times each here, because the
+regime that reaches them freely is the one the Lean checker declines. That
+is the next thing worth fixing: extend the interval reduction to cover
+in-gap deadlines, and the jumpy corpus starts counting.
+
 ## What is NOT tested — measured, not guessed
 
 The captures exercise a narrow slice, and the numbers are worth having in
@@ -254,8 +284,7 @@ front of you before trusting a green run:
 | rules that ever fire | **R4 only** — 500 firings across both traces |
 | rules never fired | **R1, R2, R3, R5, R6** |
 
-That is the CAPTURES. The fuzzer closes most of it — a tame 60-trace run
-fires all six rules and generates statuses 200/300/400/404/409 — which is
+That is the CAPTURES. The fuzzer closes most of it — see below — which is
 why it exists.
 
 So five of the six ported rules are, as far as this suite is concerned,
