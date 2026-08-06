@@ -192,12 +192,43 @@ Two details that matter more than the numbers:
   `recorded order alone also explains it`. So the cheap question is
   decidable at a size where the expensive one is not, and a green Lean
   run at 400 events says strictly less than a green porcupine run at 80.
-* The 160-event check was given `-timeout=180s` and ran for **6m25s**.
-  porcupine checks its deadline between operations, so a single expensive
-  step overruns it. `porcupine.Model` has a `StepContext` field for
-  exactly this — "allowing the checker to stop work promptly when a
-  timeout expires" — and this wiring does not set it. The timeout is
-  therefore advisory, not a bound.
+* The timeout used to be advisory. porcupine only tests its deadline
+  BETWEEN calls into the model, so a step running a deep rule closure could
+  not be interrupted: a 180s budget on 160 events ran for **6m25s**. Fixed
+  by wiring `StepContext` (below).
+
+## Three fixes to the porcupine wiring
+
+The first version of this package left three things on the table, and all
+three are in porcupine's own documentation.
+
+1. **Cache the canonical key.** `Equal` was `a.state.Key() == b.state.Key()`,
+   rebuilding a string over every promise, task and outbox entry on BOTH
+   sides of every comparison — and porcupine's `merge` calls it O(n²) times
+   per step when it deduplicates a power-set state. `modelState` and
+   `candidate` now carry the key, computed once. The Lean side had this
+   right all along: `Cand.key` in `valid/validator.lean` is filled by
+   `mkCand`.
+2. **Set `Hash`.** Documented as "reduces the number of `Equal`
+   comparisons" — `merge` then compares integers and only falls back to
+   `Equal` on collisions.
+3. **Set `StepContext` instead of `Step`.** The context carries the
+   deadline. Without it porcupine wraps `Step` in a shim that DROPS the
+   ctx, so nothing inside the model can see the clock. `closure` now checks
+   it between rounds.
+
+Measured:
+
+| | before | after |
+|---|---|---|
+| 80 concurrent events | 126 ms | **18 ms** |
+| 160 events, 45s budget | ran 6m25s against 180s | **stops at 49s** |
+
+(1) and (2) are the 7x. (3) is what makes any future scaling number
+trustworthy: "TIMEOUT after N" now means roughly N, not "gave up somewhere
+after N". The residual few seconds of overshoot is the granularity of what
+remains uninterruptible — `merge` itself is not ctx-checked inside
+porcupine.
 
 ### What this run actually found
 

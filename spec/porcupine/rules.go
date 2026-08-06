@@ -1,5 +1,7 @@
 package model
 
+import "context"
+
 // Internal rules, ported from spec/02-abstract/rules.lean.
 //
 // The machine's entire internal life is seven guarded rules, fired by the
@@ -180,10 +182,23 @@ func enabledRules(s *ServerState, now uint64) []rule {
 	return rs
 }
 
-// candidate is a state plus the rule firings that reached it.
+// candidate is a state, the rule firings that reached it, and its
+// canonical key CACHED.
+//
+// The key is what every dedup compares, and computing it walks every
+// promise, task and outbox entry to build a string. Recomputing it per
+// comparison makes dedup quadratic in string work rather than in integer
+// work. The Lean side has always cached it — `Cand.key` in
+// valid/validator.lean is filled once by `mkCand` — and this port dropped
+// that when it was written.
 type candidate struct {
 	state   *ServerState
 	witness []string
+	key     string
+}
+
+func newCand(s *ServerState, w []string) candidate {
+	return candidate{state: s, witness: w, key: s.Key()}
 }
 
 // closure is every state reachable from `cs` by firing enabled rules at
@@ -194,19 +209,26 @@ type candidate struct {
 // obligation — settles a pending promise, drains a callback or listener,
 // fulfils a task, expires a lease — and R6 is the one that does not, so it
 // is capped by dedup on the canonical key rather than by a measure.
-func closure(cs []candidate, now uint64, fuel int) ([]candidate, bool) {
+func closure(ctx context.Context, cs []candidate, now uint64, fuel int) ([]candidate, bool) {
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(cs))
 	frontier := make([]candidate, 0, len(cs))
 	for _, c := range cs {
-		k := c.state.Key()
-		if !seen[k] {
-			seen[k] = true
+		if !seen[c.key] {
+			seen[c.key] = true
 			out = append(out, c)
 			frontier = append(frontier, c)
 		}
 	}
 	for i := 0; i < fuel; i++ {
+		// The deadline is checked HERE, not only by porcupine between
+		// steps. porcupine can only interrupt between calls into the
+		// model, so without this a single expensive closure runs to
+		// completion however long that takes — which is how a 180s budget
+		// became a 6m25s run.
+		if ctx != nil && ctx.Err() != nil {
+			return out, false
+		}
 		var next []candidate
 		for _, c := range frontier {
 			for _, r := range enabledRules(c.state, now) {
@@ -218,7 +240,7 @@ func closure(cs []candidate, now uint64, fuel int) ([]candidate, bool) {
 				}
 				seen[k] = true
 				w := append(append([]string(nil), c.witness...), r.name)
-				cand := candidate{t, w}
+				cand := candidate{state: t, witness: w, key: k}
 				out = append(out, cand)
 				next = append(next, cand)
 			}

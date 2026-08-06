@@ -1,7 +1,9 @@
 package model
 
 import (
+	"context"
 	"fmt"
+	"hash/fnv"
 	"strings"
 
 	"github.com/anishathalye/porcupine"
@@ -119,6 +121,15 @@ func eqStr(a, b *string) bool {
 type modelState struct {
 	state   *ServerState
 	witness []string
+	// key is the canonical form, computed ONCE. `Equal` and `Hash` are
+	// called O(n^2) times by porcupine's `merge` when it deduplicates a
+	// power-set state, so recomputing it there is the difference between
+	// comparing integers and rebuilding a string per comparison.
+	key string
+}
+
+func newModelState(s *ServerState, w []string) modelState {
+	return modelState{state: s, witness: w, key: s.Key()}
 }
 
 // Fuel bounds the rule closure per step. Exhausting it means the model
@@ -140,9 +151,14 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 	sat.ok = true
 	m := porcupine.NondeterministicModel{
 		Init: func() []interface{} {
-			return []interface{}{modelState{&ServerState{}, nil}}
+			return []interface{}{newModelState(&ServerState{}, nil)}
 		},
-		Step: func(st interface{}, input interface{}, output interface{}) []interface{} {
+		// StepContext, not Step. porcupine only tests its deadline BETWEEN
+		// calls into the model, so a step that runs a deep rule closure
+		// cannot be interrupted unless the context reaches it. Without
+		// this the timeout is advisory: a 180s budget on a 160-event
+		// concurrent history ran for 6m25s.
+		StepContext: func(ctx context.Context, st interface{}, input interface{}, output interface{}) []interface{} {
 			ms := st.(modelState)
 			op := input.(Op)
 			want := output.(Response)
@@ -151,13 +167,16 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 			// before this call, then keep the states whose response
 			// matches what the server actually said. That filter is the
 			// whole pruning power of the construction.
-			cands, ok := closure([]candidate{{ms.state, ms.witness}}, op.Now, Fuel)
+			cands, ok := closure(ctx, []candidate{{state: ms.state, witness: ms.witness, key: ms.key}}, op.Now, Fuel)
 			if !ok {
 				sat.ok = false
 			}
 			var out []interface{}
 			seen := map[string]bool{}
 			for _, c := range cands {
+				if ctx.Err() != nil {
+					return out
+				}
 				next := c.state.clone()
 				got := op.apply(next, d)
 				if !matches(got, want) {
@@ -168,12 +187,21 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 					continue
 				}
 				seen[k] = true
-				out = append(out, modelState{next, c.witness})
+				out = append(out, modelState{state: next, witness: c.witness, key: k})
 			}
 			return out
 		},
 		Equal: func(a, b interface{}) bool {
-			return a.(modelState).state.Key() == b.(modelState).state.Key()
+			return a.(modelState).key == b.(modelState).key
+		},
+		// Hash lets `merge` compare integers and fall back to `Equal` only
+		// on collisions. porcupine documents it as "reduces the number of
+		// Equal comparisons"; with a string key and a quadratic merge that
+		// is the difference between linear and quadratic string work.
+		Hash: func(st interface{}) uint64 {
+			h := fnv.New64a()
+			_, _ = h.Write([]byte(st.(modelState).key))
+			return h.Sum64()
 		},
 		DescribeOperation: func(input, output interface{}) string {
 			return fmt.Sprintf("%v -> %d", input.(Op), output.(Response).Status)
@@ -201,9 +229,9 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 // or WHERE it stops, which is what makes a verdict reviewable rather than
 // merely coloured.
 func Replay(d Discipline, ops []Op, resps []Response) (witness []string, failedAt int, ok bool) {
-	cur := []candidate{{&ServerState{}, nil}}
+	cur := []candidate{newCand(&ServerState{}, nil)}
 	for i, op := range ops {
-		cands, sat := closure(cur, op.Now, Fuel)
+		cands, sat := closure(context.Background(), cur, op.Now, Fuel)
 		if !sat {
 			return nil, i, false
 		}
@@ -219,7 +247,7 @@ func Replay(d Discipline, ops []Op, resps []Response) (witness []string, failedA
 				continue
 			}
 			seen[k] = true
-			next = append(next, candidate{t, c.witness})
+			next = append(next, candidate{state: t, witness: c.witness, key: k})
 		}
 		if len(next) == 0 {
 			return nil, i, false
