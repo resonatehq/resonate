@@ -54,9 +54,22 @@ names normalised, not assumed from the comments.
 That the two disciplines return the same verdict is a **theorem**, not an
 observation: `responseLockstepAbstract` in `spec/04-theorems/proof.lean`
 is an unconditional mechanized proof — no `sorry`, standard axioms — that
-they answer identically on the response channel. So a disagreement here
-is a bug in this port, which makes running both a differential test of the
-Go against a proven property of the Lean.
+they answer identically on the response channel.
+
+**But be careful how much that buys here.** Because both disciplines are
+one code path with a flag, they differ in exactly two `if` statements:
+
+```go
+q := p.Project(now)
+if d == Materialized && q.State != p.State { s.SetPromise(q) }   // readPromise
+u := t.View(p)
+if d == Materialized && u != t           { s.SetTask(u) }        // readTask
+```
+
+So running both can only catch bugs in those two lines. A bug in the
+shared 99% appears identically under both and the agreement test sails
+past it. It is a real check on the discipline plumbing, and NOT the
+independent confirmation the phrase "both models agree" suggests.
 
 ## Where the nondeterminism comes from
 
@@ -168,3 +181,29 @@ refuted at 886 under both; partitioned and unpartitioned agree; a
 cross-origin suspend is refused; tampered responses are rejected on three
 different channels; the witness recovers exactly 50 hidden resumes;
 concurrent histories still pass; schedule traces are refused.
+
+## What is NOT tested — measured, not guessed
+
+The captures exercise a narrow slice, and the numbers are worth having in
+front of you before trusting a green run:
+
+| | |
+|---|---|
+| handler kinds exercised | **7** of the 10 ported |
+| never exercised | `promise.register_callback`, `task.release`, `task.heartbeat` |
+| response statuses seen | **200 only** (the clean captures are all 200) |
+| rules that ever fire | **R4 only** — 500 firings across both traces |
+| rules never fired | **R1, R2, R3, R5, R6** |
+
+So five of the six ported rules are, as far as this suite is concerned,
+dead code. Guard-ordering (400 before 404 before 409), listener
+notification, lease expiry and dispatch are all unexercised, and the
+INCONCLUSIVE path has never been reached because the closures never come
+close to the fuel bound.
+
+The captures also being SEQUENTIAL means the linearizability search never
+has to search. Taken together: this is a working cross-check of the happy
+path, not a validated model. Closing the gap needs generated traces —
+ideally differential against `valid/`, which is the same specification
+under a completely different implementation — not more runs of the same
+three files.
