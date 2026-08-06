@@ -188,17 +188,44 @@ def setMessage (address : String) (msg : Message) : M Unit :=
     let key   := entry.key
     { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
 
-/-- THE TOUCH, promise side: read a promise and materialize fact P.
-    Handlers never call `getPromise` directly — every promise a handler
-    consults arrives through here, so no guard and no response ever sees
-    a pending promise past its deadline. -/
+/-- THE COUPLED WRITE. Fact T is not an independent fact — it is fact
+    P seen through the task, made true by the same event. So the two
+    objects are written TOGETHER: any transition that stores a settled
+    promise stores its co-keyed task as fulfilled, in the same step.
+
+    This is the storage invariant, maintained by construction:
+
+      stored promise settled  ⟺  stored co-keyed task fulfilled
+
+    Every transition that settles an EXISTING promise goes through
+    here; the creation paths (`promise.create`, `task.create` on an
+    already-expired deadline) write the fulfilled task explicitly, in
+    the same step, so they maintain the invariant too. The write set
+    is still `{p.id}`: the task shares the promise's id.
+
+    Without the coupling the machine can store a settled promise over
+    an acquired task — a state no implementation should ever persist
+    (a database settling a promise must fulfill the task in the same
+    transaction), and one the concrete machine never reaches. -/
+def setSettled (p : PromiseObject) : M Unit := do
+  setPromise p
+  if p.state != .pending then
+    match ← getTask p.id with
+    | some t => if t.state != .fulfilled then setTask t.fulfill
+    | none => pure ()
+
+/-- THE TOUCH, promise side: read a promise and materialize fact P —
+    and, through `setSettled`, fact T along with it. Handlers never
+    call `getPromise` directly — every promise a handler consults
+    arrives through here, so no guard and no response ever sees a
+    pending promise past its deadline. -/
 def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
   match ← getPromise id with
   | none => return none
   | some p =>
       let p' := p.project now
       if p'.state != p.state then
-        setPromise p'
+        setSettled p'
       return some p'
 
 /-- THE PROJECTED READ, promise side: fact P served, nothing stored. -/
