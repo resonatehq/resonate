@@ -12,7 +12,7 @@ import (
 // Every parameter is an INTERVAL — `Range` below — drawn per invocation.
 // A scenario pinned to one shape produces one shape of trace; the point of
 // this binary is to feed the checkers traffic they have not seen, and the
-// recorded captures in valid/traces are already a single shape repeated
+// original recorded captures were already a single shape repeated
 // 200 times.
 
 // Args is the payload every scenario takes. One struct for all four keeps

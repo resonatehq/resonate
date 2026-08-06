@@ -10,8 +10,8 @@
 // Then:
 //
 //	lake exe checktrace < trace.ndjson                  # the Lean checker
-//	go run ./porcupine/cmd/lincheck  < trace.ndjson     # sequential
-//	go run ./porcupine/cmd/conccheck < trace.history    # searches orders
+//	go run ./valid/porc/cmd/lincheck  < trace.ndjson     # sequential
+//	go run ./valid/porc/cmd/conccheck < trace.history    # searches orders
 //
 // Every numeric flag is an INTERVAL — `3`, `2..5`, `5..50ms` — drawn per
 // invocation, because a scenario pinned to one shape produces one shape of

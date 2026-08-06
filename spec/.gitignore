@@ -6,3 +6,7 @@
 /work/go/go
 /work/go/*.ndjson
 /work/go/*.history
+
+# npm artifacts (work/ts)
+node_modules/
+package-lock.json

@@ -14,7 +14,7 @@ import (
 // Without it the server judges deadlines against wall clock — ~1.7e12 —
 // while promises carry small `timeoutAt` values, and whatever was pending
 // when a sweep fired gets expired. That mismatch is the entire cause of
-// the one REFUTED capture in valid/traces, and the banner "Debug mode
+// the one REFUTED capture in the original corpus, and the banner "Debug mode
 // enabled — background loops paused" prints unconditionally at startup
 // WITHOUT pausing anything: only this call does.
 func debugStart(url string) error {
