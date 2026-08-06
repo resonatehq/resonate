@@ -108,6 +108,34 @@ Conventions the whole model leans on:
 | [`resume`](spec/03-concrete/p/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
 | [`timeouts`](spec/03-concrete/p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*, enforced by the machine, not trusted to the environment. |
 
+## Downloading the tools
+
+Two binaries are built by [`.github/workflows/binaries.yml`](.github/workflows/binaries.yml)
+for linux, macOS and Windows on amd64 and arm64:
+
+| binary | source | what it does |
+|---|---|---|
+| `lincheck` | [`porcupine/cmd/lincheck`](porcupine/cmd/lincheck) | linearizability checker — reads an NDJSON trace on **stdin**, answers under both read disciplines |
+| `scenarios` | [`work/go`](work/go) | traffic generator — drives the Go SDK's durable functions against a real server and records the trace |
+
+Every push uploads them as artifacts on the run's summary page. Pushing a
+`v*` tag publishes a Release with the binaries attached as plain files:
+
+```
+curl -sSLO https://github.com/resonatehq/resonate-specification/releases/latest/download/lincheck-linux-amd64
+chmod +x lincheck-linux-amd64
+./lincheck-linux-amd64 < trace.ndjson
+```
+
+The two are a pipeline: `scenarios` produces the trace, `lincheck` and
+`lake exe checktrace` both read it.
+
+```
+scenarios fan-out -runs 12 -parallel 4 -contention 0.3 -out run
+lincheck < run.ndjson          # Go, every order consistent with the history
+lake exe checktrace < run.ndjson   # Lean, one fixed order, against the spec itself
+```
+
 ## Conformance — checking a real server against the specification
 
 [`valid/`](valid) is a **trace checker** built on the specification: it

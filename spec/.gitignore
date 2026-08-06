@@ -1,1 +1,8 @@
 .lake/
+
+# Build outputs. `work/go/go` — a 9 MB binary named after its own
+# directory — was committed once; that is what this line is for.
+/dist/
+/work/go/go
+/work/go/*.ndjson
+/work/go/*.history

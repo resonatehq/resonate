@@ -1,0 +1,162 @@
+# Two binaries, built for every platform anyone here runs.
+#
+#   lincheck    the linearizability checker — reads a recorded trace on
+#               stdin and answers whether the abstract machine can account
+#               for it, under both read disciplines
+#   scenarios   the traffic generator — drives the Go SDK's durable
+#               functions against a real server and records the trace that
+#               lincheck (and `lake exe checktrace`) then reads
+#
+# They live in separate Go modules (`porcupine/` and `work/go/`), so each
+# is built from its own directory rather than from a workspace.
+#
+# Every push produces downloadable artifacts on the run's summary page.
+# Pushing a `v*` tag additionally publishes a GitHub Release with the
+# binaries attached as plain files, so they can be fetched with curl.
+
+name: binaries
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The checker has real tests — that the two read disciplines agree is a
+  # mechanized theorem, and `model_test.go` checks this port against it.
+  # Shipping a binary that fails them would be worse than shipping none.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: porcupine/go.mod
+          cache-dependency-path: porcupine/go.sum
+      - name: go vet
+        working-directory: porcupine
+        run: go vet ./...
+      - name: go test
+        working-directory: porcupine
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "0"
+      SUFFIX: ${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: porcupine/go.mod
+          cache-dependency-path: |
+            porcupine/go.sum
+            work/go/go.sum
+
+      - run: mkdir -p "${GITHUB_WORKSPACE}/dist"
+
+      - name: Build lincheck
+        working-directory: porcupine
+        run: |
+          go build -trimpath -ldflags="-s -w" \
+            -o "${GITHUB_WORKSPACE}/dist/lincheck-${SUFFIX}" ./cmd/lincheck
+
+      - name: Build scenarios
+        working-directory: work/go
+        run: |
+          go build -trimpath -ldflags="-s -w" \
+            -o "${GITHUB_WORKSPACE}/dist/scenarios-${SUFFIX}" .
+
+      # A binary that does not start is not a build. The runner is
+      # linux/amd64, so that is the only target this can actually execute.
+      # Both tools exit 2 on a usage error, so the check is on what they
+      # SAY, not on the status.
+      - name: Smoke test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          set -uo pipefail
+          out=$(./dist/lincheck-linux-amd64 < /dev/null 2>&1 || true)
+          grep -q "empty trace" <<<"$out" || { echo "$out"; exit 1; }
+          out=$(./dist/scenarios-linux-amd64 2>&1 || true)
+          grep -q "simple-run" <<<"$out" || { echo "$out"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resonate-tools-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Tag `v0.1.0` and push it, and the binaries land on the release page as
+  # plain downloadable files — no unzipping, no Actions login.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: resonate-tools-*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          set -eu
+          chmod +x lincheck-* scenarios-*
+          sha256sum lincheck-* scenarios-* > SHA256SUMS
+          cat SHA256SUMS
+
+      # Written with a quoted heredoc so the backticks in the table stay
+      # backticks, then substituted — an unquoted one would try to RUN
+      # them.
+      - name: Release notes
+        run: |
+          set -eu
+          cat > notes.md <<'NOTES'
+          Two binaries, one per job.
+
+          | binary | what it does |
+          |---|---|
+          | `lincheck` | linearizability checker — reads an NDJSON trace on **stdin**, answers under both read disciplines |
+          | `scenarios` | traffic generator — drives the Go SDK against a real server and records the trace |
+
+          ```
+          curl -sSLO https://github.com/__REPO__/releases/download/__TAG__/lincheck-linux-amd64
+          chmod +x lincheck-linux-amd64
+          ./lincheck-linux-amd64 < trace.ndjson
+          ```
+
+          Verify with `SHA256SUMS`. The macOS builds are unsigned, so
+          `xattr -d com.apple.quarantine <file>` before the first run.
+          NOTES
+          sed -i "s|__REPO__|${GITHUB_REPOSITORY}|g; s|__TAG__|${GITHUB_REF_NAME}|g" notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            artifacts/lincheck-* artifacts/scenarios-* artifacts/SHA256SUMS \
+            --title "${GITHUB_REF_NAME}" --notes-file notes.md
