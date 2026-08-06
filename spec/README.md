@@ -217,6 +217,10 @@ reduction agrees with brute force on every one. See
 cannot be: `occurrences` is `opaque`, so traces mentioning schedules are
 declined rather than judged.
 
+## Implementing the protocol
+
+Every implementation answers the same questions, and the ones answered badly are recorded in [`COVERAGE.md`](alts/unified/COVERAGE.md) under their bug numbers. [`docs/implementation-questions.md`](docs/implementation-questions.md) is the catalogue: the conformance questions that have exactly one right answer, each paired with the property that fires when it is answered otherwise; the latitude the machines genuinely permit; and the platform questions the specification is silent about but every substrate forces. It carries an answer sheet, one column per implementation.
+
 ## Build
 
 ```
