@@ -3,7 +3,7 @@
 Drives a resonate server through four workflow shapes and records every
 request and response, so the traffic can be fed to the checkers in this
 repository. Built on the Go SDK; the TypeScript canonical workloads live
-one directory up, in [`work/`](../README.md).
+in the sibling directory, [`work/ts/`](../ts/README.md).
 
 ## Build and run
 
@@ -20,7 +20,7 @@ RESONATE_DEBUG=true RESONATE_STORE__TYPE=sqlite resonate serve &
 
 Every numeric flag accepts an **interval** — `3`, `2..5`, `5..50ms` —
 drawn per invocation. A scenario pinned to one shape produces one shape of
-trace, and the captures in `valid/traces` are already a single shape
+trace, and the original captures were already a single shape
 repeated 200 times.
 
 | flag | |
@@ -36,8 +36,8 @@ Each run writes two files:
 
 ```bash
 lake exe checktrace          < trace.ndjson    # the Lean checker
-go run ./porcupine/cmd/lincheck  < trace.ndjson    # sequential
-go run ./porcupine/cmd/conccheck < trace.history   # searches orders
+go run ./valid/porc/cmd/lincheck  < trace.ndjson    # sequential
+go run ./valid/porc/cmd/conccheck < trace.history   # searches orders
 ```
 
 ## How the recording works
@@ -55,7 +55,7 @@ did not send. The decorator also stamps `resonate:debug_time` into each
 envelope, because the Lean checker needs a monotone clock and a server on
 wall clock produces traces whose instants are ~1.7e12 while promises carry
 small deadlines. That mismatch is the entire cause of the one REFUTED
-capture in `valid/traces`.
+capture in the original corpus.
 
 Requests share instants in batches (`-batch`), so concurrent clients can
 legitimately overlap: `ValidM` requires non-decreasing, not increasing.
@@ -74,15 +74,15 @@ fan-out        40 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
 Getting there needed four fixes, three of them real bugs:
 
 1. **`task.fence` was in neither checker.** The specification has it
-   (`spec/02-abstract/p.lean:229`) and `valid/validator.lean` already knew
-   what it touches, but `valid/json.lean` could not decode it and the Go
+   (`spec/02-abstract/p.lean:229`) and `valid/lean/validator.lean` already knew
+   what it touches, but `valid/lean/json.lean` could not decode it and the Go
    model had no handler. The SDK issues one per fenced create/settle — 36
    of 60 events in a fan-out run — so every trace was a partial view.
    Added to both, transcribed guard for guard, validation-first.
 2. **`task.create` was in neither model.** The SDK issues one per root
    workflow, so without it nothing else in the trace has a promise to
    refer to and the first event refutes.
-3. **`valid/json.lean` decoded `task.create` wrongly.** It read
+3. **`valid/lean/json.lean` decoded `task.create` wrongly.** It read
    `id`/`timeoutAt` off the action ENVELOPE rather than its `data`, and
    threw `property not found: id` on the first real SDK trace. No
    hand-written capture had ever sent a `task.create`.
@@ -112,8 +112,8 @@ DROPPED (no checker can decode these): task.create=4 task.fence=24
 ```
 
 * **`task.fence`** — the big one. The specification has it
-  (`spec/02-abstract/p.lean:229`, and `valid/validator.lean:186` already
-  knows what it touches) but `valid/json.lean` never learned to decode it,
+  (`spec/02-abstract/p.lean:229`, and `valid/lean/validator.lean:186` already
+  knows what it touches) but `valid/lean/json.lean` never learned to decode it,
   and the Go model has no `TaskFence` at all. The SDK issues one for every
   fenced create/settle, so it dominates: 24 of 36 events in a small
   fan-out run.

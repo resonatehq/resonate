@@ -18,7 +18,7 @@ lean_lib «spec» where
   srcDir := "spec"
   roots  := #[]
   globs  := #[.submodules `«01-protocol», .submodules `«02-abstract»,
-              .submodules `«03-concrete», .submodules `«05-sqlite»]
+              .submodules `«03-concrete»]
 
 /-- The relations between machines — equivalence, refinement — with
     their exhaustive sweeps, which run under kernel `decide` at build
@@ -39,20 +39,20 @@ lean_lib «valid» where
 /-- `lake exe checktrace < trace.ndjson` — the one you want. -/
 lean_exe «checktrace» where
   srcDir := "."
-  root   := `«valid».check
+  root   := `«valid».«lean».check
 
 /-- Scaling and cone-agreement measurements. -/
 lean_exe «tracecheck_exe» where
   srcDir := "."
-  root   := `«valid».experiments
+  root   := `«valid».«lean».experiments
 
 /-- The hand-transcribed trace, plus tampered variants. -/
 lean_exe «realtrace_exe» where
   srcDir := "."
-  root   := `«valid».real
+  root   := `«valid».«lean».real
 
 /-- The instants sweep: does firing a τ off the observation's instant ever
     change what an observer sees? -/
 lean_exe «gap» where
   srcDir := "."
-  root   := `«valid».gap
+  root   := `«valid».«lean».gap

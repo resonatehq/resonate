@@ -7,7 +7,7 @@
 #               functions against a real server and records the trace that
 #               lincheck (and `lake exe checktrace`) then reads
 #
-# They live in separate Go modules (`porcupine/` and `work/go/`), so each
+# They live in separate Go modules (`valid/porc/` and `work/go/`), so each
 # is built from its own directory rather than from a workspace.
 #
 # Every push produces downloadable artifacts on the run's summary page.
@@ -36,13 +36,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: porcupine/go.mod
-          cache-dependency-path: porcupine/go.sum
+          go-version-file: valid/porc/go.mod
+          cache-dependency-path: valid/porc/go.sum
       - name: go vet
-        working-directory: porcupine
+        working-directory: valid/porc
         run: go vet ./...
       - name: go test
-        working-directory: porcupine
+        working-directory: valid/porc
         run: go test ./...
 
   build:
@@ -66,15 +66,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: porcupine/go.mod
+          go-version-file: valid/porc/go.mod
           cache-dependency-path: |
-            porcupine/go.sum
+            valid/porc/go.sum
             work/go/go.sum
 
       - run: mkdir -p "${GITHUB_WORKSPACE}/dist"
 
       - name: Build lincheck
-        working-directory: porcupine
+        working-directory: valid/porc
         run: |
           go build -trimpath -ldflags="-s -w" \
             -o "${GITHUB_WORKSPACE}/dist/lincheck-${SUFFIX}" ./cmd/lincheck

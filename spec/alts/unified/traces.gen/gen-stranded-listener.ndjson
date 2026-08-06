@@ -1,2 +1,0 @@
-{"tag": "config", "config": {"impl": "MODEL-GENERATED (stranded-listener)", "scenario": "stranded-listener", "ids": ["a", "b"], "addrs": ["L"], "pids": ["wA"], "retry": 1, "ttl": 1, "observed": ["promises", "tasks", "callbacks", "listeners", "resumes", "outbox"]}}
-{"tag": "trace", "event": {"name": "PromiseCreate", "raw": "APromiseCreate", "now": 0, "state": {"promises": {"a": {"state": "pending", "timeoutAt": 1, "kind": "plain"}}, "tasks": {}, "callbacks": [], "listeners": [], "resumes": [], "outbox": []}}}

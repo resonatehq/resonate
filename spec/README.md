@@ -1,17 +1,55 @@
 # Resonate Specification
 
-The Resonate protocol, specified as an executable **abstract machine** in Lean 4: a state, a set of effects (atomic operations on the state) and a set of request handlers (transitions composed from effects).
+The Resonate protocol, specified as an executable **abstract machine** in
+Lean 4: a state, a set of effects (atomic operations on the state), and a set
+of request handlers (transitions composed from effects).
 
-The machine comes in **twin variants** over one state and one wire surface, differing only in read discipline:
+## Layout
 
-- **`-p`, the projected machine** ([`spec/03-concrete/p`](spec/03-concrete/p)) — a read serves the *projection* of a timed-out object and writes nothing; the timeout transition persists the fact later.
-- **`-m`, the materialized machine** ([`spec/03-concrete/m`](spec/03-concrete/m)) — a read *materializes* first, by firing the anticipated timeout transition at the moment of observation, then serves stored state. Handlers are line-aligned with `-p`: reads become touches, `project` disappears from responses, the extra writes hide inside the touch.
+| directory | contents |
+|---|---|
+| [`spec/01-protocol`](spec/01-protocol) | wire-level types, requests/responses, validation |
+| [`spec/02-abstract`](spec/02-abstract) | the abstract machine — two read disciplines over shared state and rules |
+| [`spec/03-concrete`](spec/03-concrete) | the concrete machine — twin variants `-p` and `-m` |
+| [`spec/04-theorems`](spec/04-theorems) | the relations between the machines |
+| [`spec/implementation-questions.md`](spec/implementation-questions.md) | the catalogue of questions every implementation answers |
+| [`valid/`](valid) | conformance: the Lean trace checker ([`lean/`](valid/lean)), the Go linearizability checker ([`porc/`](valid/porc)), the trace format in [`valid/README.md`](valid/README.md) |
+| [`work/`](work) | traffic generators: Go SDK scenarios ([`go/`](work/go)), canonical TypeScript workloads ([`ts/`](work/ts)) |
 
-Above both concrete variants sits the **abstract machine** ([`spec/02-abstract`](spec/02-abstract)) — the coalesced model: no timeout components (deadlines live on the objects — `timeoutAt`, `expiresAt`, `retryAt`, `nextRunAt`), no deferred queue (awaiters and listeners stay on the settled promise, drained by chosen-element rules), no config (cadence is a rule parameter), and materialize-on-touch in place of projection. **The concrete machine refines the abstract one** (`ConcreteRefinesAbstract`, [`spec/04-theorems`](spec/04-theorems)): every valid concrete trace has a valid abstract trace with the same externalized behavior and the same messages at quiescence, via the purely structural abstraction `alpha` (deferred entries fold back into callbacks, task timers become the task's own deadlines) and a syntactic rule translation as the constructive schedule — executed on the battery and exhaustively at small scope, all kernel `decide`. This is exactly the refinement that was *impossible* against the unfixed machine: the three fixes below were its obstructions. The reverse holds too (`AbstractRefinesConcrete`, [`square.lean`](spec/04-theorems/square.lean)) — enabled by making listeners, like callbacks, external-only in every machine (`422`) so that no obligation can attach where no discharge path exists — and **`TheSquare`** places all four machines in one weak-bisimilarity class: every implementation choice the machines embody is unobservable, and the protocol has exactly one behavior space. Within the abstract level the twins additionally satisfy **full lockstep** (`LockstepAbstract`): pointwise-identical responses and quiescence-equal messages under any shared schedule, adversarial rule firings included — every decision in either machine, handler or rule, goes through the view, so no effect depends on fact-lag; TIMEOUT ALWAYS WINS extends to redispatch (no transition creates new work for a logically dead task).
+## The machines
 
-The abstract machine itself comes in the same two read disciplines — [`p.lean`](spec/02-abstract/p.lean) serves the views, [`m.lean`](spec/02-abstract/m.lean) persists them, over shared `state.lean` and `rules.lean` (rules are material transitions; the read discipline concerns handlers only). The square is sharper at this level: obligations are retained on the objects, and every decision — handler or rule — goes through the view, so the two disciplines **lockstep on both channels under any shared rule schedule**, checked exhaustively with the adversarial rules in the alphabet (`LockstepAbstract`, `IndistinguishableAbstract` in [`abstract-twins.lean`](spec/04-theorems/abstract-twins.lean); the once-distinguishing script is kept as a regression witness). The response half is **fully proven** — `responseLockstepAbstract` in [`proof.lean`](spec/04-theorems/proof.lean) is an unconditional mechanized theorem over all traces, no `sorry`, standard axioms only: a trace induction over one invariant (the two states agree on every lookup *through the view*), stable under monotone time because facts are (`project_absorb`), with per-step agreement discharged handler by handler and rule by rule. The proof is the design document in miniature: materialization is memoization (`REq_touchWrite`), TIMEOUT ALWAYS WINS extends to redispatch (R5/R6 close precisely because decisions consult the view), and the catch-up became provable the day the occurrence list became a declared total function ([`occurrences`](spec/01-protocol/validation.lean), opaque like `nextCron` — the machines re-check due-ness rather than trust the calendar).
+One state, one wire surface, four machines — two levels, each in two read
+disciplines:
 
-Between the concrete variants themselves: `-p` and `-m` are **weakly bisimilar** (`MRefinesP` and `PRefinesM`, together `Indistinguishable`): every valid trace of one has a valid trace of the other with the same externalized behavior — internal (τ) steps silent, each machine scheduling its own — and the same messages at quiescence. The τ schedule genuinely cannot be shared: -m's touches move the obligation records that enable τs, and [`spec/04-theorems/lockstep.lean`](spec/04-theorems/lockstep.lean) machine-checks the distinguishing trace. See [`spec/04-theorems`](spec/04-theorems): traces and `Valid` follow the trace framework (a trace is an infinite state-action sequence; validity is step-connectivity plus the monotone clock), the claims are in [`equivalence.lean`](spec/04-theorems/equivalence.lean), and both constructive directions are executed — the lazy schedule ([`lazy.lean`](spec/04-theorems/lazy.lean)) and the eager schedule ([`eager.lean`](spec/04-theorems/eager.lean)) — on a targeted battery and exhaustively on every script up to length 4 over a 9-request alphabet (7 381 scripts each) — all by kernel `decide`; the spec's string scans are structurally recursive precisely so no proof needs `native_decide`. 
+- **`-p`, projected** — a read serves the *projection* of a timed-out object
+  and writes nothing; the timeout transition persists the fact later.
+- **`-m`, materialized** — a read *materializes* first — fires the
+  anticipated timeout at the moment of observation — then serves stored
+  state.
+
+The **concrete machine** ([`spec/03-concrete`](spec/03-concrete)) carries
+explicit timeout components and a deferred queue. The **abstract machine**
+([`spec/02-abstract`](spec/02-abstract)) coalesces them: deadlines live on
+the objects, awaiters and listeners stay on the settled promise and are
+drained by chosen-element rules, cadence is a rule parameter.
+
+### The relations
+
+All in [`spec/04-theorems`](spec/04-theorems), checked by kernel `decide` on
+a targeted battery and exhaustively at small scope (every script up to
+length 4 over a 9-request alphabet):
+
+| claim | statement |
+|---|---|
+| `Indistinguishable` | `-p` and `-m` are weakly bisimilar: every valid trace of one has a valid trace of the other with the same externalized behavior and the same messages at quiescence, each machine scheduling its own τ steps |
+| `ConcreteRefinesAbstract`, `AbstractRefinesConcrete` | refinement holds in both directions, via the structural abstraction `alpha` and a syntactic rule translation as the constructive schedule |
+| `TheSquare` | all four machines sit in one weak-bisimilarity class — every implementation choice the machines embody is unobservable, and the protocol has exactly one behavior space |
+| `LockstepAbstract` | at the abstract level the twins answer pointwise-identically under any shared rule schedule, adversarial firings included |
+| `responseLockstepAbstract` | the response half of lockstep is a fully mechanized theorem over all traces ([`proof.lean`](spec/04-theorems/proof.lean)) — no `sorry`, standard axioms only |
+
+The design invariant underneath all of them: **timeout always wins**. Every
+decision — handler or rule — consults the view, so no transition creates new
+work for a logically dead object.
 
 ## The Machine
 
@@ -46,7 +84,10 @@ The atomic operations of the machine ([`state.lean`](spec/03-concrete/state.lean
 | timeouts | `setPromiseTimeout` / `setTaskTimeout` / `setScheduleTimeout` / `del…Timeout` |
 | outbox | `setMessage` |
 
-Handlers touch state only through effects. Together they are the contract a concrete implementation must realize. Settlement's write set, restricted to promises and tasks, is `{p.id}`: settle neither reads nor writes any promise but its own — resumes are recorded as deferred work, discharged by the drain.
+Handlers touch state only through effects. Together they are the contract a
+concrete implementation must realize. Settlement's write set, restricted to
+promises and tasks, is `{p.id}`: settle neither reads nor writes any promise
+but its own — resumes are recorded as deferred work, discharged by the drain.
 
 ### Handlers
 
@@ -56,12 +97,13 @@ Every handler is a pure function
 Req → (now : Nat) → M Res    -- M = StateM ServerState
 ```
 
-composed from effects. Deterministic and total; there is no hidden clock — time enters only through `now`.
+composed from effects. Deterministic and total; there is no hidden clock —
+time enters only through `now`.
 
 Conventions the whole model leans on:
 
 - **Projection** — a pending promise past `timeoutAt` is *observed* as already settled (`resolved` for timers, `rejectedTimedout` otherwise) even before its timeout transition persists that fact.
-- **Validation** — anything rejectable by inspecting the request alone is `400`, with highest precedence: before existence, state, or version are consulted. Examples: settling to a non-settable state, self-await, duplicate or empty awaited lists, an untargeted `task.create` action, an undeliverable listener address.
+- **Validation** — anything rejectable by inspecting the request alone is `400`, with highest precedence: before existence, state, or version are consulted.
 
 ## Protocol Handlers
 
@@ -73,7 +115,7 @@ Conventions the whole model leans on:
 | P-02 | [`promise.create`](spec/03-concrete/p/P-02-promise.create.lean) | Create a pending promise; a `resonate:target` tag also spawns a task and an `execute` message, optionally delayed. |
 | P-03 | [`promise.settle`](spec/03-concrete/p/P-03-promise.settle.lean) | Settle a pending promise: fulfill its task, notify listeners, resume awaiters. |
 | P-04 | [`promise.register_callback`](spec/03-concrete/p/P-04-promise.register_callback.lean) | Subscribe an awaiter promise for resume when the awaited promise settles. |
-| P-05 | [`promise.register_listener`](spec/03-concrete/p/P-05-promise.register_listener.lean) | Subscribe an address for an `unblock` message when the promise settles (external promises only — a waiter may only attach where an armed timeout guarantees discharge). |
+| P-05 | [`promise.register_listener`](spec/03-concrete/p/P-05-promise.register_listener.lean) | Subscribe an address for an `unblock` message when the promise settles (external promises only). |
 | P-06 | [`promise.search`](spec/03-concrete/p/P-06-promise.search.lean) | Not yet specified (`501`). |
 
 ### Tasks
@@ -106,44 +148,34 @@ Conventions the whole model leans on:
 | Handler | Transition |
 |---|---|
 | [`resume`](spec/03-concrete/p/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
-| [`timeouts`](spec/03-concrete/p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*, enforced by the machine, not trusted to the environment. |
+| [`timeouts`](spec/03-concrete/p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*. |
 
-## Downloading the tools
+## Tools
 
-Two binaries are built by [`.github/workflows/binaries.yml`](.github/workflows/binaries.yml)
-for linux, macOS and Windows on amd64 and arm64:
+Two binaries, built by [`.github/workflows/binaries.yml`](.github/workflows/binaries.yml)
+for linux, macOS and Windows and published on every release:
 
 | binary | source | what it does |
 |---|---|---|
-| `lincheck` | [`porcupine/cmd/lincheck`](porcupine/cmd/lincheck) | linearizability checker — reads an NDJSON trace on **stdin**, answers under both read disciplines |
+| `lincheck` | [`valid/porc/cmd/lincheck`](valid/porc/cmd/lincheck) | linearizability checker — reads an NDJSON trace on **stdin**, answers under both read disciplines |
 | `scenarios` | [`work/go`](work/go) | traffic generator — drives the Go SDK's durable functions against a real server and records the trace |
 
-Every push uploads them as artifacts on the run's summary page. Pushing a
-`v*` tag publishes a Release with the binaries attached as plain files:
-
-```
-curl -sSLO https://github.com/resonatehq/resonate-specification/releases/latest/download/lincheck-linux-amd64
-chmod +x lincheck-linux-amd64
-./lincheck-linux-amd64 < trace.ndjson
-```
-
-The two are a pipeline: `scenarios` produces the trace, `lincheck` and
-`lake exe checktrace` both read it.
+They form a pipeline with the Lean checker:
 
 ```
 scenarios fan-out -runs 12 -parallel 4 -contention 0.3 -out run
-lincheck < run.ndjson          # Go, every order consistent with the history
+lincheck < run.ndjson              # Go, every order consistent with the history
 lake exe checktrace < run.ndjson   # Lean, one fixed order, against the spec itself
 ```
 
-## Conformance — checking a real server against the specification
+## Conformance
 
-[`valid/`](valid) is a **trace checker** built on the specification: it
-takes traffic recorded from a real server and asks whether the machine can
-account for it.
+[`valid/`](valid) is a **trace checker** built on the specification: it takes
+traffic recorded from a real server and asks whether the machine can account
+for it.
 
 ```
-lake exe checktrace < valid/traces/resonate-sqlite-50wf.ndjson
+lake exe checktrace < trace.ndjson
 ```
 
 ```
@@ -157,45 +189,21 @@ witness: 50 internal steps the server never reported
 
 Exit `0` admissible, `1` refuted, `2` parse error, `3` inconclusive.
 
-Input is NDJSON, one event per line, as [`capture.py`](valid/traces/capture.py)
-tees it — `req` is the data the client sent, `res` the whole envelope the
-server returned. Internal steps are **not** in the file and must not be.
-
-[`valid/traces`](valid/traces) holds the recorded runs. The four
-`resonate-sdk-*` files come from [`work/go`](work/go), which drives the
-Go SDK's own durable functions — `simple-run`, `simple-rpc`,
-`simple-sleep`, `fan-out` — against a real server with several clients
-racing for the same workflow origins. They matter because they are the
-only captures that carry what the SDK actually sends: `task.create`,
-`task.fence` and `promise.register_listener`, which no hand-written load
-generator here ever emitted.
-
-### Why this is not a replay harness
-
-The specification deliberately does not say *when* internal transitions
-fire; the τ schedule is unspecified, which is exactly what `lazy.lean` and
-`eager.lean` are about. So there is no single trace to reproduce. The
-checker asks the existential question instead:
+Input is NDJSON, one event per line — the format is stated in
+[`valid/README.md`](valid/README.md). Internal steps are **not** in the file and must not be: the
+specification deliberately leaves the τ schedule open, so there is no single
+trace to reproduce. The checker asks the existential question instead —
 
 > Does there EXIST a schedule of internal steps under which the
 > specification produces exactly these external events?
 
-It answers by subset construction — carry the set of states the server
-could be in, close each under the internal steps enabled in the gap since
-the last observation, apply the observed request, and keep only the
-candidates whose response matches what was actually seen. Empty set means
-no schedule explains the trace.
+— and answers it by subset construction: carry the set of states the server
+could be in, close each under the internal steps enabled since the last
+observation, apply the observed request, and keep only the candidates whose
+response matches what was seen. Empty set means no schedule explains the
+trace.
 
-On 2 200 events from `resonatehq/resonate` v0.9.8 on SQLite, it recovers
-200 `τResume` steps the server never reported: resonate discharges the
-resume inside `promise.settle`'s transaction, so an observer sees a task go
-from `suspended` to `pending` with nothing to explain it.
-
-### What it guarantees
-
-Validity is the specification's own `ValidM`, not a restatement — a
-recorded run is `Valid` when some execution the spec permits has exactly
-these external steps, with internal steps anywhere in between.
+The verdict is the specification's own `Valid`, not a restatement:
 
 ```lean
 theorem accepted_trace_implies_valid_trace : Accepted t fuel cap →   Valid t
@@ -203,23 +211,26 @@ theorem rejected_trace_implies_not_valid_trace : Rejected t fuel cap → ¬ Vali
 ```
 
 Three verdicts, not two: `.inconclusive` is a first-class answer, because
-completeness is only true when the search actually saturated. Accepting and
-rejecting are two positive judgements, not each other'"'"'s negation.
+completeness is only true when the search actually saturated.
 
-**Status: the statements are mechanized, most proofs are not.**
-`valid_implies_exec` and `verdict_trichotomy` carry no `sorry`; the
-remaining obligations — that canonicalisation is a congruence, that the
-cone is independent, that critical instants suffice — are stated and open.
-Empirically: 16 203 generated scripts with 0 soundness violations, and the
-reduction agrees with brute force on every one. See
-[`valid/correctness.lean`](valid/correctness.lean) for what is claimed and
-[`valid/schedules.lean`](valid/schedules.lean) for the one thing that
-cannot be: `occurrences` is `opaque`, so traces mentioning schedules are
-declined rather than judged.
+**Status: the statements are mechanized, most proofs are not.** The remaining
+obligations are stated and open; empirically, 16 203 generated scripts show
+0 soundness violations. See
+[`valid/lean/correctness.lean`](valid/lean/correctness.lean) for what is
+claimed and [`valid/lean/schedules.lean`](valid/lean/schedules.lean) for the
+one thing that cannot be: `occurrences` is `opaque`, so traces mentioning
+schedules are declined rather than judged.
 
 ## Implementing the protocol
 
-Every implementation answers the same questions, and the ones answered badly are recorded in [`COVERAGE.md`](alts/unified/COVERAGE.md) under their bug numbers. [`docs/implementation-questions.md`](docs/implementation-questions.md) is the catalogue: the conformance questions that have exactly one right answer, each paired with the property that fires when it is answered otherwise; the latitude the machines genuinely permit; and the platform questions the specification is silent about but every substrate forces. It carries an answer sheet, one column per implementation.
+[`spec/implementation-questions.md`](spec/implementation-questions.md) is the
+catalogue of questions every implementation answers: the conformance
+questions with exactly one right answer, each paired with the property that
+fires when it is answered otherwise; the latitude the machines genuinely
+permit; and the platform questions the specification is silent about but
+every substrate forces. It carries an answer sheet, one column per
+implementation — and the ones answered badly are recorded under their bug
+numbers in its coverage record.
 
 ## Build
 

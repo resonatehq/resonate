@@ -25,8 +25,8 @@ import (
 // — no proxy, no packet capture, and no risk of recording something the
 // SDK did not actually send. That is the tap point.
 //
-// The recorded shape is the one `valid/traces` already uses, so the output
-// feeds `lake exe checktrace` and `porcupine/cmd/lincheck` unmodified:
+// The recorded shape is the trace format `valid/README.md` states, so the output
+// feeds `lake exe checktrace` and `valid/porc/cmd/lincheck` unmodified:
 //
 //	{"kind":…,"now":…,"req":…,"res":…}
 //
@@ -179,7 +179,7 @@ func (n *recordingNet) Send(ctx context.Context, body string) (string, error) {
 // `task.fence` is in it. The SDK issues one per fenced create/settle — 24
 // of 36 events in a small fan-out run — and it used to be dropped, which
 // made every trace from this binary a partial view. It is now decoded by
-// `valid/json.lean` and modelled by `porcupine`'s `TaskFence`, both
+// `valid/lean/json.lean` and modelled by `valid/porc`'s `TaskFence`, both
 // transcribed from `spec/02-abstract/p.lean:229`.
 //
 // `task.create` is in it too, for the same reason: the SDK issues one per
@@ -204,7 +204,7 @@ func recordable(kind string) bool {
 // returns the kind. Without it the server uses wall clock, and a trace
 // whose instants are 1.7e12 while promises carry small deadlines is not
 // checkable — that mismatch is what produced the one REFUTED capture in
-// valid/traces.
+// the original corpus.
 func stampDebugTime(body string, now uint64, debug bool) (string, string) {
 	var env map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(body), &env); err != nil {
