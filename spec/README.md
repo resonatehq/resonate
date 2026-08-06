@@ -108,8 +108,120 @@ Conventions the whole model leans on:
 | [`resume`](spec/03-concrete/p/03-resume.lean) | Drain a deferred resume: wake a suspended awaiter (re-pending + `execute`) or record the trigger on an active one; the deadline guard re-checks at drain time (timeout always wins). |
 | [`timeouts`](spec/03-concrete/p/02-timeouts.lean) | Environment-fired transitions: promise timeout, task retry, lease expiry, schedule fire (with catch-up). Each re-checks its own due time — an armed timer means *not before*, enforced by the machine, not trusted to the environment. |
 
+## Downloading the tools
+
+Two binaries are built by [`.github/workflows/binaries.yml`](.github/workflows/binaries.yml)
+for linux, macOS and Windows on amd64 and arm64:
+
+| binary | source | what it does |
+|---|---|---|
+| `lincheck` | [`porcupine/cmd/lincheck`](porcupine/cmd/lincheck) | linearizability checker — reads an NDJSON trace on **stdin**, answers under both read disciplines |
+| `scenarios` | [`work/go`](work/go) | traffic generator — drives the Go SDK's durable functions against a real server and records the trace |
+
+Every push uploads them as artifacts on the run's summary page. Pushing a
+`v*` tag publishes a Release with the binaries attached as plain files:
+
+```
+curl -sSLO https://github.com/resonatehq/resonate-specification/releases/latest/download/lincheck-linux-amd64
+chmod +x lincheck-linux-amd64
+./lincheck-linux-amd64 < trace.ndjson
+```
+
+The two are a pipeline: `scenarios` produces the trace, `lincheck` and
+`lake exe checktrace` both read it.
+
+```
+scenarios fan-out -runs 12 -parallel 4 -contention 0.3 -out run
+lincheck < run.ndjson          # Go, every order consistent with the history
+lake exe checktrace < run.ndjson   # Lean, one fixed order, against the spec itself
+```
+
+## Conformance — checking a real server against the specification
+
+[`valid/`](valid) is a **trace checker** built on the specification: it
+takes traffic recorded from a real server and asks whether the machine can
+account for it.
+
+```
+lake exe checktrace < valid/traces/resonate-sqlite-50wf.ndjson
+```
+
+```
+loaded 550 events
+ADMISSIBLE   events=550 maxFanout=1 witnessTaus=50   26ms
+witness: 50 internal steps the server never reported
+  @1030  τ resume o0.a → o0.x
+  @1130  τ resume o1.a → o1.x
+  …
+```
+
+Exit `0` admissible, `1` refuted, `2` parse error, `3` inconclusive.
+
+Input is NDJSON, one event per line, as [`capture.py`](valid/traces/capture.py)
+tees it — `req` is the data the client sent, `res` the whole envelope the
+server returned. Internal steps are **not** in the file and must not be.
+
+[`valid/traces`](valid/traces) holds the recorded runs. The four
+`resonate-sdk-*` files come from [`work/go`](work/go), which drives the
+Go SDK's own durable functions — `simple-run`, `simple-rpc`,
+`simple-sleep`, `fan-out` — against a real server with several clients
+racing for the same workflow origins. They matter because they are the
+only captures that carry what the SDK actually sends: `task.create`,
+`task.fence` and `promise.register_listener`, which no hand-written load
+generator here ever emitted.
+
+### Why this is not a replay harness
+
+The specification deliberately does not say *when* internal transitions
+fire; the τ schedule is unspecified, which is exactly what `lazy.lean` and
+`eager.lean` are about. So there is no single trace to reproduce. The
+checker asks the existential question instead:
+
+> Does there EXIST a schedule of internal steps under which the
+> specification produces exactly these external events?
+
+It answers by subset construction — carry the set of states the server
+could be in, close each under the internal steps enabled in the gap since
+the last observation, apply the observed request, and keep only the
+candidates whose response matches what was actually seen. Empty set means
+no schedule explains the trace.
+
+On 2 200 events from `resonatehq/resonate` v0.9.8 on SQLite, it recovers
+200 `τResume` steps the server never reported: resonate discharges the
+resume inside `promise.settle`'s transaction, so an observer sees a task go
+from `suspended` to `pending` with nothing to explain it.
+
+### What it guarantees
+
+Validity is the specification's own `ValidM`, not a restatement — a
+recorded run is `Valid` when some execution the spec permits has exactly
+these external steps, with internal steps anywhere in between.
+
+```lean
+theorem accepted_trace_implies_valid_trace : Accepted t fuel cap →   Valid t
+theorem rejected_trace_implies_not_valid_trace : Rejected t fuel cap → ¬ Valid t
+```
+
+Three verdicts, not two: `.inconclusive` is a first-class answer, because
+completeness is only true when the search actually saturated. Accepting and
+rejecting are two positive judgements, not each other'"'"'s negation.
+
+**Status: the statements are mechanized, most proofs are not.**
+`valid_implies_exec` and `verdict_trichotomy` carry no `sorry`; the
+remaining obligations — that canonicalisation is a congruence, that the
+cone is independent, that critical instants suffice — are stated and open.
+Empirically: 16 203 generated scripts with 0 soundness violations, and the
+reduction agrees with brute force on every one. See
+[`valid/correctness.lean`](valid/correctness.lean) for what is claimed and
+[`valid/schedules.lean`](valid/schedules.lean) for the one thing that
+cannot be: `occurrences` is `opaque`, so traces mentioning schedules are
+declined rather than judged.
+
 ## Build
 
 ```
-cd spec && lake build
+lake build            # everything, including the exhaustive decide sweeps (minutes)
+lake build spec       # the specification alone — the fast loop
+lake build valid      # the trace checker
+lake exe checktrace   # reads a trace on stdin
 ```
