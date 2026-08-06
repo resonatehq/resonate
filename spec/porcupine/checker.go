@@ -32,6 +32,7 @@ type Op struct {
 	State     PromiseState
 	Awaited   []string
 	Awaiter   string
+	Action    *FenceAction // task.fence only
 }
 
 func (o Op) String() string {
@@ -68,6 +69,19 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 		return s.TaskHalt(d, o.ID, o.Now)
 	case "task.continue":
 		return s.TaskContinue(d, o.ID, o.Now)
+	case "task.create":
+		if o.Action == nil {
+			return Response{Status: -1}
+		}
+		return s.TaskCreate(d, o.PID, o.TTL,
+			PromiseCreateReq{o.Action.ID, o.Action.TimeoutAt, o.Action.Tags}, o.Now)
+	case "task.fence":
+		if o.Action == nil {
+			return Response{Status: -1}
+		}
+		r, inner := s.TaskFence(d, o.ID, o.Version, *o.Action, o.Now)
+		r.Inner = inner
+		return r
 	default:
 		return Response{Status: -1}
 	}
@@ -88,6 +102,19 @@ func matches(got, want Response) bool {
 			p.TimeoutAt != want.Promise.TimeoutAt || p.CreatedAt != want.Promise.CreatedAt ||
 			!eqU64(p.SettledAt, want.Promise.SettledAt) {
 			return false
+		}
+	}
+	if want.Inner != nil {
+		g := got.Inner
+		if g == nil || g.Kind != want.Inner.Kind || g.Status != want.Inner.Status {
+			return false
+		}
+		if want.Inner.Promise != nil {
+			p := g.Promise
+			if p == nil || p.ID != want.Inner.Promise.ID || p.State != want.Inner.Promise.State ||
+				!eqU64(p.SettledAt, want.Inner.Promise.SettledAt) {
+				return false
+			}
 		}
 	}
 	if want.Task != nil {

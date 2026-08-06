@@ -62,7 +62,47 @@ capture in `valid/traces`.
 Requests share instants in batches (`-batch`), so concurrent clients can
 legitimately overlap: `ValidM` requires non-decreasing, not increasing.
 
-## Status: the traces are INCOMPLETE
+## Status: end to end
+
+All four scenarios, nothing dropped, both checkers accept:
+
+```
+simple-run     32 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
+simple-rpc     48 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
+simple-sleep   52 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
+fan-out        40 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
+```
+
+Getting there needed four fixes, three of them real bugs:
+
+1. **`task.fence` was in neither checker.** The specification has it
+   (`spec/02-abstract/p.lean:229`) and `valid/validator.lean` already knew
+   what it touches, but `valid/json.lean` could not decode it and the Go
+   model had no handler. The SDK issues one per fenced create/settle — 36
+   of 60 events in a fan-out run — so every trace was a partial view.
+   Added to both, transcribed guard for guard, validation-first.
+2. **`task.create` was in neither model.** The SDK issues one per root
+   workflow, so without it nothing else in the trace has a promise to
+   refer to and the first event refutes.
+3. **`valid/json.lean` decoded `task.create` wrongly.** It read
+   `id`/`timeoutAt` off the action ENVELOPE rather than its `data`, and
+   threw `property not found: id` on the first real SDK trace. No
+   hand-written capture had ever sent a `task.create`.
+4. **`task.create` carries no top-level `id`.** The Go decoder left
+   `Op.ID` empty, `originOf("")` put every creation in its own partition,
+   and the promise was invisible to the partition that read it.
+
+`SCENARIOS_TRACE_KINDS=1` prints every kind the SDK sends, recorded or
+not. It is how (1) was found: the runs succeeded and the trace merely
+looked thin.
+
+### The one thing still not modelled
+
+`TaskFenceRes.preload`. The wire carries the task's preloaded promises;
+`preload` defaults to `[]` in the specification and no handler ever sets
+it. Both decoders read it as empty on purpose — comparing it would refute
+every fence for a channel the spec does not describe. That is a genuine
+gap in the specification, recorded rather than papered over.
 
 The binary works — all four scenarios run against a real server, with
 contention, and produce both files. But the SDK's real protocol usage

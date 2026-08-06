@@ -174,19 +174,17 @@ func (n *recordingNet) Send(ctx context.Context, body string) (string, error) {
 	return res, nil
 }
 
-// recordable is the set of kinds `valid/json.lean` and the Go loader can
-// decode.
+// recordable is the set of kinds BOTH checkers can decode.
 //
-// TWO kinds the SDK actually uses are missing, and a trace recorded here
-// is incomplete until they are added:
+// `task.fence` is in it. The SDK issues one per fenced create/settle — 24
+// of 36 events in a small fan-out run — and it used to be dropped, which
+// made every trace from this binary a partial view. It is now decoded by
+// `valid/json.lean` and modelled by `porcupine`'s `TaskFence`, both
+// transcribed from `spec/02-abstract/p.lean:229`.
 //
-//   - `task.fence` — T-04 in the specification (`spec/02-abstract/p.lean`
-//     has `taskFence`, and `valid/validator.lean` already knows what it
-//     touches) but `valid/json.lean`'s `decodeRequest`/`decodeResponse`
-//     do not handle it. The Go model has no `TaskFence` at all. The SDK
-//     issues it for every fenced create/settle, so it is not a corner.
-//   - `task.create` — decodable by the Lean side, absent from the Go
-//     model.
+// `task.create` is in it too, for the same reason: the SDK issues one per
+// root workflow, so without it the trace has no promise for anything else
+// to refer to, and the very first event refutes.
 //
 // Schedules are excluded on purpose rather than by omission:
 // `occurrences` is opaque in the specification, so neither checker judges
@@ -196,7 +194,7 @@ func recordable(kind string) bool {
 	case "promise.create", "promise.get", "promise.settle",
 		"promise.register_callback", "promise.register_listener",
 		"task.get", "task.acquire", "task.suspend", "task.fulfill",
-		"task.release", "task.heartbeat", "task.claim", "task.complete":
+		"task.create", "task.fence", "task.release", "task.heartbeat":
 		return true
 	}
 	return false

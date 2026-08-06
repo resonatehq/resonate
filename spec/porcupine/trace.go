@@ -116,9 +116,12 @@ func decodeReq(e wireEvent) (Op, error) {
 			} `json:"data"`
 		} `json:"actions"`
 		Action struct {
+			Kind string `json:"kind"`
 			Data struct {
-				ID    string `json:"id"`
-				State string `json:"state"`
+				ID        string            `json:"id"`
+				TimeoutAt uint64            `json:"timeoutAt"`
+				Tags      map[string]string `json:"tags"`
+				State     string            `json:"state"`
 			} `json:"data"`
 		} `json:"action"`
 		Awaited string `json:"awaited"`
@@ -152,6 +155,35 @@ func decodeReq(e wireEvent) (Op, error) {
 		}
 	case "promise.register_callback":
 		op.ID, op.Awaiter = r.Awaited, r.Awaiter
+	case "task.create":
+		// Same `{kind, head, data}` envelope as task.fence and task.suspend
+		// carry, so the shared `Action` struct decodes it directly.
+		op.Action = &FenceAction{Kind: "promise.create", ID: r.Action.Data.ID,
+			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags)}
+		// task.create carries no top-level `id`; the object it creates is
+		// the action's. Without this `op.ID` stays empty, `originOf("")`
+		// puts every creation in its own partition, and the promise is
+		// invisible to the partition that then reads it.
+		op.ID = r.Action.Data.ID
+		if op.Action.Tags == nil {
+			op.Action.Tags = Tags{}
+		}
+	case "task.fence":
+		// The action envelope is `{kind, head, data}`, like task.suspend's
+		// and task.fulfill's. `State` is only meaningful for a settle.
+		fa := &FenceAction{Kind: r.Action.Kind, ID: r.Action.Data.ID,
+			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags)}
+		if fa.Tags == nil {
+			fa.Tags = Tags{}
+		}
+		if r.Action.Kind == "promise.settle" {
+			st, ok := promiseStates[r.Action.Data.State]
+			if !ok {
+				return op, fmt.Errorf("task.fence: unknown promise state %q", r.Action.Data.State)
+			}
+			fa.State = st
+		}
+		op.Action = fa
 	case "promise.register_listener":
 		// The request field is `awaited`, not `id`, and the address is in
 		// `address`. Missing this made every recorded listener decode as
@@ -176,6 +208,13 @@ func decodeRes(e wireEvent) (Response, error) {
 	var d struct {
 		Promise json.RawMessage `json:"promise"`
 		Task    json.RawMessage `json:"task"`
+		Action  *struct {
+			Kind string `json:"kind"`
+			Head struct {
+				Status int `json:"status"`
+			} `json:"head"`
+			Data json.RawMessage `json:"data"`
+		} `json:"action"`
 	}
 	if len(e.Res.Data) == 0 {
 		return res, nil
@@ -193,6 +232,24 @@ func decodeRes(e wireEvent) (Response, error) {
 			res.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
 				CreatedAt: p.CreatedAt, SettledAt: p.SettledAt}
 		}
+	}
+	if d.Action != nil {
+		inner := &InnerResponse{Kind: d.Action.Kind, Status: d.Action.Head.Status}
+		var ad struct {
+			Promise json.RawMessage `json:"promise"`
+		}
+		if err := json.Unmarshal(d.Action.Data, &ad); err == nil && len(ad.Promise) > 0 {
+			var p wirePromise
+			if err := json.Unmarshal(ad.Promise, &p); err == nil && p.State != "" {
+				st, ok := promiseStates[p.State]
+				if !ok {
+					return res, fmt.Errorf("task.fence action: unknown promise state %q", p.State)
+				}
+				inner.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
+					CreatedAt: p.CreatedAt, SettledAt: p.SettledAt}
+			}
+		}
+		res.Inner = inner
 	}
 	if len(d.Task) > 0 {
 		var t wireTask

@@ -28,6 +28,10 @@ type Response struct {
 	Status  int
 	Promise *Promise
 	Task    *Task
+	// Inner is the nested response a `task.fence` carries. A fence that
+	// succeeds around a create that 404s is 200 outside and 404 inside,
+	// and both are compared.
+	Inner *InnerResponse
 }
 
 func promiseRes(status int, p *Promise) Response { return Response{Status: status, Promise: p} }
@@ -354,4 +358,122 @@ func (s *ServerState) TaskContinue(d Discipline, id string, now uint64) Response
 	u.RetryAt = u64p(now)
 	s.SetTask(u)
 	return Response{Status: 200}
+}
+
+// FenceAction is the create-or-settle a fence carries.
+type FenceAction struct {
+	Kind      string // "promise.create" | "promise.settle"
+	ID        string
+	TimeoutAt uint64
+	Tags      Tags
+	State     PromiseState
+}
+
+// TargetID is `TaskFenceAction.targetId` — the promise the action
+// operates on, whichever variant it is.
+func (a FenceAction) TargetID() string { return a.ID }
+
+// InnerResponse is the nested `{kind, head, data}` a fence returns.
+type InnerResponse struct {
+	Kind    string
+	Status  int
+	Promise *Promise
+}
+
+// TaskFence is T-04, transcribed from spec/02-abstract/p.lean:229 guard
+// for guard.
+//
+// The validation guard is FIRST — an action operating on the fencing task
+// itself is 400, ahead of existence and version — which is the same
+// precedence discipline `precedence_test.go` pins for every other handler.
+//
+// `preload` is NOT modelled. `TaskFenceRes.preload` defaults to `[]` and
+// no handler in the specification ever sets it, while the server populates
+// it. That is a genuine gap in the specification, not an oversight here;
+// comparing it would refute every fence for a channel the spec does not
+// describe.
+func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act FenceAction, now uint64) (Response, *InnerResponse) {
+	if act.TargetID() == id {
+		return Response{Status: 400}, nil
+	}
+	t, p := s.readTask(d, id, now)
+	if t == nil {
+		return Response{Status: 404}, nil
+	}
+	if p == nil {
+		return Response{Status: 409}, nil
+	}
+	if t.State != TaskAcquired || p.State != Pending || t.Version != version {
+		return Response{Status: 409}, nil
+	}
+	switch act.Kind {
+	case "promise.create":
+		r := s.PromiseCreate(d, PromiseCreateReq{act.ID, act.TimeoutAt, act.Tags}, now)
+		return Response{Status: 200}, &InnerResponse{act.Kind, r.Status, r.Promise}
+	case "promise.settle":
+		r := s.PromiseSettle(d, act.ID, act.State, now)
+		return Response{Status: 200}, &InnerResponse{act.Kind, r.Status, r.Promise}
+	}
+	return Response{Status: 400}, nil
+}
+
+// TaskCreate is T-02, transcribed from spec/02-abstract/p.lean:159.
+//
+// Two shapes in one handler: create a promise with an immediately-acquired
+// task, or re-acquire an existing pending one. The SDK issues it for every
+// root workflow, so without it a recorded trace has no promise to explain
+// anything against — which is exactly how the first end-to-end run refuted
+// at event 0.
+//
+// The validation guard is first, as everywhere: an action without
+// `resonate:target` is 400 before existence is consulted.
+func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act PromiseCreateReq, now uint64) Response {
+	if !act.Tags.Has("resonate:target") {
+		return Response{Status: 400}
+	}
+	p := s.readPromise(d, act.ID, now)
+	if p == nil {
+		if act.TimeoutAt > now {
+			np := &Promise{ID: act.ID, State: Pending, Tags: act.Tags,
+				TimeoutAt: act.TimeoutAt, CreatedAt: now}
+			s.SetPromise(np)
+			nt := &Task{ID: np.ID, State: TaskAcquired, Version: 1,
+				TTL: u64p(ttl), PID: strp(pid), ExpiresAt: u64p(now + ttl)}
+			s.SetTask(nt)
+			return Response{Status: 200, Task: nt, Promise: np}
+		}
+		// Born past its deadline: fact P holds at birth.
+		st := RejectedTimedout
+		if act.Tags.IsTimer() {
+			st = Resolved
+		}
+		np := &Promise{ID: act.ID, State: st, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
+			CreatedAt: act.TimeoutAt, SettledAt: u64p(act.TimeoutAt)}
+		s.SetPromise(np)
+		nt := &Task{ID: np.ID, State: TaskFulfilled, Version: 0}
+		s.SetTask(nt)
+		return Response{Status: 200, Task: nt, Promise: np}
+	}
+	if !p.Tags.Has("resonate:target") {
+		return Response{Status: 422}
+	}
+	t, tp := s.readTask(d, p.ID, now)
+	if t == nil || tp == nil {
+		return Response{Status: 409}
+	}
+	switch t.State {
+	case TaskFulfilled:
+		return Response{Status: 200, Task: t, Promise: tp}
+	case TaskPending:
+		u := t.clone()
+		u.State = TaskAcquired
+		u.Version = t.Version + 1
+		u.TTL, u.PID = u64p(ttl), strp(pid)
+		u.ExpiresAt = u64p(now + ttl)
+		u.RetryAt, u.Resumes = nil, nil
+		s.SetTask(u)
+		return Response{Status: 200, Task: u, Promise: tp}
+	default:
+		return Response{Status: 409}
+	}
 }

@@ -104,6 +104,22 @@ private def sub? {α} (dec : Json → D α) (j : Json) (k : String) : Option α 
 
 /-! ## Requests -/
 
+/-- The fenced action, `{kind, head, data}` like every other nested
+    action in the protocol. Separate rather than inline because the
+    request and the response both need it and a nested `match` inside a
+    `do` returns into the wrong monad. -/
+def fenceAction (kind : String) (ad : Json) : D TaskFenceAction :=
+  match kind with
+  | "promise.create" => do
+      let pid ← str ad "id"; let t ← nat ad "timeoutAt"
+      pure <| TaskFenceAction.create
+        { id := pid, timeoutAt := t, param := valueAt ad "param", tags := tagsAt ad "tags" }
+  | "promise.settle" => do
+      let pid ← str ad "id"; let st ← str ad "state"
+      pure <| TaskFenceAction.settle
+        { id := pid, state := promiseState st, value := valueAt ad "value" }
+  | k => throw s!"task.fence: unsupported action kind: {k}"
+
 def decodeRequest (kind : String) (d : Json) : D Request := do
   match kind with
   | "promise.get" => do
@@ -140,7 +156,11 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
       let id ← str d "id"
       return Request.taskContinue { id := id }
   | "task.create" => do
-      let a ← obj? d "action"
+      -- The action is a `{kind, head, data}` envelope, like every other
+      -- nested action. This used to read `id`/`timeoutAt` off the envelope
+      -- itself and threw "property not found: id" on the first real SDK
+      -- trace: no hand-written capture ever sent a task.create.
+      let a ← obj? (← obj? d "action") "data"
       let pid ← str d "pid"; let ttl ← nat d "ttl"
       let aid ← str a "id"; let ato ← nat a "timeoutAt"
       let act : PromiseCreateReq :=
@@ -163,6 +183,16 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
       let act : PromiseSettleReq :=
         { id := pid, state := promiseState st, value := valueAt ad "value" }
       return Request.taskFulfill { id := id, version := v, action := act }
+  | "task.fence" => do
+      -- T-04. The action is a `{kind, head, data}` envelope carrying either
+      -- a `promise.create` or a `promise.settle`, exactly as `task.suspend`
+      -- and `task.fulfill` carry theirs.
+      let a  ← obj? d "action"
+      let ak ← str a "kind"
+      let ad ← obj? a "data"
+      let id ← str d "id"; let v ← nat d "version"
+      let act ← fenceAction ak ad
+      return Request.taskFence { id := id, version := v, action := act }
   | "task.heartbeat" => do
       let ts ← (← obj? d "tasks").getArr?
       let mut out : List TaskRef := []
@@ -190,6 +220,33 @@ def decodeResponse (kind : String) (status : Nat) (d : Json) : D Response := do
   | "task.create"    => return Response.taskCreate { status := status, task := t, promise := p }
   | "task.acquire"   => return Response.taskAcquire { status := status, task := t, promise := p }
   | "task.suspend"   => return Response.taskSuspend { status := status }
+  | "task.fence"     => do
+      -- The inner action is a full envelope with its OWN status, so a
+      -- fence that succeeded around a create that 404'd is `200` outside
+      -- and `404` inside. Both are compared.
+      --
+      -- `preload` is decoded as EMPTY on purpose. `TaskFenceRes.preload`
+      -- defaults to `[]` and no handler in `spec/02-abstract` or
+      -- `spec/03-concrete` ever sets it, while the server populates it
+      -- with the task's preloaded promises. Decoding the wire value would
+      -- refute every fence for a channel the specification does not model.
+      -- That is a real gap, recorded here rather than papered over: until
+      -- the spec models preload, this checker cannot judge it.
+      match obj? d "action" with
+      | .error _ => return Response.taskFence { status := status }
+      | .ok a =>
+        let ak ← str a "kind"
+        let ast ← nat (← obj? a "head") "status"
+        let adata := (obj? a "data").toOption.getD (Json.mkObj [])
+        let p := sub? promiseOf adata "promise"
+        match ak with
+        | "promise.create" =>
+            return Response.taskFence
+              { status := status, action := some (.create { status := ast, promise := p }) }
+        | "promise.settle" =>
+            return Response.taskFence
+              { status := status, action := some (.settle { status := ast, promise := p }) }
+        | k => throw s!"task.fence: unsupported action kind: {k}"
   | "task.fulfill"   => return Response.taskFulfill { status := status, promise := p }
   | "task.release"   => return Response.taskRelease { status := status }
   | "task.halt"      => return Response.taskHalt { status := status }

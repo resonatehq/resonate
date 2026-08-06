@@ -45,6 +45,15 @@ func originOf(id string) string {
 // awaits-edge stays within one origin. Returns the offending event if not.
 func CheckPartitionable(ops []Op) error {
 	for i, o := range ops {
+		// A fence links the task and the promise its action targets, so it
+		// is an awaits-edge for partitioning purposes just as a suspend is.
+		if o.Kind == "task.fence" {
+			if o.Action != nil && originOf(o.Action.ID) != originOf(o.ID) {
+				return fmt.Errorf("event %d: task.fence %s acts on %s across origins; partitioning would be unsound",
+					i, o.ID, o.Action.ID)
+			}
+			continue
+		}
 		if o.Kind != "task.suspend" && o.Kind != "promise.register_callback" {
 			continue
 		}
