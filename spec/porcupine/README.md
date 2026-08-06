@@ -260,6 +260,23 @@ histories legal, so it is a smoke test rather than a stronger check. The
 honest way to exercise linearizability properly is to capture genuinely
 concurrent traffic, which `valid/traces/capture.py` does not do.
 
+### What this checker cannot do
+
+`resonate-sqlite-concurrent-8c.ndjson` — 400 events, 8 origins, 50
+events each after partitioning — TIMES OUT under both disciplines. The
+Lean checker accepts the same file in 37 ms with `maxFanout=1`.
+
+The difference is the cone. `valid/validator.lean` restricts each gap to
+the τs that can affect what the next observation reads (`relevantTaus`,
+`touches`, `affects`); the closure here fires every enabled rule, so a
+promise carrying k drainable callbacks branches 2^k ways whether or not
+any of them can reach the next event. That is a budget limit, not a
+wrong answer — the closure reports `Saturated() == false` and the
+verdict is inconclusive, exactly as the Lean checker returns
+`Undecided`. But it is the reason this checker is the junior partner on
+long traces, and porting the cone reduction is the work that would
+change it.
+
 ## Fuel, and the third verdict
 
 `closure` is bounded. Exhausting the bound means the model stopped

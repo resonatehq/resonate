@@ -41,12 +41,48 @@ func originOf(id string) string {
 	return id
 }
 
+// partitionKey is the partition an operation belongs to.
+//
+// For almost every kind that is `originOf(o.ID)`. `task.heartbeat` is the
+// exception: it carries no top-level id at all — its subject is the list
+// of `(id, version)` refs in the request — so keying on `o.ID` put every
+// heartbeat in the `""` partition, away from the tasks whose leases it
+// extends.
+//
+// That is not a cosmetic misfiling. The lease extension is then never
+// applied in the partition that owns the task, `expiresAt` stays at its
+// old value, and R5 `leaseExpiry` becomes enabled EARLIER than the
+// specification allows. Since firing a rule is a choice, an
+// enabled-too-early rule only ADDS candidates — so the partitioned replay
+// accepts everything the whole-state replay does and possibly more. A
+// false accept, which is the one direction a checker must never fail in.
+func partitionKey(o Op) string {
+	if o.Kind == "task.heartbeat" && len(o.Refs) > 0 {
+		return originOf(o.Refs[0].ID)
+	}
+	return originOf(o.ID)
+}
+
 // CheckPartitionable verifies the property partitioning depends on: every
 // awaits-edge stays within one origin. Returns the offending event if not.
 func CheckPartitionable(ops []Op) error {
 	for i, o := range ops {
 		// A fence links the task and the promise its action targets, so it
 		// is an awaits-edge for partitioning purposes just as a suspend is.
+		// A heartbeat extends the lease of every task it names, so it
+		// belongs to all their partitions at once. One origin is fine —
+		// `partitionKey` routes it there. More than one is not
+		// representable, and guessing would silently drop the extension
+		// for every task outside the chosen partition.
+		if o.Kind == "task.heartbeat" {
+			for _, ref := range o.Refs {
+				if originOf(ref.ID) != originOf(o.Refs[0].ID) {
+					return fmt.Errorf("event %d: task.heartbeat names %s and %s across origins; partitioning would be unsound",
+						i, o.Refs[0].ID, ref.ID)
+				}
+			}
+			continue
+		}
 		if o.Kind == "task.fence" {
 			if o.Action != nil && originOf(o.Action.ID) != originOf(o.ID) {
 				return fmt.Errorf("event %d: task.fence %s acts on %s across origins; partitioning would be unsound",
@@ -80,7 +116,7 @@ func partitionOps(history []porcupine.Operation) [][]porcupine.Operation {
 	groups := map[string][]porcupine.Operation{}
 	var order []string
 	for _, op := range history {
-		k := originOf(op.Input.(Op).ID)
+		k := partitionKey(op.Input.(Op))
 		if _, seen := groups[k]; !seen {
 			order = append(order, k)
 		}
@@ -102,7 +138,7 @@ func partitionEvents(history []porcupine.Event) [][]porcupine.Event {
 	for _, e := range history {
 		var k string
 		if e.Kind == porcupine.CallEvent {
-			k = originOf(e.Value.(Op).ID)
+			k = partitionKey(e.Value.(Op))
 			byID[e.Id] = k
 		} else {
 			k = byID[e.Id]
@@ -135,7 +171,7 @@ func ReplayPartitioned(d Discipline, ops []Op, resps []Response) (witness []stri
 	groups := map[string]*group{}
 	var order []string
 	for i, o := range ops {
-		k := originOf(o.ID)
+		k := partitionKey(o)
 		g, seen := groups[k]
 		if !seen {
 			g = &group{}
