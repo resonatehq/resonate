@@ -30,13 +30,20 @@ type wireRes struct {
 }
 
 type wirePromise struct {
+	ID        string  `json:"id"`
 	State     string  `json:"state"`
+	TimeoutAt uint64  `json:"timeoutAt"`
+	CreatedAt uint64  `json:"createdAt"`
 	SettledAt *uint64 `json:"settledAt"`
 }
 
 type wireTask struct {
-	State   string `json:"state"`
-	Version uint64 `json:"version"`
+	ID      string  `json:"id"`
+	State   string  `json:"state"`
+	Version uint64  `json:"version"`
+	Resumes int     `json:"resumes"`
+	TTL     *uint64 `json:"ttl"`
+	PID     *string `json:"pid"`
 }
 
 var promiseStates = map[string]PromiseState{
@@ -171,8 +178,8 @@ func decodeRes(e wireEvent) (Response, error) {
 			if !ok {
 				return res, fmt.Errorf("unknown promise state %q", p.State)
 			}
-			res.PromiseState = &st
-			res.SettledAt = p.SettledAt
+			res.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
+				CreatedAt: p.CreatedAt, SettledAt: p.SettledAt}
 		}
 	}
 	if len(d.Task) > 0 {
@@ -182,9 +189,8 @@ func decodeRes(e wireEvent) (Response, error) {
 			if !ok {
 				return res, fmt.Errorf("unknown task state %q", t.State)
 			}
-			v := t.Version
-			res.TaskState = &st
-			res.TaskVersion = &v
+			res.Task = &Task{ID: t.ID, State: st, Version: t.Version,
+				TTL: t.TTL, PID: t.PID, Resumes: make([]string, t.Resumes)}
 		}
 	}
 	return res, nil

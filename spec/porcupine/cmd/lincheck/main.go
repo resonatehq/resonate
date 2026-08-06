@@ -164,14 +164,14 @@ func reportFirstFailure(d model.Discipline, ops []model.Op, resps []model.Respon
 	}
 	fmt.Printf("     first unexplainable event: %d  %v\n", at, ops[at])
 	fmt.Printf("       observed: status %d", resps[at].Status)
-	if s := resps[at].PromiseState; s != nil {
-		fmt.Printf("  promise %v", *s)
+	if p := resps[at].Promise; p != nil {
+		fmt.Printf("  promise %v", p.State)
+		if p.SettledAt != nil {
+			fmt.Printf(" settledAt %d", *p.SettledAt)
+		}
 	}
-	if s := resps[at].TaskState; s != nil {
-		fmt.Printf("  task %v", *s)
-	}
-	if s := resps[at].SettledAt; s != nil {
-		fmt.Printf("  settledAt %d", *s)
+	if t := resps[at].Task; t != nil {
+		fmt.Printf("  task %v v%d", t.State, t.Version)
 	}
 	fmt.Println()
 }

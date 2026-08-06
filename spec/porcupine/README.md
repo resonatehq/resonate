@@ -182,6 +182,65 @@ cross-origin suspend is refused; tampered responses are rejected on three
 different channels; the witness recovers exactly 50 hidden resumes;
 concurrent histories still pass; schedule traces are refused.
 
+## Differential fuzzing — `cmd/fuzz`
+
+```
+(cd .. && lake build checktrace)      # the Lean checker the fuzzer compares against
+go run ./cmd/fuzz -n 150 -jumpy=false
+```
+
+Generates traces, runs BOTH checkers on each, and requires them to agree.
+Nothing is shared but the specification and the file format, so a
+disagreement means one of them is wrong — and the trace that proves it is
+printed (or written out with `-keep`).
+
+**Why generated traces need no oracle.** A script is a list of external
+requests and internal rule firings. Run it, keep only the external steps,
+and the result is explainable BY CONSTRUCTION — the script is the
+execution. So a checker that refutes it is wrong, with no need to know the
+"right" answer independently. Mutants give the other direction: corrupt
+one response and both must refuse.
+
+**A generator needs structure.** The first version drew requests uniformly
+from the alphabet and produced 50 x 404 and ZERO state-changing rule
+firings in five traces: nothing existed for a rule to act on, so the
+corpus could not reach the code it was written to test. It now lays down a
+backbone of well-formed workflows and perturbs it — wrong versions,
+missing ids, unsettable states, self-awaits, bad listener addresses.
+
+## What the fuzzer found
+
+**A misleading diagnostic in the Lean checker, and a real limit behind
+it.** Generated traces came back `INCONCLUSIVE ... (fuel 16)`. Raising
+fuel to 1024 changed nothing and still returned in 1 ms — because fuel was
+never the cause. `stepObservedBy` conflated two independent reasons a step
+can be undecided:
+
+* the τ-closure hit its fuel bound;
+* a τ armed a deadline INSIDE the gap that the critical-instant set does
+  not cover (`noNewInGapDeadline`), so the interval reduction is not
+  justified there.
+
+Both reported the first. The two are now separate, and the second says so
+— including that raising fuel will not help. Recorded captures never
+exposed it because their gaps are far shorter than the retry cadence; a
+generator that jumps the clock hits it immediately.
+
+**And a measurement about the fuzzer itself.** With large clock jumps —
+which is what makes R1/R2/R5 reachable — the Lean checker DECLINES about
+60% of traces. A decline agrees with anything, so those comparisons are
+vacuous, and the fuzzer says so rather than counting them:
+
+```
+NOTE: the Lean checker DECLINED 18/30 (60%). A decline agrees with
+      anything, so those comparisons are vacuous — the real sample size
+      is 12, not 30.
+```
+
+`-jumpy=false` keeps jumps under the retry cadence: every comparison is
+then real, at the cost of reaching the timeout rules less often. Both
+settings are worth running, for opposite reasons.
+
 ## What is NOT tested — measured, not guessed
 
 The captures exercise a narrow slice, and the numbers are worth having in
@@ -194,6 +253,10 @@ front of you before trusting a green run:
 | response statuses seen | **200 only** (the clean captures are all 200) |
 | rules that ever fire | **R4 only** — 500 firings across both traces |
 | rules never fired | **R1, R2, R3, R5, R6** |
+
+That is the CAPTURES. The fuzzer closes most of it — a tame 60-trace run
+fires all six rules and generates statuses 200/300/400/404/409 — which is
+why it exists.
 
 So five of the six ported rules are, as far as this suite is concerned,
 dead code. Guard-ordering (400 before 404 before 409), listener

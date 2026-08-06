@@ -1,5 +1,7 @@
 package model
 
+import "strings"
+
 // Protocol handlers, ported from spec/02-abstract/{p,m}.lean.
 //
 // ONE copy, taking a `Discipline`, because the two Lean files are the same
@@ -15,18 +17,20 @@ package model
 // recorded trace actually carries are modelled — the checker compares
 // responses, so anything the wire format does not report cannot be
 // compared and would be invented detail.
+// Response carries the RECORDS a handler returns, not just a status.
+//
+// The Lean checker decodes full `PromiseRecord`/`TaskRecord` values and
+// compares them, so a Go response that carried only a status and a state
+// would be checking strictly less than its counterpart — and a
+// differential test between the two would pass on differences neither
+// could see. Records it is.
 type Response struct {
-	Status int
-	// PromiseState is set when the response carries a promise record.
-	PromiseState *PromiseState
-	// TaskState and TaskVersion are set when it carries a task record.
-	TaskState   *TaskState
-	TaskVersion *uint64
-	// SettledAt distinguishes a promise settled at its own deadline from
-	// one settled by a client at `now` — the field that caught the
-	// mixed-clock capture in the Lean checker.
-	SettledAt *uint64
+	Status  int
+	Promise *Promise
+	Task    *Task
 }
+
+func promiseRes(status int, p *Promise) Response { return Response{Status: status, Promise: p} }
 
 // ------------------------------------------------------------------ promises
 
@@ -35,7 +39,7 @@ func (s *ServerState) PromiseGet(d Discipline, id string, now uint64) Response {
 	if p == nil {
 		return Response{Status: 404}
 	}
-	return Response{Status: 200, PromiseState: &p.State, SettledAt: p.SettledAt}
+	return Response{Status: 200, Promise: p}
 }
 
 type PromiseCreateReq struct {
@@ -46,7 +50,7 @@ type PromiseCreateReq struct {
 
 func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint64) Response {
 	if p := s.readPromise(d, req.ID, now); p != nil {
-		return Response{Status: 200, PromiseState: &p.State, SettledAt: p.SettledAt}
+		return Response{Status: 200, Promise: p}
 	}
 	if req.TimeoutAt > now {
 		p := &Promise{ID: req.ID, State: Pending, Tags: req.Tags,
@@ -63,7 +67,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 			}
 			s.SetTask(&Task{ID: p.ID, State: TaskPending, Version: 0, RetryAt: u64p(due)})
 		}
-		return Response{Status: 200, PromiseState: &p.State, SettledAt: p.SettledAt}
+		return Response{Status: 200, Promise: p}
 	}
 	// Born past its deadline: fact P holds at birth, so the promise is
 	// written settled and its task (if targeted) fulfilled.
@@ -77,7 +81,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 	if p.Tags.Has("resonate:target") {
 		s.SetTask(&Task{ID: p.ID, State: TaskFulfilled, Version: 0})
 	}
-	return Response{Status: 200, PromiseState: &p.State, SettledAt: p.SettledAt}
+	return Response{Status: 200, Promise: p}
 }
 
 func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, now uint64) Response {
@@ -96,9 +100,9 @@ func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, no
 		// and listeners stay on the promise for the batch rules. This is
 		// the line that makes the model nondeterministic.
 		s.SetPromise(q)
-		return Response{Status: 200, PromiseState: &q.State, SettledAt: q.SettledAt}
+		return Response{Status: 200, Promise: q}
 	}
-	return Response{Status: 200, PromiseState: &p.State, SettledAt: p.SettledAt}
+	return Response{Status: 200, Promise: p}
 }
 
 func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter string, now uint64) Response {
@@ -122,7 +126,7 @@ func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter str
 	if pa.State == Pending && pw.State == Pending {
 		s.SetPromise(pa.AddCallback(awaiter))
 	}
-	return Response{Status: 200, PromiseState: &pa.State, SettledAt: pa.SettledAt}
+	return Response{Status: 200, Promise: pa}
 }
 
 // ---------------------------------------------------------------------- tasks
@@ -132,8 +136,7 @@ func (s *ServerState) TaskGet(d Discipline, id string, now uint64) Response {
 	if t == nil || p == nil {
 		return Response{Status: 404}
 	}
-	v := t.Version
-	return Response{Status: 200, TaskState: &t.State, TaskVersion: &v}
+	return Response{Status: 200, Task: t}
 }
 
 func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid string, ttl uint64, now uint64) Response {
@@ -154,12 +157,10 @@ func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid s
 	u.ExpiresAt = u64p(now + ttl)
 	u.RetryAt, u.Resumes = nil, nil
 	s.SetTask(u)
-	v := u.Version
 	// `taskAcquire` returns BOTH records in the Lean —
 	// `{ status, task := some t.toRecord, promise := some p.toRecord }` —
 	// and the capture carries both, so both are compared.
-	return Response{Status: 200, TaskState: &u.State, TaskVersion: &v,
-		PromiseState: &p.State, SettledAt: p.SettledAt}
+	return Response{Status: 200, Task: u, Promise: p}
 }
 
 // TaskSuspend parks an acquired task on awaited promises. `300` if any
@@ -238,7 +239,7 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 	// touch, or by R2. Observably indistinguishable, since every task read
 	// that could report it goes through the view.
 	s.SetPromise(q)
-	return Response{Status: 200, PromiseState: &q.State, SettledAt: q.SettledAt}
+	return Response{Status: 200, Promise: q}
 }
 
 func (s *ServerState) TaskRelease(d Discipline, id string, version uint64, now uint64) Response {
@@ -285,4 +286,72 @@ func parseNat(s string) uint64 {
 		n = n*10 + uint64(c-'0')
 	}
 	return n
+}
+
+// PromiseRegisterListener subscribes an address for an `unblock` when the
+// promise settles. External promises only — a waiter may attach only where
+// an armed timeout guarantees discharge.
+//
+// Ported for the fuzzer: nothing in the recorded captures registers a
+// listener, so R3 `notify` was unreachable and therefore untested.
+func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address string, now uint64) Response {
+	if !addressValid(address) {
+		return Response{Status: 400}
+	}
+	pa := s.readPromise(d, awaited, now)
+	if pa == nil {
+		return Response{Status: 404}
+	}
+	if !pa.External() {
+		return Response{Status: 422}
+	}
+	if pa.State == Pending {
+		s.SetPromise(pa.AddListener(address))
+	}
+	return Response{Status: 200, Promise: pa}
+}
+
+// addressValid is `ServerModel.addressValid`.
+func addressValid(a string) bool {
+	return strings.HasPrefix(a, "http://") || strings.HasPrefix(a, "https://") ||
+		(strings.HasPrefix(a, "poll://") && strings.ContainsRune(a, '@'))
+}
+
+func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
+	t, p := s.readTask(d, id, now)
+	if t == nil || p == nil {
+		return Response{Status: 404}
+	}
+	if t.State == TaskFulfilled {
+		return Response{Status: 409}
+	}
+	if t.State == TaskHalted {
+		return Response{Status: 200}
+	}
+	u := t.clone()
+	u.State = TaskHalted
+	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
+	s.SetTask(u)
+	return Response{Status: 200}
+}
+
+func (s *ServerState) TaskContinue(d Discipline, id string, now uint64) Response {
+	t, p := s.readTask(d, id, now)
+	if t == nil {
+		return Response{Status: 404}
+	}
+	if t.State != TaskHalted {
+		return Response{Status: 409}
+	}
+	if p == nil {
+		return Response{Status: 404}
+	}
+	if p.State != Pending {
+		return Response{Status: 409}
+	}
+	u := t.clone()
+	u.State = TaskPending
+	u.RetryAt = u64p(now)
+	s.SetTask(u)
+	return Response{Status: 200}
 }

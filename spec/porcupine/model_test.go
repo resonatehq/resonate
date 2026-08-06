@@ -107,8 +107,9 @@ func TestPartitioningAgrees(t *testing.T) {
 	ops, resps = ops[:22], resps[:22]
 
 	lied := append([]Response(nil), resps...)
-	settled := Resolved
-	lied[0] = Response{Status: 200, PromiseState: &settled}
+	liedP := *lied[0].Promise
+	liedP.State = Resolved
+	lied[0] = Response{Status: 200, Promise: &liedP}
 
 	for _, tc := range []struct {
 		name string
@@ -163,14 +164,16 @@ func TestTamperedTracesAreRejected(t *testing.T) {
 		},
 		"task state lied": func(r []Response) []Response {
 			c := append([]Response(nil), r...)
-			st := TaskFulfilled
-			c[2] = Response{Status: 200, TaskState: &st, TaskVersion: c[2].TaskVersion}
+			t := *c[2].Task
+			t.State = TaskFulfilled
+			c[2] = Response{Status: 200, Task: &t}
 			return c
 		},
 		"promise settled early": func(r []Response) []Response {
 			c := append([]Response(nil), r...)
-			st := Resolved
-			c[0] = Response{Status: 200, PromiseState: &st}
+			p := *c[0].Promise
+			p.State = Resolved
+			c[0] = Response{Status: 200, Promise: &p}
 			return c
 		},
 	}

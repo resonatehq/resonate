@@ -60,6 +60,12 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 		return s.TaskRelease(d, o.ID, o.Version, o.Now)
 	case "task.heartbeat":
 		return s.TaskHeartbeat(d, o.PID, o.Now)
+	case "promise.register_listener":
+		return s.PromiseRegisterListener(d, o.ID, o.PID, o.Now)
+	case "task.halt":
+		return s.TaskHalt(d, o.ID, o.Now)
+	case "task.continue":
+		return s.TaskContinue(d, o.ID, o.Now)
 	default:
 		return Response{Status: -1}
 	}
@@ -74,19 +80,37 @@ func matches(got, want Response) bool {
 	if got.Status != want.Status {
 		return false
 	}
-	if want.PromiseState != nil && (got.PromiseState == nil || *got.PromiseState != *want.PromiseState) {
-		return false
+	if want.Promise != nil {
+		p := got.Promise
+		if p == nil || p.ID != want.Promise.ID || p.State != want.Promise.State ||
+			p.TimeoutAt != want.Promise.TimeoutAt || p.CreatedAt != want.Promise.CreatedAt ||
+			!eqU64(p.SettledAt, want.Promise.SettledAt) {
+			return false
+		}
 	}
-	if want.TaskState != nil && (got.TaskState == nil || *got.TaskState != *want.TaskState) {
-		return false
-	}
-	if want.TaskVersion != nil && (got.TaskVersion == nil || *got.TaskVersion != *want.TaskVersion) {
-		return false
-	}
-	if want.SettledAt != nil && (got.SettledAt == nil || *got.SettledAt != *want.SettledAt) {
-		return false
+	if want.Task != nil {
+		t := got.Task
+		if t == nil || t.ID != want.Task.ID || t.State != want.Task.State ||
+			t.Version != want.Task.Version || len(t.Resumes) != len(want.Task.Resumes) ||
+			!eqU64(t.TTL, want.Task.TTL) || !eqStr(t.PID, want.Task.PID) {
+			return false
+		}
 	}
 	return true
+}
+
+func eqU64(a, b *uint64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func eqStr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // modelState is what porcupine carries between steps. The witness rides

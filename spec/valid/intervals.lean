@@ -174,21 +174,29 @@ def noNewInGapDeadline (a b : Nat) (instants : List Nat) (cs : List Cand) : Bool
 def allInstants (a b : Nat) : List Nat :=
   if b < a then [b] else (List.range (b + 1 - a)).map (a + ·)
 
+/-- Returns the surviving candidates and TWO independent reasons a step
+    may be undecided: the closure hit `fuel`, or it armed a deadline inside
+    the gap that the critical-instant set did not cover. They were
+    conflated into one flag, and the verdict blamed `fuel` for both — so a
+    trace declined by the gap guard reported a fuel bound it had not come
+    near, and raising the fuel changed nothing. Found by the differential
+    fuzzer: generated traces jump the clock far enough for a re-armed
+    retry to land mid-gap, which no recorded capture does. -/
 def stepObservedBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
-    (o : Observation) (cs : List Cand) : List Cand × Bool :=
+    (o : Observation) (cs : List Cand) : List Cand × Bool × Bool :=
   let instants :=
     if exhaustive then allInstants a o.now else criticalInstants a o.now (cs.map (·.state))
   let pick : ServerState → Nat → List Tau :=
     if coned then (fun st n => relevantTaus o.req st n)
     else (fun st n => enabledTaus st n)
-  let (closed, sat) := tauClosureIn pick instants fuel cs
-  let sat := sat && (exhaustive || noNewInGapDeadline a o.now instants closed)
+  let (closed, deep) := tauClosureIn pick instants fuel cs
+  let gapOK := exhaustive || noNewInGapDeadline a o.now instants closed
   (dedup <| closed.filterMap fun c =>
     let (r, s') := Equivalence.stepOf Equivalence.handleM o.req o.now c.state
-    if r == o.res then some (mkCand s' c.schedule) else none, sat)
+    if r == o.res then some (mkCand s' c.schedule) else none, deep, gapOK)
 
 def stepObserved (coned : Bool) (fuel : Nat) (a : Nat) (o : Observation)
-    (cs : List Cand) : List Cand × Bool :=
+    (cs : List Cand) : List Cand × Bool × Bool :=
   stepObservedBy false coned fuel a o cs
 
 /-! ## The verdict
@@ -224,9 +232,13 @@ def validateBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
             .refuted i cs.length
           else
             let before := cs.length
-            let (cs', sat) := stepObservedBy exhaustive coned fuel a o cs
-            if !sat then
-              .inconclusive i s!"interval closure not saturated (fuel {fuel})"
+            let (cs', deep, gapOK) := stepObservedBy exhaustive coned fuel a o cs
+            if !deep then
+              .inconclusive i s!"τ-closure hit the fuel bound ({fuel})"
+            else if !gapOK then
+              .inconclusive i
+                "a τ armed a deadline inside the gap that the critical instants miss \
+                 — the reduction is not justified here (raising fuel will not help)"
             else if cs'.isEmpty then
               .refuted i before
             else if cs'.length > cap then
