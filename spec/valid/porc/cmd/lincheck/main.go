@@ -42,8 +42,24 @@ func main() {
 		}
 	}
 	partitioned = *partition
-	fmt.Printf("loaded %d events   history: %s   partition: %v\n\n",
+	pending := 0
+	for _, r := range resps {
+		if model.PendingOp(r) {
+			pending++
+		}
+	}
+	fmt.Printf("loaded %d events   history: %s   partition: %v\n",
 		len(ops), historyDesc(*concurrent), *partition)
+	if pending > 0 {
+		// A pending op (a 500 — the server refusing to guess an ambiguous
+		// write's fate) is unconstrained evidence: it may or may not have
+		// applied. LINEARIZABLE below therefore means "with these N ops
+		// free"; a server answering 500 to everything would pass vacuously,
+		// so the count is part of the verdict.
+		fmt.Printf("pending: %d of %d ops answered 500 — each may or may not have applied; the verdict leaves them free\n",
+			pending, len(ops))
+	}
+	fmt.Println()
 
 	failed, inconclusive := false, false
 	for _, d := range []model.Discipline{model.Projected, model.Materialized} {

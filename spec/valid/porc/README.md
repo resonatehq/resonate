@@ -277,6 +277,37 @@ verdict is inconclusive, exactly as the Lean checker returns
 long traces, and porting the cone reduction is the work that would
 change it.
 
+## Pending ops — a 500 is "no verdict", not a response
+
+A faithful implementation over a fallible store (the SDK's S3 network is
+one) answers **500** exactly when it cannot determine an ambiguous write's
+fate: the machine's response for the request exists but nobody observed it,
+and guessing in either direction would be a response the machine never
+produced. The machine has no 500 transition, so this checker treats a
+500-answered op as **pending** and constrains it only existentially — at
+its step, EITHER the state is unchanged (the request did not go through) OR
+the request applied once, with the response unobserved. Both branches ride
+the nondeterministic state set (`PendingOp`, `checker.go`); the surrounding
+observations collapse them, and the witness names the resolution:
+
+```
+pending: 1 of 66 ops answered 500 — each may or may not have applied; the verdict leaves them free
+...
+  pending task.acquire wf @1010: applied, response unobserved
+```
+
+A pending op is not a wildcard — an observation neither branch explains
+still refutes (`TestPendingStillRefutesTheImpossible`). But it IS
+unconstrained evidence, so the count is part of the verdict: LINEARIZABLE
+with N pending ops means "with these N free", and a server that answered
+500 to everything would pass vacuously. The count is printed whenever it is
+nonzero, in both `lincheck` and `conccheck`.
+
+The Lean checker is deliberately not taught this: its sequential `Valid`
+would need the same disjunction threaded through the interval reduction,
+and the porcupine side is the one that checks concurrent histories, where
+ambiguous writes actually arise.
+
 ## Fuel, and the third verdict
 
 `closure` is bounded. Exhausting the bound means the model stopped
