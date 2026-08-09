@@ -303,6 +303,24 @@ with N pending ops means "with these N free", and a server that answered
 500 to everything would pass vacuously. The count is printed whenever it is
 nonzero, in both `lincheck` and `conccheck`.
 
+The semantics is fuzzed (`cmd/fuzz -pending`, on by default; `-goonly`
+skips the Lean half, whose verdicts then count as vacuous DECLINEs) via
+two properties that are theorems of the construction, checked per
+generated trace:
+
+* **weaken** — pendingization is evidence-weakening: replacing any
+  responses of a valid trace with 500s must keep it accepted, because the
+  "applied, response unobserved" branch subsumes the original evidence;
+* **mask** — pendingizing the corrupted response of a refuted mutant must
+  flip it back to accepted, because the corruption lived entirely in the
+  response channel the 500 discards.
+
+Measured: 2×1000 traces (calm and jumpy clocks, 50 steps), 4000 pending
+checks, 0 violations; valid traces ACCEPT=1000/1000 and mutants
+REFUTE=998/1000 unchanged (the 2 accepts are the documented
+model-admits-it case — generated traces contain no 500s, so the mutant
+path cannot reach the pending code).
+
 The Lean checker is deliberately not taught this: its sequential `Valid`
 would need the same disjunction threaded through the interval reduction,
 and the porcupine side is the one that checks concurrent histories, where

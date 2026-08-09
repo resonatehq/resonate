@@ -58,15 +58,21 @@ func main() {
 	maxMut := flag.Int("mutants", 40, "corpus mode: mutants sampled per trace (0 = every event)")
 	corpus := flag.String("corpus", "", "check RECORDED traces (comma-separated .ndjson) instead of generated ones")
 	keep := flag.String("keep", "", "directory to write disagreeing traces to")
+	goonly := flag.Bool("goonly", false, "skip the Lean checker (every Lean verdict becomes DECLINE — the differential halves are vacuous, the Go properties still bite)")
+	pend := flag.Bool("pending", true, "also fuzz the pending-op (500) semantics — Go checker only; the Lean checker does not know pending ops")
 	flag.Parse()
 
 	leanBin := *lean
 	if leanBin == "" {
 		leanBin = "../.lake/build/bin/checktrace"
 	}
-	if _, err := os.Stat(leanBin); err != nil {
+	if *goonly {
+		// A decline agrees with anything and is counted as vacuous, which is
+		// exactly the honest accounting for a checker that never ran.
+		leanCheck = func(string, string, int, int) verdict { return decline }
+	} else if _, err := os.Stat(leanBin); err != nil {
 		fmt.Fprintf(os.Stderr, "fuzz: Lean checker not found at %s\n", leanBin)
-		fmt.Fprintln(os.Stderr, "      build it with: (cd .. && lake build checktrace)")
+		fmt.Fprintln(os.Stderr, "      build it with: (cd .. && lake build checktrace), or run -goonly")
 		os.Exit(2)
 	}
 
@@ -84,6 +90,11 @@ func main() {
 		goCount   = map[verdict]int{}
 		mLean     = map[verdict]int{}
 		mGo       = map[verdict]int{}
+		// pending-op properties (Go checker only — the Lean checker does not
+		// know pending ops, by design)
+		pendWeaken int
+		pendMask   int
+		pendFail   int
 	)
 	start := time.Now()
 
@@ -106,7 +117,7 @@ func main() {
 		// property 1 — a recorded run is explainable by construction
 		nd := emit(ops, resps)
 		gv := goVerdict(ops, resps)
-		lv := leanVerdict(leanBin, nd, *cap_, *fuel)
+		lv := leanCheck(leanBin, nd, *cap_, *fuel)
 		goCount[gv]++
 		leanCount[lv]++
 		checked++
@@ -120,12 +131,42 @@ func main() {
 			mutants++
 			mnd := emit(mops, mresps)
 			mg := goVerdict(mops, mresps)
-			ml := leanVerdict(leanBin, mnd, *cap_, *fuel)
+			ml := leanCheck(leanBin, mnd, *cap_, *fuel)
 			mGo[mg]++
 			mLean[ml]++
 			if !agree(mg, ml) {
 				disagree++
 				report(*keep, seed, "MUTANT", mnd, mg, ml, mops, mresps)
+			}
+		}
+
+		if *pend {
+			// property 3 — pendingization is EVIDENCE-WEAKENING. Replacing
+			// any response with a 500 turns the op pending; the "applied,
+			// response unobserved" branch subsumes the original evidence, so
+			// a valid trace must stay accepted. A refutation here is a bug
+			// in the pending semantics, never in the trace.
+			wresps := pendingize(resps, pickIdxs(seed, len(resps), 1+int(seed%3))...)
+			pendWeaken++
+			if v := goVerdict(ops, wresps); v != accept {
+				pendFail++
+				disagree++
+				report(*keep, seed, "PENDING-WEAKEN", emit(ops, wresps), v, decline, ops, wresps)
+			}
+
+			// property 4 — pendingizing the CORRUPTED response discards the
+			// corruption: the mutation lived entirely in the response channel
+			// the 500 replaces, so the refuted mutant must flip back to
+			// accepted.
+			if mops, mresps, ok := mutate(seed, ops, resps); ok {
+				at := int(seed) % len(mresps)
+				mresps = pendingize(mresps, at)
+				pendMask++
+				if v := goVerdict(mops, mresps); v != accept {
+					pendFail++
+					disagree++
+					report(*keep, seed, "PENDING-MASK", emit(mops, mresps), v, decline, mops, mresps)
+				}
 			}
 		}
 	}
@@ -143,6 +184,10 @@ func main() {
 			"        checkers still explain is not a bug — the model may genuinely\n"+
 			"        admit it — but a high rate means the mutation is too weak to\n"+
 			"        discriminate.\n", max(mGo[accept], mLean[accept]), mutants)
+	}
+	if *pend {
+		fmt.Printf("  pending:  weaken=%d mask=%d violations=%d (Go only; a violation is a bug in the pending semantics)\n",
+			pendWeaken, pendMask, pendFail)
 	}
 	fmt.Printf("  rule firings that changed state: %v\n", sortedCounts(fired))
 	fmt.Printf("  response statuses generated:     %v\n", sortedInts(statuses))
@@ -187,7 +232,7 @@ func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep strin
 		}
 
 		gv := goVerdict(ops, resps)
-		lv := leanVerdict(leanBin, model.Emit(ops, resps), cap, fuel)
+		lv := leanCheck(leanBin, model.Emit(ops, resps), cap, fuel)
 		base := "agree"
 		if !agree(gv, lv) {
 			base = "*** DISAGREE ***"
@@ -213,7 +258,7 @@ func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep strin
 			mTried++
 			mops, mresps := mutateAt(i, ops, resps)
 			mg := goVerdict(mops, mresps)
-			ml := leanVerdict(leanBin, model.Emit(mops, mresps), cap, fuel)
+			ml := leanCheck(leanBin, model.Emit(mops, mresps), cap, fuel)
 			if agree(mg, ml) {
 				mAgree++
 				if mg == accept {
@@ -308,6 +353,10 @@ func goVerdict(ops []model.Op, resps []model.Response) verdict {
 	return refute
 }
 
+// leanCheck is the Lean half, replaceable so -goonly can stub it out with
+// a permanent DECLINE instead of threading a flag through every call site.
+var leanCheck = leanVerdict
+
 func leanVerdict(bin, ndjson string, cap, fuel int) verdict {
 	cmd := exec.Command(bin, fmt.Sprint(cap), fmt.Sprint(fuel))
 	cmd.Stdin = strings.NewReader(ndjson)
@@ -357,6 +406,37 @@ func mutate(seed int64, ops []model.Op, resps []model.Response) ([]model.Op, []m
 		out[i] = model.Response{Status: 200}
 	}
 	return ops, out, true
+}
+
+// pendingize replaces the responses at the given indices with a bare 500 —
+// the pending op. The op's identity (kind, request, instant) is untouched;
+// only its evidence is discarded.
+func pendingize(resps []model.Response, idxs ...int) []model.Response {
+	out := append([]model.Response(nil), resps...)
+	for _, i := range idxs {
+		out[i] = model.Response{Status: 500}
+	}
+	return out
+}
+
+// pickIdxs derives k distinct indices from the seed — deterministic, so a
+// failure reproduces from its seed alone.
+func pickIdxs(seed int64, n, k int) []int {
+	if k > n {
+		k = n
+	}
+	seen := map[int]bool{}
+	out := make([]int, 0, k)
+	x := uint64(seed)*2654435761 + 1
+	for len(out) < k {
+		x = x*6364136223846793005 + 1442695040888963407
+		i := int(x % uint64(n))
+		if !seen[i] {
+			seen[i] = true
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 func report(dir string, seed int64, kind, ndjson string, gv, lv verdict, ops []model.Op, resps []model.Response) {
