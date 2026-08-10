@@ -286,32 +286,28 @@ fn validate_promise_create_data(
         return Err(validator::ValidationError::new("null_bytes")
             .with_message("Promise ID must not contain null bytes".into()));
     }
+    // Lineage segments are appended with ':' (e.g. ``root:1:1``). Because the
+    // optional app prefix also uses ':' (``app:foo``), a lineage root such as
+    // ``app:foo`` legitimately contains ':', so we no longer forbid ':' in the
+    // origin/prefix tags -- the ``starts_with`` invariant below is the real
+    // enforcement (the promise id must equal, or be a ':'-descendant of, each
+    // declared origin/branch/parent).
     if let Some(origin) = data.tags.get("resonate:origin") {
-        if origin.contains('.') {
-            return Err(validator::ValidationError::new("dot_in_origin")
-                .with_message("resonate:origin must not contain '.'".into()));
-        }
-        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}.", origin)) {
+        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}:", origin)) {
             return Err(validator::ValidationError::new("origin_prefix")
                 .with_message("Promise ID must be prefixed by resonate:origin".into()));
         }
     }
     if let Some(branch) = data.tags.get("resonate:branch") {
-        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}.", branch)) {
+        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}:", branch)) {
             return Err(validator::ValidationError::new("branch_prefix")
                 .with_message("Promise ID must be prefixed by resonate:branch".into()));
         }
     }
     if let Some(parent) = data.tags.get("resonate:parent") {
-        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}.", parent)) {
+        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}:", parent)) {
             return Err(validator::ValidationError::new("parent_prefix")
                 .with_message("Promise ID must be prefixed by resonate:parent".into()));
-        }
-    }
-    if let Some(prefix) = data.tags.get("resonate:prefix") {
-        if prefix.contains('.') {
-            return Err(validator::ValidationError::new("dot_in_prefix")
-                .with_message("resonate:prefix must not contain '.'".into()));
         }
     }
     if let Some(delay_str) = data.tags.get("resonate:delay") {
@@ -354,7 +350,7 @@ pub struct PromiseRegisterCallbackData {
 }
 
 fn origin(id: &str) -> &str {
-    id.split_once('.').map(|(prefix, _)| prefix).unwrap_or(id)
+    id.split_once(':').map(|(prefix, _)| prefix).unwrap_or(id)
 }
 
 fn validate_callback_data(
@@ -634,9 +630,9 @@ pub struct ScheduleCreateData {
 fn validate_schedule_create_data(
     data: &ScheduleCreateData,
 ) -> Result<(), validator::ValidationError> {
-    if data.id.contains('.') {
-        return Err(validator::ValidationError::new("dot_in_schedule_id")
-            .with_message("Schedule ID must not contain '.'".into()));
+    if data.id.contains(':') {
+        return Err(validator::ValidationError::new("colon_in_schedule_id")
+            .with_message("Schedule ID must not contain ':'".into()));
     }
     if !data.promise_tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")

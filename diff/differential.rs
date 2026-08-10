@@ -1006,10 +1006,10 @@ fn gen_debug_tick(rng: &mut fastrand::Rng, now: i64) -> (RequestEnvelope, i64) {
 }
 
 fn promise_id(n: u32) -> String {
-    format!("diff.p{n}")
+    format!("diff:p{n}")
 }
 fn task_id(n: u32) -> String {
-    format!("diff.t{n}")
+    format!("diff:t{n}")
 }
 fn schedule_id(n: u32) -> String {
     format!("s{n}")
