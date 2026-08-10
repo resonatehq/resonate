@@ -23,7 +23,9 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "per-discipline check timeout")
 	quiet := flag.Bool("quiet", false, "suppress the witness")
 	partition := flag.Bool("partition", true, "check each resonate:origin independently (verified sound first)")
+	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
+	model.Cone = *cone
 
 	ops, resps, err := model.LoadTrace(os.Stdin)
 	if err != nil {

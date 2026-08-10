@@ -260,22 +260,44 @@ histories legal, so it is a smoke test rather than a stronger check. The
 honest way to exercise linearizability properly is to capture genuinely
 concurrent traffic, which a sequential capture proxy does not produce.
 
-### What this checker cannot do
+### The cone of influence
 
-`resonate-sqlite-concurrent-8c.ndjson` — 400 events, 8 origins, 50
-events each after partitioning — TIMES OUT under both disciplines. The
-Lean checker accepts the same file in 37 ms with `maxFanout=1`.
+The closure used to fire every enabled rule, so a promise carrying k
+drainable callbacks branched 2^k ways whether or not any of them could
+reach the next event — which made ~80 events in one partition the
+practical ceiling (the canonical W3 workload, a 78-event single-origin
+tree, did not finish). The Lean checker never had this problem because
+`valid/lean/validator.lean` restricts each gap to the τs that can affect
+what the next observation reads (`relevantTaus`, `touches`, `affects`).
 
-The difference is the cone. `valid/lean/validator.lean` restricts each gap to
-the τs that can affect what the next observation reads (`relevantTaus`,
-`touches`, `affects`); the closure here fires every enabled rule, so a
-promise carrying k drainable callbacks branches 2^k ways whether or not
-any of them can reach the next event. That is a budget limit, not a
-wrong answer — the closure reports `Saturated() == false` and the
-verdict is inconclusive, exactly as the Lean checker returns
-`Undecided`. But it is the reason this checker is the junior partner on
-long traces, and porting the cone reduction is the work that would
-change it.
+That reduction is now ported (`touches`/`affects`/`relevantRules` in
+`rules.go`, on by default, `-cone=false` for the full closure): at each
+observed event only the rules whose affected objects transitively meet
+what the request touches are fired. The rest are NOT discarded —
+enabledness lives in the state, so a deferred rule stays armed and is
+explored at the first later event that names its objects (partial-order
+reduction: independent steps commute). Two details worth knowing:
+
+* **R1's affected set includes the promise's callbacks**, not just its
+  own id — settling is what arms R4 for each awaiter, and R4 is not yet
+  enabled when the cone is computed. This is the same chain that made
+  the Lean cone unsound the first time.
+* **R3 (notify) and R6 (dispatch) fall out of the cone entirely**: they
+  mutate only state no response projects (listener lists, `retryAt`,
+  the outbox), and those fields feed no rule but themselves. R6 was the
+  one rule that discharges no obligation — the closure's documented
+  fanout source — so its exclusion is most of the win. The reduction is
+  sound for the RESPONSE channel, which is all this checker compares;
+  a snapshot channel would need `touches` widened, exactly as the Lean
+  header warns.
+
+Measured: the 78-event W3 tree went from TIMEOUT (>60s per discipline)
+to LINEARIZABLE in 3–5s; a 26-event rpc workload from 1.3s to 12ms; the
+fuzzer corpus runs ~10x faster. Equivalence with the full closure is
+enforced two ways: the fuzzer's `-conecheck` property (reduced and full
+must agree on every verdict — 600 traces + 600 mutants across calm and
+jumpy clocks, 0 disagreements) and the existing suite passing unchanged
+under the default.
 
 ## Pending ops — a 500 is "no verdict", not a response
 

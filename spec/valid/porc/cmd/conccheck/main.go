@@ -56,7 +56,9 @@ type row struct {
 func main() {
 	timeout := flag.Duration("timeout", 120*time.Second, "per-discipline timeout")
 	partition := flag.Bool("partition", true, "check each origin independently")
+	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
+	model.Cone = *cone
 
 	rows, err := readRows(os.Stdin)
 	if err != nil {

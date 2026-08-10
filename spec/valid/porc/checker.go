@@ -294,7 +294,7 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 			// before this call, then keep the states whose response
 			// matches what the server actually said. That filter is the
 			// whole pruning power of the construction.
-			cands, ok := closure(ctx, []candidate{{state: ms.state, witness: ms.witness, key: ms.key}}, op.Now, Fuel)
+			cands, ok := closure(ctx, []candidate{{state: ms.state, witness: ms.witness, key: ms.key}}, op.Now, Fuel, pickFor(op))
 			if !ok {
 				sat.ok = false
 			}
@@ -373,7 +373,7 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 func Replay(d Discipline, ops []Op, resps []Response) (witness []string, failedAt int, ok bool) {
 	cur := []candidate{newCand(&ServerState{}, nil)}
 	for i, op := range ops {
-		cands, sat := closure(context.Background(), cur, op.Now, Fuel)
+		cands, sat := closure(context.Background(), cur, op.Now, Fuel, pickFor(op))
 		if !sat {
 			return nil, i, false
 		}

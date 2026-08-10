@@ -60,6 +60,7 @@ func main() {
 	keep := flag.String("keep", "", "directory to write disagreeing traces to")
 	goonly := flag.Bool("goonly", false, "skip the Lean checker (every Lean verdict becomes DECLINE — the differential halves are vacuous, the Go properties still bite)")
 	pend := flag.Bool("pending", true, "also fuzz the pending-op (500) semantics — Go checker only; the Lean checker does not know pending ops")
+	coneCheck := flag.Bool("conecheck", true, "also require the cone-of-influence reduction and the full closure to agree on every verdict")
 	flag.Parse()
 
 	leanBin := *lean
@@ -95,6 +96,9 @@ func main() {
 		pendWeaken int
 		pendMask   int
 		pendFail   int
+		// cone-vs-full-closure agreement
+		coneChecked int
+		coneFail    int
 	)
 	start := time.Now()
 
@@ -137,6 +141,27 @@ func main() {
 			if !agree(mg, ml) {
 				disagree++
 				report(*keep, seed, "MUTANT", mnd, mg, ml, mops, mresps)
+			}
+		}
+
+		if *coneCheck {
+			// property 5 — the cone is an OPTIMIZATION, not a semantics:
+			// reduced and full closure must reach the same verdict on the
+			// valid trace and on its mutant alike. (gv/mg above were computed
+			// under the default, cone on.)
+			coneChecked++
+			if full := verdictWithCone(false, ops, resps); full != gv {
+				coneFail++
+				disagree++
+				report(*keep, seed, "CONE-VALID", nd, gv, full, ops, resps)
+			}
+			if mops, mresps, ok := mutate(seed, ops, resps); ok {
+				mg := goVerdict(mops, mresps)
+				if full := verdictWithCone(false, mops, mresps); full != mg {
+					coneFail++
+					disagree++
+					report(*keep, seed, "CONE-MUTANT", emit(mops, mresps), mg, full, mops, mresps)
+				}
 			}
 		}
 
@@ -188,6 +213,10 @@ func main() {
 	if *pend {
 		fmt.Printf("  pending:  weaken=%d mask=%d violations=%d (Go only; a violation is a bug in the pending semantics)\n",
 			pendWeaken, pendMask, pendFail)
+	}
+	if *coneCheck {
+		fmt.Printf("  cone:     %d traces (+mutants) compared against the full closure, %d disagreements\n",
+			coneChecked, coneFail)
 	}
 	fmt.Printf("  rule firings that changed state: %v\n", sortedCounts(fired))
 	fmt.Printf("  response statuses generated:     %v\n", sortedInts(statuses))
@@ -377,6 +406,16 @@ func leanVerdict(bin, ndjson string, cap, fuel int) verdict {
 }
 
 func emit(ops []model.Op, resps []model.Response) string { return model.Emit(ops, resps) }
+
+// verdictWithCone runs goVerdict under an explicit cone setting, restoring
+// the default after. The fuzzer is sequential, so flipping the package
+// toggle is race-free.
+func verdictWithCone(cone bool, ops []model.Op, resps []model.Response) verdict {
+	prev := model.Cone
+	model.Cone = cone
+	defer func() { model.Cone = prev }()
+	return goVerdict(ops, resps)
+}
 
 // mutate corrupts exactly one response. Status flips are the coarsest
 // channel and the easiest for both checkers to catch; record flips are
