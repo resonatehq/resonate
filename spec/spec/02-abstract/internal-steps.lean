@@ -181,7 +181,6 @@ def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
             match ← viewPromise t.id now with
             | none => pure ()
             | some p =>
-                -- The view again: no dispatch for the dead.
                 if p.state == .pending then
                   setTask { t with retryAt := some next }
                   setMessage ((p.tags.get? "resonate:target").getD "")

@@ -59,7 +59,6 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
   | some p =>
       if p.state == .pending then
         let p := { p with state := req.state, value := req.value, settledAt := some now }
-        -- coupled: the co-keyed task is fulfilled in the same step
         setSettled p
         return { status := 200, promise := some p.toRecord }
       else
@@ -146,7 +145,6 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTask t
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        -- targeted, therefore not a timer: the only birth verdict here
         let st := ServerModel.PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,

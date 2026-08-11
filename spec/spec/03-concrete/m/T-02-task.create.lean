@@ -23,7 +23,6 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTaskTimeout t.id 1 (now + req.ttl)
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        -- targeted, therefore not a timer: the only birth verdict here
         let st := PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,
