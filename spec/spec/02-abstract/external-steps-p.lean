@@ -1,27 +1,5 @@
 import «02-abstract».«state»
 
-/-!  # The coalesced machine — external steps, projected
-
-The abstract machine's second read discipline, mirroring the concrete
-twins in the opposite direction: at the concrete level projection is
-native and materialization is the twin; here materialization is native
-(`external-steps-m.lean`) and projection is the twin. A projected
-handler SERVES the view — fact P via `PromiseObject.project`, fact T via
-`TaskObject.view` — and writes no fact; the internal steps
-(`internal-steps.lean`, shared verbatim between the disciplines: they
-are material transitions, the read discipline concerns external steps
-only) persist facts at
-the environment's pace.
-
-Line-aligned with `external-steps-m.lean`: every `touch` becomes a
-`view`, nothing
-else changes — every mutation site fires only on live views, where the
-view IS the stored object, so the write sets are identical by
-construction. Since every handler in this machine reads through the
-view (the halt fix included), the two disciplines answer identically
-even under a shared rule schedule; only the message channel can tell
-them apart (`04-theorems/abstract-twins.lean`).  -/
-
 namespace AbstractModel
 namespace Projected
 
@@ -235,10 +213,6 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := d
   heartbeatAll req.pid now req.tasks
   return { status := 200 }
 
-/-- Pass 1 over the awaited set, in order, stopping at the first
-    undischargeable waiter: `none` is a 422 (missing or internal),
-    `some settled` reports whether any awaited promise is already
-    settled. -/
 def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
   | [] => return some false
   | action :: rest => do
@@ -252,7 +226,6 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Boo
             | none => return none
             | some settled => return some (settled || pa.state != .pending)
 
-/-- Pass 2: park the awaiter on every awaited promise. -/
 def registerAwaited (awaiter : String) (now : Nat) :
     List PromiseRegisterCallbackReq → M Unit
   | [] => pure ()

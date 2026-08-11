@@ -1,32 +1,6 @@
 import «02-abstract».«state»
 
-/-!  # The coalesced machine — external steps, materialized
-
-The machine's response to every external step, in one place: promises,
-tasks, schedules. This is the MATERIALIZING read discipline — a handler
-touches, persisting the facts forced at that instant; the projecting
-twin is `external-steps-p.lean`, and the discipline is the only
-difference between them.
-
-Handlers write objects and return responses; they emit no messages and
-record no auxiliary state — dispatching an `execute`, notifying a
-listener, waking an awaiter is the internal steps' job
-(`internal-steps.lean`).  -/
-
 namespace AbstractModel
-
-/-!  ## Promise handlers
-
-* `promiseCreate` of a targeted promise creates the task and stops —
-  the dispatch rule emits the `execute`. The `resonate:delay` tag is
-  consumed at creation: it seeds the task's `retryAt`, so the
-  create-side delay machinery of the base spec collapses to one field
-  initialization.
-* `promiseSettle` writes the promise AND its task pair — the coupled
-  write: fact T is fact P seen through the task, so the same step makes
-  both true. Awaiters and listeners stay on the promise for the batch
-  rules.  -/
-
 
 open ServerModel (PromiseState
                   PromiseGetReq PromiseGetRes
@@ -90,11 +64,6 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
       else
         return { status := 200, promise := some pAwaited.toRecord }
 
-/-- Registration on an already-settled promise returns the record without
-    registering, exactly as in the base spec — even though this machine's
-    retained-listener drain could naturally serve a late registration,
-    admitting one would produce an `unblock` the base machine never
-    sends. -/
 def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
     M PromiseRegisterListenerRes := do
   if !ServerModel.addressValid req.address then
@@ -113,21 +82,6 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
 
 def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
   return { status := 501 }
-
-/-!  ## Task handlers
-
-Every handler that consults a task's promise goes through `touchTask`,
-so its guards branch on materialized state: the base spec's compound
-liveness checks (`p.state != .pending ∨ p.timeoutAt ≤ now`) collapse to
-`p.state != .pending`, and TIMEOUT ALWAYS WINS is automatic — touching
-a task whose promise is past its deadline fulfills the task before any
-guard looks at it.
-
-`taskHalt` touches too: the concrete machine's halt was fixed to
-consult the promise (halting a task whose own promise is settled is
-`409` — its state is `.fulfilled`, which is what `taskGet` reports),
-and the abstract halt materializes the same fact through the touch.  -/
-
 
 open ServerModel (TaskGetReq TaskGetRes
                   TaskCreateReq TaskCreateRes
@@ -184,9 +138,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
       | none | some (_, none) =>
           return { status := 409 }
       | some (t, some p) =>
-          -- Post-touch: a `.pending` task implies a pending promise —
-          -- fact T would have fulfilled it otherwise — so re-acquisition
-          -- needs no separate liveness guard.
+
           if t.state == .fulfilled then
             return { status := 200, task := some t.toRecord, promise := some p.toRecord }
           else if t.state == .pending then
@@ -261,10 +213,6 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := d
   heartbeatAll req.pid now req.tasks
   return { status := 200 }
 
-/-- Pass 1 over the awaited set, in order, stopping at the first
-    undischargeable waiter: `none` is a 422 (missing or internal),
-    `some settled` reports whether any awaited promise is already
-    settled. -/
 def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
   | [] => return some false
   | action :: rest => do
@@ -278,7 +226,6 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Boo
             | none => return none
             | some settled => return some (settled || pa.state != .pending)
 
-/-- Pass 2: park the awaiter on every awaited promise. -/
 def registerAwaited (awaiter : String) (now : Nat) :
     List PromiseRegisterCallbackReq → M Unit
   | [] => pure ()
@@ -320,9 +267,6 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
                            expiresAt := none, retryAt := none, resumes := [] }
           return { status := 200 }
 
-/-- Settles the promise, and its task with it: fact T is fact P seen
-    through the task, so `setSettled` writes the pair in one step —
-    no separate fulfillment transition to lag behind. -/
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
@@ -393,12 +337,6 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
 
 def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
   return { status := 501 }
-
-/-!  ## Schedule handlers
-
-A schedule's `nextRunAt` is its alarm: `Internal.processSchedule` guards on it
-directly, so creation arms nothing and deletion disarms nothing.  -/
-
 
 open ServerModel (Schedule nextCron
                   ScheduleGetReq ScheduleGetRes
