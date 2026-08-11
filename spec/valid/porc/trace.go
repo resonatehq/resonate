@@ -309,7 +309,8 @@ func decodeRes(e wireEvent) (Response, error) {
 // project drops response fields the SPECIFICATION's response type for
 // this kind does not carry.
 //
-// Each handler in spec/02-abstract/p.lean returns a kind-specific record:
+// Each handler in spec/02-abstract/external-steps-p.lean returns a
+// kind-specific record:
 // `TaskGetRes` has a task and no promise, `TaskSuspendRes` has neither,
 // `TaskFulfillRes` has a promise and no task. valid/lean/json.lean decodes
 // exactly those fields and ignores the rest of the payload.

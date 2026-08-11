@@ -1,25 +1,5 @@
 import «02-abstract».«state»
 
-/-!  # The coalesced machine — projected handlers
-
-The abstract machine's second read discipline, mirroring the concrete
-twins in the opposite direction: at the concrete level projection is
-native and materialization is the twin; here materialization is native
-(`m.lean`) and projection is the twin. A projected handler SERVES the
-view — fact P via `PromiseObject.project`, fact T via
-`TaskObject.view` — and writes no fact; the rules (`rules.lean`,
-shared verbatim between the disciplines: rules are material
-transitions, the read discipline concerns handlers) persist facts at
-the environment's pace.
-
-Line-aligned with `m.lean`: every `touch` becomes a `view`, nothing
-else changes — every mutation site fires only on live views, where the
-view IS the stored object, so the write sets are identical by
-construction. Since every handler in this machine reads through the
-view (the halt fix included), the two disciplines answer identically
-even under a shared rule schedule; only the message channel can tell
-them apart (`04-theorems/abstract-twins.lean`).  -/
-
 namespace AbstractModel
 namespace Projected
 
@@ -39,45 +19,14 @@ def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
       return { status := 200, promise := some p.toRecord }
 
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  if req.tags.timerTargeted then
+    return { status := 400, promise := none }
   match ← viewPromise req.id now with
   | some p =>
       return { status := 200, promise := some p.toRecord }
   | none =>
-      if req.timeoutAt > now then
-        let p : PromiseObject :=
-          { id := req.id
-            state := .pending
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := now }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          let due :=
-            match p.tags.get? "resonate:delay" with
-            | some d => max (ServerModel.parseNat d) now
-            | none => now
-          setTask { id := p.id, state := .pending, version := 0,
-                    retryAt := some due }
-        return { status := 200, promise := some p.toRecord }
-      else
-        let state :=
-          if req.tags.isTimer then
-            PromiseState.resolved
-          else
-            PromiseState.rejectedTimedout
-        let p : PromiseObject :=
-          { id := req.id
-            state := state
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := req.timeoutAt
-            settledAt := some req.timeoutAt }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          setTask { id := p.id, state := .fulfilled, version := 0 }
-        return { status := 200, promise := some p.toRecord }
+      let p ← createPromise req now
+      return { status := 200, promise := some p.toRecord }
 
 def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
   if !req.state.settable then
@@ -88,7 +37,6 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
   | some p =>
       if p.state == .pending then
         let p := { p with state := req.state, value := req.value, settledAt := some now }
-        -- coupled: the co-keyed task is fulfilled in the same step
         setSettled p
         return { status := 200, promise := some p.toRecord }
       else
@@ -159,7 +107,7 @@ def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
-  if !(a.tags.has "resonate:target") then
+  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
   match ← viewPromise a.id now with
   | none =>
@@ -175,11 +123,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTask t
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        let st :=
-          if a.tags.isTimer then
-            ServerModel.PromiseState.resolved
-          else
-            ServerModel.PromiseState.rejectedTimedout
+        let st := ServerModel.PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,
             timeoutAt := a.timeoutAt, createdAt := a.timeoutAt,
@@ -269,10 +213,6 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := d
   heartbeatAll req.pid now req.tasks
   return { status := 200 }
 
-/-- Pass 1 over the awaited set, in order, stopping at the first
-    undischargeable waiter: `none` is a 422 (missing or internal),
-    `some settled` reports whether any awaited promise is already
-    settled. -/
 def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
   | [] => return some false
   | action :: rest => do
@@ -286,7 +226,6 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Boo
             | none => return none
             | some settled => return some (settled || pa.state != .pending)
 
-/-- Pass 2: park the awaiter on every awaited promise. -/
 def registerAwaited (awaiter : String) (now : Nat) :
     List PromiseRegisterCallbackReq → M Unit
   | [] => pure ()
@@ -413,6 +352,8 @@ def scheduleGet (req : ScheduleGetReq) (_now : Nat) : M ScheduleGetRes := do
       return { status := 200, schedule := some s }
 
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+  if req.promiseTags.timerTargeted then
+    return { status := 400 }
   match ← getSchedule req.id with
   | some s =>
       return { status := 200, schedule := some s }

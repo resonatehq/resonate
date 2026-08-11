@@ -4,7 +4,7 @@ import "testing"
 
 // Validation outranks existence.
 //
-// `spec/01-protocol` states it and `spec/02-abstract/p.lean` implements
+// `spec/01-protocol` states it and `spec/02-abstract/external-steps-p.lean` implements
 // it: in every handler that can return 400, the 400 guard is the FIRST
 // statement, before any `viewPromise`/`viewTask`. So a request that is
 // both malformed AND aimed at an object that does not exist must answer

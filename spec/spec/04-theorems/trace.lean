@@ -128,13 +128,11 @@ inductive Request
   | taskHalt                (req : TaskHaltReq)
   | taskContinue            (req : TaskContinueReq)
   | taskSearch              (req : TaskSearchReq)
-  -- internal (τ): requests the server issues to itself
   | τPromiseTimeout         (id : String)
   | τTaskRetryTimeout       (id : String)
   | τTaskLeaseTimeout       (id : String)
   | τScheduleTimeout        (id : String)
   | τResume                 (req : ResumeReq)
-  -- stutter
   | idle
   deriving Repr
 

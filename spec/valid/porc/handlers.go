@@ -57,6 +57,9 @@ type PromiseCreateReq struct {
 }
 
 func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint64) Response {
+	if req.Tags.TimerTargeted() {
+		return Response{Status: 400}
+	}
 	if p := s.readPromise(d, req.ID, now); p != nil {
 		return Response{Status: 200, Promise: p}
 	}
@@ -277,7 +280,8 @@ type TaskRef struct {
 	Version uint64
 }
 
-// TaskHeartbeat is T-05, from spec/02-abstract/p.lean:252.
+// TaskHeartbeat is T-05, from `taskHeartbeat` in
+// spec/02-abstract/external-steps-p.lean.
 //
 // It extends the lease of the REFERENCED tasks only, and only when the
 // version matches — `heartbeatOne` checks
@@ -414,7 +418,8 @@ type InnerResponse struct {
 	Promise *Promise
 }
 
-// TaskFence is T-04, transcribed from spec/02-abstract/p.lean:229 guard
+// TaskFence is T-04, transcribed from `taskFence` in
+// spec/02-abstract/external-steps-p.lean, guard
 // for guard.
 //
 // The validation guard is FIRST — an action operating on the fencing task
@@ -451,7 +456,8 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 	return Response{Status: 400}, nil
 }
 
-// TaskCreate is T-02, transcribed from spec/02-abstract/p.lean:159.
+// TaskCreate is T-02, transcribed from `taskCreate` in
+// spec/02-abstract/external-steps-p.lean.
 //
 // Two shapes in one handler: create a promise with an immediately-acquired
 // task, or re-acquire an existing pending one. The SDK issues it for every
@@ -462,7 +468,7 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 // The validation guard is first, as everywhere: an action without
 // `resonate:target` is 400 before existence is consulted.
 func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act PromiseCreateReq, now uint64) Response {
-	if !act.Tags.Has("resonate:target") {
+	if !act.Tags.Has("resonate:target") || act.Tags.TimerTargeted() {
 		return Response{Status: 400}
 	}
 	p := s.readPromise(d, act.ID, now)
@@ -476,12 +482,9 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 			s.SetTask(nt)
 			return Response{Status: 200, Task: nt, Promise: np}
 		}
-		// Born past its deadline: fact P holds at birth.
-		st := RejectedTimedout
-		if act.Tags.IsTimer() {
-			st = Resolved
-		}
-		np := &Promise{ID: act.ID, State: st, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
+		// Born past its deadline: fact P holds at birth. Targeted,
+		// therefore not a timer, so this is the only verdict here.
+		np := &Promise{ID: act.ID, State: RejectedTimedout, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
 			CreatedAt: act.TimeoutAt, SettledAt: u64p(act.TimeoutAt), Param: act.Param}
 		s.SetPromise(np)
 		nt := &Task{ID: np.ID, State: TaskFulfilled, Version: 0}

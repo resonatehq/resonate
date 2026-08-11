@@ -10,7 +10,7 @@
 //
 // Two things the Lean says that this file leans on:
 //
-//   - `spec/02-abstract/p.lean` and `m.lean` are the SAME CODE modulo
+//   - `spec/02-abstract/external-steps-p.lean` and `-m.lean` are the SAME CODE modulo
 //     viewPromise/viewTask vs touchPromise/touchTask. Verified by diff,
 //     not taken on faith. So there is one set of handlers here, taking a
 //     `Discipline`, rather than two copies.
@@ -79,6 +79,13 @@ type Tags map[string]string
 func (t Tags) Get(k string) (string, bool) { v, ok := t[k]; return v, ok }
 func (t Tags) Has(k string) bool           { _, ok := t[k]; return ok }
 func (t Tags) IsTimer() bool               { return t["resonate:timer"] == "true" }
+
+// TimerTargeted is the malformed combination: `resonate:timer` says nothing
+// executes this promise, `resonate:target` says a worker owns its execution
+// and earns it a task. A promise carrying both would be handed a task no
+// worker should run. Refused at every creation path — see `Tags.timerTargeted`
+// in spec/01-protocol/validation.lean.
+func (t Tags) TimerTargeted() bool { return t.IsTimer() && t.Has("resonate:target") }
 
 func (t Tags) key() string {
 	ks := make([]string, 0, len(t))
@@ -303,7 +310,8 @@ func (s *ServerState) SetMessage(m Message) {
 
 // ------------------------------------------------------- the read Discipline
 
-// Discipline is the ONLY difference between spec/02-abstract/p.lean and
+// Discipline is the ONLY difference between
+// spec/02-abstract/external-steps-p.lean and
 // m.lean. Verified by diffing the two files with view/touch normalised:
 // the code is otherwise identical, so porting them as one parameterised
 // handler set is faithful rather than a shortcut.

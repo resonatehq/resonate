@@ -1,0 +1,101 @@
+import «02-abstract».«state»
+
+namespace AbstractModel
+namespace Internal
+
+open ServerModel (nextCron occurrences expand Schedule)
+
+def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
+  let _ ← touchPromise id now
+
+def processListener (id : String) (address : String) (now : Nat) : M Unit := do
+  match ← touchPromise id now with
+  | none => pure ()
+  | some p =>
+      if p.state == .pending then
+        pure ()
+      else if p.listeners.contains address then
+        setPromise { p with listeners := p.listeners.filter (· != address) }
+        setMessage address (.unblock p.toRecord)
+
+def resumeOne (awaited awaiter : String) (now : Nat) : M Unit := do
+  match ← touchTask awaiter now with
+  | none => pure ()
+  | some (_, none) => pure ()
+  | some (t, some _) =>
+      match t.state with
+      | .suspended =>
+          setTask { t with state := .pending, resumes := [awaited],
+                           retryAt := some now }
+      | .pending | .acquired | .halted =>
+          if !(t.resumes.contains awaited) then
+            setTask { t with resumes := t.resumes ++ [awaited] }
+      | .fulfilled =>
+          pure ()
+
+def processCallback (id : String) (awaiter : String) (now : Nat) : M Unit := do
+  match ← touchPromise id now with
+  | none => pure ()
+  | some p =>
+      if p.state == .pending then
+        pure ()
+      else if p.callbacks.contains awaiter then
+        setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
+        resumeOne p.id awaiter now
+
+def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
+  match ← getTask id with
+  | none => pure ()
+  | some t =>
+      match t.expiresAt with
+      | none => pure ()
+      | some deadline =>
+          if t.state == .acquired ∧ deadline ≤ now then
+            match ← viewPromise t.id now with
+            | none => pure ()
+            | some p =>
+                if p.state == .pending then
+                  setTask { t with state := .pending, pid := none, ttl := none,
+                                   expiresAt := none, retryAt := some now }
+
+def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
+  match ← getTask id with
+  | none => pure ()
+  | some t =>
+      match t.retryAt with
+      | none => pure ()
+      | some due =>
+          if t.state == .pending ∧ due ≤ now then
+            match ← viewPromise t.id now with
+            | none => pure ()
+            | some p =>
+                if p.state == .pending then
+                  setTask { t with retryAt := some next }
+                  setMessage ((p.tags.get? "resonate:target").getD "")
+                    (.execute t.id t.version)
+
+def fireOccurrence (s : Schedule) (t : Nat) : M Unit :=
+  createIfAbsent
+    { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
+      param := s.promiseParam, tags := s.promiseTags } t
+
+def fireAll (s : Schedule) : List Nat → M Unit
+  | [] => pure ()
+  | t :: ts => do
+      fireOccurrence s t
+      fireAll s ts
+
+def processSchedule (id : String) (now : Nat) : M Unit := do
+  match ← getSchedule id with
+  | none => pure ()
+  | some s =>
+      let ts := (occurrences s.cron s.nextRunAt now).filter (· ≤ now)
+      fireAll s ts
+      match ts.getLast? with
+      | some last =>
+          setSchedule { s with lastRunAt := some last,
+                               nextRunAt := nextCron s.cron last }
+      | none => pure ()
+
+end Internal
+end AbstractModel

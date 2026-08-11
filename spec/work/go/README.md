@@ -74,7 +74,7 @@ fan-out        40 events  DROPPED:0  ADMISSIBLE  /  LINEARIZABLE
 Getting there needed four fixes, three of them real bugs:
 
 1. **`task.fence` was in neither checker.** The specification has it
-   (`spec/02-abstract/p.lean:229`) and `valid/lean/validator.lean` already knew
+   (`taskFence` in `spec/02-abstract/external-steps-p.lean`) and `valid/lean/validator.lean` already knew
    what it touches, but `valid/lean/json.lean` could not decode it and the Go
    model had no handler. The SDK issues one per fenced create/settle — 36
    of 60 events in a fan-out run — so every trace was a partial view.
@@ -112,7 +112,7 @@ DROPPED (no checker can decode these): task.create=4 task.fence=24
 ```
 
 * **`task.fence`** — the big one. The specification has it
-  (`spec/02-abstract/p.lean:229`, and `valid/lean/validator.lean:186` already
+  (`taskFence` in `spec/02-abstract/external-steps-p.lean`, and `valid/lean/validator.lean:186` already
   knows what it touches) but `valid/lean/json.lean` never learned to decode it,
   and the Go model has no `TaskFence` at all. The SDK issues one for every
   fenced create/settle, so it dominates: 24 of 36 events in a small

@@ -4,7 +4,7 @@ open ServerModel
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
-  if !(a.tags.has "resonate:target") then
+  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
   match ← getPromise a.id with
   | none =>
@@ -21,11 +21,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTaskTimeout t.id 1 (now + req.ttl)
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        let st :=
-          if a.tags.isTimer then
-            PromiseState.resolved
-          else
-            PromiseState.rejectedTimedout
+        let st := PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,
             timeoutAt := a.timeoutAt, createdAt := a.timeoutAt, settledAt := some a.timeoutAt }

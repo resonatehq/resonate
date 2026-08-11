@@ -1,26 +1,6 @@
 import «02-abstract».«state»
 
-/-!  # The coalesced machine — handlers
-
-All protocol handlers of the abstract machine, in one place: promises,
-tasks, schedules. Handlers write objects and return responses; they
-emit no messages and record no auxiliary state — dispatching an
-`execute`, notifying a listener, waking an awaiter is the rules' job
-(`rules.lean`).  -/
-
 namespace AbstractModel
-
-/-!  ## Promise handlers
-
-* `promiseCreate` of a targeted promise creates the task and stops —
-  the dispatch rule emits the `execute`. The `resonate:delay` tag is
-  consumed at creation: it seeds the task's `retryAt`, so the
-  create-side delay machinery of the base spec collapses to one field
-  initialization.
-* `promiseSettle` writes THE PROMISE ONLY. The task is fulfilled by
-  fact T (on the next touch, or by `Rules.taskFulfillment`); awaiters
-  and listeners stay on the promise for the batch rules.  -/
-
 
 open ServerModel (PromiseState
                   PromiseGetReq PromiseGetRes
@@ -38,49 +18,14 @@ def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
       return { status := 200, promise := some p.toRecord }
 
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  if req.tags.timerTargeted then
+    return { status := 400, promise := none }
   match ← touchPromise req.id now with
   | some p =>
       return { status := 200, promise := some p.toRecord }
   | none =>
-      if req.timeoutAt > now then
-        let p : PromiseObject :=
-          { id := req.id
-            state := .pending
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := now }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          -- The delay tag seeds `retryAt`: the first dispatch is due at
-          -- the delay if it is still ahead, immediately otherwise.
-          let due :=
-            match p.tags.get? "resonate:delay" with
-            | some d => max (ServerModel.parseNat d) now
-            | none => now
-          setTask { id := p.id, state := .pending, version := 0,
-                    retryAt := some due }
-        return { status := 200, promise := some p.toRecord }
-      else
-        -- Born past its deadline: fact P holds at birth, so the promise
-        -- is written settled and its task (if targeted) fulfilled.
-        let state :=
-          if req.tags.isTimer then
-            PromiseState.resolved
-          else
-            PromiseState.rejectedTimedout
-        let p : PromiseObject :=
-          { id := req.id
-            state := state
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := req.timeoutAt
-            settledAt := some req.timeoutAt }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          setTask { id := p.id, state := .fulfilled, version := 0 }
-        return { status := 200, promise := some p.toRecord }
+      let p ← createPromise req now
+      return { status := 200, promise := some p.toRecord }
 
 def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
   if !req.state.settable then
@@ -91,7 +36,6 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
   | some p =>
       if p.state == .pending then
         let p := { p with state := req.state, value := req.value, settledAt := some now }
-        -- coupled: the co-keyed task is fulfilled in the same step
         setSettled p
         return { status := 200, promise := some p.toRecord }
       else
@@ -120,11 +64,6 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
       else
         return { status := 200, promise := some pAwaited.toRecord }
 
-/-- Registration on an already-settled promise returns the record without
-    registering, exactly as in the base spec — even though this machine's
-    retained-listener drain could naturally serve a late registration,
-    admitting one would produce an `unblock` the base machine never
-    sends. -/
 def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
     M PromiseRegisterListenerRes := do
   if !ServerModel.addressValid req.address then
@@ -143,21 +82,6 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
 
 def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
   return { status := 501 }
-
-/-!  ## Task handlers
-
-Every handler that consults a task's promise goes through `touchTask`,
-so its guards branch on materialized state: the base spec's compound
-liveness checks (`p.state != .pending ∨ p.timeoutAt ≤ now`) collapse to
-`p.state != .pending`, and TIMEOUT ALWAYS WINS is automatic — touching
-a task whose promise is past its deadline fulfills the task before any
-guard looks at it.
-
-`taskHalt` touches too: the concrete machine's halt was fixed to
-consult the promise (halting a task whose own promise is settled is
-`409` — its state is `.fulfilled`, which is what `taskGet` reports),
-and the abstract halt materializes the same fact through the touch.  -/
-
 
 open ServerModel (TaskGetReq TaskGetRes
                   TaskCreateReq TaskCreateRes
@@ -182,7 +106,7 @@ def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
-  if !(a.tags.has "resonate:target") then
+  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
   match ← touchPromise a.id now with
   | none =>
@@ -198,11 +122,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTask t
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        let st :=
-          if a.tags.isTimer then
-            ServerModel.PromiseState.resolved
-          else
-            ServerModel.PromiseState.rejectedTimedout
+        let st := ServerModel.PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,
             timeoutAt := a.timeoutAt, createdAt := a.timeoutAt,
@@ -218,9 +138,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
       | none | some (_, none) =>
           return { status := 409 }
       | some (t, some p) =>
-          -- Post-touch: a `.pending` task implies a pending promise —
-          -- fact T would have fulfilled it otherwise — so re-acquisition
-          -- needs no separate liveness guard.
+
           if t.state == .fulfilled then
             return { status := 200, task := some t.toRecord, promise := some p.toRecord }
           else if t.state == .pending then
@@ -295,10 +213,6 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := d
   heartbeatAll req.pid now req.tasks
   return { status := 200 }
 
-/-- Pass 1 over the awaited set, in order, stopping at the first
-    undischargeable waiter: `none` is a 422 (missing or internal),
-    `some settled` reports whether any awaited promise is already
-    settled. -/
 def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
   | [] => return some false
   | action :: rest => do
@@ -312,7 +226,6 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Boo
             | none => return none
             | some settled => return some (settled || pa.state != .pending)
 
-/-- Pass 2: park the awaiter on every awaited promise. -/
 def registerAwaited (awaiter : String) (now : Nat) :
     List PromiseRegisterCallbackReq → M Unit
   | [] => pure ()
@@ -354,10 +267,6 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
                            expiresAt := none, retryAt := none, resumes := [] }
           return { status := 200 }
 
-/-- Settles the promise; the task's fulfillment is fact T, materialized
-    on the next touch or by `Rules.taskFulfillment` — observably
-    indistinguishable, since every task read that could report it goes
-    through `touchTask`. -/
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
@@ -429,12 +338,6 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
 def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
   return { status := 501 }
 
-/-!  ## Schedule handlers
-
-A schedule's `nextRunAt` is its alarm: `Rules.scheduleFire` guards on it
-directly, so creation arms nothing and deletion disarms nothing.  -/
-
-
 open ServerModel (Schedule nextCron
                   ScheduleGetReq ScheduleGetRes
                   ScheduleCreateReq ScheduleCreateRes
@@ -449,6 +352,8 @@ def scheduleGet (req : ScheduleGetReq) (_now : Nat) : M ScheduleGetRes := do
       return { status := 200, schedule := some s }
 
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+  if req.promiseTags.timerTargeted then
+    return { status := 400 }
   match ← getSchedule req.id with
   | some s =>
       return { status := 200, schedule := some s }

@@ -365,8 +365,8 @@ changed between runs — one module, one `Next`, six configurations.
 | `CallbackExternalGuard` | P-04 refuses an internal awaited (422) | accepts any awaited |
 | `ListenerExternalGuard` | P-05 refuses an internal awaited (422) | accepts any awaited |
 | `PromiseLivenessGuard` | T-02 claim / T-09 halt / T-10 continue gate on the projection | ungated |
-| `TimeoutLivenessGuard` | R5 lease expiry / R6 dispatch gate on the projection | ungated |
-| `ResumeLivenessGuard` | R4 resume skips an awaiter that is itself logically dead | resumes it anyway |
+| `TimeoutLivenessGuard` | R5 lease timeout / R6 retry timeout gate on the projection | ungated |
+| `ResumeLivenessGuard` | R4 callback processing skips an awaiter that is itself logically dead | resumes it anyway |
 | `HeartbeatGuard` | T-05 gates on the projection | ungated |
 | `SequencedDriver` | — | promise-timeout loop drains before the task-timeout loop |
 | `FaultsOn` | message loss + worker crashes enabled | — |

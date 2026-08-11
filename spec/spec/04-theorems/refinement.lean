@@ -34,11 +34,11 @@ the abstract rules it discharges —
 
 — and the concrete handlers' inline `execute` emissions (create,
 release, continue) get their R6 appended, since abstract handlers emit
-nothing. What needs NO translation is the settlement cascade: concrete
-settle flips the task and emits unblocks inline, the abstract machine
-lets fact T self-heal at the next touch and drains listeners by rule —
-reads on both sides serve the same bytes meanwhile, and quiescence
-reconciles the lag. `translate` is syntactic (it reads requests, not
+nothing. What needs NO translation is the settlement cascade: both
+machines flip the task in the settling step itself — the coupled write
+— and the concrete one additionally emits its unblocks inline while the
+abstract machine drains listeners by rule. Reads on both sides serve
+the same bytes meanwhile, and quiescence reconciles the lag. `translate` is syntactic (it reads requests, not
 runs); it is the canonical schedule for these scripts, while the
 theorem's ∃ admits run-dependent schedules in general.
 
@@ -64,11 +64,12 @@ open Equivalence (Request Response eqSet)
 abbrev defaultRetry : Nat := ServerModel.ServerState.init.config.retryTimeout
 
 /-- The abstract machine's alphabet: the same external requests, plus
-    its seven rules with their scheduler-chosen parameters. -/
+    its six rules with their scheduler-chosen parameters. The gap at
+    `r2` is the deleted fulfillment rule — fact T rides with fact P in
+    R1's coupled write — and the survivors keep their numbers. -/
 inductive AStep
   | api (rq : Request)
   | r1 (id : String)
-  | r2 (id : String)
   | r3 (id address : String)
   | r4 (id awaiter : String)
   | r5 (id : String)
@@ -109,13 +110,12 @@ def handleA (st : AStep) (now : Nat) : AbstractModel.M Response :=
   -- a concrete-internal request arriving as `.api` is a stutter; the
   -- translation never produces one
   | .api _                              => return .τ
-  | .r1 id      => do AbstractModel.Rules.promiseTimeout id now; return .τ
-  | .r2 id      => do AbstractModel.Rules.taskFulfillment id now; return .τ
-  | .r3 id a    => do AbstractModel.Rules.notify id a now; return .τ
-  | .r4 id x    => do AbstractModel.Rules.resume id x now; return .τ
-  | .r5 id      => do AbstractModel.Rules.leaseExpiry id now; return .τ
-  | .r6 id next => do AbstractModel.Rules.dispatch id next now; return .τ
-  | .r7 id      => do AbstractModel.Rules.scheduleFire id now; return .τ
+  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .τ
+  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .τ
+  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .τ
+  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .τ
+  | .r6 id next => do AbstractModel.Internal.processRetryTimeout id next now; return .τ
+  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
   | .idle       => return .τ
 
 def stepOfA (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :
@@ -152,25 +152,24 @@ def SameObservationCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
     (∀ s, (tr' s).req.isExternal = true →
       ∃ t, (tr t).req.isExternal = true ∧ φ t = s)
 
-/-- Quiescence, abstract side: materialize every fact (R1, R2 over all
-    objects), then drain every retained obligation (R3 per listener,
-    R4 per awaiter — each wake immediately dispatched, mirroring the
-    concrete drain's inline emission). -/
+/-- Quiescence, abstract side: materialize every fact (R1 over all
+    promises — the coupled write carries fact T to the task pairs, so
+    there is nothing left for a fulfillment rule to do), then drain
+    every retained obligation (R3 per listener, R4 per awaiter — each
+    wake immediately dispatched, mirroring the concrete drain's inline
+    emission). -/
 def absQuiesce (retry : Nat) (now : Nat) : AbstractModel.M Unit := do
   let pids := (← get).promises.map (·.id)
   for id in pids do
-    AbstractModel.Rules.promiseTimeout id now
-  let tids := (← get).tasks.map (·.id)
-  for id in tids do
-    AbstractModel.Rules.taskFulfillment id now
+    AbstractModel.Internal.processPromiseTimeout id now
   let ps := (← get).promises
   for p in ps do
     if p.state != .pending then
       for a in p.listeners do
-        AbstractModel.Rules.notify p.id a now
+        AbstractModel.Internal.processListener p.id a now
       for c in p.callbacks do
-        AbstractModel.Rules.resume p.id c now
-        AbstractModel.Rules.dispatch c (now + retry) now
+        AbstractModel.Internal.processCallback p.id c now
+        AbstractModel.Internal.processRetryTimeout c (now + retry) now
 
 def absQuiesced (retry : Nat) (now : Nat) (s : AbstractModel.ServerState) :
     AbstractModel.ServerState :=

@@ -1,60 +1,10 @@
 import «01-protocol».«validation»
 
-/-!  # The coalesced machine — state
-
-A second, more abstract specification of the Resonate protocol. Same wire
-types, same request/response behavior at the API — a different machine:
-
-* **No timeout components.** The base machine mirrors every deadline into
-  an armed-timeout set (`promiseTimeouts`, `taskTimeouts`,
-  `scheduleTimeouts`). Here a deadline lives only on the object that owns
-  it — `timeoutAt` on the promise, `expiresAt` on the task,
-  `nextRunAt` on the schedule — and every internal transition is a
-  guarded rule of the form *"if there is a promise past its deadline …"*.
-
-* **No deferred set.** The base machine moves a settled promise's
-  callbacks into a `deferred` queue and drains it. Here settlement writes
-  the promise's state and nothing else: awaiters and listeners STAY ON
-  THE PROMISE until batch rules (`Rules.resume`, `Rules.notify`) drain
-  them, one to all at a time.
-
-* **No projection.** The base machine serves a logical view of a
-  timed-out promise without persisting it. Here there is no logical view:
-  every time a handler touches an object it MATERIALIZES the facts that
-  are forced at that instant, then reads the stored state.
-
-Two facts are forced (monotone consequences of the state, no choice
-involved), and touching applies them:
-
-  fact P   a pending promise past `timeoutAt` is settled — `resolved`
-           for timers, `rejectedTimedout` otherwise — stamped at the
-           deadline.  Derivable from the promise alone; applied by
-           `touchPromise`.
-  fact T   the task of a settled promise is fulfilled.  Derivable from
-           the task and its promise jointly; applied by `touchTask`.
-
-Everything else — waking awaiters, notifying listeners, expiring leases,
-dispatching executes, firing schedules — is a scheduling CHOICE, and
-choices are never applied on touch: they are the internal rules of
-`rules.lean`, fired by the environment at its own pace.
-
-Retaining awaiters and listeners across settlement is what makes
-materialization-on-touch sound: flipping a promise's state on a read
-commits no notification atomically, because the obligations remain
-recorded on the object and the batch rules discharge them later.
-
-Wire records, request and response types, and the tag algebra are shared
-with the base spec (`01-protocol/types.lean`) — the protocol surface is
-identical, only the machine behind it differs.  -/
-
 namespace AbstractModel
 
 open ServerModel (Tags Value PromiseState TaskState PromiseRecord
-                  TaskRecord Schedule Message OutboxEntry)
+                  TaskRecord Schedule Message OutboxEntry PromiseCreateReq)
 
-/-- Same shape as the base machine's promise object. The difference is
-    dynamic, not structural: `callbacks` and `listeners` survive
-    settlement here, drained later in batches. -/
 structure PromiseObject where
   id        : String
   state     : PromiseState
@@ -91,16 +41,6 @@ def PromiseObject.addListener (p : PromiseObject) (address : String) : PromiseOb
   else
     { p with listeners := p.listeners ++ [address] }
 
-/-- Fact P, as a pure function — the PROJECTION, same formula as the
-    concrete machine's. Stamped AT THE DEADLINE, so the record is
-    byte-identical to the one the concrete timeout transition writes.
-    Awaiters and listeners are untouched: settlement records the fact,
-    the drain rules discharge the obligations.
-
-    The two read disciplines are the two uses of this one function:
-    the projected handlers (`p.lean`) SERVE it, the materialized
-    handlers (`m.lean`) PERSIST it (`touchPromise`). Materialization is
-    projection, written down. -/
 def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
   if p.state == .pending ∧ p.timeoutAt ≤ now then
     if p.isTimer then
@@ -110,17 +50,6 @@ def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
   else
     p
 
-/-- The base machine's task object plus its two deadlines, which the
-    base machine keeps in its `taskTimeouts` component: `expiresAt`, the
-    absolute lease deadline (kind 1), and `retryAt`, the instant the
-    next dispatch of the task's `execute` is due (kind 0 — seeded by the
-    `resonate:delay` tag at creation, reset to `now` by every transition
-    that re-pends the task, re-armed by the dispatch rule itself). With
-    the deadlines on the object, lease expiry and dispatch need no
-    auxiliary state — their rules guard on the task alone.
-
-    Both are guard data for CHOICES (R5, R6), never facts: neither is
-    materialized on touch. -/
 structure TaskObject where
   id        : String
   state     : TaskState
@@ -136,20 +65,13 @@ def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
   { id := t.id, state := t.state, version := t.version,
     resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
 
-/-- Fact T, on the task side: the fulfilled form. Byte-identical to what
-    the base machine's settle and timeout transitions write. -/
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
   { t with state := .fulfilled, pid := none, ttl := none,
            expiresAt := none, retryAt := none, resumes := [] }
 
-/-- Fact T, as a pure function: the task of a settled promise, read as
-    fulfilled. Served by the projected discipline, persisted by
-    `touchTask`. -/
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
   if p.state != .pending ∧ t.state != .fulfilled then t.fulfill else t
 
-/-- Four components. No config (no retry cadence — dispatch is a rule the
-    environment fires at will), no timeout sets, no deferred queue. -/
 structure ServerState where
   promises  : List PromiseObject := []
   tasks     : List TaskObject    := []
@@ -188,25 +110,6 @@ def setMessage (address : String) (msg : Message) : M Unit :=
     let key   := entry.key
     { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
 
-/-- THE COUPLED WRITE. Fact T is not an independent fact — it is fact
-    P seen through the task, made true by the same event. So the two
-    objects are written TOGETHER: any transition that stores a settled
-    promise stores its co-keyed task as fulfilled, in the same step.
-
-    This is the storage invariant, maintained by construction:
-
-      stored promise settled  ⟺  stored co-keyed task fulfilled
-
-    Every transition that settles an EXISTING promise goes through
-    here; the creation paths (`promise.create`, `task.create` on an
-    already-expired deadline) write the fulfilled task explicitly, in
-    the same step, so they maintain the invariant too. The write set
-    is still `{p.id}`: the task shares the promise's id.
-
-    Without the coupling the machine can store a settled promise over
-    an acquired task — a state no implementation should ever persist
-    (a database settling a promise must fulfill the task in the same
-    transaction), and one the concrete machine never reaches. -/
 def setSettled (p : PromiseObject) : M Unit := do
   setPromise p
   if p.state != .pending then
@@ -214,11 +117,43 @@ def setSettled (p : PromiseObject) : M Unit := do
     | some t => if t.state != .fulfilled then setTask t.fulfill
     | none => pure ()
 
-/-- THE TOUCH, promise side: read a promise and materialize fact P —
-    and, through `setSettled`, fact T along with it. Handlers never
-    call `getPromise` directly — every promise a handler consults
-    arrives through here, so no guard and no response ever sees a
-    pending promise past its deadline. -/
+def createPromise (req : PromiseCreateReq) (now : Nat) : M PromiseObject := do
+  if req.timeoutAt > now then
+    let p : PromiseObject :=
+      { id := req.id
+        state := .pending
+        param := req.param
+        tags := req.tags
+        timeoutAt := req.timeoutAt
+        createdAt := now }
+    setPromise p
+    if p.tags.has "resonate:target" then
+      let due :=
+        match p.tags.get? "resonate:delay" with
+        | some d => max (ServerModel.parseNat d) now
+        | none => now
+      setTask { id := p.id, state := .pending, version := 0,
+                retryAt := some due }
+    return p
+  else
+    let state :=
+      if req.tags.isTimer then
+        PromiseState.resolved
+      else
+        PromiseState.rejectedTimedout
+    let p : PromiseObject :=
+      { id := req.id
+        state := state
+        param := req.param
+        tags := req.tags
+        timeoutAt := req.timeoutAt
+        createdAt := req.timeoutAt
+        settledAt := some req.timeoutAt }
+    setPromise p
+    if p.tags.has "resonate:target" then
+      setTask { id := p.id, state := .fulfilled, version := 0 }
+    return p
+
 def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
   match ← getPromise id with
   | none => return none
@@ -228,11 +163,14 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
         setSettled p'
       return some p'
 
-/-- THE PROJECTED READ, promise side: fact P served, nothing stored. -/
+def createIfAbsent (req : PromiseCreateReq) (now : Nat) : M Unit := do
+  match ← touchPromise req.id now with
+  | some _ => pure ()
+  | none   => let _ ← createPromise req now
+
 def viewPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
   return (← getPromise id).map (·.project now)
 
-/-- THE PROJECTED READ, task side: fact P then fact T, served. -/
 def viewTask (id : String) (now : Nat) :
     M (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
@@ -244,8 +182,6 @@ def viewTask (id : String) (now : Nat) :
       let p := p.project now
       return some (t.view p, some p)
 
-/-- THE TOUCH, task side: read a task together with its promise and
-    materialize fact P then fact T — `viewTask`, persisted. -/
 def touchTask (id : String) (now : Nat) :
     M (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with

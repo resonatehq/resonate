@@ -19,6 +19,29 @@ def Tags.has (t : Tags) (k : String) : Bool :=
 def Tags.isTimer (t : Tags) : Bool :=
   t.get? "resonate:timer" == some "true"
 
+/-- A TIMER IS NEVER TARGETED. The two tags name incompatible things:
+    `resonate:target` says a worker owns this promise's execution, and
+    the machine gives it a task to carry that execution; `resonate:timer`
+    says nothing executes it at all — it resolves when its deadline
+    arrives, and that is its whole life. A promise carrying both would
+    be handed a task no worker should ever run.
+
+    Malformed, therefore, and refused at every door a promise can be
+    born through — `promise.create`, `task.create`, and `schedule.create`
+    (whose `promiseTags` become its occurrences' tags, so an unchecked
+    schedule would smuggle the combination past the other two).
+    `task.fence` needs no guard of its own: its create action is
+    `promise.create`, and the inner refusal is what it reports.
+
+    With the combination refused, `task.create` faces no timers: its
+    `resonate:target` requirement and this rule are exclusive, so a task
+    is never born onto a timer promise and the birth verdict there is
+    `rejectedTimedout`, with no `isTimer` case to answer for. Fact P's
+    timer verdict remains where it is reachable — a timer, untargeted,
+    born or timing out past its deadline, which has no task at all. -/
+def Tags.timerTargeted (t : Tags) : Bool :=
+  t.isTimer && t.has "resonate:target"
+
 /-- The terminal states a client may settle into. `pending` is not a
     settlement, and `rejectedTimedout` is server-owned: only the timeout
     path writes it, so a client can never forge one. -/

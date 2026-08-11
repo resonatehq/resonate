@@ -5,8 +5,8 @@ import «04-theorems».«abstract-twins»
 Four machines, one protocol surface:
 
                  concrete state          coalesced state
-  projection     03-concrete/p           02-abstract/p.lean
-  materialized   03-concrete/m           02-abstract/m.lean
+  projection     03-concrete/p           02-abstract/external-steps-p.lean
+  materialized   03-concrete/m           02-abstract/external-steps-m.lean
 
 and four relations:
 
@@ -14,6 +14,16 @@ and four relations:
   * `IndistinguishableAbstract`            — Ap ≈ Am   (abstract-twins.lean)
   * `ConcreteRefinesAbstract`              — Cm ⊑ Am   (refinement.lean)
   * `AbstractRefinesConcrete` (this file)  — Am ⊑ Cm
+
+The two levels file their internal steps differently, and the layout
+says so. At the coalesced level they are SHARED — one
+`02-abstract/internal-steps.lean`, no `-p`/`-m`, because the read
+discipline splits the external steps and nothing else. At the concrete
+level each discipline carries its own copies (`03-concrete/{p,m}/`
+hold `02-timeouts.lean` and `03-resume.lean` alongside their handlers),
+because there the τs move obligation records and the disciplines see
+different ones — which is exactly why response lockstep fails at the
+concrete level (`lockstep.lean`) and holds at the abstract one.
 
 `TheSquare` is their conjunction. By composition it places ALL FOUR
 machines in one weak-bisimilarity class with respect to the two
@@ -46,12 +56,13 @@ concrete script `w` against its translation — is equally a witness
 that the abstract trace's behavior is realized by a concrete trace;
 that covers every abstract schedule in the translation's image
 (battery plus exhaustive sweep). The pairs below cover the
-abstract-native steps OUTSIDE that image: the standalone fact rules
-R2 and R3, the wake pair R4;R6, and a fact-lagged internal promise.  -/
+abstract-native steps OUTSIDE that image: the standalone listener rule
+R3, the wake pair R4;R6, a fact-lagged internal promise, and the
+coupled write standing where a fulfillment rule used to.  -/
 
 namespace Abstraction
 
-open Equivalence (Request Response extTags tgtTags eqSet)
+open Equivalence (Request Response extTags tgtTags timerTags eqSet)
 
 /-- Same externalized behavior, abstract trace realized by a concrete
     trace: every external abstract step `.api rq` lands, order-
@@ -114,6 +125,55 @@ example : lastStatus (Equivalence.runFin Equivalence.handleM wListen).1 = some 4
 example : lastStatus (runFinA wListenA).1 = some 422 := by decide
 example : lastStatus (runFinAP wListenA).1 = some 422 := by decide
 
+/-! ### A timer is never targeted, witnessed in all four machines
+
+`resonate:timer` says nothing executes this promise — it resolves when
+its deadline arrives, and that is its whole life. `resonate:target`
+says a worker owns its execution, and earns it a task. A promise
+carrying both would be handed a task no worker should run, so it is
+malformed: `400` at every door a promise can be born through.
+
+`schedule.create` is a door because its `promiseTags` become its
+occurrences' tags, and R7 creates those without a handler in the way —
+unchecked, it was the way past the other two. `task.fence` needs no
+witness: its create action IS `promise.create`, and it reports the
+inner refusal. -/
+
+def timerTgtTags : ServerModel.Tags :=
+  [("resonate:target", "w1"), ("resonate:timer", "true")]
+
+def createStatus (rs : List Response) : Option Nat :=
+  match rs.getLast? with
+  | some (.promiseCreate r)  => some r.status
+  | some (.taskCreate r)     => some r.status
+  | some (.scheduleCreate r) => some r.status
+  | _                        => none
+
+/-- All four machines refuse it, on the same request, with the same code. -/
+def refusedEverywhere (w : List (Request × Nat)) : Bool :=
+  let wA := w.map (fun (rq, n) => (AStep.api rq, n))
+  createStatus (Equivalence.runFin Equivalence.handleP w).1 == some 400
+    && createStatus (Equivalence.runFin Equivalence.handleM w).1 == some 400
+    && createStatus (runFinA wA).1 == some 400
+    && createStatus (runFinAP wA).1 == some 400
+
+def wTimerPromise : List (Request × Nat) :=
+  [ (.promiseCreate { id := "tt", timeoutAt := 1000, param := {}, tags := timerTgtTags }, 100) ]
+
+def wTimerTask : List (Request × Nat) :=
+  [ (.taskCreate { pid := "p0", ttl := 100,
+                   action := { id := "tt", timeoutAt := 1000, param := {},
+                               tags := timerTgtTags } }, 100) ]
+
+def wTimerSchedule : List (Request × Nat) :=
+  [ (.scheduleCreate { id := "s", cron := "* * * * *", promiseId := "tt",
+                       promiseTimeout := 1000, promiseParam := {},
+                       promiseTags := timerTgtTags }, 100) ]
+
+example : refusedEverywhere wTimerPromise := by decide
+example : refusedEverywhere wTimerTask := by decide
+example : refusedEverywhere wTimerSchedule := by decide
+
 /-! ### The paired witnesses, abstract-native steps -/
 
 /-- The normalizing comparator: both sides closed under the
@@ -147,14 +207,16 @@ def q2A : List (AStep × Nat) :=
 
 example : pairCheck q2C q2A 300 := by decide
 
--- R2, standalone: the concrete settle fulfills the task inline; the
--- abstract machine fulfills by rule.
+-- The coupled write, standalone: both machines fulfill the task in the
+-- settling step itself, so the abstract script needs NO rule after the
+-- settle. This is the witness that the deleted R2 was redundant — where
+-- it used to be appended here, nothing is, and the pair still closes.
 def q3C : List (Request × Nat) :=
   [ (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }, 100),
     (.promiseSettle { id := "x", state := .resolved, value := {} }, 200) ]
 
 def q3A : List (AStep × Nat) :=
-  (q3C.map (fun (rq, n) => (AStep.api rq, n))) ++ [(.r2 "x", 200)]
+  q3C.map (fun (rq, n) => (AStep.api rq, n))
 
 example : pairCheck q3C q3A 300 := by decide
 
@@ -189,5 +251,17 @@ def q5A : List (AStep × Nat) :=
     (.r1 "i", 300) ]
 
 example : pairCheck q5C q5A 400 := by decide
+
+-- Fact P AT BIRTH, timer verdict: a timer created past its own deadline
+-- is born `resolved`, not `rejectedTimedout`. Reachable only untargeted
+-- — a targeted timer is `400` above — so this promise has no task at
+-- all, and this is the only script in the tree that reaches the verdict.
+def q6C : List (Request × Nat) :=
+  [ (.promiseCreate { id := "tm", timeoutAt := 250, param := {}, tags := timerTags }, 300),
+    (.promiseGet { id := "tm" }, 300) ]
+
+def q6A : List (AStep × Nat) := q6C.map (fun (rq, n) => (AStep.api rq, n))
+
+example : pairCheck q6C q6A 400 := by decide
 
 end Abstraction
