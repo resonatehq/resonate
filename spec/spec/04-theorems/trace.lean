@@ -66,21 +66,23 @@ one machine stutter where the other has already acted.  -/
 namespace Equivalence
 
 open ServerModel
+open ConcreteModel
+open ConcreteModel.P
 
 deriving instance BEq for ServerModel.Value
 deriving instance BEq for ServerModel.PromiseRecord
 deriving instance BEq for ServerModel.TaskRecord
-deriving instance BEq for ServerModel.PromiseObject
-deriving instance BEq for ServerModel.TaskObject
+deriving instance BEq for ConcreteModel.PromiseObject
+deriving instance BEq for ConcreteModel.TaskObject
 deriving instance BEq for ServerModel.Schedule
 deriving instance BEq for ServerModel.ResumeReq
-deriving instance BEq for ServerModel.PromiseTimeout
-deriving instance BEq for ServerModel.TaskTimeout
-deriving instance BEq for ServerModel.ScheduleTimeout
+deriving instance BEq for ConcreteModel.PromiseTimeout
+deriving instance BEq for ConcreteModel.TaskTimeout
+deriving instance BEq for ConcreteModel.ScheduleTimeout
 deriving instance BEq for ServerModel.Message
 deriving instance BEq for ServerModel.OutboxEntry
-deriving instance BEq for ServerModel.ServerConfig
-deriving instance BEq for ServerModel.ServerState
+deriving instance BEq for ConcreteModel.ServerConfig
+deriving instance BEq for ConcreteModel.ServerState
 deriving instance BEq for ServerModel.ResumeRes
 deriving instance BEq for ServerModel.PromiseGetRes
 deriving instance BEq for ServerModel.PromiseCreateRes
@@ -226,45 +228,45 @@ def handleP (rq : Request) (now : Nat) : H Response :=
 /-- The materialized machine's step: dispatch to the -m handlers. -/
 def handleM (rq : Request) (now : Nat) : H Response :=
   match rq with
-  | .promiseGet req              => Response.promiseGet <$> Materialized.promiseGet req now
-  | .promiseCreate req           => Response.promiseCreate <$> Materialized.promiseCreate req now
-  | .promiseSettle req           => Response.promiseSettle <$> Materialized.promiseSettle req now
-  | .promiseRegisterCallback req => Response.promiseRegisterCallback <$> Materialized.promiseRegisterCallback req now
-  | .promiseRegisterListener req => Response.promiseRegisterListener <$> Materialized.promiseRegisterListener req now
-  | .promiseSearch req           => Response.promiseSearch <$> Materialized.promiseSearch req now
-  | .scheduleGet req             => Response.scheduleGet <$> Materialized.scheduleGet req now
-  | .scheduleCreate req          => Response.scheduleCreate <$> Materialized.scheduleCreate req now
-  | .scheduleDelete req          => Response.scheduleDelete <$> Materialized.scheduleDelete req now
-  | .scheduleSearch req          => Response.scheduleSearch <$> Materialized.scheduleSearch req now
-  | .taskGet req                 => Response.taskGet <$> Materialized.taskGet req now
-  | .taskCreate req              => Response.taskCreate <$> Materialized.taskCreate req now
-  | .taskAcquire req             => Response.taskAcquire <$> Materialized.taskAcquire req now
-  | .taskFence req               => Response.taskFence <$> Materialized.taskFence req now
-  | .taskHeartbeat req           => Response.taskHeartbeat <$> Materialized.taskHeartbeat req now
-  | .taskSuspend req             => Response.taskSuspend <$> Materialized.taskSuspend req now
-  | .taskFulfill req             => Response.taskFulfill <$> Materialized.taskFulfill req now
-  | .taskRelease req             => Response.taskRelease <$> Materialized.taskRelease req now
-  | .taskHalt req                => Response.taskHalt <$> Materialized.taskHalt req now
-  | .taskContinue req            => Response.taskContinue <$> Materialized.taskContinue req now
-  | .taskSearch req              => Response.taskSearch <$> Materialized.taskSearch req now
+  | .promiseGet req              => Response.promiseGet <$> ConcreteModel.M.promiseGet req now
+  | .promiseCreate req           => Response.promiseCreate <$> ConcreteModel.M.promiseCreate req now
+  | .promiseSettle req           => Response.promiseSettle <$> ConcreteModel.M.promiseSettle req now
+  | .promiseRegisterCallback req => Response.promiseRegisterCallback <$> ConcreteModel.M.promiseRegisterCallback req now
+  | .promiseRegisterListener req => Response.promiseRegisterListener <$> ConcreteModel.M.promiseRegisterListener req now
+  | .promiseSearch req           => Response.promiseSearch <$> ConcreteModel.M.promiseSearch req now
+  | .scheduleGet req             => Response.scheduleGet <$> ConcreteModel.M.scheduleGet req now
+  | .scheduleCreate req          => Response.scheduleCreate <$> ConcreteModel.M.scheduleCreate req now
+  | .scheduleDelete req          => Response.scheduleDelete <$> ConcreteModel.M.scheduleDelete req now
+  | .scheduleSearch req          => Response.scheduleSearch <$> ConcreteModel.M.scheduleSearch req now
+  | .taskGet req                 => Response.taskGet <$> ConcreteModel.M.taskGet req now
+  | .taskCreate req              => Response.taskCreate <$> ConcreteModel.M.taskCreate req now
+  | .taskAcquire req             => Response.taskAcquire <$> ConcreteModel.M.taskAcquire req now
+  | .taskFence req               => Response.taskFence <$> ConcreteModel.M.taskFence req now
+  | .taskHeartbeat req           => Response.taskHeartbeat <$> ConcreteModel.M.taskHeartbeat req now
+  | .taskSuspend req             => Response.taskSuspend <$> ConcreteModel.M.taskSuspend req now
+  | .taskFulfill req             => Response.taskFulfill <$> ConcreteModel.M.taskFulfill req now
+  | .taskRelease req             => Response.taskRelease <$> ConcreteModel.M.taskRelease req now
+  | .taskHalt req                => Response.taskHalt <$> ConcreteModel.M.taskHalt req now
+  | .taskContinue req            => Response.taskContinue <$> ConcreteModel.M.taskContinue req now
+  | .taskSearch req              => Response.taskSearch <$> ConcreteModel.M.taskSearch req now
   | .τPromiseTimeout id => do
       if (← get).promiseTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Materialized.Timeouts.processPromiseTimeout id now
+        ConcreteModel.M.Timeouts.processPromiseTimeout id now
       return .τ
   | .τTaskRetryTimeout id => do
-      Materialized.Timeouts.processRetryTimeout id now
+      ConcreteModel.M.Timeouts.processRetryTimeout id now
       return .τ
   | .τTaskLeaseTimeout id => do
-      Materialized.Timeouts.processLeaseTimeout id now
+      ConcreteModel.M.Timeouts.processLeaseTimeout id now
       return .τ
   | .τScheduleTimeout id => do
       if (← get).scheduleTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Materialized.Timeouts.processSchedule id now
+        ConcreteModel.M.Timeouts.processSchedule id now
       return .τ
   | .τResume req => do
       if (← get).deferred.any (fun d => d.awaited == req.awaited && d.awaiter == req.awaiter) then
         undefer req
-        Response.resume <$> Materialized.processResume req now
+        Response.resume <$> ConcreteModel.M.processResume req now
       else
         return .τ
   | .idle => return .τ

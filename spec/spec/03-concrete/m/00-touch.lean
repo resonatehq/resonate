@@ -18,7 +18,8 @@ responses, and the extra writes hide inside the touch.  -/
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 /-- Fire the anticipated promise-timeout transition, then read. The
     materialization body is -p's `processPromiseTimeout`, verbatim. -/
@@ -55,4 +56,5 @@ def touchTask (id : String) (now : Nat) :
   | none => return some (t, some p)
   | some t => return some (t, some p)
 
-end Materialized
+end M
+end ConcreteModel

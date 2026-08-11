@@ -47,7 +47,7 @@ first two capture attempts were rejected. -/
 
 namespace TraceCheck.Real
 
-open ServerModel TraceCheck
+open ServerModel ConcreteModel ConcreteModel.P TraceCheck
 
 def aTags : Tags := [("resonate:external", "true"), ("resonate:origin", "o1")]
 def xTags : Tags := [("resonate:origin", "o1"), ("resonate:target", "poll://any@w1")]

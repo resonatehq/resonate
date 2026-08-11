@@ -23,7 +23,7 @@ regardless of how long the trace is. -/
 
 namespace TraceCheck.Experiments
 
-open ServerModel Equivalence TraceCheck TraceCheck.Intervals
+open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Intervals
 
 def ext : Tags := [("resonate:external", "true")]
 def tgt : Tags := [("resonate:target", "w1")]

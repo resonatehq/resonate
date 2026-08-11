@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
   match ← getTask req.id with
   | none =>
@@ -15,3 +18,6 @@ def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
         return { status := 200, task := some t.toRecord }
       else
         return { status := 200, task := some ({ t with state := .fulfilled, pid := none, ttl := none, resumes := [] }).toRecord }
+
+end P
+end ConcreteModel

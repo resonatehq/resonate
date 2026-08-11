@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
@@ -60,4 +61,5 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
         | none =>
             return { status := 409 }
 
-end Materialized
+end M
+end ConcreteModel

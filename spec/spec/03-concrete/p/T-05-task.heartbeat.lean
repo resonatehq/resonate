@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := do
   for ref in req.tasks do
     match ← getTask ref.id with
@@ -17,3 +20,6 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := d
           | none =>
               pure ()
   return { status := 200 }
+
+end P
+end ConcreteModel

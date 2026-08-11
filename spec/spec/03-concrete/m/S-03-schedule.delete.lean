@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes := do
   match ← getSchedule req.id with
@@ -13,4 +14,5 @@ def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes 
       delScheduleTimeout s.id
       return { status := 200 }
 
-end Materialized
+end M
+end ConcreteModel

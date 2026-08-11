@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def processResume (req : ResumeReq) (now : Nat) : H ResumeRes := do
   match ← touchTask req.awaiter now with
@@ -42,4 +43,5 @@ def step {α} (act : H α) (now : Nat) : H α := do
   drain now
   return res
 
-end Materialized
+end M
+end ConcreteModel

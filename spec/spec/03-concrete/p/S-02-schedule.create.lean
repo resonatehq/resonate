@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes := do
   if req.promiseTags.timerTargeted then
     return { status := 400 }
@@ -22,3 +25,6 @@ def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes :
       setSchedule s
       setScheduleTimeout s.id s.nextRunAt
       return { status := 200, schedule := some s }
+
+end P
+end ConcreteModel

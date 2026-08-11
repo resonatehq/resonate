@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
   match ← touchTask req.id now with
@@ -23,4 +24,5 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
       setTaskTimeout t.id 1 (now + req.ttl)
       return { status := 200, task := some t.toRecord, promise := some p.toRecord }
 
-end Materialized
+end M
+end ConcreteModel

@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes := do
   match ← getSchedule req.id with
   | none =>
@@ -10,3 +13,6 @@ def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes 
       delSchedule s.id
       delScheduleTimeout s.id
       return { status := 200 }
+
+end P
+end ConcreteModel

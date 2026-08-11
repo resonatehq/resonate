@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   if req.actions.isEmpty then
@@ -48,4 +49,5 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
         delTaskTimeout t.id
         return { status := 200 }
 
-end Materialized
+end M
+end ConcreteModel

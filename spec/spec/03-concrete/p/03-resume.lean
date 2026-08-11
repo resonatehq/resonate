@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def processResume (req : ResumeReq) (now : Nat) : H ResumeRes := do
   let some t ← getTask req.awaiter    | return { outcome := .absent }
   let some p ← getPromise req.awaiter | return { outcome := .absent }
@@ -35,3 +38,6 @@ def step {α} (act : H α) (now : Nat) : H α := do
   let res ← act
   drain now
   return res
+
+end P
+end ConcreteModel

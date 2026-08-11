@@ -55,7 +55,7 @@ filter-then-prepend on a key). -/
 
 namespace TraceCheck
 
-open ServerModel Equivalence
+open ServerModel ConcreteModel ConcreteModel.P Equivalence
 
 /-! ## Canonicalisation -/
 

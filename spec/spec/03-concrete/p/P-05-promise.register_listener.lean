@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 /-- Listeners, like callbacks, attach only to EXTERNAL promises: only
     external promises carry an armed timeout, so only they can
     guarantee the notification is ever sent. An internal awaited is
@@ -23,3 +26,6 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : H P
         return { status := 200, promise := some pAwaited.toRecord }
       else
         return { status := 200, promise := some (pAwaited.project now).toRecord }
+
+end P
+end ConcreteModel

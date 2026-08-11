@@ -61,7 +61,7 @@ open Equivalence (Request Response eqSet)
     configuration. Quiescence closure is insensitive to it (R6's re-arm
     parameter never changes the message it emits), but it takes the
     same value so the two never drift apart. -/
-abbrev defaultRetry : Nat := ServerModel.ServerState.init.config.retryTimeout
+abbrev defaultRetry : Nat := ConcreteModel.ServerState.init.config.retryTimeout
 
 /-- The abstract machine's alphabet: the same external requests, plus
     its six rules with their scheduler-chosen parameters. The gap at
@@ -86,27 +86,27 @@ def AStep.isExternal : AStep → Bool
     concrete machine — the protocol surface is shared. -/
 def handleA (st : AStep) (now : Nat) : AbstractModel.H Response :=
   match st with
-  | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.promiseGet req now
-  | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.promiseCreate req now
-  | .api (.promiseSettle req)           => Response.promiseSettle <$> AbstractModel.promiseSettle req now
-  | .api (.promiseRegisterCallback req) => Response.promiseRegisterCallback <$> AbstractModel.promiseRegisterCallback req now
-  | .api (.promiseRegisterListener req) => Response.promiseRegisterListener <$> AbstractModel.promiseRegisterListener req now
-  | .api (.promiseSearch req)           => Response.promiseSearch <$> AbstractModel.promiseSearch req now
-  | .api (.scheduleGet req)             => Response.scheduleGet <$> AbstractModel.scheduleGet req now
-  | .api (.scheduleCreate req)          => Response.scheduleCreate <$> AbstractModel.scheduleCreate req now
-  | .api (.scheduleDelete req)          => Response.scheduleDelete <$> AbstractModel.scheduleDelete req now
-  | .api (.scheduleSearch req)          => Response.scheduleSearch <$> AbstractModel.scheduleSearch req now
-  | .api (.taskGet req)                 => Response.taskGet <$> AbstractModel.taskGet req now
-  | .api (.taskCreate req)              => Response.taskCreate <$> AbstractModel.taskCreate req now
-  | .api (.taskAcquire req)             => Response.taskAcquire <$> AbstractModel.taskAcquire req now
-  | .api (.taskFence req)               => Response.taskFence <$> AbstractModel.taskFence req now
-  | .api (.taskHeartbeat req)           => Response.taskHeartbeat <$> AbstractModel.taskHeartbeat req now
-  | .api (.taskSuspend req)             => Response.taskSuspend <$> AbstractModel.taskSuspend req now
-  | .api (.taskFulfill req)             => Response.taskFulfill <$> AbstractModel.taskFulfill req now
-  | .api (.taskRelease req)             => Response.taskRelease <$> AbstractModel.taskRelease req now
-  | .api (.taskHalt req)                => Response.taskHalt <$> AbstractModel.taskHalt req now
-  | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.taskContinue req now
-  | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.taskSearch req now
+  | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.M.promiseGet req now
+  | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.M.promiseCreate req now
+  | .api (.promiseSettle req)           => Response.promiseSettle <$> AbstractModel.M.promiseSettle req now
+  | .api (.promiseRegisterCallback req) => Response.promiseRegisterCallback <$> AbstractModel.M.promiseRegisterCallback req now
+  | .api (.promiseRegisterListener req) => Response.promiseRegisterListener <$> AbstractModel.M.promiseRegisterListener req now
+  | .api (.promiseSearch req)           => Response.promiseSearch <$> AbstractModel.M.promiseSearch req now
+  | .api (.scheduleGet req)             => Response.scheduleGet <$> AbstractModel.M.scheduleGet req now
+  | .api (.scheduleCreate req)          => Response.scheduleCreate <$> AbstractModel.M.scheduleCreate req now
+  | .api (.scheduleDelete req)          => Response.scheduleDelete <$> AbstractModel.M.scheduleDelete req now
+  | .api (.scheduleSearch req)          => Response.scheduleSearch <$> AbstractModel.M.scheduleSearch req now
+  | .api (.taskGet req)                 => Response.taskGet <$> AbstractModel.M.taskGet req now
+  | .api (.taskCreate req)              => Response.taskCreate <$> AbstractModel.M.taskCreate req now
+  | .api (.taskAcquire req)             => Response.taskAcquire <$> AbstractModel.M.taskAcquire req now
+  | .api (.taskFence req)               => Response.taskFence <$> AbstractModel.M.taskFence req now
+  | .api (.taskHeartbeat req)           => Response.taskHeartbeat <$> AbstractModel.M.taskHeartbeat req now
+  | .api (.taskSuspend req)             => Response.taskSuspend <$> AbstractModel.M.taskSuspend req now
+  | .api (.taskFulfill req)             => Response.taskFulfill <$> AbstractModel.M.taskFulfill req now
+  | .api (.taskRelease req)             => Response.taskRelease <$> AbstractModel.M.taskRelease req now
+  | .api (.taskHalt req)                => Response.taskHalt <$> AbstractModel.M.taskHalt req now
+  | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.M.taskContinue req now
+  | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.M.taskSearch req now
   -- a concrete-internal request arriving as `.api` is a stutter; the
   -- translation never produces one
   | .api _                              => return .τ
@@ -188,7 +188,7 @@ def SameMessagesCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
 /-- **THE CLAIM: the concrete machine refines the abstract machine.**
     (Stated at -m; -p inherits it through the twins' bisimulation.) -/
 def ConcreteRefinesAbstract : Prop :=
-  ∀ tr, Equivalence.ValidM tr → (tr 0).state = ServerModel.ServerState.init →
+  ∀ tr, Equivalence.ValidM tr → (tr 0).state = ConcreteModel.ServerState.init →
     ∃ tr', ValidA tr' ∧ (tr' 0).state = AbstractModel.ServerState.init ∧
       SameObservationCA tr tr' ∧ SameMessagesCA tr tr'
 

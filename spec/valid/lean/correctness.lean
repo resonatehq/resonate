@@ -82,7 +82,7 @@ side-condition. -/
 
 namespace TraceCheck.Correctness
 
-open ServerModel Equivalence TraceCheck
+open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck
 
 /-! ## Validity — reusing the specification's own definition -/
 

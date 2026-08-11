@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
   if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
@@ -61,3 +64,6 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
                      promise := some (p.project now).toRecord }
         | none =>
             return { status := 409 }
+
+end P
+end ConcreteModel

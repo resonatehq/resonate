@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
   match ← getTask req.id with
   | none =>
@@ -22,3 +25,6 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
       delTaskTimeout t.id
       setTaskTimeout t.id 1 (now + req.ttl)
       return { status := 200, task := some t.toRecord, promise := some p.toRecord }
+
+end P
+end ConcreteModel

@@ -1,7 +1,7 @@
 import «02-abstract».«state»
 
 namespace AbstractModel
-namespace Projected
+namespace P
 
 open ServerModel (PromiseState
                   PromiseGetReq PromiseGetRes
@@ -382,5 +382,5 @@ def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes 
 def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : H ScheduleSearchRes := do
   return { status := 501 }
 
-end Projected
+end P
 end AbstractModel

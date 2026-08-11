@@ -30,9 +30,9 @@ open ServerModel (PromiseState)
 /-- The lazy schedule: -p's script with its silent internal steps made
     literally silent. External steps are never touched. -/
 def lazySchedule (w : List (Request × Nat)) : List (Request × Nat) :=
-  go w ServerModel.ServerState.init
+  go w ConcreteModel.ServerState.init
 where
-  go : List (Request × Nat) → ServerModel.ServerState → List (Request × Nat)
+  go : List (Request × Nat) → ConcreteModel.ServerState → List (Request × Nat)
     | [], _ => []
     | (rq, n) :: rest, s =>
         let s' := (stepOf handleP rq n s).2

@@ -82,8 +82,8 @@ def SameMessages (tr tr' : Trace) : Prop :=
     -p fires, as explicit τs, exactly the materializations -m performs
     inside its touches. -/
 def MRefinesP : Prop :=
-  ∀ tr, ValidM tr → (tr 0).state = ServerModel.ServerState.init →
-    ∃ tr', ValidP tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
+  ∀ tr, ValidM tr → (tr 0).state = ConcreteModel.ServerState.init →
+    ∃ tr', ValidP tr' ∧ (tr' 0).state = ConcreteModel.ServerState.init ∧
       SameObservation tr tr' ∧ SameMessages tr tr'
 
 /-- The converse direction: the abstract machine's behaviors are also
@@ -91,8 +91,8 @@ def MRefinesP : Prop :=
     behavior is lost by materializing. This is what upgrades the
     refinement to an equivalence. -/
 def PRefinesM : Prop :=
-  ∀ tr, ValidP tr → (tr 0).state = ServerModel.ServerState.init →
-    ∃ tr', ValidM tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
+  ∀ tr, ValidP tr → (tr 0).state = ConcreteModel.ServerState.init →
+    ∃ tr', ValidM tr' ∧ (tr' 0).state = ConcreteModel.ServerState.init ∧
       SameObservation tr tr' ∧ SameMessages tr tr'
 
 /-- **THE CLAIM: the projected and the materialized machine are weakly

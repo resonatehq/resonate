@@ -3,7 +3,8 @@ import «03-concrete».«m».«P-03-promise.settle»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
@@ -28,4 +29,5 @@ def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
           let res ← promiseSettle r now
           return { status := 200, action := some (.settle res) }
 
-end Materialized
+end M
+end ConcreteModel

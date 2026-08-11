@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
   match ← touchTask req.id now with
@@ -16,4 +17,5 @@ def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
       else
         return { status := 200, task := some ({ t with state := .fulfilled, pid := none, ttl := none, resumes := [] }).toRecord }
 
-end Materialized
+end M
+end ConcreteModel

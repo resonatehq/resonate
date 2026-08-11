@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTask req.id with
@@ -24,3 +27,6 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
       setTaskTimeout t.id 0 (now + retryTimeout)
       setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
       return { status := 200 }
+
+end P
+end ConcreteModel

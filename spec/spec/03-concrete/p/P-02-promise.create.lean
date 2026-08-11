@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : H PromiseCreateRes := do
   if req.tags.timerTargeted then
     return { status := 400, promise := none }
@@ -64,3 +67,6 @@ def promiseCreate (req : PromiseCreateReq) (now : Nat) : H PromiseCreateRes := d
           return { status := 200, promise := some p.toRecord }
   | some p =>
       return { status := 200, promise := some (p.project now).toRecord }
+
+end P
+end ConcreteModel

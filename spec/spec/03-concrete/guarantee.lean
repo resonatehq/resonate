@@ -5,6 +5,8 @@ import «03-concrete».«p».«03-resume»
 import «03-concrete».«p».«T-01-task.get»
 
 open ServerModel
+open ConcreteModel
+open ConcreteModel.P
 
 /-! ## The durable-execution guarantee, on the τ-quotient
 

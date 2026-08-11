@@ -36,14 +36,14 @@ open Equivalence (eqSet)
 
 deriving instance BEq for AbstractModel.TaskObject
 
-def absPromise (p : ServerModel.PromiseObject) : AbstractModel.PromiseObject :=
+def absPromise (p : ConcreteModel.PromiseObject) : AbstractModel.PromiseObject :=
   { id := p.id, state := p.state, param := p.param, value := p.value,
     tags := p.tags, timeoutAt := p.timeoutAt, createdAt := p.createdAt,
     settledAt := p.settledAt, callbacks := p.callbacks,
     listeners := p.listeners }
 
-def absTask (timeouts : List ServerModel.TaskTimeout)
-    (t : ServerModel.TaskObject) : AbstractModel.TaskObject :=
+def absTask (timeouts : List ConcreteModel.TaskTimeout)
+    (t : ConcreteModel.TaskObject) : AbstractModel.TaskObject :=
   { id := t.id, state := t.state, version := t.version, ttl := t.ttl,
     pid := t.pid, resumes := t.resumes,
     expiresAt :=
@@ -57,7 +57,7 @@ def addDeferred (ps : List AbstractModel.PromiseObject)
   ps.map fun p => if p.id == d.awaited then p.addCallback d.awaiter else p
 
 /-- THE ABSTRACTION. -/
-def alpha (s : ServerModel.ServerState) : AbstractModel.ServerState :=
+def alpha (s : ConcreteModel.ServerState) : AbstractModel.ServerState :=
   { promises := s.deferred.foldl addDeferred (s.promises.map absPromise)
     tasks := s.tasks.map (absTask s.taskTimeouts)
     schedules := s.schedules

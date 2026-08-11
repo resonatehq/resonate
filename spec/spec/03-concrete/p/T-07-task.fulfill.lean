@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
@@ -28,3 +31,6 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
       for awaiterId in callbacks do
         defer { awaited := p.id, awaiter := awaiterId }
       return { status := 200, promise := some p.toRecord }
+
+end P
+end ConcreteModel

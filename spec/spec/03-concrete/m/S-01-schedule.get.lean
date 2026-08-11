@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def scheduleGet (req : ScheduleGetReq) (_now : Nat) : H ScheduleGetRes := do
   match ← getSchedule req.id with
@@ -11,4 +12,5 @@ def scheduleGet (req : ScheduleGetReq) (_now : Nat) : H ScheduleGetRes := do
   | some s =>
       return { status := 200, schedule := some s }
 
-end Materialized
+end M
+end ConcreteModel

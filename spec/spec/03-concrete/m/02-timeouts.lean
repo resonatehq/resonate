@@ -2,7 +2,8 @@ import «03-concrete».«m».«P-02-promise.create»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 namespace Timeouts
 
 /-- Materialization IS the timeout transition: -m's promise timeout is
@@ -108,4 +109,5 @@ def processSchedule (id : String) (now : Nat) : H Unit := do
         setScheduleTimeout s.id s.nextRunAt
 
 end Timeouts
-end Materialized
+end M
+end ConcreteModel

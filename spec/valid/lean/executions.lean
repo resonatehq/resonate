@@ -67,7 +67,7 @@ about what a trace IS, and it is true by construction. -/
 
 namespace TraceCheck.Executions
 
-open ServerModel Equivalence TraceCheck TraceCheck.Correctness
+open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Correctness
 
 /-! ## Internal requests, read back as τs
 

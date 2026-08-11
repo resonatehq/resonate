@@ -86,7 +86,7 @@ machine's read discipline, not a general fact about timed systems. -/
 
 namespace TraceCheck.Intervals
 
-open ServerModel Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
+open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
 
 /-! ## The observable part of a state -/
 

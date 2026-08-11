@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : H PromiseRegisterListenerRes := do
   if !addressValid req.address then
@@ -19,4 +20,5 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : H P
       else
         return { status := 200, promise := some pAwaited.toRecord }
 
-end Materialized
+end M
+end ConcreteModel

@@ -679,7 +679,7 @@ theorem agrees_scheduleGet (req) : Agrees (.api (.scheduleGet req)) := by
   intro n sP sM h
   have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
     h.2.2 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleGet, AbstractModel.scheduleGet,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.scheduleGet, AbstractModel.M.scheduleGet,
              run_map, run_bind, run_getSchedule, run_pure, Id.run]
   rw [hsid]
   cases hfM : sM.schedules.find? (·.id == req.id) with
@@ -690,8 +690,8 @@ theorem agrees_scheduleCreate (req) : Agrees (.api (.scheduleCreate req)) := by
   intro n sP sM h
   have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
     h.2.2 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleCreate,
-             AbstractModel.scheduleCreate, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.scheduleCreate,
+             AbstractModel.M.scheduleCreate, run_map, Id.run]
   by_cases htt : req.promiseTags.timerTargeted = true
   · simp only [if_pos htt, run_pure]; exact ⟨trivial, h⟩
   simp only [if_neg htt, run_bind, run_getSchedule, run_setSchedule, run_pure]
@@ -704,7 +704,7 @@ theorem agrees_scheduleDelete (req) : Agrees (.api (.scheduleDelete req)) := by
   intro n sP sM h
   have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
     h.2.2 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleDelete, AbstractModel.scheduleDelete,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.scheduleDelete, AbstractModel.M.scheduleDelete,
              run_map, run_bind, run_getSchedule, run_delSchedule, run_pure, Id.run]
   rw [hsid]
   cases hfM : sM.schedules.find? (·.id == req.id) with
@@ -722,7 +722,7 @@ theorem agrees_promiseGet (req) : Agrees (.api (.promiseGet req)) := by
   intro n sP sM h
   have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
       = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseGet, AbstractModel.promiseGet,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.promiseGet, AbstractModel.M.promiseGet,
              run_map, run_bind, run_viewPromise, run_touchPromise, run_pure, Id.run]
   cases hfP : sP.promises.find? (·.id == req.id) with
   | none =>
@@ -887,11 +887,11 @@ theorem REq_setSettled {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
 
 theorem runAgrees_promiseCreate (req : ServerModel.PromiseCreateReq) (n : Nat)
     {sP sM : ServerState} (h : REq n sP sM) :
-    ((Projected.promiseCreate req n).run sP).1 = ((AbstractModel.promiseCreate req n).run sM).1
-      ∧ REq n ((Projected.promiseCreate req n).run sP).2 ((AbstractModel.promiseCreate req n).run sM).2 := by
+    ((P.promiseCreate req n).run sP).1 = ((AbstractModel.M.promiseCreate req n).run sM).1
+      ∧ REq n ((P.promiseCreate req n).run sP).2 ((AbstractModel.M.promiseCreate req n).run sM).2 := by
   have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
       = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
-  simp only [Projected.promiseCreate, AbstractModel.promiseCreate]
+  simp only [P.promiseCreate, AbstractModel.M.promiseCreate]
   by_cases htt : req.tags.timerTargeted = true
   · simp only [if_pos htt]; exact ⟨rfl, h⟩
   simp only [if_neg htt, run_pureUnit_bind]
@@ -950,9 +950,9 @@ theorem runAgrees_promiseCreate (req : ServerModel.PromiseCreateReq) (n : Nat)
 
 theorem runAgrees_promiseSettle (req : ServerModel.PromiseSettleReq) (n : Nat)
     {sP sM : ServerState} (h : REq n sP sM) :
-    ((Projected.promiseSettle req n).run sP).1 = ((AbstractModel.promiseSettle req n).run sM).1
-      ∧ REq n ((Projected.promiseSettle req n).run sP).2 ((AbstractModel.promiseSettle req n).run sM).2 := by
-  simp only [Projected.promiseSettle, AbstractModel.promiseSettle]
+    ((P.promiseSettle req n).run sP).1 = ((AbstractModel.M.promiseSettle req n).run sM).1
+      ∧ REq n ((P.promiseSettle req n).run sP).2 ((AbstractModel.M.promiseSettle req n).run sM).2 := by
+  simp only [P.promiseSettle, AbstractModel.M.promiseSettle]
   by_cases hset : (!req.state.settable) = true
   · simp only [if_pos hset]; exact ⟨rfl, h⟩
   · simp only [if_neg hset]
@@ -1023,8 +1023,8 @@ theorem agrees_promiseSettle (req) : Agrees (.api (.promiseSettle req)) := by
 theorem agrees_promiseRegisterListener (req) :
     Agrees (.api (.promiseRegisterListener req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseRegisterListener,
-             AbstractModel.promiseRegisterListener, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.promiseRegisterListener,
+             AbstractModel.M.promiseRegisterListener, run_map, Id.run]
   by_cases haddr : (!ServerModel.addressValid req.address) = true
   · simp only [if_pos haddr]; exact ⟨rfl, h⟩
   · simp only [if_neg haddr]
@@ -1081,8 +1081,8 @@ theorem agrees_promiseRegisterListener (req) :
 theorem agrees_promiseRegisterCallback (req) :
     Agrees (.api (.promiseRegisterCallback req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.promiseRegisterCallback,
-             AbstractModel.promiseRegisterCallback, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.promiseRegisterCallback,
+             AbstractModel.M.promiseRegisterCallback, run_map, Id.run]
   by_cases heq : (req.awaited == req.awaiter) = true
   · simp only [if_pos heq]; exact ⟨rfl, h⟩
   · simp only [if_neg heq]
@@ -1412,8 +1412,8 @@ theorem bind_taskRead_agrees {α : Type} (id : String) (n : Nat)
 
 theorem agrees_taskGet (req) : Agrees (.api (.taskGet req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskGet,
-             AbstractModel.taskGet, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskGet,
+             AbstractModel.M.taskGet, run_map, Id.run]
   refine And.imp (congrArg Equivalence.Response.taskGet) (fun x => x)
     (bind_taskRead_agrees req.id n _ _ h ?_)
   intro v sP' sM' h' hf
@@ -1431,8 +1431,8 @@ theorem agrees_taskGet (req) : Agrees (.api (.taskGet req)) := by
 
 theorem agrees_taskAcquire (req) : Agrees (.api (.taskAcquire req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskAcquire,
-             AbstractModel.taskAcquire, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskAcquire,
+             AbstractModel.M.taskAcquire, run_map, Id.run]
   refine And.imp (congrArg Equivalence.Response.taskAcquire) (fun x => x)
     (bind_taskRead_agrees req.id n _ _ h ?_)
   intro v sP' sM' h' hf
@@ -1458,8 +1458,8 @@ theorem agrees_taskAcquire (req) : Agrees (.api (.taskAcquire req)) := by
 
 theorem agrees_taskRelease (req) : Agrees (.api (.taskRelease req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskRelease,
-             AbstractModel.taskRelease, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskRelease,
+             AbstractModel.M.taskRelease, run_map, Id.run]
   refine And.imp (congrArg Equivalence.Response.taskRelease) (fun x => x)
     (bind_taskRead_agrees req.id n _ _ h ?_)
   intro v sP' sM' h' hf
@@ -1485,8 +1485,8 @@ theorem agrees_taskRelease (req) : Agrees (.api (.taskRelease req)) := by
 
 theorem agrees_taskHalt (req) : Agrees (.api (.taskHalt req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskHalt,
-             AbstractModel.taskHalt, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskHalt,
+             AbstractModel.M.taskHalt, run_map, Id.run]
   refine And.imp (congrArg Equivalence.Response.taskHalt) (fun x => x)
     (bind_taskRead_agrees req.id n _ _ h ?_)
   intro v sP' sM' h' hf
@@ -1509,8 +1509,8 @@ theorem agrees_taskHalt (req) : Agrees (.api (.taskHalt req)) := by
 
 theorem agrees_taskContinue (req) : Agrees (.api (.taskContinue req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskContinue,
-             AbstractModel.taskContinue, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskContinue,
+             AbstractModel.M.taskContinue, run_map, Id.run]
   refine And.imp (congrArg Equivalence.Response.taskContinue) (fun x => x)
     (bind_taskRead_agrees req.id n _ _ h ?_)
   intro v sP' sM' h' hf
@@ -1533,8 +1533,8 @@ theorem agrees_taskContinue (req) : Agrees (.api (.taskContinue req)) := by
 
 theorem agrees_taskFulfill (req) : Agrees (.api (.taskFulfill req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskFulfill,
-             AbstractModel.taskFulfill, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskFulfill,
+             AbstractModel.M.taskFulfill, run_map, Id.run]
   by_cases hset0 : (!req.action.state.settable) = true
   · simp only [if_pos hset0]; exact ⟨rfl, h⟩
   · simp only [if_neg hset0, run_pureUnit_bind]
@@ -2198,9 +2198,9 @@ theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
 
 theorem runAgrees_heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (n : Nat)
     {sP sM : ServerState} (h : REq n sP sM) :
-    REq n ((Projected.heartbeatOne pid ref n).run sP).2
-          ((AbstractModel.heartbeatOne pid ref n).run sM).2 := by
-  simp only [Projected.heartbeatOne, AbstractModel.heartbeatOne]
+    REq n ((P.heartbeatOne pid ref n).run sP).2
+          ((AbstractModel.M.heartbeatOne pid ref n).run sM).2 := by
+  simp only [P.heartbeatOne, AbstractModel.M.heartbeatOne]
   refine (bind_taskRead_agrees ref.id n _ _ h ?_).2
   intro v sP' sM' h' hf
   cases v with
@@ -2220,39 +2220,39 @@ theorem runAgrees_heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (n : N
 
 theorem REq_heartbeatAll (pid : String) (n : Nat) (refs : List ServerModel.TaskRef) :
     ∀ {sP sM : ServerState}, REq n sP sM →
-      REq n ((Projected.heartbeatAll pid n refs).run sP).2
-            ((AbstractModel.heartbeatAll pid n refs).run sM).2 := by
+      REq n ((P.heartbeatAll pid n refs).run sP).2
+            ((AbstractModel.M.heartbeatAll pid n refs).run sM).2 := by
   induction refs with
   | nil =>
       intro sP sM h
-      simp only [Projected.heartbeatAll, AbstractModel.heartbeatAll, run_pure]
+      simp only [P.heartbeatAll, AbstractModel.M.heartbeatAll, run_pure]
       exact h
   | cons ref refs ih =>
       intro sP sM h
-      simp only [Projected.heartbeatAll, AbstractModel.heartbeatAll, run_bind]
+      simp only [P.heartbeatAll, AbstractModel.M.heartbeatAll, run_bind]
       exact ih (runAgrees_heartbeatOne pid ref n h)
 
 theorem agrees_taskHeartbeat (req) : Agrees (.api (.taskHeartbeat req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskHeartbeat,
-             AbstractModel.taskHeartbeat, run_map, run_bind, run_pure, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskHeartbeat,
+             AbstractModel.M.taskHeartbeat, run_map, run_bind, run_pure, Id.run]
   exact ⟨trivial, REq_heartbeatAll req.pid n req.tasks h⟩
 
 theorem runAgrees_checkAwaited (n : Nat)
     (actions : List ServerModel.PromiseRegisterCallbackReq) :
     ∀ {sP sM : ServerState}, REq n sP sM →
-      ((Projected.checkAwaited n actions).run sP).1
-          = ((AbstractModel.checkAwaited n actions).run sM).1
-        ∧ REq n ((Projected.checkAwaited n actions).run sP).2
-                ((AbstractModel.checkAwaited n actions).run sM).2 := by
+      ((P.checkAwaited n actions).run sP).1
+          = ((AbstractModel.M.checkAwaited n actions).run sM).1
+        ∧ REq n ((P.checkAwaited n actions).run sP).2
+                ((AbstractModel.M.checkAwaited n actions).run sM).2 := by
   induction actions with
   | nil =>
       intro sP sM h
-      simp only [Projected.checkAwaited, AbstractModel.checkAwaited, run_pure]
+      simp only [P.checkAwaited, AbstractModel.M.checkAwaited, run_pure]
       exact ⟨trivial, h⟩
   | cons action rest ih =>
       intro sP sM h
-      simp only [Projected.checkAwaited, AbstractModel.checkAwaited, run_bind,
+      simp only [P.checkAwaited, AbstractModel.M.checkAwaited, run_bind,
                  run_viewPromise, run_touchPromise, run_pure]
       have hpi : (sP.promises.find? (·.id == action.awaited)).map (·.project n)
           = (sM.promises.find? (·.id == action.awaited)).map (·.project n) :=
@@ -2288,23 +2288,23 @@ theorem runAgrees_checkAwaited (n : Nat)
               · simp only [if_neg hext, run_bind]
                 obtain ⟨hval, hst⟩ := ih h1
                 rw [hval]
-                cases hrec : ((AbstractModel.checkAwaited n rest).run sM1).1 with
+                cases hrec : ((AbstractModel.M.checkAwaited n rest).run sM1).1 with
                 | none => exact ⟨rfl, hst⟩
                 | some settled => exact ⟨rfl, hst⟩
 
 theorem runAgrees_registerAwaited (awaiter : String) (n : Nat)
     (actions : List ServerModel.PromiseRegisterCallbackReq) :
     ∀ {sP sM : ServerState}, REq n sP sM →
-      REq n ((Projected.registerAwaited awaiter n actions).run sP).2
-            ((AbstractModel.registerAwaited awaiter n actions).run sM).2 := by
+      REq n ((P.registerAwaited awaiter n actions).run sP).2
+            ((AbstractModel.M.registerAwaited awaiter n actions).run sM).2 := by
   induction actions with
   | nil =>
       intro sP sM h
-      simp only [Projected.registerAwaited, AbstractModel.registerAwaited, run_pure]
+      simp only [P.registerAwaited, AbstractModel.M.registerAwaited, run_pure]
       exact h
   | cons action rest ih =>
       intro sP sM h
-      simp only [Projected.registerAwaited, AbstractModel.registerAwaited, run_bind,
+      simp only [P.registerAwaited, AbstractModel.M.registerAwaited, run_bind,
                  run_viewPromise, run_touchPromise, run_pure, run_setPromise]
       have hpi : (sP.promises.find? (·.id == action.awaited)).map (·.project n)
           = (sM.promises.find? (·.id == action.awaited)).map (·.project n) :=
@@ -2358,8 +2358,8 @@ theorem runAgrees_registerAwaited (awaiter : String) (n : Nat)
 
 theorem agrees_taskSuspend (req) : Agrees (.api (.taskSuspend req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskSuspend,
-             AbstractModel.taskSuspend, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskSuspend,
+             AbstractModel.M.taskSuspend, run_map, Id.run]
   by_cases hg0 : (req.actions.isEmpty) = true
   · simp only [if_pos hg0]; exact ⟨rfl, h⟩
   · simp only [if_neg hg0, run_pureUnit_bind]
@@ -2393,7 +2393,7 @@ theorem agrees_taskSuspend (req) : Agrees (.api (.taskSuspend req)) := by
                       simp only [run_bind]
                       obtain ⟨hval, hst⟩ := runAgrees_checkAwaited n req.actions h'
                       rw [hval]
-                      cases hchk : ((AbstractModel.checkAwaited n req.actions).run sM').1 with
+                      cases hchk : ((AbstractModel.M.checkAwaited n req.actions).run sM').1 with
                       | none => exact ⟨rfl, hst⟩
                       | some settled =>
                           cases settled with
@@ -2410,8 +2410,8 @@ theorem agrees_taskSuspend (req) : Agrees (.api (.taskSuspend req)) := by
 
 theorem agrees_taskFence (req) : Agrees (.api (.taskFence req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskFence,
-             AbstractModel.taskFence, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskFence,
+             AbstractModel.M.taskFence, run_map, Id.run]
   by_cases hg0 : (req.action.targetId == req.id) = true
   · simp only [if_pos hg0]; exact ⟨rfl, h⟩
   · simp only [if_neg hg0, run_pureUnit_bind]
@@ -2607,8 +2607,8 @@ theorem agrees_r7 (id : String) : Agrees (.r7 id) := by
 
 theorem agrees_taskCreate (req) : Agrees (.api (.taskCreate req)) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskCreate,
-             AbstractModel.taskCreate, run_map, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, P.taskCreate,
+             AbstractModel.M.taskCreate, run_map, Id.run]
   by_cases htag0 : ((!req.action.tags.has "resonate:target")
       ∨ req.action.tags.timerTargeted = true)
   · simp only [if_pos htag0]; exact ⟨rfl, h⟩

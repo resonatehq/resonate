@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
   let retryTimeout := (← get).config.retryTimeout
@@ -25,4 +26,5 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
       setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
       return { status := 200 }
 
-end Materialized
+end M
+end ConcreteModel

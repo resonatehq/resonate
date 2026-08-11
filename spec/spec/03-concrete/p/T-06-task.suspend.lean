@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   if req.actions.isEmpty then
     return { status := 400 }
@@ -47,3 +50,6 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
         setTask { t with state := .suspended, pid := none, ttl := none, resumes := [] }
         delTaskTimeout t.id
         return { status := 200 }
+
+end P
+end ConcreteModel

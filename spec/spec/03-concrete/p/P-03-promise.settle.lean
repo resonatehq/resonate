@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := do
   if !req.state.settable then
     return { status := 400 }
@@ -21,3 +24,6 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := d
         return { status := 200, promise := some p.toRecord }
       else
         return { status := 200, promise := some (p.project now).toRecord }
+
+end P
+end ConcreteModel

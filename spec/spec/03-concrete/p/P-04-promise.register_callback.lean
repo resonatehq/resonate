@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
     return { status := 400 }
@@ -23,3 +26,6 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H P
         return { status := 200, promise := some pAwaited.toRecord }
       else
         return { status := 200, promise := some (pAwaited.project now).toRecord }
+
+end P
+end ConcreteModel

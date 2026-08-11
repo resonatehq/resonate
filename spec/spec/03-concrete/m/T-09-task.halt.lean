@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
   match ← touchTask req.id now with
@@ -21,4 +22,5 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
       delTaskTimeout t.id
       return { status := 200 }
 
-end Materialized
+end M
+end ConcreteModel

@@ -91,7 +91,7 @@ def SameMessagesAC (tr : ATrace) (tr' : Equivalence.Trace) : Prop :=
     concrete twins' bisimulation. -/
 def AbstractRefinesConcrete : Prop :=
   ∀ tr, ValidA tr → (tr 0).state = AbstractModel.ServerState.init →
-    ∃ tr', Equivalence.ValidM tr' ∧ (tr' 0).state = ServerModel.ServerState.init ∧
+    ∃ tr', Equivalence.ValidM tr' ∧ (tr' 0).state = ConcreteModel.ServerState.init ∧
       SameObservationAC tr tr' ∧ SameMessagesAC tr tr'
 
 /-- **THE SQUARE: all four machines, one behavior space.** -/
@@ -179,7 +179,7 @@ example : refusedEverywhere wTimerSchedule := by decide
 /-- The normalizing comparator: both sides closed under the
     object-guarded fact rules and the drains — absorbing the harmless
     fact-lag on internal promises. -/
-def normC (h : Nat) (s : ServerModel.ServerState) : AbstractModel.ServerState :=
+def normC (h : Nat) (s : ConcreteModel.ServerState) : AbstractModel.ServerState :=
   absQuiesced defaultRetry h (alpha (Equivalence.quiesced h s))
 
 def normA (h : Nat) (s : AbstractModel.ServerState) : AbstractModel.ServerState :=

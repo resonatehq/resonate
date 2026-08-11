@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
@@ -26,4 +27,5 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H P
       else
         return { status := 200, promise := some pAwaited.toRecord }
 
-end Materialized
+end M
+end ConcreteModel

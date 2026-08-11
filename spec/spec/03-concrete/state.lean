@@ -7,7 +7,9 @@ timeouts, the deferred-resume queue, retry config), and the effects —
 lookups, keyed upserts, deletes — through which handlers touch state.
 Shared by both read disciplines (`p/`, `m/`).  -/
 
-namespace ServerModel
+namespace ConcreteModel
+
+open ServerModel
 
 structure PromiseObject where
   id        : String
@@ -229,4 +231,4 @@ def undefer (r : ResumeReq) : H Unit :=
         s.deferred.filter (fun e =>
           !(e.awaited == r.awaited && e.awaiter == r.awaiter)) }
 
-end ServerModel
+end ConcreteModel

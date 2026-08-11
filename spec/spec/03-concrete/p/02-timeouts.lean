@@ -2,6 +2,9 @@ import «03-concrete».«p».«P-02-promise.create»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 namespace Timeouts
 
 /-- NOT BEFORE: every timeout transition re-checks its own due time and
@@ -118,3 +121,6 @@ def processSchedule (id : String) (now : Nat) : H Unit := do
         setScheduleTimeout s.id s.nextRunAt
 
 end Timeouts
+
+end P
+end ConcreteModel

@@ -3,6 +3,9 @@ import «03-concrete».«p».«P-03-promise.settle»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
@@ -27,3 +30,6 @@ def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
       | .settle r =>
           let res ← promiseSettle r now
           return { status := 200, action := some (.settle res) }
+
+end P
+end ConcreteModel

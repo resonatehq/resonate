@@ -2,6 +2,9 @@ import «03-concrete».«state»
 
 open ServerModel
 
+namespace ConcreteModel
+namespace P
+
 /-- Halting exists to take a LIVE task out of circulation. A task whose
     own promise is logically settled has no circulation left — its
     projected state is `.fulfilled` (exactly what `taskGet` reports),
@@ -26,3 +29,6 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
       setTask { t with state := .halted, pid := none, ttl := none }
       delTaskTimeout t.id
       return { status := 200 }
+
+end P
+end ConcreteModel

@@ -2,7 +2,8 @@ import «03-concrete».«m».«00-touch»
 
 open ServerModel
 
-namespace Materialized
+namespace ConcreteModel
+namespace M
 
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes := do
   if req.promiseTags.timerTargeted then
@@ -25,4 +26,5 @@ def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes :
       setScheduleTimeout s.id s.nextRunAt
       return { status := 200, schedule := some s }
 
-end Materialized
+end M
+end ConcreteModel
