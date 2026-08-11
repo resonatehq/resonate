@@ -1005,11 +1005,14 @@ fn gen_debug_tick(rng: &mut fastrand::Rng, now: i64) -> (RequestEnvelope, i64) {
     (req("debug.tick", json!({ "time": new_now })), new_now)
 }
 
+// IDs share the origin "diff" (text before the first ':'), so a task promise
+// (`diff:tN`) and a plain promise (`diff:pM`) pass the origin-match validation
+// used by promise.register_callback and task.suspend.
 fn promise_id(n: u32) -> String {
-    format!("diff.p{n}")
+    format!("diff:p{n}")
 }
 fn task_id(n: u32) -> String {
-    format!("diff.t{n}")
+    format!("diff:t{n}")
 }
 fn schedule_id(n: u32) -> String {
     format!("s{n}")
