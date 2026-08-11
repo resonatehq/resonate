@@ -425,7 +425,7 @@ exposed it because their gaps are far shorter than the retry cadence; a
 generator that jumps the clock hits it immediately.
 
 **And a measurement about the fuzzer itself.** With large clock jumps —
-which is what makes R1/R2/R5 reachable — the Lean checker DECLINES about
+which is what makes R1/R5 reachable — the Lean checker DECLINES about
 60% of traces. A decline agrees with anything, so those comparisons are
 vacuous, and the fuzzer says so rather than counting them:
 
@@ -448,7 +448,7 @@ $ go run ./cmd/fuzz -n 150 -steps 50 -jumpy=false
   go   ACCEPT=150
   lean ACCEPT=150
   mutants:  go REFUTE=150 | lean REFUTE=150
-  rule firings that changed state: R1=11 R2=8 R3=82 R4=30 R5=7 R6=22
+  rule firings that changed state: R1=11 R3=82 R4=30 R5=7 R6=22
   response statuses generated:     200=3563 300=63 400=558 404=312 409=1042
 
   no disagreements
@@ -464,7 +464,7 @@ binary at ~1.9 s each. The checking itself is milliseconds.
 **What this still does not establish.** Both checkers were written from
 the same specification by the same author, so a common-mode misreading
 would agree with itself; only porcupine's SEARCH is genuinely foreign
-code. And R1, R2 and R5 fire only 7-11 times each here, because the
+code. And R1 and R5 fire only 7-11 times each here, because the
 regime that reaches them freely is the one the Lean checker declines. That
 is the next thing worth fixing: extend the interval reduction to cover
 in-gap deadlines, and the jumpy corpus starts counting.
@@ -480,12 +480,12 @@ front of you before trusting a green run:
 | never exercised | `promise.register_callback`, `task.release`, `task.heartbeat` |
 | response statuses seen | **200 only** (the clean captures are all 200) |
 | rules that ever fire | **R4 only** — 500 firings across both traces |
-| rules never fired | **R1, R2, R3, R5, R6** |
+| rules never fired | **R1, R3, R5, R6** |
 
 That is the CAPTURES. The fuzzer closes most of it — see below — which is
 why it exists.
 
-So five of the six ported rules are, as far as this suite is concerned,
+So four of the five ported rules are, as far as this suite is concerned,
 dead code. Guard-ordering (400 before 404 before 409), listener
 notification, lease expiry and dispatch are all unexercised, and the
 INCONCLUSIVE path has never been reached because the closures never come

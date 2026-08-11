@@ -4,28 +4,29 @@ import "context"
 
 // Internal steps, ported from spec/02-abstract/internal-steps.lean.
 //
-// The machine's entire internal life is seven guarded rules, fired by the
-// environment in any order, at any pace, any number of times. Every rule
-// is total: if its guard does not hold it is a no-op, so a stale or
+// The machine's entire internal life is five guarded steps here, fired by
+// the environment in any order, at any pace, any number of times. Every
+// step is total: if its guard does not hold it is a no-op, so a stale or
 // spurious firing is harmless. That totality is what lets the closure
-// below fire rules speculatively without checking anything first.
+// below fire steps speculatively without checking anything first.
 //
-// R7 (scheduleFire) is absent: `nextCron` and `occurrences` are `opaque`
-// in the Lean with no value, so there is nothing to port. Traces that
-// mention schedules are rejected by the loader.
+// R2 is absent because it is absent from the spec: fact T is fact P seen
+// through the task, and `SetSettled` makes both true in one write, so a
+// separate fulfillment step would be the identity on every reachable
+// state.
+//
+// R7 (processSchedule) is absent for a different reason: `nextCron` and
+// `occurrences` are `opaque` in the Lean with no value, so there is
+// nothing to port. Traces that mention schedules are rejected by the
+// loader.
 
-// R1 promiseTimeout — materialize fact P.
-func (s *ServerState) RulePromiseTimeout(id string, now uint64) {
+// R1 processPromiseTimeout — materialize fact P.
+func (s *ServerState) ProcessPromiseTimeout(id string, now uint64) {
 	s.readPromise(Materialized, id, now)
 }
 
-// R2 taskFulfillment — materialize fact T.
-func (s *ServerState) RuleTaskFulfillment(id string, now uint64) {
-	s.readTask(Materialized, id, now)
-}
-
-// R3 notify — deliver a chosen listener of a settled promise its unblock.
-func (s *ServerState) RuleNotify(id, address string, now uint64) {
+// R3 processListener — deliver a chosen listener of a settled promise its unblock.
+func (s *ServerState) ProcessListener(id, address string, now uint64) {
 	p := s.readPromise(Materialized, id, now)
 	if p == nil || p.State == Pending || !contains(p.Listeners, address) {
 		return
@@ -61,13 +62,13 @@ func (s *ServerState) resumeOne(awaited, awaiter string, now uint64) {
 	}
 }
 
-// R4 resume — wake a chosen awaiter of a settled promise.
+// R4 processCallback — wake a chosen awaiter of a settled promise.
 //
 // THIS IS THE NONDETERMINISM. The abstract machine has no deferred queue:
 // `promiseSettle` writes the promise and nothing else, and the awaiter
 // stays recorded on it until this rule fires. Nothing an observer can see
 // says whether it has fired yet, so the model must carry both answers.
-func (s *ServerState) RuleResume(id, awaiter string, now uint64) {
+func (s *ServerState) ProcessCallback(id, awaiter string, now uint64) {
 	p := s.readPromise(Materialized, id, now)
 	if p == nil || p.State == Pending || !contains(p.Callbacks, awaiter) {
 		return
@@ -78,11 +79,11 @@ func (s *ServerState) RuleResume(id, awaiter string, now uint64) {
 	s.resumeOne(p.ID, awaiter, now)
 }
 
-// R5 leaseExpiry — an acquired task past its lease returns to pending.
+// R5 processLeaseTimeout — an acquired task past its lease returns to pending.
 // The TASK is read raw (expiry is a choice, not a fact, and must never be
 // forced by observation) but the DECISION consults the promise through the
 // view: no rule creates new work for a logically dead task.
-func (s *ServerState) RuleLeaseExpiry(id string, now uint64) {
+func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
 	t := s.GetTask(id)
 	if t == nil || t.ExpiresAt == nil {
 		return
@@ -101,10 +102,10 @@ func (s *ServerState) RuleLeaseExpiry(id string, now uint64) {
 	s.SetTask(u)
 }
 
-// R6 dispatch — emit the execute for a pending task whose dispatch is due,
+// R6 processRetryTimeout — emit the execute for a pending task whose dispatch is due,
 // re-arming `retryAt` at a chosen instant. Repeatable: the outbox's keyed
 // upsert makes re-emission idempotent, so any `next` is sound.
-func (s *ServerState) RuleDispatch(id string, next, now uint64) {
+func (s *ServerState) ProcessRetryTimeout(id string, next, now uint64) {
 	t := s.GetTask(id)
 	if t == nil || t.RetryAt == nil {
 		return
@@ -152,39 +153,38 @@ func enabledRules(s *ServerState, now uint64) []rule {
 	for _, p := range s.Promises {
 		p := p
 		if p.State == Pending && p.TimeoutAt <= now {
-			rs = append(rs, rule{"R1 promiseTimeout " + p.ID,
-				func(t *ServerState) { t.RulePromiseTimeout(p.ID, now) }})
+			rs = append(rs, rule{"R1 processPromiseTimeout " + p.ID,
+				func(t *ServerState) { t.ProcessPromiseTimeout(p.ID, now) }})
 			continue // its callbacks cannot drain until it is settled
 		}
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				rs = append(rs, rule{"R4 resume " + p.ID + " -> " + a,
-					func(t *ServerState) { t.RuleResume(p.ID, a, now) }})
+				rs = append(rs, rule{"R4 processCallback " + p.ID + " -> " + a,
+					func(t *ServerState) { t.ProcessCallback(p.ID, a, now) }})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				rs = append(rs, rule{"R3 notify " + p.ID + " -> " + l,
-					func(t *ServerState) { t.RuleNotify(p.ID, l, now) }})
+				rs = append(rs, rule{"R3 processListener " + p.ID + " -> " + l,
+					func(t *ServerState) { t.ProcessListener(p.ID, l, now) }})
 			}
 		}
 	}
 	for _, t := range s.Tasks {
 		t := t
-		if t.State != TaskFulfilled {
-			if p := s.GetPromise(t.ID); p != nil && p.Project(now).State != Pending {
-				rs = append(rs, rule{"R2 taskFulfillment " + t.ID,
-					func(u *ServerState) { u.RuleTaskFulfillment(t.ID, now) }})
-				continue
-			}
+		// No new work for the dead — and nothing to fulfil by rule: a
+		// settled promise fulfils its task in the same write, and a
+		// fact-lagged one is R1's to settle, task included.
+		if p := s.GetPromise(t.ID); p == nil || p.Project(now).State != Pending {
+			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			rs = append(rs, rule{"R5 leaseExpiry " + t.ID,
-				func(u *ServerState) { u.RuleLeaseExpiry(t.ID, now) }})
+			rs = append(rs, rule{"R5 processLeaseTimeout " + t.ID,
+				func(u *ServerState) { u.ProcessLeaseTimeout(t.ID, now) }})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			rs = append(rs, rule{"R6 dispatch " + t.ID,
-				func(u *ServerState) { u.RuleDispatch(t.ID, now, now) }})
+			rs = append(rs, rule{"R6 processRetryTimeout " + t.ID,
+				func(u *ServerState) { u.ProcessRetryTimeout(t.ID, now, now) }})
 		}
 	}
 	return rs
@@ -270,44 +270,39 @@ func enabledFirings(s *ServerState, now uint64) []firing {
 	for _, p := range s.Promises {
 		p := p
 		if p.State == Pending && p.TimeoutAt <= now {
-			fs = append(fs, firing{rule{"R1 promiseTimeout " + p.ID,
-				func(t *ServerState) { t.RulePromiseTimeout(p.ID, now) }},
+			fs = append(fs, firing{rule{"R1 processPromiseTimeout " + p.ID,
+				func(t *ServerState) { t.ProcessPromiseTimeout(p.ID, now) }},
 				append(append([]string{}, p.Callbacks...), p.ID)})
 			continue
 		}
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				fs = append(fs, firing{rule{"R4 resume " + p.ID + " -> " + a,
-					func(t *ServerState) { t.RuleResume(p.ID, a, now) }},
+				fs = append(fs, firing{rule{"R4 processCallback " + p.ID + " -> " + a,
+					func(t *ServerState) { t.ProcessCallback(p.ID, a, now) }},
 					[]string{p.ID, a}})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				fs = append(fs, firing{rule{"R3 notify " + p.ID + " -> " + l,
-					func(t *ServerState) { t.RuleNotify(p.ID, l, now) }},
+				fs = append(fs, firing{rule{"R3 processListener " + p.ID + " -> " + l,
+					func(t *ServerState) { t.ProcessListener(p.ID, l, now) }},
 					nil})
 			}
 		}
 	}
 	for _, t := range s.Tasks {
 		t := t
-		if t.State != TaskFulfilled {
-			if p := s.GetPromise(t.ID); p != nil && p.Project(now).State != Pending {
-				fs = append(fs, firing{rule{"R2 taskFulfillment " + t.ID,
-					func(u *ServerState) { u.RuleTaskFulfillment(t.ID, now) }},
-					[]string{t.ID}})
-				continue
-			}
+		if p := s.GetPromise(t.ID); p == nil || p.Project(now).State != Pending {
+			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			fs = append(fs, firing{rule{"R5 leaseExpiry " + t.ID,
-				func(u *ServerState) { u.RuleLeaseExpiry(t.ID, now) }},
+			fs = append(fs, firing{rule{"R5 processLeaseTimeout " + t.ID,
+				func(u *ServerState) { u.ProcessLeaseTimeout(t.ID, now) }},
 				[]string{t.ID}})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			fs = append(fs, firing{rule{"R6 dispatch " + t.ID,
-				func(u *ServerState) { u.RuleDispatch(t.ID, now, now) }},
+			fs = append(fs, firing{rule{"R6 processRetryTimeout " + t.ID,
+				func(u *ServerState) { u.ProcessRetryTimeout(t.ID, now, now) }},
 				nil})
 		}
 	}

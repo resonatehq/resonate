@@ -108,10 +108,10 @@ func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, va
 		q.State = st
 		q.SettledAt = u64p(now)
 		q.Value = val
-		// The promise ONLY. The task is fulfilled by fact T; the awaiters
-		// and listeners stay on the promise for the batch rules. This is
-		// the line that makes the model nondeterministic.
-		s.SetPromise(q)
+		// The promise and its task pair, coupled. The awaiters and
+		// listeners stay on the promise for the batch rules — that is
+		// what makes the model nondeterministic.
+		s.SetSettled(q)
 		return Response{Status: 200, Promise: q}
 	}
 	return Response{Status: 200, Promise: p}
@@ -248,10 +248,9 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 	q.State = st
 	q.SettledAt = u64p(now)
 	q.Value = val
-	// The promise only — the task is fulfilled by fact T on the next
-	// touch, or by R2. Observably indistinguishable, since every task read
-	// that could report it goes through the view.
-	s.SetPromise(q)
+	// The promise and its own task, coupled: this settle fulfils the task
+	// it was issued against, in the same step.
+	s.SetSettled(q)
 	return Response{Status: 200, Promise: q}
 }
 

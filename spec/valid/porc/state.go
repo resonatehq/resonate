@@ -267,6 +267,26 @@ func (s *ServerState) GetPromise(id string) *Promise {
 	return nil
 }
 
+// SetSettled is the coupled write — `setSettled` in
+// spec/02-abstract/state.lean. Storing a settled promise stores its
+// co-keyed task fulfilled, in the same step, so that
+//
+//	stored promise settled  <=>  stored co-keyed task fulfilled
+//
+// holds of every state this model reaches. Birth is the other writer of
+// a settled promise and cannot come through here — there is no stored
+// task to couple to — so the create paths write the fulfilled task
+// themselves.
+func (s *ServerState) SetSettled(p *Promise) {
+	s.SetPromise(p)
+	if p.State == Pending {
+		return
+	}
+	if t := s.GetTask(p.ID); t != nil && t.State != TaskFulfilled {
+		s.SetTask(t.Fulfill())
+	}
+}
+
 func (s *ServerState) SetPromise(p *Promise) {
 	for i, q := range s.Promises {
 		if q.ID == p.ID {
@@ -339,7 +359,7 @@ func (s *ServerState) readPromise(d Discipline, id string, now uint64) *Promise 
 	}
 	q := p.Project(now)
 	if d == Materialized && q.State != p.State {
-		s.SetPromise(q)
+		s.SetSettled(q)
 	}
 	return q
 }

@@ -42,7 +42,7 @@ type Gen struct {
 	origin string
 	now    uint64
 	script []step
-	// Jumpy allows large clock jumps. They are what make R1/R2/R5
+	// Jumpy allows large clock jumps. They are what make R1/R5
 	// reachable — but a jump longer than the retry cadence lets a τ arm a
 	// deadline mid-gap, which the Lean checker declines to reason about
 	// (`noNewInGapDeadline`). So jumpy corpora reach more code and compare
@@ -66,7 +66,7 @@ func NewGen(seed int64, origin string) *Gen {
 func (g *Gen) id(suffix string) string { return g.origin + "." + suffix }
 
 // tick advances the clock. Sometimes by a lot, so deadlines are crossed
-// and R1/R2/R5 become enabled — a generator that never lets time pass
+// and R1/R5 become enabled — a generator that never lets time pass
 // cannot reach the timeout rules at all.
 func (g *Gen) tick() uint64 {
 	switch g.r.Intn(10) {
@@ -111,7 +111,7 @@ func (g *Gen) Script(n int) []step {
 	// refill lays down one complete workflow: two promises, acquire,
 	// suspend, settle, re-acquire, fulfil, reads. Deadlines are drawn so
 	// that some workflows outlive the trace and others expire inside it —
-	// the second kind is what makes R1, R2 and R5 reachable.
+	// the second kind is what makes R1 and R5 reachable.
 	refill := func(now uint64) {
 		a := fmt.Sprintf("%s.a%d", g.origin, wf)
 		x := fmt.Sprintf("%s.x%d", g.origin, wf)
@@ -229,16 +229,14 @@ func (g *Gen) noise(id string, now uint64) *Op {
 func (g *Gen) randomRule(ids []string, now uint64) step {
 	id := ids[g.r.Intn(len(ids))]
 	other := ids[g.r.Intn(len(ids))]
-	switch g.r.Intn(6) {
+	switch g.r.Intn(5) {
 	case 0:
 		return step{rule: "R1", arg: id, now: now}
 	case 1:
-		return step{rule: "R2", arg: id, now: now}
-	case 2:
 		return step{rule: "R3", arg: id, arg2: "poll://any@w1", now: now}
-	case 3:
+	case 2:
 		return step{rule: "R4", arg: id, arg2: other, now: now}
-	case 4:
+	case 3:
 		return step{rule: "R5", arg: id, now: now}
 	default:
 		return step{rule: "R6", arg: id, now: now}
@@ -264,17 +262,15 @@ func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[str
 		before := s.Key()
 		switch st.rule {
 		case "R1":
-			s.RulePromiseTimeout(st.arg, st.now)
-		case "R2":
-			s.RuleTaskFulfillment(st.arg, st.now)
+			s.ProcessPromiseTimeout(st.arg, st.now)
 		case "R3":
-			s.RuleNotify(st.arg, st.arg2, st.now)
+			s.ProcessListener(st.arg, st.arg2, st.now)
 		case "R4":
-			s.RuleResume(st.arg, st.arg2, st.now)
+			s.ProcessCallback(st.arg, st.arg2, st.now)
 		case "R5":
-			s.RuleLeaseExpiry(st.arg, st.now)
+			s.ProcessLeaseTimeout(st.arg, st.now)
 		case "R6":
-			s.RuleDispatch(st.arg, st.now, st.now)
+			s.ProcessRetryTimeout(st.arg, st.now, st.now)
 		}
 		if s.Key() != before {
 			fired[st.rule]++
