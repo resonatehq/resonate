@@ -23,7 +23,9 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "per-discipline check timeout")
 	quiet := flag.Bool("quiet", false, "suppress the witness")
 	partition := flag.Bool("partition", true, "check each resonate:origin independently (verified sound first)")
+	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
+	model.Cone = *cone
 
 	ops, resps, err := model.LoadTrace(os.Stdin)
 	if err != nil {
@@ -42,8 +44,24 @@ func main() {
 		}
 	}
 	partitioned = *partition
-	fmt.Printf("loaded %d events   history: %s   partition: %v\n\n",
+	pending := 0
+	for _, r := range resps {
+		if model.PendingOp(r) {
+			pending++
+		}
+	}
+	fmt.Printf("loaded %d events   history: %s   partition: %v\n",
 		len(ops), historyDesc(*concurrent), *partition)
+	if pending > 0 {
+		// A pending op (a 500 — the server refusing to guess an ambiguous
+		// write's fate) is unconstrained evidence: it may or may not have
+		// applied. LINEARIZABLE below therefore means "with these N ops
+		// free"; a server answering 500 to everything would pass vacuously,
+		// so the count is part of the verdict.
+		fmt.Printf("pending: %d of %d ops answered 500 — each may or may not have applied; the verdict leaves them free\n",
+			pending, len(ops))
+	}
+	fmt.Println()
 
 	failed, inconclusive := false, false
 	for _, d := range []model.Discipline{model.Projected, model.Materialized} {

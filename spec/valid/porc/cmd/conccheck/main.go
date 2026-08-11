@@ -56,7 +56,9 @@ type row struct {
 func main() {
 	timeout := flag.Duration("timeout", 120*time.Second, "per-discipline timeout")
 	partition := flag.Bool("partition", true, "check each origin independently")
+	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
+	model.Cone = *cone
 
 	rows, err := readRows(os.Stdin)
 	if err != nil {
@@ -89,6 +91,16 @@ func main() {
 	if maxConc < 2 {
 		fmt.Println("  WARNING: nothing overlapped — this history is sequential, so")
 		fmt.Println("           porcupine has no ordering freedom to search over.")
+	}
+	pending := 0
+	for _, r := range resps {
+		if model.PendingOp(r) {
+			pending++
+		}
+	}
+	if pending > 0 {
+		fmt.Printf("pending: %d of %d ops answered 500 — each may or may not have applied; the verdict leaves them free\n",
+			pending, len(ops))
 	}
 	fmt.Println()
 

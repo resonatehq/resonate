@@ -260,22 +260,93 @@ histories legal, so it is a smoke test rather than a stronger check. The
 honest way to exercise linearizability properly is to capture genuinely
 concurrent traffic, which a sequential capture proxy does not produce.
 
-### What this checker cannot do
+### The cone of influence
 
-`resonate-sqlite-concurrent-8c.ndjson` — 400 events, 8 origins, 50
-events each after partitioning — TIMES OUT under both disciplines. The
-Lean checker accepts the same file in 37 ms with `maxFanout=1`.
+The closure used to fire every enabled rule, so a promise carrying k
+drainable callbacks branched 2^k ways whether or not any of them could
+reach the next event — which made ~80 events in one partition the
+practical ceiling (the canonical W3 workload, a 78-event single-origin
+tree, did not finish). The Lean checker never had this problem because
+`valid/lean/validator.lean` restricts each gap to the τs that can affect
+what the next observation reads (`relevantTaus`, `touches`, `affects`).
 
-The difference is the cone. `valid/lean/validator.lean` restricts each gap to
-the τs that can affect what the next observation reads (`relevantTaus`,
-`touches`, `affects`); the closure here fires every enabled rule, so a
-promise carrying k drainable callbacks branches 2^k ways whether or not
-any of them can reach the next event. That is a budget limit, not a
-wrong answer — the closure reports `Saturated() == false` and the
-verdict is inconclusive, exactly as the Lean checker returns
-`Undecided`. But it is the reason this checker is the junior partner on
-long traces, and porting the cone reduction is the work that would
-change it.
+That reduction is now ported (`touches`/`affects`/`relevantRules` in
+`rules.go`, on by default, `-cone=false` for the full closure): at each
+observed event only the rules whose affected objects transitively meet
+what the request touches are fired. The rest are NOT discarded —
+enabledness lives in the state, so a deferred rule stays armed and is
+explored at the first later event that names its objects (partial-order
+reduction: independent steps commute). Two details worth knowing:
+
+* **R1's affected set includes the promise's callbacks**, not just its
+  own id — settling is what arms R4 for each awaiter, and R4 is not yet
+  enabled when the cone is computed. This is the same chain that made
+  the Lean cone unsound the first time.
+* **R3 (notify) and R6 (dispatch) fall out of the cone entirely**: they
+  mutate only state no response projects (listener lists, `retryAt`,
+  the outbox), and those fields feed no rule but themselves. R6 was the
+  one rule that discharges no obligation — the closure's documented
+  fanout source — so its exclusion is most of the win. The reduction is
+  sound for the RESPONSE channel, which is all this checker compares;
+  a snapshot channel would need `touches` widened, exactly as the Lean
+  header warns.
+
+Measured: the 78-event W3 tree went from TIMEOUT (>60s per discipline)
+to LINEARIZABLE in 3–5s; a 26-event rpc workload from 1.3s to 12ms; the
+fuzzer corpus runs ~10x faster. Equivalence with the full closure is
+enforced two ways: the fuzzer's `-conecheck` property (reduced and full
+must agree on every verdict — 600 traces + 600 mutants across calm and
+jumpy clocks, 0 disagreements) and the existing suite passing unchanged
+under the default.
+
+## Pending ops — a 500 is "no verdict", not a response
+
+A faithful implementation over a fallible store (the SDK's S3 network is
+one) answers **500** exactly when it cannot determine an ambiguous write's
+fate: the machine's response for the request exists but nobody observed it,
+and guessing in either direction would be a response the machine never
+produced. The machine has no 500 transition, so this checker treats a
+500-answered op as **pending** and constrains it only existentially — at
+its step, EITHER the state is unchanged (the request did not go through) OR
+the request applied once, with the response unobserved. Both branches ride
+the nondeterministic state set (`PendingOp`, `checker.go`); the surrounding
+observations collapse them, and the witness names the resolution:
+
+```
+pending: 1 of 66 ops answered 500 — each may or may not have applied; the verdict leaves them free
+...
+  pending task.acquire wf @1010: applied, response unobserved
+```
+
+A pending op is not a wildcard — an observation neither branch explains
+still refutes (`TestPendingStillRefutesTheImpossible`). But it IS
+unconstrained evidence, so the count is part of the verdict: LINEARIZABLE
+with N pending ops means "with these N free", and a server that answered
+500 to everything would pass vacuously. The count is printed whenever it is
+nonzero, in both `lincheck` and `conccheck`.
+
+The semantics is fuzzed (`cmd/fuzz -pending`, on by default; `-goonly`
+skips the Lean half, whose verdicts then count as vacuous DECLINEs) via
+two properties that are theorems of the construction, checked per
+generated trace:
+
+* **weaken** — pendingization is evidence-weakening: replacing any
+  responses of a valid trace with 500s must keep it accepted, because the
+  "applied, response unobserved" branch subsumes the original evidence;
+* **mask** — pendingizing the corrupted response of a refuted mutant must
+  flip it back to accepted, because the corruption lived entirely in the
+  response channel the 500 discards.
+
+Measured: 2×1000 traces (calm and jumpy clocks, 50 steps), 4000 pending
+checks, 0 violations; valid traces ACCEPT=1000/1000 and mutants
+REFUTE=998/1000 unchanged (the 2 accepts are the documented
+model-admits-it case — generated traces contain no 500s, so the mutant
+path cannot reach the pending code).
+
+The Lean checker is deliberately not taught this: its sequential `Valid`
+would need the same disjunction threaded through the interval reduction,
+and the porcupine side is the one that checks concurrent histories, where
+ambiguous writes actually arise.
 
 ## Fuel, and the third verdict
 

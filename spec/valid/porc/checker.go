@@ -97,6 +97,24 @@ func (o Op) apply(s *ServerState, d Discipline) Response {
 	}
 }
 
+// Pending reports whether a recorded response is a PENDING op: the server
+// answered 500, the wire's "no verdict". A faithful implementation over a
+// fallible store answers 500 exactly when it cannot determine whether the
+// request applied (the write may have landed with its acknowledgment lost),
+// so the machine — which has no 500 transition — constrains such an op only
+// existentially: EITHER the state is unchanged (the request did not go
+// through) OR the request applied once, with a response nobody observed.
+// The checker carries both branches; the surrounding observations are what
+// collapse them.
+//
+// The cost is stated where the verdict is printed: a pending op is
+// unconstrained evidence, so a run's LINEARIZABLE is only as strong as its
+// pending count is low — an implementation answering 500 to everything
+// would pass vacuously.
+func PendingOp(r Response) bool {
+	return r.Status == 500
+}
+
 // matches compares a computed response against the recorded one.
 //
 // A record the capture does not carry at all is not evidence and is not
@@ -202,6 +220,14 @@ func canonValue(raw []byte) string {
 	return b.String()
 }
 
+// appendNote copies before appending, so sibling branches never share a
+// backing array.
+func appendNote(w []string, note string) []string {
+	out := make([]string, len(w), len(w)+1)
+	copy(out, w)
+	return append(out, note)
+}
+
 func eqU64(a, b *uint64) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -268,27 +294,42 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 			// before this call, then keep the states whose response
 			// matches what the server actually said. That filter is the
 			// whole pruning power of the construction.
-			cands, ok := closure(ctx, []candidate{{state: ms.state, witness: ms.witness, key: ms.key}}, op.Now, Fuel)
+			cands, ok := closure(ctx, []candidate{{state: ms.state, witness: ms.witness, key: ms.key}}, op.Now, Fuel, pickFor(op))
 			if !ok {
 				sat.ok = false
 			}
 			var out []interface{}
 			seen := map[string]bool{}
+			keep := func(s *ServerState, w []string, k string) {
+				if seen[k] {
+					return
+				}
+				seen[k] = true
+				out = append(out, modelState{state: s, witness: w, key: k})
+			}
 			for _, c := range cands {
 				if ctx.Err() != nil {
 					return out
+				}
+				if PendingOp(want) {
+					// A pending op constrains nothing by itself: it either
+					// did not go through (the state is untouched) or applied
+					// once with a response nobody observed. Both branches
+					// survive; later observations decide between them. The
+					// witness slices are copied — two appends on one shared
+					// backing array would silently overwrite each other.
+					keep(c.state, appendNote(c.witness, fmt.Sprintf("pending %v: not applied", op)), c.key)
+					next := c.state.clone()
+					op.apply(next, d)
+					keep(next, appendNote(c.witness, fmt.Sprintf("pending %v: applied, response unobserved", op)), next.Key())
+					continue
 				}
 				next := c.state.clone()
 				got := op.apply(next, d)
 				if !matches(got, want) {
 					continue
 				}
-				k := next.Key()
-				if seen[k] {
-					continue
-				}
-				seen[k] = true
-				out = append(out, modelState{state: next, witness: c.witness, key: k})
+				keep(next, c.witness, next.Key())
 			}
 			return out
 		},
@@ -332,23 +373,34 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 func Replay(d Discipline, ops []Op, resps []Response) (witness []string, failedAt int, ok bool) {
 	cur := []candidate{newCand(&ServerState{}, nil)}
 	for i, op := range ops {
-		cands, sat := closure(context.Background(), cur, op.Now, Fuel)
+		cands, sat := closure(context.Background(), cur, op.Now, Fuel, pickFor(op))
 		if !sat {
 			return nil, i, false
 		}
 		var next []candidate
 		seen := map[string]bool{}
+		keep := func(s *ServerState, w []string, k string) {
+			if seen[k] {
+				return
+			}
+			seen[k] = true
+			next = append(next, candidate{state: s, witness: w, key: k})
+		}
 		for _, c := range cands {
+			if PendingOp(resps[i]) {
+				// Same existential as the porcupine step: not applied, or
+				// applied with the response unobserved.
+				keep(c.state, appendNote(c.witness, fmt.Sprintf("pending %v: not applied", op)), c.key)
+				t := c.state.clone()
+				op.apply(t, d)
+				keep(t, appendNote(c.witness, fmt.Sprintf("pending %v: applied, response unobserved", op)), t.Key())
+				continue
+			}
 			t := c.state.clone()
 			if !matches(op.apply(t, d), resps[i]) {
 				continue
 			}
-			k := t.Key()
-			if seen[k] {
-				continue
-			}
-			seen[k] = true
-			next = append(next, candidate{state: t, witness: c.witness, key: k})
+			keep(t, c.witness, t.Key())
 		}
 		if len(next) == 0 {
 			return nil, i, false

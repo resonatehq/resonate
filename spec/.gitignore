@@ -10,3 +10,4 @@
 # npm artifacts (work/ts)
 node_modules/
 package-lock.json
+valid/porc/fuzz

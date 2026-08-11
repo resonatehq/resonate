@@ -190,6 +190,178 @@ func enabledRules(s *ServerState, now uint64) []rule {
 	return rs
 }
 
+// ------------------------------------------------------- cone of influence
+//
+// The closure explores every subset of the enabled rules, which is 2^n and
+// is the only thing that actually limits this checker — a 78-event
+// single-origin workload trace (the canonical W3 tree) does not finish.
+// Most of those subsets are irrelevant: a lease expiry on task `a5` cannot
+// change the response to `promiseGet a0`.
+//
+// So, ported from valid/lean/validator.lean (`touches`/`affects`/
+// `relevantTaus`): at each observed event, fire only the rules whose
+// affected objects the event's request also reaches, transitively. The
+// rest are NOT discarded — enabledness lives in the state, not in the
+// closure, so a deferred rule stays armed and is explored at the first
+// later event that names its objects. Independent steps commute
+// (partial-order reduction), so firing them later is a canonical choice
+// rather than a lost one.
+//
+// Soundness is for the RESPONSE channel, which is all this checker
+// compares. Two rules of the abstract machine touch ONLY state no
+// response projects and so carry an empty affected set, dropping out of
+// the cone entirely:
+//
+//   R3 notify   removes a listener and writes the outbox — listener lists
+//               and outbox appear in no response record, and a listener
+//               feeds no rule but R3 itself;
+//   R6 dispatch re-arms `retryAt` and writes the outbox — `TaskRecord`
+//               carries no retryAt, and retryAt feeds no rule but R6.
+//
+// R6 was the one rule that discharges no obligation (the closure's
+// documented fanout source), so excluding it is most of the win. R1's
+// affected set must include the promise's CALLBACKS, not just its own id:
+// settling is what arms R4 for each awaiter, and R4 is not yet enabled
+// when the cone is computed — the same chain that made the Lean cone
+// unsound the first time (its `affects` doc tells the story).
+
+// touches is what a request reads — the seed of the cone. Mirrors the
+// Lean `touches` exactly; searches read no single object and seed nothing.
+func touches(o Op) []string {
+	switch o.Kind {
+	case "promise.register_callback":
+		return []string{o.ID, o.Awaiter}
+	case "task.suspend":
+		return append([]string{o.ID}, o.Awaited...)
+	case "task.create":
+		if o.Action != nil {
+			return []string{o.Action.ID}
+		}
+		return nil
+	case "task.fence":
+		if o.Action != nil {
+			return []string{o.ID, o.Action.ID}
+		}
+		return []string{o.ID}
+	case "task.heartbeat":
+		ids := make([]string, 0, len(o.Refs))
+		for _, r := range o.Refs {
+			ids = append(ids, r.ID)
+		}
+		return ids
+	case "promise.search", "task.search", "schedule.search":
+		return nil
+	default:
+		return []string{o.ID}
+	}
+}
+
+// firing is an enabled rule together with what it can affect on the
+// response channel. An empty affects means no response can ever tell
+// whether it fired.
+type firing struct {
+	rule
+	affects []string
+}
+
+// enabledFirings is enabledRules with each rule's affected set attached.
+func enabledFirings(s *ServerState, now uint64) []firing {
+	var fs []firing
+	for _, p := range s.Promises {
+		p := p
+		if p.State == Pending && p.TimeoutAt <= now {
+			fs = append(fs, firing{rule{"R1 promiseTimeout " + p.ID,
+				func(t *ServerState) { t.RulePromiseTimeout(p.ID, now) }},
+				append(append([]string{}, p.Callbacks...), p.ID)})
+			continue
+		}
+		if p.State != Pending {
+			for _, a := range p.Callbacks {
+				a := a
+				fs = append(fs, firing{rule{"R4 resume " + p.ID + " -> " + a,
+					func(t *ServerState) { t.RuleResume(p.ID, a, now) }},
+					[]string{p.ID, a}})
+			}
+			for _, l := range p.Listeners {
+				l := l
+				fs = append(fs, firing{rule{"R3 notify " + p.ID + " -> " + l,
+					func(t *ServerState) { t.RuleNotify(p.ID, l, now) }},
+					nil})
+			}
+		}
+	}
+	for _, t := range s.Tasks {
+		t := t
+		if t.State != TaskFulfilled {
+			if p := s.GetPromise(t.ID); p != nil && p.Project(now).State != Pending {
+				fs = append(fs, firing{rule{"R2 taskFulfillment " + t.ID,
+					func(u *ServerState) { u.RuleTaskFulfillment(t.ID, now) }},
+					[]string{t.ID}})
+				continue
+			}
+		}
+		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
+			fs = append(fs, firing{rule{"R5 leaseExpiry " + t.ID,
+				func(u *ServerState) { u.RuleLeaseExpiry(t.ID, now) }},
+				[]string{t.ID}})
+		}
+		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
+			fs = append(fs, firing{rule{"R6 dispatch " + t.ID,
+				func(u *ServerState) { u.RuleDispatch(t.ID, now, now) }},
+				nil})
+		}
+	}
+	return fs
+}
+
+// relevantRules is the cone: the enabled rules whose affected sets meet the
+// transitive closure of what `op` touches. Mirrors the Lean `relevantTaus`
+// — grow the wanted set through the enabled rules' affected sets to a
+// fixpoint (fuelled), then filter.
+func relevantRules(op Op) func(*ServerState, uint64) []rule {
+	return func(s *ServerState, now uint64) []rule {
+		enabled := enabledFirings(s, now)
+		want := map[string]bool{}
+		for _, id := range touches(op) {
+			want[id] = true
+		}
+		for i := 0; i < 32; i++ {
+			grew := false
+			for _, f := range enabled {
+				hit := false
+				for _, id := range f.affects {
+					if want[id] {
+						hit = true
+						break
+					}
+				}
+				if !hit {
+					continue
+				}
+				for _, id := range f.affects {
+					if !want[id] {
+						want[id] = true
+						grew = true
+					}
+				}
+			}
+			if !grew {
+				break
+			}
+		}
+		var rs []rule
+		for _, f := range enabled {
+			for _, id := range f.affects {
+				if want[id] {
+					rs = append(rs, f.rule)
+					break
+				}
+			}
+		}
+		return rs
+	}
+}
+
 // candidate is a state, the rule firings that reached it, and its
 // canonical key CACHED.
 //
@@ -209,15 +381,28 @@ func newCand(s *ServerState, w []string) candidate {
 	return candidate{state: s, witness: w, key: s.Key()}
 }
 
-// closure is every state reachable from `cs` by firing enabled rules at
-// `now`. This is the subset construction: since no observer can tell which
-// rules have fired, the model carries all of them.
+// Cone toggles the cone-of-influence reduction. On by default; `-cone=false`
+// on the CLIs runs the full closure, and the fuzzer checks the two agree.
+var Cone = true
+
+// pickFor is the closure's rule selector for one observed op: the cone
+// when enabled, every enabled rule otherwise.
+func pickFor(op Op) func(*ServerState, uint64) []rule {
+	if Cone {
+		return relevantRules(op)
+	}
+	return enabledRules
+}
+
+// closure is every state reachable from `cs` by firing rules `pick` allows
+// at `now`. This is the subset construction: since no observer can tell
+// which rules have fired, the model carries all of them.
 //
 // Terminates because every rule that changes the state discharges an
 // obligation — settles a pending promise, drains a callback or listener,
 // fulfils a task, expires a lease — and R6 is the one that does not, so it
 // is capped by dedup on the canonical key rather than by a measure.
-func closure(ctx context.Context, cs []candidate, now uint64, fuel int) ([]candidate, bool) {
+func closure(ctx context.Context, cs []candidate, now uint64, fuel int, pick func(*ServerState, uint64) []rule) ([]candidate, bool) {
 	seen := map[string]bool{}
 	out := make([]candidate, 0, len(cs))
 	frontier := make([]candidate, 0, len(cs))
@@ -239,7 +424,7 @@ func closure(ctx context.Context, cs []candidate, now uint64, fuel int) ([]candi
 		}
 		var next []candidate
 		for _, c := range frontier {
-			for _, r := range enabledRules(c.state, now) {
+			for _, r := range pick(c.state, now) {
 				t := c.state.clone()
 				r.fire(t)
 				k := t.Key()
