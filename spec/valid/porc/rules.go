@@ -2,7 +2,7 @@ package model
 
 import "context"
 
-// Internal rules, ported from spec/02-abstract/rules.lean.
+// Internal steps, ported from spec/02-abstract/internal-steps.lean.
 //
 // The machine's entire internal life is seven guarded rules, fired by the
 // environment in any order, at any pace, any number of times. Every rule
@@ -141,7 +141,8 @@ type rule struct {
 // admits every value of it; ONE representative is fired here, `next =
 // now`. That is sound rather than convenient: `next` is written to
 // `retryAt`, `TaskRecord` is `{id, state, version, resumes, ttl, pid}`
-// (spec/02-abstract/state.lean:135) and carries no `retryAt`, and no
+// (`TaskObject.toRecord` in spec/02-abstract/state.lean) and carries no
+// `retryAt`, and no
 // handler returns the outbox — so the states a different `next` would
 // reach differ only in fields no response can report. Firing `next = now`
 // also keeps R6 enabled at every later instant, which is the permissive

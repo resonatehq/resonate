@@ -110,12 +110,12 @@ def handleA (st : AStep) (now : Nat) : AbstractModel.M Response :=
   -- a concrete-internal request arriving as `.api` is a stutter; the
   -- translation never produces one
   | .api _                              => return .τ
-  | .r1 id      => do AbstractModel.Rules.processPromiseTimeout id now; return .τ
-  | .r3 id a    => do AbstractModel.Rules.processListener id a now; return .τ
-  | .r4 id x    => do AbstractModel.Rules.processCallback id x now; return .τ
-  | .r5 id      => do AbstractModel.Rules.processLeaseTimeout id now; return .τ
-  | .r6 id next => do AbstractModel.Rules.processRetryTimeout id next now; return .τ
-  | .r7 id      => do AbstractModel.Rules.processSchedule id now; return .τ
+  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .τ
+  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .τ
+  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .τ
+  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .τ
+  | .r6 id next => do AbstractModel.Internal.processRetryTimeout id next now; return .τ
+  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
   | .idle       => return .τ
 
 def stepOfA (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :
@@ -161,15 +161,15 @@ def SameObservationCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
 def absQuiesce (retry : Nat) (now : Nat) : AbstractModel.M Unit := do
   let pids := (← get).promises.map (·.id)
   for id in pids do
-    AbstractModel.Rules.processPromiseTimeout id now
+    AbstractModel.Internal.processPromiseTimeout id now
   let ps := (← get).promises
   for p in ps do
     if p.state != .pending then
       for a in p.listeners do
-        AbstractModel.Rules.processListener p.id a now
+        AbstractModel.Internal.processListener p.id a now
       for c in p.callbacks do
-        AbstractModel.Rules.processCallback p.id c now
-        AbstractModel.Rules.processRetryTimeout c (now + retry) now
+        AbstractModel.Internal.processCallback p.id c now
+        AbstractModel.Internal.processRetryTimeout c (now + retry) now
 
 def absQuiesced (retry : Nat) (now : Nat) (s : AbstractModel.ServerState) :
     AbstractModel.ServerState :=

@@ -5,8 +5,8 @@ import «04-theorems».«abstract-twins»
 Four machines, one protocol surface:
 
                  concrete state          coalesced state
-  projection     03-concrete/p           02-abstract/p.lean
-  materialized   03-concrete/m           02-abstract/m.lean
+  projection     03-concrete/p           02-abstract/external-steps-p.lean
+  materialized   03-concrete/m           02-abstract/external-steps-m.lean
 
 and four relations:
 
@@ -14,6 +14,16 @@ and four relations:
   * `IndistinguishableAbstract`            — Ap ≈ Am   (abstract-twins.lean)
   * `ConcreteRefinesAbstract`              — Cm ⊑ Am   (refinement.lean)
   * `AbstractRefinesConcrete` (this file)  — Am ⊑ Cm
+
+The two levels file their internal steps differently, and the layout
+says so. At the coalesced level they are SHARED — one
+`02-abstract/internal-steps.lean`, no `-p`/`-m`, because the read
+discipline splits the external steps and nothing else. At the concrete
+level each discipline carries its own copies (`03-concrete/{p,m}/`
+hold `02-timeouts.lean` and `03-resume.lean` alongside their handlers),
+because there the τs move obligation records and the disciplines see
+different ones — which is exactly why response lockstep fails at the
+concrete level (`lockstep.lean`) and holds at the abstract one.
 
 `TheSquare` is their conjunction. By composition it places ALL FOUR
 machines in one weak-bisimilarity class with respect to the two

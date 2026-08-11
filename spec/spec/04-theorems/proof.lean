@@ -1646,7 +1646,7 @@ theorem REq_touchTask_self (id : String) (n : Nat) (s : ServerState) :
 
 theorem agrees_r1 (id : String) : Agrees (.r1 id) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processPromiseTimeout,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Internal.processPromiseTimeout,
              run_bind, run_pure, Id.run]
   exact ⟨trivial, ((REq_touchPromise_self id n sP).symm.trans h).trans
     (REq_touchPromise_self id n sM)⟩
@@ -1660,7 +1660,7 @@ with the same record; under a settled or absent view neither side
 writes — TIMEOUT ALWAYS WINS extends to redispatch, mechanized. -/
 
 theorem run_processLeaseTimeout (id : String) (n : Nat) (s : ServerState) :
-    (Rules.processLeaseTimeout id n).run s = ((),
+    (Internal.processLeaseTimeout id n).run s = ((),
       match s.tasks.find? (·.id == id) with
       | none => s
       | some t =>
@@ -1676,26 +1676,26 @@ theorem run_processLeaseTimeout (id : String) (n : Nat) (s : ServerState) :
                 else s
           else s) := by
   cases hf : s.tasks.find? (·.id == id) with
-  | none => simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, run_pure]
+  | none => simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, run_pure]
   | some t =>
       cases he : t.expiresAt with
-      | none => simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, run_pure]
+      | none => simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, he, run_pure]
       | some d =>
           by_cases hg : ((t.state == TaskState.acquired) = true ∧ d ≤ n)
           · cases hp : s.promises.find? (·.id == t.id) with
             | none =>
-                simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                            run_viewPromise, hp, Option.map, run_pure]
             | some p0 =>
                 by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
-                · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_pos hpe, run_setTask, run_pure]
-                · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
-          · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+          · simp only [Internal.processLeaseTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
 
 theorem run_processRetryTimeout (id : String) (next : Nat) (n : Nat) (s : ServerState) :
-    (Rules.processRetryTimeout id next n).run s = ((),
+    (Internal.processRetryTimeout id next n).run s = ((),
       match s.tasks.find? (·.id == id) with
       | none => s
       | some t =>
@@ -1712,24 +1712,24 @@ theorem run_processRetryTimeout (id : String) (next : Nat) (n : Nat) (s : Server
                 else s
           else s) := by
   cases hf : s.tasks.find? (·.id == id) with
-  | none => simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, run_pure]
+  | none => simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, run_pure]
   | some t =>
       cases he : t.retryAt with
-      | none => simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, run_pure]
+      | none => simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, he, run_pure]
       | some due =>
           by_cases hg : ((t.state == TaskState.pending) = true ∧ due ≤ n)
           · cases hp : s.promises.find? (·.id == t.id) with
             | none =>
-                simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                            run_viewPromise, hp, Option.map, run_pure]
             | some p0 =>
                 by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
-                · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_pos hpe, run_setTask,
                              setMessage, run_modify, run_pure]
-                · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
-          · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+          · simp only [Internal.processRetryTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
 
 theorem agrees_r5 (id : String) : Agrees (.r5 id) := by
   intro n sP sM h
@@ -1950,7 +1950,7 @@ theorem REq_setPromise_settled {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
 
 theorem agrees_r3 (id address : String) : Agrees (.r3 id address) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processListener,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Internal.processListener,
              run_bind, run_touchPromise, run_pure, setMessage, run_modify, Id.run]
   refine ⟨trivial, ?_⟩
   have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
@@ -2099,12 +2099,12 @@ theorem touchTask_val_agrees (id : String) (n : Nat) {sA sB : ServerState}
     the view, touch state absorbed. -/
 theorem agrees_resumeOne (awaited awaiter : String) (n : Nat) {sA sB : ServerState}
     (h : REq n sA sB) :
-    REq n ((Rules.resumeOne awaited awaiter n).run sA).2
-          ((Rules.resumeOne awaited awaiter n).run sB).2 := by
+    REq n ((Internal.resumeOne awaited awaiter n).run sA).2
+          ((Internal.resumeOne awaited awaiter n).run sB).2 := by
   have h1 : REq n ((touchTask awaiter n).run sA).2 ((touchTask awaiter n).run sB).2 :=
     ((REq_touchTask_self awaiter n sA).symm.trans h).trans (REq_touchTask_self awaiter n sB)
   have hv := touchTask_val_agrees awaiter n h
-  simp only [Rules.resumeOne, run_bind]
+  simp only [Internal.resumeOne, run_bind]
   rw [hv]
   cases hvB : ((touchTask awaiter n).run sB).1 with
   | none => exact h1
@@ -2132,7 +2132,7 @@ theorem agrees_resumeOne (awaited awaiter : String) (n : Nat) {sA sB : ServerSta
 
 theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processCallback,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Internal.processCallback,
              run_bind, run_touchPromise, run_setPromise, run_pure, Id.run]
   refine ⟨trivial, ?_⟩
   have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
@@ -2564,21 +2564,21 @@ theorem REq_promiseCreateMM (req : ServerModel.PromiseCreateReq) {t n : Nat} (ht
 theorem REq_fireAll (s0 : ServerModel.Schedule) {n : Nat} (ts : List Nat)
     (hle : ∀ t ∈ ts, t ≤ n) :
     ∀ {sA sB : ServerState}, REq n sA sB →
-      REq n ((Rules.fireAll s0 ts).run sA).2 ((Rules.fireAll s0 ts).run sB).2 := by
+      REq n ((Internal.fireAll s0 ts).run sA).2 ((Internal.fireAll s0 ts).run sB).2 := by
   induction ts with
   | nil =>
       intro sA sB h
-      simp only [Rules.fireAll, run_pure]
+      simp only [Internal.fireAll, run_pure]
       exact h
   | cons t ts ih =>
       intro sA sB h
-      simp only [Rules.fireAll, Rules.fireOccurrence, run_bind, run_pure]
+      simp only [Internal.fireAll, Internal.fireOccurrence, run_bind, run_pure]
       exact ih (fun x hx => hle x (List.mem_cons_of_mem _ hx))
         (REq_promiseCreateMM _ (hle t List.mem_cons_self) h)
 
 theorem agrees_r7 (id : String) : Agrees (.r7 id) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processSchedule,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Internal.processSchedule,
              run_bind, run_getSchedule, run_pure, Id.run]
   refine ⟨trivial, ?_⟩
   have hs : sP.schedules.find? (·.id == id) = sM.schedules.find? (·.id == id) := h.2.2 id

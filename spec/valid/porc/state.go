@@ -10,7 +10,7 @@
 //
 // Two things the Lean says that this file leans on:
 //
-//   - `spec/02-abstract/p.lean` and `m.lean` are the SAME CODE modulo
+//   - `spec/02-abstract/external-steps-p.lean` and `-m.lean` are the SAME CODE modulo
 //     viewPromise/viewTask vs touchPromise/touchTask. Verified by diff,
 //     not taken on faith. So there is one set of handlers here, taking a
 //     `Discipline`, rather than two copies.
@@ -303,7 +303,8 @@ func (s *ServerState) SetMessage(m Message) {
 
 // ------------------------------------------------------- the read Discipline
 
-// Discipline is the ONLY difference between spec/02-abstract/p.lean and
+// Discipline is the ONLY difference between
+// spec/02-abstract/external-steps-p.lean and
 // m.lean. Verified by diffing the two files with view/touch normalised:
 // the code is otherwise identical, so porting them as one parameterised
 // handler set is faithful rather than a shortcut.

@@ -1,14 +1,27 @@
-import «02-abstract».«m»
+-- The -m twin, and it has to be that one: R7 creates its occurrences
+-- through `promiseCreate`, the MATERIALIZED handler, in both
+-- disciplines. Internal steps are material transitions on either side —
+-- the read discipline concerns external steps only — so the projected
+-- machine materializes when it fires R7, by design.
+import «02-abstract».«external-steps-m»
 
-/-!  # The coalesced machine — internal rules
+/-!  # The coalesced machine — internal steps
 
-The machine's entire internal life is six guarded rules, fired by the
-environment in any order, at any pace, any number of times. Each rule
-names its target (and, where there is a choice, the chosen listener,
-awaiter, or re-arm instant) — the
-parameters ARE the scheduler's nondeterminism, exactly as `now` is the
-clock's. Every rule is total: if its guard does not hold it is a no-op,
-so a stale or spurious firing is harmless.
+The machine's steps come in two kinds. EXTERNAL steps are the protocol
+handlers — one per request, in `external-steps-p.lean` and
+`external-steps-m.lean`, which differ only in read discipline. INTERNAL
+steps are these: the transitions the machine takes on its own, with no
+request behind them, shared by both disciplines. `AStep.isExternal` in
+`04-theorems` is the same distinction, drawn over the alphabet.
+
+The machine's entire internal life is six guarded rules — "rule" for
+the shape (a guard and a write), "internal step" for the role — fired
+by the environment in any order, at any pace, any number of times. Each
+rule names its target (and, where there is a choice, the chosen
+listener, awaiter, or re-arm instant) — the parameters ARE the
+scheduler's nondeterminism, exactly as `now` is the clock's. Every rule
+is total: if its guard does not hold it is a no-op, so a stale or
+spurious firing is harmless.
 
   R1 `processPromiseTimeout`  the promise deadline: settle to the
                               verdict and fulfill the task pair — the
@@ -73,7 +86,7 @@ next attempt is owed, the scheduler decides the cadence — repeated
 firing is at-least-once delivery.  -/
 
 namespace AbstractModel
-namespace Rules
+namespace Internal
 
 open ServerModel (nextCron occurrences expand Schedule)
 
@@ -211,5 +224,5 @@ def processSchedule (id : String) (now : Nat) : M Unit := do
                                nextRunAt := nextCron s.cron last }
       | none => pure ()
 
-end Rules
+end Internal
 end AbstractModel

@@ -133,7 +133,7 @@ func matches(got, want Response) bool {
 
 // samePromiseRecord compares the WHOLE `PromiseRecord`.
 //
-// `spec/02-abstract/state.lean:71` is
+// `PromiseObject.toRecord` in `spec/02-abstract/state.lean` is
 //
 //	{ id, state, param, value, tags, timeoutAt, createdAt, settledAt }
 //

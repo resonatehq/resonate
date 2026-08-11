@@ -180,7 +180,7 @@ func (n *recordingNet) Send(ctx context.Context, body string) (string, error) {
 // of 36 events in a small fan-out run — and it used to be dropped, which
 // made every trace from this binary a partial view. It is now decoded by
 // `valid/lean/json.lean` and modelled by `valid/porc`'s `TaskFence`, both
-// transcribed from `spec/02-abstract/p.lean:229`.
+// transcribed from `taskFence` in `spec/02-abstract/external-steps-p.lean`.
 //
 // `task.create` is in it too, for the same reason: the SDK issues one per
 // root workflow, so without it the trace has no promise for anything else

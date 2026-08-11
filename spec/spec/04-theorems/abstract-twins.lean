@@ -1,12 +1,13 @@
 import «04-theorems».«refinement»
-import «02-abstract».«p»
+import «02-abstract».«external-steps-p»
 
 /-!  # The abstract twins — projected vs materialized, coalesced state
 
 The square, completed: the abstract machine in both read disciplines.
-`AbstractModel` (in `m.lean`) materializes on touch; here its projected
-twin (`p.lean`) serves the same facts as views and persists nothing —
-the shared rules (`rules.lean`, material transitions both) do all fact
+`AbstractModel` (in `external-steps-m.lean`) materializes on touch;
+here its projected twin (`external-steps-p.lean`) serves the same facts
+as views and persists nothing — the shared internal steps
+(`internal-steps.lean`, material transitions both) do all fact
 writing at the environment's pace.
 
 The situation is SHARPER than at the concrete level, in both
@@ -62,12 +63,12 @@ def handleAP (st : AStep) (now : Nat) : AbstractModel.M Response :=
   | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.Projected.taskContinue req now
   | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.Projected.taskSearch req now
   | .api _                              => return .τ
-  | .r1 id      => do AbstractModel.Rules.processPromiseTimeout id now; return .τ
-  | .r3 id a    => do AbstractModel.Rules.processListener id a now; return .τ
-  | .r4 id x    => do AbstractModel.Rules.processCallback id x now; return .τ
-  | .r5 id      => do AbstractModel.Rules.processLeaseTimeout id now; return .τ
-  | .r6 id next => do AbstractModel.Rules.processRetryTimeout id next now; return .τ
-  | .r7 id      => do AbstractModel.Rules.processSchedule id now; return .τ
+  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .τ
+  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .τ
+  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .τ
+  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .τ
+  | .r6 id next => do AbstractModel.Internal.processRetryTimeout id next now; return .τ
+  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
   | .idle       => return .τ
 
 def stepOfAP (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :

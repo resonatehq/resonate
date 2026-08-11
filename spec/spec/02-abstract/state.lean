@@ -15,8 +15,8 @@ types, same request/response behavior at the API — a different machine:
 * **No deferred set.** The base machine moves a settled promise's
   callbacks into a `deferred` queue and drains it. Here settlement writes
   the promise's state and nothing else: awaiters and listeners STAY ON
-  THE PROMISE until batch rules (`Rules.processCallback`,
-  `Rules.processListener`) drain
+  THE PROMISE until batch rules (`Internal.processCallback`,
+  `Internal.processListener`) drain
   them, one to all at a time.
 
 * **No projection.** The base machine serves a logical view of a
@@ -37,7 +37,7 @@ involved), and touching applies them:
 Everything else — waking awaiters, notifying listeners, expiring leases,
 dispatching executes, firing schedules — is a scheduling CHOICE, and
 choices are never applied on touch: they are the internal rules of
-`rules.lean`, fired by the environment at its own pace.
+`internal-steps.lean`, fired by the environment at its own pace.
 
 Retaining awaiters and listeners across settlement is what makes
 materialization-on-touch sound: flipping a promise's state on a read
@@ -99,8 +99,9 @@ def PromiseObject.addListener (p : PromiseObject) (address : String) : PromiseOb
     the drain rules discharge the obligations.
 
     The two read disciplines are the two uses of this one function:
-    the projected handlers (`p.lean`) SERVE it, the materialized
-    handlers (`m.lean`) PERSIST it (`touchPromise`). Materialization is
+    the projected external steps (`external-steps-p.lean`) SERVE it,
+    the materialized ones (`external-steps-m.lean`) PERSIST it
+    (`touchPromise`). Materialization is
     projection, written down. -/
 def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
   if p.state == .pending ∧ p.timeoutAt ≤ now then
