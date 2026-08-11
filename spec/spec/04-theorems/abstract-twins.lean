@@ -62,13 +62,12 @@ def handleAP (st : AStep) (now : Nat) : AbstractModel.M Response :=
   | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.Projected.taskContinue req now
   | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.Projected.taskSearch req now
   | .api _                              => return .τ
-  | .r1 id      => do AbstractModel.Rules.promiseTimeout id now; return .τ
-  | .r2 id      => do AbstractModel.Rules.taskFulfillment id now; return .τ
-  | .r3 id a    => do AbstractModel.Rules.notify id a now; return .τ
-  | .r4 id x    => do AbstractModel.Rules.resume id x now; return .τ
-  | .r5 id      => do AbstractModel.Rules.leaseExpiry id now; return .τ
-  | .r6 id next => do AbstractModel.Rules.dispatch id next now; return .τ
-  | .r7 id      => do AbstractModel.Rules.scheduleFire id now; return .τ
+  | .r1 id      => do AbstractModel.Rules.processPromiseTimeout id now; return .τ
+  | .r3 id a    => do AbstractModel.Rules.processListener id a now; return .τ
+  | .r4 id x    => do AbstractModel.Rules.processCallback id x now; return .τ
+  | .r5 id      => do AbstractModel.Rules.processLeaseTimeout id now; return .τ
+  | .r6 id next => do AbstractModel.Rules.processRetryTimeout id next now; return .τ
+  | .r7 id      => do AbstractModel.Rules.processSchedule id now; return .τ
   | .idle       => return .τ
 
 def stepOfAP (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :

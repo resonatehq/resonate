@@ -17,9 +17,10 @@ namespace AbstractModel
   consumed at creation: it seeds the task's `retryAt`, so the
   create-side delay machinery of the base spec collapses to one field
   initialization.
-* `promiseSettle` writes THE PROMISE ONLY. The task is fulfilled by
-  fact T (on the next touch, or by `Rules.taskFulfillment`); awaiters
-  and listeners stay on the promise for the batch rules.  -/
+* `promiseSettle` writes the promise AND its task pair — the coupled
+  write: fact T is fact P seen through the task, so the same step makes
+  both true. Awaiters and listeners stay on the promise for the batch
+  rules.  -/
 
 
 open ServerModel (PromiseState
@@ -354,10 +355,9 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
                            expiresAt := none, retryAt := none, resumes := [] }
           return { status := 200 }
 
-/-- Settles the promise; the task's fulfillment is fact T, materialized
-    on the next touch or by `Rules.taskFulfillment` — observably
-    indistinguishable, since every task read that could report it goes
-    through `touchTask`. -/
+/-- Settles the promise, and its task with it: fact T is fact P seen
+    through the task, so `setSettled` writes the pair in one step —
+    no separate fulfillment transition to lag behind. -/
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
@@ -431,7 +431,7 @@ def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
 
 /-!  ## Schedule handlers
 
-A schedule's `nextRunAt` is its alarm: `Rules.scheduleFire` guards on it
+A schedule's `nextRunAt` is its alarm: `Rules.processSchedule` guards on it
 directly, so creation arms nothing and deletion disarms nothing.  -/
 
 

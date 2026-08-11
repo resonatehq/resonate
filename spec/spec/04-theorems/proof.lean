@@ -28,10 +28,10 @@ anywhere in this file):
      follows, by induction over the trace.
   5. Per-step agreement (`Agrees st`) — ALL CASES DISCHARGED: `idle`,
      the searches, the schedule handlers, the five promise handlers,
-     the ten task handlers, and the seven rules. The recurring
+     the ten task handlers, and the six rules. The recurring
      arguments: the task read proven once (`bind_taskRead_agrees`);
      touch self-invisibility plus symmetry/transitivity of the
-     invariant (R1/R2); the doomed-dispatch fix mechanized — under a
+     invariant (R1); the doomed-dispatch fix mechanized — under a
      pending view the raw tasks coincide, under a settled view
      neither side writes (R5/R6); the settled-upsert congruence and
      the value/state split of the touch (R3/R4); the loop handlers by
@@ -1581,8 +1581,10 @@ theorem agrees_taskFulfill (req) : Agrees (.api (.taskFulfill req)) := by
 
 Instantiating the absorption lemmas at `REq.refl` says each touch is
 invisible to the invariant RELATIVE TO ITS OWN STATE. With symmetry
-and transitivity, the fact rules R1 and R2 — which BOTH machines run
-identically — need no case analysis at all. -/
+and transitivity, the fact rule R1 — which BOTH machines run
+identically — needs no case analysis at all. The task-side touch is
+kept because R4's wake step reads through it, not because a
+fulfillment rule survives. -/
 
 theorem REq_touchPromise_self (id : String) (n : Nat) (s : ServerState) :
     REq n s ((touchPromise id n).run s).2 := by
@@ -1640,21 +1642,14 @@ theorem REq_touchTask_self (id : String) (n : Nat) (s : ServerState) :
             · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n s) p hp'
             · simp only [if_neg hc]; exact REq.refl n s
 
-/-! ### 5n. The fact rules R1 and R2 -/
+/-! ### 5n. The fact rule R1 -/
 
 theorem agrees_r1 (id : String) : Agrees (.r1 id) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.promiseTimeout,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processPromiseTimeout,
              run_bind, run_pure, Id.run]
   exact ⟨trivial, ((REq_touchPromise_self id n sP).symm.trans h).trans
     (REq_touchPromise_self id n sM)⟩
-
-theorem agrees_r2 (id : String) : Agrees (.r2 id) := by
-  intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.taskFulfillment,
-             run_bind, run_pure, Id.run]
-  exact ⟨trivial, ((REq_touchTask_self id n sP).symm.trans h).trans
-    (REq_touchTask_self id n sM)⟩
 
 /-! ### 5o. The choice rules R5 and R6
 
@@ -1664,8 +1659,8 @@ tasks coincide (`tLook_pending`), so the sides make the same choice
 with the same record; under a settled or absent view neither side
 writes — TIMEOUT ALWAYS WINS extends to redispatch, mechanized. -/
 
-theorem run_leaseExpiry (id : String) (n : Nat) (s : ServerState) :
-    (Rules.leaseExpiry id n).run s = ((),
+theorem run_processLeaseTimeout (id : String) (n : Nat) (s : ServerState) :
+    (Rules.processLeaseTimeout id n).run s = ((),
       match s.tasks.find? (·.id == id) with
       | none => s
       | some t =>
@@ -1681,26 +1676,26 @@ theorem run_leaseExpiry (id : String) (n : Nat) (s : ServerState) :
                 else s
           else s) := by
   cases hf : s.tasks.find? (·.id == id) with
-  | none => simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, run_pure]
+  | none => simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, run_pure]
   | some t =>
       cases he : t.expiresAt with
-      | none => simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, run_pure]
+      | none => simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, run_pure]
       | some d =>
           by_cases hg : ((t.state == TaskState.acquired) = true ∧ d ≤ n)
           · cases hp : s.promises.find? (·.id == t.id) with
             | none =>
-                simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                            run_viewPromise, hp, Option.map, run_pure]
             | some p0 =>
                 by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
-                · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_pos hpe, run_setTask, run_pure]
-                · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
-          · simp only [Rules.leaseExpiry, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+          · simp only [Rules.processLeaseTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
 
-theorem run_dispatch (id : String) (next : Nat) (n : Nat) (s : ServerState) :
-    (Rules.dispatch id next n).run s = ((),
+theorem run_processRetryTimeout (id : String) (next : Nat) (n : Nat) (s : ServerState) :
+    (Rules.processRetryTimeout id next n).run s = ((),
       match s.tasks.find? (·.id == id) with
       | none => s
       | some t =>
@@ -1717,29 +1712,29 @@ theorem run_dispatch (id : String) (next : Nat) (n : Nat) (s : ServerState) :
                 else s
           else s) := by
   cases hf : s.tasks.find? (·.id == id) with
-  | none => simp only [Rules.dispatch, run_bind, run_getTask, hf, run_pure]
+  | none => simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, run_pure]
   | some t =>
       cases he : t.retryAt with
-      | none => simp only [Rules.dispatch, run_bind, run_getTask, hf, he, run_pure]
+      | none => simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, run_pure]
       | some due =>
           by_cases hg : ((t.state == TaskState.pending) = true ∧ due ≤ n)
           · cases hp : s.promises.find? (·.id == t.id) with
             | none =>
-                simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                            run_viewPromise, hp, Option.map, run_pure]
             | some p0 =>
                 by_cases hpe : (((p0.project n).state == PromiseState.pending) = true)
-                · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_pos hpe, run_setTask,
                              setMessage, run_modify, run_pure]
-                · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_pos hg,
+                · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_pos hg,
                              run_viewPromise, hp, Option.map, if_neg hpe, run_pure]
-          · simp only [Rules.dispatch, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
+          · simp only [Rules.processRetryTimeout, run_bind, run_getTask, hf, he, if_neg hg, run_pure]
 
 theorem agrees_r5 (id : String) : Agrees (.r5 id) := by
   intro n sP sM h
   simp only [stepOfAP, stepOfA, handleAP, handleA, run_bind, run_pure, Id.run,
-             run_leaseExpiry]
+             run_processLeaseTimeout]
   refine ⟨trivial, ?_⟩
   have hti : (sP.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sP id))
       = (sM.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sM id)) := h.2.1 id
@@ -1799,7 +1794,7 @@ theorem agrees_r5 (id : String) : Agrees (.r5 id) := by
 theorem agrees_r6 (id : String) (next : Nat) : Agrees (.r6 id next) := by
   intro n sP sM h
   simp only [stepOfAP, stepOfA, handleAP, handleA, run_bind, run_pure, Id.run,
-             run_dispatch]
+             run_processRetryTimeout]
   refine ⟨trivial, ?_⟩
   have hti : (sP.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sP id))
       = (sM.tasks.find? (·.id == id)).map (fun t => applyView t (pLook n sM id)) := h.2.1 id
@@ -1856,7 +1851,7 @@ theorem agrees_r6 (id : String) (next : Nat) : Agrees (.r6 id next) := by
                   · simp only [if_neg hpe]
                     cases tP.retryAt <;> cases tM.retryAt <;> simp only [ite_self] <;> exact h
 
-/-! ### 5p. R3 — notify. The write is a SETTLED promise (drop one
+/-! ### 5p. R3 — processListener. The write is a SETTLED promise (drop one
     listener): a settled upsert needs no task-agreement side condition,
     because the view against any settled promise is the same
     fulfill-or-identity. -/
@@ -1955,7 +1950,7 @@ theorem REq_setPromise_settled {n : Nat} {sP sM : ServerState} (h : REq n sP sM)
 
 theorem agrees_r3 (id address : String) : Agrees (.r3 id address) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.notify,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processListener,
              run_bind, run_touchPromise, run_pure, setMessage, run_modify, Id.run]
   refine ⟨trivial, ?_⟩
   have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
@@ -2009,7 +2004,7 @@ theorem agrees_r3 (id address : String) : Agrees (.r3 id address) := by
               exact REq_setPromise_settled h1 _ (toFalse hpend)
             · simp only [if_neg hlc]; exact h1
 
-/-! ### 5q. R4 — resume. The touch's VALUE is the view pair, its STATE
+/-! ### 5q. R4 — processCallback. The touch's VALUE is the view pair, its STATE
     is self-invisible; splitting the two lets the shared `resumeOne`
     compose through the invariant without expanding the touch. -/
 
@@ -2137,7 +2132,7 @@ theorem agrees_resumeOne (awaited awaiter : String) (n : Nat) {sA sB : ServerSta
 
 theorem agrees_r4 (id awaiter : String) : Agrees (.r4 id awaiter) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.resume,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processCallback,
              run_bind, run_touchPromise, run_setPromise, run_pure, Id.run]
   refine ⟨trivial, ?_⟩
   have hpi : (sP.promises.find? (·.id == id)).map (·.project n)
@@ -2446,7 +2441,7 @@ theorem agrees_taskFence (req) : Agrees (.api (.taskFence req)) := by
                       refine ⟨?_, hst⟩
                       rw [hval]
 
-/-! ### 5r. R7 — scheduleFire. The occurrence list is one opaque pure
+/-! ### 5r. R7 — processSchedule. The occurrence list is one opaque pure
     term shared by both sides (schedules agree, the clock is shared),
     so the rule is a list induction of `promiseCreate` steps. Each
     step runs AS OF a past cron time `t ≤ now` — and a touch write
@@ -2583,7 +2578,7 @@ theorem REq_fireAll (s0 : ServerModel.Schedule) {n : Nat} (ts : List Nat)
 
 theorem agrees_r7 (id : String) : Agrees (.r7 id) := by
   intro n sP sM h
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.scheduleFire,
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Rules.processSchedule,
              run_bind, run_getSchedule, run_pure, Id.run]
   refine ⟨trivial, ?_⟩
   have hs : sP.schedules.find? (·.id == id) = sM.schedules.find? (·.id == id) := h.2.2 id
@@ -2720,7 +2715,6 @@ theorem stepAgreement : StepAgreement := by
       | τResume req => exact fun n sP sM h => ⟨rfl, h⟩
       | idle => exact fun n sP sM h => ⟨rfl, h⟩
   | r1 id => exact agrees_r1 id
-  | r2 id => exact agrees_r2 id
   | r3 id address => exact agrees_r3 id address
   | r4 id awaiter => exact agrees_r4 id awaiter
   | r5 id => exact agrees_r5 id

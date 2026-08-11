@@ -2,7 +2,7 @@ import «02-abstract».«m»
 
 /-!  # The coalesced machine — internal rules
 
-The machine's entire internal life is seven guarded rules, fired by the
+The machine's entire internal life is six guarded rules, fired by the
 environment in any order, at any pace, any number of times. Each rule
 names its target (and, where there is a choice, the chosen listener,
 awaiter, or re-arm instant) — the
@@ -10,50 +10,87 @@ parameters ARE the scheduler's nondeterminism, exactly as `now` is the
 clock's. Every rule is total: if its guard does not hold it is a no-op,
 so a stale or spurious firing is harmless.
 
-  R1 `promiseTimeout`    if there is a promise past its deadline — fact P.
-  R2 `taskFulfillment`   if there is a task whose promise is settled — fact T.
-  R3 `notify`            if there is a settled promise with a listener:
-                         deliver a chosen one its `unblock`.
-  R4 `resume`            if there is a settled promise with an awaiter:
-                         wake a chosen one.
-  R5 `leaseExpiry`       if there is a task past its lease deadline.
-  R6 `dispatch`          if there is a pending task past `retryAt`, emit
-                         its `execute` and re-arm `retryAt` at a chosen
-                         instant.
-  R7 `scheduleFire`      if there is a schedule past `nextRunAt`.
+  R1 `processPromiseTimeout`  the promise deadline: settle to the
+                              verdict and fulfill the task pair — the
+                              coupled write.
+  R3 `processListener`        one listener of a settled promise: emit
+                              its `unblock` — the work continues
+                              outside.
+  R4 `processCallback`        one callback of a settled promise: wake
+                              the awaiter task — the work continues in
+                              the durable world.
+  R5 `processLeaseTimeout`    the lease deadline: reclaim the task to
+                              pending, arm the retry deadline.
+  R6 `processRetryTimeout`    the retry deadline: emit the `execute`,
+                              re-arm at a chosen instant.
+  R7 `processSchedule`        the schedule's alarm: create every
+                              occurrence now due, advance past the last.
 
-R1 and R2 are the facts themselves — firing one is the environment
-touching an object, nothing more. They exist as rules so that facts
-materialize eventually even on objects no request ever touches again.
+EVERY RULE PROCESSES SOMETHING THE STATE OWES, and is named for what it
+processes — its TRIGGER — never for what it emits. Three process a
+deadline that has come due (R1, R5, R6); two process one entry of a
+settled promise's fan-out ledger, remove-and-act in a single step (R3
+over `listeners`, R4 over `callbacks`); R7 processes the schedule's
+alarm. What a rule emits is an effect: exactly two write the outbox,
+and neither takes its name from the message. R6 is the third member of
+the timeout family, not a `dispatch` of its own — the retry deadline's
+only consequence IS the `execute`, so the deadline and the message are
+one event.
 
-R5 and R6 read the TASK raw — lease expiry and dispatch are choices,
-not facts: an expired lease is permission to redispatch, not
-revocation, and neither may be forced by observation. But their
-DECISIONS consult the promise through the view, like every decision in
-the machine: TIMEOUT ALWAYS WINS extends to redispatch and
-reassignment — no rule creates new work for a logically dead task.
-R6's due time is state (`retryAt`) while its re-arm instant is a
-parameter: the machine records WHEN the next attempt is owed, the
-scheduler decides the cadence — repeated firing is at-least-once
-delivery.  -/
+There is no sixth kind of obligation, and that is checkable: the only
+things the state can owe work on are the three deadlines (`timeoutAt`,
+the lease deadline, the retry deadline), the two ledgers, and the
+schedule's `nextRunAt`. A task's queued resumes are CARRIED and
+delivered with the `execute` rather than processed, and outbox entries
+are transport's business, below the model.
+
+FACT T IS NOT A RULE. There was once an R2 `taskFulfillment` — a
+separate transition materializing fact T on a task whose promise is
+settled. It is gone. Fact T is not an independent fact but fact P seen
+through the task, made true by the same event, so settling a promise
+fulfills its task pair in the SAME step: the coupled write of
+`setSettled`, which R1 goes through like every other settling
+transition. On any state satisfying that storage invariant a separate
+fulfillment rule is the identity — the write that settled the promise
+already fulfilled the task. The surviving rules keep their original
+numbers so that cross-references elsewhere in the tree still point at
+the same rules; the gap at R2 is the deletion, recorded.
+
+The fan-out ledgers are still drained ASYNCHRONOUSLY, one entry at a
+time, rather than inlined into the settling transitions. That keeps
+this spec the liberal contract: an implementation that pages through a
+large fan-out still refines it, and one that settles with the whole
+fan-out inline in a single atomic write refines it trivially.
+
+R5 and R6 read the TASK raw — lease and retry are choices, not facts:
+an expired lease is permission to redispatch, not revocation, and
+neither may be forced by observation. But their DECISIONS consult the
+promise through the view, like every decision in the machine: TIMEOUT
+ALWAYS WINS extends to redispatch and reassignment — no rule creates
+new work for a logically dead task. R6's due time is state (`retryAt`)
+while its re-arm instant is a parameter: the machine records WHEN the
+next attempt is owed, the scheduler decides the cadence — repeated
+firing is at-least-once delivery.  -/
 
 namespace AbstractModel
 namespace Rules
 
 open ServerModel (nextCron occurrences expand Schedule)
 
-/-- R1: materialize fact P on a promise of the environment's choosing. -/
-def promiseTimeout (id : String) (now : Nat) : M Unit := do
+/-- R1: process the promise deadline on a promise of the environment's
+    choosing — settle it to its verdict and fulfill its task pair. Fact
+    P and fact T are one event, so the rule that materializes one
+    materializes both: `touchPromise` settles through the coupled write
+    (`setSettled`). It exists as a rule so that the fact materializes
+    eventually even on a promise no request ever touches again. -/
+def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
   let _ ← touchPromise id now
 
-/-- R2: materialize fact T on a task of the environment's choosing. -/
-def taskFulfillment (id : String) (now : Nat) : M Unit := do
-  let _ ← touchTask id now
-
-/-- R3: deliver a chosen listener of a settled promise its `unblock`.
-    A batch — one to all at a time — is consecutive firings; the
-    selection, like the pace, is the scheduler's. -/
-def notify (id : String) (address : String) (now : Nat) : M Unit := do
+/-- R3: process one listener of a settled promise — remove it from the
+    ledger and emit its `unblock`. A batch — one to all at a time — is
+    consecutive firings; the selection, like the pace, is the
+    scheduler's. -/
+def processListener (id : String) (address : String) (now : Nat) : M Unit := do
   match ← touchPromise id now with
   | none => pure ()
   | some p =>
@@ -63,7 +100,8 @@ def notify (id : String) (address : String) (now : Nat) : M Unit := do
         setPromise { p with listeners := p.listeners.filter (· != address) }
         setMessage address (.unblock p.toRecord)
 
-/-- Wake one awaiter of a settled promise. The touch materializes the
+/-- Wake one awaiter of a settled promise — R4's wake step, a helper
+    rather than a rule of its own. The touch materializes the
     awaiter's own deadline first, so TIMEOUT ALWAYS WINS falls out: an
     awaiter past its own deadline reads `.fulfilled` and is dropped —
     no explicit deadline guard, unlike the base machine's resume. -/
@@ -82,9 +120,10 @@ def resumeOne (awaited awaiter : String) (now : Nat) : M Unit := do
       | .fulfilled =>
           pure ()
 
-/-- R4: wake a chosen awaiter of a settled promise. A woken task is
-    `.pending`; its `execute` is R6's job. -/
-def resume (id : String) (awaiter : String) (now : Nat) : M Unit := do
+/-- R4: process one callback of a settled promise — remove it from the
+    ledger and wake the awaiter task. A woken task is `.pending`; its
+    `execute` is R6's job. -/
+def processCallback (id : String) (awaiter : String) (now : Nat) : M Unit := do
   match ← touchPromise id now with
   | none => pure ()
   | some p =>
@@ -94,13 +133,13 @@ def resume (id : String) (awaiter : String) (now : Nat) : M Unit := do
         setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
         resumeOne p.id awaiter now
 
-/-- R5: an acquired task past its lease deadline returns to `.pending`.
-    The TASK is read raw — expiry is a choice, not a fact, and must
-    never be forced by observation — but the DECISION consults the
-    promise through the view: TIMEOUT ALWAYS WINS extends to
-    reassignment, and no rule creates new work for a logically dead
-    task. -/
-def leaseExpiry (id : String) (now : Nat) : M Unit := do
+/-- R5: process the lease deadline — an acquired task past it returns
+    to `.pending` with the retry deadline armed. The TASK is read raw —
+    expiry is a choice, not a fact, and must never be forced by
+    observation — but the DECISION consults the promise through the
+    view: TIMEOUT ALWAYS WINS extends to reassignment, and no rule
+    creates new work for a logically dead task. -/
+def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
   match ← getTask id with
   | none => pure ()
   | some t =>
@@ -115,13 +154,15 @@ def leaseExpiry (id : String) (now : Nat) : M Unit := do
                   setTask { t with state := .pending, pid := none, ttl := none,
                                    expiresAt := none, retryAt := some now }
 
-/-- R6: emit the `execute` for a pending task whose dispatch is due
-    (`retryAt ≤ now`), and re-arm `retryAt` at `next` — the rule's
-    parameter, because cadence is the scheduler's choice, not the
-    machine's state. Raw read; repeatable — the outbox's keyed upsert
+/-- R6: process the retry deadline — emit the `execute` for a pending
+    task whose dispatch is due (`retryAt ≤ now`), and re-arm `retryAt`
+    at `next` — the rule's parameter, because cadence is the
+    scheduler's choice, not the machine's state. The deadline and the
+    message are one event: emitting the `execute` is the deadline's
+    only consequence. Raw read; repeatable — the outbox's keyed upsert
     makes re-emission idempotent, so any `next` (including one already
     past) is sound. -/
-def dispatch (id : String) (next : Nat) (now : Nat) : M Unit := do
+def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
   match ← getTask id with
   | none => pure ()
   | some t =>
@@ -153,12 +194,12 @@ def fireAll (s : Schedule) : List Nat → M Unit
       fireOccurrence s t
       fireAll s ts
 
-/-- R7: fire a schedule past `nextRunAt` (with catch-up): create every
-    occurrence due at or before `now`, then advance the schedule past
-    the last one. The occurrence list is the opaque `occurrences` —
+/-- R7: process a schedule past `nextRunAt` (with catch-up): create
+    every occurrence due at or before `now`, then advance the schedule
+    past the last one. The occurrence list is the opaque `occurrences` —
     calendar math, like `nextCron` itself — filtered by due-ness: the
     machine takes only what is due, whatever the calendar says. -/
-def scheduleFire (id : String) (now : Nat) : M Unit := do
+def processSchedule (id : String) (now : Nat) : M Unit := do
   match ← getSchedule id with
   | none => pure ()
   | some s =>

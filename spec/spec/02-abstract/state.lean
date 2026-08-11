@@ -15,7 +15,8 @@ types, same request/response behavior at the API — a different machine:
 * **No deferred set.** The base machine moves a settled promise's
   callbacks into a `deferred` queue and drains it. Here settlement writes
   the promise's state and nothing else: awaiters and listeners STAY ON
-  THE PROMISE until batch rules (`Rules.resume`, `Rules.notify`) drain
+  THE PROMISE until batch rules (`Rules.processCallback`,
+  `Rules.processListener`) drain
   them, one to all at a time.
 
 * **No projection.** The base machine serves a logical view of a

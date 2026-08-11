@@ -46,8 +46,9 @@ concrete script `w` against its translation — is equally a witness
 that the abstract trace's behavior is realized by a concrete trace;
 that covers every abstract schedule in the translation's image
 (battery plus exhaustive sweep). The pairs below cover the
-abstract-native steps OUTSIDE that image: the standalone fact rules
-R2 and R3, the wake pair R4;R6, and a fact-lagged internal promise.  -/
+abstract-native steps OUTSIDE that image: the standalone listener rule
+R3, the wake pair R4;R6, a fact-lagged internal promise, and the
+coupled write standing where a fulfillment rule used to.  -/
 
 namespace Abstraction
 
@@ -147,14 +148,16 @@ def q2A : List (AStep × Nat) :=
 
 example : pairCheck q2C q2A 300 := by decide
 
--- R2, standalone: the concrete settle fulfills the task inline; the
--- abstract machine fulfills by rule.
+-- The coupled write, standalone: both machines fulfill the task in the
+-- settling step itself, so the abstract script needs NO rule after the
+-- settle. This is the witness that the deleted R2 was redundant — where
+-- it used to be appended here, nothing is, and the pair still closes.
 def q3C : List (Request × Nat) :=
   [ (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }, 100),
     (.promiseSettle { id := "x", state := .resolved, value := {} }, 200) ]
 
 def q3A : List (AStep × Nat) :=
-  (q3C.map (fun (rq, n) => (AStep.api rq, n))) ++ [(.r2 "x", 200)]
+  q3C.map (fun (rq, n) => (AStep.api rq, n))
 
 example : pairCheck q3C q3A 300 := by decide
 
