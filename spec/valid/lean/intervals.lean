@@ -38,15 +38,15 @@ already stored in the state:
 
 | handler | comparisons |
 |---|---|
-| `touchPromise` / `onPromiseTimeout` | `p.timeoutAt > now` |
-| `onTaskRetryTimeout` | `tt.timeout > now`, `p.timeoutAt > now` |
-| `onTaskLeaseTimeout` | `tt.timeout > now`, `p.timeoutAt > now` |
-| `onResume` | `now >= p.timeoutAt` (and `touchTask`'s) |
-| `onScheduleTimeout` | `s0.nextRunAt > now` — **and `occurrences … now`** |
+| `touchPromise` / `processPromiseTimeout` | `p.timeoutAt > now` |
+| `processRetryTimeout` | `tt.timeout > now`, `p.timeoutAt > now` |
+| `processLeaseTimeout` | `tt.timeout > now`, `p.timeoutAt > now` |
+| `processResume` | `now >= p.timeoutAt` (and `touchTask`'s) |
+| `processSchedule` | `s0.nextRunAt > now` — **and `occurrences … now`** |
 
 The first four are thresholds against stored numbers, so on an interval
 the behaviour is piecewise constant with breakpoints exactly at those
-numbers. `onScheduleTimeout` is not: it passes `now` itself to an opaque
+numbers. `processSchedule` is not: it passes `now` itself to an opaque
 function. That is not a gap in the argument, it is the reason the checker
 below refuses schedule traces outright — see `valid/lean/schedules.lean`,
 where a faithful `occurrences` REFUTES `InstantsSuffice`.
@@ -64,12 +64,12 @@ It does not need to. Read the handlers rather than the prose:
 
 * `taskTimeouts` is read by exactly one function, `getTaskTimeout`
   (`03-concrete/state.lean`), whose only two call sites in the whole
-  machine are `onTaskRetryTimeout` and `onTaskLeaseTimeout`. NO external
+  machine are `processRetryTimeout` and `processLeaseTimeout`. NO external
   handler reads it, so no `Response` projects it.
 * `outbox` is read by NO handler at all. `grep -rn outbox 03-concrete/`
   finds `state.lean`'s writer and `guarantee.lean`, which is
   meta-analysis, not a transition.
-* `onTaskRetryTimeout` writes NOTHING ELSE: `delTaskTimeout`,
+* `processRetryTimeout` writes NOTHING ELSE: `delTaskTimeout`,
   `setTaskTimeout … 0 …`, `setMessage`. So a retry τ is invisible to the
   response channel entirely — provided a `.pending` task never carries a
   LEASE timer, since `delTaskTimeout` deletes both kinds. That proviso is
@@ -92,7 +92,7 @@ open ServerModel Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Execut
 
 /-- The state modulo what no `Response` projects: the outbox, and the
     RETRY timers, whose only reader is the retry τ's own guard. Lease
-    timers stay — `onTaskLeaseTimeout` writes task state, and `taskGet`
+    timers stay — `processLeaseTimeout` writes task state, and `taskGet`
     projects that. -/
 def Visible (s : ServerState) : ServerState :=
   { s with outbox := [], taskTimeouts := s.taskTimeouts.filter (·.kind != 0) }
@@ -205,7 +205,7 @@ Two things make the theorem below unconditional, and both are refusals
 rather than proofs.
 
 * A trace that MENTIONS A SCHEDULE is declined. `occurrences` is opaque,
-  so no reduction can be justified for `onScheduleTimeout`, and the
+  so no reduction can be justified for `processSchedule`, and the
   executable's `occurrences` returns `[]` — a degenerate calendar, not a
   cron. Refuting such a trace would be refuting an artefact.
 * A trace whose instants RUN BACKWARDS is refuted, not declined: `ValidM`
@@ -282,7 +282,7 @@ observation list and every execution explaining it, and had no
 per-handler decomposition at all — which is why nobody could prove it and
 why it took an empirical hunt to even guess at its truth. -/
 
-/-- **R1 · Retry τs are invisible.** `onTaskRetryTimeout` writes only
+/-- **R1 · Retry τs are invisible.** `processRetryTimeout` writes only
     `taskTimeouts` and `outbox`, so it changes nothing `Visible` keeps —
     given that its `delTaskTimeout` cannot take a lease timer with it. -/
 theorem retry_invisible {s : ServerState} {id : String} {n : Nat}
@@ -309,7 +309,7 @@ theorem visible_step {s s' : ServerState} (h : Visible s = Visible s')
     per-τ and per-state — no trace in sight.
 
     `s.schedules = []` is not decoration: with a schedule present,
-    `onScheduleTimeout` reads `occurrences … now`, an opaque function of
+    `processSchedule` reads `occurrences … now`, an opaque function of
     the instant, and the statement is FALSE for any faithful cron. -/
 theorem step_at_rep {s : ServerState} {t : Tau} {a b n : Nat}
     (hsched : s.schedules = []) (hinv : PendingHasNoLease s)

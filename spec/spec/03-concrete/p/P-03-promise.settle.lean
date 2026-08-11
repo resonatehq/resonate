@@ -13,14 +13,7 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
         let listeners := p.listeners
         let callbacks := p.callbacks
         let p := { p with state := req.state, value := req.value, settledAt := some now, callbacks := [], listeners := [] }
-        setPromise p
-        delPromiseTimeout p.id
-        match ← getTask p.id with
-        | some t =>
-            setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
-            delTaskTimeout t.id
-        | none =>
-            pure ()
+        setSettled p
         for address in listeners do
           setMessage address (.unblock p.toRecord)
         for awaiterId in callbacks do

@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def onResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
+def processResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
   match ← touchTask req.awaiter now with
   | none =>
       return { outcome := .absent }
@@ -35,7 +35,7 @@ def onResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
 def drain (now : Nat) : M Unit := do
   for d in (← get).deferred do
     undefer d
-    let _ ← onResume d now
+    let _ ← processResume d now
 
 def step {α} (act : M α) (now : Nat) : M α := do
   let res ← act

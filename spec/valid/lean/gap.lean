@@ -38,7 +38,7 @@ observation instants as well as strictly between them.
 No handler reads `outbox` — `grep -rn outbox 03-concrete/` finds only
 writes plus `guarantee.lean`, which is meta-analysis, not a handler. And
 `taskTimeouts` is read only by `getTaskTimeout`, whose only two call
-sites are `onTaskRetryTimeout` and `onTaskLeaseTimeout`. So a difference
+sites are `processRetryTimeout` and `processLeaseTimeout`. So a difference
 confined to `outbox` and to retry timers cannot reach a `Response`.
 
 `visible` erases exactly that much. A τ that discriminates only under
@@ -64,7 +64,7 @@ def validateBrute (trace : List Observation)
 
 /-- The state modulo what no response can project: the outbox, and the
     RETRY timers (`kind = 0`), which only the retry τ's own guard reads.
-    Lease timers (`kind = 1`) are kept — `onTaskLeaseTimeout` writes task
+    Lease timers (`kind = 1`) are kept — `processLeaseTimeout` writes task
     state, which `taskGet` does project. -/
 def visible (s : ServerState) : ServerState :=
   { s with outbox := [], taskTimeouts := s.taskTimeouts.filter (·.kind != 0) }
@@ -181,7 +181,7 @@ def tauFree (obs : List Observation) : Bool :=
 
 /-! ## An invariant the retry argument rests on
 
-`onTaskRetryTimeout` fires only on a `.pending` task, and its cleanup is
+`processRetryTimeout` fires only on a `.pending` task, and its cleanup is
 `delTaskTimeout t.id`, which deletes BOTH kinds. If a pending task could
 ever carry a LEASE timer, the retry τ would silently disarm an observable
 transition, and the "retry τs are invisible" argument would be wrong.

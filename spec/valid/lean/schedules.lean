@@ -17,7 +17,7 @@ case: a promise past its deadline is settled `at p.timeoutAt`, not at
 `now` — "born settled, exactly as if it had been created on time". So the
 instant at which the τ fired leaves no trace in the state.
 
-`onScheduleTimeout` breaks that discipline, in one line:
+`processSchedule` breaks that discipline, in one line:
 
 ```lean
 let ts := (occurrences s0.cron s0.nextRunAt now).filter (· ≤ now)
@@ -88,7 +88,7 @@ namespace TraceCheck.Schedules
 open ServerModel Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
 
 /-- The occurrence a firing at `now` settles on: the last one in the
-    window, which is what `onScheduleTimeout` writes into `lastRunAt`. -/
+    window, which is what `processSchedule` writes into `lastRunAt`. -/
 def lastOcc (cron : String) (since now : Nat) : Option Nat :=
   ((occurrences cron since now).filter (· ≤ now)).getLast?
 

@@ -5,7 +5,7 @@ import «03-concrete».«state»
 The -m machine is the projected machine (-p) under one change of read
 discipline: every read of an object MATERIALIZES what -p's projection
 would have shown, by firing the anticipated timeout transition at the
-moment of observation. `touchPromise` IS -p's `onPromiseTimeout`, run
+moment of observation. `touchPromise` IS -p's `processPromiseTimeout`, run
 eagerly; a handler reading through touch therefore sees stored state
 that agrees, byte for byte, with -p's projected view.
 
@@ -21,7 +21,7 @@ open ServerModel
 namespace Materialized
 
 /-- Fire the anticipated promise-timeout transition, then read. The
-    materialization body is -p's `onPromiseTimeout`, verbatim. -/
+    materialization body is -p's `processPromiseTimeout`, verbatim. -/
 def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
   match ← getPromise id with
   | none =>
@@ -33,14 +33,7 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
         let listeners := p.listeners
         let callbacks := p.callbacks
         let p := { p.project p.timeoutAt with callbacks := [], listeners := [] }
-        setPromise p
-        delPromiseTimeout p.id
-        match ← getTask p.id with
-        | some t =>
-            setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
-            delTaskTimeout t.id
-        | none =>
-            pure ()
+        setSettled p
         for address in listeners do
           setMessage address (.unblock p.toRecord)
         for awaiterId in callbacks do

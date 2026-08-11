@@ -33,7 +33,7 @@ def PromiseObject.isTimer (p : PromiseObject) : Bool := p.tags.isTimer
     pending promise past its deadline is logically settled -- `resolved`
     for timers, `rejectedTimedout` otherwise -- stamped AT THE DEADLINE,
     so the projected record is byte-identical to the record the timeout
-    τ-step (`onPromiseTimeout`) eventually writes. Materialization is
+    τ-step (`processPromiseTimeout`) eventually writes. Materialization is
     memoization of this function.
 
     The projection is total over PROMISE state: every promise-bearing
@@ -188,6 +188,21 @@ def setScheduleTimeout (id : String) (timeout : Nat) : M Unit :=
 def delScheduleTimeout (id : String) : M Unit :=
   modify fun s =>
     { s with scheduleTimeouts := s.scheduleTimeouts.filter (·.id != id) }
+
+/-- The coupled write: storing a settled promise disarms its deadline,
+    fulfils its co-keyed task and disarms the task's deadlines, in one
+    step. `setSettled` in `02-abstract/state.lean` is the same write
+    without the timeout components. -/
+def setSettled (p : PromiseObject) : M Unit := do
+  setPromise p
+  if p.state != .pending then
+    delPromiseTimeout p.id
+    match ← getTask p.id with
+    | some t =>
+        setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
+        delTaskTimeout t.id
+    | none =>
+        pure ()
 
 def setMessage (address : String) (msg : Message) : M Unit :=
   modify fun s =>

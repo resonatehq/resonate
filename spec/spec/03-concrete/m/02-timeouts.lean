@@ -7,14 +7,14 @@ namespace Timeouts
 
 /-- Materialization IS the timeout transition: -m's promise timeout is
     a touch, discarded. (`touchPromise`'s body is -p's
-    `onPromiseTimeout`, so the two τs are the same transition.) -/
-def onPromiseTimeout (id : String) (now : Nat) : M Unit := do
+    `processPromiseTimeout`, so the two τs are the same transition.) -/
+def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
   let _ ← touchPromise id now
 
 /-- Retry and lease are material rules, verbatim from -p: the read
     discipline concerns projected facts, and these consult only their
     own timers, material task state, and immutable tags. -/
-def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
+def processRetryTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 0 with
   | none =>
@@ -43,7 +43,7 @@ def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
               setTaskTimeout t.id 0 (now + retryTimeout)
               setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
-def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
+def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 1 with
   | none =>
@@ -88,7 +88,7 @@ def fireAll (s : Schedule) : List Nat → M Unit
       fireOccurrence s t
       fireAll s ts
 
-def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
+def processSchedule (id : String) (now : Nat) : M Unit := do
   match ← getSchedule id with
   | none =>
       pure ()

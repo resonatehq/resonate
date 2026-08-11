@@ -22,13 +22,13 @@ schedule the spec deliberately does not fix:
 
   stage 0  callback registered on the awaited.
            Settlement may be merely logical: the awaited is past its
-           deadline and the timeout τ (`onPromiseTimeout`) is pending.
+           deadline and the timeout τ (`processPromiseTimeout`) is pending.
   stage 1  resume deferred.
            Settlement materialized: `promiseSettle` / `taskFulfill` /
-           `onPromiseTimeout` moved the callback into `deferred`;
-           the drain τ (`onResume`) is pending.
+           `processPromiseTimeout` moved the callback into `deferred`;
+           the drain τ (`processResume`) is pending.
   stage 2  wake materialized.
-           `onResume` flipped the task to `.pending` (emitting an
+           `processResume` flipped the task to `.pending` (emitting an
            execute if targeted); the task has left `.suspended`.
 
 TIMEOUT ALWAYS WINS: if the task's OWN promise is past its deadline the
@@ -75,7 +75,7 @@ invariant: no suspended task with a live own promise is orphaned
     task has left `.suspended`. This is the guarantee proper; its
     per-handler proof obligations are discharged below by EXECUTING the
     handlers on concrete states -- the spec is an abstract machine, so
-    the scenarios drive `promiseSettle`, `onPromiseTimeout`, `drain`,
+    the scenarios drive `promiseSettle`, `processPromiseTimeout`, `drain`,
     and `step` directly rather than hand-building post-states.
 
 Under any schedule that eventually runs every enabled τ (weak
@@ -286,7 +286,7 @@ example :
 /-- Eager materialization of the determined closure: the timeout τ then
     the drain τ at zero delay -- "depth 2" as two internal steps. -/
 def sLogicalEager : ServerState :=
-  runM (step (Timeouts.onPromiseTimeout "a" 500) 500) sLogical
+  runM (step (Timeouts.processPromiseTimeout "a" 500) 500) sLogical
 
 example : wakeConserved sLogical sLogicalEager 500 := by decide
 example : hasExecuteInOutbox "t1" sLogicalEager.outbox = true := by decide

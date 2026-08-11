@@ -41,7 +41,7 @@ may fire internal steps at any instants BETWEEN observations. The pinned
 notion is therefore strictly narrower, and that asymmetry is exactly what
 the checker searches.
 
-That is not academic. `onTaskRetryTimeout` re-arms at `now +
+That is not academic. `processRetryTimeout` re-arms at `now +
 retryTimeout`, so WHEN a retry fired is visible at any later event that
 straddles the re-armed deadline.
 

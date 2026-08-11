@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def onResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
+def processResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
   let some t ← getTask req.awaiter    | return { outcome := .absent }
   let some p ← getPromise req.awaiter | return { outcome := .absent }
   if now >= p.timeoutAt then
@@ -29,7 +29,7 @@ def onResume (req : ResumeReq) (now : Nat) : M ResumeRes := do
 def drain (now : Nat) : M Unit := do
   for d in (← get).deferred do
     undefer d
-    let _ ← onResume d now
+    let _ ← processResume d now
 
 def step {α} (act : M α) (now : Nat) : M α := do
   let res ← act

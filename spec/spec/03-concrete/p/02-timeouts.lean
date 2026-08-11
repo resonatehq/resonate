@@ -7,7 +7,7 @@ namespace Timeouts
 /-- NOT BEFORE: every timeout transition re-checks its own due time and
     refuses an early firing — the machine enforces the timer contract
     rather than trusting the environment to fire on schedule. -/
-def onPromiseTimeout (id : String) (now : Nat) : M Unit := do
+def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
   match ← getPromise id with
   | none =>
       pure ()
@@ -18,20 +18,13 @@ def onPromiseTimeout (id : String) (now : Nat) : M Unit := do
         let listeners := p.listeners
         let callbacks := p.callbacks
         let p := { p.project p.timeoutAt with callbacks := [], listeners := [] }
-        setPromise p
-        delPromiseTimeout p.id
-        match ← getTask p.id with
-        | some t =>
-            setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
-            delTaskTimeout t.id
-        | none =>
-            pure ()
+        setSettled p
         for address in listeners do
           setMessage address (.unblock p.toRecord)
         for awaiterId in callbacks do
           defer { awaited := p.id, awaiter := awaiterId }
 
-def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
+def processRetryTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 0 with
   | none =>
@@ -60,7 +53,7 @@ def onTaskRetryTimeout (id : String) (now : Nat) : M Unit := do
               setTaskTimeout t.id 0 (now + retryTimeout)
               setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
-def onTaskLeaseTimeout (id : String) (now : Nat) : M Unit := do
+def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 1 with
   | none =>
@@ -105,7 +98,7 @@ def fireAll (s : Schedule) : List Nat → M Unit
       fireOccurrence s t
       fireAll s ts
 
-def onScheduleTimeout (id : String) (now : Nat) : M Unit := do
+def processSchedule (id : String) (now : Nat) : M Unit := do
   match ← getSchedule id with
   | none =>
       pure ()

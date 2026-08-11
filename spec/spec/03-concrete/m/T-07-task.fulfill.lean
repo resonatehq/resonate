@@ -22,10 +22,7 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
       let listeners := p.listeners
       let callbacks := p.callbacks
       let p := { p with state := req.action.state, value := req.action.value, settledAt := some now, callbacks := [], listeners := [] }
-      setPromise p
-      delPromiseTimeout p.id
-      setTask { t with state := .fulfilled, pid := none, ttl := none, resumes := [] }
-      delTaskTimeout t.id
+      setSettled p
       for address in listeners do
         setMessage address (.unblock p.toRecord)
       for awaiterId in callbacks do

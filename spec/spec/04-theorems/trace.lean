@@ -203,22 +203,22 @@ def handleP (rq : Request) (now : Nat) : M Response :=
   | .taskSearch req              => Response.taskSearch <$> taskSearch req now
   | .τPromiseTimeout id => do
       if (← get).promiseTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Timeouts.onPromiseTimeout id now
+        Timeouts.processPromiseTimeout id now
       return .τ
   | .τTaskRetryTimeout id => do
-      Timeouts.onTaskRetryTimeout id now   -- self-guarded on its due record
+      Timeouts.processRetryTimeout id now   -- self-guarded on its due record
       return .τ
   | .τTaskLeaseTimeout id => do
-      Timeouts.onTaskLeaseTimeout id now   -- self-guarded on its due record
+      Timeouts.processLeaseTimeout id now   -- self-guarded on its due record
       return .τ
   | .τScheduleTimeout id => do
       if (← get).scheduleTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Timeouts.onScheduleTimeout id now
+        Timeouts.processSchedule id now
       return .τ
   | .τResume req => do
       if (← get).deferred.any (fun d => d.awaited == req.awaited && d.awaiter == req.awaiter) then
         undefer req
-        Response.resume <$> onResume req now
+        Response.resume <$> processResume req now
       else
         return .τ
   | .idle => return .τ
@@ -249,22 +249,22 @@ def handleM (rq : Request) (now : Nat) : M Response :=
   | .taskSearch req              => Response.taskSearch <$> Materialized.taskSearch req now
   | .τPromiseTimeout id => do
       if (← get).promiseTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Materialized.Timeouts.onPromiseTimeout id now
+        Materialized.Timeouts.processPromiseTimeout id now
       return .τ
   | .τTaskRetryTimeout id => do
-      Materialized.Timeouts.onTaskRetryTimeout id now
+      Materialized.Timeouts.processRetryTimeout id now
       return .τ
   | .τTaskLeaseTimeout id => do
-      Materialized.Timeouts.onTaskLeaseTimeout id now
+      Materialized.Timeouts.processLeaseTimeout id now
       return .τ
   | .τScheduleTimeout id => do
       if (← get).scheduleTimeouts.any (fun e => e.id == id && decide (e.timeout ≤ now)) then
-        Materialized.Timeouts.onScheduleTimeout id now
+        Materialized.Timeouts.processSchedule id now
       return .τ
   | .τResume req => do
       if (← get).deferred.any (fun d => d.awaited == req.awaited && d.awaiter == req.awaiter) then
         undefer req
-        Response.resume <$> Materialized.onResume req now
+        Response.resume <$> Materialized.processResume req now
       else
         return .τ
   | .idle => return .τ
@@ -330,7 +330,7 @@ def stateEq (a b : ServerState) : Bool :=
 def quiesce (now : Nat) : M Unit := do
   let ids := ((← get).promiseTimeouts.filter (fun e => decide (e.timeout ≤ now))).map (·.id)
   for id in ids do
-    Timeouts.onPromiseTimeout id now
+    Timeouts.processPromiseTimeout id now
   drain now
 
 def quiesced (now : Nat) (s : ServerState) : ServerState :=
