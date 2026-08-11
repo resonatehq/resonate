@@ -5,6 +5,8 @@ open ServerModel
 namespace Materialized
 
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  if req.tags.timerTargeted then
+    return { status := 400, promise := none }
   let retryTimeout := (← get).config.retryTimeout
   match ← touchPromise req.id now with
   | none =>

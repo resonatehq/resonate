@@ -41,6 +41,8 @@ def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
       return { status := 200, promise := some p.toRecord }
 
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  if req.tags.timerTargeted then
+    return { status := 400, promise := none }
   match ← viewPromise req.id now with
   | some p =>
       return { status := 200, promise := some p.toRecord }
@@ -128,7 +130,7 @@ def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
   let a := req.action
-  if !(a.tags.has "resonate:target") then
+  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
   match ← viewPromise a.id now with
   | none =>
@@ -144,11 +146,8 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
         setTask t
         return { status := 200, task := some t.toRecord, promise := some p.toRecord }
       else
-        let st :=
-          if a.tags.isTimer then
-            ServerModel.PromiseState.resolved
-          else
-            ServerModel.PromiseState.rejectedTimedout
+        -- targeted, therefore not a timer: the only birth verdict here
+        let st := ServerModel.PromiseState.rejectedTimedout
         let p : PromiseObject :=
           { id := a.id, state := st, param := a.param, tags := a.tags,
             timeoutAt := a.timeoutAt, createdAt := a.timeoutAt,
@@ -382,6 +381,8 @@ def scheduleGet (req : ScheduleGetReq) (_now : Nat) : M ScheduleGetRes := do
       return { status := 200, schedule := some s }
 
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+  if req.promiseTags.timerTargeted then
+    return { status := 400 }
   match ← getSchedule req.id with
   | some s =>
       return { status := 200, schedule := some s }

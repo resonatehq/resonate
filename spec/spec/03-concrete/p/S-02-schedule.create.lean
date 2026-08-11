@@ -3,6 +3,8 @@ import «03-concrete».«state»
 open ServerModel
 
 def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+  if req.promiseTags.timerTargeted then
+    return { status := 400 }
   match ← getSchedule req.id with
   | some s =>
       return { status := 200, schedule := some s }

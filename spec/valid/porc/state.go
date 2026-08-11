@@ -80,6 +80,13 @@ func (t Tags) Get(k string) (string, bool) { v, ok := t[k]; return v, ok }
 func (t Tags) Has(k string) bool           { _, ok := t[k]; return ok }
 func (t Tags) IsTimer() bool               { return t["resonate:timer"] == "true" }
 
+// TimerTargeted is the malformed combination: `resonate:timer` says nothing
+// executes this promise, `resonate:target` says a worker owns its execution
+// and earns it a task. A promise carrying both would be handed a task no
+// worker should run. Refused at every creation path — see `Tags.timerTargeted`
+// in spec/01-protocol/validation.lean.
+func (t Tags) TimerTargeted() bool { return t.IsTimer() && t.Has("resonate:target") }
+
 func (t Tags) key() string {
 	ks := make([]string, 0, len(t))
 	for k := range t {

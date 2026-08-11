@@ -376,6 +376,9 @@ theorem agrees_scheduleSearch (req) : Agrees (.api (.scheduleSearch req)) := by
 
 /-! ### 5a. Effect runs — every effect is a pure pair, by `rfl` -/
 
+theorem run_pureUnit_bind {α} (f : PUnit → M α) (s : ServerState) :
+    ((pure PUnit.unit >>= f) : M α).run s = (f PUnit.unit).run s := rfl
+
 theorem run_getPromise (id : String) (s : ServerState) :
     (getPromise id).run s = (s.promises.find? (·.id == id), s) := rfl
 
@@ -687,8 +690,11 @@ theorem agrees_scheduleCreate (req) : Agrees (.api (.scheduleCreate req)) := by
   intro n sP sM h
   have hsid : sP.schedules.find? (·.id == req.id) = sM.schedules.find? (·.id == req.id) :=
     h.2.2 req.id
-  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleCreate, AbstractModel.scheduleCreate,
-             run_map, run_bind, run_getSchedule, run_setSchedule, run_pure, Id.run]
+  simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.scheduleCreate,
+             AbstractModel.scheduleCreate, run_map, Id.run]
+  by_cases htt : req.promiseTags.timerTargeted = true
+  · simp only [if_pos htt, run_pure]; exact ⟨trivial, h⟩
+  simp only [if_neg htt, run_bind, run_getSchedule, run_setSchedule, run_pure]
   rw [hsid]
   cases hfM : sM.schedules.find? (·.id == req.id) with
   | some sch => exact ⟨rfl, h⟩
@@ -885,8 +891,11 @@ theorem runAgrees_promiseCreate (req : ServerModel.PromiseCreateReq) (n : Nat)
       ∧ REq n ((Projected.promiseCreate req n).run sP).2 ((AbstractModel.promiseCreate req n).run sM).2 := by
   have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
       = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
-  simp only [Projected.promiseCreate, AbstractModel.promiseCreate, createPromise, run_bind,
-             run_viewPromise, run_touchPromise, run_pure]
+  simp only [Projected.promiseCreate, AbstractModel.promiseCreate]
+  by_cases htt : req.tags.timerTargeted = true
+  · simp only [if_pos htt]; exact ⟨rfl, h⟩
+  simp only [if_neg htt, run_pureUnit_bind]
+  simp only [createPromise, run_bind, run_viewPromise, run_touchPromise, run_pure]
   cases hfP : sP.promises.find? (·.id == req.id) with
   | some pP =>
       cases hfM : sM.promises.find? (·.id == req.id) with
@@ -1232,9 +1241,6 @@ theorem run_touchTask (id : String) (n : Nat) (s : ServerState) :
 
 theorem view_id (t : TaskObject) (p : PromiseObject) : (t.view p).id = t.id := by
   unfold TaskObject.view; split <;> rfl
-
-theorem run_pureUnit_bind {α} (f : PUnit → M α) (s : ServerState) :
-    ((pure PUnit.unit >>= f) : M α).run s = (f PUnit.unit).run s := rfl
 
 /-- What the read guarantees about the states the CONTINUATIONS run
     on: for each shape of the value, the lookups that produced it —
@@ -2603,7 +2609,8 @@ theorem agrees_taskCreate (req) : Agrees (.api (.taskCreate req)) := by
   intro n sP sM h
   simp only [stepOfAP, stepOfA, handleAP, handleA, Projected.taskCreate,
              AbstractModel.taskCreate, run_map, Id.run]
-  by_cases htag0 : (!req.action.tags.has "resonate:target") = true
+  by_cases htag0 : ((!req.action.tags.has "resonate:target")
+      ∨ req.action.tags.timerTargeted = true)
   · simp only [if_pos htag0]; exact ⟨rfl, h⟩
   · simp only [if_neg htag0, run_pureUnit_bind]
     simp only [run_bind, run_viewPromise, run_touchPromise, run_pure]
@@ -2627,8 +2634,7 @@ theorem agrees_taskCreate (req) : Agrees (.api (.taskCreate req)) := by
                    tags := req.action.tags, timeoutAt := req.action.timeoutAt, createdAt := n } : PromiseObject) htq) _⟩
             · simp only [if_neg hto]
               exact ⟨rfl, REq_setTask (REq_setPromise h
-                ({ id := req.action.id,
-                   state := if req.action.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout,
+                ({ id := req.action.id, state := PromiseState.rejectedTimedout,
                    param := req.action.param, tags := req.action.tags, timeoutAt := req.action.timeoutAt,
                    createdAt := req.action.timeoutAt, settledAt := some req.action.timeoutAt } : PromiseObject) htq) _⟩
     | some pP =>

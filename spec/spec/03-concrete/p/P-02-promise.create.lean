@@ -3,6 +3,8 @@ import «03-concrete».«state»
 open ServerModel
 
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+  if req.tags.timerTargeted then
+    return { status := 400, promise := none }
   let retryTimeout := (← get).config.retryTimeout
   match ← getPromise req.id with
   | none =>
