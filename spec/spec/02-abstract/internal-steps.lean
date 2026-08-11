@@ -1,9 +1,4 @@
--- The -m twin, and it has to be that one: R7 creates its occurrences
--- through `promiseCreate`, the MATERIALIZED handler, in both
--- disciplines. Internal steps are material transitions on either side —
--- the read discipline concerns external steps only — so the projected
--- machine materializes when it fires R7, by design.
-import «02-abstract».«external-steps-m»
+import «02-abstract».«state»
 
 /-!  # The coalesced machine — internal steps
 
@@ -192,12 +187,21 @@ def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
                   setMessage ((p.tags.get? "resonate:target").getD "")
                     (.execute t.id t.version)
 
-/-- One occurrence: create the promise AS OF ITS OWN CRON TIME — a
-    backlogged occurrence is born settled, exactly as if it had been
-    created on time. Idempotent: the expanded id is per-occurrence, so
-    a re-fire finds the promise and writes nothing. -/
-def fireOccurrence (s : Schedule) (t : Nat) : M Unit := do
-  let _ ← promiseCreate
+/-- One occurrence: create the promise AS OF ITS OWN CRON TIME — the
+    occurrence instant is passed as `now`, so a backlogged occurrence
+    is born exactly as one fired on time would have been. Born
+    PENDING, therefore, dated at its cron instant with its deadline a
+    promise-timeout later; if that window has already elapsed by the
+    time anyone reads it, the touch settles it at the deadline, and the
+    record is the one an on-time firing would have left. Idempotent:
+    the expanded id is per-occurrence, so a re-fire finds the promise
+    and writes nothing.
+
+    The birth write is `createIfAbsent`, over the same `createPromise`
+    both external twins call — an internal step reaches for the shared
+    write, never for a handler. -/
+def fireOccurrence (s : Schedule) (t : Nat) : M Unit :=
+  createIfAbsent
     { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
       param := s.promiseParam, tags := s.promiseTags } t
 

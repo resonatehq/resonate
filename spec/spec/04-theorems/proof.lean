@@ -885,7 +885,7 @@ theorem runAgrees_promiseCreate (req : ServerModel.PromiseCreateReq) (n : Nat)
       ∧ REq n ((Projected.promiseCreate req n).run sP).2 ((AbstractModel.promiseCreate req n).run sM).2 := by
   have hpi : (sP.promises.find? (·.id == req.id)).map (·.project n)
       = (sM.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
-  simp only [Projected.promiseCreate, AbstractModel.promiseCreate, run_bind,
+  simp only [Projected.promiseCreate, AbstractModel.promiseCreate, createPromise, run_bind,
              run_viewPromise, run_touchPromise, run_pure]
   cases hfP : sP.promises.find? (·.id == req.id) with
   | some pP =>
@@ -2496,13 +2496,13 @@ theorem REq_touchWrite_le {t n : Nat} (ht : t ≤ n) {sP sM : ServerState} (h : 
         · simp only [hft, if_neg htf]; exact h1
   · simp only [if_neg hset]; exact h1
 
-/-- The SAME `promiseCreate`, run by both machines at a past instant
+/-- The SAME occurrence birth, run by both machines at a past instant
     `t ≤ n`, preserves the invariant AT the current clock. -/
-theorem REq_promiseCreateMM (req : ServerModel.PromiseCreateReq) {t n : Nat} (ht : t ≤ n)
+theorem REq_createIfAbsentMM (req : ServerModel.PromiseCreateReq) {t n : Nat} (ht : t ≤ n)
     {sA sB : ServerState} (h : REq n sA sB) :
-    REq n ((AbstractModel.promiseCreate req t).run sA).2
-          ((AbstractModel.promiseCreate req t).run sB).2 := by
-  simp only [AbstractModel.promiseCreate, run_bind, run_touchPromise, run_pure]
+    REq n ((createIfAbsent req t).run sA).2
+          ((createIfAbsent req t).run sB).2 := by
+  simp only [createIfAbsent, createPromise, run_bind, run_touchPromise, run_pure]
   have hpi : (sA.promises.find? (·.id == req.id)).map (·.project n)
       = (sB.promises.find? (·.id == req.id)).map (·.project n) := h.1 req.id
   cases hfA : sA.promises.find? (·.id == req.id) with
@@ -2574,7 +2574,7 @@ theorem REq_fireAll (s0 : ServerModel.Schedule) {n : Nat} (ts : List Nat)
       intro sA sB h
       simp only [Internal.fireAll, Internal.fireOccurrence, run_bind, run_pure]
       exact ih (fun x hx => hle x (List.mem_cons_of_mem _ hx))
-        (REq_promiseCreateMM _ (hle t List.mem_cons_self) h)
+        (REq_createIfAbsentMM _ (hle t List.mem_cons_self) h)
 
 theorem agrees_r7 (id : String) : Agrees (.r7 id) := by
   intro n sP sM h

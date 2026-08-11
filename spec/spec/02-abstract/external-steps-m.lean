@@ -48,45 +48,8 @@ def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := d
   | some p =>
       return { status := 200, promise := some p.toRecord }
   | none =>
-      if req.timeoutAt > now then
-        let p : PromiseObject :=
-          { id := req.id
-            state := .pending
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := now }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          -- The delay tag seeds `retryAt`: the first dispatch is due at
-          -- the delay if it is still ahead, immediately otherwise.
-          let due :=
-            match p.tags.get? "resonate:delay" with
-            | some d => max (ServerModel.parseNat d) now
-            | none => now
-          setTask { id := p.id, state := .pending, version := 0,
-                    retryAt := some due }
-        return { status := 200, promise := some p.toRecord }
-      else
-        -- Born past its deadline: fact P holds at birth, so the promise
-        -- is written settled and its task (if targeted) fulfilled.
-        let state :=
-          if req.tags.isTimer then
-            PromiseState.resolved
-          else
-            PromiseState.rejectedTimedout
-        let p : PromiseObject :=
-          { id := req.id
-            state := state
-            param := req.param
-            tags := req.tags
-            timeoutAt := req.timeoutAt
-            createdAt := req.timeoutAt
-            settledAt := some req.timeoutAt }
-        setPromise p
-        if p.tags.has "resonate:target" then
-          setTask { id := p.id, state := .fulfilled, version := 0 }
-        return { status := 200, promise := some p.toRecord }
+      let p ← createPromise req now
+      return { status := 200, promise := some p.toRecord }
 
 def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
   if !req.state.settable then

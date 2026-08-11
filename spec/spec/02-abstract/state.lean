@@ -51,7 +51,7 @@ identical, only the machine behind it differs.  -/
 namespace AbstractModel
 
 open ServerModel (Tags Value PromiseState TaskState PromiseRecord
-                  TaskRecord Schedule Message OutboxEntry)
+                  TaskRecord Schedule Message OutboxEntry PromiseCreateReq)
 
 /-- Same shape as the base machine's promise object. The difference is
     dynamic, not structural: `callbacks` and `listeners` survive
@@ -200,10 +200,13 @@ def setMessage (address : String) (msg : Message) : M Unit :=
       stored promise settled  ⟺  stored co-keyed task fulfilled
 
     Every transition that settles an EXISTING promise goes through
-    here; the creation paths (`promise.create`, `task.create` on an
-    already-expired deadline) write the fulfilled task explicitly, in
-    the same step, so they maintain the invariant too. The write set
-    is still `{p.id}`: the task shares the promise's id.
+    here. Birth is the other event that can store a settled promise,
+    and it cannot go through here — there is no stored task to couple
+    to, both objects being written in the same step — so it maintains
+    the invariant by construction instead: see `createPromise` below,
+    and `task.create` on an already-expired deadline. Two writers, one
+    invariant; the write set is `{p.id}` either way, the task sharing
+    the promise's id.
 
     Without the coupling the machine can store a settled promise over
     an acquired task — a state no implementation should ever persist
@@ -215,6 +218,66 @@ def setSettled (p : PromiseObject) : M Unit := do
     match ← getTask p.id with
     | some t => if t.state != .fulfilled then setTask t.fulfill
     | none => pure ()
+
+/-- BIRTH: write a promise that does not exist, and its task if it is
+    targeted. Returns the record written.
+
+    THE READ DISCIPLINE HAS NO SAY HERE. A discipline is a choice about
+    what to do with a STORED object — serve its projection or persist
+    it — and on this path there is nothing stored: the caller has
+    already looked (by touch or by view, as it prefers) and found
+    nothing. So the two external-step twins share this verbatim, and so
+    does R7, which creates a schedule's occurrences.
+
+    Fact P applies at birth like anywhere else: a promise whose deadline
+    has already passed at `now` is written settled — `resolved` for
+    timers, `rejectedTimedout` otherwise — with `settledAt` at the
+    deadline, the same verdict and stamp `project` gives a stored
+    promise. Birth goes one step further and dates `createdAt` at the
+    deadline too, rather than at `now`: a promise that arrives already
+    dead never had a live window, and dating it `now` would claim one.
+    Its task, if targeted, is written fulfilled in the same step: the
+    coupled write, by construction rather than by lookup.
+
+    The `resonate:delay` tag is consumed here, seeding the task's
+    `retryAt`: the first dispatch is due at the delay if that is still
+    ahead, immediately otherwise. -/
+def createPromise (req : PromiseCreateReq) (now : Nat) : M PromiseObject := do
+  if req.timeoutAt > now then
+    let p : PromiseObject :=
+      { id := req.id
+        state := .pending
+        param := req.param
+        tags := req.tags
+        timeoutAt := req.timeoutAt
+        createdAt := now }
+    setPromise p
+    if p.tags.has "resonate:target" then
+      let due :=
+        match p.tags.get? "resonate:delay" with
+        | some d => max (ServerModel.parseNat d) now
+        | none => now
+      setTask { id := p.id, state := .pending, version := 0,
+                retryAt := some due }
+    return p
+  else
+    let state :=
+      if req.tags.isTimer then
+        PromiseState.resolved
+      else
+        PromiseState.rejectedTimedout
+    let p : PromiseObject :=
+      { id := req.id
+        state := state
+        param := req.param
+        tags := req.tags
+        timeoutAt := req.timeoutAt
+        createdAt := req.timeoutAt
+        settledAt := some req.timeoutAt }
+    setPromise p
+    if p.tags.has "resonate:target" then
+      setTask { id := p.id, state := .fulfilled, version := 0 }
+    return p
 
 /-- THE TOUCH, promise side: read a promise and materialize fact P —
     and, through `setSettled`, fact T along with it. Handlers never
@@ -229,6 +292,17 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
       if p'.state != p.state then
         setSettled p'
       return some p'
+
+/-- BIRTH, IDEMPOTENT: create the promise unless it is already there.
+    The internal steps' way in — R7 creates a schedule's occurrences
+    with it, and the per-occurrence id makes a re-fire a no-op. The
+    external steps do not use it: a handler needs the record back for
+    its response, so it does its own lookup and calls `createPromise`
+    on the absent branch. -/
+def createIfAbsent (req : PromiseCreateReq) (now : Nat) : M Unit := do
+  match ← touchPromise req.id now with
+  | some _ => pure ()
+  | none   => let _ ← createPromise req now
 
 /-- THE PROJECTED READ, promise side: fact P served, nothing stored. -/
 def viewPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
