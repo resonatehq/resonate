@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : M PromiseRegisterListenerRes := do
+def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : H PromiseRegisterListenerRes := do
   if !addressValid req.address then
     return { status := 400 }
   match ← touchPromise req.awaited now with

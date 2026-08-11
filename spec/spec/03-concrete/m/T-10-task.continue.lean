@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
+def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
   let retryTimeout := (← get).config.retryTimeout
   match ← touchTask req.id now with
   | none =>

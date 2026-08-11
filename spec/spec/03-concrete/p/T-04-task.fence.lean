@@ -3,7 +3,7 @@ import «03-concrete».«p».«P-03-promise.settle»
 
 open ServerModel
 
-def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
+def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
   match ← getTask req.id with

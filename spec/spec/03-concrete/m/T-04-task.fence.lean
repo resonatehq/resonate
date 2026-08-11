@@ -5,7 +5,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
+def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
   match ← touchTask req.id now with

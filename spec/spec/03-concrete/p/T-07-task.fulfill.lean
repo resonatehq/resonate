@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
+def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
   match ← getTask req.id with

@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
+def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
   match ← touchTask req.id now with

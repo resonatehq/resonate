@@ -39,7 +39,7 @@ open Equivalence (Request Response extTags tgtTags timerTags eqSet)
 
 /-- The projected abstract machine's step: `Projected` handlers, the
     SAME rules — the read discipline concerns handlers only. -/
-def handleAP (st : AStep) (now : Nat) : AbstractModel.M Response :=
+def handleAP (st : AStep) (now : Nat) : AbstractModel.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.Projected.promiseGet req now
   | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.Projected.promiseCreate req now

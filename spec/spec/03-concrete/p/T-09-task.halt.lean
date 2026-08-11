@@ -8,7 +8,7 @@ open ServerModel
     and halt-on-fulfilled is `409`. Branching on the raw stored task
     here would make the stored-vs-projected divergence observable — the
     one thing the projection discipline forbids. -/
-def taskHalt (req : TaskHaltReq) (now : Nat) : M TaskHaltRes := do
+def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
   match ← getTask req.id with
   | none =>
       return { status := 404 }

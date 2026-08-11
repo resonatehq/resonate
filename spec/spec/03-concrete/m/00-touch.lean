@@ -22,7 +22,7 @@ namespace Materialized
 
 /-- Fire the anticipated promise-timeout transition, then read. The
     materialization body is -p's `processPromiseTimeout`, verbatim. -/
-def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
+def touchPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
   match ← getPromise id with
   | none =>
       return none
@@ -44,7 +44,7 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
     task is re-read after the touch: materialization may have
     fulfilled it. -/
 def touchTask (id : String) (now : Nat) :
-    M (Option (TaskObject × Option PromiseObject)) := do
+    H (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
   | none => return none
   | some t =>

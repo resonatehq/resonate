@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := do
+def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := do
   for ref in req.tasks do
     match ← touchTask ref.id now with
     | some (t, some p) =>

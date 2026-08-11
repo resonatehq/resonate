@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := do
+def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := do
   for ref in req.tasks do
     match ← getTask ref.id with
     | none =>

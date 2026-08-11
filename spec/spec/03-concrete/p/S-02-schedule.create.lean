@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes := do
   if req.promiseTags.timerTargeted then
     return { status := 400 }
   match ← getSchedule req.id with

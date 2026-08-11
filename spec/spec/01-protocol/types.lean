@@ -295,7 +295,7 @@ structure ResumeReq where
   deriving Repr
 
 /-- Spec artifact for the oracle: a resume never serializes and nobody is
-    listening, but the drain has six distinct outcomes and `M Unit` would
+    listening, but the drain has six distinct outcomes and `H Unit` would
     leave it testable only by state diffing. An inductive, not a `Nat`:
     there is no wire format to be compatible with, so name the cases.
     `expired` vs `fulfilled` is the distinction TIMEOUT ALWAYS WINS

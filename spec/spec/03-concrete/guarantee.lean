@@ -161,11 +161,11 @@ admit.
 -/
 
 /-- Run an action for its post-state. -/
-def runM {α} (act : M α) (s : ServerState) : ServerState :=
+def runM {α} (act : H α) (s : ServerState) : ServerState :=
   (Id.run (act.run s)).2
 
 /-- Run an action for its response. -/
-def runRes {α} (act : M α) (s : ServerState) : α :=
+def runRes {α} (act : H α) (s : ServerState) : α :=
   (Id.run (act.run s)).1
 
 def pAwaited : PromiseObject :=

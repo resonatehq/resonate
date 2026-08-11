@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : M PromiseRegisterCallbackRes := do
+def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
     return { status := 400 }
   match ← touchPromise req.awaited now with

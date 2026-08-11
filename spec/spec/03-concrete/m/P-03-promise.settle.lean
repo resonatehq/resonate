@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
+def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := do
   if !req.state.settable then
     return { status := 400 }
   match ← touchPromise req.id now with

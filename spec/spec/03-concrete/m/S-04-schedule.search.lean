@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : M ScheduleSearchRes := do
+def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : H ScheduleSearchRes := do
   return { status := 501 }
 
 end Materialized

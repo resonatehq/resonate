@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
+def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTask req.id with
   | none =>

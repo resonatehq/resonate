@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
+def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }

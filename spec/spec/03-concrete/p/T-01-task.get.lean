@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
+def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
   match ← getTask req.id with
   | none =>
       return { status := 404 }

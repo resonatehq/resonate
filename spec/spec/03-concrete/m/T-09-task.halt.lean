@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskHalt (req : TaskHaltReq) (now : Nat) : M TaskHaltRes := do
+def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }

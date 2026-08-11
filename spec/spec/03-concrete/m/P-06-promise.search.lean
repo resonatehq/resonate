@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
+def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : H PromiseSearchRes := do
   return { status := 501 }
 
 end Materialized

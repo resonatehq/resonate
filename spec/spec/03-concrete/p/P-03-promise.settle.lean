@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
+def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := do
   if !req.state.settable then
     return { status := 400 }
   match ← getPromise req.id with

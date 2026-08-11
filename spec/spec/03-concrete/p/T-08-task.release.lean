@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
+def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTask req.id with
   | none =>

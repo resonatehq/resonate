@@ -84,7 +84,7 @@ def AStep.isExternal : AStep → Bool
 /-- The abstract machine's step: dispatch to the coalesced handlers and
     rules. External requests answer with the SAME wire responses as the
     concrete machine — the protocol surface is shared. -/
-def handleA (st : AStep) (now : Nat) : AbstractModel.M Response :=
+def handleA (st : AStep) (now : Nat) : AbstractModel.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.promiseGet req now
   | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.promiseCreate req now
@@ -158,7 +158,7 @@ def SameObservationCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
     every retained obligation (R3 per listener, R4 per awaiter — each
     wake immediately dispatched, mirroring the concrete drain's inline
     emission). -/
-def absQuiesce (retry : Nat) (now : Nat) : AbstractModel.M Unit := do
+def absQuiesce (retry : Nat) (now : Nat) : AbstractModel.H Unit := do
   let pids := (← get).promises.map (·.id)
   for id in pids do
     AbstractModel.Internal.processPromiseTimeout id now

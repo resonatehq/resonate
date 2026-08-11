@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : M ScheduleDeleteRes := do
+def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes := do
   match ← getSchedule req.id with
   | none =>
       return { status := 404 }

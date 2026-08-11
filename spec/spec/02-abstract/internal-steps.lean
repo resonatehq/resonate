@@ -5,10 +5,10 @@ namespace Internal
 
 open ServerModel (nextCron occurrences expand Schedule)
 
-def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
+def processPromiseTimeout (id : String) (now : Nat) : H Unit := do
   let _ ← touchPromise id now
 
-def processListener (id : String) (address : String) (now : Nat) : M Unit := do
+def processListener (id : String) (address : String) (now : Nat) : H Unit := do
   match ← touchPromise id now with
   | none => pure ()
   | some p =>
@@ -18,7 +18,7 @@ def processListener (id : String) (address : String) (now : Nat) : M Unit := do
         setPromise { p with listeners := p.listeners.filter (· != address) }
         setMessage address (.unblock p.toRecord)
 
-def resumeOne (awaited awaiter : String) (now : Nat) : M Unit := do
+def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
   match ← touchTask awaiter now with
   | none => pure ()
   | some (_, none) => pure ()
@@ -33,7 +33,7 @@ def resumeOne (awaited awaiter : String) (now : Nat) : M Unit := do
       | .fulfilled =>
           pure ()
 
-def processCallback (id : String) (awaiter : String) (now : Nat) : M Unit := do
+def processCallback (id : String) (awaiter : String) (now : Nat) : H Unit := do
   match ← touchPromise id now with
   | none => pure ()
   | some p =>
@@ -43,7 +43,7 @@ def processCallback (id : String) (awaiter : String) (now : Nat) : M Unit := do
         setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
         resumeOne p.id awaiter now
 
-def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
+def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
   match ← getTask id with
   | none => pure ()
   | some t =>
@@ -58,7 +58,7 @@ def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
                   setTask { t with state := .pending, pid := none, ttl := none,
                                    expiresAt := none, retryAt := some now }
 
-def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
+def processRetryTimeout (id : String) (next : Nat) (now : Nat) : H Unit := do
   match ← getTask id with
   | none => pure ()
   | some t =>
@@ -74,18 +74,18 @@ def processRetryTimeout (id : String) (next : Nat) (now : Nat) : M Unit := do
                   setMessage ((p.tags.get? "resonate:target").getD "")
                     (.execute t.id t.version)
 
-def fireOccurrence (s : Schedule) (t : Nat) : M Unit :=
+def fireOccurrence (s : Schedule) (t : Nat) : H Unit :=
   createIfAbsent
     { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
       param := s.promiseParam, tags := s.promiseTags } t
 
-def fireAll (s : Schedule) : List Nat → M Unit
+def fireAll (s : Schedule) : List Nat → H Unit
   | [] => pure ()
   | t :: ts => do
       fireOccurrence s t
       fireAll s ts
 
-def processSchedule (id : String) (now : Nat) : M Unit := do
+def processSchedule (id : String) (now : Nat) : H Unit := do
   match ← getSchedule id with
   | none => pure ()
   | some s =>

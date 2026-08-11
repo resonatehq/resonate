@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
+def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
   let retryTimeout := (← get).config.retryTimeout
   match ← touchTask req.id now with
   | none =>

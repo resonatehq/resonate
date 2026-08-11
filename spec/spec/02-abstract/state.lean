@@ -81,43 +81,43 @@ structure ServerState where
 
 def ServerState.init : ServerState := {}
 
-abbrev M := StateM ServerState
+abbrev H := StateM ServerState
 
-def getPromise (id : String) : M (Option PromiseObject) :=
+def getPromise (id : String) : H (Option PromiseObject) :=
   return (← get).promises.find? (·.id == id)
 
-def setPromise (p : PromiseObject) : M Unit :=
+def setPromise (p : PromiseObject) : H Unit :=
   modify fun s => { s with promises := p :: s.promises.filter (·.id != p.id) }
 
-def getTask (id : String) : M (Option TaskObject) :=
+def getTask (id : String) : H (Option TaskObject) :=
   return (← get).tasks.find? (·.id == id)
 
-def setTask (t : TaskObject) : M Unit :=
+def setTask (t : TaskObject) : H Unit :=
   modify fun s => { s with tasks := t :: s.tasks.filter (·.id != t.id) }
 
-def getSchedule (id : String) : M (Option Schedule) :=
+def getSchedule (id : String) : H (Option Schedule) :=
   return (← get).schedules.find? (·.id == id)
 
-def setSchedule (sch : Schedule) : M Unit :=
+def setSchedule (sch : Schedule) : H Unit :=
   modify fun s => { s with schedules := sch :: s.schedules.filter (·.id != sch.id) }
 
-def delSchedule (id : String) : M Unit :=
+def delSchedule (id : String) : H Unit :=
   modify fun s => { s with schedules := s.schedules.filter (·.id != id) }
 
-def setMessage (address : String) (msg : Message) : M Unit :=
+def setMessage (address : String) (msg : Message) : H Unit :=
   modify fun s =>
     let entry := OutboxEntry.mk address msg
     let key   := entry.key
     { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
 
-def setSettled (p : PromiseObject) : M Unit := do
+def setSettled (p : PromiseObject) : H Unit := do
   setPromise p
   if p.state != .pending then
     match ← getTask p.id with
     | some t => if t.state != .fulfilled then setTask t.fulfill
     | none => pure ()
 
-def createPromise (req : PromiseCreateReq) (now : Nat) : M PromiseObject := do
+def createPromise (req : PromiseCreateReq) (now : Nat) : H PromiseObject := do
   if req.timeoutAt > now then
     let p : PromiseObject :=
       { id := req.id
@@ -154,7 +154,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : M PromiseObject := do
       setTask { id := p.id, state := .fulfilled, version := 0 }
     return p
 
-def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
+def touchPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
   match ← getPromise id with
   | none => return none
   | some p =>
@@ -163,16 +163,16 @@ def touchPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
         setSettled p'
       return some p'
 
-def createIfAbsent (req : PromiseCreateReq) (now : Nat) : M Unit := do
+def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do
   match ← touchPromise req.id now with
   | some _ => pure ()
   | none   => let _ ← createPromise req now
 
-def viewPromise (id : String) (now : Nat) : M (Option PromiseObject) := do
+def viewPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
   return (← getPromise id).map (·.project now)
 
 def viewTask (id : String) (now : Nat) :
-    M (Option (TaskObject × Option PromiseObject)) := do
+    H (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
   | none => return none
   | some t =>
@@ -183,7 +183,7 @@ def viewTask (id : String) (now : Nat) :
       return some (t.view p, some p)
 
 def touchTask (id : String) (now : Nat) :
-    M (Option (TaskObject × Option PromiseObject)) := do
+    H (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
   | none => return none
   | some t =>

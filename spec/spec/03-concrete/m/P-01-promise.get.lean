@@ -4,7 +4,7 @@ open ServerModel
 
 namespace Materialized
 
-def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
+def promiseGet (req : PromiseGetReq) (now : Nat) : H PromiseGetRes := do
   match ← touchPromise req.id now with
   | none =>
       return { status := 404 }

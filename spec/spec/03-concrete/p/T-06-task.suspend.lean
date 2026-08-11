@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
+def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   if req.actions.isEmpty then
     return { status := 400 }
   if req.actions.any (·.awaited == req.id) then

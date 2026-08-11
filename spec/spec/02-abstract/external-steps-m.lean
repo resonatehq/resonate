@@ -10,14 +10,14 @@ open ServerModel (PromiseState
                   PromiseRegisterListenerReq PromiseRegisterListenerRes
                   PromiseSearchReq PromiseSearchRes)
 
-def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
+def promiseGet (req : PromiseGetReq) (now : Nat) : H PromiseGetRes := do
   match ← touchPromise req.id now with
   | none =>
       return { status := 404 }
   | some p =>
       return { status := 200, promise := some p.toRecord }
 
-def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := do
+def promiseCreate (req : PromiseCreateReq) (now : Nat) : H PromiseCreateRes := do
   if req.tags.timerTargeted then
     return { status := 400, promise := none }
   match ← touchPromise req.id now with
@@ -27,7 +27,7 @@ def promiseCreate (req : PromiseCreateReq) (now : Nat) : M PromiseCreateRes := d
       let p ← createPromise req now
       return { status := 200, promise := some p.toRecord }
 
-def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := do
+def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := do
   if !req.state.settable then
     return { status := 400 }
   match ← touchPromise req.id now with
@@ -42,7 +42,7 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : M PromiseSettleRes := d
         return { status := 200, promise := some p.toRecord }
 
 def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
-    M PromiseRegisterCallbackRes := do
+    H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
     return { status := 400 }
   match ← touchPromise req.awaited now with
@@ -65,7 +65,7 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
         return { status := 200, promise := some pAwaited.toRecord }
 
 def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
-    M PromiseRegisterListenerRes := do
+    H PromiseRegisterListenerRes := do
   if !ServerModel.addressValid req.address then
     return { status := 400 }
   match ← touchPromise req.awaited now with
@@ -80,7 +80,7 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
       else
         return { status := 200, promise := some pAwaited.toRecord }
 
-def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : M PromiseSearchRes := do
+def promiseSearch (_req : PromiseSearchReq) (_now : Nat) : H PromiseSearchRes := do
   return { status := 501 }
 
 open ServerModel (TaskGetReq TaskGetRes
@@ -95,7 +95,7 @@ open ServerModel (TaskGetReq TaskGetRes
                   TaskContinueReq TaskContinueRes
                   TaskSearchReq TaskSearchRes)
 
-def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
+def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }
@@ -104,7 +104,7 @@ def taskGet (req : TaskGetReq) (now : Nat) : M TaskGetRes := do
   | some (t, some _) =>
       return { status := 200, task := some t.toRecord }
 
-def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
+def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
   if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
@@ -151,7 +151,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
           else
             return { status := 409 }
 
-def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
+def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }
@@ -171,7 +171,7 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : M TaskAcquireRes := do
       setTask t
       return { status := 200, task := some t.toRecord, promise := some p.toRecord }
 
-def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
+def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
   match ← touchTask req.id now with
@@ -194,7 +194,7 @@ def taskFence (req : TaskFenceReq) (now : Nat) : M TaskFenceRes := do
           let res ← promiseSettle r now
           return { status := 200, action := some (.settle res) }
 
-def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : M Unit := do
+def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : H Unit := do
   match ← touchTask ref.id now with
   | some (t, some p) =>
       if t.state == .acquired ∧ t.version == ref.version
@@ -203,17 +203,17 @@ def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : M Unit
   | _ =>
       pure ()
 
-def heartbeatAll (pid : String) (now : Nat) : List ServerModel.TaskRef → M Unit
+def heartbeatAll (pid : String) (now : Nat) : List ServerModel.TaskRef → H Unit
   | [] => pure ()
   | ref :: refs => do
       heartbeatOne pid ref now
       heartbeatAll pid now refs
 
-def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : M TaskHeartbeatRes := do
+def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := do
   heartbeatAll req.pid now req.tasks
   return { status := 200 }
 
-def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Bool)
+def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → H (Option Bool)
   | [] => return some false
   | action :: rest => do
       match ← touchPromise action.awaited now with
@@ -227,7 +227,7 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → M (Option Boo
             | some settled => return some (settled || pa.state != .pending)
 
 def registerAwaited (awaiter : String) (now : Nat) :
-    List PromiseRegisterCallbackReq → M Unit
+    List PromiseRegisterCallbackReq → H Unit
   | [] => pure ()
   | action :: rest => do
       match ← touchPromise action.awaited now with
@@ -235,7 +235,7 @@ def registerAwaited (awaiter : String) (now : Nat) :
       | none => pure ()
       registerAwaited awaiter now rest
 
-def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
+def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   if req.actions.isEmpty then
     return { status := 400 }
   if req.actions.any (·.awaited == req.id) then
@@ -267,7 +267,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : M TaskSuspendRes := do
                            expiresAt := none, retryAt := none, resumes := [] }
           return { status := 200 }
 
-def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
+def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
   match ← touchTask req.id now with
@@ -287,7 +287,7 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : M TaskFulfillRes := do
       setSettled p
       return { status := 200, promise := some p.toRecord }
 
-def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
+def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }
@@ -304,7 +304,7 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : M TaskReleaseRes := do
                        expiresAt := none, retryAt := some now }
       return { status := 200 }
 
-def taskHalt (req : TaskHaltReq) (now : Nat) : M TaskHaltRes := do
+def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }
@@ -319,7 +319,7 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : M TaskHaltRes := do
                        expiresAt := none, retryAt := none }
       return { status := 200 }
 
-def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
+def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
   match ← touchTask req.id now with
   | none =>
       return { status := 404 }
@@ -335,7 +335,7 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : M TaskContinueRes := do
           setTask { t with state := .pending, retryAt := some now }
           return { status := 200 }
 
-def taskSearch (_req : TaskSearchReq) (_now : Nat) : M TaskSearchRes := do
+def taskSearch (_req : TaskSearchReq) (_now : Nat) : H TaskSearchRes := do
   return { status := 501 }
 
 open ServerModel (Schedule nextCron
@@ -344,14 +344,14 @@ open ServerModel (Schedule nextCron
                   ScheduleDeleteReq ScheduleDeleteRes
                   ScheduleSearchReq ScheduleSearchRes)
 
-def scheduleGet (req : ScheduleGetReq) (_now : Nat) : M ScheduleGetRes := do
+def scheduleGet (req : ScheduleGetReq) (_now : Nat) : H ScheduleGetRes := do
   match ← getSchedule req.id with
   | none =>
       return { status := 404 }
   | some s =>
       return { status := 200, schedule := some s }
 
-def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes := do
+def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : H ScheduleCreateRes := do
   if req.promiseTags.timerTargeted then
     return { status := 400 }
   match ← getSchedule req.id with
@@ -371,7 +371,7 @@ def scheduleCreate (req : ScheduleCreateReq) (now : Nat) : M ScheduleCreateRes :
       setSchedule s
       return { status := 200, schedule := some s }
 
-def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : M ScheduleDeleteRes := do
+def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes := do
   match ← getSchedule req.id with
   | none =>
       return { status := 404 }
@@ -379,7 +379,7 @@ def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : M ScheduleDeleteRes 
       delSchedule s.id
       return { status := 200 }
 
-def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : M ScheduleSearchRes := do
+def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : H ScheduleSearchRes := do
   return { status := 501 }
 
 end AbstractModel

@@ -132,60 +132,60 @@ structure ServerState where
 
 def ServerState.init : ServerState := {}
 
-abbrev M := StateM ServerState
+abbrev H := StateM ServerState
 
-def getPromise (id : String) : M (Option PromiseObject) :=
+def getPromise (id : String) : H (Option PromiseObject) :=
   return (← get).promises.find? (·.id == id)
 
-def setPromise (p : PromiseObject) : M Unit :=
+def setPromise (p : PromiseObject) : H Unit :=
   modify fun s => { s with promises := p :: s.promises.filter (·.id != p.id) }
 
-def getTask (id : String) : M (Option TaskObject) :=
+def getTask (id : String) : H (Option TaskObject) :=
   return (← get).tasks.find? (·.id == id)
 
 /-- Read an armed task timer. The timeout transitions consult their own
     due entry before acting: an armed timer means NOT BEFORE, and the
     machine enforces it rather than trusting the environment. -/
-def getTaskTimeout (id : String) (kind : Nat) : M (Option TaskTimeout) :=
+def getTaskTimeout (id : String) (kind : Nat) : H (Option TaskTimeout) :=
   return (← get).taskTimeouts.find? (fun t => t.id == id && t.kind == kind)
 
-def setTask (t : TaskObject) : M Unit :=
+def setTask (t : TaskObject) : H Unit :=
   modify fun s => { s with tasks := t :: s.tasks.filter (·.id != t.id) }
 
-def getSchedule (id : String) : M (Option Schedule) :=
+def getSchedule (id : String) : H (Option Schedule) :=
   return (← get).schedules.find? (·.id == id)
 
-def setSchedule (sch : Schedule) : M Unit :=
+def setSchedule (sch : Schedule) : H Unit :=
   modify fun s => { s with schedules := sch :: s.schedules.filter (·.id != sch.id) }
 
-def delSchedule (id : String) : M Unit :=
+def delSchedule (id : String) : H Unit :=
   modify fun s => { s with schedules := s.schedules.filter (·.id != id) }
 
-def setPromiseTimeout (id : String) (timeout : Nat) : M Unit :=
+def setPromiseTimeout (id : String) (timeout : Nat) : H Unit :=
   modify fun s =>
     { s with promiseTimeouts :=
         { id, timeout } :: s.promiseTimeouts.filter (·.id != id) }
 
-def delPromiseTimeout (id : String) : M Unit :=
+def delPromiseTimeout (id : String) : H Unit :=
   modify fun s =>
     { s with promiseTimeouts := s.promiseTimeouts.filter (·.id != id) }
 
-def setTaskTimeout (id : String) (kind timeout : Nat) : M Unit :=
+def setTaskTimeout (id : String) (kind timeout : Nat) : H Unit :=
   modify fun s =>
     { s with taskTimeouts :=
         { id, kind, timeout } ::
         s.taskTimeouts.filter (fun t => !(t.id == id && t.kind == kind)) }
 
-def delTaskTimeout (id : String) : M Unit :=
+def delTaskTimeout (id : String) : H Unit :=
   modify fun s =>
     { s with taskTimeouts := s.taskTimeouts.filter (·.id != id) }
 
-def setScheduleTimeout (id : String) (timeout : Nat) : M Unit :=
+def setScheduleTimeout (id : String) (timeout : Nat) : H Unit :=
   modify fun s =>
     { s with scheduleTimeouts :=
         { id, timeout } :: s.scheduleTimeouts.filter (·.id != id) }
 
-def delScheduleTimeout (id : String) : M Unit :=
+def delScheduleTimeout (id : String) : H Unit :=
   modify fun s =>
     { s with scheduleTimeouts := s.scheduleTimeouts.filter (·.id != id) }
 
@@ -193,7 +193,7 @@ def delScheduleTimeout (id : String) : M Unit :=
     fulfils its co-keyed task and disarms the task's deadlines, in one
     step. `setSettled` in `02-abstract/state.lean` is the same write
     without the timeout components. -/
-def setSettled (p : PromiseObject) : M Unit := do
+def setSettled (p : PromiseObject) : H Unit := do
   setPromise p
   if p.state != .pending then
     delPromiseTimeout p.id
@@ -204,7 +204,7 @@ def setSettled (p : PromiseObject) : M Unit := do
     | none =>
         pure ()
 
-def setMessage (address : String) (msg : Message) : M Unit :=
+def setMessage (address : String) (msg : Message) : H Unit :=
   modify fun s =>
     let entry := OutboxEntry.mk address msg
     let key   := entry.key
@@ -217,13 +217,13 @@ def setMessage (address : String) (msg : Message) : M Unit :=
     re-registered, so each pair is deferred at most once over any run.
     No time field: all call sites would pass `now`, and *later* is not
     *a time* -- the drain supplies its own clock to the deadline guard. -/
-def defer (r : ResumeReq) : M Unit :=
+def defer (r : ResumeReq) : H Unit :=
   modify fun s =>
     { s with deferred :=
         r :: s.deferred.filter (fun e =>
           !(e.awaited == r.awaited && e.awaiter == r.awaiter)) }
 
-def undefer (r : ResumeReq) : M Unit :=
+def undefer (r : ResumeReq) : H Unit :=
   modify fun s =>
     { s with deferred :=
         s.deferred.filter (fun e =>

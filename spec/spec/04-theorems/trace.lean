@@ -178,7 +178,7 @@ def Request.isExternal : Request → Bool
   | _                    => true
 
 /-- The projected machine's step: dispatch to the -p handlers. -/
-def handleP (rq : Request) (now : Nat) : M Response :=
+def handleP (rq : Request) (now : Nat) : H Response :=
   match rq with
   | .promiseGet req              => Response.promiseGet <$> promiseGet req now
   | .promiseCreate req           => Response.promiseCreate <$> promiseCreate req now
@@ -224,7 +224,7 @@ def handleP (rq : Request) (now : Nat) : M Response :=
   | .idle => return .τ
 
 /-- The materialized machine's step: dispatch to the -m handlers. -/
-def handleM (rq : Request) (now : Nat) : M Response :=
+def handleM (rq : Request) (now : Nat) : H Response :=
   match rq with
   | .promiseGet req              => Response.promiseGet <$> Materialized.promiseGet req now
   | .promiseCreate req           => Response.promiseCreate <$> Materialized.promiseCreate req now
@@ -270,7 +270,7 @@ def handleM (rq : Request) (now : Nat) : M Response :=
   | .idle => return .τ
 
 /-- One protocol step as a total function. -/
-def stepOf (handle : Request → Nat → M Response)
+def stepOf (handle : Request → Nat → H Response)
     (rq : Request) (now : Nat) (s : ServerState) : Response × ServerState :=
   Id.run ((handle rq now).run s)
 
@@ -289,7 +289,7 @@ abbrev Trace := Nat → StateAction
     are connected by a step — the recorded response and the successor's
     state are exactly the handler's output — and the clock never runs
     backwards. -/
-def Valid (handle : Request → Nat → M Response) (tr : Trace) : Prop :=
+def Valid (handle : Request → Nat → H Response) (tr : Trace) : Prop :=
   ∀ t : Nat,
     (tr t).res = (stepOf handle (tr t).req (tr t).now (tr t).state).1 ∧
     (tr (t + 1)).state = (stepOf handle (tr t).req (tr t).now (tr t).state).2 ∧
@@ -304,7 +304,7 @@ Executable counterparts for `decide`: run a finite request script,
 collect responses and the final state.  -/
 
 /-- Run a finite script of (request, instant) steps. -/
-def runFin (handle : Request → Nat → M Response)
+def runFin (handle : Request → Nat → H Response)
     (w : List (Request × Nat)) : List Response × ServerState :=
   Id.run ((w.mapM (fun (rq, n) => handle rq n)).run ServerState.init)
 
@@ -327,7 +327,7 @@ def stateEq (a b : ServerState) : Bool :=
     promise timeout, then every deferred resume. A wake arms no new due
     promise timeout, so one round is the fixpoint. Dispatch obligations
     (retry, lease) are pure delivery policy and stay put. -/
-def quiesce (now : Nat) : M Unit := do
+def quiesce (now : Nat) : H Unit := do
   let ids := ((← get).promiseTimeouts.filter (fun e => decide (e.timeout ≤ now))).map (·.id)
   for id in ids do
     Timeouts.processPromiseTimeout id now

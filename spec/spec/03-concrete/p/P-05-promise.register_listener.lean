@@ -9,7 +9,7 @@ open ServerModel
     the machine would accept an obligation its transition relation
     cannot discharge (an internal promise that dies by deadline is
     settled by projection only; no τ ever emits the `unblock`). -/
-def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : M PromiseRegisterListenerRes := do
+def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) : H PromiseRegisterListenerRes := do
   if !addressValid req.address then
     return { status := 400 }
   match ← getPromise req.awaited with

@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def taskCreate (req : TaskCreateReq) (now : Nat) : M TaskCreateRes := do
+def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
   if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }

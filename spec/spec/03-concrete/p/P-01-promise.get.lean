@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def promiseGet (req : PromiseGetReq) (now : Nat) : M PromiseGetRes := do
+def promiseGet (req : PromiseGetReq) (now : Nat) : H PromiseGetRes := do
   match ← getPromise req.id with
   | none =>
       return { status := 404 }

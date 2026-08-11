@@ -7,7 +7,7 @@ namespace Timeouts
 /-- NOT BEFORE: every timeout transition re-checks its own due time and
     refuses an early firing — the machine enforces the timer contract
     rather than trusting the environment to fire on schedule. -/
-def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
+def processPromiseTimeout (id : String) (now : Nat) : H Unit := do
   match ← getPromise id with
   | none =>
       pure ()
@@ -24,7 +24,7 @@ def processPromiseTimeout (id : String) (now : Nat) : M Unit := do
         for awaiterId in callbacks do
           defer { awaited := p.id, awaiter := awaiterId }
 
-def processRetryTimeout (id : String) (now : Nat) : M Unit := do
+def processRetryTimeout (id : String) (now : Nat) : H Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 0 with
   | none =>
@@ -53,7 +53,7 @@ def processRetryTimeout (id : String) (now : Nat) : M Unit := do
               setTaskTimeout t.id 0 (now + retryTimeout)
               setMessage ((p.tags.get? "resonate:target").getD "") (.execute t.id t.version)
 
-def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
+def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
   let retryTimeout := (← get).config.retryTimeout
   match ← getTaskTimeout id 1 with
   | none =>
@@ -87,18 +87,18 @@ def processLeaseTimeout (id : String) (now : Nat) : M Unit := do
     backlogged occurrence is born settled, exactly as if it had been
     created on time. Idempotent: the expanded id is per-occurrence, so
     a re-fire finds the promise and writes nothing. -/
-def fireOccurrence (s : Schedule) (t : Nat) : M Unit := do
+def fireOccurrence (s : Schedule) (t : Nat) : H Unit := do
   let _ ← promiseCreate
     { id := expand s.promiseId s.id t, timeoutAt := t + s.promiseTimeout,
       param := s.promiseParam, tags := s.promiseTags } t
 
-def fireAll (s : Schedule) : List Nat → M Unit
+def fireAll (s : Schedule) : List Nat → H Unit
   | [] => pure ()
   | t :: ts => do
       fireOccurrence s t
       fireAll s ts
 
-def processSchedule (id : String) (now : Nat) : M Unit := do
+def processSchedule (id : String) (now : Nat) : H Unit := do
   match ← getSchedule id with
   | none =>
       pure ()

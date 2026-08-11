@@ -2,7 +2,7 @@ import «03-concrete».«state»
 
 open ServerModel
 
-def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : M PromiseRegisterCallbackRes := do
+def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
     return { status := 400 }
   match ← getPromise req.awaited with

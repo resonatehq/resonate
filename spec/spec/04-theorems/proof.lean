@@ -339,22 +339,22 @@ theorem responseLockstep_of_stepAgreement (h : StepAgreement) :
 
 /-! ### 5. Per-step agreement, case by case
 
-Monadic plumbing first: `M` is `StateT ServerState Id`, so runs reduce
+Monadic plumbing first: `H` is `StateT ServerState Id`, so runs reduce
 definitionally — recorded as `rfl`-lemmas for `simp`. -/
 
-theorem run_bind {α β} (x : M α) (f : α → M β) (s : ServerState) :
+theorem run_bind {α β} (x : H α) (f : α → H β) (s : ServerState) :
     (x >>= f).run s = (f (x.run s).1).run (x.run s).2 := rfl
 
 theorem run_pure {α} (a : α) (s : ServerState) :
-    (pure a : M α).run s = (a, s) := rfl
+    (pure a : H α).run s = (a, s) := rfl
 
-theorem run_map {α β} (f : α → β) (x : M α) (s : ServerState) :
+theorem run_map {α β} (f : α → β) (x : H α) (s : ServerState) :
     (f <$> x).run s = (f (x.run s).1, (x.run s).2) := rfl
 
-theorem run_get (s : ServerState) : (get : M ServerState).run s = (s, s) := rfl
+theorem run_get (s : ServerState) : (get : H ServerState).run s = (s, s) := rfl
 
 theorem run_modify (f : ServerState → ServerState) (s : ServerState) :
-    (modify f : M Unit).run s = ((), f s) := rfl
+    (modify f : H Unit).run s = ((), f s) := rfl
 
 /-- `idle`: both machines stutter. -/
 theorem agrees_idle : Agrees .idle := by
@@ -376,8 +376,8 @@ theorem agrees_scheduleSearch (req) : Agrees (.api (.scheduleSearch req)) := by
 
 /-! ### 5a. Effect runs — every effect is a pure pair, by `rfl` -/
 
-theorem run_pureUnit_bind {α} (f : PUnit → M α) (s : ServerState) :
-    ((pure PUnit.unit >>= f) : M α).run s = (f PUnit.unit).run s := rfl
+theorem run_pureUnit_bind {α} (f : PUnit → H α) (s : ServerState) :
+    ((pure PUnit.unit >>= f) : H α).run s = (f PUnit.unit).run s := rfl
 
 theorem run_getPromise (id : String) (s : ServerState) :
     (getPromise id).run s = (s.promises.find? (·.id == id), s) := rfl
@@ -713,7 +713,7 @@ theorem agrees_scheduleDelete (req) : Agrees (.api (.scheduleDelete req)) := by
 
 /-! ### 5e. `promiseGet` — THE TEMPLATE: view served vs view persisted
 
-The P side answers from `pLook` and writes nothing; the M side answers
+The P side answers from `pLook` and writes nothing; the H side answers
 from the same `pLook` (the touch serves the projection it persists)
 and its write is `REq_touchWrite`-invisible. Every remaining promise
 and task handler is this argument, composed with more effects. -/
@@ -1244,7 +1244,7 @@ theorem view_id (t : TaskObject) (p : PromiseObject) : (t.view p).id = t.id := b
 
 /-- What the read guarantees about the states the CONTINUATIONS run
     on: for each shape of the value, the lookups that produced it —
-    stable under the touch writes, so they hold of the M side's
+    stable under the touch writes, so they hold of the H side's
     post-read state as well. -/
 def ReadFacts (n : Nat) (id : String) (v : Option (TaskObject × Option PromiseObject))
     (sP' sM' : ServerState) : Prop :=
@@ -1264,7 +1264,7 @@ def ReadFacts (n : Nat) (id : String) (v : Option (TaskObject × Option PromiseO
     inherit the lookups behind the value. Every task handler is this
     lemma plus a per-continuation argument. -/
 theorem bind_taskRead_agrees {α : Type} (id : String) (n : Nat)
-    (kP kM : Option (TaskObject × Option PromiseObject) → M α)
+    (kP kM : Option (TaskObject × Option PromiseObject) → H α)
     {sP sM : ServerState} (h : REq n sP sM)
     (hk : ∀ v sP' sM', REq n sP' sM' → ReadFacts n id v sP' sM' →
       ((kP v).run sP').1 = ((kM v).run sM').1
