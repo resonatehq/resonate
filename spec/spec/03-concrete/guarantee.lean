@@ -1,8 +1,6 @@
 import «03-concrete».«state»
-import «03-concrete».«p».«P-03-promise.settle»
-import «03-concrete».«p».«02-timeouts»
-import «03-concrete».«p».«03-resume»
-import «03-concrete».«p».«T-01-task.get»
+import «03-concrete».«external-steps-p»
+import «03-concrete».«internal-steps-p»
 
 open ServerModel
 open ConcreteModel

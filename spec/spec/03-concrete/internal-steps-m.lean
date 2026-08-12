@@ -1,9 +1,12 @@
-import «03-concrete».«m».«P-02-promise.create»
+import «03-concrete».«external-steps-m»
 
 open ServerModel
 
 namespace ConcreteModel
 namespace M
+
+open ServerModel
+
 namespace Timeouts
 
 /-- Materialization IS the timeout transition: -m's promise timeout is
@@ -109,5 +112,47 @@ def processSchedule (id : String) (now : Nat) : H Unit := do
         setScheduleTimeout s.id s.nextRunAt
 
 end Timeouts
+
+open ServerModel
+
+
+def processResume (req : ResumeReq) (now : Nat) : H ResumeRes := do
+  match ← touchTask req.awaiter now with
+  | none =>
+      return { outcome := .absent }
+  | some (_, none) =>
+      return { outcome := .absent }
+  | some (t, some p) =>
+  if now >= p.timeoutAt then
+    return { outcome := .expired }
+  match t.state with
+  | .suspended =>
+      let retryTimeout := (← get).config.retryTimeout
+      let t := { t with state := .pending, resumes := [req.awaited] }
+      setTask t
+      setTaskTimeout t.id 0 (now + retryTimeout)
+      let target := (p.tags.get? "resonate:target").getD ""
+      if target != "" then
+        setMessage target (.execute t.id t.version)
+      return { outcome := .resumed }
+  | .pending | .acquired | .halted =>
+      if t.resumes.contains req.awaited then
+        return { outcome := .duplicate }
+      else
+        setTask { t with resumes := t.resumes ++ [req.awaited] }
+        return { outcome := .buffered }
+  | .fulfilled =>
+      return { outcome := .fulfilled }
+
+def drain (now : Nat) : H Unit := do
+  for d in (← get).deferred do
+    undefer d
+    let _ ← processResume d now
+
+def step {α} (act : H α) (now : Nat) : H α := do
+  let res ← act
+  drain now
+  return res
+
 end M
 end ConcreteModel
