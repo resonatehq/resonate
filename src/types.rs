@@ -291,19 +291,23 @@ fn validate_promise_create_data(
             return Err(validator::ValidationError::new("dot_in_origin")
                 .with_message("resonate:origin must not contain '.'".into()));
         }
-        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}.", origin)) {
+        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}:", origin)) {
             return Err(validator::ValidationError::new("origin_prefix")
                 .with_message("Promise ID must be prefixed by resonate:origin".into()));
         }
     }
     if let Some(branch) = data.tags.get("resonate:branch") {
-        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}.", branch)) {
+        // A bare root ancestor joins its first lineage segment with ':'; ancestors
+        // that already carry lineage join deeper segments with '.'.
+        let sep = if branch.contains(':') { '.' } else { ':' };
+        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}{}", branch, sep)) {
             return Err(validator::ValidationError::new("branch_prefix")
                 .with_message("Promise ID must be prefixed by resonate:branch".into()));
         }
     }
     if let Some(parent) = data.tags.get("resonate:parent") {
-        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}.", parent)) {
+        let sep = if parent.contains(':') { '.' } else { ':' };
+        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}{}", parent, sep)) {
             return Err(validator::ValidationError::new("parent_prefix")
                 .with_message("Promise ID must be prefixed by resonate:parent".into()));
         }
@@ -354,7 +358,9 @@ pub struct PromiseRegisterCallbackData {
 }
 
 fn origin(id: &str) -> &str {
-    id.split_once('.').map(|(prefix, _)| prefix).unwrap_or(id)
+    // An id has the form "<promiseId>:<lineage>", so the origin is everything
+    // before the ':' (lineage segments are '.'-separated).
+    id.split_once(':').map(|(origin, _)| origin).unwrap_or(id)
 }
 
 fn validate_callback_data(
