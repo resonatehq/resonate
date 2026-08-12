@@ -166,6 +166,38 @@ def mutants : List (String × Bool) :=
        well_formed_schedule_created_at_lte_last_run_at { C with lastRunAt := some 1 }),
     ("well_formed_schedule_last_run_at_lt_next_run_at",
        well_formed_schedule_last_run_at_lt_next_run_at { C with lastRunAt := some 90 }),
+    ("well_formed_promise_pending_created_before_deadline",
+       well_formed_promise_pending_created_before_deadline { P with createdAt := 100 }),
+    ("well_formed_promise_deadline_verdict_matches_timer_tag",
+       well_formed_promise_deadline_verdict_matches_timer_tag { P with tags := [("resonate:timer","true")], state := .rejectedTimedout, settledAt := some 100 }),
+    ("well_formed_promise_deadline_settlement_has_no_value",
+       well_formed_promise_deadline_settlement_has_no_value { P with state := .rejectedTimedout, settledAt := some 100, value := { data := some "boom" } }),
+    ("well_formed_task_acquired_version_positive",
+       well_formed_task_acquired_version_positive { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none }),
+    ("consistent_task_iff_targeted_promise/task_without_target",
+       consistent_task_iff_targeted_promise { promises := [P], tasks := [T] }),
+    ("consistent_task_iff_targeted_promise/target_without_task",
+       consistent_task_iff_targeted_promise { promises := [{ P with tags := [("resonate:target","w")] }] }),
+    ("consistent_settled_promise_has_fulfilled_task",
+       consistent_settled_promise_has_fulfilled_task { promises := [{ P with state := .resolved, settledAt := some 20 }], tasks := [T] }),
+    ("consistent_callback_awaiter_is_targeted",
+       consistent_callback_awaiter_is_targeted { promises := [{ P with callbacks := ["z"] }] }),
+    ("consistent_listener_addresses_deliverable",
+       consistent_listener_addresses_deliverable { promises := [{ P with listeners := ["not-an-address"] }] }),
+    ("consistent_outbox_execute_names_existing_task",
+       consistent_outbox_execute_names_existing_task { outbox := [{ address := "w", message := .execute "ghost" 0 }] }),
+    ("consistent_outbox_never_ahead",
+       consistent_outbox_never_ahead { tasks := [T], outbox := [{ address := "w", message := .execute "a" 9 }] }),
+    ("consistent_outbox_execute_address_is_target_tag",
+       consistent_outbox_execute_address_is_target_tag { promises := [{ P with tags := [("resonate:target","w")] }], outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
+    ("consistent_outbox_unblock_names_settled_promise",
+       consistent_outbox_unblock_names_settled_promise { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
+    ("consistent_outbox_unblock_address_deliverable",
+       consistent_outbox_unblock_address_deliverable { promises := [{ P with state := .resolved, settledAt := some 20 }], outbox := [{ address := "nope", message := .unblock ({ P with state := .resolved, settledAt := some 20 } : AbstractModel.PromiseObject).toRecord }] }),
+    ("consistent_settled_task_promise_settled",
+       consistent_settled_task_promise_settled { promises := [P], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
+    ("consistent_suspended_task_holds_rung",
+       consistent_suspended_task_holds_rung 50 { promises := [P], tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("well_formed_store_promise_ids_unique",
        well_formed_store_promise_ids_unique { promises := [P, P] }),
     ("well_formed_store_task_ids_unique",
@@ -225,6 +257,18 @@ theorem reaches_two_tasks :
 
 theorem reaches_two_outbox_entries :
     witnesses battery (fun s => s.outbox.length ≥ 2) = true := by decide
+
+
+theorem reaches_deadline_settlement :
+    witnesses battery (fun s => s.promises.any (fun p => p.settledAt == some p.timeoutAt)) = true := by decide
+
+theorem reaches_outbox_execute :
+    witnesses battery (fun s => s.outbox.any (fun e =>
+      match e.message with | .execute _ _ => true | .unblock _ => false)) = true := by decide
+
+theorem reaches_outbox_unblock :
+    witnesses battery (fun s => s.outbox.any (fun e =>
+      match e.message with | .unblock _ => true | .execute _ _ => false)) = true := by decide
 
 /-- The four `well_formed_schedule_*` entries are exercised by NOTHING:
     no script can create a schedule that runs, because `nextCron` and
