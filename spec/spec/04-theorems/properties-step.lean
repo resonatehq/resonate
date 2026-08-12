@@ -2,133 +2,15 @@ import «04-theorems».«properties-check»
 
 namespace Abstraction
 
-/-!  # Stage 3 — transition properties
+/-!  # Stage 3, evaluated
 
-Predicates on a PAIR of states linked by one step. Everything in
-`02-abstract/properties.lean` is a claim about a state; these are claims
-about a change, and no state predicate can express them: "the version
-went up by one" is invisible in either endpoint alone.
+The transition catalogue (`02-abstract/properties.lean`) run over the
+same corpus as stage 1, consumed as consecutive PAIRS rather than as
+states. Same three gates: it holds, every entry rejects a violator, and
+the corpus reaches the transition each entry is about. -/
 
-The corpus is the same as stage 1's — every script, both read
-disciplines — but consumed as consecutive pairs rather than as states.
-
-Two of these say something the object-level reading gets wrong.
-
-`preserved_settled_promise_record` freezes `state`, `value` and
-`settledAt` once a promise is settled. It does NOT freeze the promise:
-the listener and callback rules keep removing obligations from settled
-promises, which is how a wake is discharged. What is frozen is exactly
-`toRecord` — exactly the part a response can carry — so "a settled
-promise never changes again" is true on the wire and false in the store.
-
-`preserved_task_version_increments_only_on_acquisition` is the fencing
-law. Version moves by exactly one, only on `pending → acquired`, and by
-nothing on any other transition — release, halt, continue, suspend,
-fulfilment, lease expiry, retry, wake. `monotone_task_version_never_decreases`
-is not carried separately: it follows. -/
-
+open AbstractModel.Properties
 open AbstractModel (ServerState PromiseObject TaskObject)
-
-def preserved_promise_birth_fields_immutable (a b : ServerState) : Bool :=
-  a.promises.all fun p =>
-    match b.promises.find? (·.id == p.id) with
-    | none => true
-    | some q =>
-        q.param.data == p.param.data && q.param.headers == p.param.headers
-          && q.tags == p.tags && q.timeoutAt == p.timeoutAt && q.createdAt == p.createdAt
-
-def preserved_settled_promise_record (a b : ServerState) : Bool :=
-  a.promises.all fun p =>
-    p.state == .pending ||
-      (match b.promises.find? (·.id == p.id) with
-       | none => false
-       | some q =>
-           q.state == p.state && q.settledAt == p.settledAt
-             && q.value.data == p.value.data && q.value.headers == p.value.headers)
-
-def monotone_settled_promise_obligations_shrink (a b : ServerState) : Bool :=
-  a.promises.all fun p =>
-    p.state == .pending ||
-      (match b.promises.find? (·.id == p.id) with
-       | none => false
-       | some q =>
-           q.callbacks.all p.callbacks.contains && q.listeners.all p.listeners.contains)
-
-def monotone_promise_set_grows (a b : ServerState) : Bool :=
-  a.promises.all fun p => b.promises.any (·.id == p.id)
-
-def monotone_task_set_grows (a b : ServerState) : Bool :=
-  a.tasks.all fun t => b.tasks.any (·.id == t.id)
-
-/-- The fencing law: a task's version rises by exactly one on
-    `pending → acquired`, and does not move on any other transition. -/
-def preserved_task_version_increments_only_on_acquisition (a b : ServerState) : Bool :=
-  a.tasks.all fun t =>
-    match b.tasks.find? (·.id == t.id) with
-    | none => true
-    | some u =>
-        if t.state == .pending && u.state == .acquired then
-          u.version == t.version + 1
-        else
-          u.version == t.version
-
-def preserved_fulfilled_task (a b : ServerState) : Bool :=
-  a.tasks.all fun t =>
-    t.state != .fulfilled ||
-      (match b.tasks.find? (·.id == t.id) with
-       | none => false
-       | some u =>
-           u.state == .fulfilled && u.version == t.version && u.resumes.isEmpty
-             && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.retryAt.isNone)
-
-/-- `NoDeadDispatch`, state half: no step puts a task into `pending`
-    when its promise's deadline has already passed. A task already
-    pending before the step is not a re-pend. -/
-def preserved_no_dead_dispatch (now : Nat) (a b : ServerState) : Bool :=
-  b.tasks.all fun u =>
-    u.state != .pending
-      || (match a.tasks.find? (·.id == u.id) with
-          | some t => t.state == .pending
-          | none   => false)
-      || (match b.promises.find? (·.id == u.id) with
-          | some p => (p.project now).state == .pending
-          | none   => true)
-
-/-- `NoDeadDispatch`, message half: an `execute` that was not already
-    queued before the step names a task whose promise is still live. -/
-def preserved_execute_only_for_live_task (now : Nat) (a b : ServerState) : Bool :=
-  b.outbox.all fun e =>
-    match e.message with
-    | .unblock _ => true
-    | .execute id v =>
-        a.outbox.any (fun f =>
-          match f.message with
-          | .execute id' v' => id' == id && v' == v && f.address == e.address
-          | .unblock _ => false)
-        || (match b.promises.find? (·.id == id) with
-            | some p => (p.project now).state == .pending
-            | none   => true)
-
-def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
-  [ ("preserved_promise_birth_fields_immutable",  preserved_promise_birth_fields_immutable),
-    ("preserved_settled_promise_record",          preserved_settled_promise_record),
-    ("monotone_settled_promise_obligations_shrink", monotone_settled_promise_obligations_shrink),
-    ("monotone_promise_set_grows",                monotone_promise_set_grows),
-    ("monotone_task_set_grows",                   monotone_task_set_grows),
-    ("preserved_task_version_increments_only_on_acquisition",
-       preserved_task_version_increments_only_on_acquisition),
-    ("preserved_fulfilled_task",                  preserved_fulfilled_task) ]
-
-def stepClockChecks : List (String × (Nat → ServerState → ServerState → Bool)) :=
-  [ ("preserved_no_dead_dispatch",            preserved_no_dead_dispatch),
-    ("preserved_execute_only_for_live_task",  preserved_execute_only_for_live_task) ]
-
-def stepFailures (now : Nat) (a b : ServerState) : List String :=
-  (stepChecks.filterMap fun (n, f) => if f a b then none else some n)
-    ++ (stepClockChecks.filterMap fun (n, f) => if f now a b then none else some n)
-
-def stepWellFormed (now : Nat) (a b : ServerState) : Bool :=
-  (stepFailures now a b).isEmpty
 
 /-! ### The harness
 
