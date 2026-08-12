@@ -370,19 +370,445 @@ def preserved_execute_only_for_live_task (now : Nat) (a b : ServerState) : Bool 
             | some p => (p.project now).state == .pending
             | none   => true)
 
+/-! ## Stage 3 — field-level evolution
+
+Derived per field from every write site, then evaluated. The obligation
+laws split on the POST-state, not the pre-state: `processCallback`
+materializes a deadline AND drains a callback in the same step, so a
+promise pending before and settled after loses one. -/
+
+def appendedAtMostOne (pre post : List String) : Bool :=
+  post == pre ||
+    (post.length == pre.length + 1 && post.take pre.length == pre
+      && (post.drop pre.length).all (fun x => !pre.contains x))
+
+def removedAtMostOne (pre post : List String) : Bool :=
+  post == pre || pre.any (fun x => post == pre.filter (· != x))
+
+def preserved_promise_state_frozen_once_settled (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.state == .pending ||
+      (match b.promises.find? (·.id == p.id) with
+       | none => false
+       | some q => q.state == p.state)
+
+def preserved_promise_settlement_is_one_way (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    q.state != .pending
+      || (match a.promises.find? (·.id == q.id) with
+          | some p => p.state == .pending
+          | none   => true)
+
+def consistent_promise_settled_at_moves_with_state (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    match b.promises.find? (·.id == p.id) with
+    | none => false
+    | some q => (q.settledAt != p.settledAt) == (q.state != p.state)
+
+def preserved_promise_value_until_settlement (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    match b.promises.find? (·.id == p.id) with
+    | none => false
+    | some q =>
+        q.state != .pending
+          || (q.value.data == p.value.data && q.value.headers == p.value.headers)
+
+def preserved_promise_no_duplicate_ids (_a b : ServerState) : Bool :=
+  (b.promises.map (·.id)).eraseDups.length == b.promises.length
+
+def monotone_promise_callbacks_append_one_while_pending (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    q.state != .pending ||
+      (match a.promises.find? (·.id == q.id) with
+       | none => q.callbacks.isEmpty
+       | some p => appendedAtMostOne p.callbacks q.callbacks)
+
+def monotone_promise_callbacks_drain_one_once_settled (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    q.state == .pending ||
+      (match a.promises.find? (·.id == q.id) with
+       | none => q.callbacks.isEmpty
+       | some p => removedAtMostOne p.callbacks q.callbacks)
+
+def monotone_promise_listeners_append_one_while_pending (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    q.state != .pending ||
+      (match a.promises.find? (·.id == q.id) with
+       | none => q.listeners.isEmpty
+       | some p => appendedAtMostOne p.listeners q.listeners)
+
+def monotone_promise_listeners_drain_one_once_settled (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    q.state == .pending ||
+      (match a.promises.find? (·.id == q.id) with
+       | none => q.listeners.isEmpty
+       | some p => removedAtMostOne p.listeners q.listeners)
+
+/-! ## Stage 3 — the state machine edges
+
+The admissible pair lists, written out rather than paraphrased from the
+handlers, so the check is independent of the code it checks. -/
+
+def consistent_promise_state_edge_admissible (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    match b.promises.find? (·.id == p.id) with
+    | none   => true
+    | some q =>
+        [ (PromiseState.pending,          PromiseState.pending),
+          (PromiseState.pending,          PromiseState.resolved),
+          (PromiseState.pending,          PromiseState.rejected),
+          (PromiseState.pending,          PromiseState.rejectedCanceled),
+          (PromiseState.pending,          PromiseState.rejectedTimedout),
+          (PromiseState.resolved,         PromiseState.resolved),
+          (PromiseState.rejected,         PromiseState.rejected),
+          (PromiseState.rejectedCanceled, PromiseState.rejectedCanceled),
+          (PromiseState.rejectedTimedout, PromiseState.rejectedTimedout)
+        ].contains (p.state, q.state)
+
+def consistent_task_state_edge_admissible (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none   => true
+    | some u =>
+        [ (TaskState.pending,   TaskState.pending),
+          (TaskState.pending,   TaskState.acquired),
+          (TaskState.pending,   TaskState.halted),
+          (TaskState.pending,   TaskState.fulfilled),
+          (TaskState.acquired,  TaskState.pending),
+          (TaskState.acquired,  TaskState.acquired),
+          (TaskState.acquired,  TaskState.suspended),
+          (TaskState.acquired,  TaskState.halted),
+          (TaskState.acquired,  TaskState.fulfilled),
+          (TaskState.suspended, TaskState.pending),
+          (TaskState.suspended, TaskState.suspended),
+          (TaskState.suspended, TaskState.halted),
+          (TaskState.suspended, TaskState.fulfilled),
+          (TaskState.halted,    TaskState.pending),
+          (TaskState.halted,    TaskState.halted),
+          (TaskState.halted,    TaskState.fulfilled),
+          (TaskState.fulfilled, TaskState.fulfilled)
+        ].contains (t.state, u.state)
+
+def preserved_task_acquisition_only_from_pending (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    u.state != .acquired
+      || (match a.tasks.find? (·.id == u.id) with
+          | some t => t.state == .pending || t.state == .acquired
+          | none   => true)
+
+def preserved_task_suspension_only_from_acquired (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    u.state != .suspended
+      || (match a.tasks.find? (·.id == u.id) with
+          | some t => t.state == .acquired || t.state == .suspended
+          | none   => false)
+
+def preserved_task_halted_only_reenters_via_pending (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    t.state != .halted
+      || (match b.tasks.find? (·.id == t.id) with
+          | none   => false
+          | some u => [TaskState.halted, TaskState.pending, TaskState.fulfilled].contains u.state)
+
+/-! ## Stage 3 — cross-object coupling
+
+What must move together in one step. These are the primitives; several
+state invariants above are their inductive consequences. -/
+
+def consistent_settlement_fulfils_task (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.state != .pending ||
+      (match b.promises.find? (·.id == p.id), b.tasks.find? (·.id == p.id) with
+       | some q, some u => q.state == .pending || u.state == .fulfilled
+       | _, _ => true)
+
+def consistent_task_fulfilment_needs_settlement (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    u.state != .fulfilled ||
+      (match a.tasks.find? (·.id == u.id) with
+       | none => true
+       | some t =>
+           t.state == .fulfilled
+             || (match a.promises.find? (·.id == u.id), b.promises.find? (·.id == u.id) with
+                 | some p, some q => p.state == .pending && q.state != .pending
+                 | _, _ => false))
+
+def consistent_obligation_discharge_requires_settled (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    match b.promises.find? (·.id == p.id) with
+    | none => true
+    | some q =>
+        (p.callbacks.all q.callbacks.contains && p.listeners.all q.listeners.contains)
+          || q.state != .pending
+
+def consistent_callback_consumption_resumes_awaiter (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.callbacks.all fun x =>
+      (match b.promises.find? (·.id == p.id) with
+       | none => true
+       | some q => q.callbacks.contains x)
+      || (match b.tasks.find? (·.id == x) with
+          | none => true
+          | some u => u.state == .fulfilled || u.resumes.contains p.id)
+
+def consistent_listener_consumption_enqueues_unblock (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.listeners.all fun addr =>
+      (match b.promises.find? (·.id == p.id) with
+       | none => true
+       | some q => q.listeners.contains addr)
+      || (b.outbox.filter (fun e =>
+            e.address == addr &&
+              (match e.message with
+               | .unblock r => r.id == p.id && r.state != .pending
+               | .execute _ _ => false))).length == 1
+
+def consistent_wake_follows_callback_consumption (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    match a.tasks.find? (·.id == u.id) with
+    | none => true
+    | some t =>
+        !(t.state == .suspended && u.state == .pending)
+          || a.promises.any (fun p =>
+               p.callbacks.contains u.id
+                 && (match b.promises.find? (·.id == p.id) with
+                     | none => false
+                     | some q => !q.callbacks.contains u.id)
+                 && u.resumes == [p.id])
+
+def consistent_suspension_registers_callback (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    u.state != .suspended
+      || (match a.tasks.find? (·.id == u.id) with
+          | none => false
+          | some t => t.state == .suspended)
+      || b.promises.any (fun q =>
+           q.callbacks.contains u.id
+             && (match a.promises.find? (·.id == q.id) with
+                 | none => true
+                 | some p => !p.callbacks.contains u.id)
+             && q.state == .pending)
+
+def consistent_callback_additions_share_one_awaiter (a b : ServerState) : Bool :=
+  ((b.promises.flatMap fun q =>
+      match a.promises.find? (·.id == q.id) with
+      | none => q.callbacks
+      | some p => q.callbacks.filter (fun x => !p.callbacks.contains x)).eraseDups.length ≤ 1)
+    && b.promises.all fun q =>
+         (match a.promises.find? (·.id == q.id) with
+          | none => q.callbacks.isEmpty
+          | some p => q.callbacks.all p.callbacks.contains)
+         || q.state == .pending
+
+def consistent_at_most_one_obligation_discharged (a b : ServerState) : Bool :=
+  ((a.promises.map fun p =>
+      match b.promises.find? (·.id == p.id) with
+      | none => 0
+      | some q =>
+          (p.callbacks.filter (fun x => !q.callbacks.contains x)).length
+            + (p.listeners.filter (fun x => !q.listeners.contains x)).length).sum) ≤ 1
+
+def consistent_at_most_one_task_acquired (a b : ServerState) : Bool :=
+  (b.tasks.filter fun u =>
+     u.state == .acquired &&
+       (match a.tasks.find? (·.id == u.id) with
+        | none => true
+        | some t => t.state != .acquired)).length ≤ 1
+
+def consistent_task_birth_couples_promise_birth (a b : ServerState) : Bool :=
+  (b.tasks.all fun u =>
+     a.tasks.any (·.id == u.id)
+       || ((!a.promises.any (·.id == u.id))
+            && (match b.promises.find? (·.id == u.id) with
+                | none => false
+                | some q =>
+                    q.tags.has "resonate:target"
+                      && (if u.state == .fulfilled then q.state != .pending
+                          else q.state == .pending))
+            && ((u.state == .pending && u.version == 0)
+                || (u.state == .acquired && u.version == 1)
+                || (u.state == .fulfilled && u.version == 0))))
+  && (b.promises.all fun q =>
+        a.promises.any (·.id == q.id)
+          || !q.tags.has "resonate:target"
+          || b.tasks.any (·.id == q.id))
+
+/-! ## Stage 3 — the outbox -/
+
+def monotone_outbox_keys_never_disappear (a b : ServerState) : Bool :=
+  a.outbox.all fun e => b.outbox.any (fun f => f.key == e.key)
+
+def consistent_new_execute_matches_task_and_target (a b : ServerState) : Bool :=
+  b.outbox.all fun f =>
+    match f.message with
+    | .unblock _ => true
+    | .execute id v =>
+        a.outbox.any (fun e =>
+          match e.message with
+          | .execute id' v' => id' == id && v' == v && e.address == f.address
+          | .unblock _ => false)
+        || ((match b.tasks.find? (·.id == id) with
+             | some t => t.version == v
+             | none   => false)
+            && (match b.promises.find? (·.id == id) with
+                | some p => f.address == (p.tags.get? "resonate:target").getD ""
+                | none   => false))
+
+def consistent_new_unblock_carries_stored_record (a b : ServerState) : Bool :=
+  b.outbox.all fun f =>
+    match f.message with
+    | .execute _ _ => true
+    | .unblock r =>
+        a.outbox.any (fun e =>
+          match e.message with
+          | .unblock r' => e.address == f.address && r'.id == r.id
+          | .execute _ _ => false)
+        || (r.state != .pending
+            && (match b.promises.find? (·.id == r.id) with
+                | some p =>
+                    p.state == r.state && p.settledAt == r.settledAt
+                      && p.value.data == r.value.data && p.timeoutAt == r.timeoutAt
+                      && p.createdAt == r.createdAt
+                | none => false))
+
+def consistent_new_unblock_discharges_its_listener (a b : ServerState) : Bool :=
+  b.outbox.all fun f =>
+    match f.message with
+    | .execute _ _ => true
+    | .unblock r =>
+        a.outbox.any (fun e =>
+          match e.message with
+          | .unblock r' => e.address == f.address && r'.id == r.id
+          | .execute _ _ => false)
+        || ((a.promises.any fun p => p.id == r.id && p.listeners.contains f.address)
+            && (b.promises.all fun p => p.id != r.id || !p.listeners.contains f.address))
+
+/-! ## Stage 3 — schedules
+
+Only the laws that hold unconditionally. The ordering laws
+(`nextRunAt` never regresses, the run marks advance together) are true
+of the protocol but not of the model: they need axioms on `nextCron`
+and `occurrences`, which are `opaque` with no value. They are not
+carried here, because a law that passes only because nothing reaches it
+is not being checked. -/
+
+def preserved_schedule_birth_fields_immutable (a b : ServerState) : Bool :=
+  a.schedules.all fun c =>
+    match b.schedules.find? (·.id == c.id) with
+    | none => true
+    | some d =>
+        d.cron == c.cron && d.promiseId == c.promiseId
+          && d.promiseTimeout == c.promiseTimeout
+          && d.promiseParam.data == c.promiseParam.data
+          && d.promiseParam.headers == c.promiseParam.headers
+          && d.promiseTags == c.promiseTags && d.createdAt == c.createdAt
+
+def consistent_schedule_change_is_single (a b : ServerState) : Bool :=
+  let gone  := a.schedules.filter fun c => !b.schedules.any (·.id == c.id)
+  let born  := b.schedules.filter fun d => !a.schedules.any (·.id == d.id)
+  let moved := a.schedules.filter fun c =>
+                 match b.schedules.find? (·.id == c.id) with
+                 | none => false
+                 | some d => !(d.nextRunAt == c.nextRunAt && d.lastRunAt == c.lastRunAt)
+  gone.length + born.length + moved.length ≤ 1
+
+def consistent_schedule_removal_is_isolated (a b : ServerState) : Bool :=
+  a.schedules.all (fun c => b.schedules.any (·.id == c.id))
+    || (b.promises.length == a.promises.length
+        && b.tasks.length == a.tasks.length
+        && b.outbox.length == a.outbox.length
+        && b.schedules.length + 1 == a.schedules.length)
+
 def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
   [ ("preserved_promise_birth_fields_immutable",  preserved_promise_birth_fields_immutable),
     ("preserved_settled_promise_record",          preserved_settled_promise_record),
-    ("monotone_settled_promise_obligations_shrink", monotone_settled_promise_obligations_shrink),
     ("monotone_promise_set_grows",                monotone_promise_set_grows),
     ("monotone_task_set_grows",                   monotone_task_set_grows),
     ("preserved_task_version_increments_only_on_acquisition",
        preserved_task_version_increments_only_on_acquisition),
-    ("preserved_fulfilled_task",                  preserved_fulfilled_task) ]
+    ("preserved_fulfilled_task",                  preserved_fulfilled_task),
+    ("preserved_promise_state_frozen_once_settled", preserved_promise_state_frozen_once_settled),
+    ("preserved_promise_settlement_is_one_way",   preserved_promise_settlement_is_one_way),
+    ("consistent_promise_settled_at_moves_with_state", consistent_promise_settled_at_moves_with_state),
+    ("preserved_promise_value_until_settlement",  preserved_promise_value_until_settlement),
+    ("preserved_promise_no_duplicate_ids",        preserved_promise_no_duplicate_ids),
+    ("monotone_promise_callbacks_append_one_while_pending", monotone_promise_callbacks_append_one_while_pending),
+    ("monotone_promise_callbacks_drain_one_once_settled",   monotone_promise_callbacks_drain_one_once_settled),
+    ("monotone_promise_listeners_append_one_while_pending", monotone_promise_listeners_append_one_while_pending),
+    ("monotone_promise_listeners_drain_one_once_settled",   monotone_promise_listeners_drain_one_once_settled),
+    ("consistent_promise_state_edge_admissible",  consistent_promise_state_edge_admissible),
+    ("consistent_task_state_edge_admissible",     consistent_task_state_edge_admissible),
+    ("preserved_task_acquisition_only_from_pending", preserved_task_acquisition_only_from_pending),
+    ("preserved_task_suspension_only_from_acquired", preserved_task_suspension_only_from_acquired),
+    ("preserved_task_halted_only_reenters_via_pending", preserved_task_halted_only_reenters_via_pending),
+    ("consistent_settlement_fulfils_task",        consistent_settlement_fulfils_task),
+    ("consistent_task_fulfilment_needs_settlement", consistent_task_fulfilment_needs_settlement),
+    ("consistent_obligation_discharge_requires_settled", consistent_obligation_discharge_requires_settled),
+    ("consistent_callback_consumption_resumes_awaiter", consistent_callback_consumption_resumes_awaiter),
+    ("consistent_listener_consumption_enqueues_unblock", consistent_listener_consumption_enqueues_unblock),
+    ("consistent_wake_follows_callback_consumption", consistent_wake_follows_callback_consumption),
+    ("consistent_suspension_registers_callback",  consistent_suspension_registers_callback),
+    ("consistent_callback_additions_share_one_awaiter", consistent_callback_additions_share_one_awaiter),
+    ("consistent_at_most_one_obligation_discharged", consistent_at_most_one_obligation_discharged),
+    ("consistent_at_most_one_task_acquired",      consistent_at_most_one_task_acquired),
+    ("consistent_task_birth_couples_promise_birth", consistent_task_birth_couples_promise_birth),
+    ("monotone_outbox_keys_never_disappear",      monotone_outbox_keys_never_disappear),
+    ("consistent_new_execute_matches_task_and_target", consistent_new_execute_matches_task_and_target),
+    ("consistent_new_unblock_carries_stored_record", consistent_new_unblock_carries_stored_record),
+    ("consistent_new_unblock_discharges_its_listener", consistent_new_unblock_discharges_its_listener),
+    ("preserved_schedule_birth_fields_immutable", preserved_schedule_birth_fields_immutable),
+    ("consistent_schedule_change_is_single",      consistent_schedule_change_is_single),
+    ("consistent_schedule_removal_is_isolated",   consistent_schedule_removal_is_isolated) ]
+
+/-- The settlement dichotomy: a promise leaving `pending` did so either
+    by a client verdict stamped at `now`, strictly before the deadline
+    and never `rejectedTimedout`; or by its deadline, stamped AT the
+    deadline, verdict fixed by the timer tag, value untouched. -/
+def consistent_promise_settlement_stamp (now : Nat) (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.state != .pending ||
+      (match b.promises.find? (·.id == p.id) with
+       | none => false
+       | some q =>
+           q.state == .pending
+             || (q.settledAt == some now && now < q.timeoutAt
+                   && q.state != .rejectedTimedout)
+             || (q.settledAt == some q.timeoutAt && q.timeoutAt ≤ now
+                   && (if q.isTimer then q.state == .resolved
+                       else q.state == .rejectedTimedout)
+                   && q.value.data == p.value.data
+                   && q.value.headers == p.value.headers))
+
+/-- `rejectedTimedout` is server-owned: a client can never forge it,
+    and it is stamped at the deadline, never at the wall clock. -/
+def preserved_timedout_is_server_owned (now : Nat) (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    p.state != .pending
+      || (match b.promises.find? (·.id == p.id) with
+          | none   => true
+          | some q => q.state != .rejectedTimedout
+                        || (p.timeoutAt ≤ now && q.settledAt == some p.timeoutAt))
+
+/-- A promise that appears in a step is born clean: no obligations, no
+    value, in the past, and in exactly one of the two birth shapes. -/
+def consistent_new_promise_born_clean (now : Nat) (a b : ServerState) : Bool :=
+  b.promises.all fun q =>
+    a.promises.any (·.id == q.id)
+      || (q.callbacks.isEmpty && q.listeners.isEmpty
+          && q.value.data.isNone && q.value.headers.isEmpty
+          && q.createdAt ≤ now
+          && ((q.state == .pending && q.settledAt.isNone && q.createdAt < q.timeoutAt)
+              || (q.settledAt == some q.timeoutAt && q.createdAt == q.timeoutAt
+                  && q.timeoutAt ≤ now
+                  && (if q.isTimer then q.state == .resolved
+                      else q.state == .rejectedTimedout))))
 
 def stepClockChecks : List (String × (Nat → ServerState → ServerState → Bool)) :=
   [ ("preserved_no_dead_dispatch",            preserved_no_dead_dispatch),
-    ("preserved_execute_only_for_live_task",  preserved_execute_only_for_live_task) ]
+    ("preserved_execute_only_for_live_task",  preserved_execute_only_for_live_task),
+    ("consistent_promise_settlement_stamp",   consistent_promise_settlement_stamp),
+    ("preserved_timedout_is_server_owned",    preserved_timedout_is_server_owned),
+    ("consistent_new_promise_born_clean",     consistent_new_promise_born_clean) ]
 
 def stepFailures (now : Nat) (a b : ServerState) : List String :=
   (stepChecks.filterMap fun (n, f) => if f a b then none else some n)
