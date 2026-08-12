@@ -62,7 +62,8 @@ func main() {
 	pend := flag.Bool("pending", true, "also fuzz the pending-op (500) semantics — Go checker only; the Lean checker does not know pending ops")
 	coneCheck := flag.Bool("conecheck", true, "also require the cone-of-influence reduction and the full closure to agree on every verdict")
 	tagCheck := flag.Bool("tagrule", true, "also require the tag rules to hold on generated traffic: a targeted timer is refused, a timer born past its deadline resolves")
-	affCheck := flag.Bool("affects", true, "also require every firing's observable writes to be declared in its `affects` — the write half of the cone's soundness obligation")
+	affCheck := flag.Bool("affects", true, "also require every firing's REACHABLE writes to be declared in its `affects` — the cone's soundness obligation, arming included")
+	affCap := flag.Int("affectscap", 2000, "node cap for the arming search; a state whose search hits it is counted, not silently passed")
 	flag.Parse()
 
 	leanBin := *lean
@@ -103,6 +104,7 @@ func main() {
 		coneFail    int
 		affChecked  int
 		affFail     int
+		affTrunc    int
 		tagRefused  int
 		tagBornDead int
 		tagFail     int
@@ -165,15 +167,21 @@ func main() {
 			}
 		}
 
-		// property 0 — the cone's own obligation: at every state the
-		// generated run passes through, no enabled firing writes anything
-		// response-visible that its `affects` does not declare. Checked on
-		// the -m replay, which is the discipline that materialises and so
-		// reaches the most rule-enabling states.
+		// property 0 — the cone's own obligation, both halves: at every
+		// state the generated run passes through, nothing an enabled firing
+		// can REACH a response-visible write to is missing from its
+		// `affects`. Reaching covers arming: R1 writes only its promise but
+		// reaches the awaiter it wakes by enabling R4. Checked on the -m
+		// replay, the discipline that materialises and so reaches the most
+		// rule-enabling states.
 		if *affCheck {
 			for _, st := range model.States(model.Materialized, script) {
 				affChecked++
-				if bad := model.AffectsSound(st.S, st.Now); bad != "" {
+				bad, complete := model.ArmingSound(st.S, st.Now, *affCap)
+				if !complete {
+					affTrunc++
+				}
+				if bad != "" {
 					affFail++
 					fmt.Printf("AFFECTS UNSOUND seed=%d: %s\n", seed, bad)
 					break
@@ -286,8 +294,8 @@ func main() {
 			tagRefused, tagBornDead, tagFail)
 	}
 	if *affCheck {
-		fmt.Printf("  affects:  %d states checked, %d firings writing outside their declared set\n",
-			affChecked, affFail)
+		fmt.Printf("  affects:  %d states checked, %d firings reaching outside their declared set, %d searches truncated at the cap\n",
+			affChecked, affFail, affTrunc)
 	}
 	if *coneCheck {
 		fmt.Printf("  cone:     %d traces (+mutants) compared against the full closure, %d disagreements\n",

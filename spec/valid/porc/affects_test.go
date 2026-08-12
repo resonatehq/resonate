@@ -74,3 +74,71 @@ func TestAffectsCatchesAnUnderstatedSet(t *testing.T) {
 	}
 	t.Fatal("an understated affects went undetected")
 }
+
+// armR1 is the state the arming obligation exists for: a promise past its
+// deadline carrying an awaiter on its callback ledger, and that awaiter
+// suspended on it. Firing R1 settles the promise, which is what ENABLES
+// R4, which wakes the task — so R1 can reach a write to `x` without ever
+// writing `x` itself.
+func armR1() (*ServerState, uint64) {
+	ext := Tags{"resonate:external": "true"}
+	tgt := Tags{"resonate:target": "poll://any@w1"}
+	return &ServerState{
+		Promises: []*Promise{
+			{ID: "a", State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
+				Callbacks: []string{"x"}},
+			{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 5000, CreatedAt: 100},
+		},
+		Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
+	}, 300
+}
+
+func TestArmingReachesThroughR1(t *testing.T) {
+	s, now := armR1()
+	fs := enabledFirings(s, now)
+	var r1 firing
+	for _, f := range fs {
+		if len(f.name) > 2 && f.name[:2] == "R1" {
+			r1 = f
+		}
+	}
+	if r1.fire == nil {
+		t.Fatal("R1 not enabled — the fixture does not test what it claims")
+	}
+
+	reach, complete := reachableWrites(s, now, r1.fire, 4000)
+	if !complete {
+		t.Fatal("search truncated on a two-promise state")
+	}
+	// R1 writes only `a`; it REACHES `x` by arming R4.
+	direct := observableWrites(s, r1.fire)
+	if len(direct) != 1 || direct[0] != "a" {
+		t.Fatalf("R1 should write only [a], got %v", direct)
+	}
+	if len(reach) != 2 || reach[0] != "a" || reach[1] != "x" {
+		t.Fatalf("R1 should reach [a x], got %v", reach)
+	}
+
+	// as declared, it is sound
+	if bad, _ := ArmingSound(s, now, 4000); bad != "" {
+		t.Errorf("declared affects should be sound: %s", bad)
+	}
+}
+
+// The historical bug, reproduced: drop the callbacks from R1's affects —
+// leaving exactly the set it WRITES — and the check must catch it. Without
+// this, the check above only shows that today's table passes.
+func TestArmingCatchesTheHistoricalBug(t *testing.T) {
+	s, now := armR1()
+	var r1 firing
+	for _, f := range enabledFirings(s, now) {
+		if len(f.name) > 2 && f.name[:2] == "R1" {
+			r1 = f
+		}
+	}
+	understated := firing{rule: r1.rule, affects: []string{"a"}} // the write set alone
+	if bad := armingViolation(s, now, understated, 4000); bad == "" {
+		t.Fatal("R1 with only its write set declared went undetected — " +
+			"this is the shape that made the Lean cone unsound")
+	}
+}

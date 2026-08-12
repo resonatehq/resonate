@@ -114,3 +114,151 @@ func AffectsSound(s *ServerState, now uint64) string {
 	}
 	return ""
 }
+
+// ---------------------------------------------------------------- arming
+
+// The other half of the obligation, and the one that has been wrong.
+//
+// `relevantRules` computes the cone over `enabledFirings(s, now)` — the
+// firings enabled AT THIS STATE. A firing that only becomes enabled after
+// another fires is not in that list and no fixpoint over it can pull the
+// firing in. R1 is the standing case: settling a promise is what ENABLES
+// R4 for each awaiter on its ledger, and at the moment the cone is
+// computed those R4s do not exist to be found. R1 therefore has to carry
+// the awaiters in its own `affects`, which is why its set is
+// `callbacks + p.ID` and not the `{p.ID}` it writes. Miss that and a
+// request touching the awaiter drops R1, never reaches the R4 it would
+// have armed, and a correct server is refuted. That is the bug the Lean
+// cone shipped once.
+//
+// Stated as an obligation over reachability rather than over one write:
+//
+//	if firing f, followed by any number of further firings, can change
+//	what a request touching k would see, then k is in f.affects.
+//
+// which is checkable by exploring: fire f, then keep firing what f ARMED,
+// and watch which ids move.
+//
+// Only what it armed. A firing already enabled at s is a candidate in the
+// fixpoint on its own merits — if it writes k then k is in ITS affects, by
+// the write half above, so a request touching k pulls it in without any
+// help from f. Following those too makes the check reject sound tables:
+// it reported R3 removing a listener as "reaching" a task write, when all
+// that happened was an unrelated firing, enabled the whole time, doing its
+// own job. What f owes is only the firings that did not exist to be found.
+//
+// Termination is by state key — the clock is fixed at `now`, so the
+// reachable set is finite — with a node cap so a pathological state cannot
+// hang the fuzzer. `complete` reports whether the cap was hit, because a
+// check that quietly truncates its own search is worse than no check.
+func reachableWrites(s *ServerState, now uint64, first func(*ServerState), cap int) (out []string, complete bool) {
+	base := map[string]promiseFacet{}
+	baseT := map[string]taskFacet{}
+	for _, p := range s.Promises {
+		base[p.ID] = facetOf(p)
+	}
+	for _, t := range s.Tasks {
+		baseT[t.ID] = taskFacetOf(t)
+	}
+
+	moved := map[string]bool{}
+	note := func(u *ServerState) {
+		for _, p := range u.Promises {
+			if f, ok := base[p.ID]; !ok || f != facetOf(p) {
+				moved[p.ID] = true
+			}
+		}
+		for _, t := range u.Tasks {
+			if f, ok := baseT[t.ID]; !ok || f != taskFacetOf(t) {
+				moved[t.ID] = true
+			}
+		}
+	}
+
+	// the firings already available before f — not f's responsibility
+	preEnabled := map[string]bool{}
+	for _, g := range enabledFirings(s, now) {
+		preEnabled[g.name] = true
+	}
+
+	head := s.clone()
+	first(head)
+	note(head)
+
+	seen := map[string]bool{head.Key(): true}
+	frontier := []*ServerState{head}
+	complete = true
+	for len(frontier) > 0 {
+		cur := frontier[0]
+		frontier = frontier[1:]
+		for _, g := range enabledFirings(cur, now) {
+			if preEnabled[g.name] {
+				continue // enabled all along; it answers for its own writes
+			}
+			next := cur.clone()
+			g.fire(next)
+			k := next.Key()
+			if seen[k] {
+				continue
+			}
+			if len(seen) >= cap {
+				complete = false
+				frontier = nil
+				break
+			}
+			seen[k] = true
+			note(next)
+			frontier = append(frontier, next)
+		}
+	}
+
+	out = make([]string, 0, len(moved))
+	for id := range moved {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, complete
+}
+
+// armingViolation checks one firing's reachability obligation. Exported
+// shape takes the firing so a test can hand it a deliberately understated
+// `affects` and confirm the check bites.
+func armingViolation(s *ServerState, now uint64, f firing, cap int) string {
+	declared := map[string]bool{}
+	for _, id := range f.affects {
+		declared[id] = true
+	}
+	reach, complete := reachableWrites(s, now, f.fire, cap)
+	if !complete {
+		return "" // truncated search proves nothing; counted separately
+	}
+	for _, id := range reach {
+		if !declared[id] {
+			return f.name + " can reach a write to " + id + ", not in affects"
+		}
+	}
+	return ""
+}
+
+// ArmingSound checks every enabled firing's reachability obligation.
+// Returns the offending rule, and whether every search ran to exhaustion.
+func ArmingSound(s *ServerState, now uint64, cap int) (bad string, complete bool) {
+	complete = true
+	for _, f := range enabledFirings(s, now) {
+		reach, ok := reachableWrites(s, now, f.fire, cap)
+		if !ok {
+			complete = false
+			continue
+		}
+		declared := map[string]bool{}
+		for _, id := range f.affects {
+			declared[id] = true
+		}
+		for _, id := range reach {
+			if !declared[id] {
+				return f.name + " can reach a write to " + id + ", not in affects", complete
+			}
+		}
+	}
+	return "", complete
+}
