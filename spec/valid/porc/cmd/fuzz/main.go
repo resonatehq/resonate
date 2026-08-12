@@ -61,6 +61,7 @@ func main() {
 	goonly := flag.Bool("goonly", false, "skip the Lean checker (every Lean verdict becomes DECLINE — the differential halves are vacuous, the Go properties still bite)")
 	pend := flag.Bool("pending", true, "also fuzz the pending-op (500) semantics — Go checker only; the Lean checker does not know pending ops")
 	coneCheck := flag.Bool("conecheck", true, "also require the cone-of-influence reduction and the full closure to agree on every verdict")
+	tagCheck := flag.Bool("tagrule", true, "also require the tag rules to hold on generated traffic: a targeted timer is refused, a timer born past its deadline resolves")
 	affCheck := flag.Bool("affects", true, "also require every firing's observable writes to be declared in its `affects` — the write half of the cone's soundness obligation")
 	flag.Parse()
 
@@ -102,6 +103,9 @@ func main() {
 		coneFail    int
 		affChecked  int
 		affFail     int
+		tagRefused  int
+		tagBornDead int
+		tagFail     int
 	)
 	start := time.Now()
 
@@ -119,6 +123,46 @@ func main() {
 		}
 		for _, r := range resps {
 			statuses[r.Status]++
+		}
+
+		// property -1 — the tag rules, on the traffic that reaches them.
+		// A timer is never targeted, so both creation doors refuse the
+		// combination; and a timer born past its own deadline takes fact
+		// P's TIMER verdict, `resolved` rather than `rejectedTimedout`,
+		// with no task since it is untargeted.
+		if *tagCheck {
+			for k, o := range ops {
+				r := resps[k]
+				switch {
+				case o.Kind == "promise.create" && o.Tags.TimerTargeted():
+					tagRefused++
+					if r.Status != 400 {
+						tagFail++
+						fmt.Printf("TAG RULE seed=%d: targeted timer promise.create answered %d, want 400\n", seed, r.Status)
+					}
+				case o.Kind == "task.create" && o.Action != nil && o.Action.Tags.TimerTargeted():
+					tagRefused++
+					if r.Status != 400 {
+						tagFail++
+						fmt.Printf("TAG RULE seed=%d: targeted timer task.create answered %d, want 400\n", seed, r.Status)
+					}
+				case o.Kind == "promise.create" && r.Promise != nil &&
+					r.Promise.Tags.IsTimer() && r.Promise.TimeoutAt <= o.Now:
+					// Stated over the RECORD RETURNED, not over the request:
+					// `promise.create` is idempotent, so a create naming an
+					// existing id answers with the stored record rather than
+					// the one asked for. Either way fact P holds of what came
+					// back — a timer past its deadline reads `resolved`,
+					// whether it was just born there or projected on the way
+					// out.
+					tagBornDead++
+					if r.Status != 200 || r.Promise.State != model.Resolved {
+						tagFail++
+						fmt.Printf("TAG RULE seed=%d: timer past its deadline read %v, want RESOLVED\n",
+							seed, r.Promise.State)
+					}
+				}
+			}
 		}
 
 		// property 0 — the cone's own obligation: at every state the
@@ -236,6 +280,10 @@ func main() {
 	if *pend {
 		fmt.Printf("  pending:  weaken=%d mask=%d violations=%d (Go only; a violation is a bug in the pending semantics)\n",
 			pendWeaken, pendMask, pendFail)
+	}
+	if *tagCheck {
+		fmt.Printf("  tagrule:  %d targeted timers refused, %d timers born past their deadline, %d violations\n",
+			tagRefused, tagBornDead, tagFail)
 	}
 	if *affCheck {
 		fmt.Printf("  affects:  %d states checked, %d firings writing outside their declared set\n",

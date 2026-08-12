@@ -196,10 +196,21 @@ func (g *Gen) Script(n int) []step {
 	return g.script
 }
 
-// noise is one request drawn to land on an error path.
+// noise is one request drawn to land somewhere the structured plan does
+// not go: an error path, or a branch that is legal but rare.
+//
+// The last three cases exist because the plan cannot reach them. The
+// structured workflow never pairs `resonate:timer` with
+// `resonate:target` — the combination is malformed, so nothing that
+// models real traffic would emit it — and never creates a timer whose
+// deadline has already passed, because its deadlines are drawn ahead of
+// the clock. Both are branches of the machine, so the fuzzer has to
+// reach them deliberately or not at all.
 func (g *Gen) noise(id string, now uint64) *Op {
+	timerTgt := Tags{"resonate:timer": "true", "resonate:target": "poll://any@w1",
+		"resonate:origin": g.origin}
 	var op Op
-	switch g.r.Intn(10) {
+	switch g.r.Intn(13) {
 	case 0:
 		op = Op{Kind: "promise.settle", ID: id, State: Pending} // 400: not settable
 	case 1:
@@ -218,11 +229,29 @@ func (g *Gen) noise(id string, now uint64) *Op {
 		op = Op{Kind: "promise.register_listener", ID: id, PID: "nonsense"} // 400: bad address
 	case 8:
 		op = Op{Kind: "task.halt", ID: id}
+	case 9:
+		// 400: a timer is never targeted
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tt%d", g.origin, now), TimeoutAt: now + 1000, Tags: timerTgt}
+	case 10:
+		// the same rule at the other door
+		tid := fmt.Sprintf("%s.tx%d", g.origin, now)
+		op = Op{Kind: "task.create", ID: tid, PID: "p0", TTL: 500,
+			Action: &FenceAction{Kind: "promise.create", ID: tid,
+				TimeoutAt: now + 1000, Tags: timerTgt}}
+	case 11:
+		// fact P at birth, timer verdict: born `resolved`, not
+		// `rejectedTimedout`, and untargeted so it carries no task
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tm%d", g.origin, now),
+			TimeoutAt: now - uint64(1+g.r.Intn(50)),
+			Tags: Tags{"resonate:timer": "true", "resonate:external": "true",
+				"resonate:origin": g.origin}}
 	default:
 		op = Op{Kind: "task.continue", ID: id}
 	}
 	op.Now = now
-	op.Tags = Tags{}
+	if op.Tags == nil {
+		op.Tags = Tags{}
+	}
 	return &op
 }
 
