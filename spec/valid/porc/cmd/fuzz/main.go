@@ -61,6 +61,7 @@ func main() {
 	goonly := flag.Bool("goonly", false, "skip the Lean checker (every Lean verdict becomes DECLINE — the differential halves are vacuous, the Go properties still bite)")
 	pend := flag.Bool("pending", true, "also fuzz the pending-op (500) semantics — Go checker only; the Lean checker does not know pending ops")
 	coneCheck := flag.Bool("conecheck", true, "also require the cone-of-influence reduction and the full closure to agree on every verdict")
+	affCheck := flag.Bool("affects", true, "also require every firing's observable writes to be declared in its `affects` — the write half of the cone's soundness obligation")
 	flag.Parse()
 
 	leanBin := *lean
@@ -99,6 +100,8 @@ func main() {
 		// cone-vs-full-closure agreement
 		coneChecked int
 		coneFail    int
+		affChecked  int
+		affFail     int
 	)
 	start := time.Now()
 
@@ -116,6 +119,22 @@ func main() {
 		}
 		for _, r := range resps {
 			statuses[r.Status]++
+		}
+
+		// property 0 — the cone's own obligation: at every state the
+		// generated run passes through, no enabled firing writes anything
+		// response-visible that its `affects` does not declare. Checked on
+		// the -m replay, which is the discipline that materialises and so
+		// reaches the most rule-enabling states.
+		if *affCheck {
+			for _, st := range model.States(model.Materialized, script) {
+				affChecked++
+				if bad := model.AffectsSound(st.S, st.Now); bad != "" {
+					affFail++
+					fmt.Printf("AFFECTS UNSOUND seed=%d: %s\n", seed, bad)
+					break
+				}
+			}
 		}
 
 		// property 1 — a recorded run is explainable by construction
@@ -144,6 +163,10 @@ func main() {
 			}
 		}
 
+		if *affCheck {
+			fmt.Printf("  affects:  %d states checked, %d firings writing outside their declared set\n",
+				affChecked, affFail)
+		}
 		if *coneCheck {
 			// property 5 — the cone is an OPTIMIZATION, not a semantics:
 			// reduced and full closure must reach the same verdict on the
@@ -213,6 +236,10 @@ func main() {
 	if *pend {
 		fmt.Printf("  pending:  weaken=%d mask=%d violations=%d (Go only; a violation is a bug in the pending semantics)\n",
 			pendWeaken, pendMask, pendFail)
+	}
+	if *affCheck {
+		fmt.Printf("  affects:  %d states checked, %d firings writing outside their declared set\n",
+			affChecked, affFail)
 	}
 	if *coneCheck {
 		fmt.Printf("  cone:     %d traces (+mutants) compared against the full closure, %d disagreements\n",

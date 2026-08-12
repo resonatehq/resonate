@@ -1,0 +1,76 @@
+package model
+
+import "testing"
+
+// The write half of the cone's soundness obligation, on states built to
+// enable each rule in turn. The fuzzer checks it across generated runs;
+// this pins the shapes that matter even if the generator drifts.
+func TestAffectsCoversObservableWrites(t *testing.T) {
+	tgt := Tags{"resonate:target": "w1", "resonate:external": "true"}
+	ext := Tags{"resonate:external": "true"}
+
+	cases := []struct {
+		name string
+		now  uint64
+		s    *ServerState
+	}{
+		{"R1 a promise past its deadline, with an awaiter on its ledger", 300, &ServerState{
+			Promises: []*Promise{
+				{ID: "a", State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
+					Callbacks: []string{"x"}, Listeners: []string{"https://l"}},
+				{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100},
+			},
+			Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
+		}},
+		{"R3/R4 a settled promise with both ledgers loaded", 300, &ServerState{
+			Promises: []*Promise{
+				{ID: "a", State: Resolved, Tags: ext, TimeoutAt: 2000, CreatedAt: 100,
+					SettledAt: u64p(200), Callbacks: []string{"x"}, Listeners: []string{"https://l"}},
+				{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100},
+			},
+			Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
+		}},
+		{"R5 an acquired task past its lease", 300, &ServerState{
+			Promises: []*Promise{{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}},
+			Tasks: []*Task{{ID: "x", State: TaskAcquired, Version: 1, TTL: u64p(100),
+				PID: strp("p0"), ExpiresAt: u64p(200)}},
+		}},
+		{"R6 a pending task past its retry deadline", 300, &ServerState{
+			Promises: []*Promise{{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}},
+			Tasks:    []*Task{{ID: "x", State: TaskPending, Version: 1, RetryAt: u64p(200)}},
+		}},
+	}
+
+	for _, c := range cases {
+		if len(enabledFirings(c.s, c.now)) == 0 {
+			t.Fatalf("%s: no firing enabled — the fixture does not test what it claims", c.name)
+		}
+		if bad := AffectsSound(c.s, c.now); bad != "" {
+			t.Errorf("%s: %s", c.name, bad)
+		}
+	}
+}
+
+// The check must be able to FAIL, or it proves nothing. Understating a
+// firing's affects has to be caught.
+func TestAffectsCatchesAnUnderstatedSet(t *testing.T) {
+	s := &ServerState{
+		Promises: []*Promise{{ID: "a", State: Pending, Tags: Tags{"resonate:external": "true"},
+			TimeoutAt: 250, CreatedAt: 100}},
+	}
+	fs := enabledFirings(s, 300)
+	if len(fs) != 1 {
+		t.Fatalf("expected exactly R1 enabled, got %d", len(fs))
+	}
+	if got := observableWrites(s, fs[0].fire); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("R1 should observably write exactly [a], got %v", got)
+	}
+	// declare nothing, as R3 and R6 legitimately do, and the write must show
+	declared := map[string]bool{}
+	for _, id := range observableWrites(s, fs[0].fire) {
+		if !declared[id] {
+			return // caught, as it must be
+		}
+	}
+	t.Fatal("an understated affects went undetected")
+}

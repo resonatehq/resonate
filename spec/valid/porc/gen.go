@@ -250,6 +250,44 @@ func (g *Gen) randomRule(ids []string, now uint64) step {
 // `fired` counts rule firings that actually changed the state, so the
 // fuzzer can report whether a corpus reached the rules at all rather than
 // merely mentioning them.
+// Snapshot is a state a replay passed through, with the instant it was at.
+type Snapshot struct {
+	S   *ServerState
+	Now uint64
+}
+
+// States replays a script and returns the state BEFORE each step, so a
+// property about enabled firings can be checked at every state the run
+// actually reached rather than only at hand-built fixtures.
+func States(d Discipline, script []step) []Snapshot {
+	s := &ServerState{}
+	out := make([]Snapshot, 0, len(script))
+	for _, st := range script {
+		now := st.now
+		if st.op != nil {
+			now = st.op.Now
+		}
+		out = append(out, Snapshot{S: s.clone(), Now: now})
+		if st.op != nil {
+			st.op.apply(s, d)
+			continue
+		}
+		switch st.rule {
+		case "R1":
+			s.ProcessPromiseTimeout(st.arg, st.now)
+		case "R3":
+			s.ProcessListener(st.arg, st.arg2, st.now)
+		case "R4":
+			s.ProcessCallback(st.arg, st.arg2, st.now)
+		case "R5":
+			s.ProcessLeaseTimeout(st.arg, st.now)
+		case "R6":
+			s.ProcessRetryTimeout(st.arg, st.now, st.now)
+		}
+	}
+	return out
+}
+
 func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[string]int) {
 	s := &ServerState{}
 	fired = map[string]int{}
