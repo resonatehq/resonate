@@ -43,7 +43,7 @@ form, the four-equation frame, the `↔` direction — against the real
 machine rather than against my reading of it. Each frame bridge is
 `ServerState.ext'` and `rfl`, and the same skeleton scales to the
 handlers; what does not scale is the case analysis, which is where the
-39 remaining `sorry`s live.
+38 remaining `sorry`s live.
 
 ## The two disciplines, once
 
@@ -677,10 +677,21 @@ def scheduleSearch (_d : Discipline) (s s' : ServerState) (_req : ScheduleSearch
 
 /-! ## 10. The internal steps
 
-No `Discipline` parameter. These read `touchPromise`/`touchTask` under
-both disciplines — materialization is a property of the handler layer,
-not of the machine — and they read the TASK raw (`taskOf`) where a
-choice is being made, deciding through the view. -/
+No `Discipline` parameter — but not because they all materialize.
+They split:
+
+  R1, R3, R4, and R7 (through `createdIfAbsent`) TOUCH, in both
+  disciplines. Materialization is a property of the handler layer, not
+  of the machine, so these persist fact P whichever discipline the
+  handlers are running.
+
+  R5 and R6 materialize NOTHING. They read the task raw (`getTask`) —
+  a choice is never forced by an observation — and the promise through
+  `viewPromise`, which serves the verdict without storing it. Their
+  refusal paths therefore assert `s' = s` literally, which is why the
+  twin can state them without an intermediate state.
+
+Both halves decide through the view; only the first half writes. -/
 
 def r1 (s s' : ServerState) (id : String) (now : Nat) : Prop :=
   ∃ r, touchedPromise s s' id now r
