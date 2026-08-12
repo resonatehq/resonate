@@ -719,6 +719,159 @@ def consistent_schedule_removal_is_isolated (a b : ServerState) : Bool :=
         && b.outbox.length == a.outbox.length
         && b.schedules.length + 1 == a.schedules.length)
 
+/-! ## Stage 3 — task field evolution
+
+The lease is three fields that move as one unit, the retry alarm is
+armed on every entry into `pending`, and the resume buffer is cleared
+only where work is handed over or parked. -/
+
+def consistent_task_birth_state (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    (a.tasks.any (·.id == u.id))
+    || (u.state == .pending && u.version == 0 && u.retryAt.isSome
+          && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
+    || (u.state == .fulfilled && u.version == 0 && u.retryAt.isNone
+          && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
+    || (u.state == .acquired && u.version == 1 && u.retryAt.isNone
+          && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome && u.resumes.isEmpty)
+
+def consistent_task_lease_released_atomically (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state == .acquired && u.state != .acquired)
+        || (u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.version == t.version)
+
+def preserved_task_lease_holder_stable (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state == .acquired && u.state == .acquired && u.version == t.version)
+        || (u.pid == t.pid && u.ttl == t.ttl)
+
+def consistent_task_lease_fields_move_together (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        (u.pid == t.pid && u.ttl == t.ttl && u.expiresAt == t.expiresAt)
+        || (t.state != .acquired && u.state == .acquired
+              && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome)
+        || (t.state == .acquired && u.state != .acquired
+              && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone)
+        || (t.state == .acquired && u.state == .acquired
+              && u.pid == t.pid && u.ttl == t.ttl)
+
+def consistent_task_resumes_buffer_or_clear (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        u.resumes == t.resumes
+        || u.resumes.isEmpty
+        || (u.resumes.length == t.resumes.length + 1
+              && u.resumes.take t.resumes.length == t.resumes
+              && u.resumes.eraseDups.length == u.resumes.length)
+
+def consistent_task_resumes_cleared_only_on_dispatch_or_park (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(!t.resumes.isEmpty && u.resumes.isEmpty)
+        || u.state == .acquired || u.state == .suspended || u.state == .fulfilled
+
+def consistent_task_acquisition_is_atomic (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state != .acquired && u.state == .acquired)
+        || (t.state == .pending && u.version == t.version + 1
+              && u.pid.isSome && u.ttl.isSome
+              && u.expiresAt == some (now + u.ttl.getD 0)
+              && u.retryAt.isNone && u.resumes.isEmpty)
+
+def consistent_task_lease_deadline_is_now_plus_ttl (now : Nat) (a b : ServerState) : Bool :=
+  b.tasks.all fun u =>
+    match u.expiresAt with
+    | none => true
+    | some d =>
+        d == now + u.ttl.getD 0
+        || (match a.tasks.find? (·.id == u.id) with
+            | some t => t.expiresAt == some d && t.ttl == u.ttl && t.state == u.state
+            | none   => false)
+
+def consistent_task_pending_entry_arms_retry (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state != .pending && u.state == .pending) || u.retryAt == some now
+
+def consistent_task_retry_rearm_only_when_due (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state == .pending && u.state == .pending && u.retryAt != t.retryAt)
+        || (match t.retryAt with | some due => decide (due ≤ now) | none => false)
+
+def consistent_task_wake_replaces_resumes (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none => true
+    | some u =>
+        !(t.state == .suspended && u.state == .pending)
+        || (u.resumes.length == 1 && u.retryAt == some now && u.version == t.version)
+
+/-! ## The sweeper laws
+
+Applied to INTERNAL steps only, and false on request steps — which is
+what makes them strictly stronger than the general edge tables. A
+background sweeper may re-pend, fulfil, resume-from-suspended or
+refresh; it may never acquire, suspend, halt or continue a task, and it
+may settle a promise only by its deadline. A server whose reaper does
+any of the rest steals a lease or invents a verdict nobody asked for. -/
+
+def consistent_task_state_edge_rule_admissible (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    match b.tasks.find? (·.id == t.id) with
+    | none   => true
+    | some u =>
+        [ (TaskState.pending,   TaskState.pending),
+          (TaskState.pending,   TaskState.fulfilled),
+          (TaskState.acquired,  TaskState.pending),
+          (TaskState.acquired,  TaskState.acquired),
+          (TaskState.acquired,  TaskState.fulfilled),
+          (TaskState.suspended, TaskState.pending),
+          (TaskState.suspended, TaskState.suspended),
+          (TaskState.suspended, TaskState.fulfilled),
+          (TaskState.halted,    TaskState.halted),
+          (TaskState.halted,    TaskState.fulfilled),
+          (TaskState.fulfilled, TaskState.fulfilled)
+        ].contains (t.state, u.state)
+
+def consistent_promise_state_edge_rule_admissible (a b : ServerState) : Bool :=
+  a.promises.all fun p =>
+    match b.promises.find? (·.id == p.id) with
+    | none   => true
+    | some q =>
+        (p.state == q.state)
+          || (p.state == .pending
+                && (q.state == .rejectedTimedout || (q.state == .resolved && p.isTimer)))
+
+def ruleChecks : List (String × (ServerState → ServerState → Bool)) :=
+  [ ("consistent_task_state_edge_rule_admissible",    consistent_task_state_edge_rule_admissible),
+    ("consistent_promise_state_edge_rule_admissible", consistent_promise_state_edge_rule_admissible) ]
+
+def ruleFailures (a b : ServerState) : List String :=
+  ruleChecks.filterMap fun (n, f) => if f a b then none else some n
+
+def ruleWellFormed (a b : ServerState) : Bool := (ruleFailures a b).isEmpty
+
 def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
   [ ("preserved_promise_birth_fields_immutable",  preserved_promise_birth_fields_immutable),
     ("preserved_settled_promise_record",          preserved_settled_promise_record),
@@ -758,7 +911,14 @@ def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
     ("consistent_new_unblock_discharges_its_listener", consistent_new_unblock_discharges_its_listener),
     ("preserved_schedule_birth_fields_immutable", preserved_schedule_birth_fields_immutable),
     ("consistent_schedule_change_is_single",      consistent_schedule_change_is_single),
-    ("consistent_schedule_removal_is_isolated",   consistent_schedule_removal_is_isolated) ]
+    ("consistent_schedule_removal_is_isolated",   consistent_schedule_removal_is_isolated),
+    ("consistent_task_birth_state",               consistent_task_birth_state),
+    ("consistent_task_lease_released_atomically", consistent_task_lease_released_atomically),
+    ("preserved_task_lease_holder_stable",        preserved_task_lease_holder_stable),
+    ("consistent_task_lease_fields_move_together", consistent_task_lease_fields_move_together),
+    ("consistent_task_resumes_buffer_or_clear",   consistent_task_resumes_buffer_or_clear),
+    ("consistent_task_resumes_cleared_only_on_dispatch_or_park",
+       consistent_task_resumes_cleared_only_on_dispatch_or_park) ]
 
 /-- The settlement dichotomy: a promise leaving `pending` did so either
     by a client verdict stamped at `now`, strictly before the deadline
@@ -808,7 +968,12 @@ def stepClockChecks : List (String × (Nat → ServerState → ServerState → B
     ("preserved_execute_only_for_live_task",  preserved_execute_only_for_live_task),
     ("consistent_promise_settlement_stamp",   consistent_promise_settlement_stamp),
     ("preserved_timedout_is_server_owned",    preserved_timedout_is_server_owned),
-    ("consistent_new_promise_born_clean",     consistent_new_promise_born_clean) ]
+    ("consistent_new_promise_born_clean",     consistent_new_promise_born_clean),
+    ("consistent_task_acquisition_is_atomic", consistent_task_acquisition_is_atomic),
+    ("consistent_task_lease_deadline_is_now_plus_ttl", consistent_task_lease_deadline_is_now_plus_ttl),
+    ("consistent_task_pending_entry_arms_retry", consistent_task_pending_entry_arms_retry),
+    ("consistent_task_retry_rearm_only_when_due", consistent_task_retry_rearm_only_when_due),
+    ("consistent_task_wake_replaces_resumes",  consistent_task_wake_replaces_resumes) ]
 
 def stepFailures (now : Nat) (a b : ServerState) : List String :=
   (stepChecks.filterMap fun (n, f) => if f a b then none else some n)

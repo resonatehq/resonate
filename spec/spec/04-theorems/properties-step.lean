@@ -166,6 +166,32 @@ def stepMutants : List (String × Bool) :=
        consistent_new_promise_born_clean 50 { } { promises := [{ P with callbacks := ["x"] }] }),
     ("consistent_new_promise_born_clean/born_in_the_future",
        consistent_new_promise_born_clean 5 { } { promises := [P] }),
+    ("consistent_task_birth_state",
+       consistent_task_birth_state { } { tasks := [{ T with state := .suspended, retryAt := none }] }),
+    ("consistent_task_lease_released_atomically",
+       consistent_task_lease_released_atomically { tasks := [A] } { tasks := [{ T with version := 4, pid := some "w" }] }),
+    ("preserved_task_lease_holder_stable",
+       preserved_task_lease_holder_stable { tasks := [A] } { tasks := [{ A with pid := some "w2" }] }),
+    ("consistent_task_lease_fields_move_together",
+       consistent_task_lease_fields_move_together { tasks := [A] } { tasks := [{ A with ttl := some 50 }] }),
+    ("consistent_task_resumes_buffer_or_clear",
+       consistent_task_resumes_buffer_or_clear { tasks := [{ T with resumes := ["b"] }] } { tasks := [{ T with resumes := ["b","c","d"] }] }),
+    ("consistent_task_resumes_cleared_only_on_dispatch_or_park",
+       consistent_task_resumes_cleared_only_on_dispatch_or_park { tasks := [{ A with resumes := ["b"] }] } { tasks := [{ T with version := 4 }] }),
+    ("consistent_task_acquisition_is_atomic",
+       consistent_task_acquisition_is_atomic 40 { tasks := [T] } { tasks := [A] }),
+    ("consistent_task_lease_deadline_is_now_plus_ttl",
+       consistent_task_lease_deadline_is_now_plus_ttl 40 { tasks := [A] } { tasks := [{ A with expiresAt := some 999 }] }),
+    ("consistent_task_pending_entry_arms_retry",
+       consistent_task_pending_entry_arms_retry 7 { tasks := [A] } { tasks := [{ T with version := 4, retryAt := none }] }),
+    ("consistent_task_retry_rearm_only_when_due",
+       consistent_task_retry_rearm_only_when_due 5 { tasks := [{ T with retryAt := some 50 }] } { tasks := [{ T with retryAt := some 900 }] }),
+    ("consistent_task_wake_replaces_resumes",
+       consistent_task_wake_replaces_resumes 7 { tasks := [{ T with state := .suspended, retryAt := none }] } { tasks := [{ T with retryAt := some 7 }] }),
+    ("consistent_task_state_edge_rule_admissible",
+       consistent_task_state_edge_rule_admissible { tasks := [T] } { tasks := [A] }),
+    ("consistent_promise_state_edge_rule_admissible",
+       consistent_promise_state_edge_rule_admissible { promises := [P] } { promises := [{ P with state := .resolved, settledAt := some 20 }] }),
     ("preserved_no_dead_dispatch",
        preserved_no_dead_dispatch 500
          { promises := [P], tasks := [{ T with state := .acquired, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none }] }
@@ -210,5 +236,44 @@ theorem settled_promise_object_is_not_frozen :
         p.state != .pending &&
           b.promises.any (fun q => q.id == p.id && q.listeners.length < p.listeners.length))
       = true := by decide
+
+/-! ### The rule-only harness
+
+The sweeper laws hold on internal steps and are FALSE on request steps.
+That is not a defect — it is what makes them stronger than the general
+edge tables, and it means they need their own walk. -/
+
+def stepsWithA (handle : AStep → Nat → AbstractModel.H Response) :
+    List (AStep × Nat) → ServerState → List (AStep × Nat × ServerState × ServerState)
+  | [], _ => []
+  | (st, n) :: w, s =>
+      let (_, s') := Id.run ((handle st n).run s)
+      (st, n, s, s') :: stepsWithA handle w s'
+
+def isRuleStep : AStep → Bool
+  | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
+  | .r5 _ => true | .r6 _ _ => true | .r7 _ => true
+  | _ => false
+
+def allSteps (w : List (AStep × Nat)) : List (AStep × Nat × ServerState × ServerState) :=
+  stepsWithA handleA w AbstractModel.ServerState.init
+    ++ stepsWithA handleAP w AbstractModel.ServerState.init
+
+def ruleWellFormedRun (w : List (AStep × Nat)) : Bool :=
+  (allSteps w).all (fun (st, _, a, b) => !isRuleStep st || ruleWellFormed a b)
+
+theorem stage3_rule_sweep :
+    ((seqsUpToA kernelsResp 3).map instantiateA).all ruleWellFormedRun = true := by decide
+
+theorem reaches_rule_steps :
+    (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => isRuleStep st)) = true := by decide
+
+/-- Strictly stronger than the general edge tables, machine-checked:
+    some REQUEST step in the corpus violates the sweeper laws. If they
+    held everywhere they would be a restatement, not a constraint. -/
+theorem rule_laws_are_strictly_stronger :
+    (((seqsUpToA kernelsResp 3).map instantiateA).any fun w =>
+      (allSteps w).any (fun (st, _, a, b) => !isRuleStep st && !ruleWellFormed a b)) = true := by
+  decide
 
 end Abstraction
