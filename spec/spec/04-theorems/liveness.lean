@@ -15,8 +15,8 @@ every theorem in `04-theorems` — and every one of the 101 predicates.
 Liveness needs two hypotheses the specification does not currently
 have, and they are stated here for the first time:
 
-  **`ClockDiverges`** — the clock is unbounded. Monotone is not enough;
-  a clock that stalls at 5 forever is monotone.
+  **`ClockAdvances`** — the clock advances without bound. Monotone is
+  not enough; a clock that stalls at 5 forever is monotone.
 
   **`WeaklyFairOn`** — an internal step that stays enabled eventually
   fires. Weak, not strong: a step that flickers may be starved.
@@ -73,8 +73,9 @@ def enabledInternal (st : AStep) (now : Nat) (s : ServerState) : Bool :=
 
 /-! ### The environment's obligations -/
 
-/-- The clock is unbounded. Monotone is not enough. -/
-def ClockDiverges (tr : ATrace) : Prop :=
+/-- The clock advances without bound. Monotone is not enough:
+    a clock stalled at 5 forever is monotone. -/
+def ClockAdvances (tr : ATrace) : Prop :=
   ∀ n : Nat, ∃ t : Nat, n ≤ (tr t).now
 
 /-- Weak fairness, restricted to a family of internal steps: one that is
@@ -106,7 +107,7 @@ discipline nothing touches it except R1. So this needs the clock AND
 fairness on R1. -/
 
 def EventuallyEveryPromiseSettles : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockDiverges tr → WeaklyFairOn tr isSettlementStep →
+  ∀ tr : ATrace, ValidA tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : String),
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
@@ -122,7 +123,7 @@ implication rather than as an axiom of its own — carrying it separately
 would be exactly the redundancy the catalogue refuses. -/
 
 def EventuallyEveryTaskFulfils : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockDiverges tr → WeaklyFairOn tr isSettlementStep →
+  ∀ tr : ATrace, ValidA tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : String),
       (taskAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
@@ -158,7 +159,7 @@ the awaited promise is settled in STORE, so R1 must fire too; hence
 both families in the hypothesis. -/
 
 def EventuallyAwaiterResumed : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockDiverges tr →
+  ∀ tr : ATrace, ValidA tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isCallbackStep →
     ∀ (t : Nat) (a x : String),
       (∃ p, promiseAt (tr t).state a = some p ∧
@@ -173,7 +174,7 @@ def EventuallyAwaiterResumed : Prop :=
     outside the model — this says the message is ENQUEUED, and nothing
     in the machine can say it arrives. -/
 def EventuallyListenerNotified : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockDiverges tr →
+  ∀ tr : ATrace, ValidA tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isListenerStep →
     ∀ (t : Nat) (a addr : String),
       (∃ p, promiseAt (tr t).state a = some p ∧
