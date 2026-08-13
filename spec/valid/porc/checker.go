@@ -48,7 +48,7 @@ func (o Op) String() string {
 }
 
 // apply runs the handler for this op. It is the deterministic half: all
-// nondeterminism is in the rule closure that runs before it.
+// nondeterminism is in the internal step closure that runs before it.
 func (o Op) apply(s *ServerState, d Discipline) Response {
 	switch o.Kind {
 	case "promise.get":
@@ -243,7 +243,7 @@ func eqStr(a, b *string) bool {
 }
 
 // modelState is what porcupine carries between steps. The witness rides
-// along so an accepted history can report the hidden rule firings — the
+// along so an accepted history can report the hidden internal-step firings — the
 // same certificate idea as the Lean checker's schedule.
 type modelState struct {
 	state   *ServerState
@@ -259,7 +259,7 @@ func newModelState(s *ServerState, w []string) modelState {
 	return modelState{state: s, witness: w, key: s.Key()}
 }
 
-// Fuel bounds the rule closure per step. Exhausting it means the model
+// Fuel bounds the internal step closure per step. Exhausting it means the model
 // stopped looking, which is NOT the same as finding nothing — see
 // Saturated below.
 var Fuel = 24
@@ -281,7 +281,7 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 			return []interface{}{newModelState(&ServerState{}, nil)}
 		},
 		// StepContext, not Step. porcupine only tests its deadline BETWEEN
-		// calls into the model, so a step that runs a deep rule closure
+		// calls into the model, so a step that runs a deep internal step closure
 		// cannot be interrupted unless the context reaches it. Without
 		// this the timeout is advisory: a 180s budget on a 160-event
 		// concurrent history ran for 6m25s.
@@ -290,7 +290,7 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 			op := input.(Op)
 			want := output.(Response)
 
-			// Fire every schedule of internal rules that could have run
+			// Fire every schedule of internal internal steps that could have run
 			// before this call, then keep the states whose response
 			// matches what the server actually said. That filter is the
 			// whole pruning power of the construction.
@@ -360,7 +360,7 @@ func NondeterministicModel(d Discipline, sat *Saturation, partition bool) porcup
 }
 
 // Replay walks the trace sequentially, carrying the candidate set. It
-// returns the rule firings that explain the run, and — when nothing does —
+// returns the internal-step firings that explain the run, and — when nothing does —
 // the index of the first event no schedule can account for.
 //
 // One forward pass. An earlier version answered "where did it fail?" by

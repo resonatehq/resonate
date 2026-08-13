@@ -54,7 +54,7 @@ func main() {
 	lean := flag.String("lean", "", "path to the Lean checktrace binary (default: ../.lake/build/bin/checktrace)")
 	fuel := flag.Int("fuel", 64, "fuel passed to the Lean checker")
 	cap_ := flag.Int("cap", 200000, "candidate cap passed to the Lean checker")
-	jumpy := flag.Bool("jumpy", true, "allow large clock jumps (reaches the timeout rules; raises the Lean decline rate)")
+	jumpy := flag.Bool("jumpy", true, "allow large clock jumps (reaches the timeout internal steps; raises the Lean decline rate)")
 	maxMut := flag.Int("mutants", 40, "corpus mode: mutants sampled per trace (0 = every event)")
 	corpus := flag.String("corpus", "", "check RECORDED traces (comma-separated .ndjson) instead of generated ones")
 	keep := flag.String("keep", "", "directory to write disagreeing traces to")
@@ -116,11 +116,11 @@ func main() {
 		g := model.NewGen(seed, "o")
 		g.Jumpy = *jumpy
 		script := g.Script(*steps)
-		ops, resps, ruleHits := model.Run(model.Materialized, script)
+		ops, resps, internalStepHits := model.Run(model.Materialized, script)
 		if len(ops) == 0 {
 			continue
 		}
-		for k, v := range ruleHits {
+		for k, v := range internalStepHits {
 			fired[k] += v
 		}
 		for _, r := range resps {
@@ -173,7 +173,7 @@ func main() {
 		// `affects`. Reaching covers arming: R1 writes only its promise but
 		// reaches the awaiter it wakes by enabling R4. Checked on the -m
 		// replay, the discipline that materialises and so reaches the most
-		// rule-enabling states.
+		// internal step-enabling states.
 		if *affCheck {
 			for _, st := range model.States(model.Materialized, script) {
 				affChecked++
@@ -301,7 +301,7 @@ func main() {
 		fmt.Printf("  cone:     %d traces (+mutants) compared against the full closure, %d disagreements\n",
 			coneChecked, coneFail)
 	}
-	fmt.Printf("  rule firings that changed state: %v\n", sortedCounts(fired))
+	fmt.Printf("  internal-step firings that changed state: %v\n", sortedCounts(fired))
 	fmt.Printf("  response statuses generated:     %v\n", sortedInts(statuses))
 	if disagree > 0 {
 		fmt.Printf("\n  *** %d DISAGREEMENTS ***\n", disagree)
@@ -608,7 +608,7 @@ func sortedCounts(m map[string]int) string {
 		f = append(f, fmt.Sprintf("%s=%d", k, m[k]))
 	}
 	if len(f) == 0 {
-		return "(none — the corpus never reached a rule)"
+		return "(none — the corpus never reached an internal step)"
 	}
 	return strings.Join(f, " ")
 }

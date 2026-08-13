@@ -109,7 +109,7 @@ func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, va
 		q.SettledAt = u64p(now)
 		q.Value = val
 		// The promise and its task pair, coupled. The awaiters and
-		// listeners stay on the promise for the batch rules — that is
+		// listeners stay on the promise for the batch internal steps — that is
 		// what makes the model nondeterministic.
 		s.SetSettled(q)
 		return Response{Status: 200, Promise: q}

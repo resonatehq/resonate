@@ -3,7 +3,7 @@ package model
 import "testing"
 
 // The write half of the cone's soundness obligation, on states built to
-// enable each rule in turn. The fuzzer checks it across generated runs;
+// enable each internal step in turn. The fuzzer checks it across generated runs;
 // this pins the shapes that matter even if the generator drifts.
 func TestAffectsCoversObservableWrites(t *testing.T) {
 	tgt := Tags{"resonate:target": "w1", "resonate:external": "true"}
@@ -136,7 +136,7 @@ func TestArmingCatchesTheHistoricalBug(t *testing.T) {
 			r1 = f
 		}
 	}
-	understated := firing{rule: r1.rule, affects: []string{"a"}} // the write set alone
+	understated := firing{internalStep: r1.internalStep, affects: []string{"a"}} // the write set alone
 	if bad := armingViolation(s, now, understated, 4000); bad == "" {
 		t.Fatal("R1 with only its write set declared went undetected — " +
 			"this is the shape that made the Lean cone unsound")

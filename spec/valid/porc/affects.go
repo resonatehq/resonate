@@ -14,7 +14,7 @@ import "sort"
 // version of the Lean cone missed that chain.
 //
 // Half of the obligation is mechanically checkable, and this file checks
-// it. The half about ARMING — which rules a firing newly enables — stays
+// it. The half about ARMING — which internal steps a firing newly enables — stays
 // hand-reasoned, because it is a claim about the future rather than about
 // this write. What is checkable is the write half: run the firing and look
 // at what moved.
@@ -99,7 +99,7 @@ func observableWrites(s *ServerState, fire func(*ServerState)) []string {
 
 // AffectsSound checks the write half of the cone's obligation at one state:
 // every id a firing observably writes is declared in its `affects`. Returns
-// the offending rule name, or "" when every firing is covered.
+// the offending internal-step name, or "" when every firing is covered.
 func AffectsSound(s *ServerState, now uint64) string {
 	for _, f := range enabledFirings(s, now) {
 		declared := map[string]bool{}
@@ -119,7 +119,7 @@ func AffectsSound(s *ServerState, now uint64) string {
 
 // The other half of the obligation, and the one that has been wrong.
 //
-// `relevantRules` computes the cone over `enabledFirings(s, now)` — the
+// `relevantInternalSteps` computes the cone over `enabledFirings(s, now)` — the
 // firings enabled AT THIS STATE. A firing that only becomes enabled after
 // another fires is not in that list and no fixpoint over it can pull the
 // firing in. R1 is the standing case: settling a promise is what ENABLES
@@ -241,7 +241,7 @@ func armingViolation(s *ServerState, now uint64, f firing, cap int) string {
 }
 
 // ArmingSound checks every enabled firing's reachability obligation.
-// Returns the offending rule, and whether every search ran to exhaustion.
+// Returns the offending internal step, and whether every search ran to exhaustion.
 func ArmingSound(s *ServerState, now uint64, cap int) (bad string, complete bool) {
 	complete = true
 	for _, f := range enabledFirings(s, now) {

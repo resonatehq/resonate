@@ -45,7 +45,7 @@ func check(t *testing.T, d Discipline, ops []Op, resps []Response, concurrent in
 	nm := NondeterministicModel(d, &sat, partition)
 	r, _ := porcupine.CheckOperationsVerbose(nm.ToModel(), history(ops, resps, concurrent), 120*time.Second)
 	if !sat.OK() {
-		t.Fatalf("%v: a rule closure hit the fuel bound; no verdict is earned", d)
+		t.Fatalf("%v: an internal-step closure hit the fuel bound; no verdict is earned", d)
 	}
 	return r
 }

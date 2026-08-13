@@ -10,13 +10,13 @@ import (
 // Trace generation, for differential fuzzing.
 //
 // The three recorded captures exercise a narrow slice: 7 handler kinds,
-// status 200 only, and exactly ONE of the six rules. Everything else in
+// status 200 only, and exactly ONE of the six internal steps. Everything else in
 // this package is untested by them. So: generate traces that reach the
 // rest, and require the Lean checker in `valid/` to agree on every one.
 //
 // ## Why generated traces are valid by construction
 //
-// A script is a list of (external request | internal rule, instant). Run
+// A script is a list of (external request | internal internal step, instant). Run
 // it through the model, keep only the external steps, and the result is a
 // trace SOME execution explains — namely the script. So a checker that
 // refutes it is wrong, and no oracle is needed to know the right answer.
@@ -52,10 +52,10 @@ type Gen struct {
 }
 
 type step struct {
-	op   *Op    // external, or nil for a rule
-	rule string // rule name when op == nil
-	arg  string // rule target
-	arg2 string // rule's second parameter (awaiter / listener address)
+	op   *Op    // external, or nil for an internal step
+	internal string // internal-step name when op == nil
+	arg  string // internal-step target
+	arg2 string // internal step's second parameter (awaiter / listener address)
 	now  uint64
 }
 
@@ -67,7 +67,7 @@ func (g *Gen) id(suffix string) string { return g.origin + "." + suffix }
 
 // tick advances the clock. Sometimes by a lot, so deadlines are crossed
 // and R1/R5 become enabled — a generator that never lets time pass
-// cannot reach the timeout rules at all.
+// cannot reach the timeout internal steps at all.
 func (g *Gen) tick() uint64 {
 	switch g.r.Intn(10) {
 	case 0:
@@ -88,11 +88,11 @@ var settleStates = []PromiseState{Resolved, Rejected, RejectedCanceled,
 	Pending /* 400: not settable */, RejectedTimedout /* 400: server-owned */}
 
 // Script generates `n` steps: a BACKBONE of well-formed workflows with
-// random noise and rule firings interleaved.
+// random noise and internal-step firings interleaved.
 //
 // Purely random requests do not work. The first version of this was
 // uniform over the alphabet and produced 50 x 404 and zero state-changing
-// rule firings in five traces — nothing existed for a rule to act on, so
+// internal-step firings in five traces — nothing existed for an internal step to act on, so
 // the corpus could not reach the code it was written to test. Structure
 // first, perturbation on top.
 //
@@ -178,7 +178,7 @@ func (g *Gen) Script(n int) []step {
 		}
 		switch {
 		case g.r.Intn(4) == 0:
-			g.script = append(g.script, g.randomRule(ids, now))
+			g.script = append(g.script, g.randomInternalStep(ids, now))
 			continue
 		case g.r.Intn(5) == 0:
 			// noise: a deliberately ill-formed or ill-timed request
@@ -233,7 +233,7 @@ func (g *Gen) noise(id string, now uint64) *Op {
 		// 400: a timer is never targeted
 		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tt%d", g.origin, now), TimeoutAt: now + 1000, Tags: timerTgt}
 	case 10:
-		// the same rule at the other door
+		// the same internal step at the other door
 		tid := fmt.Sprintf("%s.tx%d", g.origin, now)
 		op = Op{Kind: "task.create", ID: tid, PID: "p0", TTL: 500,
 			Action: &FenceAction{Kind: "promise.create", ID: tid,
@@ -255,20 +255,20 @@ func (g *Gen) noise(id string, now uint64) *Op {
 	return &op
 }
 
-func (g *Gen) randomRule(ids []string, now uint64) step {
+func (g *Gen) randomInternalStep(ids []string, now uint64) step {
 	id := ids[g.r.Intn(len(ids))]
 	other := ids[g.r.Intn(len(ids))]
 	switch g.r.Intn(5) {
 	case 0:
-		return step{rule: "R1", arg: id, now: now}
+		return step{internal: "R1", arg: id, now: now}
 	case 1:
-		return step{rule: "R3", arg: id, arg2: "poll://any@w1", now: now}
+		return step{internal: "R3", arg: id, arg2: "poll://any@w1", now: now}
 	case 2:
-		return step{rule: "R4", arg: id, arg2: other, now: now}
+		return step{internal: "R4", arg: id, arg2: other, now: now}
 	case 3:
-		return step{rule: "R5", arg: id, now: now}
+		return step{internal: "R5", arg: id, now: now}
 	default:
-		return step{rule: "R6", arg: id, now: now}
+		return step{internal: "R6", arg: id, now: now}
 	}
 }
 
@@ -276,8 +276,8 @@ func (g *Gen) randomRule(ids []string, now uint64) step {
 // discarded, which is the point: the checkers must rediscover a schedule
 // that explains what is left.
 //
-// `fired` counts rule firings that actually changed the state, so the
-// fuzzer can report whether a corpus reached the rules at all rather than
+// `fired` counts internal-step firings that actually changed the state, so the
+// fuzzer can report whether a corpus reached the internal steps at all rather than
 // merely mentioning them.
 // Snapshot is a state a replay passed through, with the instant it was at.
 type Snapshot struct {
@@ -301,7 +301,7 @@ func States(d Discipline, script []step) []Snapshot {
 			st.op.apply(s, d)
 			continue
 		}
-		switch st.rule {
+		switch st.internal {
 		case "R1":
 			s.ProcessPromiseTimeout(st.arg, st.now)
 		case "R3":
@@ -327,7 +327,7 @@ func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[str
 			continue
 		}
 		before := s.Key()
-		switch st.rule {
+		switch st.internal {
 		case "R1":
 			s.ProcessPromiseTimeout(st.arg, st.now)
 		case "R3":
@@ -340,7 +340,7 @@ func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[str
 			s.ProcessRetryTimeout(st.arg, st.now, st.now)
 		}
 		if s.Key() != before {
-			fired[st.rule]++
+			fired[st.internal]++
 		}
 	}
 	return ops, resps, fired

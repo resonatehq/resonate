@@ -56,7 +56,7 @@ type row struct {
 func main() {
 	timeout := flag.Duration("timeout", 120*time.Second, "per-discipline timeout")
 	partition := flag.Bool("partition", true, "check each origin independently")
-	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
+	cone := flag.Bool("cone", true, "restrict each gap's internal step closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
 	model.Cone = *cone
 
@@ -121,7 +121,7 @@ func main() {
 		label := fmt.Sprintf("%-18s", d.String())
 		switch {
 		case !sat.OK():
-			fmt.Printf("%s INCONCLUSIVE  a rule closure hit the fuel bound  %v\n", label, el)
+			fmt.Printf("%s INCONCLUSIVE  an internal step closure hit the fuel bound  %v\n", label, el)
 		case res == porcupine.Ok:
 			fmt.Printf("%s LINEARIZABLE  (some order works)  %v\n", label, el)
 		case res == porcupine.Illegal:

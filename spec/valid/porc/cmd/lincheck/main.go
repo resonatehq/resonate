@@ -5,7 +5,7 @@
 //	go run ./cmd/lincheck < trace.ndjson
 //
 // Exit 0 both linearize, 1 one or both do not, 2 usage/parse error,
-// 3 inconclusive (a rule closure hit its fuel bound).
+// 3 inconclusive (an internal step closure hit its fuel bound).
 package main
 
 import (
@@ -23,7 +23,7 @@ func main() {
 	timeout := flag.Duration("timeout", 60*time.Second, "per-discipline check timeout")
 	quiet := flag.Bool("quiet", false, "suppress the witness")
 	partition := flag.Bool("partition", true, "check each resonate:origin independently (verified sound first)")
-	cone := flag.Bool("cone", true, "restrict each gap's rule closure to the cone of influence of the next observation (the full closure with -cone=false)")
+	cone := flag.Bool("cone", true, "restrict each gap's internal step closure to the cone of influence of the next observation (the full closure with -cone=false)")
 	flag.Parse()
 	model.Cone = *cone
 
@@ -76,7 +76,7 @@ func main() {
 		label := fmt.Sprintf("%-18s", d.String())
 		switch {
 		case res == porcupine.Ok && !sat.OK():
-			fmt.Printf("%s INCONCLUSIVE  linearizable, but a rule closure hit the fuel bound  %v\n", label, elapsed)
+			fmt.Printf("%s INCONCLUSIVE  linearizable, but an internal step closure hit the fuel bound  %v\n", label, elapsed)
 			inconclusive = true
 		case res == porcupine.Ok:
 			fmt.Printf("%s LINEARIZABLE  %v\n", label, elapsed)
@@ -159,10 +159,10 @@ func printWitness(d model.Discipline, ops []model.Op, resps []model.Response) {
 		return
 	}
 	if len(w) == 0 {
-		fmt.Println("     witness: no internal rules needed")
+		fmt.Println("     witness: no internal steps needed")
 		return
 	}
-	fmt.Printf("     witness: %d internal rule firings the server never reported\n", len(w))
+	fmt.Printf("     witness: %d internal internal-step firings the server never reported\n", len(w))
 	for i, r := range w {
 		if i == 8 {
 			fmt.Printf("       … and %d more\n", len(w)-8)

@@ -15,7 +15,7 @@ import (
 // independent in general: `task.suspend x awaiting a` links `a` and `x`,
 // and a settle on `a` wakes `x`.
 //
-// What makes partitioning sound here is a rule of resonate's, not of the
+// What makes partitioning sound here is an internal step of resonate's, not of the
 // specification's: an awaiter and its awaited must share
 // `resonate:origin`, enforced with
 //
@@ -52,8 +52,8 @@ func originOf(id string) string {
 // That is not a cosmetic misfiling. The lease extension is then never
 // applied in the partition that owns the task, `expiresAt` stays at its
 // old value, and R5 `leaseExpiry` becomes enabled EARLIER than the
-// specification allows. Since firing a rule is a choice, an
-// enabled-too-early rule only ADDS candidates — so the partitioned replay
+// specification allows. Since firing an internal step is a choice, an
+// enabled-too-early internal step only ADDS candidates — so the partitioned replay
 // accepts everything the whole-state replay does and possibly more. A
 // false accept, which is the one direction a checker must never fail in.
 func partitionKey(o Op) string {
@@ -158,7 +158,7 @@ func partitionEvents(history []porcupine.Event) [][]porcupine.Event {
 // ReplayPartitioned runs Replay per origin and stitches the results.
 //
 // The linearizability check partitions, so the witness pass must too, or
-// it becomes the slow half: `enabledRules` and `Key` are both linear in
+// it becomes the slow half: `enabledInternalSteps` and `Key` are both linear in
 // the number of live objects, and on a 2200 event capture that is 600 of
 // them for every step. Same soundness argument, same `CheckPartitionable`
 // precondition.

@@ -16,7 +16,7 @@
 //     `Discipline`, rather than two copies.
 //
 //   - The abstract machine has NO deferred queue. A settled promise keeps
-//     its callbacks and listeners until the batch rules drain them. That
+//     its callbacks and listeners until the batch internal steps drain them. That
 //     is what makes the model nondeterministic: whether a resume has been
 //     drained yet is not determined by the requests, so `Step` has to
 //     return every state consistent with some drain schedule.
@@ -104,7 +104,7 @@ func (t Tags) key() string {
 
 // Promise is `AbstractModel.PromiseObject`. Note `Callbacks` and
 // `Listeners`: in this machine they SURVIVE settlement and are drained by
-// rules R4/R3 later. That is the whole source of nondeterminism.
+// internal steps R4/R3 later. That is the whole source of nondeterminism.
 type Promise struct {
 	ID        string
 	State     PromiseState
@@ -158,8 +158,8 @@ func (p *Promise) AddListener(addr string) *Promise {
 
 // Project is fact P — `PromiseObject.project`. Stamped AT THE DEADLINE,
 // not at `now`, so the record a late read produces is byte-identical to
-// the one an on-time rule would have written. Awaiters and listeners are
-// untouched: settlement records the fact, the drain rules discharge the
+// the one an on-time internal step would have written. Awaiters and listeners are
+// untouched: settlement records the fact, the drain internal steps discharge the
 // obligations.
 func (p *Promise) Project(now uint64) *Promise {
 	if p.State == Pending && p.TimeoutAt <= now {
