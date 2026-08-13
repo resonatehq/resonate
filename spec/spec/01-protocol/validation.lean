@@ -113,4 +113,49 @@ opaque occurrences : (cron : String) → (since now : Nat) → List Nat
 /-- Expand a schedule's promise-id template against one occurrence. -/
 opaque expand : (template id : String) → (timestamp : Nat) → String
 
+/-! ### What these three must satisfy, and do not yet
+
+`nextCron`, `occurrences` and `expand` are `opaque` with no value, so
+every schedule property in `02-abstract/properties.lean` is asserted
+rather than checked: no script can reach a schedule state, and the four
+`well_formed_schedule_*` entries are carried unexercised.
+
+Two things follow that are easy to get wrong:
+
+  * An AXIOM would make them provable and would still leave them
+    untested. `decide` reduces terms and an axiom has no reduction
+    rule, exactly like `opaque`.
+  * `#eval` is worse than useless here. The opaque constants return
+    `Inhabited.default`, so `nextCron c t = 0`, `occurrences … = []`,
+    `expand … = ""`. The schedule step becomes a silent no-op and
+    `nextCron` returns an instant BEFORE its argument, violating the
+    machine's own `well_formed_schedule_created_at_lte_next_run_at`.
+    Anyone who reaches for `#eval` or `native_decide` to "test
+    schedules" gets a green run that proves the opposite.
+
+The contract the protocol needs from the calendar:
+
+    nextCron_strictly_after       ∀ c t, t < nextCron c t
+    occurrences_in_window         ∀ c s n t, t ∈ occurrences c s n → s ≤ t ∧ t ≤ n
+    occurrences_sorted            occurrences c s n is strictly increasing
+    occurrences_is_the_chain      it enumerates exactly the nextCron chain in the window
+    expand_injective_in_timestamp t ≠ t' → expand tpl id t ≠ expand tpl id t'
+    expand_injective_in_id        two schedules sharing a template do not collide
+    expand_ids_are_not_forgeable  an occurrence id is not reachable as a client promise id
+
+`occurrences_empty_when_unreached` is NOT needed separately: an
+inverted window has no element satisfying `s ≤ t ≤ n`, so it follows
+from `occurrences_in_window`.
+
+The last one is a protocol assumption rather than a lemma, and it is
+load-bearing: without it a client can pre-create a promise at an
+occurrence's id and have the schedule silently adopt it instead of
+firing. It is the same defect class as the outbox key collision — the
+specification has no id-namespacing discipline.
+
+Testing them needs a definition, not an axiom: a total, kernel-reducible
+toy cron behind a parameter, `opaque` in production and the toy in
+tests. That is the only way to check the contract above is satisfiable
+rather than vacuous. -/
+
 end ServerModel

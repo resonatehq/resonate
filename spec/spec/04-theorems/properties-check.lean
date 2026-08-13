@@ -128,6 +128,10 @@ def mutants : List (String × Bool) :=
        well_formed_promise_pending_has_no_value { P with value := { data := some "x" } }),
     ("well_formed_promise_timer_not_targeted",
        well_formed_promise_timer_not_targeted { P with tags := [("resonate:timer","true"), ("resonate:target","w")] }),
+    -- the forged verdict: a client names `rejectedTimedout` and the row
+    -- is stamped at the wall clock instead of at the deadline.
+    ("well_formed_promise_timedout_is_server_owned",
+       well_formed_promise_timedout_is_server_owned { P with state := .rejectedTimedout, settledAt := some 50 }),
     ("well_formed_promise_callbacks_unique",
        well_formed_promise_callbacks_unique { P with callbacks := ["x","x"] }),
     ("well_formed_promise_listeners_unique",
@@ -259,6 +263,12 @@ theorem reaches_two_outbox_entries :
     witnesses battery (fun s => s.outbox.length ≥ 2) = true := by decide
 
 
+/-- The guard of `well_formed_promise_timedout_is_server_owned`. Without
+    this the property is vacuous: it says nothing about a corpus that
+    never produces the state it constrains. -/
+theorem reaches_timedout_promise :
+    witnesses battery (fun s => s.promises.any (·.state == .rejectedTimedout)) = true := by decide
+
 theorem reaches_deadline_settlement :
     witnesses battery (fun s => s.promises.any (fun p => p.settledAt == some p.timeoutAt)) = true := by decide
 
@@ -277,5 +287,55 @@ theorem reaches_outbox_unblock :
     checks them. -/
 theorem schedules_unreached :
     witnesses battery (fun s => !s.schedules.isEmpty) = false := by decide
+
+/-! ### The known gaps, witnessed
+
+Each of these is true of the protocol and false of the machine. The
+theorems are `= false`: they assert that a reachable state VIOLATES the
+constraint, so if the machine is ever fixed these go red and say so. -/
+
+open AbstractModel.Properties (well_formed_task_ttl_positive
+  well_formed_promise_target_is_nonempty
+  well_formed_promise_delay_before_deadline)
+
+/-- `ttl = 0` is accepted: the task is acquired with `expiresAt = now`,
+    a lease already expired at the instant it was granted. -/
+def wGapTtlZero : List (AStep × Nat) :=
+  [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
+
+theorem gap_task_ttl_positive_is_violable :
+    (trace wGapTtlZero).any (fun (_, s) => !well_formed_task_ttl_positive s) = true := by decide
+
+/-- `("resonate:target","")` passes `Tags.has`, so a task is created and
+    its dispatch is enqueued to the empty address. -/
+def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
+
+def wGapEmptyTarget : List (AStep × Nat) :=
+  [ (.api (.promiseCreate { id := "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
+    (.r6 "y" 9000, 110) ]
+
+theorem gap_promise_target_is_nonempty_is_violable :
+    (trace wGapEmptyTarget).any (fun (_, s) => !well_formed_promise_target_is_nonempty s) = true := by decide
+
+/-- And the gap is a gap, not an artefact of the predicate: an ORDINARY
+    targeted promise satisfies it. `resonate:target = "w1"` names a
+    worker group; a predicate that rejected it would be reporting itself,
+    not the machine. -/
+theorem ordinary_target_is_nonempty :
+    (trace covInternal).all (fun (_, s) => well_formed_promise_target_is_nonempty s) = true := by decide
+
+theorem gap_empty_target_reaches_the_outbox :
+    (trace wGapEmptyTarget).any (fun (_, s) => s.outbox.any (·.address == "")) = true := by decide
+
+/-- A delay past the promise's own deadline: the task is born pending
+    with `retryAt = 5000` on a promise that dies at 200. It is never
+    dispatched, and it is not an error. -/
+def lateDelayTags : ServerModel.Tags := [("resonate:target", "w"), ("resonate:delay", "5000")]
+
+def wGapLateDelay : List (AStep × Nat) :=
+  [ (.api (.promiseCreate { id := "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
+
+theorem gap_promise_delay_before_deadline_is_violable :
+    (trace wGapLateDelay).any (fun (_, s) => !well_formed_promise_delay_before_deadline s) = true := by decide
 
 end Abstraction

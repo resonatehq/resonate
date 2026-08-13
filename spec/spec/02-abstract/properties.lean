@@ -66,6 +66,76 @@ becomes a loop.
     continue equals release. Those are equations between programs, not
     predicates over states.
 
+## The door checks
+
+A request that fails validation gets 400 and writes nothing, so you might
+conclude the malformed shapes are unreachable and need no property. That
+is exactly backwards: the 400 is the *reason* the shape is impossible, and
+a property that names the shape is what catches an implementation that
+forgot the check. The door check and the property are the same claim
+stated at two places — one refuses the write, one refuses the row — and
+the second is the one a conformance suite can run against a server whose
+door you did not write.
+
+Every 400 in the machine, and the property that shadows it:
+
+    promise.create      timer + target        well_formed_promise_timer_not_targeted
+    promise.settle      state = pending       well_formed_promise_settled_at_iff_not_pending
+    promise.settle      state = timedout      well_formed_promise_timedout_is_server_owned
+    promise.callback    awaited = awaiter     well_formed_promise_awaiter_is_not_self
+    promise.listener    undeliverable addr    consistent_listener_addresses_deliverable
+    task.create         untargeted / timer    consistent_task_iff_targeted_promise
+    task.suspend        no actions            consistent_suspended_task_holds_rung
+    task.suspend        self-await            well_formed_promise_awaiter_is_not_self
+    task.suspend        duplicate awaited     well_formed_promise_callbacks_unique
+    task.fulfill        state not settable    well_formed_promise_timedout_is_server_owned
+                                              well_formed_promise_settled_at_iff_not_pending
+    schedule.create     timer + target        well_formed_schedule_promise_tags_not_timer_targeted
+
+    task.fence          action targets self   — no shadow, see below
+
+Eleven of the twelve leave a row a property can name. `task.fence`'s
+self-target check does not, and the reason is worth stating rather than
+hiding: a fence bypass writes a state that is *legal in every respect*.
+The task is acquired, its promise is pending, the action settles that
+promise, and the coupled write fulfils the task — the identical state a
+plain `task.fulfill` would have produced. What the check protects is
+authority, not shape: a task may not use its own fence to act on the
+promise it is executing. Authority is provenance, and provenance is not
+visible in a state or in a pair of states, so this one belongs to the
+`internalChecks` family at the bottom of the file in spirit, and to your
+own implementation's tests in practice.
+
+## Plausible and false
+
+Nine claims that read like properties of this protocol and are not. Each
+was proposed, checked, and refuted; they are recorded because the
+refutation is the useful part.
+
+  * *a settled promise is immutable* — the internal steps keep removing
+    callbacks and listeners from settled promises. What is frozen is
+    `toRecord`, which is exactly what a response can carry.
+  * *a pending promise has `timeoutAt > now`* — false by design. Reads
+    project, so a past-deadline promise sits stored-pending until
+    something touches it.
+  * *settling twice is an error* — it absorbs, with 200.
+  * *a late settle fails* — it returns **200** carrying
+    `rejectedTimedout`. A client that reads only the status concludes
+    its value was stored.
+  * *firing any internal step is unobservable* — true of the promise
+    timeout, the listener drain and the retry dispatch; false of the
+    callback drain and the lease timeout, both visible through
+    `task.get`.
+  * *`task.acquire` is idempotent* — it is exclusive. The second gets
+    409 and the version has moved.
+  * *advancing the clock is neutral* — only for already-settled objects.
+  * *`promise.create` commutes with a clock advance* — `createdAt` is
+    `now` on the live path and `timeoutAt` on the born-dead path.
+  * *exclusivity holds per task* — it holds per **version**. With
+    `ttl = 0` a second acquisition legally succeeds, at the next
+    version.
+
+
 ## Scope
 
 Stated against the COALESCED machine (`02-abstract`), where deadlines
@@ -123,6 +193,22 @@ def well_formed_promise_deadline_settlement_has_no_value (p : PromiseObject) : B
 
 def well_formed_promise_timer_not_targeted (p : PromiseObject) : Bool :=
   !p.tags.timerTargeted
+
+/-- `rejectedTimedout` is server-owned. `PromiseState.settable` refuses
+    it at every door a client can settle through, so a stored promise in
+    that state was written by its own deadline and carries that deadline
+    as its settlement instant. Forget the `settable` check in
+    `promise.settle` or `task.fulfill` and a client can name the state
+    directly; the row it leaves behind is settled at `now`, not at
+    `timeoutAt`, and this rejects it.
+
+    The converse — deadline instant implies the deadline verdict — is
+    `well_formed_promise_deadline_verdict_matches_timer_tag`. Neither
+    implies the other: that one reads a promise settled AT its deadline
+    and pins the verdict; this one reads the timeout verdict and pins the
+    instant. -/
+def well_formed_promise_timedout_is_server_owned (p : PromiseObject) : Bool :=
+  p.state != .rejectedTimedout || p.settledAt == some p.timeoutAt
 
 def well_formed_promise_callbacks_unique (p : PromiseObject) : Bool :=
   p.callbacks.eraseDups.length == p.callbacks.length
@@ -900,6 +986,8 @@ def catalogue : List Named :=
       , property := .state (fun _ s => s.promises.all well_formed_promise_deadline_settlement_has_no_value) },
     { name := "well_formed_promise_timer_not_targeted"
       , property := .state (fun _ s => s.promises.all well_formed_promise_timer_not_targeted) },
+    { name := "well_formed_promise_timedout_is_server_owned"
+      , property := .state (fun _ s => s.promises.all well_formed_promise_timedout_is_server_owned) },
     { name := "well_formed_promise_callbacks_unique"
       , property := .state (fun _ s => s.promises.all well_formed_promise_callbacks_unique) },
     { name := "well_formed_promise_listeners_unique"
@@ -1095,6 +1183,95 @@ def stepWellFormed (now : Nat) (a b : ServerState) : Bool :=
 
 def stateCount : Nat := (catalogue.filter (fun l => match l.property with | .state _ => true | _ => false)).length
 def transCount : Nat := (catalogue.filter (fun l => match l.property with | .trans _ => true | _ => false)).length
+
+/-! ## Known gaps
+
+Four constraints that are true of the PROTOCOL and false of this
+machine. They are not in `catalogue`, because a reachable state
+violates each — putting them there would turn the sweep red. They are
+here because an implementation should enforce them at its doors even
+though the specification does not, and because a gap recorded in Lean
+with a witness is worth more than a gap recorded in prose.
+
+They carry the same `Property` as the catalogue, so an implementation
+that closes a gap moves the entry up into `catalogue` unchanged and the
+walks pick it up with no other edit.
+
+A gap needs a witness for the opposite reason a property does. A
+property must be shown FALSIFIABLE — that a violator exists and is
+rejected. A gap must be shown REACHED — that this machine actually
+produces a state the constraint forbids. A gap with no witness is
+either already enforced, or a predicate reporting on itself: the
+target gap below was first written with `addressValid`, which every
+ordinary `resonate:target = "w1"` fails, and it "witnessed" a defect
+that was entirely in the predicate.
+
+`04-theorems/properties-check.lean` and `properties-step.lean` carry
+the witnesses; each is `= true` on the NEGATED constraint, so a gap
+that gets closed turns red and says so. -/
+
+/-- A lease of length zero expires at the instant it is granted.
+    `task.create`/`task.acquire` accept `ttl = 0` and there is no lower
+    bound anywhere. -/
+def well_formed_task_ttl_positive (s : ServerState) : Bool :=
+  s.tasks.all fun t => t.state != .acquired || 0 < t.ttl.getD 0
+
+/-- `Tags.has` is `isSome`, so `("resonate:target", "")` carries a
+    target that is the empty string. The dispatch sites fall back to
+    `getD ""`, so the task is created and its `execute` is enqueued to
+    an address nothing can receive. `addressValid` guards listener
+    addresses only.
+
+    Non-emptiness is the whole claim, and deliberately so: a target
+    names a WORKER GROUP, not a URL — `resonate:target = "w1"` is the
+    ordinary case throughout the corpus — so `addressValid`, which
+    demands an `http`/`https`/`poll` scheme, is the wrong predicate here
+    and would reject every well-formed targeted promise. -/
+def well_formed_promise_target_is_nonempty (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    match p.tags.get? "resonate:target" with
+    | none      => true
+    | some addr => !addr.isEmpty
+
+/-- A first dispatch scheduled at or after the promise's own deadline
+    can never fire: by the time it comes due the promise has timed out
+    and the dispatch guard refuses. The promise is born pending, is
+    never executed, and dies `rejectedTimedout`. Nothing relates
+    `resonate:delay` to `timeoutAt`, and `parseNat` is total, so a
+    malformed delay becomes a garbage instant with the same effect. -/
+def well_formed_promise_delay_before_deadline (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    match p.tags.get? "resonate:delay" with
+    | none   => true
+    | some d => parseNat d < p.timeoutAt
+
+/-- A re-arm must move the deadline FORWARD. `processRetryTimeout` takes
+    the next instant as a parameter and imposes no lower bound, so
+    re-arming a due task to an instant already past leaves the retry
+    step enabled at the same instant it just fired — the dispatcher
+    re-dispatches forever and the outbox grows without bound. Note the
+    shape: the defect is in the MOVE, so no state predicate can see it.
+    `consistent_task_retry_rearm_only_when_due` constrains WHEN you may
+    re-arm; nothing constrains what you may re-arm TO. -/
+def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    t.state != .pending ||
+      (match b.tasks.find? (·.id == t.id) with
+       | none   => true
+       | some u => u.state != .pending || u.retryAt == t.retryAt
+                     || (match u.retryAt with
+                         | some d => now < d
+                         | none   => false))
+
+def gaps : List Named :=
+  [ { name := "well_formed_task_ttl_positive"
+      , property := .state (fun _ s => well_formed_task_ttl_positive s) },
+    { name := "well_formed_promise_target_is_nonempty"
+      , property := .state (fun _ s => well_formed_promise_target_is_nonempty s) },
+    { name := "well_formed_promise_delay_before_deadline"
+      , property := .state (fun _ s => well_formed_promise_delay_before_deadline s) },
+    { name := "monotone_task_retry_rearm_advances"
+      , property := .trans (monotone_task_retry_rearm_advances) } ]
 
 /-! ### Record projections
 

@@ -264,4 +264,29 @@ theorem internal_laws_are_strictly_stronger :
       (allSteps w).any (fun (st, _, a, b) => !isInternalStep st && !internalWellFormed a b)) = true := by
   decide
 
+/-! ### The `.trans` gap, witnessed
+
+`monotone_task_retry_rearm_advances` is the one known gap whose defect
+lives in the MOVE rather than in a row, so its witness belongs here
+rather than in `properties-check.lean`. -/
+
+/-- Release a task at 110, then re-arm its retry to instant 0 at instant
+    200. The task is pending with `retryAt = some 0` — due at the
+    instant it was armed — so the retry step is enabled again
+    immediately and dispatches forever. -/
+def wGapRetryBackwards : List (AStep × Nat) :=
+  [ (.api (.taskCreate { pid := "p", ttl := 50, action := { id := "x", timeoutAt := 9000, param := {}, tags := [("resonate:target", "w1")] } }), 100),
+    (.api (.taskRelease { id := "x", version := 1 }), 110),
+    (.r6 "x" 0, 200) ]
+
+theorem gap_task_retry_rearm_advances_is_violable :
+    (steps wGapRetryBackwards).any
+      (fun (n, a, b) => !monotone_task_retry_rearm_advances n a b) = true := by decide
+
+/-- And the catalogue does not see it: every state is well formed and
+    every step is well formed. That is the whole point of recording the
+    gap — the machine admits a livelock the properties call legal. -/
+theorem gap_task_retry_rearm_is_invisible_to_the_catalogue :
+    stepWellFormedRun wGapRetryBackwards = true := by decide
+
 end Abstraction
