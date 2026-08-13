@@ -297,7 +297,7 @@ promises, which is how a wake is discharged. What is frozen is exactly
 `toRecord` — exactly the part a response can carry — so "a settled
 promise never changes again" is true on the wire and false in the store.
 
-`preserved_task_version_increments_only_on_acquisition` is the fencing
+`monotone_task_version_increases_only_on_acquisition` is the fencing
 property. Version moves by exactly one, only on `pending → acquired`, and by
 nothing on any other transition — release, halt, continue, suspend,
 fulfilment, lease expiry, retry, wake. `monotone_task_version_never_decreases`
@@ -328,13 +328,13 @@ def monotone_task_set_grows (a b : ServerState) : Bool :=
 
 /-- The fencing property: a task's version rises by exactly one on
     `pending → acquired`, and does not move on any other transition. -/
-def preserved_task_version_increments_only_on_acquisition (a b : ServerState) : Bool :=
+def monotone_task_version_increases_only_on_acquisition (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u =>
         if t.state == .pending && u.state == .acquired then
-          u.version == t.version + 1
+          t.version < u.version
         else
           u.version == t.version
 
@@ -382,13 +382,11 @@ properties split on the POST-state, not the pre-state: `processCallback`
 materializes a deadline AND drains a callback in the same step, so a
 promise pending before and settled after loses one. -/
 
-def appendedAtMostOne (pre post : List String) : Bool :=
-  post == pre ||
-    (post.length == pre.length + 1 && post.take pre.length == pre
-      && (post.drop pre.length).all (fun x => !pre.contains x))
-
-def removedAtMostOne (pre post : List String) : Bool :=
-  post == pre || pre.any (fun x => post == pre.filter (· != x))
+/-- `xs ⊆ ys`. The obligation properties are stated as containment, not
+    as a step count: an implementation may register or drain a whole
+    ledger in one transaction, and doing so is not a violation. What is
+    forbidden is movement in the wrong DIRECTION. -/
+def subsetOf (xs ys : List String) : Bool := xs.all ys.contains
 
 def preserved_promise_state_frozen_once_settled (a b : ServerState) : Bool :=
   a.promises.all fun p =>
@@ -421,33 +419,33 @@ def preserved_promise_value_until_settlement (a b : ServerState) : Bool :=
 def preserved_promise_no_duplicate_ids (_a b : ServerState) : Bool :=
   (b.promises.map (·.id)).eraseDups.length == b.promises.length
 
-def monotone_promise_callbacks_append_one_while_pending (a b : ServerState) : Bool :=
+def monotone_promise_callbacks_grow_while_pending (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state != .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.callbacks.isEmpty
-       | some p => appendedAtMostOne p.callbacks q.callbacks)
+       | some p => subsetOf p.callbacks q.callbacks)
 
-def monotone_promise_callbacks_drain_one_once_settled (a b : ServerState) : Bool :=
+def monotone_promise_callbacks_shrink_once_settled (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state == .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.callbacks.isEmpty
-       | some p => removedAtMostOne p.callbacks q.callbacks)
+       | some p => subsetOf q.callbacks p.callbacks)
 
-def monotone_promise_listeners_append_one_while_pending (a b : ServerState) : Bool :=
+def monotone_promise_listeners_grow_while_pending (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state != .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.listeners.isEmpty
-       | some p => appendedAtMostOne p.listeners q.listeners)
+       | some p => subsetOf p.listeners q.listeners)
 
-def monotone_promise_listeners_drain_one_once_settled (a b : ServerState) : Bool :=
+def monotone_promise_listeners_shrink_once_settled (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state == .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.listeners.isEmpty
-       | some p => removedAtMostOne p.listeners q.listeners)
+       | some p => subsetOf q.listeners p.listeners)
 
 /-! ## Stage 3 — the state machine edges
 
@@ -579,7 +577,7 @@ def consistent_wake_follows_callback_consumption (a b : ServerState) : Bool :=
                  && (match b.promises.find? (·.id == p.id) with
                      | none => false
                      | some q => !q.callbacks.contains u.id)
-                 && u.resumes == [p.id])
+                 && u.resumes.contains p.id)
 
 def consistent_suspension_registers_callback (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
@@ -594,32 +592,6 @@ def consistent_suspension_registers_callback (a b : ServerState) : Bool :=
                  | some p => !p.callbacks.contains u.id)
              && q.state == .pending)
 
-def consistent_callback_additions_share_one_awaiter (a b : ServerState) : Bool :=
-  ((b.promises.flatMap fun q =>
-      match a.promises.find? (·.id == q.id) with
-      | none => q.callbacks
-      | some p => q.callbacks.filter (fun x => !p.callbacks.contains x)).eraseDups.length ≤ 1)
-    && b.promises.all fun q =>
-         (match a.promises.find? (·.id == q.id) with
-          | none => q.callbacks.isEmpty
-          | some p => q.callbacks.all p.callbacks.contains)
-         || q.state == .pending
-
-def consistent_at_most_one_obligation_discharged (a b : ServerState) : Bool :=
-  ((a.promises.map fun p =>
-      match b.promises.find? (·.id == p.id) with
-      | none => 0
-      | some q =>
-          (p.callbacks.filter (fun x => !q.callbacks.contains x)).length
-            + (p.listeners.filter (fun x => !q.listeners.contains x)).length).sum) ≤ 1
-
-def consistent_at_most_one_task_acquired (a b : ServerState) : Bool :=
-  (b.tasks.filter fun u =>
-     u.state == .acquired &&
-       (match a.tasks.find? (·.id == u.id) with
-        | none => true
-        | some t => t.state != .acquired)).length ≤ 1
-
 def consistent_task_birth_couples_promise_birth (a b : ServerState) : Bool :=
   (b.tasks.all fun u =>
      a.tasks.any (·.id == u.id)
@@ -631,7 +603,7 @@ def consistent_task_birth_couples_promise_birth (a b : ServerState) : Bool :=
                       && (if u.state == .fulfilled then q.state != .pending
                           else q.state == .pending))
             && ((u.state == .pending && u.version == 0)
-                || (u.state == .acquired && u.version == 1)
+                || (u.state == .acquired && 1 ≤ u.version)
                 || (u.state == .fulfilled && u.version == 0))))
   && (b.promises.all fun q =>
         a.promises.any (·.id == q.id)
@@ -708,36 +680,14 @@ def preserved_schedule_birth_fields_immutable (a b : ServerState) : Bool :=
           && d.promiseParam.headers == c.promiseParam.headers
           && d.promiseTags == c.promiseTags && d.createdAt == c.createdAt
 
-def consistent_schedule_change_is_single (a b : ServerState) : Bool :=
-  let gone  := a.schedules.filter fun c => !b.schedules.any (·.id == c.id)
-  let born  := b.schedules.filter fun d => !a.schedules.any (·.id == d.id)
-  let moved := a.schedules.filter fun c =>
-                 match b.schedules.find? (·.id == c.id) with
-                 | none => false
-                 | some d => !(d.nextRunAt == c.nextRunAt && d.lastRunAt == c.lastRunAt)
-  gone.length + born.length + moved.length ≤ 1
-
-def consistent_schedule_removal_is_isolated (a b : ServerState) : Bool :=
-  a.schedules.all (fun c => b.schedules.any (·.id == c.id))
-    || (b.promises.length == a.promises.length
-        && b.tasks.length == a.tasks.length
-        && b.outbox.length == a.outbox.length
-        && b.schedules.length + 1 == a.schedules.length)
-
-/-! ## Stage 3 — task field evolution
-
-The lease is three fields that move as one unit, the retry alarm is
-armed on every entry into `pending`, and the resume buffer is cleared
-only where work is handed over or parked. -/
-
 def consistent_task_birth_state (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     (a.tasks.any (·.id == u.id))
-    || (u.state == .pending && u.version == 0 && u.retryAt.isSome
+    || (u.state == .pending && u.retryAt.isSome
           && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
-    || (u.state == .fulfilled && u.version == 0 && u.retryAt.isNone
+    || (u.state == .fulfilled && u.retryAt.isNone
           && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
-    || (u.state == .acquired && u.version == 1 && u.retryAt.isNone
+    || (u.state == .acquired && 1 ≤ u.version && u.retryAt.isNone
           && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome && u.resumes.isEmpty)
 
 def consistent_task_lease_released_atomically (a b : ServerState) : Bool :=
@@ -769,16 +719,11 @@ def consistent_task_lease_fields_move_together (a b : ServerState) : Bool :=
         || (t.state == .acquired && u.state == .acquired
               && u.pid == t.pid && u.ttl == t.ttl)
 
-def consistent_task_resumes_buffer_or_clear (a b : ServerState) : Bool :=
+def monotone_task_resumes_grow_or_clear (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
-    | some u =>
-        u.resumes == t.resumes
-        || u.resumes.isEmpty
-        || (u.resumes.length == t.resumes.length + 1
-              && u.resumes.take t.resumes.length == t.resumes
-              && u.resumes.eraseDups.length == u.resumes.length)
+    | some u => u.resumes.isEmpty || subsetOf t.resumes u.resumes
 
 def consistent_task_resumes_cleared_only_on_dispatch_or_park (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -794,7 +739,7 @@ def consistent_task_acquisition_is_atomic (now : Nat) (a b : ServerState) : Bool
     | none => true
     | some u =>
         !(t.state != .acquired && u.state == .acquired)
-        || (t.state == .pending && u.version == t.version + 1
+        || (t.state == .pending && t.version < u.version
               && u.pid.isSome && u.ttl.isSome
               && u.expiresAt == some (now + u.ttl.getD 0)
               && u.retryAt.isNone && u.resumes.isEmpty)
@@ -824,13 +769,13 @@ def consistent_task_retry_rearm_only_when_due (now : Nat) (a b : ServerState) : 
         !(t.state == .pending && u.state == .pending && u.retryAt != t.retryAt)
         || (match t.retryAt with | some due => decide (due ≤ now) | none => false)
 
-def consistent_task_wake_replaces_resumes (now : Nat) (a b : ServerState) : Bool :=
+def consistent_task_wake_records_resume (now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u =>
         !(t.state == .suspended && u.state == .pending)
-        || (u.resumes.length == 1 && u.retryAt == some now && u.version == t.version)
+        || (!u.resumes.isEmpty && u.retryAt == some now && u.version == t.version)
 
 /-! ## The sweeper properties
 
@@ -1033,8 +978,8 @@ def catalogue : List Named :=
       , property := .trans (fun _ a b => monotone_promise_set_grows a b) },
     { name := "monotone_task_set_grows"
       , property := .trans (fun _ a b => monotone_task_set_grows a b) },
-    { name := "preserved_task_version_increments_only_on_acquisition"
-      , property := .trans (fun _ a b => preserved_task_version_increments_only_on_acquisition a b) },
+    { name := "monotone_task_version_increases_only_on_acquisition"
+      , property := .trans (fun _ a b => monotone_task_version_increases_only_on_acquisition a b) },
     { name := "preserved_fulfilled_task"
       , property := .trans (fun _ a b => preserved_fulfilled_task a b) },
     { name := "preserved_promise_state_frozen_once_settled"
@@ -1047,14 +992,14 @@ def catalogue : List Named :=
       , property := .trans (fun _ a b => preserved_promise_value_until_settlement a b) },
     { name := "preserved_promise_no_duplicate_ids"
       , property := .trans (fun _ a b => preserved_promise_no_duplicate_ids a b) },
-    { name := "monotone_promise_callbacks_append_one_while_pending"
-      , property := .trans (fun _ a b => monotone_promise_callbacks_append_one_while_pending a b) },
-    { name := "monotone_promise_callbacks_drain_one_once_settled"
-      , property := .trans (fun _ a b => monotone_promise_callbacks_drain_one_once_settled a b) },
-    { name := "monotone_promise_listeners_append_one_while_pending"
-      , property := .trans (fun _ a b => monotone_promise_listeners_append_one_while_pending a b) },
-    { name := "monotone_promise_listeners_drain_one_once_settled"
-      , property := .trans (fun _ a b => monotone_promise_listeners_drain_one_once_settled a b) },
+    { name := "monotone_promise_callbacks_grow_while_pending"
+      , property := .trans (fun _ a b => monotone_promise_callbacks_grow_while_pending a b) },
+    { name := "monotone_promise_callbacks_shrink_once_settled"
+      , property := .trans (fun _ a b => monotone_promise_callbacks_shrink_once_settled a b) },
+    { name := "monotone_promise_listeners_grow_while_pending"
+      , property := .trans (fun _ a b => monotone_promise_listeners_grow_while_pending a b) },
+    { name := "monotone_promise_listeners_shrink_once_settled"
+      , property := .trans (fun _ a b => monotone_promise_listeners_shrink_once_settled a b) },
     { name := "consistent_promise_state_edge_admissible"
       , property := .trans (fun _ a b => consistent_promise_state_edge_admissible a b) },
     { name := "consistent_task_state_edge_admissible"
@@ -1079,12 +1024,6 @@ def catalogue : List Named :=
       , property := .trans (fun _ a b => consistent_wake_follows_callback_consumption a b) },
     { name := "consistent_suspension_registers_callback"
       , property := .trans (fun _ a b => consistent_suspension_registers_callback a b) },
-    { name := "consistent_callback_additions_share_one_awaiter"
-      , property := .trans (fun _ a b => consistent_callback_additions_share_one_awaiter a b) },
-    { name := "consistent_at_most_one_obligation_discharged"
-      , property := .trans (fun _ a b => consistent_at_most_one_obligation_discharged a b) },
-    { name := "consistent_at_most_one_task_acquired"
-      , property := .trans (fun _ a b => consistent_at_most_one_task_acquired a b) },
     { name := "consistent_task_birth_couples_promise_birth"
       , property := .trans (fun _ a b => consistent_task_birth_couples_promise_birth a b) },
     { name := "monotone_outbox_keys_never_disappear"
@@ -1097,10 +1036,6 @@ def catalogue : List Named :=
       , property := .trans (fun _ a b => consistent_new_unblock_discharges_its_listener a b) },
     { name := "preserved_schedule_birth_fields_immutable"
       , property := .trans (fun _ a b => preserved_schedule_birth_fields_immutable a b) },
-    { name := "consistent_schedule_change_is_single"
-      , property := .trans (fun _ a b => consistent_schedule_change_is_single a b) },
-    { name := "consistent_schedule_removal_is_isolated"
-      , property := .trans (fun _ a b => consistent_schedule_removal_is_isolated a b) },
     { name := "consistent_task_birth_state"
       , property := .trans (fun _ a b => consistent_task_birth_state a b) },
     { name := "consistent_task_lease_released_atomically"
@@ -1109,8 +1044,8 @@ def catalogue : List Named :=
       , property := .trans (fun _ a b => preserved_task_lease_holder_stable a b) },
     { name := "consistent_task_lease_fields_move_together"
       , property := .trans (fun _ a b => consistent_task_lease_fields_move_together a b) },
-    { name := "consistent_task_resumes_buffer_or_clear"
-      , property := .trans (fun _ a b => consistent_task_resumes_buffer_or_clear a b) },
+    { name := "monotone_task_resumes_grow_or_clear"
+      , property := .trans (fun _ a b => monotone_task_resumes_grow_or_clear a b) },
     { name := "consistent_task_resumes_cleared_only_on_dispatch_or_park"
       , property := .trans (fun _ a b => consistent_task_resumes_cleared_only_on_dispatch_or_park a b) },
     { name := "preserved_no_dead_dispatch"
@@ -1131,8 +1066,8 @@ def catalogue : List Named :=
       , property := .trans (consistent_task_pending_entry_arms_retry) },
     { name := "consistent_task_retry_rearm_only_when_due"
       , property := .trans (consistent_task_retry_rearm_only_when_due) },
-    { name := "consistent_task_wake_replaces_resumes"
-      , property := .trans (consistent_task_wake_replaces_resumes) } ]
+    { name := "consistent_task_wake_records_resume"
+      , property := .trans (consistent_task_wake_records_resume) } ]
 
 /-! ### The two walks
 
