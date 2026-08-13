@@ -413,14 +413,28 @@ def monotone_task_set_grows (a b : ServerState) : Bool :=
   a.tasks.all fun t => b.tasks.any (·.id == t.id)
 
 /-- The fencing property: a task's version rises by exactly one on
-    `pending → acquired`, and does not move on any other transition. -/
+    `pending → acquired`, and does not move on any other transition.
+
+    Both halves are exact, and the exactness is the point. `+1` rather
+    than `<` is not tidiness: the version is the fencing token, so it
+    must be PREDICTABLE from the transition, not merely increasing. A
+    holder that is told its version, loses the lease, and sees the task
+    re-granted knows the new version is its own plus one — that is what
+    makes a stale claim recognisable rather than just unequal. An
+    implementation that draws versions from a global sequence satisfies
+    `<` and breaks this, and it breaks fencing with it.
+
+    This is deliberately NOT loosened the way the obligation properties
+    are. There, a step may register or drain a whole ledger at once, so
+    the count is an implementation choice and only the direction is
+    protocol. Here the count IS the protocol: one grant, one version. -/
 def monotone_task_version_increases_only_on_acquisition (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u =>
         if t.state == .pending && u.state == .acquired then
-          t.version < u.version
+          u.version == t.version + 1
         else
           u.version == t.version
 

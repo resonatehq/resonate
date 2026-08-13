@@ -78,6 +78,11 @@ def stepMutants : List (String × Bool) :=
        monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ T with version := 4 }] }),
     ("monotone_task_version_increases_only_on_acquisition/acquired_without_bumping",
        monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ A with version := 3 }] }),
+    -- the mutant only `+1` catches: a grant that skips a version. Legal
+    -- under a merely-increasing token, and it breaks fencing — a holder
+    -- can no longer name the version that supersedes its own.
+    ("monotone_task_version_increases_only_on_acquisition/skipped_a_version",
+       monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ A with version := 5 }] }),
     ("monotone_task_version_increases_only_on_acquisition/reset_on_release",
        monotone_task_version_increases_only_on_acquisition { tasks := [A] } { tasks := [{ T with version := 0 }] }),
     ("preserved_fulfilled_task/resurrected",
