@@ -42,11 +42,17 @@ as long as your clock does not run backwards.
     preserved_<subject>_<claim>     a field or record that must not move
     monotone_<subject>_<claim>      something that may move one way only
 
-The predicate above each catalogue entry is the portable statement. The
-`Property` wrapper is dispatch, nothing more — in Go every `.state` property is a
-`func(s *ServerState) bool` and every `.trans` property is a
-`func(a, b *ServerState) bool`, and the lifting (`s.promises.all …`)
-becomes a loop.
+The predicate above each catalogue entry is the portable statement, and
+it is written at the signature the walk calls it at — `Nat → State →
+Bool` or `Nat → State → State → Bool`, never at the signature of one
+promise or one task. A property that talks about promises does its own
+`s.promises.all` inside. That is deliberate: the quantifier is part of
+the claim, and hiding it in the catalogue entry meant the predicate you
+read and the predicate that ran were different functions. In Go every
+`.state` property is a `func(now int, s *ServerState) bool` and every
+`.trans` property is a `func(now int, a, b *ServerState) bool`, with the
+`all` as a loop in the body — a direct transcription, with nothing left
+at the call site to get wrong.
 
 ## What is NOT here
 
@@ -161,38 +167,70 @@ namespace Properties
 
 open ServerModel
 
-def well_formed_promise_created_at_lte_timeout_at (p : PromiseObject) : Bool :=
-  p.createdAt ≤ p.timeoutAt
+/-! ## The two shapes
 
-def well_formed_promise_pending_created_before_deadline (p : PromiseObject) : Bool :=
-  p.state != .pending || p.createdAt < p.timeoutAt
+Declared first because every predicate below is written to fit one of
+them exactly. A property is a function of the whole state, never of one
+object: `s.promises.all fun p => …` is part of the property, not
+scaffolding wrapped around it at the point of use. That costs a line at
+each definition and buys the thing that matters — the predicate you read
+is the predicate that runs, applied to the argument the walk actually
+has.
 
-def well_formed_promise_settled_at_lte_timeout_at (p : PromiseObject) : Bool :=
-  match p.settledAt with
-  | none => true
-  | some x => x ≤ p.timeoutAt
+A property that does not consult the clock writes `_now`, so the ones
+that ARE relative to a clock reading can be spotted by eye. -/
 
-def well_formed_promise_created_at_lte_settled_at (p : PromiseObject) : Bool :=
-  match p.settledAt with
-  | none => true
-  | some x => p.createdAt ≤ x
+inductive Property where
+  /-- Check at every state the implementation passes through. -/
+  | state (f : Nat → ServerState → Bool)
+  /-- Check at every pair of consecutive states — one step. -/
+  | trans (f : Nat → ServerState → ServerState → Bool)
 
-def well_formed_promise_settled_at_iff_not_pending (p : PromiseObject) : Bool :=
-  (p.state != .pending) == p.settledAt.isSome
+structure Named where
+  name : String
+  property : Property
 
-def well_formed_promise_pending_has_no_value (p : PromiseObject) : Bool :=
-  p.state != .pending || (p.value.data.isNone && p.value.headers.isEmpty)
+def well_formed_promise_created_at_lte_timeout_at (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.createdAt ≤ p.timeoutAt
 
-def well_formed_promise_deadline_verdict_matches_timer_tag (p : PromiseObject) : Bool :=
-  p.settledAt != some p.timeoutAt
-    || p.state == (if p.tags.isTimer then .resolved else .rejectedTimedout)
+def well_formed_promise_pending_created_before_deadline (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.state != .pending || p.createdAt < p.timeoutAt
 
-def well_formed_promise_deadline_settlement_has_no_value (p : PromiseObject) : Bool :=
-  p.settledAt != some p.timeoutAt
-    || (p.value.data.isNone && p.value.headers.isEmpty)
+def well_formed_promise_settled_at_lte_timeout_at (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    match p.settledAt with
+    | none => true
+    | some x => x ≤ p.timeoutAt
 
-def well_formed_promise_timer_not_targeted (p : PromiseObject) : Bool :=
-  !p.tags.timerTargeted
+def well_formed_promise_created_at_lte_settled_at (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    match p.settledAt with
+    | none => true
+    | some x => p.createdAt ≤ x
+
+def well_formed_promise_settled_at_iff_not_pending (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    (p.state != .pending) == p.settledAt.isSome
+
+def well_formed_promise_pending_has_no_value (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.state != .pending || (p.value.data.isNone && p.value.headers.isEmpty)
+
+def well_formed_promise_deadline_verdict_matches_timer_tag (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.settledAt != some p.timeoutAt
+      || p.state == (if p.tags.isTimer then .resolved else .rejectedTimedout)
+
+def well_formed_promise_deadline_settlement_has_no_value (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.settledAt != some p.timeoutAt
+      || (p.value.data.isNone && p.value.headers.isEmpty)
+
+def well_formed_promise_timer_not_targeted (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    !p.tags.timerTargeted
 
 /-- `rejectedTimedout` is server-owned. `PromiseState.settable` refuses
     it at every door a client can settle through, so a stored promise in
@@ -207,116 +245,137 @@ def well_formed_promise_timer_not_targeted (p : PromiseObject) : Bool :=
     implies the other: that one reads a promise settled AT its deadline
     and pins the verdict; this one reads the timeout verdict and pins the
     instant. -/
-def well_formed_promise_timedout_is_server_owned (p : PromiseObject) : Bool :=
-  p.state != .rejectedTimedout || p.settledAt == some p.timeoutAt
+def well_formed_promise_timedout_is_server_owned (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.state != .rejectedTimedout || p.settledAt == some p.timeoutAt
 
-def well_formed_promise_callbacks_unique (p : PromiseObject) : Bool :=
-  p.callbacks.eraseDups.length == p.callbacks.length
+def well_formed_promise_callbacks_unique (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.callbacks.eraseDups.length == p.callbacks.length
 
-def well_formed_promise_listeners_unique (p : PromiseObject) : Bool :=
-  p.listeners.eraseDups.length == p.listeners.length
+def well_formed_promise_listeners_unique (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.listeners.eraseDups.length == p.listeners.length
 
-def well_formed_promise_obligations_require_external (p : PromiseObject) : Bool :=
-  (p.callbacks.isEmpty && p.listeners.isEmpty) || p.external
+def well_formed_promise_obligations_require_external (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    (p.callbacks.isEmpty && p.listeners.isEmpty) || p.external
 
-def well_formed_promise_awaiter_is_not_self (p : PromiseObject) : Bool :=
-  !p.callbacks.contains p.id
+def well_formed_promise_awaiter_is_not_self (_now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    !p.callbacks.contains p.id
 
-def well_formed_promise_created_at_lte_now (now : Nat) (p : PromiseObject) : Bool :=
-  p.createdAt ≤ now
+def well_formed_promise_created_at_lte_now (now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    p.createdAt ≤ now
 
-def well_formed_promise_settled_at_lte_now (now : Nat) (p : PromiseObject) : Bool :=
-  match p.settledAt with
-  | none => true
-  | some x => x ≤ now
+def well_formed_promise_settled_at_lte_now (now : Nat) (s : ServerState) : Bool :=
+  s.promises.all fun p =>
+    match p.settledAt with
+    | none => true
+    | some x => x ≤ now
 
-def well_formed_task_acquired_iff_has_pid (t : TaskObject) : Bool :=
-  (t.state == .acquired) == t.pid.isSome
+def well_formed_task_acquired_iff_has_pid (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    (t.state == .acquired) == t.pid.isSome
 
-def well_formed_task_acquired_iff_has_ttl (t : TaskObject) : Bool :=
-  (t.state == .acquired) == t.ttl.isSome
+def well_formed_task_acquired_iff_has_ttl (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    (t.state == .acquired) == t.ttl.isSome
 
-def well_formed_task_acquired_iff_has_expires_at (t : TaskObject) : Bool :=
-  (t.state == .acquired) == t.expiresAt.isSome
+def well_formed_task_acquired_iff_has_expires_at (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    (t.state == .acquired) == t.expiresAt.isSome
 
-def well_formed_task_pending_iff_has_retry_at (t : TaskObject) : Bool :=
-  (t.state == .pending) == t.retryAt.isSome
+def well_formed_task_pending_iff_has_retry_at (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    (t.state == .pending) == t.retryAt.isSome
 
-def well_formed_task_fulfilled_is_cleared (t : TaskObject) : Bool :=
-  t.state != .fulfilled
-    || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
-        && t.resumes.isEmpty)
+def well_formed_task_fulfilled_is_cleared (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.state != .fulfilled
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
+          && t.resumes.isEmpty)
 
-def well_formed_task_suspended_is_cleared (t : TaskObject) : Bool :=
-  t.state != .suspended
-    || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+def well_formed_task_suspended_is_cleared (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.state != .suspended
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
-def well_formed_task_halted_is_cleared (t : TaskObject) : Bool :=
-  t.state != .halted
-    || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+def well_formed_task_halted_is_cleared (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.state != .halted
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
-def well_formed_task_suspended_has_no_resumes (t : TaskObject) : Bool :=
-  t.state != .suspended || t.resumes.isEmpty
+def well_formed_task_suspended_has_no_resumes (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.state != .suspended || t.resumes.isEmpty
 
-def well_formed_task_resumes_unique (t : TaskObject) : Bool :=
-  t.resumes.eraseDups.length == t.resumes.length
+def well_formed_task_resumes_unique (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.resumes.eraseDups.length == t.resumes.length
 
-def well_formed_task_acquired_version_positive (t : TaskObject) : Bool :=
-  t.state != .acquired || 1 ≤ t.version
+def well_formed_task_acquired_version_positive (_now : Nat) (s : ServerState) : Bool :=
+  s.tasks.all fun t =>
+    t.state != .acquired || 1 ≤ t.version
 
-def well_formed_schedule_promise_tags_not_timer_targeted (c : Schedule) : Bool :=
-  !c.promiseTags.timerTargeted
+def well_formed_schedule_promise_tags_not_timer_targeted (_now : Nat) (s : ServerState) : Bool :=
+  s.schedules.all fun c =>
+    !c.promiseTags.timerTargeted
 
-def well_formed_schedule_created_at_lte_next_run_at (c : Schedule) : Bool :=
-  c.createdAt ≤ c.nextRunAt
+def well_formed_schedule_created_at_lte_next_run_at (_now : Nat) (s : ServerState) : Bool :=
+  s.schedules.all fun c =>
+    c.createdAt ≤ c.nextRunAt
 
-def well_formed_schedule_created_at_lte_last_run_at (c : Schedule) : Bool :=
-  match c.lastRunAt with
-  | none => true
-  | some l => c.createdAt ≤ l
+def well_formed_schedule_created_at_lte_last_run_at (_now : Nat) (s : ServerState) : Bool :=
+  s.schedules.all fun c =>
+    match c.lastRunAt with
+    | none => true
+    | some l => c.createdAt ≤ l
 
-def well_formed_schedule_last_run_at_lt_next_run_at (c : Schedule) : Bool :=
-  match c.lastRunAt with
-  | none => true
-  | some l => l < c.nextRunAt
+def well_formed_schedule_last_run_at_lt_next_run_at (_now : Nat) (s : ServerState) : Bool :=
+  s.schedules.all fun c =>
+    match c.lastRunAt with
+    | none => true
+    | some l => l < c.nextRunAt
 
-def well_formed_store_promise_ids_unique (s : ServerState) : Bool :=
+def well_formed_store_promise_ids_unique (_now : Nat) (s : ServerState) : Bool :=
   (s.promises.map (·.id)).eraseDups.length == s.promises.length
 
-def well_formed_store_task_ids_unique (s : ServerState) : Bool :=
+def well_formed_store_task_ids_unique (_now : Nat) (s : ServerState) : Bool :=
   (s.tasks.map (·.id)).eraseDups.length == s.tasks.length
 
-def well_formed_store_schedule_ids_unique (s : ServerState) : Bool :=
+def well_formed_store_schedule_ids_unique (_now : Nat) (s : ServerState) : Bool :=
   (s.schedules.map (·.id)).eraseDups.length == s.schedules.length
 
-def well_formed_store_outbox_keys_unique (s : ServerState) : Bool :=
+def well_formed_store_outbox_keys_unique (_now : Nat) (s : ServerState) : Bool :=
   (s.outbox.map (·.key)).eraseDups.length == s.outbox.length
 
-def consistent_task_iff_targeted_promise (s : ServerState) : Bool :=
+def consistent_task_iff_targeted_promise (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all (fun t =>
       s.promises.any (fun p => p.id == t.id && p.tags.has "resonate:target"))
     && s.promises.all (fun p =>
       !p.tags.has "resonate:target" || s.tasks.any (·.id == p.id))
 
-def consistent_settled_promise_has_fulfilled_task (s : ServerState) : Bool :=
+def consistent_settled_promise_has_fulfilled_task (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     p.state == .pending || s.tasks.all (fun t => t.id != p.id || t.state == .fulfilled)
 
-def consistent_callback_awaiter_is_targeted (s : ServerState) : Bool :=
+def consistent_callback_awaiter_is_targeted (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     p.callbacks.all fun a =>
       s.promises.any (fun q => q.id == a && q.tags.has "resonate:target")
 
-def consistent_listener_addresses_deliverable (s : ServerState) : Bool :=
+def consistent_listener_addresses_deliverable (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p => p.listeners.all addressValid
 
-def consistent_outbox_execute_names_existing_task (s : ServerState) : Bool :=
+def consistent_outbox_execute_names_existing_task (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
     | .execute id _ => s.tasks.any (·.id == id)
     | .unblock _    => true
 
-def consistent_outbox_never_ahead (s : ServerState) : Bool :=
+def consistent_outbox_never_ahead (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
     | .execute id v =>
@@ -325,7 +384,7 @@ def consistent_outbox_never_ahead (s : ServerState) : Bool :=
         | none   => true
     | .unblock _ => true
 
-def consistent_outbox_execute_address_is_target_tag (s : ServerState) : Bool :=
+def consistent_outbox_execute_address_is_target_tag (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
     | .execute id _ =>
@@ -334,7 +393,7 @@ def consistent_outbox_execute_address_is_target_tag (s : ServerState) : Bool :=
         | none   => true
     | .unblock _ => true
 
-def consistent_outbox_unblock_names_settled_promise (s : ServerState) : Bool :=
+def consistent_outbox_unblock_names_settled_promise (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
     | .unblock r =>
@@ -342,7 +401,7 @@ def consistent_outbox_unblock_names_settled_promise (s : ServerState) : Bool :=
           && s.promises.any (fun p => p.id == r.id && p.state != .pending)
     | .execute _ _ => true
 
-def consistent_outbox_unblock_address_deliverable (s : ServerState) : Bool :=
+def consistent_outbox_unblock_address_deliverable (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
     | .unblock _   => addressValid e.address
@@ -357,7 +416,7 @@ def consistent_suspended_task_holds_rung (now : Nat) (s : ServerState) : Bool :=
            (p.project now).state != .pending
              || s.promises.any (·.callbacks.contains t.id))
 
-def consistent_settled_task_promise_settled (s : ServerState) : Bool :=
+def consistent_settled_task_promise_settled (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .fulfilled ||
       (match s.promises.find? (·.id == t.id) with
@@ -389,7 +448,7 @@ nothing on any other transition — release, halt, continue, suspend,
 fulfilment, lease expiry, retry, wake. `monotone_task_version_never_decreases`
 is not carried separately: it follows. -/
 
-def preserved_promise_birth_fields_immutable (a b : ServerState) : Bool :=
+def preserved_promise_birth_fields_immutable (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none => true
@@ -397,7 +456,7 @@ def preserved_promise_birth_fields_immutable (a b : ServerState) : Bool :=
         q.param.data == p.param.data && q.param.headers == p.param.headers
           && q.tags == p.tags && q.timeoutAt == p.timeoutAt && q.createdAt == p.createdAt
 
-def preserved_settled_promise_record (a b : ServerState) : Bool :=
+def preserved_settled_promise_record (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     p.state == .pending ||
       (match b.promises.find? (·.id == p.id) with
@@ -406,10 +465,10 @@ def preserved_settled_promise_record (a b : ServerState) : Bool :=
            q.state == p.state && q.settledAt == p.settledAt
              && q.value.data == p.value.data && q.value.headers == p.value.headers)
 
-def monotone_promise_set_grows (a b : ServerState) : Bool :=
+def monotone_promise_set_grows (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p => b.promises.any (·.id == p.id)
 
-def monotone_task_set_grows (a b : ServerState) : Bool :=
+def monotone_task_set_grows (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t => b.tasks.any (·.id == t.id)
 
 /-- The fencing property: a task's version rises by exactly one on
@@ -428,7 +487,7 @@ def monotone_task_set_grows (a b : ServerState) : Bool :=
     are. There, a step may register or drain a whole ledger at once, so
     the count is an implementation choice and only the direction is
     protocol. Here the count IS the protocol: one grant, one version. -/
-def monotone_task_version_increases_only_on_acquisition (a b : ServerState) : Bool :=
+def monotone_task_version_increases_only_on_acquisition (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
@@ -438,7 +497,7 @@ def monotone_task_version_increases_only_on_acquisition (a b : ServerState) : Bo
         else
           u.version == t.version
 
-def preserved_fulfilled_task (a b : ServerState) : Bool :=
+def preserved_fulfilled_task (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     t.state != .fulfilled ||
       (match b.tasks.find? (·.id == t.id) with
@@ -488,27 +547,27 @@ promise pending before and settled after loses one. -/
     forbidden is movement in the wrong DIRECTION. -/
 def subsetOf (xs ys : List String) : Bool := xs.all ys.contains
 
-def preserved_promise_state_frozen_once_settled (a b : ServerState) : Bool :=
+def preserved_promise_state_frozen_once_settled (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     p.state == .pending ||
       (match b.promises.find? (·.id == p.id) with
        | none => false
        | some q => q.state == p.state)
 
-def preserved_promise_settlement_is_one_way (a b : ServerState) : Bool :=
+def preserved_promise_settlement_is_one_way (_now : Nat) (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state != .pending
       || (match a.promises.find? (·.id == q.id) with
           | some p => p.state == .pending
           | none   => true)
 
-def consistent_promise_settled_at_moves_with_state (a b : ServerState) : Bool :=
+def consistent_promise_settled_at_moves_with_state (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none => false
     | some q => (q.settledAt != p.settledAt) == (q.state != p.state)
 
-def preserved_promise_value_until_settlement (a b : ServerState) : Bool :=
+def preserved_promise_value_until_settlement (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none => false
@@ -516,31 +575,31 @@ def preserved_promise_value_until_settlement (a b : ServerState) : Bool :=
         q.state != .pending
           || (q.value.data == p.value.data && q.value.headers == p.value.headers)
 
-def preserved_promise_no_duplicate_ids (_a b : ServerState) : Bool :=
+def preserved_promise_no_duplicate_ids (_now : Nat) (_a b : ServerState) : Bool :=
   (b.promises.map (·.id)).eraseDups.length == b.promises.length
 
-def monotone_promise_callbacks_grow_while_pending (a b : ServerState) : Bool :=
+def monotone_promise_callbacks_grow_while_pending (_now : Nat) (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state != .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.callbacks.isEmpty
        | some p => subsetOf p.callbacks q.callbacks)
 
-def monotone_promise_callbacks_shrink_once_settled (a b : ServerState) : Bool :=
+def monotone_promise_callbacks_shrink_once_settled (_now : Nat) (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state == .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.callbacks.isEmpty
        | some p => subsetOf q.callbacks p.callbacks)
 
-def monotone_promise_listeners_grow_while_pending (a b : ServerState) : Bool :=
+def monotone_promise_listeners_grow_while_pending (_now : Nat) (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state != .pending ||
       (match a.promises.find? (·.id == q.id) with
        | none => q.listeners.isEmpty
        | some p => subsetOf p.listeners q.listeners)
 
-def monotone_promise_listeners_shrink_once_settled (a b : ServerState) : Bool :=
+def monotone_promise_listeners_shrink_once_settled (_now : Nat) (a b : ServerState) : Bool :=
   b.promises.all fun q =>
     q.state == .pending ||
       (match a.promises.find? (·.id == q.id) with
@@ -552,7 +611,7 @@ def monotone_promise_listeners_shrink_once_settled (a b : ServerState) : Bool :=
 The admissible pair lists, written out rather than paraphrased from the
 handlers, so the check is independent of the code it checks. -/
 
-def consistent_promise_state_edge_admissible (a b : ServerState) : Bool :=
+def consistent_promise_state_edge_admissible (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none   => true
@@ -568,7 +627,7 @@ def consistent_promise_state_edge_admissible (a b : ServerState) : Bool :=
           (PromiseState.rejectedTimedout, PromiseState.rejectedTimedout)
         ].contains (p.state, q.state)
 
-def consistent_task_state_edge_admissible (a b : ServerState) : Bool :=
+def consistent_task_state_edge_admissible (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none   => true
@@ -592,21 +651,21 @@ def consistent_task_state_edge_admissible (a b : ServerState) : Bool :=
           (TaskState.fulfilled, TaskState.fulfilled)
         ].contains (t.state, u.state)
 
-def preserved_task_acquisition_only_from_pending (a b : ServerState) : Bool :=
+def preserved_task_acquisition_only_from_pending (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     u.state != .acquired
       || (match a.tasks.find? (·.id == u.id) with
           | some t => t.state == .pending || t.state == .acquired
           | none   => true)
 
-def preserved_task_suspension_only_from_acquired (a b : ServerState) : Bool :=
+def preserved_task_suspension_only_from_acquired (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     u.state != .suspended
       || (match a.tasks.find? (·.id == u.id) with
           | some t => t.state == .acquired || t.state == .suspended
           | none   => false)
 
-def preserved_task_halted_only_reenters_via_pending (a b : ServerState) : Bool :=
+def preserved_task_halted_only_reenters_via_pending (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     t.state != .halted
       || (match b.tasks.find? (·.id == t.id) with
@@ -618,14 +677,14 @@ def preserved_task_halted_only_reenters_via_pending (a b : ServerState) : Bool :
 What must move together in one step. These are the primitives; several
 state invariants above are their inductive consequences. -/
 
-def consistent_settlement_fulfils_task (a b : ServerState) : Bool :=
+def consistent_settlement_fulfils_task (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     p.state != .pending ||
       (match b.promises.find? (·.id == p.id), b.tasks.find? (·.id == p.id) with
        | some q, some u => q.state == .pending || u.state == .fulfilled
        | _, _ => true)
 
-def consistent_task_fulfilment_needs_settlement (a b : ServerState) : Bool :=
+def consistent_task_fulfilment_needs_settlement (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     u.state != .fulfilled ||
       (match a.tasks.find? (·.id == u.id) with
@@ -636,7 +695,7 @@ def consistent_task_fulfilment_needs_settlement (a b : ServerState) : Bool :=
                  | some p, some q => p.state == .pending && q.state != .pending
                  | _, _ => false))
 
-def consistent_obligation_discharge_requires_settled (a b : ServerState) : Bool :=
+def consistent_obligation_discharge_requires_settled (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none => true
@@ -644,7 +703,7 @@ def consistent_obligation_discharge_requires_settled (a b : ServerState) : Bool 
         (p.callbacks.all q.callbacks.contains && p.listeners.all q.listeners.contains)
           || q.state != .pending
 
-def consistent_callback_consumption_resumes_awaiter (a b : ServerState) : Bool :=
+def consistent_callback_consumption_resumes_awaiter (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     p.callbacks.all fun x =>
       (match b.promises.find? (·.id == p.id) with
@@ -654,7 +713,7 @@ def consistent_callback_consumption_resumes_awaiter (a b : ServerState) : Bool :
           | none => true
           | some u => u.state == .fulfilled || u.resumes.contains p.id)
 
-def consistent_listener_consumption_enqueues_unblock (a b : ServerState) : Bool :=
+def consistent_listener_consumption_enqueues_unblock (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     p.listeners.all fun addr =>
       (match b.promises.find? (·.id == p.id) with
@@ -666,7 +725,7 @@ def consistent_listener_consumption_enqueues_unblock (a b : ServerState) : Bool 
                | .unblock r => r.id == p.id && r.state != .pending
                | .execute _ _ => false))).length == 1
 
-def consistent_wake_follows_callback_consumption (a b : ServerState) : Bool :=
+def consistent_wake_follows_callback_consumption (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     match a.tasks.find? (·.id == u.id) with
     | none => true
@@ -679,7 +738,7 @@ def consistent_wake_follows_callback_consumption (a b : ServerState) : Bool :=
                      | some q => !q.callbacks.contains u.id)
                  && u.resumes.contains p.id)
 
-def consistent_suspension_registers_callback (a b : ServerState) : Bool :=
+def consistent_suspension_registers_callback (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     u.state != .suspended
       || (match a.tasks.find? (·.id == u.id) with
@@ -692,7 +751,7 @@ def consistent_suspension_registers_callback (a b : ServerState) : Bool :=
                  | some p => !p.callbacks.contains u.id)
              && q.state == .pending)
 
-def consistent_task_birth_couples_promise_birth (a b : ServerState) : Bool :=
+def consistent_task_birth_couples_promise_birth (_now : Nat) (a b : ServerState) : Bool :=
   (b.tasks.all fun u =>
      a.tasks.any (·.id == u.id)
        || ((!a.promises.any (·.id == u.id))
@@ -712,10 +771,10 @@ def consistent_task_birth_couples_promise_birth (a b : ServerState) : Bool :=
 
 /-! ## Stage 3 — the outbox -/
 
-def monotone_outbox_keys_never_disappear (a b : ServerState) : Bool :=
+def monotone_outbox_keys_never_disappear (_now : Nat) (a b : ServerState) : Bool :=
   a.outbox.all fun e => b.outbox.any (fun f => f.key == e.key)
 
-def consistent_new_execute_matches_task_and_target (a b : ServerState) : Bool :=
+def consistent_new_execute_matches_task_and_target (_now : Nat) (a b : ServerState) : Bool :=
   b.outbox.all fun f =>
     match f.message with
     | .unblock _ => true
@@ -731,7 +790,7 @@ def consistent_new_execute_matches_task_and_target (a b : ServerState) : Bool :=
                 | some p => f.address == (p.tags.get? "resonate:target").getD ""
                 | none   => false))
 
-def consistent_new_unblock_carries_stored_record (a b : ServerState) : Bool :=
+def consistent_new_unblock_carries_stored_record (_now : Nat) (a b : ServerState) : Bool :=
   b.outbox.all fun f =>
     match f.message with
     | .execute _ _ => true
@@ -748,7 +807,7 @@ def consistent_new_unblock_carries_stored_record (a b : ServerState) : Bool :=
                       && p.createdAt == r.createdAt
                 | none => false))
 
-def consistent_new_unblock_discharges_its_listener (a b : ServerState) : Bool :=
+def consistent_new_unblock_discharges_its_listener (_now : Nat) (a b : ServerState) : Bool :=
   b.outbox.all fun f =>
     match f.message with
     | .execute _ _ => true
@@ -769,7 +828,7 @@ and `occurrences`, which are `opaque` with no value. They are not
 carried here, because a property that passes only because nothing reaches it
 is not being checked. -/
 
-def preserved_schedule_birth_fields_immutable (a b : ServerState) : Bool :=
+def preserved_schedule_birth_fields_immutable (_now : Nat) (a b : ServerState) : Bool :=
   a.schedules.all fun c =>
     match b.schedules.find? (·.id == c.id) with
     | none => true
@@ -780,7 +839,7 @@ def preserved_schedule_birth_fields_immutable (a b : ServerState) : Bool :=
           && d.promiseParam.headers == c.promiseParam.headers
           && d.promiseTags == c.promiseTags && d.createdAt == c.createdAt
 
-def consistent_task_birth_state (a b : ServerState) : Bool :=
+def consistent_task_birth_state (_now : Nat) (a b : ServerState) : Bool :=
   b.tasks.all fun u =>
     (a.tasks.any (·.id == u.id))
     || (u.state == .pending && u.retryAt.isSome
@@ -790,7 +849,7 @@ def consistent_task_birth_state (a b : ServerState) : Bool :=
     || (u.state == .acquired && 1 ≤ u.version && u.retryAt.isNone
           && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome && u.resumes.isEmpty)
 
-def consistent_task_lease_released_atomically (a b : ServerState) : Bool :=
+def consistent_task_lease_released_atomically (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
@@ -798,7 +857,7 @@ def consistent_task_lease_released_atomically (a b : ServerState) : Bool :=
         !(t.state == .acquired && u.state != .acquired)
         || (u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.version == t.version)
 
-def preserved_task_lease_holder_stable (a b : ServerState) : Bool :=
+def preserved_task_lease_holder_stable (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
@@ -806,7 +865,7 @@ def preserved_task_lease_holder_stable (a b : ServerState) : Bool :=
         !(t.state == .acquired && u.state == .acquired && u.version == t.version)
         || (u.pid == t.pid && u.ttl == t.ttl)
 
-def consistent_task_lease_fields_move_together (a b : ServerState) : Bool :=
+def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
@@ -819,13 +878,13 @@ def consistent_task_lease_fields_move_together (a b : ServerState) : Bool :=
         || (t.state == .acquired && u.state == .acquired
               && u.pid == t.pid && u.ttl == t.ttl)
 
-def monotone_task_resumes_grow_or_clear (a b : ServerState) : Bool :=
+def monotone_task_resumes_grow_or_clear (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u => u.resumes.isEmpty || subsetOf t.resumes u.resumes
 
-def consistent_task_resumes_cleared_only_on_dispatch_or_park (a b : ServerState) : Bool :=
+def consistent_task_resumes_cleared_only_on_dispatch_or_park (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none => true
@@ -886,7 +945,7 @@ refresh; it may never acquire, suspend, halt or continue a task, and it
 may settle a promise only by its deadline. A server whose reaper does
 any of the rest steals a lease or invents a verdict nobody asked for. -/
 
-def consistent_task_state_edge_internal_admissible (a b : ServerState) : Bool :=
+def consistent_task_state_edge_internal_admissible (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none   => true
@@ -904,7 +963,7 @@ def consistent_task_state_edge_internal_admissible (a b : ServerState) : Bool :=
           (TaskState.fulfilled, TaskState.fulfilled)
         ].contains (t.state, u.state)
 
-def consistent_promise_state_edge_internal_admissible (a b : ServerState) : Bool :=
+def consistent_promise_state_edge_internal_admissible (_now : Nat) (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none   => true
@@ -913,14 +972,20 @@ def consistent_promise_state_edge_internal_admissible (a b : ServerState) : Bool
           || (p.state == .pending
                 && (q.state == .rejectedTimedout || (q.state == .resolved && p.isTimer)))
 
-def internalChecks : List (String × (ServerState → ServerState → Bool)) :=
-  [ ("consistent_task_state_edge_internal_admissible",    consistent_task_state_edge_internal_admissible),
-    ("consistent_promise_state_edge_internal_admissible", consistent_promise_state_edge_internal_admissible) ]
+def internalChecks : List Named :=
+  [ { name := "consistent_task_state_edge_internal_admissible"
+      , property := .trans consistent_task_state_edge_internal_admissible },
+    { name := "consistent_promise_state_edge_internal_admissible"
+      , property := .trans consistent_promise_state_edge_internal_admissible } ]
 
-def internalFailures (a b : ServerState) : List String :=
-  internalChecks.filterMap fun (n, f) => if f a b then none else some n
+def internalFailures (now : Nat) (a b : ServerState) : List String :=
+  internalChecks.filterMap fun l =>
+    match l.property with
+    | .state _ => none
+    | .trans f => if f now a b then none else some l.name
 
-def internalWellFormed (a b : ServerState) : Bool := (internalFailures a b).isEmpty
+def internalWellFormed (now : Nat) (a b : ServerState) : Bool :=
+  (internalFailures now a b).isEmpty
 
 /-- The settlement dichotomy: a promise leaving `pending` did so either
     by a client verdict stamped at `now`, strictly before the deadline
@@ -971,205 +1036,195 @@ Every property, in one list, each with the name an implementation should use
 when it reports a violation. `Property` says which walk the property needs and
 nothing else; the predicates above say what it means. -/
 
-inductive Property where
-  /-- Check at every state the implementation passes through. -/
-  | state (f : Nat → ServerState → Bool)
-  /-- Check at every pair of consecutive states — one step. -/
-  | trans (f : Nat → ServerState → ServerState → Bool)
-
-structure Named where
-  name : String
-  property : Property
-
 def catalogue : List Named :=
   [ { name := "well_formed_promise_created_at_lte_timeout_at"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_timeout_at) },
+      , property := .state well_formed_promise_created_at_lte_timeout_at },
     { name := "well_formed_promise_pending_created_before_deadline"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_pending_created_before_deadline) },
+      , property := .state well_formed_promise_pending_created_before_deadline },
     { name := "well_formed_promise_settled_at_lte_timeout_at"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_settled_at_lte_timeout_at) },
+      , property := .state well_formed_promise_settled_at_lte_timeout_at },
     { name := "well_formed_promise_created_at_lte_settled_at"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_settled_at) },
+      , property := .state well_formed_promise_created_at_lte_settled_at },
     { name := "well_formed_promise_settled_at_iff_not_pending"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_settled_at_iff_not_pending) },
+      , property := .state well_formed_promise_settled_at_iff_not_pending },
     { name := "well_formed_promise_pending_has_no_value"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_pending_has_no_value) },
+      , property := .state well_formed_promise_pending_has_no_value },
     { name := "well_formed_promise_deadline_verdict_matches_timer_tag"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_deadline_verdict_matches_timer_tag) },
+      , property := .state well_formed_promise_deadline_verdict_matches_timer_tag },
     { name := "well_formed_promise_deadline_settlement_has_no_value"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_deadline_settlement_has_no_value) },
+      , property := .state well_formed_promise_deadline_settlement_has_no_value },
     { name := "well_formed_promise_timer_not_targeted"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_timer_not_targeted) },
+      , property := .state well_formed_promise_timer_not_targeted },
     { name := "well_formed_promise_timedout_is_server_owned"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_timedout_is_server_owned) },
+      , property := .state well_formed_promise_timedout_is_server_owned },
     { name := "well_formed_promise_callbacks_unique"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_callbacks_unique) },
+      , property := .state well_formed_promise_callbacks_unique },
     { name := "well_formed_promise_listeners_unique"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_listeners_unique) },
+      , property := .state well_formed_promise_listeners_unique },
     { name := "well_formed_promise_obligations_require_external"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_obligations_require_external) },
+      , property := .state well_formed_promise_obligations_require_external },
     { name := "well_formed_promise_awaiter_is_not_self"
-      , property := .state (fun _ s => s.promises.all well_formed_promise_awaiter_is_not_self) },
+      , property := .state well_formed_promise_awaiter_is_not_self },
     { name := "well_formed_promise_created_at_lte_now"
-      , property := .state (fun now s => s.promises.all (well_formed_promise_created_at_lte_now now)) },
+      , property := .state well_formed_promise_created_at_lte_now },
     { name := "well_formed_promise_settled_at_lte_now"
-      , property := .state (fun now s => s.promises.all (well_formed_promise_settled_at_lte_now now)) },
+      , property := .state well_formed_promise_settled_at_lte_now },
     { name := "well_formed_task_acquired_iff_has_pid"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_pid) },
+      , property := .state well_formed_task_acquired_iff_has_pid },
     { name := "well_formed_task_acquired_iff_has_ttl"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_ttl) },
+      , property := .state well_formed_task_acquired_iff_has_ttl },
     { name := "well_formed_task_acquired_iff_has_expires_at"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_expires_at) },
+      , property := .state well_formed_task_acquired_iff_has_expires_at },
     { name := "well_formed_task_pending_iff_has_retry_at"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_pending_iff_has_retry_at) },
+      , property := .state well_formed_task_pending_iff_has_retry_at },
     { name := "well_formed_task_fulfilled_is_cleared"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_fulfilled_is_cleared) },
+      , property := .state well_formed_task_fulfilled_is_cleared },
     { name := "well_formed_task_suspended_is_cleared"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_suspended_is_cleared) },
+      , property := .state well_formed_task_suspended_is_cleared },
     { name := "well_formed_task_halted_is_cleared"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_halted_is_cleared) },
+      , property := .state well_formed_task_halted_is_cleared },
     { name := "well_formed_task_suspended_has_no_resumes"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_suspended_has_no_resumes) },
+      , property := .state well_formed_task_suspended_has_no_resumes },
     { name := "well_formed_task_resumes_unique"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_resumes_unique) },
+      , property := .state well_formed_task_resumes_unique },
     { name := "well_formed_task_acquired_version_positive"
-      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_version_positive) },
+      , property := .state well_formed_task_acquired_version_positive },
     { name := "well_formed_schedule_promise_tags_not_timer_targeted"
-      , property := .state (fun _ s => s.schedules.all well_formed_schedule_promise_tags_not_timer_targeted) },
+      , property := .state well_formed_schedule_promise_tags_not_timer_targeted },
     { name := "well_formed_schedule_created_at_lte_next_run_at"
-      , property := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_next_run_at) },
+      , property := .state well_formed_schedule_created_at_lte_next_run_at },
     { name := "well_formed_schedule_created_at_lte_last_run_at"
-      , property := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_last_run_at) },
+      , property := .state well_formed_schedule_created_at_lte_last_run_at },
     { name := "well_formed_schedule_last_run_at_lt_next_run_at"
-      , property := .state (fun _ s => s.schedules.all well_formed_schedule_last_run_at_lt_next_run_at) },
+      , property := .state well_formed_schedule_last_run_at_lt_next_run_at },
     { name := "well_formed_store_promise_ids_unique"
-      , property := .state (fun _ s => well_formed_store_promise_ids_unique s) },
+      , property := .state well_formed_store_promise_ids_unique },
     { name := "well_formed_store_task_ids_unique"
-      , property := .state (fun _ s => well_formed_store_task_ids_unique s) },
+      , property := .state well_formed_store_task_ids_unique },
     { name := "well_formed_store_schedule_ids_unique"
-      , property := .state (fun _ s => well_formed_store_schedule_ids_unique s) },
+      , property := .state well_formed_store_schedule_ids_unique },
     { name := "well_formed_store_outbox_keys_unique"
-      , property := .state (fun _ s => well_formed_store_outbox_keys_unique s) },
+      , property := .state well_formed_store_outbox_keys_unique },
     { name := "consistent_task_iff_targeted_promise"
-      , property := .state (fun _ s => consistent_task_iff_targeted_promise s) },
+      , property := .state consistent_task_iff_targeted_promise },
     { name := "consistent_settled_promise_has_fulfilled_task"
-      , property := .state (fun _ s => consistent_settled_promise_has_fulfilled_task s) },
+      , property := .state consistent_settled_promise_has_fulfilled_task },
     { name := "consistent_callback_awaiter_is_targeted"
-      , property := .state (fun _ s => consistent_callback_awaiter_is_targeted s) },
+      , property := .state consistent_callback_awaiter_is_targeted },
     { name := "consistent_listener_addresses_deliverable"
-      , property := .state (fun _ s => consistent_listener_addresses_deliverable s) },
+      , property := .state consistent_listener_addresses_deliverable },
     { name := "consistent_outbox_execute_names_existing_task"
-      , property := .state (fun _ s => consistent_outbox_execute_names_existing_task s) },
+      , property := .state consistent_outbox_execute_names_existing_task },
     { name := "consistent_outbox_never_ahead"
-      , property := .state (fun _ s => consistent_outbox_never_ahead s) },
+      , property := .state consistent_outbox_never_ahead },
     { name := "consistent_outbox_execute_address_is_target_tag"
-      , property := .state (fun _ s => consistent_outbox_execute_address_is_target_tag s) },
+      , property := .state consistent_outbox_execute_address_is_target_tag },
     { name := "consistent_outbox_unblock_names_settled_promise"
-      , property := .state (fun _ s => consistent_outbox_unblock_names_settled_promise s) },
+      , property := .state consistent_outbox_unblock_names_settled_promise },
     { name := "consistent_outbox_unblock_address_deliverable"
-      , property := .state (fun _ s => consistent_outbox_unblock_address_deliverable s) },
+      , property := .state consistent_outbox_unblock_address_deliverable },
     { name := "consistent_settled_task_promise_settled"
-      , property := .state (fun _ s => consistent_settled_task_promise_settled s) },
+      , property := .state consistent_settled_task_promise_settled },
     { name := "consistent_suspended_task_holds_rung"
-      , property := .state (consistent_suspended_task_holds_rung) },
+      , property := .state consistent_suspended_task_holds_rung },
     { name := "preserved_promise_birth_fields_immutable"
-      , property := .trans (fun _ a b => preserved_promise_birth_fields_immutable a b) },
+      , property := .trans preserved_promise_birth_fields_immutable },
     { name := "preserved_settled_promise_record"
-      , property := .trans (fun _ a b => preserved_settled_promise_record a b) },
+      , property := .trans preserved_settled_promise_record },
     { name := "monotone_promise_set_grows"
-      , property := .trans (fun _ a b => monotone_promise_set_grows a b) },
+      , property := .trans monotone_promise_set_grows },
     { name := "monotone_task_set_grows"
-      , property := .trans (fun _ a b => monotone_task_set_grows a b) },
+      , property := .trans monotone_task_set_grows },
     { name := "monotone_task_version_increases_only_on_acquisition"
-      , property := .trans (fun _ a b => monotone_task_version_increases_only_on_acquisition a b) },
+      , property := .trans monotone_task_version_increases_only_on_acquisition },
     { name := "preserved_fulfilled_task"
-      , property := .trans (fun _ a b => preserved_fulfilled_task a b) },
+      , property := .trans preserved_fulfilled_task },
     { name := "preserved_promise_state_frozen_once_settled"
-      , property := .trans (fun _ a b => preserved_promise_state_frozen_once_settled a b) },
+      , property := .trans preserved_promise_state_frozen_once_settled },
     { name := "preserved_promise_settlement_is_one_way"
-      , property := .trans (fun _ a b => preserved_promise_settlement_is_one_way a b) },
+      , property := .trans preserved_promise_settlement_is_one_way },
     { name := "consistent_promise_settled_at_moves_with_state"
-      , property := .trans (fun _ a b => consistent_promise_settled_at_moves_with_state a b) },
+      , property := .trans consistent_promise_settled_at_moves_with_state },
     { name := "preserved_promise_value_until_settlement"
-      , property := .trans (fun _ a b => preserved_promise_value_until_settlement a b) },
+      , property := .trans preserved_promise_value_until_settlement },
     { name := "preserved_promise_no_duplicate_ids"
-      , property := .trans (fun _ a b => preserved_promise_no_duplicate_ids a b) },
+      , property := .trans preserved_promise_no_duplicate_ids },
     { name := "monotone_promise_callbacks_grow_while_pending"
-      , property := .trans (fun _ a b => monotone_promise_callbacks_grow_while_pending a b) },
+      , property := .trans monotone_promise_callbacks_grow_while_pending },
     { name := "monotone_promise_callbacks_shrink_once_settled"
-      , property := .trans (fun _ a b => monotone_promise_callbacks_shrink_once_settled a b) },
+      , property := .trans monotone_promise_callbacks_shrink_once_settled },
     { name := "monotone_promise_listeners_grow_while_pending"
-      , property := .trans (fun _ a b => monotone_promise_listeners_grow_while_pending a b) },
+      , property := .trans monotone_promise_listeners_grow_while_pending },
     { name := "monotone_promise_listeners_shrink_once_settled"
-      , property := .trans (fun _ a b => monotone_promise_listeners_shrink_once_settled a b) },
+      , property := .trans monotone_promise_listeners_shrink_once_settled },
     { name := "consistent_promise_state_edge_admissible"
-      , property := .trans (fun _ a b => consistent_promise_state_edge_admissible a b) },
+      , property := .trans consistent_promise_state_edge_admissible },
     { name := "consistent_task_state_edge_admissible"
-      , property := .trans (fun _ a b => consistent_task_state_edge_admissible a b) },
+      , property := .trans consistent_task_state_edge_admissible },
     { name := "preserved_task_acquisition_only_from_pending"
-      , property := .trans (fun _ a b => preserved_task_acquisition_only_from_pending a b) },
+      , property := .trans preserved_task_acquisition_only_from_pending },
     { name := "preserved_task_suspension_only_from_acquired"
-      , property := .trans (fun _ a b => preserved_task_suspension_only_from_acquired a b) },
+      , property := .trans preserved_task_suspension_only_from_acquired },
     { name := "preserved_task_halted_only_reenters_via_pending"
-      , property := .trans (fun _ a b => preserved_task_halted_only_reenters_via_pending a b) },
+      , property := .trans preserved_task_halted_only_reenters_via_pending },
     { name := "consistent_settlement_fulfils_task"
-      , property := .trans (fun _ a b => consistent_settlement_fulfils_task a b) },
+      , property := .trans consistent_settlement_fulfils_task },
     { name := "consistent_task_fulfilment_needs_settlement"
-      , property := .trans (fun _ a b => consistent_task_fulfilment_needs_settlement a b) },
+      , property := .trans consistent_task_fulfilment_needs_settlement },
     { name := "consistent_obligation_discharge_requires_settled"
-      , property := .trans (fun _ a b => consistent_obligation_discharge_requires_settled a b) },
+      , property := .trans consistent_obligation_discharge_requires_settled },
     { name := "consistent_callback_consumption_resumes_awaiter"
-      , property := .trans (fun _ a b => consistent_callback_consumption_resumes_awaiter a b) },
+      , property := .trans consistent_callback_consumption_resumes_awaiter },
     { name := "consistent_listener_consumption_enqueues_unblock"
-      , property := .trans (fun _ a b => consistent_listener_consumption_enqueues_unblock a b) },
+      , property := .trans consistent_listener_consumption_enqueues_unblock },
     { name := "consistent_wake_follows_callback_consumption"
-      , property := .trans (fun _ a b => consistent_wake_follows_callback_consumption a b) },
+      , property := .trans consistent_wake_follows_callback_consumption },
     { name := "consistent_suspension_registers_callback"
-      , property := .trans (fun _ a b => consistent_suspension_registers_callback a b) },
+      , property := .trans consistent_suspension_registers_callback },
     { name := "consistent_task_birth_couples_promise_birth"
-      , property := .trans (fun _ a b => consistent_task_birth_couples_promise_birth a b) },
+      , property := .trans consistent_task_birth_couples_promise_birth },
     { name := "monotone_outbox_keys_never_disappear"
-      , property := .trans (fun _ a b => monotone_outbox_keys_never_disappear a b) },
+      , property := .trans monotone_outbox_keys_never_disappear },
     { name := "consistent_new_execute_matches_task_and_target"
-      , property := .trans (fun _ a b => consistent_new_execute_matches_task_and_target a b) },
+      , property := .trans consistent_new_execute_matches_task_and_target },
     { name := "consistent_new_unblock_carries_stored_record"
-      , property := .trans (fun _ a b => consistent_new_unblock_carries_stored_record a b) },
+      , property := .trans consistent_new_unblock_carries_stored_record },
     { name := "consistent_new_unblock_discharges_its_listener"
-      , property := .trans (fun _ a b => consistent_new_unblock_discharges_its_listener a b) },
+      , property := .trans consistent_new_unblock_discharges_its_listener },
     { name := "preserved_schedule_birth_fields_immutable"
-      , property := .trans (fun _ a b => preserved_schedule_birth_fields_immutable a b) },
+      , property := .trans preserved_schedule_birth_fields_immutable },
     { name := "consistent_task_birth_state"
-      , property := .trans (fun _ a b => consistent_task_birth_state a b) },
+      , property := .trans consistent_task_birth_state },
     { name := "consistent_task_lease_released_atomically"
-      , property := .trans (fun _ a b => consistent_task_lease_released_atomically a b) },
+      , property := .trans consistent_task_lease_released_atomically },
     { name := "preserved_task_lease_holder_stable"
-      , property := .trans (fun _ a b => preserved_task_lease_holder_stable a b) },
+      , property := .trans preserved_task_lease_holder_stable },
     { name := "consistent_task_lease_fields_move_together"
-      , property := .trans (fun _ a b => consistent_task_lease_fields_move_together a b) },
+      , property := .trans consistent_task_lease_fields_move_together },
     { name := "monotone_task_resumes_grow_or_clear"
-      , property := .trans (fun _ a b => monotone_task_resumes_grow_or_clear a b) },
+      , property := .trans monotone_task_resumes_grow_or_clear },
     { name := "consistent_task_resumes_cleared_only_on_dispatch_or_park"
-      , property := .trans (fun _ a b => consistent_task_resumes_cleared_only_on_dispatch_or_park a b) },
+      , property := .trans consistent_task_resumes_cleared_only_on_dispatch_or_park },
     { name := "preserved_no_dead_dispatch"
-      , property := .trans (preserved_no_dead_dispatch) },
+      , property := .trans preserved_no_dead_dispatch },
     { name := "preserved_execute_only_for_live_task"
-      , property := .trans (preserved_execute_only_for_live_task) },
+      , property := .trans preserved_execute_only_for_live_task },
     { name := "consistent_promise_settlement_stamp"
-      , property := .trans (consistent_promise_settlement_stamp) },
+      , property := .trans consistent_promise_settlement_stamp },
     { name := "preserved_timedout_is_server_owned"
-      , property := .trans (preserved_timedout_is_server_owned) },
+      , property := .trans preserved_timedout_is_server_owned },
     { name := "consistent_new_promise_born_clean"
-      , property := .trans (consistent_new_promise_born_clean) },
+      , property := .trans consistent_new_promise_born_clean },
     { name := "consistent_task_acquisition_is_atomic"
-      , property := .trans (consistent_task_acquisition_is_atomic) },
+      , property := .trans consistent_task_acquisition_is_atomic },
     { name := "consistent_task_lease_deadline_is_now_plus_ttl"
-      , property := .trans (consistent_task_lease_deadline_is_now_plus_ttl) },
+      , property := .trans consistent_task_lease_deadline_is_now_plus_ttl },
     { name := "consistent_task_pending_entry_arms_retry"
-      , property := .trans (consistent_task_pending_entry_arms_retry) },
+      , property := .trans consistent_task_pending_entry_arms_retry },
     { name := "consistent_task_retry_rearm_only_when_due"
-      , property := .trans (consistent_task_retry_rearm_only_when_due) },
+      , property := .trans consistent_task_retry_rearm_only_when_due },
     { name := "consistent_task_wake_records_resume"
-      , property := .trans (consistent_task_wake_records_resume) } ]
+      , property := .trans consistent_task_wake_records_resume } ]
 
 /-! ### The two walks
 
@@ -1227,7 +1282,7 @@ that gets closed turns red and says so. -/
 /-- A lease of length zero expires at the instant it is granted.
     `task.create`/`task.acquire` accept `ttl = 0` and there is no lower
     bound anywhere. -/
-def well_formed_task_ttl_positive (s : ServerState) : Bool :=
+def well_formed_task_ttl_positive (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t => t.state != .acquired || 0 < t.ttl.getD 0
 
 /-- `Tags.has` is `isSome`, so `("resonate:target", "")` carries a
@@ -1241,7 +1296,7 @@ def well_formed_task_ttl_positive (s : ServerState) : Bool :=
     ordinary case throughout the corpus — so `addressValid`, which
     demands an `http`/`https`/`poll` scheme, is the wrong predicate here
     and would reject every well-formed targeted promise. -/
-def well_formed_promise_target_is_nonempty (s : ServerState) : Bool :=
+def well_formed_promise_target_is_nonempty (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     match p.tags.get? "resonate:target" with
     | none      => true
@@ -1253,7 +1308,7 @@ def well_formed_promise_target_is_nonempty (s : ServerState) : Bool :=
     never executed, and dies `rejectedTimedout`. Nothing relates
     `resonate:delay` to `timeoutAt`, and `parseNat` is total, so a
     malformed delay becomes a garbage instant with the same effect. -/
-def well_formed_promise_delay_before_deadline (s : ServerState) : Bool :=
+def well_formed_promise_delay_before_deadline (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     match p.tags.get? "resonate:delay" with
     | none   => true
@@ -1279,13 +1334,13 @@ def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
 
 def gaps : List Named :=
   [ { name := "well_formed_task_ttl_positive"
-      , property := .state (fun _ s => well_formed_task_ttl_positive s) },
+      , property := .state well_formed_task_ttl_positive },
     { name := "well_formed_promise_target_is_nonempty"
-      , property := .state (fun _ s => well_formed_promise_target_is_nonempty s) },
+      , property := .state well_formed_promise_target_is_nonempty },
     { name := "well_formed_promise_delay_before_deadline"
-      , property := .state (fun _ s => well_formed_promise_delay_before_deadline s) },
+      , property := .state well_formed_promise_delay_before_deadline },
     { name := "monotone_task_retry_rearm_advances"
-      , property := .trans (monotone_task_retry_rearm_advances) } ]
+      , property := .trans monotone_task_retry_rearm_advances } ]
 
 /-! ### Record projections
 

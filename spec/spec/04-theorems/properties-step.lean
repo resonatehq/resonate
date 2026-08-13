@@ -63,92 +63,92 @@ def stepMutants : List (String × Bool) :=
                         promiseParam := {}, promiseTags := [], nextRunAt := 60, createdAt := 10 }
   let ex : OutboxEntry := { address := "w", message := .execute "a" 3 }
   [ ("preserved_promise_birth_fields_immutable",
-       preserved_promise_birth_fields_immutable { promises := [P] } { promises := [{ P with timeoutAt := 9999 }] }),
+       preserved_promise_birth_fields_immutable 0 { promises := [P] } { promises := [{ P with timeoutAt := 9999 }] }),
     ("preserved_settled_promise_record/state_moved",
-       preserved_settled_promise_record { promises := [S] } { promises := [{ S with state := .rejected }] }),
+       preserved_settled_promise_record 0 { promises := [S] } { promises := [{ S with state := .rejected }] }),
     ("preserved_settled_promise_record/settled_at_restamped",
-       preserved_settled_promise_record { promises := [S] } { promises := [{ S with settledAt := some 90 }] }),
+       preserved_settled_promise_record 0 { promises := [S] } { promises := [{ S with settledAt := some 90 }] }),
     ("preserved_settled_promise_record/value_rewritten",
-       preserved_settled_promise_record { promises := [S] } { promises := [{ S with value := { data := some "x" } }] }),
+       preserved_settled_promise_record 0 { promises := [S] } { promises := [{ S with value := { data := some "x" } }] }),
     ("monotone_promise_set_grows",
-       monotone_promise_set_grows { promises := [P] } { promises := [] }),
+       monotone_promise_set_grows 0 { promises := [P] } { promises := [] }),
     ("monotone_task_set_grows",
-       monotone_task_set_grows { tasks := [T] } { tasks := [] }),
+       monotone_task_set_grows 0 { tasks := [T] } { tasks := [] }),
     ("monotone_task_version_increases_only_on_acquisition/bumped_without_acquiring",
-       monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ T with version := 4 }] }),
+       monotone_task_version_increases_only_on_acquisition 0 { tasks := [T] } { tasks := [{ T with version := 4 }] }),
     ("monotone_task_version_increases_only_on_acquisition/acquired_without_bumping",
-       monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ A with version := 3 }] }),
+       monotone_task_version_increases_only_on_acquisition 0 { tasks := [T] } { tasks := [{ A with version := 3 }] }),
     -- the mutant only `+1` catches: a grant that skips a version. Legal
     -- under a merely-increasing token, and it breaks fencing — a holder
     -- can no longer name the version that supersedes its own.
     ("monotone_task_version_increases_only_on_acquisition/skipped_a_version",
-       monotone_task_version_increases_only_on_acquisition { tasks := [T] } { tasks := [{ A with version := 5 }] }),
+       monotone_task_version_increases_only_on_acquisition 0 { tasks := [T] } { tasks := [{ A with version := 5 }] }),
     ("monotone_task_version_increases_only_on_acquisition/reset_on_release",
-       monotone_task_version_increases_only_on_acquisition { tasks := [A] } { tasks := [{ T with version := 0 }] }),
+       monotone_task_version_increases_only_on_acquisition 0 { tasks := [A] } { tasks := [{ T with version := 0 }] }),
     ("preserved_fulfilled_task/resurrected",
-       preserved_fulfilled_task { tasks := [F] } { tasks := [T] }),
+       preserved_fulfilled_task 0 { tasks := [F] } { tasks := [T] }),
     ("preserved_fulfilled_task/regained_a_lease",
-       preserved_fulfilled_task { tasks := [F] } { tasks := [{ F with pid := some "w" }] }),
+       preserved_fulfilled_task 0 { tasks := [F] } { tasks := [{ F with pid := some "w" }] }),
     ("preserved_promise_state_frozen_once_settled",
-       preserved_promise_state_frozen_once_settled { promises := [S0] } { promises := [{ S0 with state := .rejected }] }),
+       preserved_promise_state_frozen_once_settled 0 { promises := [S0] } { promises := [{ S0 with state := .rejected }] }),
     ("preserved_promise_settlement_is_one_way",
-       preserved_promise_settlement_is_one_way { promises := [S0] } { promises := [P] }),
+       preserved_promise_settlement_is_one_way 0 { promises := [S0] } { promises := [P] }),
     ("consistent_promise_settled_at_moves_with_state",
-       consistent_promise_settled_at_moves_with_state { promises := [P] } { promises := [{ P with state := .resolved }] }),
+       consistent_promise_settled_at_moves_with_state 0 { promises := [P] } { promises := [{ P with state := .resolved }] }),
     ("preserved_promise_value_until_settlement",
-       preserved_promise_value_until_settlement { promises := [P] } { promises := [{ P with value := { data := some "v" } }] }),
+       preserved_promise_value_until_settlement 0 { promises := [P] } { promises := [{ P with value := { data := some "v" } }] }),
     ("preserved_promise_no_duplicate_ids",
-       preserved_promise_no_duplicate_ids { } { promises := [P, P] }),
+       preserved_promise_no_duplicate_ids 0 { } { promises := [P, P] }),
     ("monotone_promise_callbacks_grow_while_pending",
-       monotone_promise_callbacks_grow_while_pending { promises := [{ P with callbacks := ["x"] }] } { promises := [P] }),
+       monotone_promise_callbacks_grow_while_pending 0 { promises := [{ P with callbacks := ["x"] }] } { promises := [P] }),
     ("monotone_promise_callbacks_shrink_once_settled",
-       monotone_promise_callbacks_shrink_once_settled { promises := [S0] } { promises := [{ S0 with callbacks := ["x"] }] }),
+       monotone_promise_callbacks_shrink_once_settled 0 { promises := [S0] } { promises := [{ S0 with callbacks := ["x"] }] }),
     ("monotone_promise_listeners_grow_while_pending",
-       monotone_promise_listeners_grow_while_pending { promises := [{ P with listeners := ["https://a"] }] } { promises := [P] }),
+       monotone_promise_listeners_grow_while_pending 0 { promises := [{ P with listeners := ["https://a"] }] } { promises := [P] }),
     ("monotone_promise_listeners_shrink_once_settled",
-       monotone_promise_listeners_shrink_once_settled { promises := [S0] } { promises := [{ S0 with listeners := ["https://a"] }] }),
+       monotone_promise_listeners_shrink_once_settled 0 { promises := [S0] } { promises := [{ S0 with listeners := ["https://a"] }] }),
     ("consistent_promise_state_edge_admissible",
-       consistent_promise_state_edge_admissible { promises := [S0] } { promises := [{ S0 with state := .rejected }] }),
+       consistent_promise_state_edge_admissible 0 { promises := [S0] } { promises := [{ S0 with state := .rejected }] }),
     ("consistent_task_state_edge_admissible",
-       consistent_task_state_edge_admissible { tasks := [T] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
+       consistent_task_state_edge_admissible 0 { tasks := [T] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("preserved_task_acquisition_only_from_pending",
-       preserved_task_acquisition_only_from_pending { tasks := [{ T with state := .suspended, retryAt := none }] } { tasks := [A] }),
+       preserved_task_acquisition_only_from_pending 0 { tasks := [{ T with state := .suspended, retryAt := none }] } { tasks := [A] }),
     ("preserved_task_suspension_only_from_acquired",
-       preserved_task_suspension_only_from_acquired { tasks := [T] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
+       preserved_task_suspension_only_from_acquired 0 { tasks := [T] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("preserved_task_halted_only_reenters_via_pending",
-       preserved_task_halted_only_reenters_via_pending { tasks := [{ T with state := .halted, retryAt := none }] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
+       preserved_task_halted_only_reenters_via_pending 0 { tasks := [{ T with state := .halted, retryAt := none }] } { tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("consistent_settlement_fulfils_task",
-       consistent_settlement_fulfils_task { promises := [PT], tasks := [T] } { promises := [PTs], tasks := [T] }),
+       consistent_settlement_fulfils_task 0 { promises := [PT], tasks := [T] } { promises := [PTs], tasks := [T] }),
     ("consistent_task_fulfilment_needs_settlement",
-       consistent_task_fulfilment_needs_settlement { promises := [PT], tasks := [T] } { promises := [PT], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
+       consistent_task_fulfilment_needs_settlement 0 { promises := [PT], tasks := [T] } { promises := [PT], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
     ("consistent_obligation_discharge_requires_settled",
-       consistent_obligation_discharge_requires_settled { promises := [{ P with callbacks := ["z"] }] } { promises := [P] }),
+       consistent_obligation_discharge_requires_settled 0 { promises := [{ P with callbacks := ["z"] }] } { promises := [P] }),
     ("consistent_callback_consumption_resumes_awaiter",
-       consistent_callback_consumption_resumes_awaiter
+       consistent_callback_consumption_resumes_awaiter 0
          { promises := [{ P with id := "c", callbacks := ["a"] }], tasks := [T] }
          { promises := [{ P with id := "c", state := .resolved, settledAt := some 20 }], tasks := [T] }),
     ("consistent_listener_consumption_enqueues_unblock",
-       consistent_listener_consumption_enqueues_unblock { promises := [{ S0 with listeners := ["https://l"] }] } { promises := [S0] }),
+       consistent_listener_consumption_enqueues_unblock 0 { promises := [{ S0 with listeners := ["https://l"] }] } { promises := [S0] }),
     ("consistent_wake_follows_callback_consumption",
-       consistent_wake_follows_callback_consumption
+       consistent_wake_follows_callback_consumption 0
          { promises := [{ P with id := "c", callbacks := ["a"] }], tasks := [{ T with state := .suspended, retryAt := none }] }
          { promises := [{ P with id := "c", callbacks := ["a"] }], tasks := [{ T with state := .pending, retryAt := some 30 }] }),
     ("consistent_suspension_registers_callback",
-       consistent_suspension_registers_callback { promises := [P], tasks := [A] } { promises := [P], tasks := [{ A with state := .suspended, pid := none, ttl := none, expiresAt := none }] }),
+       consistent_suspension_registers_callback 0 { promises := [P], tasks := [A] } { promises := [P], tasks := [{ A with state := .suspended, pid := none, ttl := none, expiresAt := none }] }),
     ("consistent_task_birth_couples_promise_birth",
-       consistent_task_birth_couples_promise_birth { } { tasks := [T] }),
+       consistent_task_birth_couples_promise_birth 0 { } { tasks := [T] }),
     ("monotone_outbox_keys_never_disappear",
-       monotone_outbox_keys_never_disappear { outbox := [ex] } { }),
+       monotone_outbox_keys_never_disappear 0 { outbox := [ex] } { }),
     ("consistent_new_execute_matches_task_and_target",
-       consistent_new_execute_matches_task_and_target { promises := [PT], tasks := [T] } { promises := [PT], tasks := [T], outbox := [{ address := "wrong", message := .execute "a" 3 }] }),
+       consistent_new_execute_matches_task_and_target 0 { promises := [PT], tasks := [T] } { promises := [PT], tasks := [T], outbox := [{ address := "wrong", message := .execute "a" 3 }] }),
     ("consistent_new_unblock_carries_stored_record",
-       consistent_new_unblock_carries_stored_record { promises := [P] } { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
+       consistent_new_unblock_carries_stored_record 0 { promises := [P] } { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
     ("consistent_new_unblock_discharges_its_listener",
-       consistent_new_unblock_discharges_its_listener
+       consistent_new_unblock_discharges_its_listener 0
          { promises := [{ S0 with listeners := ["https://l"] }] }
          { promises := [{ S0 with listeners := ["https://l"] }], outbox := [{ address := "https://l", message := .unblock S0.toRecord }] }),
     ("preserved_schedule_birth_fields_immutable",
-       preserved_schedule_birth_fields_immutable { schedules := [C] } { schedules := [{ C with cron := "@daily" }] }),
+       preserved_schedule_birth_fields_immutable 0 { schedules := [C] } { schedules := [{ C with cron := "@daily" }] }),
     ("consistent_promise_settlement_stamp/forged_timeout",
        consistent_promise_settlement_stamp 50 { promises := [P] } { promises := [{ P with state := .rejectedTimedout, settledAt := some 50 }] }),
     ("consistent_promise_settlement_stamp/verdict_before_deadline",
@@ -160,17 +160,17 @@ def stepMutants : List (String × Bool) :=
     ("consistent_new_promise_born_clean/born_in_the_future",
        consistent_new_promise_born_clean 5 { } { promises := [P] }),
     ("consistent_task_birth_state",
-       consistent_task_birth_state { } { tasks := [{ T with state := .suspended, retryAt := none }] }),
+       consistent_task_birth_state 0 { } { tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("consistent_task_lease_released_atomically",
-       consistent_task_lease_released_atomically { tasks := [A] } { tasks := [{ T with version := 4, pid := some "w" }] }),
+       consistent_task_lease_released_atomically 0 { tasks := [A] } { tasks := [{ T with version := 4, pid := some "w" }] }),
     ("preserved_task_lease_holder_stable",
-       preserved_task_lease_holder_stable { tasks := [A] } { tasks := [{ A with pid := some "w2" }] }),
+       preserved_task_lease_holder_stable 0 { tasks := [A] } { tasks := [{ A with pid := some "w2" }] }),
     ("consistent_task_lease_fields_move_together",
-       consistent_task_lease_fields_move_together { tasks := [A] } { tasks := [{ A with ttl := some 50 }] }),
+       consistent_task_lease_fields_move_together 0 { tasks := [A] } { tasks := [{ A with ttl := some 50 }] }),
     ("monotone_task_resumes_grow_or_clear",
-       monotone_task_resumes_grow_or_clear { tasks := [{ T with resumes := ["b"] }] } { tasks := [{ T with resumes := ["c"] }] }),
+       monotone_task_resumes_grow_or_clear 0 { tasks := [{ T with resumes := ["b"] }] } { tasks := [{ T with resumes := ["c"] }] }),
     ("consistent_task_resumes_cleared_only_on_dispatch_or_park",
-       consistent_task_resumes_cleared_only_on_dispatch_or_park { tasks := [{ A with resumes := ["b"] }] } { tasks := [{ T with version := 4 }] }),
+       consistent_task_resumes_cleared_only_on_dispatch_or_park 0 { tasks := [{ A with resumes := ["b"] }] } { tasks := [{ T with version := 4 }] }),
     ("consistent_task_acquisition_is_atomic",
        consistent_task_acquisition_is_atomic 40 { tasks := [T] } { tasks := [A] }),
     ("consistent_task_lease_deadline_is_now_plus_ttl",
@@ -182,9 +182,9 @@ def stepMutants : List (String × Bool) :=
     ("consistent_task_wake_records_resume",
        consistent_task_wake_records_resume 7 { tasks := [{ T with state := .suspended, retryAt := none }] } { tasks := [{ T with retryAt := some 7 }] }),
     ("consistent_task_state_edge_internal_admissible",
-       consistent_task_state_edge_internal_admissible { tasks := [T] } { tasks := [A] }),
+       consistent_task_state_edge_internal_admissible 0 { tasks := [T] } { tasks := [A] }),
     ("consistent_promise_state_edge_internal_admissible",
-       consistent_promise_state_edge_internal_admissible { promises := [P] } { promises := [{ P with state := .resolved, settledAt := some 20 }] }),
+       consistent_promise_state_edge_internal_admissible 0 { promises := [P] } { promises := [{ P with state := .resolved, settledAt := some 20 }] }),
     ("preserved_no_dead_dispatch",
        preserved_no_dead_dispatch 500
          { promises := [P], tasks := [{ T with state := .acquired, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none }] }
@@ -253,7 +253,7 @@ def allSteps (w : List (AStep × Nat)) : List (AStep × Nat × ServerState × Se
     ++ stepsWithA handleAP w AbstractModel.ServerState.init
 
 def internalWellFormedRun (w : List (AStep × Nat)) : Bool :=
-  (allSteps w).all (fun (st, _, a, b) => !isInternalStep st || internalWellFormed a b)
+  (allSteps w).all (fun (st, n, a, b) => !isInternalStep st || internalWellFormed n a b)
 
 theorem stage3_internal_sweep :
     ((seqsUpToA kernelsResp 3).map instantiateA).all internalWellFormedRun = true := by decide
@@ -266,7 +266,7 @@ theorem reaches_internal_steps :
     held everywhere they would be a restatement, not a constraint. -/
 theorem internal_laws_are_strictly_stronger :
     (((seqsUpToA kernelsResp 3).map instantiateA).any fun w =>
-      (allSteps w).any (fun (st, _, a, b) => !isInternalStep st && !internalWellFormed a b)) = true := by
+      (allSteps w).any (fun (st, n, a, b) => !isInternalStep st && !internalWellFormed n a b)) = true := by
   decide
 
 /-! ### The `.trans` gap, witnessed

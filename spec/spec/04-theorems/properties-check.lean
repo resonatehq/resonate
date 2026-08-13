@@ -104,7 +104,21 @@ theorem stage1_sweep :
 /-! ### Falsifiability
 
 One hand-built violator per entry. `mutants` pairs the entry's name
-with the verdict its violator receives; every verdict must be `false`. -/
+with the verdict its violator receives; every verdict must be `false`.
+
+A property is a function of the whole state, so a violator is a state —
+even when the defect is one bad row. These three build the smallest
+state that holds one object, which is what most of the violators below
+want. -/
+
+def onePromise (p : AbstractModel.PromiseObject) : AbstractModel.ServerState :=
+  { promises := [p] }
+
+def oneTask (t : AbstractModel.TaskObject) : AbstractModel.ServerState :=
+  { tasks := [t] }
+
+def oneSchedule (c : ServerModel.Schedule) : AbstractModel.ServerState :=
+  { schedules := [c] }
 
 open ServerModel AbstractModel.Properties in
 def mutants : List (String × Bool) :=
@@ -115,101 +129,101 @@ def mutants : List (String × Bool) :=
   let C : Schedule := { id := "c", cron := "*", promiseId := "p", promiseTimeout := 1,
                         promiseParam := {}, promiseTags := [], nextRunAt := 50, createdAt := 10 }
   [ ("well_formed_promise_created_at_lte_timeout_at",
-       well_formed_promise_created_at_lte_timeout_at { P with createdAt := 500 }),
+       well_formed_promise_created_at_lte_timeout_at 0 (onePromise { P with createdAt := 500 })),
     ("well_formed_promise_settled_at_lte_timeout_at",
-       well_formed_promise_settled_at_lte_timeout_at { P with settledAt := some 500 }),
+       well_formed_promise_settled_at_lte_timeout_at 0 (onePromise { P with settledAt := some 500 })),
     ("well_formed_promise_created_at_lte_settled_at",
-       well_formed_promise_created_at_lte_settled_at { P with settledAt := some 5 }),
+       well_formed_promise_created_at_lte_settled_at 0 (onePromise { P with settledAt := some 5 })),
     ("well_formed_promise_settled_at_iff_not_pending/settled_at_while_pending",
-       well_formed_promise_settled_at_iff_not_pending { P with settledAt := some 20 }),
+       well_formed_promise_settled_at_iff_not_pending 0 (onePromise { P with settledAt := some 20 })),
     ("well_formed_promise_settled_at_iff_not_pending/no_settled_at_when_settled",
-       well_formed_promise_settled_at_iff_not_pending { P with state := .resolved }),
+       well_formed_promise_settled_at_iff_not_pending 0 (onePromise { P with state := .resolved })),
     ("well_formed_promise_pending_has_no_value",
-       well_formed_promise_pending_has_no_value { P with value := { data := some "x" } }),
+       well_formed_promise_pending_has_no_value 0 (onePromise { P with value := { data := some "x" } })),
     ("well_formed_promise_timer_not_targeted",
-       well_formed_promise_timer_not_targeted { P with tags := [("resonate:timer","true"), ("resonate:target","w")] }),
+       well_formed_promise_timer_not_targeted 0 (onePromise { P with tags := [("resonate:timer","true"), ("resonate:target","w")] })),
     -- the forged verdict: a client names `rejectedTimedout` and the row
     -- is stamped at the wall clock instead of at the deadline.
     ("well_formed_promise_timedout_is_server_owned",
-       well_formed_promise_timedout_is_server_owned { P with state := .rejectedTimedout, settledAt := some 50 }),
+       well_formed_promise_timedout_is_server_owned 0 (onePromise { P with state := .rejectedTimedout, settledAt := some 50 })),
     ("well_formed_promise_callbacks_unique",
-       well_formed_promise_callbacks_unique { P with callbacks := ["x","x"] }),
+       well_formed_promise_callbacks_unique 0 (onePromise { P with callbacks := ["x","x"] })),
     ("well_formed_promise_listeners_unique",
-       well_formed_promise_listeners_unique { P with listeners := ["u","u"] }),
+       well_formed_promise_listeners_unique 0 (onePromise { P with listeners := ["u","u"] })),
     ("well_formed_promise_obligations_require_external",
-       well_formed_promise_obligations_require_external { P with tags := [], callbacks := ["x"] }),
+       well_formed_promise_obligations_require_external 0 (onePromise { P with tags := [], callbacks := ["x"] })),
     ("well_formed_promise_awaiter_is_not_self",
-       well_formed_promise_awaiter_is_not_self { P with callbacks := ["a"] }),
+       well_formed_promise_awaiter_is_not_self 0 (onePromise { P with callbacks := ["a"] })),
     ("well_formed_promise_created_at_lte_now",
-       well_formed_promise_created_at_lte_now 5 P),
+       well_formed_promise_created_at_lte_now 5 (onePromise P)),
     ("well_formed_promise_settled_at_lte_now",
-       well_formed_promise_settled_at_lte_now 5 { P with settledAt := some 20 }),
+       well_formed_promise_settled_at_lte_now 5 (onePromise { P with settledAt := some 20 })),
     ("well_formed_task_acquired_iff_has_pid",
-       well_formed_task_acquired_iff_has_pid { T with state := .acquired, ttl := some 1, expiresAt := some 1, retryAt := none }),
+       well_formed_task_acquired_iff_has_pid 0 (oneTask { T with state := .acquired, ttl := some 1, expiresAt := some 1, retryAt := none })),
     ("well_formed_task_acquired_iff_has_ttl",
-       well_formed_task_acquired_iff_has_ttl { T with state := .acquired, pid := some "w", expiresAt := some 1, retryAt := none }),
+       well_formed_task_acquired_iff_has_ttl 0 (oneTask { T with state := .acquired, pid := some "w", expiresAt := some 1, retryAt := none })),
     ("well_formed_task_acquired_iff_has_expires_at",
-       well_formed_task_acquired_iff_has_expires_at { T with state := .acquired, pid := some "w", ttl := some 1, retryAt := none }),
+       well_formed_task_acquired_iff_has_expires_at 0 (oneTask { T with state := .acquired, pid := some "w", ttl := some 1, retryAt := none })),
     ("well_formed_task_pending_iff_has_retry_at",
-       well_formed_task_pending_iff_has_retry_at { T with retryAt := none }),
+       well_formed_task_pending_iff_has_retry_at 0 (oneTask { T with retryAt := none })),
     ("well_formed_task_fulfilled_is_cleared",
-       well_formed_task_fulfilled_is_cleared { T with state := .fulfilled, pid := some "w" }),
+       well_formed_task_fulfilled_is_cleared 0 (oneTask { T with state := .fulfilled, pid := some "w" })),
     ("well_formed_task_suspended_is_cleared",
-       well_formed_task_suspended_is_cleared { T with state := .suspended, pid := some "w" }),
+       well_formed_task_suspended_is_cleared 0 (oneTask { T with state := .suspended, pid := some "w" })),
     ("well_formed_task_halted_is_cleared",
-       well_formed_task_halted_is_cleared { T with state := .halted, pid := some "w" }),
+       well_formed_task_halted_is_cleared 0 (oneTask { T with state := .halted, pid := some "w" })),
     ("well_formed_task_suspended_has_no_resumes",
-       well_formed_task_suspended_has_no_resumes { T with state := .suspended, resumes := ["b"] }),
+       well_formed_task_suspended_has_no_resumes 0 (oneTask { T with state := .suspended, resumes := ["b"] })),
     ("well_formed_task_resumes_unique",
-       well_formed_task_resumes_unique { T with resumes := ["b","b"] }),
+       well_formed_task_resumes_unique 0 (oneTask { T with resumes := ["b","b"] })),
     ("well_formed_schedule_promise_tags_not_timer_targeted",
-       well_formed_schedule_promise_tags_not_timer_targeted { C with promiseTags := [("resonate:timer","true"), ("resonate:target","w")] }),
+       well_formed_schedule_promise_tags_not_timer_targeted 0 (oneSchedule { C with promiseTags := [("resonate:timer","true"), ("resonate:target","w")] })),
     ("well_formed_schedule_created_at_lte_next_run_at",
-       well_formed_schedule_created_at_lte_next_run_at { C with nextRunAt := 1 }),
+       well_formed_schedule_created_at_lte_next_run_at 0 (oneSchedule { C with nextRunAt := 1 })),
     ("well_formed_schedule_created_at_lte_last_run_at",
-       well_formed_schedule_created_at_lte_last_run_at { C with lastRunAt := some 1 }),
+       well_formed_schedule_created_at_lte_last_run_at 0 (oneSchedule { C with lastRunAt := some 1 })),
     ("well_formed_schedule_last_run_at_lt_next_run_at",
-       well_formed_schedule_last_run_at_lt_next_run_at { C with lastRunAt := some 90 }),
+       well_formed_schedule_last_run_at_lt_next_run_at 0 (oneSchedule { C with lastRunAt := some 90 })),
     ("well_formed_promise_pending_created_before_deadline",
-       well_formed_promise_pending_created_before_deadline { P with createdAt := 100 }),
+       well_formed_promise_pending_created_before_deadline 0 (onePromise { P with createdAt := 100 })),
     ("well_formed_promise_deadline_verdict_matches_timer_tag",
-       well_formed_promise_deadline_verdict_matches_timer_tag { P with tags := [("resonate:timer","true")], state := .rejectedTimedout, settledAt := some 100 }),
+       well_formed_promise_deadline_verdict_matches_timer_tag 0 (onePromise { P with tags := [("resonate:timer","true")], state := .rejectedTimedout, settledAt := some 100 })),
     ("well_formed_promise_deadline_settlement_has_no_value",
-       well_formed_promise_deadline_settlement_has_no_value { P with state := .rejectedTimedout, settledAt := some 100, value := { data := some "boom" } }),
+       well_formed_promise_deadline_settlement_has_no_value 0 (onePromise { P with state := .rejectedTimedout, settledAt := some 100, value := { data := some "boom" } })),
     ("well_formed_task_acquired_version_positive",
-       well_formed_task_acquired_version_positive { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none }),
+       well_formed_task_acquired_version_positive 0 (oneTask { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none })),
     ("consistent_task_iff_targeted_promise/task_without_target",
-       consistent_task_iff_targeted_promise { promises := [P], tasks := [T] }),
+       consistent_task_iff_targeted_promise 0 { promises := [P], tasks := [T] }),
     ("consistent_task_iff_targeted_promise/target_without_task",
-       consistent_task_iff_targeted_promise { promises := [{ P with tags := [("resonate:target","w")] }] }),
+       consistent_task_iff_targeted_promise 0 { promises := [{ P with tags := [("resonate:target","w")] }] }),
     ("consistent_settled_promise_has_fulfilled_task",
-       consistent_settled_promise_has_fulfilled_task { promises := [{ P with state := .resolved, settledAt := some 20 }], tasks := [T] }),
+       consistent_settled_promise_has_fulfilled_task 0 { promises := [{ P with state := .resolved, settledAt := some 20 }], tasks := [T] }),
     ("consistent_callback_awaiter_is_targeted",
-       consistent_callback_awaiter_is_targeted { promises := [{ P with callbacks := ["z"] }] }),
+       consistent_callback_awaiter_is_targeted 0 { promises := [{ P with callbacks := ["z"] }] }),
     ("consistent_listener_addresses_deliverable",
-       consistent_listener_addresses_deliverable { promises := [{ P with listeners := ["not-an-address"] }] }),
+       consistent_listener_addresses_deliverable 0 { promises := [{ P with listeners := ["not-an-address"] }] }),
     ("consistent_outbox_execute_names_existing_task",
-       consistent_outbox_execute_names_existing_task { outbox := [{ address := "w", message := .execute "ghost" 0 }] }),
+       consistent_outbox_execute_names_existing_task 0 { outbox := [{ address := "w", message := .execute "ghost" 0 }] }),
     ("consistent_outbox_never_ahead",
-       consistent_outbox_never_ahead { tasks := [T], outbox := [{ address := "w", message := .execute "a" 9 }] }),
+       consistent_outbox_never_ahead 0 { tasks := [T], outbox := [{ address := "w", message := .execute "a" 9 }] }),
     ("consistent_outbox_execute_address_is_target_tag",
-       consistent_outbox_execute_address_is_target_tag { promises := [{ P with tags := [("resonate:target","w")] }], outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
+       consistent_outbox_execute_address_is_target_tag 0 { promises := [{ P with tags := [("resonate:target","w")] }], outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
     ("consistent_outbox_unblock_names_settled_promise",
-       consistent_outbox_unblock_names_settled_promise { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
+       consistent_outbox_unblock_names_settled_promise 0 { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
     ("consistent_outbox_unblock_address_deliverable",
-       consistent_outbox_unblock_address_deliverable { promises := [{ P with state := .resolved, settledAt := some 20 }], outbox := [{ address := "nope", message := .unblock ({ P with state := .resolved, settledAt := some 20 } : AbstractModel.PromiseObject).toRecord }] }),
+       consistent_outbox_unblock_address_deliverable 0 { promises := [{ P with state := .resolved, settledAt := some 20 }], outbox := [{ address := "nope", message := .unblock ({ P with state := .resolved, settledAt := some 20 } : AbstractModel.PromiseObject).toRecord }] }),
     ("consistent_settled_task_promise_settled",
-       consistent_settled_task_promise_settled { promises := [P], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
+       consistent_settled_task_promise_settled 0 { promises := [P], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
     ("consistent_suspended_task_holds_rung",
        consistent_suspended_task_holds_rung 50 { promises := [P], tasks := [{ T with state := .suspended, retryAt := none }] }),
     ("well_formed_store_promise_ids_unique",
-       well_formed_store_promise_ids_unique { promises := [P, P] }),
+       well_formed_store_promise_ids_unique 0 { promises := [P, P] }),
     ("well_formed_store_task_ids_unique",
-       well_formed_store_task_ids_unique { tasks := [T, T] }),
+       well_formed_store_task_ids_unique 0 { tasks := [T, T] }),
     ("well_formed_store_schedule_ids_unique",
-       well_formed_store_schedule_ids_unique { schedules := [C, C] }),
+       well_formed_store_schedule_ids_unique 0 { schedules := [C, C] }),
     ("well_formed_store_outbox_keys_unique",
-       well_formed_store_outbox_keys_unique { outbox := [{ address := "w", message := .execute "a" 1 }, { address := "w", message := .execute "a" 2 }] }) ]
+       well_formed_store_outbox_keys_unique 0 { outbox := [{ address := "w", message := .execute "a" 1 }, { address := "w", message := .execute "a" 2 }] }) ]
 
 /-- Every catalogue entry rejects its violator. A property that cannot
     fail is not a property. -/
@@ -304,7 +318,7 @@ def wGapTtlZero : List (AStep × Nat) :=
   [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
 
 theorem gap_task_ttl_positive_is_violable :
-    (trace wGapTtlZero).any (fun (_, s) => !well_formed_task_ttl_positive s) = true := by decide
+    (trace wGapTtlZero).any (fun (n, s) => !well_formed_task_ttl_positive n s) = true := by decide
 
 /-- `("resonate:target","")` passes `Tags.has`, so a task is created and
     its dispatch is enqueued to the empty address. -/
@@ -315,14 +329,14 @@ def wGapEmptyTarget : List (AStep × Nat) :=
     (.r6 "y" 9000, 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
-    (trace wGapEmptyTarget).any (fun (_, s) => !well_formed_promise_target_is_nonempty s) = true := by decide
+    (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide
 
 /-- And the gap is a gap, not an artefact of the predicate: an ORDINARY
     targeted promise satisfies it. `resonate:target = "w1"` names a
     worker group; a predicate that rejected it would be reporting itself,
     not the machine. -/
 theorem ordinary_target_is_nonempty :
-    (trace covInternal).all (fun (_, s) => well_formed_promise_target_is_nonempty s) = true := by decide
+    (trace covInternal).all (fun (n, s) => well_formed_promise_target_is_nonempty n s) = true := by decide
 
 theorem gap_empty_target_reaches_the_outbox :
     (trace wGapEmptyTarget).any (fun (_, s) => s.outbox.any (·.address == "")) = true := by decide
@@ -336,6 +350,6 @@ def wGapLateDelay : List (AStep × Nat) :=
   [ (.api (.promiseCreate { id := "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
 
 theorem gap_promise_delay_before_deadline_is_violable :
-    (trace wGapLateDelay).any (fun (_, s) => !well_formed_promise_delay_before_deadline s) = true := by decide
+    (trace wGapLateDelay).any (fun (n, s) => !well_formed_promise_delay_before_deadline n s) = true := by decide
 
 end Abstraction
