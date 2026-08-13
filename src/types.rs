@@ -291,6 +291,14 @@ fn validate_promise_create_data(
             return Err(validator::ValidationError::new("dot_in_origin")
                 .with_message("resonate:origin must not contain '.'".into()));
         }
+        // The origin is everything before an id's first ':' (see `origin()`), so
+        // an origin that itself holds one is unrepresentable: no id could ever
+        // split back to it. Rejecting it here keeps ':' reserved as the
+        // origin/lineage separator in caller-supplied ids.
+        if origin.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_origin")
+                .with_message("resonate:origin must not contain ':'".into()));
+        }
         if data.id != origin.as_str() && !data.id.starts_with(&format!("{}:", origin)) {
             return Err(validator::ValidationError::new("origin_prefix")
                 .with_message("Promise ID must be prefixed by resonate:origin".into()));
