@@ -1,5 +1,91 @@
 import «02-abstract».«state»
 
+/-!  # The conformance catalogue
+
+Every law an implementation of the Resonate protocol must satisfy,
+stated once, named, and evaluable. This file is meant to be readable on
+its own: if you are porting the protocol, you should be able to work
+from here without reading the machine it was derived from.
+
+## How to use it
+
+There are exactly two ways to check a law, and `Law` says which one a
+law needs:
+
+  `.state f`   check `f now s` at every state your server passes
+               through. A violation is a bad row or a bad join — the
+               store is in a shape the protocol does not admit.
+
+  `.trans f`   check `f now a b` at every pair of consecutive states,
+               where `b` is the state your server reached from `a` in
+               ONE step. A violation is a bad transaction — each state
+               is fine on its own and the move between them is not.
+
+`failures now s` and `stepFailures now a b` run the whole catalogue and
+return the NAMES of the laws that broke. Report the name: it is the same
+string in Lean, Go, TypeScript and Verus, so a violation means the same
+thing everywhere.
+
+Both walks take `now`. Most laws ignore it. The ones that do not are the
+ones that are only true relative to a clock reading — those are worth
+knowing about, because two of them were originally written without it
+and were wrong. `created_at ≤ settled_at`, for instance, is NOT a
+property of a single state: nothing stops a server creating a promise at
+instant 500 and settling it at instant 100. What is step-local is
+`created_at ≤ now` and `settled_at ≤ now`, from which the chain follows
+as long as your clock does not run backwards.
+
+## Reading a name
+
+    well_formed_<subject>_<claim>   one object, one state
+    consistent_<subject>_<claim>    several objects, one state
+    preserved_<subject>_<claim>     a field or record that must not move
+    monotone_<subject>_<claim>      something that may move one way only
+
+The predicate above each catalogue entry is the portable statement. The
+`Law` wrapper is dispatch, nothing more — in Go every `.state` law is a
+`func(s *ServerState) bool` and every `.trans` law is a
+`func(a, b *ServerState) bool`, and the lifting (`s.promises.all …`)
+becomes a loop.
+
+## What is NOT here
+
+  * **Provenance laws.** Two laws restrict what a BACKGROUND job may do
+    on its own initiative — it may not acquire, suspend, halt or
+    continue a task, and it may settle a promise only by its deadline.
+    They cannot be `.state` or `.trans`, because the two states do not
+    say what caused the move. They are at the bottom of this file, with
+    their own walk. Your implementation knows the cause and can check
+    them directly; we can only check them against the model.
+  * **Response laws.** Status codes and response bodies need the
+    request, which neither walk carries.
+  * **Liveness.** `04-theorems/liveness.lean`. Those quantify over
+    infinite traces and are not decidable, so they are `Prop`s with no
+    executable form — plus a bounded shadow that can refute them.
+  * **Algebraic laws** — create is idempotent, settle absorbs, halt then
+    continue equals release. Those are equations between programs, not
+    predicates over states.
+
+## Scope
+
+Stated against the COALESCED machine (`02-abstract`), where deadlines
+live on the objects and obligations are drained by internal steps. A
+server built like `03-concrete` — separate timer tables, a deferred
+queue — must satisfy these plus the representation laws in that
+directory. Where the two machines disagree, the coalesced statement is
+the protocol and the concrete one is an implementation choice.
+
+## Evidence
+
+The laws hold over every script of length ≤ 3 over an adversarial
+alphabet, under both read disciplines, at every state and every
+consecutive pair — `04-theorems/properties-check.lean` and
+`properties-step.lean`. Those files also carry the two checks that
+matter more than passing: every law rejects a hand-built violator, and
+the corpus actually reaches the states that make each guard bite. A law
+that cannot fail, or whose guard nothing satisfies, is not being
+checked. -/
+
 namespace AbstractModel
 namespace Properties
 
@@ -192,79 +278,6 @@ def consistent_settled_task_promise_settled (s : ServerState) : Bool :=
        | none => true
        | some p => p.state != .pending)
 
-/-! ### The catalogue as data
-
-Names travel with predicates so a failure reports which property broke
-rather than that something did. -/
-
-def promiseChecks : List (String × (PromiseObject → Bool)) :=
-  [ ("well_formed_promise_created_at_lte_timeout_at",        well_formed_promise_created_at_lte_timeout_at),
-    ("well_formed_promise_pending_created_before_deadline",  well_formed_promise_pending_created_before_deadline),
-    ("well_formed_promise_settled_at_lte_timeout_at",        well_formed_promise_settled_at_lte_timeout_at),
-    ("well_formed_promise_created_at_lte_settled_at",        well_formed_promise_created_at_lte_settled_at),
-    ("well_formed_promise_settled_at_iff_not_pending",       well_formed_promise_settled_at_iff_not_pending),
-    ("well_formed_promise_pending_has_no_value",             well_formed_promise_pending_has_no_value),
-    ("well_formed_promise_deadline_verdict_matches_timer_tag", well_formed_promise_deadline_verdict_matches_timer_tag),
-    ("well_formed_promise_deadline_settlement_has_no_value", well_formed_promise_deadline_settlement_has_no_value),
-    ("well_formed_promise_timer_not_targeted",               well_formed_promise_timer_not_targeted),
-    ("well_formed_promise_callbacks_unique",                 well_formed_promise_callbacks_unique),
-    ("well_formed_promise_listeners_unique",                 well_formed_promise_listeners_unique),
-    ("well_formed_promise_obligations_require_external",     well_formed_promise_obligations_require_external),
-    ("well_formed_promise_awaiter_is_not_self",              well_formed_promise_awaiter_is_not_self) ]
-
-def promiseClockChecks : List (String × (Nat → PromiseObject → Bool)) :=
-  [ ("well_formed_promise_created_at_lte_now",  well_formed_promise_created_at_lte_now),
-    ("well_formed_promise_settled_at_lte_now",  well_formed_promise_settled_at_lte_now) ]
-
-def taskChecks : List (String × (TaskObject → Bool)) :=
-  [ ("well_formed_task_acquired_iff_has_pid",        well_formed_task_acquired_iff_has_pid),
-    ("well_formed_task_acquired_iff_has_ttl",        well_formed_task_acquired_iff_has_ttl),
-    ("well_formed_task_acquired_iff_has_expires_at", well_formed_task_acquired_iff_has_expires_at),
-    ("well_formed_task_pending_iff_has_retry_at",    well_formed_task_pending_iff_has_retry_at),
-    ("well_formed_task_fulfilled_is_cleared",        well_formed_task_fulfilled_is_cleared),
-    ("well_formed_task_suspended_is_cleared",        well_formed_task_suspended_is_cleared),
-    ("well_formed_task_halted_is_cleared",           well_formed_task_halted_is_cleared),
-    ("well_formed_task_suspended_has_no_resumes",    well_formed_task_suspended_has_no_resumes),
-    ("well_formed_task_resumes_unique",              well_formed_task_resumes_unique),
-    ("well_formed_task_acquired_version_positive",   well_formed_task_acquired_version_positive) ]
-
-def scheduleChecks : List (String × (Schedule → Bool)) :=
-  [ ("well_formed_schedule_promise_tags_not_timer_targeted", well_formed_schedule_promise_tags_not_timer_targeted),
-    ("well_formed_schedule_created_at_lte_next_run_at",      well_formed_schedule_created_at_lte_next_run_at),
-    ("well_formed_schedule_created_at_lte_last_run_at",      well_formed_schedule_created_at_lte_last_run_at),
-    ("well_formed_schedule_last_run_at_lt_next_run_at",      well_formed_schedule_last_run_at_lt_next_run_at) ]
-
-def storeChecks : List (String × (ServerState → Bool)) :=
-  [ ("well_formed_store_promise_ids_unique",  well_formed_store_promise_ids_unique),
-    ("well_formed_store_task_ids_unique",     well_formed_store_task_ids_unique),
-    ("well_formed_store_schedule_ids_unique", well_formed_store_schedule_ids_unique),
-    ("well_formed_store_outbox_keys_unique",  well_formed_store_outbox_keys_unique),
-    ("consistent_task_iff_targeted_promise",              consistent_task_iff_targeted_promise),
-    ("consistent_settled_promise_has_fulfilled_task",     consistent_settled_promise_has_fulfilled_task),
-    ("consistent_callback_awaiter_is_targeted",           consistent_callback_awaiter_is_targeted),
-    ("consistent_listener_addresses_deliverable",         consistent_listener_addresses_deliverable),
-    ("consistent_outbox_execute_names_existing_task",     consistent_outbox_execute_names_existing_task),
-    ("consistent_outbox_never_ahead",                     consistent_outbox_never_ahead),
-    ("consistent_outbox_execute_address_is_target_tag",   consistent_outbox_execute_address_is_target_tag),
-    ("consistent_outbox_unblock_names_settled_promise",   consistent_outbox_unblock_names_settled_promise),
-    ("consistent_outbox_unblock_address_deliverable",     consistent_outbox_unblock_address_deliverable),
-    ("consistent_settled_task_promise_settled",           consistent_settled_task_promise_settled) ]
-
-def storeClockChecks : List (String × (Nat → ServerState → Bool)) :=
-  [ ("consistent_suspended_task_holds_rung", consistent_suspended_task_holds_rung) ]
-
-def failures (now : Nat) (s : ServerState) : List String :=
-  (promiseChecks.filterMap fun (n, f) => if s.promises.all f then none else some n)
-    ++ (promiseClockChecks.filterMap fun (n, f) =>
-          if s.promises.all (f now) then none else some n)
-    ++ (taskChecks.filterMap fun (n, f) => if s.tasks.all f then none else some n)
-    ++ (scheduleChecks.filterMap fun (n, f) => if s.schedules.all f then none else some n)
-    ++ (storeChecks.filterMap fun (n, f) => if f s then none else some n)
-    ++ (storeClockChecks.filterMap fun (n, f) => if f now s then none else some n)
-
-def well_formed (now : Nat) (s : ServerState) : Bool :=
-  (failures now s).isEmpty
-
 /-! ## Stage 3 — transition properties
 
 Predicates on a PAIR of states linked by one step. Everything in
@@ -306,14 +319,6 @@ def preserved_settled_promise_record (a b : ServerState) : Bool :=
        | some q =>
            q.state == p.state && q.settledAt == p.settledAt
              && q.value.data == p.value.data && q.value.headers == p.value.headers)
-
-def monotone_settled_promise_obligations_shrink (a b : ServerState) : Bool :=
-  a.promises.all fun p =>
-    p.state == .pending ||
-      (match b.promises.find? (·.id == p.id) with
-       | none => false
-       | some q =>
-           q.callbacks.all p.callbacks.contains && q.listeners.all p.listeners.contains)
 
 def monotone_promise_set_grows (a b : ServerState) : Bool :=
   a.promises.all fun p => b.promises.any (·.id == p.id)
@@ -872,54 +877,6 @@ def internalFailures (a b : ServerState) : List String :=
 
 def internalWellFormed (a b : ServerState) : Bool := (internalFailures a b).isEmpty
 
-def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
-  [ ("preserved_promise_birth_fields_immutable",  preserved_promise_birth_fields_immutable),
-    ("preserved_settled_promise_record",          preserved_settled_promise_record),
-    ("monotone_promise_set_grows",                monotone_promise_set_grows),
-    ("monotone_task_set_grows",                   monotone_task_set_grows),
-    ("preserved_task_version_increments_only_on_acquisition",
-       preserved_task_version_increments_only_on_acquisition),
-    ("preserved_fulfilled_task",                  preserved_fulfilled_task),
-    ("preserved_promise_state_frozen_once_settled", preserved_promise_state_frozen_once_settled),
-    ("preserved_promise_settlement_is_one_way",   preserved_promise_settlement_is_one_way),
-    ("consistent_promise_settled_at_moves_with_state", consistent_promise_settled_at_moves_with_state),
-    ("preserved_promise_value_until_settlement",  preserved_promise_value_until_settlement),
-    ("preserved_promise_no_duplicate_ids",        preserved_promise_no_duplicate_ids),
-    ("monotone_promise_callbacks_append_one_while_pending", monotone_promise_callbacks_append_one_while_pending),
-    ("monotone_promise_callbacks_drain_one_once_settled",   monotone_promise_callbacks_drain_one_once_settled),
-    ("monotone_promise_listeners_append_one_while_pending", monotone_promise_listeners_append_one_while_pending),
-    ("monotone_promise_listeners_drain_one_once_settled",   monotone_promise_listeners_drain_one_once_settled),
-    ("consistent_promise_state_edge_admissible",  consistent_promise_state_edge_admissible),
-    ("consistent_task_state_edge_admissible",     consistent_task_state_edge_admissible),
-    ("preserved_task_acquisition_only_from_pending", preserved_task_acquisition_only_from_pending),
-    ("preserved_task_suspension_only_from_acquired", preserved_task_suspension_only_from_acquired),
-    ("preserved_task_halted_only_reenters_via_pending", preserved_task_halted_only_reenters_via_pending),
-    ("consistent_settlement_fulfils_task",        consistent_settlement_fulfils_task),
-    ("consistent_task_fulfilment_needs_settlement", consistent_task_fulfilment_needs_settlement),
-    ("consistent_obligation_discharge_requires_settled", consistent_obligation_discharge_requires_settled),
-    ("consistent_callback_consumption_resumes_awaiter", consistent_callback_consumption_resumes_awaiter),
-    ("consistent_listener_consumption_enqueues_unblock", consistent_listener_consumption_enqueues_unblock),
-    ("consistent_wake_follows_callback_consumption", consistent_wake_follows_callback_consumption),
-    ("consistent_suspension_registers_callback",  consistent_suspension_registers_callback),
-    ("consistent_callback_additions_share_one_awaiter", consistent_callback_additions_share_one_awaiter),
-    ("consistent_at_most_one_obligation_discharged", consistent_at_most_one_obligation_discharged),
-    ("consistent_at_most_one_task_acquired",      consistent_at_most_one_task_acquired),
-    ("consistent_task_birth_couples_promise_birth", consistent_task_birth_couples_promise_birth),
-    ("monotone_outbox_keys_never_disappear",      monotone_outbox_keys_never_disappear),
-    ("consistent_new_execute_matches_task_and_target", consistent_new_execute_matches_task_and_target),
-    ("consistent_new_unblock_carries_stored_record", consistent_new_unblock_carries_stored_record),
-    ("consistent_new_unblock_discharges_its_listener", consistent_new_unblock_discharges_its_listener),
-    ("preserved_schedule_birth_fields_immutable", preserved_schedule_birth_fields_immutable),
-    ("consistent_schedule_change_is_single",      consistent_schedule_change_is_single),
-    ("consistent_schedule_removal_is_isolated",   consistent_schedule_removal_is_isolated),
-    ("consistent_task_birth_state",               consistent_task_birth_state),
-    ("consistent_task_lease_released_atomically", consistent_task_lease_released_atomically),
-    ("preserved_task_lease_holder_stable",        preserved_task_lease_holder_stable),
-    ("consistent_task_lease_fields_move_together", consistent_task_lease_fields_move_together),
-    ("consistent_task_resumes_buffer_or_clear",   consistent_task_resumes_buffer_or_clear),
-    ("consistent_task_resumes_cleared_only_on_dispatch_or_park",
-       consistent_task_resumes_cleared_only_on_dispatch_or_park) ]
-
 /-- The settlement dichotomy: a promise leaving `pending` did so either
     by a client verdict stamped at `now`, strictly before the deadline
     and never `rejectedTimedout`; or by its deadline, stamped AT the
@@ -963,24 +920,246 @@ def consistent_new_promise_born_clean (now : Nat) (a b : ServerState) : Bool :=
                   && (if q.isTimer then q.state == .resolved
                       else q.state == .rejectedTimedout))))
 
-def stepClockChecks : List (String × (Nat → ServerState → ServerState → Bool)) :=
-  [ ("preserved_no_dead_dispatch",            preserved_no_dead_dispatch),
-    ("preserved_execute_only_for_live_task",  preserved_execute_only_for_live_task),
-    ("consistent_promise_settlement_stamp",   consistent_promise_settlement_stamp),
-    ("preserved_timedout_is_server_owned",    preserved_timedout_is_server_owned),
-    ("consistent_new_promise_born_clean",     consistent_new_promise_born_clean),
-    ("consistent_task_acquisition_is_atomic", consistent_task_acquisition_is_atomic),
-    ("consistent_task_lease_deadline_is_now_plus_ttl", consistent_task_lease_deadline_is_now_plus_ttl),
-    ("consistent_task_pending_entry_arms_retry", consistent_task_pending_entry_arms_retry),
-    ("consistent_task_retry_rearm_only_when_due", consistent_task_retry_rearm_only_when_due),
-    ("consistent_task_wake_replaces_resumes",  consistent_task_wake_replaces_resumes) ]
+/-! # The catalogue
+
+Every law, in one list, each with the name an implementation should use
+when it reports a violation. `Law` says which walk the law needs and
+nothing else; the predicates above say what it means. -/
+
+inductive Law where
+  /-- Check at every state the implementation passes through. -/
+  | state (f : Nat → ServerState → Bool)
+  /-- Check at every pair of consecutive states — one step. -/
+  | trans (f : Nat → ServerState → ServerState → Bool)
+
+structure Named where
+  name : String
+  law  : Law
+
+def catalogue : List Named :=
+  [ { name := "well_formed_promise_created_at_lte_timeout_at"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_timeout_at) },
+    { name := "well_formed_promise_pending_created_before_deadline"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_pending_created_before_deadline) },
+    { name := "well_formed_promise_settled_at_lte_timeout_at"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_settled_at_lte_timeout_at) },
+    { name := "well_formed_promise_created_at_lte_settled_at"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_settled_at) },
+    { name := "well_formed_promise_settled_at_iff_not_pending"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_settled_at_iff_not_pending) },
+    { name := "well_formed_promise_pending_has_no_value"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_pending_has_no_value) },
+    { name := "well_formed_promise_deadline_verdict_matches_timer_tag"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_deadline_verdict_matches_timer_tag) },
+    { name := "well_formed_promise_deadline_settlement_has_no_value"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_deadline_settlement_has_no_value) },
+    { name := "well_formed_promise_timer_not_targeted"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_timer_not_targeted) },
+    { name := "well_formed_promise_callbacks_unique"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_callbacks_unique) },
+    { name := "well_formed_promise_listeners_unique"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_listeners_unique) },
+    { name := "well_formed_promise_obligations_require_external"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_obligations_require_external) },
+    { name := "well_formed_promise_awaiter_is_not_self"
+      , law  := .state (fun _ s => s.promises.all well_formed_promise_awaiter_is_not_self) },
+    { name := "well_formed_promise_created_at_lte_now"
+      , law  := .state (fun now s => s.promises.all (well_formed_promise_created_at_lte_now now)) },
+    { name := "well_formed_promise_settled_at_lte_now"
+      , law  := .state (fun now s => s.promises.all (well_formed_promise_settled_at_lte_now now)) },
+    { name := "well_formed_task_acquired_iff_has_pid"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_pid) },
+    { name := "well_formed_task_acquired_iff_has_ttl"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_ttl) },
+    { name := "well_formed_task_acquired_iff_has_expires_at"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_expires_at) },
+    { name := "well_formed_task_pending_iff_has_retry_at"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_pending_iff_has_retry_at) },
+    { name := "well_formed_task_fulfilled_is_cleared"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_fulfilled_is_cleared) },
+    { name := "well_formed_task_suspended_is_cleared"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_suspended_is_cleared) },
+    { name := "well_formed_task_halted_is_cleared"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_halted_is_cleared) },
+    { name := "well_formed_task_suspended_has_no_resumes"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_suspended_has_no_resumes) },
+    { name := "well_formed_task_resumes_unique"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_resumes_unique) },
+    { name := "well_formed_task_acquired_version_positive"
+      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_version_positive) },
+    { name := "well_formed_schedule_promise_tags_not_timer_targeted"
+      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_promise_tags_not_timer_targeted) },
+    { name := "well_formed_schedule_created_at_lte_next_run_at"
+      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_next_run_at) },
+    { name := "well_formed_schedule_created_at_lte_last_run_at"
+      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_last_run_at) },
+    { name := "well_formed_schedule_last_run_at_lt_next_run_at"
+      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_last_run_at_lt_next_run_at) },
+    { name := "well_formed_store_promise_ids_unique"
+      , law  := .state (fun _ s => well_formed_store_promise_ids_unique s) },
+    { name := "well_formed_store_task_ids_unique"
+      , law  := .state (fun _ s => well_formed_store_task_ids_unique s) },
+    { name := "well_formed_store_schedule_ids_unique"
+      , law  := .state (fun _ s => well_formed_store_schedule_ids_unique s) },
+    { name := "well_formed_store_outbox_keys_unique"
+      , law  := .state (fun _ s => well_formed_store_outbox_keys_unique s) },
+    { name := "consistent_task_iff_targeted_promise"
+      , law  := .state (fun _ s => consistent_task_iff_targeted_promise s) },
+    { name := "consistent_settled_promise_has_fulfilled_task"
+      , law  := .state (fun _ s => consistent_settled_promise_has_fulfilled_task s) },
+    { name := "consistent_callback_awaiter_is_targeted"
+      , law  := .state (fun _ s => consistent_callback_awaiter_is_targeted s) },
+    { name := "consistent_listener_addresses_deliverable"
+      , law  := .state (fun _ s => consistent_listener_addresses_deliverable s) },
+    { name := "consistent_outbox_execute_names_existing_task"
+      , law  := .state (fun _ s => consistent_outbox_execute_names_existing_task s) },
+    { name := "consistent_outbox_never_ahead"
+      , law  := .state (fun _ s => consistent_outbox_never_ahead s) },
+    { name := "consistent_outbox_execute_address_is_target_tag"
+      , law  := .state (fun _ s => consistent_outbox_execute_address_is_target_tag s) },
+    { name := "consistent_outbox_unblock_names_settled_promise"
+      , law  := .state (fun _ s => consistent_outbox_unblock_names_settled_promise s) },
+    { name := "consistent_outbox_unblock_address_deliverable"
+      , law  := .state (fun _ s => consistent_outbox_unblock_address_deliverable s) },
+    { name := "consistent_settled_task_promise_settled"
+      , law  := .state (fun _ s => consistent_settled_task_promise_settled s) },
+    { name := "consistent_suspended_task_holds_rung"
+      , law  := .state (consistent_suspended_task_holds_rung) },
+    { name := "preserved_promise_birth_fields_immutable"
+      , law  := .trans (fun _ a b => preserved_promise_birth_fields_immutable a b) },
+    { name := "preserved_settled_promise_record"
+      , law  := .trans (fun _ a b => preserved_settled_promise_record a b) },
+    { name := "monotone_promise_set_grows"
+      , law  := .trans (fun _ a b => monotone_promise_set_grows a b) },
+    { name := "monotone_task_set_grows"
+      , law  := .trans (fun _ a b => monotone_task_set_grows a b) },
+    { name := "preserved_task_version_increments_only_on_acquisition"
+      , law  := .trans (fun _ a b => preserved_task_version_increments_only_on_acquisition a b) },
+    { name := "preserved_fulfilled_task"
+      , law  := .trans (fun _ a b => preserved_fulfilled_task a b) },
+    { name := "preserved_promise_state_frozen_once_settled"
+      , law  := .trans (fun _ a b => preserved_promise_state_frozen_once_settled a b) },
+    { name := "preserved_promise_settlement_is_one_way"
+      , law  := .trans (fun _ a b => preserved_promise_settlement_is_one_way a b) },
+    { name := "consistent_promise_settled_at_moves_with_state"
+      , law  := .trans (fun _ a b => consistent_promise_settled_at_moves_with_state a b) },
+    { name := "preserved_promise_value_until_settlement"
+      , law  := .trans (fun _ a b => preserved_promise_value_until_settlement a b) },
+    { name := "preserved_promise_no_duplicate_ids"
+      , law  := .trans (fun _ a b => preserved_promise_no_duplicate_ids a b) },
+    { name := "monotone_promise_callbacks_append_one_while_pending"
+      , law  := .trans (fun _ a b => monotone_promise_callbacks_append_one_while_pending a b) },
+    { name := "monotone_promise_callbacks_drain_one_once_settled"
+      , law  := .trans (fun _ a b => monotone_promise_callbacks_drain_one_once_settled a b) },
+    { name := "monotone_promise_listeners_append_one_while_pending"
+      , law  := .trans (fun _ a b => monotone_promise_listeners_append_one_while_pending a b) },
+    { name := "monotone_promise_listeners_drain_one_once_settled"
+      , law  := .trans (fun _ a b => monotone_promise_listeners_drain_one_once_settled a b) },
+    { name := "consistent_promise_state_edge_admissible"
+      , law  := .trans (fun _ a b => consistent_promise_state_edge_admissible a b) },
+    { name := "consistent_task_state_edge_admissible"
+      , law  := .trans (fun _ a b => consistent_task_state_edge_admissible a b) },
+    { name := "preserved_task_acquisition_only_from_pending"
+      , law  := .trans (fun _ a b => preserved_task_acquisition_only_from_pending a b) },
+    { name := "preserved_task_suspension_only_from_acquired"
+      , law  := .trans (fun _ a b => preserved_task_suspension_only_from_acquired a b) },
+    { name := "preserved_task_halted_only_reenters_via_pending"
+      , law  := .trans (fun _ a b => preserved_task_halted_only_reenters_via_pending a b) },
+    { name := "consistent_settlement_fulfils_task"
+      , law  := .trans (fun _ a b => consistent_settlement_fulfils_task a b) },
+    { name := "consistent_task_fulfilment_needs_settlement"
+      , law  := .trans (fun _ a b => consistent_task_fulfilment_needs_settlement a b) },
+    { name := "consistent_obligation_discharge_requires_settled"
+      , law  := .trans (fun _ a b => consistent_obligation_discharge_requires_settled a b) },
+    { name := "consistent_callback_consumption_resumes_awaiter"
+      , law  := .trans (fun _ a b => consistent_callback_consumption_resumes_awaiter a b) },
+    { name := "consistent_listener_consumption_enqueues_unblock"
+      , law  := .trans (fun _ a b => consistent_listener_consumption_enqueues_unblock a b) },
+    { name := "consistent_wake_follows_callback_consumption"
+      , law  := .trans (fun _ a b => consistent_wake_follows_callback_consumption a b) },
+    { name := "consistent_suspension_registers_callback"
+      , law  := .trans (fun _ a b => consistent_suspension_registers_callback a b) },
+    { name := "consistent_callback_additions_share_one_awaiter"
+      , law  := .trans (fun _ a b => consistent_callback_additions_share_one_awaiter a b) },
+    { name := "consistent_at_most_one_obligation_discharged"
+      , law  := .trans (fun _ a b => consistent_at_most_one_obligation_discharged a b) },
+    { name := "consistent_at_most_one_task_acquired"
+      , law  := .trans (fun _ a b => consistent_at_most_one_task_acquired a b) },
+    { name := "consistent_task_birth_couples_promise_birth"
+      , law  := .trans (fun _ a b => consistent_task_birth_couples_promise_birth a b) },
+    { name := "monotone_outbox_keys_never_disappear"
+      , law  := .trans (fun _ a b => monotone_outbox_keys_never_disappear a b) },
+    { name := "consistent_new_execute_matches_task_and_target"
+      , law  := .trans (fun _ a b => consistent_new_execute_matches_task_and_target a b) },
+    { name := "consistent_new_unblock_carries_stored_record"
+      , law  := .trans (fun _ a b => consistent_new_unblock_carries_stored_record a b) },
+    { name := "consistent_new_unblock_discharges_its_listener"
+      , law  := .trans (fun _ a b => consistent_new_unblock_discharges_its_listener a b) },
+    { name := "preserved_schedule_birth_fields_immutable"
+      , law  := .trans (fun _ a b => preserved_schedule_birth_fields_immutable a b) },
+    { name := "consistent_schedule_change_is_single"
+      , law  := .trans (fun _ a b => consistent_schedule_change_is_single a b) },
+    { name := "consistent_schedule_removal_is_isolated"
+      , law  := .trans (fun _ a b => consistent_schedule_removal_is_isolated a b) },
+    { name := "consistent_task_birth_state"
+      , law  := .trans (fun _ a b => consistent_task_birth_state a b) },
+    { name := "consistent_task_lease_released_atomically"
+      , law  := .trans (fun _ a b => consistent_task_lease_released_atomically a b) },
+    { name := "preserved_task_lease_holder_stable"
+      , law  := .trans (fun _ a b => preserved_task_lease_holder_stable a b) },
+    { name := "consistent_task_lease_fields_move_together"
+      , law  := .trans (fun _ a b => consistent_task_lease_fields_move_together a b) },
+    { name := "consistent_task_resumes_buffer_or_clear"
+      , law  := .trans (fun _ a b => consistent_task_resumes_buffer_or_clear a b) },
+    { name := "consistent_task_resumes_cleared_only_on_dispatch_or_park"
+      , law  := .trans (fun _ a b => consistent_task_resumes_cleared_only_on_dispatch_or_park a b) },
+    { name := "preserved_no_dead_dispatch"
+      , law  := .trans (preserved_no_dead_dispatch) },
+    { name := "preserved_execute_only_for_live_task"
+      , law  := .trans (preserved_execute_only_for_live_task) },
+    { name := "consistent_promise_settlement_stamp"
+      , law  := .trans (consistent_promise_settlement_stamp) },
+    { name := "preserved_timedout_is_server_owned"
+      , law  := .trans (preserved_timedout_is_server_owned) },
+    { name := "consistent_new_promise_born_clean"
+      , law  := .trans (consistent_new_promise_born_clean) },
+    { name := "consistent_task_acquisition_is_atomic"
+      , law  := .trans (consistent_task_acquisition_is_atomic) },
+    { name := "consistent_task_lease_deadline_is_now_plus_ttl"
+      , law  := .trans (consistent_task_lease_deadline_is_now_plus_ttl) },
+    { name := "consistent_task_pending_entry_arms_retry"
+      , law  := .trans (consistent_task_pending_entry_arms_retry) },
+    { name := "consistent_task_retry_rearm_only_when_due"
+      , law  := .trans (consistent_task_retry_rearm_only_when_due) },
+    { name := "consistent_task_wake_replaces_resumes"
+      , law  := .trans (consistent_task_wake_replaces_resumes) } ]
+
+/-! ### The two walks
+
+`failures` for an implementation that can inspect a state; `stepFailures`
+for one that can inspect a state transition. Both report by NAME, so a
+violation names the law it broke. -/
+
+def failures (now : Nat) (s : ServerState) : List String :=
+  catalogue.filterMap fun l =>
+    match l.law with
+    | .state f => if f now s then none else some l.name
+    | .trans _ => none
+
+def well_formed (now : Nat) (s : ServerState) : Bool :=
+  (failures now s).isEmpty
 
 def stepFailures (now : Nat) (a b : ServerState) : List String :=
-  (stepChecks.filterMap fun (n, f) => if f a b then none else some n)
-    ++ (stepClockChecks.filterMap fun (n, f) => if f now a b then none else some n)
+  catalogue.filterMap fun l =>
+    match l.law with
+    | .state _ => none
+    | .trans f => if f now a b then none else some l.name
 
 def stepWellFormed (now : Nat) (a b : ServerState) : Bool :=
   (stepFailures now a b).isEmpty
+
+def stateLawCount : Nat := (catalogue.filter (fun l => match l.law with | .state _ => true | _ => false)).length
+def transLawCount : Nat := (catalogue.filter (fun l => match l.law with | .trans _ => true | _ => false)).length
 
 /-! ### Record projections
 
