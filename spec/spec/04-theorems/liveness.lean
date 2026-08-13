@@ -1,0 +1,285 @@
+import «04-theorems».«properties-step»
+
+namespace Abstraction
+
+open AbstractModel (ServerState PromiseObject TaskObject)
+
+/-!  # Stage 4 — liveness
+
+Everything before this file is safety: nothing bad is in the state,
+nothing bad happens across a step. None of it says anything ever
+happens at all. `ValidA` requires only `now ≤ next now`, so the trace
+in which `now = 0` forever and no internal step ever fires satisfies
+every theorem in `04-theorems` — and every one of the 101 predicates.
+
+Liveness needs two hypotheses the specification does not currently
+have, and they are stated here for the first time:
+
+  **`ClockDiverges`** — the clock is unbounded. Monotone is not enough;
+  a clock that stalls at 5 forever is monotone.
+
+  **`WeaklyFairOn`** — an internal step that stays enabled eventually
+  fires. Weak, not strong: a step that flickers may be starved.
+
+Neither is a property of the machine. Both are obligations on the
+environment, and an implementation discharges them with a clock and a
+scheduler. Stating them is what makes the difference between "the
+server may wake you" and "the server will".
+
+The three properties below are the ones worth having, and only the
+third is hard.  -/
+
+/-! ### Enabledness
+
+What a scheduler must be able to see. An internal step fired when not
+enabled is the identity — that is `preserved_state_under_disabled_*` —
+so enabledness is not needed for safety; it is needed to say that
+something is *owed*. -/
+
+def promiseAt (s : ServerState) (id : String) : Option PromiseObject :=
+  s.promises.find? (·.id == id)
+
+def taskAt (s : ServerState) (id : String) : Option TaskObject :=
+  s.tasks.find? (·.id == id)
+
+def enabledInternal (st : AStep) (now : Nat) (s : ServerState) : Bool :=
+  match st with
+  | .r1 id =>
+      match promiseAt s id with
+      | some p => p.state == .pending && p.timeoutAt ≤ now
+      | none   => false
+  | .r3 id addr =>
+      match promiseAt s id with
+      | some p => (p.project now).state != .pending && p.listeners.contains addr
+      | none   => false
+  | .r4 id x =>
+      match promiseAt s id with
+      | some p => (p.project now).state != .pending && p.callbacks.contains x
+      | none   => false
+  | .r5 id =>
+      match taskAt s id, (taskAt s id).bind (fun t => promiseAt s t.id) with
+      | some t, some p =>
+          t.state == .acquired && (t.expiresAt.getD (now + 1)) ≤ now
+            && (p.project now).state == .pending
+      | _, _ => false
+  | .r6 id _ =>
+      match taskAt s id, (taskAt s id).bind (fun t => promiseAt s t.id) with
+      | some t, some p =>
+          t.state == .pending && (t.retryAt.getD (now + 1)) ≤ now
+            && (p.project now).state == .pending
+      | _, _ => false
+  | .r7 id => (s.schedules.find? (·.id == id)).isSome
+  | _ => false
+
+/-! ### The environment's obligations -/
+
+/-- The clock is unbounded. Monotone is not enough. -/
+def ClockDiverges (tr : ATrace) : Prop :=
+  ∀ n : Nat, ∃ t : Nat, n ≤ (tr t).now
+
+/-- Weak fairness, restricted to a family of internal steps: one that is
+    continuously enabled from some instant on is eventually taken. -/
+def WeaklyFairOn (tr : ATrace) (family : AStep → Bool) : Prop :=
+  ∀ st : AStep, family st = true →
+    ∀ t : Nat,
+      (∀ u : Nat, t ≤ u → enabledInternal st (tr u).now (tr u).state = true) →
+      ∃ u : Nat, t ≤ u ∧ (tr u).req = st
+
+def isSettlementStep : AStep → Bool
+  | .r1 _ => true
+  | _     => false
+
+def isCallbackStep : AStep → Bool
+  | .r4 _ _ => true
+  | _       => false
+
+def isListenerStep : AStep → Bool
+  | .r3 _ _ => true
+  | _       => false
+
+/-! ### 1. Every promise eventually settles
+
+Not trivial, and not a consequence of time passing alone. A promise
+past its deadline reads as settled through any view, but the STORED
+promise stays pending until something touches it — and in the projected
+discipline nothing touches it except R1. So this needs the clock AND
+fairness on R1. -/
+
+def EventuallyEveryPromiseSettles : Prop :=
+  ∀ tr : ATrace, ValidA tr → ClockDiverges tr → WeaklyFairOn tr isSettlementStep →
+    ∀ (t : Nat) (id : String),
+      (promiseAt (tr t).state id).isSome →
+      ∃ u : Nat, t ≤ u ∧
+        ∀ p, promiseAt (tr u).state id = some p → p.state ≠ .pending
+
+/-! ### 2. Every task eventually fulfils
+
+A corollary, not a property. `consistent_settlement_fulfils_task` says
+the promise's settlement fulfils its co-keyed task IN THE SAME STEP, and
+`consistent_task_iff_targeted_promise` says every task has one. So (2)
+is (1) composed with the coupled write, and it is recorded here as an
+implication rather than as an axiom of its own — carrying it separately
+would be exactly the redundancy the catalogue refuses. -/
+
+def EventuallyEveryTaskFulfils : Prop :=
+  ∀ tr : ATrace, ValidA tr → ClockDiverges tr → WeaklyFairOn tr isSettlementStep →
+    ∀ (t : Nat) (id : String),
+      (taskAt (tr t).state id).isSome →
+      ∃ u : Nat, t ≤ u ∧
+        ∀ w, taskAt (tr u).state id = some w → w.state = .fulfilled
+
+theorem taskFulfilment_follows_from_promiseSettlement :
+    EventuallyEveryPromiseSettles → EventuallyEveryTaskFulfils := by
+  sorry
+
+/-! ### 3. The central thesis
+
+**When a promise settles, its awaiters are eventually resumed — unless
+the awaiter's own deadline wins the race first.**
+
+This is the property the whole protocol exists to provide, and it is
+the only one of the three that is not about time passing. The
+antecedent is a settled promise carrying `x` on its callback ledger.
+The conclusion has three parts, and all three matter:
+
+  * the ledger entry is DISCHARGED — `x` is no longer on it, so the
+    obligation cannot be silently retained;
+  * the awaiter LEARNS which promise woke it — `a ∈ resumes` — so the
+    wake is not an anonymous nudge;
+  * and it has LEFT `suspended`, so it is dispatchable again.
+
+The escape clause is the `.fulfilled` disjunct: TIMEOUT ALWAYS WINS. If
+the awaiter's own promise died while it waited, the timeout path owns
+its cleanup and the wake is void — which is exactly what
+`resumeOne` does when it lands on a fulfilled task.
+
+Fairness on R4 alone is not enough. The ledger is only reachable once
+the awaited promise is settled in STORE, so R1 must fire too; hence
+both families in the hypothesis. -/
+
+def EventuallyAwaiterResumed : Prop :=
+  ∀ tr : ATrace, ValidA tr → ClockDiverges tr →
+    WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isCallbackStep →
+    ∀ (t : Nat) (a x : String),
+      (∃ p, promiseAt (tr t).state a = some p ∧
+              p.state ≠ .pending ∧ p.callbacks.contains x = true) →
+      ∃ u : Nat, t ≤ u ∧
+        (∀ p, promiseAt (tr u).state a = some p → p.callbacks.contains x = false) ∧
+        (∀ w, taskAt (tr u).state x = some w →
+           w.state = .fulfilled ∨ (w.state ≠ .suspended ∧ w.resumes.contains a = true))
+
+/-- The listener analogue, and strictly weaker: a settled promise's
+    listeners are eventually notified. Weaker because delivery is
+    outside the model — this says the message is ENQUEUED, and nothing
+    in the machine can say it arrives. -/
+def EventuallyListenerNotified : Prop :=
+  ∀ tr : ATrace, ValidA tr → ClockDiverges tr →
+    WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isListenerStep →
+    ∀ (t : Nat) (a addr : String),
+      (∃ p, promiseAt (tr t).state a = some p ∧
+              p.state ≠ .pending ∧ p.listeners.contains addr = true) →
+      ∃ u : Nat, t ≤ u ∧
+        (tr u).state.outbox.any (fun e =>
+          e.address == addr &&
+            (match e.message with
+             | .unblock r => r.id == a && r.state != .pending
+             | .execute _ _ => false)) = true
+
+/-! ### The bounded, executable half
+
+The `Prop`s above are unprovable by `decide` — they quantify over
+infinite traces. What IS checkable is the finite core: fire every
+enabled internal step, repeatedly, and see whether the wake
+materializes. That is one fair round, iterated, and it is the exact
+finite shadow of `WeaklyFairOn`.
+
+If the bounded version FAILED, the unbounded one would be false, so
+this is a real refutation channel rather than decoration. -/
+
+def enabledSteps (now : Nat) (s : ServerState) : List AStep :=
+  (s.promises.flatMap fun p =>
+      (if enabledInternal (.r1 p.id) now s then [AStep.r1 p.id] else [])
+        ++ p.listeners.map (fun addr => AStep.r3 p.id addr)
+        ++ p.callbacks.map (fun x => AStep.r4 p.id x))
+    ++ (s.tasks.flatMap fun t =>
+          (if enabledInternal (.r5 t.id) now s then [AStep.r5 t.id] else [])
+            ++ (if enabledInternal (.r6 t.id (now + 1000)) now s
+                then [AStep.r6 t.id (now + 1000)] else []))
+
+def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
+  (enabledSteps now s).foldl
+    (fun acc st => if enabledInternal st now acc then (stepOfA st now acc).2 else acc) s
+
+def fairRounds : Nat → Nat → ServerState → ServerState
+  | 0,     _,   s => s
+  | k + 1, now, s => fairRounds k now (fireAllEnabled now s)
+
+/-- After enough fair rounds at a fixed instant: no settled promise
+    retains an obligation, and every awaiter has either learned its
+    wake or died. The finite shadow of `EventuallyAwaiterResumed`. -/
+def wakeMaterializes (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
+  let s := fairRounds 6 horizon (runFinA w).2
+  s.promises.all fun p =>
+    (p.project horizon).state == .pending ||
+      (p.callbacks.isEmpty && p.listeners.isEmpty)
+
+def resumeRecorded (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
+  let s0 := (runFinA w).2
+  let s  := fairRounds 6 horizon s0
+  s0.promises.all fun p =>
+    p.callbacks.all fun x =>
+      match taskAt s x with
+      | none   => true
+      | some u => u.state == .fulfilled
+                    || (u.state != .suspended && u.resumes.contains p.id)
+
+set_option maxRecDepth 100000
+set_option maxHeartbeats 4000000
+
+open Equivalence (extTags tgtTags)
+
+/-- The wake, end to end: a suspended awaiter, a settled awaited, and
+    nothing but internal steps between them. -/
+def wWake : List (AStep × Nat) :=
+  [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
+    (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200) ]
+
+example : wakeMaterializes wWake 300 := by decide
+example : resumeRecorded wWake 300 := by decide
+
+/-- TIMEOUT ALWAYS WINS: the awaiter's own promise dies while it waits.
+    The obligation is still discharged, and the escape clause is the one
+    that fires — the task reads fulfilled, not resumed. -/
+def wWakeTimedOut : List (AStep × Nat) :=
+  [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
+    (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200) ]
+
+example : wakeMaterializes wWakeTimedOut 300 := by decide
+example : resumeRecorded wWakeTimedOut 300 := by decide
+
+/-- **Fairness is load-bearing, not decoration.** The same script with
+    no internal step fired retains the obligation forever: the ledger
+    still names `x` and the task is still suspended. This is the
+    counterexample that makes `WeaklyFairOn` a hypothesis rather than a
+    formality. -/
+theorem wake_requires_fairness :
+    ((runFinA wWake).2.promises.any (fun p => p.callbacks.contains "x")
+      && (runFinA wWake).2.tasks.any (fun t => t.state == .suspended)) = true := by
+  decide
+
+/-- The bounded wake over the whole corpus: every script, both
+    disciplines, then fair rounds. -/
+theorem boundedWakeSweep :
+    (((seqsUpToA kernelsResp 3).map instantiateA).all
+      (fun w => wakeMaterializes w 9000 && resumeRecorded w 9000)) = true := by
+  decide
+
+theorem boundedWakeBattery :
+    (battery.all (fun w => wakeMaterializes w 9000 && resumeRecorded w 9000)) = true := by
+  decide
+
+end Abstraction
