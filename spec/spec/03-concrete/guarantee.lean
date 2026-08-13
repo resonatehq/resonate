@@ -63,7 +63,7 @@ Once the antecedent reads the true await graph, a single-state
 implication "awaits ∧ settled → some stage holds" is a TAUTOLOGY: for a
 suspended task, the await evidence IS stage 0 or stage 1. The content
 of the guarantee is therefore not a state predicate but a conservation
-law across transitions -- no handler may DROP a rung without producing
+property across transitions -- no handler may DROP a rung without producing
 the next stage or waking the task -- plus one non-trivial state
 invariant: no suspended task with a live own promise is orphaned
 (rungless). Formally:

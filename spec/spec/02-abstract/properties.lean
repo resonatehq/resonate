@@ -2,15 +2,15 @@ import «02-abstract».«state»
 
 /-!  # The conformance catalogue
 
-Every law an implementation of the Resonate protocol must satisfy,
+Every property an implementation of the Resonate protocol must satisfy,
 stated once, named, and evaluable. This file is meant to be readable on
 its own: if you are porting the protocol, you should be able to work
 from here without reading the machine it was derived from.
 
 ## How to use it
 
-There are exactly two ways to check a law, and `Law` says which one a
-law needs:
+There are exactly two ways to check a property, and `Property` says which one a
+property needs:
 
   `.state f`   check `f now s` at every state your server passes
                through. A violation is a bad row or a bad join — the
@@ -22,11 +22,11 @@ law needs:
                is fine on its own and the move between them is not.
 
 `failures now s` and `stepFailures now a b` run the whole catalogue and
-return the NAMES of the laws that broke. Report the name: it is the same
+return the NAMES of the properties that broke. Report the name: it is the same
 string in Lean, Go, TypeScript and Verus, so a violation means the same
 thing everywhere.
 
-Both walks take `now`. Most laws ignore it. The ones that do not are the
+Both walks take `now`. Most properties ignore it. The ones that do not are the
 ones that are only true relative to a clock reading — those are worth
 knowing about, because two of them were originally written without it
 and were wrong. `created_at ≤ settled_at`, for instance, is NOT a
@@ -43,26 +43,26 @@ as long as your clock does not run backwards.
     monotone_<subject>_<claim>      something that may move one way only
 
 The predicate above each catalogue entry is the portable statement. The
-`Law` wrapper is dispatch, nothing more — in Go every `.state` law is a
-`func(s *ServerState) bool` and every `.trans` law is a
+`Property` wrapper is dispatch, nothing more — in Go every `.state` property is a
+`func(s *ServerState) bool` and every `.trans` property is a
 `func(a, b *ServerState) bool`, and the lifting (`s.promises.all …`)
 becomes a loop.
 
 ## What is NOT here
 
-  * **Provenance laws.** Two laws restrict what a BACKGROUND job may do
+  * **Provenance properties.** Two properties restrict what a BACKGROUND job may do
     on its own initiative — it may not acquire, suspend, halt or
     continue a task, and it may settle a promise only by its deadline.
     They cannot be `.state` or `.trans`, because the two states do not
     say what caused the move. They are at the bottom of this file, with
     their own walk. Your implementation knows the cause and can check
     them directly; we can only check them against the model.
-  * **Response laws.** Status codes and response bodies need the
+  * **Response properties.** Status codes and response bodies need the
     request, which neither walk carries.
   * **Liveness.** `04-theorems/liveness.lean`. Those quantify over
     infinite traces and are not decidable, so they are `Prop`s with no
     executable form — plus a bounded shadow that can refute them.
-  * **Algebraic laws** — create is idempotent, settle absorbs, halt then
+  * **Algebraic properties** — create is idempotent, settle absorbs, halt then
     continue equals release. Those are equations between programs, not
     predicates over states.
 
@@ -71,18 +71,18 @@ becomes a loop.
 Stated against the COALESCED machine (`02-abstract`), where deadlines
 live on the objects and obligations are drained by internal steps. A
 server built like `03-concrete` — separate timer tables, a deferred
-queue — must satisfy these plus the representation laws in that
+queue — must satisfy these plus the representation properties in that
 directory. Where the two machines disagree, the coalesced statement is
 the protocol and the concrete one is an implementation choice.
 
 ## Evidence
 
-The laws hold over every script of length ≤ 3 over an adversarial
+The properties hold over every script of length ≤ 3 over an adversarial
 alphabet, under both read disciplines, at every state and every
 consecutive pair — `04-theorems/properties-check.lean` and
 `properties-step.lean`. Those files also carry the two checks that
-matter more than passing: every law rejects a hand-built violator, and
-the corpus actually reaches the states that make each guard bite. A law
+matter more than passing: every property rejects a hand-built violator, and
+the corpus actually reaches the states that make each guard bite. A property
 that cannot fail, or whose guard nothing satisfies, is not being
 checked. -/
 
@@ -298,7 +298,7 @@ promises, which is how a wake is discharged. What is frozen is exactly
 promise never changes again" is true on the wire and false in the store.
 
 `preserved_task_version_increments_only_on_acquisition` is the fencing
-law. Version moves by exactly one, only on `pending → acquired`, and by
+property. Version moves by exactly one, only on `pending → acquired`, and by
 nothing on any other transition — release, halt, continue, suspend,
 fulfilment, lease expiry, retry, wake. `monotone_task_version_never_decreases`
 is not carried separately: it follows. -/
@@ -326,7 +326,7 @@ def monotone_promise_set_grows (a b : ServerState) : Bool :=
 def monotone_task_set_grows (a b : ServerState) : Bool :=
   a.tasks.all fun t => b.tasks.any (·.id == t.id)
 
-/-- The fencing law: a task's version rises by exactly one on
+/-- The fencing property: a task's version rises by exactly one on
     `pending → acquired`, and does not move on any other transition. -/
 def preserved_task_version_increments_only_on_acquisition (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -378,7 +378,7 @@ def preserved_execute_only_for_live_task (now : Nat) (a b : ServerState) : Bool 
 /-! ## Stage 3 — field-level evolution
 
 Derived per field from every write site, then evaluated. The obligation
-laws split on the POST-state, not the pre-state: `processCallback`
+properties split on the POST-state, not the pre-state: `processCallback`
 materializes a deadline AND drains a callback in the same step, so a
 promise pending before and settled after loses one. -/
 
@@ -690,11 +690,11 @@ def consistent_new_unblock_discharges_its_listener (a b : ServerState) : Bool :=
 
 /-! ## Stage 3 — schedules
 
-Only the laws that hold unconditionally. The ordering laws
+Only the properties that hold unconditionally. The ordering properties
 (`nextRunAt` never regresses, the run marks advance together) are true
 of the protocol but not of the model: they need axioms on `nextCron`
 and `occurrences`, which are `opaque` with no value. They are not
-carried here, because a law that passes only because nothing reaches it
+carried here, because a property that passes only because nothing reaches it
 is not being checked. -/
 
 def preserved_schedule_birth_fields_immutable (a b : ServerState) : Bool :=
@@ -832,7 +832,7 @@ def consistent_task_wake_replaces_resumes (now : Nat) (a b : ServerState) : Bool
         !(t.state == .suspended && u.state == .pending)
         || (u.resumes.length == 1 && u.retryAt == some now && u.version == t.version)
 
-/-! ## The sweeper laws
+/-! ## The sweeper properties
 
 Applied to INTERNAL steps only, and false on request steps — which is
 what makes them strictly stronger than the general edge tables. A
@@ -922,11 +922,11 @@ def consistent_new_promise_born_clean (now : Nat) (a b : ServerState) : Bool :=
 
 /-! # The catalogue
 
-Every law, in one list, each with the name an implementation should use
-when it reports a violation. `Law` says which walk the law needs and
+Every property, in one list, each with the name an implementation should use
+when it reports a violation. `Property` says which walk the property needs and
 nothing else; the predicates above say what it means. -/
 
-inductive Law where
+inductive Property where
   /-- Check at every state the implementation passes through. -/
   | state (f : Nat → ServerState → Bool)
   /-- Check at every pair of consecutive states — one step. -/
@@ -934,215 +934,215 @@ inductive Law where
 
 structure Named where
   name : String
-  law  : Law
+  property : Property
 
 def catalogue : List Named :=
   [ { name := "well_formed_promise_created_at_lte_timeout_at"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_timeout_at) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_timeout_at) },
     { name := "well_formed_promise_pending_created_before_deadline"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_pending_created_before_deadline) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_pending_created_before_deadline) },
     { name := "well_formed_promise_settled_at_lte_timeout_at"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_settled_at_lte_timeout_at) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_settled_at_lte_timeout_at) },
     { name := "well_formed_promise_created_at_lte_settled_at"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_settled_at) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_created_at_lte_settled_at) },
     { name := "well_formed_promise_settled_at_iff_not_pending"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_settled_at_iff_not_pending) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_settled_at_iff_not_pending) },
     { name := "well_formed_promise_pending_has_no_value"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_pending_has_no_value) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_pending_has_no_value) },
     { name := "well_formed_promise_deadline_verdict_matches_timer_tag"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_deadline_verdict_matches_timer_tag) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_deadline_verdict_matches_timer_tag) },
     { name := "well_formed_promise_deadline_settlement_has_no_value"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_deadline_settlement_has_no_value) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_deadline_settlement_has_no_value) },
     { name := "well_formed_promise_timer_not_targeted"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_timer_not_targeted) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_timer_not_targeted) },
     { name := "well_formed_promise_callbacks_unique"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_callbacks_unique) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_callbacks_unique) },
     { name := "well_formed_promise_listeners_unique"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_listeners_unique) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_listeners_unique) },
     { name := "well_formed_promise_obligations_require_external"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_obligations_require_external) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_obligations_require_external) },
     { name := "well_formed_promise_awaiter_is_not_self"
-      , law  := .state (fun _ s => s.promises.all well_formed_promise_awaiter_is_not_self) },
+      , property := .state (fun _ s => s.promises.all well_formed_promise_awaiter_is_not_self) },
     { name := "well_formed_promise_created_at_lte_now"
-      , law  := .state (fun now s => s.promises.all (well_formed_promise_created_at_lte_now now)) },
+      , property := .state (fun now s => s.promises.all (well_formed_promise_created_at_lte_now now)) },
     { name := "well_formed_promise_settled_at_lte_now"
-      , law  := .state (fun now s => s.promises.all (well_formed_promise_settled_at_lte_now now)) },
+      , property := .state (fun now s => s.promises.all (well_formed_promise_settled_at_lte_now now)) },
     { name := "well_formed_task_acquired_iff_has_pid"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_pid) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_pid) },
     { name := "well_formed_task_acquired_iff_has_ttl"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_ttl) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_ttl) },
     { name := "well_formed_task_acquired_iff_has_expires_at"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_expires_at) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_iff_has_expires_at) },
     { name := "well_formed_task_pending_iff_has_retry_at"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_pending_iff_has_retry_at) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_pending_iff_has_retry_at) },
     { name := "well_formed_task_fulfilled_is_cleared"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_fulfilled_is_cleared) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_fulfilled_is_cleared) },
     { name := "well_formed_task_suspended_is_cleared"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_suspended_is_cleared) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_suspended_is_cleared) },
     { name := "well_formed_task_halted_is_cleared"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_halted_is_cleared) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_halted_is_cleared) },
     { name := "well_formed_task_suspended_has_no_resumes"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_suspended_has_no_resumes) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_suspended_has_no_resumes) },
     { name := "well_formed_task_resumes_unique"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_resumes_unique) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_resumes_unique) },
     { name := "well_formed_task_acquired_version_positive"
-      , law  := .state (fun _ s => s.tasks.all well_formed_task_acquired_version_positive) },
+      , property := .state (fun _ s => s.tasks.all well_formed_task_acquired_version_positive) },
     { name := "well_formed_schedule_promise_tags_not_timer_targeted"
-      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_promise_tags_not_timer_targeted) },
+      , property := .state (fun _ s => s.schedules.all well_formed_schedule_promise_tags_not_timer_targeted) },
     { name := "well_formed_schedule_created_at_lte_next_run_at"
-      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_next_run_at) },
+      , property := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_next_run_at) },
     { name := "well_formed_schedule_created_at_lte_last_run_at"
-      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_last_run_at) },
+      , property := .state (fun _ s => s.schedules.all well_formed_schedule_created_at_lte_last_run_at) },
     { name := "well_formed_schedule_last_run_at_lt_next_run_at"
-      , law  := .state (fun _ s => s.schedules.all well_formed_schedule_last_run_at_lt_next_run_at) },
+      , property := .state (fun _ s => s.schedules.all well_formed_schedule_last_run_at_lt_next_run_at) },
     { name := "well_formed_store_promise_ids_unique"
-      , law  := .state (fun _ s => well_formed_store_promise_ids_unique s) },
+      , property := .state (fun _ s => well_formed_store_promise_ids_unique s) },
     { name := "well_formed_store_task_ids_unique"
-      , law  := .state (fun _ s => well_formed_store_task_ids_unique s) },
+      , property := .state (fun _ s => well_formed_store_task_ids_unique s) },
     { name := "well_formed_store_schedule_ids_unique"
-      , law  := .state (fun _ s => well_formed_store_schedule_ids_unique s) },
+      , property := .state (fun _ s => well_formed_store_schedule_ids_unique s) },
     { name := "well_formed_store_outbox_keys_unique"
-      , law  := .state (fun _ s => well_formed_store_outbox_keys_unique s) },
+      , property := .state (fun _ s => well_formed_store_outbox_keys_unique s) },
     { name := "consistent_task_iff_targeted_promise"
-      , law  := .state (fun _ s => consistent_task_iff_targeted_promise s) },
+      , property := .state (fun _ s => consistent_task_iff_targeted_promise s) },
     { name := "consistent_settled_promise_has_fulfilled_task"
-      , law  := .state (fun _ s => consistent_settled_promise_has_fulfilled_task s) },
+      , property := .state (fun _ s => consistent_settled_promise_has_fulfilled_task s) },
     { name := "consistent_callback_awaiter_is_targeted"
-      , law  := .state (fun _ s => consistent_callback_awaiter_is_targeted s) },
+      , property := .state (fun _ s => consistent_callback_awaiter_is_targeted s) },
     { name := "consistent_listener_addresses_deliverable"
-      , law  := .state (fun _ s => consistent_listener_addresses_deliverable s) },
+      , property := .state (fun _ s => consistent_listener_addresses_deliverable s) },
     { name := "consistent_outbox_execute_names_existing_task"
-      , law  := .state (fun _ s => consistent_outbox_execute_names_existing_task s) },
+      , property := .state (fun _ s => consistent_outbox_execute_names_existing_task s) },
     { name := "consistent_outbox_never_ahead"
-      , law  := .state (fun _ s => consistent_outbox_never_ahead s) },
+      , property := .state (fun _ s => consistent_outbox_never_ahead s) },
     { name := "consistent_outbox_execute_address_is_target_tag"
-      , law  := .state (fun _ s => consistent_outbox_execute_address_is_target_tag s) },
+      , property := .state (fun _ s => consistent_outbox_execute_address_is_target_tag s) },
     { name := "consistent_outbox_unblock_names_settled_promise"
-      , law  := .state (fun _ s => consistent_outbox_unblock_names_settled_promise s) },
+      , property := .state (fun _ s => consistent_outbox_unblock_names_settled_promise s) },
     { name := "consistent_outbox_unblock_address_deliverable"
-      , law  := .state (fun _ s => consistent_outbox_unblock_address_deliverable s) },
+      , property := .state (fun _ s => consistent_outbox_unblock_address_deliverable s) },
     { name := "consistent_settled_task_promise_settled"
-      , law  := .state (fun _ s => consistent_settled_task_promise_settled s) },
+      , property := .state (fun _ s => consistent_settled_task_promise_settled s) },
     { name := "consistent_suspended_task_holds_rung"
-      , law  := .state (consistent_suspended_task_holds_rung) },
+      , property := .state (consistent_suspended_task_holds_rung) },
     { name := "preserved_promise_birth_fields_immutable"
-      , law  := .trans (fun _ a b => preserved_promise_birth_fields_immutable a b) },
+      , property := .trans (fun _ a b => preserved_promise_birth_fields_immutable a b) },
     { name := "preserved_settled_promise_record"
-      , law  := .trans (fun _ a b => preserved_settled_promise_record a b) },
+      , property := .trans (fun _ a b => preserved_settled_promise_record a b) },
     { name := "monotone_promise_set_grows"
-      , law  := .trans (fun _ a b => monotone_promise_set_grows a b) },
+      , property := .trans (fun _ a b => monotone_promise_set_grows a b) },
     { name := "monotone_task_set_grows"
-      , law  := .trans (fun _ a b => monotone_task_set_grows a b) },
+      , property := .trans (fun _ a b => monotone_task_set_grows a b) },
     { name := "preserved_task_version_increments_only_on_acquisition"
-      , law  := .trans (fun _ a b => preserved_task_version_increments_only_on_acquisition a b) },
+      , property := .trans (fun _ a b => preserved_task_version_increments_only_on_acquisition a b) },
     { name := "preserved_fulfilled_task"
-      , law  := .trans (fun _ a b => preserved_fulfilled_task a b) },
+      , property := .trans (fun _ a b => preserved_fulfilled_task a b) },
     { name := "preserved_promise_state_frozen_once_settled"
-      , law  := .trans (fun _ a b => preserved_promise_state_frozen_once_settled a b) },
+      , property := .trans (fun _ a b => preserved_promise_state_frozen_once_settled a b) },
     { name := "preserved_promise_settlement_is_one_way"
-      , law  := .trans (fun _ a b => preserved_promise_settlement_is_one_way a b) },
+      , property := .trans (fun _ a b => preserved_promise_settlement_is_one_way a b) },
     { name := "consistent_promise_settled_at_moves_with_state"
-      , law  := .trans (fun _ a b => consistent_promise_settled_at_moves_with_state a b) },
+      , property := .trans (fun _ a b => consistent_promise_settled_at_moves_with_state a b) },
     { name := "preserved_promise_value_until_settlement"
-      , law  := .trans (fun _ a b => preserved_promise_value_until_settlement a b) },
+      , property := .trans (fun _ a b => preserved_promise_value_until_settlement a b) },
     { name := "preserved_promise_no_duplicate_ids"
-      , law  := .trans (fun _ a b => preserved_promise_no_duplicate_ids a b) },
+      , property := .trans (fun _ a b => preserved_promise_no_duplicate_ids a b) },
     { name := "monotone_promise_callbacks_append_one_while_pending"
-      , law  := .trans (fun _ a b => monotone_promise_callbacks_append_one_while_pending a b) },
+      , property := .trans (fun _ a b => monotone_promise_callbacks_append_one_while_pending a b) },
     { name := "monotone_promise_callbacks_drain_one_once_settled"
-      , law  := .trans (fun _ a b => monotone_promise_callbacks_drain_one_once_settled a b) },
+      , property := .trans (fun _ a b => monotone_promise_callbacks_drain_one_once_settled a b) },
     { name := "monotone_promise_listeners_append_one_while_pending"
-      , law  := .trans (fun _ a b => monotone_promise_listeners_append_one_while_pending a b) },
+      , property := .trans (fun _ a b => monotone_promise_listeners_append_one_while_pending a b) },
     { name := "monotone_promise_listeners_drain_one_once_settled"
-      , law  := .trans (fun _ a b => monotone_promise_listeners_drain_one_once_settled a b) },
+      , property := .trans (fun _ a b => monotone_promise_listeners_drain_one_once_settled a b) },
     { name := "consistent_promise_state_edge_admissible"
-      , law  := .trans (fun _ a b => consistent_promise_state_edge_admissible a b) },
+      , property := .trans (fun _ a b => consistent_promise_state_edge_admissible a b) },
     { name := "consistent_task_state_edge_admissible"
-      , law  := .trans (fun _ a b => consistent_task_state_edge_admissible a b) },
+      , property := .trans (fun _ a b => consistent_task_state_edge_admissible a b) },
     { name := "preserved_task_acquisition_only_from_pending"
-      , law  := .trans (fun _ a b => preserved_task_acquisition_only_from_pending a b) },
+      , property := .trans (fun _ a b => preserved_task_acquisition_only_from_pending a b) },
     { name := "preserved_task_suspension_only_from_acquired"
-      , law  := .trans (fun _ a b => preserved_task_suspension_only_from_acquired a b) },
+      , property := .trans (fun _ a b => preserved_task_suspension_only_from_acquired a b) },
     { name := "preserved_task_halted_only_reenters_via_pending"
-      , law  := .trans (fun _ a b => preserved_task_halted_only_reenters_via_pending a b) },
+      , property := .trans (fun _ a b => preserved_task_halted_only_reenters_via_pending a b) },
     { name := "consistent_settlement_fulfils_task"
-      , law  := .trans (fun _ a b => consistent_settlement_fulfils_task a b) },
+      , property := .trans (fun _ a b => consistent_settlement_fulfils_task a b) },
     { name := "consistent_task_fulfilment_needs_settlement"
-      , law  := .trans (fun _ a b => consistent_task_fulfilment_needs_settlement a b) },
+      , property := .trans (fun _ a b => consistent_task_fulfilment_needs_settlement a b) },
     { name := "consistent_obligation_discharge_requires_settled"
-      , law  := .trans (fun _ a b => consistent_obligation_discharge_requires_settled a b) },
+      , property := .trans (fun _ a b => consistent_obligation_discharge_requires_settled a b) },
     { name := "consistent_callback_consumption_resumes_awaiter"
-      , law  := .trans (fun _ a b => consistent_callback_consumption_resumes_awaiter a b) },
+      , property := .trans (fun _ a b => consistent_callback_consumption_resumes_awaiter a b) },
     { name := "consistent_listener_consumption_enqueues_unblock"
-      , law  := .trans (fun _ a b => consistent_listener_consumption_enqueues_unblock a b) },
+      , property := .trans (fun _ a b => consistent_listener_consumption_enqueues_unblock a b) },
     { name := "consistent_wake_follows_callback_consumption"
-      , law  := .trans (fun _ a b => consistent_wake_follows_callback_consumption a b) },
+      , property := .trans (fun _ a b => consistent_wake_follows_callback_consumption a b) },
     { name := "consistent_suspension_registers_callback"
-      , law  := .trans (fun _ a b => consistent_suspension_registers_callback a b) },
+      , property := .trans (fun _ a b => consistent_suspension_registers_callback a b) },
     { name := "consistent_callback_additions_share_one_awaiter"
-      , law  := .trans (fun _ a b => consistent_callback_additions_share_one_awaiter a b) },
+      , property := .trans (fun _ a b => consistent_callback_additions_share_one_awaiter a b) },
     { name := "consistent_at_most_one_obligation_discharged"
-      , law  := .trans (fun _ a b => consistent_at_most_one_obligation_discharged a b) },
+      , property := .trans (fun _ a b => consistent_at_most_one_obligation_discharged a b) },
     { name := "consistent_at_most_one_task_acquired"
-      , law  := .trans (fun _ a b => consistent_at_most_one_task_acquired a b) },
+      , property := .trans (fun _ a b => consistent_at_most_one_task_acquired a b) },
     { name := "consistent_task_birth_couples_promise_birth"
-      , law  := .trans (fun _ a b => consistent_task_birth_couples_promise_birth a b) },
+      , property := .trans (fun _ a b => consistent_task_birth_couples_promise_birth a b) },
     { name := "monotone_outbox_keys_never_disappear"
-      , law  := .trans (fun _ a b => monotone_outbox_keys_never_disappear a b) },
+      , property := .trans (fun _ a b => monotone_outbox_keys_never_disappear a b) },
     { name := "consistent_new_execute_matches_task_and_target"
-      , law  := .trans (fun _ a b => consistent_new_execute_matches_task_and_target a b) },
+      , property := .trans (fun _ a b => consistent_new_execute_matches_task_and_target a b) },
     { name := "consistent_new_unblock_carries_stored_record"
-      , law  := .trans (fun _ a b => consistent_new_unblock_carries_stored_record a b) },
+      , property := .trans (fun _ a b => consistent_new_unblock_carries_stored_record a b) },
     { name := "consistent_new_unblock_discharges_its_listener"
-      , law  := .trans (fun _ a b => consistent_new_unblock_discharges_its_listener a b) },
+      , property := .trans (fun _ a b => consistent_new_unblock_discharges_its_listener a b) },
     { name := "preserved_schedule_birth_fields_immutable"
-      , law  := .trans (fun _ a b => preserved_schedule_birth_fields_immutable a b) },
+      , property := .trans (fun _ a b => preserved_schedule_birth_fields_immutable a b) },
     { name := "consistent_schedule_change_is_single"
-      , law  := .trans (fun _ a b => consistent_schedule_change_is_single a b) },
+      , property := .trans (fun _ a b => consistent_schedule_change_is_single a b) },
     { name := "consistent_schedule_removal_is_isolated"
-      , law  := .trans (fun _ a b => consistent_schedule_removal_is_isolated a b) },
+      , property := .trans (fun _ a b => consistent_schedule_removal_is_isolated a b) },
     { name := "consistent_task_birth_state"
-      , law  := .trans (fun _ a b => consistent_task_birth_state a b) },
+      , property := .trans (fun _ a b => consistent_task_birth_state a b) },
     { name := "consistent_task_lease_released_atomically"
-      , law  := .trans (fun _ a b => consistent_task_lease_released_atomically a b) },
+      , property := .trans (fun _ a b => consistent_task_lease_released_atomically a b) },
     { name := "preserved_task_lease_holder_stable"
-      , law  := .trans (fun _ a b => preserved_task_lease_holder_stable a b) },
+      , property := .trans (fun _ a b => preserved_task_lease_holder_stable a b) },
     { name := "consistent_task_lease_fields_move_together"
-      , law  := .trans (fun _ a b => consistent_task_lease_fields_move_together a b) },
+      , property := .trans (fun _ a b => consistent_task_lease_fields_move_together a b) },
     { name := "consistent_task_resumes_buffer_or_clear"
-      , law  := .trans (fun _ a b => consistent_task_resumes_buffer_or_clear a b) },
+      , property := .trans (fun _ a b => consistent_task_resumes_buffer_or_clear a b) },
     { name := "consistent_task_resumes_cleared_only_on_dispatch_or_park"
-      , law  := .trans (fun _ a b => consistent_task_resumes_cleared_only_on_dispatch_or_park a b) },
+      , property := .trans (fun _ a b => consistent_task_resumes_cleared_only_on_dispatch_or_park a b) },
     { name := "preserved_no_dead_dispatch"
-      , law  := .trans (preserved_no_dead_dispatch) },
+      , property := .trans (preserved_no_dead_dispatch) },
     { name := "preserved_execute_only_for_live_task"
-      , law  := .trans (preserved_execute_only_for_live_task) },
+      , property := .trans (preserved_execute_only_for_live_task) },
     { name := "consistent_promise_settlement_stamp"
-      , law  := .trans (consistent_promise_settlement_stamp) },
+      , property := .trans (consistent_promise_settlement_stamp) },
     { name := "preserved_timedout_is_server_owned"
-      , law  := .trans (preserved_timedout_is_server_owned) },
+      , property := .trans (preserved_timedout_is_server_owned) },
     { name := "consistent_new_promise_born_clean"
-      , law  := .trans (consistent_new_promise_born_clean) },
+      , property := .trans (consistent_new_promise_born_clean) },
     { name := "consistent_task_acquisition_is_atomic"
-      , law  := .trans (consistent_task_acquisition_is_atomic) },
+      , property := .trans (consistent_task_acquisition_is_atomic) },
     { name := "consistent_task_lease_deadline_is_now_plus_ttl"
-      , law  := .trans (consistent_task_lease_deadline_is_now_plus_ttl) },
+      , property := .trans (consistent_task_lease_deadline_is_now_plus_ttl) },
     { name := "consistent_task_pending_entry_arms_retry"
-      , law  := .trans (consistent_task_pending_entry_arms_retry) },
+      , property := .trans (consistent_task_pending_entry_arms_retry) },
     { name := "consistent_task_retry_rearm_only_when_due"
-      , law  := .trans (consistent_task_retry_rearm_only_when_due) },
+      , property := .trans (consistent_task_retry_rearm_only_when_due) },
     { name := "consistent_task_wake_replaces_resumes"
-      , law  := .trans (consistent_task_wake_replaces_resumes) } ]
+      , property := .trans (consistent_task_wake_replaces_resumes) } ]
 
 /-! ### The two walks
 
 `failures` for an implementation that can inspect a state; `stepFailures`
 for one that can inspect a state transition. Both report by NAME, so a
-violation names the law it broke. -/
+violation names the property it broke. -/
 
 def failures (now : Nat) (s : ServerState) : List String :=
   catalogue.filterMap fun l =>
-    match l.law with
+    match l.property with
     | .state f => if f now s then none else some l.name
     | .trans _ => none
 
@@ -1151,15 +1151,15 @@ def well_formed (now : Nat) (s : ServerState) : Bool :=
 
 def stepFailures (now : Nat) (a b : ServerState) : List String :=
   catalogue.filterMap fun l =>
-    match l.law with
+    match l.property with
     | .state _ => none
     | .trans f => if f now a b then none else some l.name
 
 def stepWellFormed (now : Nat) (a b : ServerState) : Bool :=
   (stepFailures now a b).isEmpty
 
-def stateLawCount : Nat := (catalogue.filter (fun l => match l.law with | .state _ => true | _ => false)).length
-def transLawCount : Nat := (catalogue.filter (fun l => match l.law with | .trans _ => true | _ => false)).length
+def stateCount : Nat := (catalogue.filter (fun l => match l.property with | .state _ => true | _ => false)).length
+def transCount : Nat := (catalogue.filter (fun l => match l.property with | .trans _ => true | _ => false)).length
 
 /-! ### Record projections
 

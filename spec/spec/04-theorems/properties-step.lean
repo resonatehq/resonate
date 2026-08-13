@@ -239,7 +239,7 @@ theorem settled_promise_object_is_not_frozen :
 
 /-! ### The internal-step-only harness
 
-The sweeper laws hold on internal steps and are FALSE on request steps.
+The sweeper properties hold on internal steps and are FALSE on request steps.
 That is not a defect — it is what makes them stronger than the general
 edge tables, and it means they need their own walk. -/
 
@@ -269,7 +269,7 @@ theorem reaches_internal_steps :
     (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => isInternalStep st)) = true := by decide
 
 /-- Strictly stronger than the general edge tables, machine-checked:
-    some REQUEST step in the corpus violates the sweeper laws. If they
+    some REQUEST step in the corpus violates the sweeper properties. If they
     held everywhere they would be a restatement, not a constraint. -/
 theorem internal_laws_are_strictly_stronger :
     (((seqsUpToA kernelsResp 3).map instantiateA).any fun w =>
