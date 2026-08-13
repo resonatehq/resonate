@@ -193,7 +193,7 @@ func (c *Context) child(id, funcName string, timeoutAt int64) *Context {
 }
 
 func (c *Context) nextID() string {
-	return fmt.Sprintf("%s.%d", c.id, c.seq.Add(1))
+	return JoinID(c.id, fmt.Sprintf("%d", c.seq.Add(1)))
 }
 
 func (c *Context) childTimeout(requested time.Duration) int64 {
@@ -210,10 +210,18 @@ func (c *Context) childTimeout(requested time.Duration) int64 {
 // ── Request builders ────────────────────────────────────────────────────
 
 func (c *Context) baseTags(scope, branch string) map[string]string {
+	return c.baseTagsWithParent(scope, branch, c.id)
+}
+
+// baseTagsWithParent is baseTags with an explicit resonate:parent. Only
+// Detached overrides the parent: its id is minted off the origin rather than
+// off the spawning context, and the server requires every id to extend its
+// declared resonate:parent.
+func (c *Context) baseTagsWithParent(scope, branch, parent string) map[string]string {
 	return map[string]string{
 		"resonate:scope":  scope,
 		"resonate:branch": branch,
-		"resonate:parent": c.id,
+		"resonate:parent": parent,
 		"resonate:origin": c.originID,
 	}
 }
@@ -231,12 +239,12 @@ func (c *Context) localCreateReq(id string, args any, timeout time.Duration) (Pr
 	}, nil
 }
 
-func (c *Context) remoteCreateReq(id, funcName string, args any, timeout time.Duration, targetOverride *string) (PromiseCreateReq, error) {
+func (c *Context) remoteCreateReq(id, funcName, parent string, args any, timeout time.Duration, targetOverride *string) (PromiseCreateReq, error) {
 	param, err := c.codec.Encode(map[string]any{"func": funcName, "args": args})
 	if err != nil {
 		return PromiseCreateReq{}, err
 	}
-	tags := c.baseTags("global", id)
+	tags := c.baseTagsWithParent("global", id, parent)
 	tags["resonate:target"] = c.targetResolver(targetOverride)
 	return PromiseCreateReq{
 		ID:        id,
@@ -266,6 +274,13 @@ func (c *Context) promiseCreateReq(id string, timeout time.Duration, data any) (
 func (c *Context) sleepCreateReq(id string, duration time.Duration) PromiseCreateReq {
 	tags := c.baseTags("global", id)
 	tags["resonate:timer"] = "true"
+	// The resonate:target is what makes the deadline *happen*: the server only
+	// schedules timeouts for promises carrying an address, so a target-less
+	// timer would simply never fire. The flip side is that a target also spawns
+	// a task, dispatched immediately rather than at the wake; a timer names no
+	// function to run, so the worker that receives it drops it and lets the
+	// deadline do the waking (see Core.ExecuteUntilBlocked).
+	tags["resonate:target"] = c.targetResolver(nil)
 	return PromiseCreateReq{
 		ID:        id,
 		TimeoutAt: c.childTimeout(duration),
@@ -475,7 +490,7 @@ func (c *Context) executeLocal(f *Future, df *durableFunction, childCtx *Context
 func (c *Context) RPC(funcName string, args any, opts ...RPCOpts) (*Future, error) {
 	opt := firstOpt(opts)
 	childID := c.nextID()
-	req, err := c.remoteCreateReq(childID, funcName, args, opt.Timeout, optTarget(opt.Target))
+	req, err := c.remoteCreateReq(childID, funcName, c.id, args, opt.Timeout, optTarget(opt.Target))
 	if err != nil {
 		return nil, err
 	}
@@ -487,10 +502,17 @@ func (c *Context) RPC(funcName string, args any, opts ...RPCOpts) (*Future, erro
 }
 
 // Sleep creates a durable timer promise. Await on the returned future yields
-// (suspends) until the timer elapses. Because workflow functions re-execute
-// from the top on resume, any code above a ctx.Sleep call runs again after the
-// timer resolves — wrap observable side effects in [Context.Run] so the durable
-// child record short-circuits them on replay.
+// (suspends) until the timer elapses. The timer is the promise's own deadline:
+// resonate:timer makes the server settle it RESOLVED (rather than timed out)
+// when the deadline arrives, which fires the callbacks every sleeper is
+// suspended on. Nothing is held in memory while sleeping, and the wake
+// survives this worker — or every worker — dying, because it is the server's
+// own deadline that settles the promise.
+//
+// Because workflow functions re-execute from the top on resume, any code
+// above a ctx.Sleep call runs again after the timer resolves — wrap observable
+// side effects in [Context.Run] so the durable child record short-circuits
+// them on replay.
 func (c *Context) Sleep(d time.Duration) (*Future, error) {
 	childID := c.nextID()
 	req := c.sleepCreateReq(childID, d)
@@ -519,7 +541,19 @@ func (c *Context) Promise(opts ...PromiseOpts) (*Future, error) {
 
 // Detached dispatches a remote function and returns only its promise ID. It
 // is NOT registered in spawnedRemote — the parent workflow does not suspend
-// on it. The ID is deterministic: `{origin}.{16-hex FNV-1a 64 of "id.seq"}`.
+// on it. The ID is deterministic: `{origin}:d{16-hex FNV-1a 64 of the next
+// child id}` — minted off the lineage origin (fixed at the top and propagated
+// unchanged forever) so recursion stays bounded at one segment past the
+// origin instead of growing a segment per level. The `d` marks the segment as
+// a detached child (vs a normal child's numeric `{seq}`).
+//
+// The child keeps the *parent's* origin rather than re-rooting onto its own
+// id: the server derives the origin as everything before the first `:` and
+// requires every id in a lineage to start with `{origin}:`. Its declared
+// resonate:parent is the origin too — the id hangs off the origin, not off
+// this context, and the server requires every id to extend its declared
+// parent. resonate:branch stays the child's own id: a detached child roots
+// its own branch.
 //
 // The hash is FNV-1a 64; other Resonate runtimes may hash differently, so
 // Detached IDs are NOT portable across runtimes. If you need cross-runtime
@@ -527,8 +561,8 @@ func (c *Context) Promise(opts ...PromiseOpts) (*Future, error) {
 func (c *Context) Detached(funcName string, args any, opts ...DetachedOpts) (string, error) {
 	opt := firstOpt(opts)
 	raw := c.nextID()
-	childID := fmt.Sprintf("%s.%s", c.originID, hashID(raw))
-	req, err := c.remoteCreateReq(childID, funcName, args, opt.Timeout, optTarget(opt.Target))
+	childID := JoinID(c.originID, "d"+hashID(raw))
+	req, err := c.remoteCreateReq(childID, funcName, c.originID, args, opt.Timeout, optTarget(opt.Target))
 	if err != nil {
 		return "", err
 	}

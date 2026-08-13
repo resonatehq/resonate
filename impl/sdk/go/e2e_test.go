@@ -743,12 +743,12 @@ func TestE2EOriginPropagatesAcrossWorker(t *testing.T) {
 		t.Errorf("result = %d, want 5", got)
 	}
 
-	// Lineage ids: root = rootID, remote child = rootID.1, grandchild = rootID.1.1.
-	child := mustPromise(t, ctx, r, rootID+".1")
+	// Lineage ids: root = rootID, remote child = rootID:1, grandchild = rootID:1.1.
+	child := mustPromise(t, ctx, r, rootID+":1")
 	if got := child.Tags["resonate:origin"]; got != rootID {
 		t.Errorf("child resonate:origin = %q, want %q", got, rootID)
 	}
-	grandchild := mustPromise(t, ctx, r, rootID+".1.1")
+	grandchild := mustPromise(t, ctx, r, rootID+":1.1")
 	if got := grandchild.Tags["resonate:origin"]; got != rootID {
 		t.Errorf("grandchild resonate:origin = %q, want %q (lineage root, not the child id)", got, rootID)
 	}

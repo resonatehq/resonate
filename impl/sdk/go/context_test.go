@@ -17,7 +17,7 @@ func TestContext_NextID_Sequential(t *testing.T) {
 	c := testContext("root", nil)
 	for i := 1; i <= 5; i++ {
 		got := c.nextID()
-		want := fmt.Sprintf("root.%d", i)
+		want := fmt.Sprintf("root:%d", i)
 		if got != want {
 			t.Fatalf("want %q, got %q", want, got)
 		}
@@ -92,7 +92,7 @@ func abs64(x int64) int64 {
 
 func TestContext_LocalCreateReq_Tags(t *testing.T) {
 	c := testContext("root", nil)
-	req, err := c.localCreateReq("root.0", 42, 0)
+	req, err := c.localCreateReq("root:0", 42, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,8 @@ func TestContext_LocalCreateReq_Tags(t *testing.T) {
 			t.Fatalf("tag %s: want %q, got %q", k, v, req.Tags[k])
 		}
 	}
-	if req.ID != "root.0" {
-		t.Fatalf("ID: want root.0, got %s", req.ID)
+	if req.ID != "root:0" {
+		t.Fatalf("ID: want root:0, got %s", req.ID)
 	}
 }
 
@@ -121,14 +121,14 @@ func TestContext_RemoteCreateReq_TagsAndTarget(t *testing.T) {
 		return "resolved-" + *o
 	}
 	override := "custom"
-	req, err := c.remoteCreateReq("root.0", "myFunc", map[string]int{"a": 1}, 0, &override)
+	req, err := c.remoteCreateReq("root:0", "myFunc", c.id, map[string]int{"a": 1}, 0, &override)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
 		"resonate:scope":  "global",
 		"resonate:target": "resolved-custom",
-		"resonate:branch": "root.0",
+		"resonate:branch": "root:0",
 		"resonate:parent": "root",
 		"resonate:origin": "root",
 	}
@@ -147,7 +147,7 @@ func TestContext_RemoteCreateReq_TargetDefault(t *testing.T) {
 		}
 		return *o
 	}
-	req, _ := c.remoteCreateReq("root.0", "myFunc", nil, 0, nil)
+	req, _ := c.remoteCreateReq("root:0", "myFunc", c.id, nil, 0, nil)
 	if req.Tags["resonate:target"] != "default" {
 		t.Fatalf("expected default target, got %q", req.Tags["resonate:target"])
 	}
@@ -155,18 +155,29 @@ func TestContext_RemoteCreateReq_TargetDefault(t *testing.T) {
 
 func TestContext_SleepCreateReq_Tags(t *testing.T) {
 	c := testContext("root", nil)
-	req := c.sleepCreateReq("root.0", 30*time.Second)
+	c.targetResolver = func(o *string) string {
+		if o == nil {
+			return "default-target"
+		}
+		return *o
+	}
+	req := c.sleepCreateReq("root:0", 30*time.Second)
 	if req.Tags["resonate:timer"] != "true" {
 		t.Fatalf("missing timer tag: %v", req.Tags)
 	}
 	if req.Tags["resonate:scope"] != "global" {
 		t.Fatalf("scope: %q", req.Tags["resonate:scope"])
 	}
+	// The server only schedules a timeout for a promise carrying a target, so
+	// a target-less timer would never fire — the timer must carry one.
+	if req.Tags["resonate:target"] != "default-target" {
+		t.Fatalf("missing target tag: %v", req.Tags)
+	}
 }
 
 func TestContext_PromiseCreateReq_NoTimerTag(t *testing.T) {
 	c := testContext("root", nil)
-	req, err := c.promiseCreateReq("root.0", 0, nil)
+	req, err := c.promiseCreateReq("root:0", 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +226,8 @@ func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fut.ID() != "root.1" {
-		t.Fatalf("expected root.1, got %q", fut.ID())
+	if fut.ID() != "root:1" {
+		t.Fatalf("expected root:1, got %q", fut.ID())
 	}
 	if fake.createCalls.Load() != 1 {
 		t.Fatalf("expected 1 create call, got %d", fake.createCalls.Load())
@@ -236,7 +247,7 @@ func TestContext_Run_SyncCreateAndAwait(t *testing.T) {
 
 func TestContext_Run_PreSettledSkipsGoroutine(t *testing.T) {
 	fake := newFakeFenceClient()
-	fake.preset("root.1", resolvedPromise(t, "root.1", 99))
+	fake.preset("root:1", resolvedPromise(t, "root:1", 99))
 	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 
@@ -310,12 +321,12 @@ func TestContext_RPC_PendingSuspends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fut.ID() != "root.1" {
-		t.Fatalf("expected root.1, got %q", fut.ID())
+	if fut.ID() != "root:1" {
+		t.Fatalf("expected root:1, got %q", fut.ID())
 	}
 	assertPanicsWithSuspend(t, func() { _ = fut.Await(nil) })
 	todos := ctx.drainRemoteTodos()
-	if len(todos) != 1 || todos[0] != "root.1" {
+	if len(todos) != 1 || todos[0] != "root:1" {
 		t.Fatalf("todos: %v", todos)
 	}
 }
@@ -344,7 +355,7 @@ func TestContext_Promise_PendingSuspends(t *testing.T) {
 
 func TestContext_RPC_AlreadyResolved_DecodesValue(t *testing.T) {
 	fake := newFakeFenceClient()
-	fake.preset("root.1", resolvedPromise(t, "root.1", "ok"))
+	fake.preset("root:1", resolvedPromise(t, "root:1", "ok"))
 	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	fut, _ := ctx.RPC("noop", nil)
@@ -367,8 +378,8 @@ func TestContext_Detached_ReturnsIDAndCreatesPromise(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(id, "root.") {
-		t.Fatalf("expected origin prefix, got %q", id)
+	if !strings.HasPrefix(id, "root:d") {
+		t.Fatalf("expected origin-anchored detached id, got %q", id)
 	}
 	if _, ok := fake.record(id); !ok {
 		t.Fatalf("promise %q not created", id)
@@ -383,7 +394,7 @@ func TestContext_Detached_IDIsHashed16Hex(t *testing.T) {
 	eff := NewEffects(fake, "task-1", 1, "task-1", nil)
 	ctx := testContext("root", eff)
 	id, _ := ctx.Detached("f", nil)
-	suffix := strings.TrimPrefix(id, "root.")
+	suffix := strings.TrimPrefix(id, "root:d")
 	if len(suffix) != 16 {
 		t.Fatalf("expected 16-char hash suffix, got %q (len=%d)", suffix, len(suffix))
 	}
@@ -395,8 +406,8 @@ func TestContext_Detached_IDIsHashed16Hex(t *testing.T) {
 }
 
 func TestHashID_StableAndHexLength(t *testing.T) {
-	a := hashID("root.0")
-	b := hashID("root.0")
+	a := hashID("root:0")
+	b := hashID("root:0")
 	if a != b {
 		t.Fatalf("expected stable hash, got %s vs %s", a, b)
 	}
@@ -581,7 +592,7 @@ func TestContext_GetDependency_ChildInherits(t *testing.T) {
 	c := testContext("root", nil)
 	c.host = context.WithValue(c.host, depKey("db"), db)
 
-	child := c.child("root.1", "childFunc", c.timeoutAt)
+	child := c.child("root:1", "childFunc", c.timeoutAt)
 	got, ok := child.GetDependency("db")
 	if !ok || got != any(db) {
 		t.Fatalf("child GetDependency(db) = (%v, %v), want (%v, true)", got, ok, db)

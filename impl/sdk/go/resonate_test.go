@@ -20,10 +20,9 @@ import (
 // localConfig is the subset of resonate.Config most tests vary. Anything not
 // set falls back to defaults appropriate for local-mode tests.
 type localConfig struct {
-	PID    string
-	Group  string
-	Prefix string
-	TTL    time.Duration
+	PID   string
+	Group string
+	TTL   time.Duration
 }
 
 // newLocal builds a Resonate instance backed by an in-process LocalNetwork.
@@ -48,7 +47,6 @@ func newLocal(t *testing.T, lc localConfig) *resonate.Resonate {
 		Network:   localnet.NewLocal(group, &pidPtr),
 		Heartbeat: resonate.NoopHeartbeat{},
 		TTL:       ttl,
-		Prefix:    lc.Prefix,
 	})
 	if err != nil {
 		t.Fatalf("resonate.New: %v", err)
@@ -172,20 +170,6 @@ func TestCustomTTL(t *testing.T) {
 	}
 }
 
-func TestEmptyPrefix(t *testing.T) {
-	r := newLocal(t, localConfig{})
-	if r.IDPrefix() != "" {
-		t.Errorf("empty Prefix should produce empty IDPrefix, got %q", r.IDPrefix())
-	}
-}
-
-func TestPrefixGetsColon(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "myapp"})
-	if got, want := r.IDPrefix(), "myapp:"; got != want {
-		t.Errorf("IDPrefix = %q, want %q", got, want)
-	}
-}
-
 func TestCustomPIDAndGroup(t *testing.T) {
 	r := newLocal(t, localConfig{PID: "worker-1", Group: "workers"})
 	if r.PID() != "worker-1" {
@@ -303,13 +287,13 @@ func TestRunInnerPromiseOriginPropagatesAcrossWorker(t *testing.T) {
 		t.Errorf("result = %d, want 5", got)
 	}
 
-	// Lineage ids: root = "origin-root", remote child = "origin-root.1",
-	// grandchild created inside the child = "origin-root.1.1".
-	child := mustPromise(t, ctx, r, rootID+".1")
+	// Lineage ids: root = "origin-root", remote child = "origin-root:1",
+	// grandchild created inside the child = "origin-root:1.1".
+	child := mustPromise(t, ctx, r, rootID+":1")
 	if got := child.Tags["resonate:origin"]; got != rootID {
 		t.Errorf("child resonate:origin = %q, want %q", got, rootID)
 	}
-	grandchild := mustPromise(t, ctx, r, rootID+".1.1")
+	grandchild := mustPromise(t, ctx, r, rootID+":1.1")
 	if got := grandchild.Tags["resonate:origin"]; got != rootID {
 		t.Errorf("grandchild resonate:origin = %q, want %q (lineage root, not the child id)", got, rootID)
 	}
@@ -407,20 +391,23 @@ func TestRunReturnsHandle(t *testing.T) {
 	}
 }
 
-func TestRunWithPrefixPrependsToID(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "app"})
+func TestRunRejectsInvalidRootID(t *testing.T) {
+	// Raised at the call site, before anything reaches the server: a root id
+	// becomes the origin of its whole lineage, so the reserved separators are
+	// rejected outright.
+	r := newLocal(t, localConfig{})
 	noopFn, err := resonate.Register(r, "noop", noop)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := testCtx(t)
 	defer cancel()
-	h, err := noopFn.Run(ctx, "my-id", struct{}{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := h.ID(), "app:my-id"; got != want {
-		t.Errorf("handle id = %q, want %q", got, want)
+	for _, id := range []string{"bad.id", "bad:id", "", "bad\x00id"} {
+		_, err := noopFn.Run(ctx, id, struct{}{})
+		var invalid *resonate.InvalidIDError
+		if !errors.As(err, &invalid) {
+			t.Errorf("Run(%q): expected InvalidIDError, got %v", id, err)
+		}
 	}
 }
 
@@ -592,16 +579,39 @@ func TestRPCWithoutRegistration(t *testing.T) {
 	}
 }
 
-func TestRPCWithPrefix(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "svc"})
+func TestRootPromiseTagsAreSelfAnchored(t *testing.T) {
+	// A genuine top-level root is its own lineage origin, so
+	// origin == branch == parent == id, and no resonate:prefix is emitted.
+	r := newLocal(t, localConfig{})
 	ctx, cancel := testCtx(t)
 	defer cancel()
-	h, err := r.RPC(ctx, "rpc-2", "remote", nil, resonate.RPCOptions{Target: "unhandled"})
+	if _, err := r.RPC(ctx, "wf-tags", "remote", nil, resonate.RPCOptions{Target: "unhandled"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := r.Promises().Get(ctx, "wf-tags")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := h.ID(), "svc:rpc-2"; got != want {
-		t.Errorf("id = %q, want %q", got, want)
+	for _, key := range []string{"resonate:origin", "resonate:branch", "resonate:parent"} {
+		if got := rec.Tags[key]; got != "wf-tags" {
+			t.Errorf("%s = %q, want wf-tags", key, got)
+		}
+	}
+	if _, ok := rec.Tags["resonate:prefix"]; ok {
+		t.Error("root promise emits resonate:prefix")
+	}
+}
+
+func TestRPCRejectsInvalidRootID(t *testing.T) {
+	r := newLocal(t, localConfig{})
+	ctx, cancel := testCtx(t)
+	defer cancel()
+	for _, id := range []string{"bad.id", "bad:id"} {
+		_, err := r.RPC(ctx, id, "remote", nil, resonate.RPCOptions{Target: "unhandled"})
+		var invalid *resonate.InvalidIDError
+		if !errors.As(err, &invalid) {
+			t.Errorf("RPC(%q): expected InvalidIDError, got %v", id, err)
+		}
 	}
 }
 
@@ -713,19 +723,17 @@ func TestGetExistingPromise(t *testing.T) {
 	}
 }
 
-func TestGetWithPrefix(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "ns"})
+func TestGetDoesNotValidateID(t *testing.T) {
+	// Get is a lookup, not a create: it takes any id, including a child's
+	// (e.g. "wf:1.2"), so it must NOT validate. A missing one 404s rather
+	// than returning InvalidIDError.
+	r := newLocal(t, localConfig{})
 	ctx, cancel := testCtx(t)
 	defer cancel()
-	if _, err := r.RPC(ctx, "p1", "remote", nil, resonate.RPCOptions{Target: "unhandled"}); err != nil {
-		t.Fatal(err)
-	}
-	h, err := r.Get(ctx, "p1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := h.ID(), "ns:p1"; got != want {
-		t.Errorf("id = %q, want %q", got, want)
+	_, err := r.Get(ctx, "wf:1.2")
+	var srvErr *resonate.ServerError
+	if !errors.As(err, &srvErr) || srvErr.Code != 404 {
+		t.Fatalf("expected 404 ServerError, got %v", err)
 	}
 }
 
@@ -788,44 +796,6 @@ func TestStopIsIdempotent(t *testing.T) {
 	}
 	if err := r.Stop(); err != nil {
 		t.Errorf("second Stop: %v", err)
-	}
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Prefix consistency
-// ──────────────────────────────────────────────────────────────────────────
-
-func TestPrefixConsistentAcrossRunRPCGet(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "p"})
-	noopFn, err := resonate.Register(r, "noop", noop)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := testCtx(t)
-	defer cancel()
-
-	h1, err := noopFn.Run(ctx, "id1", struct{}{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h1.ID() != "p:id1" {
-		t.Errorf("run id = %q, want p:id1", h1.ID())
-	}
-
-	h2, err := r.RPC(ctx, "id2", "remote", nil, resonate.RPCOptions{Target: "unhandled"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h2.ID() != "p:id2" {
-		t.Errorf("rpc id = %q, want p:id2", h2.ID())
-	}
-
-	h3, err := r.Get(ctx, "id2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h3.ID() != "p:id2" {
-		t.Errorf("get id = %q, want p:id2", h3.ID())
 	}
 }
 

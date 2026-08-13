@@ -72,22 +72,18 @@ func TestSchedulesDelete(t *testing.T) {
 	}
 }
 
-func TestSchedulesPrefixAppliedToBothIDs(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "pre"})
+func TestSchedulesCreateRejectsInvalidID(t *testing.T) {
+	// A schedule id names the root promise of every firing, so it is bound by
+	// the same rules as a Run/RPC id.
+	r := newLocal(t, localConfig{})
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	rec, err := r.Schedules().Create(ctx, "s1", "0 * * * *", "run-{{.timestamp}}", time.Hour)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if rec.ID != "pre:s1" {
-		t.Errorf("ID = %q, want pre:s1", rec.ID)
-	}
-	if rec.PromiseID != "pre:run-{{.timestamp}}" {
-		t.Errorf("PromiseID = %q, want pre:run-{{.timestamp}}", rec.PromiseID)
-	}
-	if _, err := r.Schedules().Get(ctx, "s1"); err != nil {
-		t.Errorf("Get(s1): %v", err)
+	for _, id := range []string{"bad.id", "bad:id"} {
+		_, err := r.Schedules().Create(ctx, id, "0 * * * *", "run-{{.timestamp}}", time.Hour)
+		var invalid *resonate.InvalidIDError
+		if !errors.As(err, &invalid) {
+			t.Errorf("Create(%q): expected InvalidIDError, got %v", id, err)
+		}
 	}
 }

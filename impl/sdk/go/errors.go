@@ -45,6 +45,17 @@ type ApplicationError struct{ Message string }
 
 func (e *ApplicationError) Error() string { return "application error: " + e.Message }
 
+// InvalidIDError signals a caller-supplied root id the server's id format
+// cannot carry. See ValidateRootID.
+type InvalidIDError struct {
+	ID     string
+	Reason string
+}
+
+func (e *InvalidIDError) Error() string {
+	return fmt.Sprintf("invalid id %q: %s", e.ID, e.Reason)
+}
+
 // FunctionNotFoundError signals a missing function in the registry.
 type FunctionNotFoundError struct{ Name string }
 
