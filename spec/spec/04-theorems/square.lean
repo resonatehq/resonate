@@ -48,7 +48,7 @@ The remaining fact-lag on internal promises (the abstract machine may
 settle one the concrete machine leaves stored-pending forever) now
 carries no obligations and is invisible to both observables; the
 normalizing comparator `normEq` below absorbs it for state-level
-checks by closing BOTH sides under the object-guarded fact rules.
+checks by closing BOTH sides under the object-guarded fact internal steps.
 
 Constructive evidence for `AbstractRefinesConcrete`: observation
 equality is symmetric, so every paired run of `refinement.lean` —
@@ -56,9 +56,9 @@ concrete script `w` against its translation — is equally a witness
 that the abstract trace's behavior is realized by a concrete trace;
 that covers every abstract schedule in the translation's image
 (battery plus exhaustive sweep). The pairs below cover the
-abstract-native steps OUTSIDE that image: the standalone listener rule
+abstract-native steps OUTSIDE that image: the standalone listener internal step
 R3, the wake pair R4;R6, a fact-lagged internal promise, and the
-coupled write standing where a fulfillment rule used to.  -/
+coupled write standing where a fulfillment internal step used to.  -/
 
 namespace Abstraction
 
@@ -177,7 +177,7 @@ example : refusedEverywhere wTimerSchedule := by decide
 /-! ### The paired witnesses, abstract-native steps -/
 
 /-- The normalizing comparator: both sides closed under the
-    object-guarded fact rules and the drains — absorbing the harmless
+    object-guarded fact internal steps and the drains — absorbing the harmless
     fact-lag on internal promises. -/
 def normC (h : Nat) (s : ConcreteModel.ServerState) : AbstractModel.ServerState :=
   absQuiesced defaultRetry h (alpha (Equivalence.quiesced h s))
@@ -196,7 +196,7 @@ def pairCheck (wC : List (Request × Nat)) (wA : List (AStep × Nat)) (h : Nat) 
     && absStateEq (normC h sC) (normA h sA)
 
 -- R3, standalone: the concrete settle notifies inline; the abstract
--- machine notifies by rule.
+-- machine notifies by internal step.
 def q2C : List (Request × Nat) :=
   [ (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }, 100),
     (.promiseRegisterListener { awaited := "a", address := "https://l" }, 150),
@@ -208,7 +208,7 @@ def q2A : List (AStep × Nat) :=
 example : pairCheck q2C q2A 300 := by decide
 
 -- The coupled write, standalone: both machines fulfill the task in the
--- settling step itself, so the abstract script needs NO rule after the
+-- settling step itself, so the abstract script needs NO internal step after the
 -- settle. This is the witness that the deleted R2 was redundant — where
 -- it used to be appended here, nothing is, and the pair still closes.
 def q3C : List (Request × Nat) :=

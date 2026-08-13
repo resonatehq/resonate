@@ -11,7 +11,7 @@ read discipline (-p and -m are weakly bisimilar, `04-theorems`). The
 ABSTRACT machine is the coalesced machine of `02-abstract`: no timeout
 components (deadlines live on the objects), no deferred queue (awaiters
 and listeners stay on the settled promise, drained by chosen-element
-rules), no config (cadence is a rule parameter).
+internal steps), no config (cadence is an internal step parameter).
 
 `alpha` is purely structural and time-independent:
 

@@ -22,9 +22,9 @@ obstructions — and the fixes in this PR are exactly what unblocked it.
 (The abstract machine ported here carries the mirrored halt fix: its
 `taskHalt` touches.)
 
-The constructive schedule is the rule translation `translate`:
+The constructive schedule is the internal-step translation `translate`:
 external requests pass through; each concrete internal step becomes
-the abstract rules it discharges —
+the abstract internal steps it discharges —
 
     τPromiseTimeout id     ↦  R1 id
     τResume (a, x)         ↦  R4 a x ; R6 x (n+retry)
@@ -37,7 +37,7 @@ release, continue) get their R6 appended, since abstract handlers emit
 nothing. What needs NO translation is the settlement cascade: both
 machines flip the task in the settling step itself — the coupled write
 — and the concrete one additionally emits its unblocks inline while the
-abstract machine drains listeners by rule. Reads on both sides serve
+abstract machine drains listeners by internal step. Reads on both sides serve
 the same bytes meanwhile, and quiescence reconciles the lag. `translate` is syntactic (it reads requests, not
 runs); it is the canonical schedule for these scripts, while the
 theorem's ∃ admits run-dependent schedules in general.
@@ -64,8 +64,8 @@ open Equivalence (Request Response eqSet)
 abbrev defaultRetry : Nat := ConcreteModel.ServerState.init.config.retryTimeout
 
 /-- The abstract machine's alphabet: the same external requests, plus
-    its six rules with their scheduler-chosen parameters. The gap at
-    `r2` is the deleted fulfillment rule — fact T rides with fact P in
+    its six internal steps with their scheduler-chosen parameters. The gap at
+    `r2` is the deleted fulfillment internal step — fact T rides with fact P in
     R1's coupled write — and the survivors keep their numbers. -/
 inductive AStep
   | api (rq : Request)
@@ -82,7 +82,7 @@ def AStep.isExternal : AStep → Bool
   | _ => false
 
 /-- The abstract machine's step: dispatch to the coalesced handlers and
-    rules. External requests answer with the SAME wire responses as the
+    internal steps. External requests answer with the SAME wire responses as the
     concrete machine — the protocol surface is shared. -/
 def handleA (st : AStep) (now : Nat) : AbstractModel.H Response :=
   match st with
@@ -154,7 +154,7 @@ def SameObservationCA (tr : Equivalence.Trace) (tr' : ATrace) : Prop :=
 
 /-- Quiescence, abstract side: materialize every fact (R1 over all
     promises — the coupled write carries fact T to the task pairs, so
-    there is nothing left for a fulfillment rule to do), then drain
+    there is nothing left for a fulfillment internal step to do), then drain
     every retained obligation (R3 per listener, R4 per awaiter — each
     wake immediately dispatched, mirroring the concrete drain's inline
     emission). -/
@@ -194,7 +194,7 @@ def ConcreteRefinesAbstract : Prop :=
 
 /-! ### The constructive schedule, executed -/
 
-/-- Rule translation: the abstract steps a concrete step discharges.
+/-- Internal-step translation: the abstract steps a concrete step discharges.
     Purely syntactic. -/
 def translate (retry : Nat) (rq : Request) (n : Nat) : List (AStep × Nat) :=
   match rq with

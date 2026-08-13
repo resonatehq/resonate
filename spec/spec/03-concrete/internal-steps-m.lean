@@ -15,7 +15,7 @@ namespace Timeouts
 def processPromiseTimeout (id : String) (now : Nat) : H Unit := do
   let _ ← touchPromise id now
 
-/-- Retry and lease are material rules, verbatim from -p: the read
+/-- Retry and lease are material internal steps, verbatim from -p: the read
     discipline concerns projected facts, and these consult only their
     own timers, material task state, and immutable tags. -/
 def processRetryTimeout (id : String) (now : Nat) : H Unit := do

@@ -28,7 +28,7 @@ anywhere in this file):
      follows, by induction over the trace.
   5. Per-step agreement (`Agrees st`) — ALL CASES DISCHARGED: `idle`,
      the searches, the schedule handlers, the five promise handlers,
-     the ten task handlers, and the six rules. The recurring
+     the ten task handlers, and the six internal steps. The recurring
      arguments: the task read proven once (`bind_taskRead_agrees`);
      touch self-invisibility plus symmetry/transitivity of the
      invariant (R1); the doomed-dispatch fix mechanized — under a
@@ -253,7 +253,7 @@ theorem REq.refl (n : Nat) (s : ServerState) : REq n s s :=
   ⟨fun _ => rfl, fun _ => rfl, fun _ => rfl⟩
 
 /-- The invariant is pointwise equality of lookups, so it is symmetric
-    and transitive — the rules' shared code composes through it. -/
+    and transitive — the internal steps' shared code composes through it. -/
 theorem REq.symm {n : Nat} {sP sM : ServerState} (h : REq n sP sM) : REq n sM sP :=
   ⟨fun id => (h.1 id).symm, fun id => (h.2.1 id).symm, fun id => (h.2.2 id).symm⟩
 
@@ -1587,10 +1587,10 @@ theorem agrees_taskFulfill (req) : Agrees (.api (.taskFulfill req)) := by
 
 Instantiating the absorption lemmas at `REq.refl` says each touch is
 invisible to the invariant RELATIVE TO ITS OWN STATE. With symmetry
-and transitivity, the fact rule R1 — which BOTH machines run
+and transitivity, the fact internal step R1 — which BOTH machines run
 identically — needs no case analysis at all. The task-side touch is
 kept because R4's wake step reads through it, not because a
-fulfillment rule survives. -/
+fulfillment internal step survives. -/
 
 theorem REq_touchPromise_self (id : String) (n : Nat) (s : ServerState) :
     REq n s ((touchPromise id n).run s).2 := by
@@ -1648,7 +1648,7 @@ theorem REq_touchTask_self (id : String) (n : Nat) (s : ServerState) :
             · simp only [if_pos hc]; exact REq_touchWrite (REq.refl n s) p hp'
             · simp only [if_neg hc]; exact REq.refl n s
 
-/-! ### 5n. The fact rule R1 -/
+/-! ### 5n. The fact internal step R1 -/
 
 theorem agrees_r1 (id : String) : Agrees (.r1 id) := by
   intro n sP sM h
@@ -1657,7 +1657,7 @@ theorem agrees_r1 (id : String) : Agrees (.r1 id) := by
   exact ⟨trivial, ((REq_touchPromise_self id n sP).symm.trans h).trans
     (REq_touchPromise_self id n sM)⟩
 
-/-! ### 5o. The choice rules R5 and R6
+/-! ### 5o. The choice internal steps R5 and R6
 
 Both read the TASK raw — but their decisions go through the view, and
 that is exactly what makes them agree: under a PENDING view the raw
@@ -2449,7 +2449,7 @@ theorem agrees_taskFence (req) : Agrees (.api (.taskFence req)) := by
 
 /-! ### 5r. R7 — processSchedule. The occurrence list is one opaque pure
     term shared by both sides (schedules agree, the clock is shared),
-    so the rule is a list induction of `promiseCreate` steps. Each
+    so the internal step is a list induction of `promiseCreate` steps. Each
     step runs AS OF a past cron time `t ≤ now` — and a touch write
     made at an earlier instant is still invisible at the current
     clock, because facts are stable under monotone time
@@ -2729,7 +2729,7 @@ theorem stepAgreement : StepAgreement := by
   | idle => exact agrees_idle
 
 /-- **THE THEOREM, UNCONDITIONALLY.** Feed the same schedule — every
-    step, adversarial rule firings included — to both read disciplines
+    step, adversarial internal-step firings included — to both read disciplines
     from the same initial state, and the response streams are
     pointwise identical. Projection and materialization are the same
     machine, on the synchronous channel, at every step, forever. -/

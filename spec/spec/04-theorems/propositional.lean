@@ -58,7 +58,7 @@ side.
 The INTERNAL steps take no discipline. They read `touchPromise` and
 `touchTask` under both, which is the fact `effects.lean` had to
 discover the hard way when a sweep refuted 60 scripts: materialization
-is scoped to the handler, and rules materialize regardless. Here it is
+is scoped to the handler, and internal steps materialize regardless. Here it is
 not a parameter to get wrong — R1 through R7 simply mention the
 touching relations.
 -/

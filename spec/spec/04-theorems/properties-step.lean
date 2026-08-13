@@ -188,10 +188,10 @@ def stepMutants : List (String × Bool) :=
        consistent_task_retry_rearm_only_when_due 5 { tasks := [{ T with retryAt := some 50 }] } { tasks := [{ T with retryAt := some 900 }] }),
     ("consistent_task_wake_replaces_resumes",
        consistent_task_wake_replaces_resumes 7 { tasks := [{ T with state := .suspended, retryAt := none }] } { tasks := [{ T with retryAt := some 7 }] }),
-    ("consistent_task_state_edge_rule_admissible",
-       consistent_task_state_edge_rule_admissible { tasks := [T] } { tasks := [A] }),
-    ("consistent_promise_state_edge_rule_admissible",
-       consistent_promise_state_edge_rule_admissible { promises := [P] } { promises := [{ P with state := .resolved, settledAt := some 20 }] }),
+    ("consistent_task_state_edge_internal_admissible",
+       consistent_task_state_edge_internal_admissible { tasks := [T] } { tasks := [A] }),
+    ("consistent_promise_state_edge_internal_admissible",
+       consistent_promise_state_edge_internal_admissible { promises := [P] } { promises := [{ P with state := .resolved, settledAt := some 20 }] }),
     ("preserved_no_dead_dispatch",
        preserved_no_dead_dispatch 500
          { promises := [P], tasks := [{ T with state := .acquired, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none }] }
@@ -237,7 +237,7 @@ theorem settled_promise_object_is_not_frozen :
           b.promises.any (fun q => q.id == p.id && q.listeners.length < p.listeners.length))
       = true := by decide
 
-/-! ### The rule-only harness
+/-! ### The internal-step-only harness
 
 The sweeper laws hold on internal steps and are FALSE on request steps.
 That is not a defect — it is what makes them stronger than the general
@@ -250,7 +250,7 @@ def stepsWithA (handle : AStep → Nat → AbstractModel.H Response) :
       let (_, s') := Id.run ((handle st n).run s)
       (st, n, s, s') :: stepsWithA handle w s'
 
-def isRuleStep : AStep → Bool
+def isInternalStep : AStep → Bool
   | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
   | .r5 _ => true | .r6 _ _ => true | .r7 _ => true
   | _ => false
@@ -259,21 +259,21 @@ def allSteps (w : List (AStep × Nat)) : List (AStep × Nat × ServerState × Se
   stepsWithA handleA w AbstractModel.ServerState.init
     ++ stepsWithA handleAP w AbstractModel.ServerState.init
 
-def ruleWellFormedRun (w : List (AStep × Nat)) : Bool :=
-  (allSteps w).all (fun (st, _, a, b) => !isRuleStep st || ruleWellFormed a b)
+def internalWellFormedRun (w : List (AStep × Nat)) : Bool :=
+  (allSteps w).all (fun (st, _, a, b) => !isInternalStep st || internalWellFormed a b)
 
-theorem stage3_rule_sweep :
-    ((seqsUpToA kernelsResp 3).map instantiateA).all ruleWellFormedRun = true := by decide
+theorem stage3_internal_sweep :
+    ((seqsUpToA kernelsResp 3).map instantiateA).all internalWellFormedRun = true := by decide
 
-theorem reaches_rule_steps :
-    (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => isRuleStep st)) = true := by decide
+theorem reaches_internal_steps :
+    (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => isInternalStep st)) = true := by decide
 
 /-- Strictly stronger than the general edge tables, machine-checked:
     some REQUEST step in the corpus violates the sweeper laws. If they
     held everywhere they would be a restatement, not a constraint. -/
-theorem rule_laws_are_strictly_stronger :
+theorem internal_laws_are_strictly_stronger :
     (((seqsUpToA kernelsResp 3).map instantiateA).any fun w =>
-      (allSteps w).any (fun (st, _, a, b) => !isRuleStep st && !ruleWellFormed a b)) = true := by
+      (allSteps w).any (fun (st, _, a, b) => !isInternalStep st && !internalWellFormed a b)) = true := by
   decide
 
 end Abstraction

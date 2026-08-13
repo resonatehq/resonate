@@ -34,7 +34,7 @@ def Tags.isTimer (t : Tags) : Bool :=
     `promise.create`, and the inner refusal is what it reports.
 
     With the combination refused, `task.create` faces no timers: its
-    `resonate:target` requirement and this rule are exclusive, so a task
+    `resonate:target` requirement and this internal step are exclusive, so a task
     is never born onto a timer promise and the birth verdict there is
     `rejectedTimedout`, with no `isTimer` case to answer for. Fact P's
     timer verdict remains where it is reachable — a timer, untargeted,

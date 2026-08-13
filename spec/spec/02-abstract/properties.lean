@@ -279,7 +279,7 @@ Two of these say something the object-level reading gets wrong.
 
 `preserved_settled_promise_record` freezes `state`, `value` and
 `settledAt` once a promise is settled. It does NOT freeze the promise:
-the listener and callback rules keep removing obligations from settled
+the listener and callback internal steps keep removing obligations from settled
 promises, which is how a wake is discharged. What is frozen is exactly
 `toRecord` — exactly the part a response can carry — so "a settled
 promise never changes again" is true on the wire and false in the store.
@@ -836,7 +836,7 @@ refresh; it may never acquire, suspend, halt or continue a task, and it
 may settle a promise only by its deadline. A server whose reaper does
 any of the rest steals a lease or invents a verdict nobody asked for. -/
 
-def consistent_task_state_edge_rule_admissible (a b : ServerState) : Bool :=
+def consistent_task_state_edge_internal_admissible (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     match b.tasks.find? (·.id == t.id) with
     | none   => true
@@ -854,7 +854,7 @@ def consistent_task_state_edge_rule_admissible (a b : ServerState) : Bool :=
           (TaskState.fulfilled, TaskState.fulfilled)
         ].contains (t.state, u.state)
 
-def consistent_promise_state_edge_rule_admissible (a b : ServerState) : Bool :=
+def consistent_promise_state_edge_internal_admissible (a b : ServerState) : Bool :=
   a.promises.all fun p =>
     match b.promises.find? (·.id == p.id) with
     | none   => true
@@ -863,14 +863,14 @@ def consistent_promise_state_edge_rule_admissible (a b : ServerState) : Bool :=
           || (p.state == .pending
                 && (q.state == .rejectedTimedout || (q.state == .resolved && p.isTimer)))
 
-def ruleChecks : List (String × (ServerState → ServerState → Bool)) :=
-  [ ("consistent_task_state_edge_rule_admissible",    consistent_task_state_edge_rule_admissible),
-    ("consistent_promise_state_edge_rule_admissible", consistent_promise_state_edge_rule_admissible) ]
+def internalChecks : List (String × (ServerState → ServerState → Bool)) :=
+  [ ("consistent_task_state_edge_internal_admissible",    consistent_task_state_edge_internal_admissible),
+    ("consistent_promise_state_edge_internal_admissible", consistent_promise_state_edge_internal_admissible) ]
 
-def ruleFailures (a b : ServerState) : List String :=
-  ruleChecks.filterMap fun (n, f) => if f a b then none else some n
+def internalFailures (a b : ServerState) : List String :=
+  internalChecks.filterMap fun (n, f) => if f a b then none else some n
 
-def ruleWellFormed (a b : ServerState) : Bool := (ruleFailures a b).isEmpty
+def internalWellFormed (a b : ServerState) : Bool := (internalFailures a b).isEmpty
 
 def stepChecks : List (String × (ServerState → ServerState → Bool)) :=
   [ ("preserved_promise_birth_fields_immutable",  preserved_promise_birth_fields_immutable),

@@ -21,12 +21,12 @@ directions:
     the view, and the view of a fact-lagged object equals the touched
     object byte for byte. So the two disciplines answer identically
     under ANY shared schedule — checked exhaustively below, with the
-    adversarial rules (R5, R6) in the alphabet.
+    adversarial internal steps (R5, R6) in the alphabet.
 
   * **Message lockstep holds too.** R5 and R6 read the TASK raw
     (choices are never forced by observation) but DECIDE through the
-    view — no rule creates new work for a logically dead task. With
-    that, no rule's effect depends on fact-lag at all, and the twins
+    view — no internal step creates new work for a logically dead task. With
+    that, no internal step's effect depends on fact-lag at all, and the twins
     lockstep on both channels: `LockstepAbstract`. The script that
     refuted message lockstep when R5/R6 decided raw (`wLag` — the
     projected machine re-pended a fact-lagged task and emitted a
@@ -38,7 +38,7 @@ namespace Abstraction
 open Equivalence (Request Response extTags tgtTags timerTags eqSet)
 
 /-- The projected abstract machine's step: `Projected` handlers, the
-    SAME rules — the read discipline concerns handlers only. -/
+    SAME internal steps — the read discipline concerns handlers only. -/
 def handleAP (st : AStep) (now : Nat) : AbstractModel.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.P.promiseGet req now
@@ -115,7 +115,7 @@ def AMRefinesAP : Prop :=
 def IndistinguishableAbstract : Prop := APRefinesAM ∧ AMRefinesAP
 
 /-- **The sharper theorem, unique to the abstract level: response
-    lockstep.** Feed the SAME schedule — every step, adversarial rule
+    lockstep.** Feed the SAME schedule — every step, adversarial internal step
     firings included — to both disciplines, and the response streams
     are pointwise identical. No ∃, no re-indexing, no silence: the
     universal synchronous form, strictly stronger than the response
@@ -134,7 +134,7 @@ def ResponseLockstepAbstract : Prop :=
 
 /-- **Full lockstep: both channels, any shared schedule.** Responses
     pointwise identical AND messages equal at quiescence. Holds because
-    every decision in either machine — handler or rule — goes through
+    every decision in either machine — handler or internal step — goes through
     the view, so no effect depends on fact-lag; only the stored bytes
     differ, and quiescence closes them. -/
 def LockstepAbstract : Prop :=
@@ -236,7 +236,7 @@ example : twinCheckA b5 2500 := by decide
 /-! ### The sweep
 
 Full lockstep — responses pointwise, quiesced states and outboxes —
-over the ADVERSARIAL alphabet, the choice-rules R5 and R6 included:
+over the ADVERSARIAL alphabet, the choice-internal steps R5 and R6 included:
 no shared schedule, however hostile, splits the twins on either
 channel. -/
 
