@@ -1,7 +1,18 @@
-import «02-abstract».«state»
+import «02-abstract».«external»
+
+/-!  # Internal steps — what the server does on its own initiative
+
+Six steps a background job may fire: the promise timeout, the listener
+drain, the callback drain, the lease timeout, the retry dispatch, and
+the schedule. No client asks for these.
+
+They take the FORCED reads — `touchPromise`, `touchTask`,
+`viewPromise` — not the parametric ones. Internal steps materialise
+under both readings of the machine; `Env.mat` does not reach here. -/
 
 namespace AbstractModel
 namespace Internal
+
 
 open ServerModel (nextCron occurrences expand Schedule)
 

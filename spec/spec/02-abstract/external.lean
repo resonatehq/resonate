@@ -1,7 +1,16 @@
 import «02-abstract».«state»
 
+/-!  # External steps — the request handlers
+
+The 21 handlers a client can reach. Each is a pure function from the
+environment to a response and a list of writes; nothing here mutates.
+
+These read through `readPromise`/`readTask`, the DISCIPLINE-PARAMETRIC
+reads: whether a projected settlement is persisted is `Env.mat`, and
+that bit is the whole of the difference between the two readings of
+this machine. -/
+
 namespace AbstractModel
-namespace M
 
 open ServerModel (PromiseState
                   PromiseGetReq PromiseGetRes
@@ -12,7 +21,7 @@ open ServerModel (PromiseState
                   PromiseSearchReq PromiseSearchRes)
 
 def promiseGet (req : PromiseGetReq) (now : Nat) : H PromiseGetRes := do
-  match ← touchPromise req.id now with
+  match ← readPromise req.id now with
   | none =>
       return { status := 404 }
   | some p =>
@@ -21,7 +30,7 @@ def promiseGet (req : PromiseGetReq) (now : Nat) : H PromiseGetRes := do
 def promiseCreate (req : PromiseCreateReq) (now : Nat) : H PromiseCreateRes := do
   if req.tags.timerTargeted then
     return { status := 400, promise := none }
-  match ← touchPromise req.id now with
+  match ← readPromise req.id now with
   | some p =>
       return { status := 200, promise := some p.toRecord }
   | none =>
@@ -31,7 +40,7 @@ def promiseCreate (req : PromiseCreateReq) (now : Nat) : H PromiseCreateRes := d
 def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := do
   if !req.state.settable then
     return { status := 400 }
-  match ← touchPromise req.id now with
+  match ← readPromise req.id now with
   | none =>
       return { status := 404 }
   | some p =>
@@ -46,11 +55,11 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
     H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
     return { status := 400 }
-  match ← touchPromise req.awaited now with
+  match ← readPromise req.awaited now with
   | none =>
       return { status := 404 }
   | some pAwaited =>
-  match ← touchPromise req.awaiter now with
+  match ← readPromise req.awaiter now with
   | none =>
       return { status := 422 }
   | some pAwaiter =>
@@ -69,7 +78,7 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
     H PromiseRegisterListenerRes := do
   if !ServerModel.addressValid req.address then
     return { status := 400 }
-  match ← touchPromise req.awaited now with
+  match ← readPromise req.awaited now with
   | none =>
       return { status := 404 }
   | some pAwaited =>
@@ -97,7 +106,7 @@ open ServerModel (TaskGetReq TaskGetRes
                   TaskSearchReq TaskSearchRes)
 
 def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -109,7 +118,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
   if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
     return { status := 400 }
-  match ← touchPromise a.id now with
+  match ← readPromise a.id now with
   | none =>
       if a.timeoutAt > now then
         let p : PromiseObject :=
@@ -135,7 +144,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   | some p =>
       if !(p.tags.has "resonate:target") then
         return { status := 422 }
-      match ← touchTask p.id now with
+      match ← readTask p.id now with
       | none | some (_, none) =>
           return { status := 409 }
       | some (t, some p) =>
@@ -153,7 +162,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
             return { status := 409 }
 
 def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -175,7 +184,7 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
 def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -196,7 +205,7 @@ def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
           return { status := 200, action := some (.settle res) }
 
 def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : H Unit := do
-  match ← touchTask ref.id now with
+  match ← readTask ref.id now with
   | some (t, some p) =>
       if t.state == .acquired ∧ t.version == ref.version
           ∧ t.pid == some pid ∧ p.state == .pending then
@@ -217,7 +226,7 @@ def taskHeartbeat (req : TaskHeartbeatReq) (now : Nat) : H TaskHeartbeatRes := d
 def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → H (Option Bool)
   | [] => return some false
   | action :: rest => do
-      match ← touchPromise action.awaited now with
+      match ← readPromise action.awaited now with
       | none => return none
       | some pa =>
           if !pa.external then
@@ -231,7 +240,7 @@ def registerAwaited (awaiter : String) (now : Nat) :
     List PromiseRegisterCallbackReq → H Unit
   | [] => pure ()
   | action :: rest => do
-      match ← touchPromise action.awaited now with
+      match ← readPromise action.awaited now with
       | some pa => setPromise (pa.addCallback awaiter)
       | none => pure ()
       registerAwaited awaiter now rest
@@ -244,7 +253,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   let awaitedIds := req.actions.map (·.awaited)
   if awaitedIds.eraseDups.length != awaitedIds.length then
     return { status := 400 }
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -271,7 +280,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -289,7 +298,7 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
       return { status := 200, promise := some p.toRecord }
 
 def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -306,7 +315,7 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
       return { status := 200 }
 
 def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (_, none) =>
@@ -321,7 +330,7 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
       return { status := 200 }
 
 def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
-  match ← touchTask req.id now with
+  match ← readTask req.id now with
   | none =>
       return { status := 404 }
   | some (t, pOpt) =>
@@ -383,5 +392,4 @@ def scheduleDelete (req : ScheduleDeleteReq) (_now : Nat) : H ScheduleDeleteRes 
 def scheduleSearch (_req : ScheduleSearchReq) (_now : Nat) : H ScheduleSearchRes := do
   return { status := 501 }
 
-end M
 end AbstractModel

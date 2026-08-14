@@ -1,5 +1,31 @@
 import «01-protocol».«validation»
 
+/-!  # The abstract machine — state, and the shape of a transition
+
+The coalesced state, and the monad every step is written in. There is
+one machine now: reads come from the environment, writes accumulate as
+`Effect`, and `run` folds them onto the pre-state at the end.
+
+`bind` passes the SAME environment to its continuation, so a read
+cannot observe a write of its own transition. That is not a habit to be
+maintained — it is what the type says, and it is what lets a step's
+writes be collected and committed together. One step is one
+transaction.
+
+MATERIALISATION IS A PARAMETER. `Env.mat` decides whether a read that
+projects a settled promise also PERSISTS that settlement. `run true`
+materialises; `run false` serves the same facts as views and persists
+nothing. The two used to be two machines, 387 and 386 lines differing
+in one word per read; here they are one body and a bit.
+
+The parameter scopes over EXTERNAL steps only. Internal steps
+materialise under both readings, and take the forced reads
+(`touchPromise`, `touchTask`, `viewPromise`) rather than the parametric
+ones. Getting that wrong is not theoretical: the first derivation of
+this machine substituted the parametric read into the internal steps
+too, and the sweep refuted it — 60 of 1 331 scripts. `withMat` is the
+fix. -/
+
 namespace AbstractModel
 
 open ServerModel (Tags Value PromiseState TaskState PromiseRecord
@@ -81,34 +107,62 @@ structure ServerState where
 
 def ServerState.init : ServerState := {}
 
-abbrev H := StateM ServerState
+inductive Effect
+  | setPromise  (p : PromiseObject)
+  | setTask     (t : TaskObject)
+  | setSchedule (s : Schedule)
+  | delSchedule (id : String)
+  | setMessage  (address : String) (msg : Message)
+  deriving Repr
+
+def Effect.apply (s : ServerState) : Effect → ServerState
+  | .setPromise p  => { s with promises  := p :: s.promises.filter (·.id != p.id) }
+  | .setTask t     => { s with tasks     := t :: s.tasks.filter (·.id != t.id) }
+  | .setSchedule c => { s with schedules := c :: s.schedules.filter (·.id != c.id) }
+  | .delSchedule i => { s with schedules := s.schedules.filter (·.id != i) }
+  | .setMessage a m =>
+      let entry := OutboxEntry.mk a m
+      { s with outbox := entry :: s.outbox.filter (fun e => e.key != entry.key) }
+
+def applyAll (s : ServerState) : List Effect → ServerState
+  | []      => s
+  | e :: es => applyAll (e.apply s) es
+
+structure Env where
+  state : ServerState
+  mat   : Bool
+
+def H (α : Type) : Type := Env → α × List Effect
+
+instance : Monad H where
+  pure a   := fun _ => (a, [])
+  bind x f := fun e =>
+    let (a, w₁) := x e
+    let (b, w₂) := f a e
+    (b, w₁ ++ w₂)
+
+def ask : H Env := fun e => (e, [])
+
+def emit (f : Effect) : H Unit := fun _ => ((), [f])
+
+def run (mat : Bool) (act : H α) (s : ServerState) : α × ServerState :=
+  let (a, w) := act { state := s, mat := mat }
+  (a, applyAll s w)
 
 def getPromise (id : String) : H (Option PromiseObject) :=
-  return (← get).promises.find? (·.id == id)
-
-def setPromise (p : PromiseObject) : H Unit :=
-  modify fun s => { s with promises := p :: s.promises.filter (·.id != p.id) }
+  return (← ask).state.promises.find? (·.id == id)
 
 def getTask (id : String) : H (Option TaskObject) :=
-  return (← get).tasks.find? (·.id == id)
-
-def setTask (t : TaskObject) : H Unit :=
-  modify fun s => { s with tasks := t :: s.tasks.filter (·.id != t.id) }
+  return (← ask).state.tasks.find? (·.id == id)
 
 def getSchedule (id : String) : H (Option Schedule) :=
-  return (← get).schedules.find? (·.id == id)
+  return (← ask).state.schedules.find? (·.id == id)
 
-def setSchedule (sch : Schedule) : H Unit :=
-  modify fun s => { s with schedules := sch :: s.schedules.filter (·.id != sch.id) }
-
-def delSchedule (id : String) : H Unit :=
-  modify fun s => { s with schedules := s.schedules.filter (·.id != id) }
-
-def setMessage (address : String) (msg : Message) : H Unit :=
-  modify fun s =>
-    let entry := OutboxEntry.mk address msg
-    let key   := entry.key
-    { s with outbox := entry :: s.outbox.filter (fun e => e.key != key) }
+def setPromise (p : PromiseObject) : H Unit := emit (.setPromise p)
+def setTask (t : TaskObject) : H Unit := emit (.setTask t)
+def setSchedule (c : Schedule) : H Unit := emit (.setSchedule c)
+def delSchedule (id : String) : H Unit := emit (.delSchedule id)
+def setMessage (a : String) (m : Message) : H Unit := emit (.setMessage a m)
 
 def setSettled (p : PromiseObject) : H Unit := do
   setPromise p
@@ -120,81 +174,65 @@ def setSettled (p : PromiseObject) : H Unit := do
 def createPromise (req : PromiseCreateReq) (now : Nat) : H PromiseObject := do
   if req.timeoutAt > now then
     let p : PromiseObject :=
-      { id := req.id
-        state := .pending
-        param := req.param
-        tags := req.tags
-        timeoutAt := req.timeoutAt
-        createdAt := now }
+      { id := req.id, state := .pending, param := req.param, tags := req.tags,
+        timeoutAt := req.timeoutAt, createdAt := now }
     setPromise p
     if p.tags.has "resonate:target" then
       let due :=
         match p.tags.get? "resonate:delay" with
         | some d => max (ServerModel.parseNat d) now
         | none => now
-      setTask { id := p.id, state := .pending, version := 0,
-                retryAt := some due }
+      setTask { id := p.id, state := .pending, version := 0, retryAt := some due }
     return p
   else
     let state :=
-      if req.tags.isTimer then
-        PromiseState.resolved
-      else
-        PromiseState.rejectedTimedout
+      if req.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout
     let p : PromiseObject :=
-      { id := req.id
-        state := state
-        param := req.param
-        tags := req.tags
-        timeoutAt := req.timeoutAt
-        createdAt := req.timeoutAt
+      { id := req.id, state := state, param := req.param, tags := req.tags,
+        timeoutAt := req.timeoutAt, createdAt := req.timeoutAt,
         settledAt := some req.timeoutAt }
     setPromise p
     if p.tags.has "resonate:target" then
       setTask { id := p.id, state := .fulfilled, version := 0 }
     return p
 
-def touchPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
+def readPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
   match ← getPromise id with
   | none => return none
   | some p =>
       let p' := p.project now
-      if p'.state != p.state then
+      if (← ask).mat && p'.state != p.state then
         setSettled p'
       return some p'
 
 def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do
-  match ← touchPromise req.id now with
+  match ← readPromise req.id now with
   | some _ => pure ()
   | none   => let _ ← createPromise req now
 
-def viewPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
-  return (← getPromise id).map (·.project now)
-
-def viewTask (id : String) (now : Nat) :
+def readTask (id : String) (now : Nat) :
     H (Option (TaskObject × Option PromiseObject)) := do
   match ← getTask id with
   | none => return none
   | some t =>
-  match ← getPromise t.id with
+  match ← readPromise t.id now with
   | none => return some (t, none)
   | some p =>
-      let p := p.project now
-      return some (t.view p, some p)
+      let u := t.view p
+      if (← ask).mat && u.state != t.state then
+        setTask u
+      return some (u, some p)
+
+def withMat (mat : Bool) (act : H α) : H α := fun e => act { e with mat := mat }
+
+def touchPromise (id : String) (now : Nat) : H (Option PromiseObject) :=
+  withMat true (readPromise id now)
 
 def touchTask (id : String) (now : Nat) :
-    H (Option (TaskObject × Option PromiseObject)) := do
-  match ← getTask id with
-  | none => return none
-  | some t =>
-  match ← touchPromise t.id now with
-  | none => return some (t, none)
-  | some p =>
-      if p.state != .pending ∧ t.state != .fulfilled then
-        let t := t.fulfill
-        setTask t
-        return some (t, some p)
-      else
-        return some (t, some p)
+    H (Option (TaskObject × Option PromiseObject)) :=
+  withMat true (readTask id now)
+
+def viewPromise (id : String) (now : Nat) : H (Option PromiseObject) :=
+  withMat false (readPromise id now)
 
 end AbstractModel
