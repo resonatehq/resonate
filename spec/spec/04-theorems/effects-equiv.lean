@@ -58,8 +58,28 @@ def eqP (w : List (AStep × Nat)) : Bool :=
 
 def eqBoth (w : List (AStep × Nat)) : Bool := eqM w && eqP w
 
-def EqualsM : Prop := ∀ w, eqM w = true
-def EqualsP : Prop := ∀ w, eqP w = true
+/-! ### The bridge
+
+`E` and the two StateM twins agree — on the response stream and on the
+quiesced state, for every script, under both disciplines. Stated as
+theorems rather than as `Prop` definitions, and left unproved.
+
+The change from `def … : Prop` to `theorem … := sorry` is not cosmetic.
+An unconsumed `Prop` is a claim nobody makes: it compiles green, no
+build reports it, and nothing anywhere depends on it. A `sorry` is a
+claim the build names every time it runs. These two are the reason a
+result about `E` is a result about the specification, so they should be
+loud.
+
+The evidence beneath them is `effectSweep₀..₂`: every script of length
+≤ 3 over the adversarial alphabet — 133 + 1 331 = 1 464 — both
+disciplines, responses and state, by `decide`. That is a refutation
+engine, not a proof; it is what caught the `withMat` error (60 of 1 331
+scripts, `eqM` true throughout and `eqP` false). What it cannot do is
+quantify over scripts of length 4. -/
+
+theorem EqualsM : ∀ w, eqM w = true := sorry
+theorem EqualsP : ∀ w, eqP w = true := sorry
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
