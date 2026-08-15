@@ -137,105 +137,18 @@ theorem getPromise_sound {q : PromiseObject → Bool} {s : ServerState}
     (h : s.promises.find? (·.id == id) = some p) : q p = true :=
   List.all_eq_true.mp hs p (List.mem_of_find?_eq_some h)
 
-/-! ### The transformations
+/-! ### What is left per property
 
-Four functions produce every promise the machine ever stores, and each
-one is a statement about a `PromiseObject`. `project` is Fact P;
-`addCallback` and `addListener` are the obligation ledgers; a settle
-rewrites the verdict.
+Nine functions produce every promise the machine ever stores, and each
+one is a statement about a `PromiseObject`: no monad, no state, no
+handler. `project` is Fact P; `addCallback` and `addListener` are the
+obligation ledgers, and the internal drains remove from them by
+rewriting the field directly, since there are no inverses; a settle
+rewrites the verdict; and two births — `createPromise`'s and the copy
+`task.create` inlines — build a promise from nothing.
 
-Stated for `created_at ≤ timeout_at`, the first property to go through
-end to end. All four are `rfl`-shaped, because none of them touches
-either field — which is itself the content: the birth fields are
-immutable, and that is why the property is inductive. -/
-
-def qCreatedLeTimeout (p : PromiseObject) : Bool := p.createdAt ≤ p.timeoutAt
-
-theorem project_preserves_created_le_timeout (p : PromiseObject) (now : Nat) :
-    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.project now) = true := by
-  intro h
-  unfold PromiseObject.project
-  split
-  · split <;> simpa [qCreatedLeTimeout] using h
-  · simpa [qCreatedLeTimeout] using h
-
-theorem addCallback_preserves_created_le_timeout (p : PromiseObject) (a : String) :
-    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.addCallback a) = true := by
-  intro h
-  unfold PromiseObject.addCallback
-  split <;> simpa [qCreatedLeTimeout] using h
-
-theorem addListener_preserves_created_le_timeout (p : PromiseObject) (a : String) :
-    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.addListener a) = true := by
-  intro h
-  unfold PromiseObject.addListener
-  split <;> simpa [qCreatedLeTimeout] using h
-
-/-- A settle rewrites `state`, `value` and `settledAt` and nothing else,
-    so the birth fields ride through untouched. -/
-theorem settle_preserves_created_le_timeout
-    (p : PromiseObject) (st : ServerModel.PromiseState)
-    (v : ServerModel.Value) (t : Option Nat) :
-    qCreatedLeTimeout p = true →
-    qCreatedLeTimeout { p with state := st, value := v, settledAt := t } = true := by
-  intro h; simpa [qCreatedLeTimeout] using h
-
-/-- And the one promise the machine builds from nothing rather than
-    from another promise: `createPromise`'s two birth shapes. Live,
-    `createdAt := now < req.timeoutAt`; born dead, both fields are
-    `req.timeoutAt` and the inequality is an equality. Neither needs a
-    hypothesis, which is what makes the property inductive rather than
-    merely true. -/
-theorem live_satisfies_created_le_timeout
-    (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
-    (timeoutAt createdAt : Nat) (h : createdAt < timeoutAt) :
-    qCreatedLeTimeout
-      { id := id, state := .pending, param := param, tags := tags,
-        timeoutAt := timeoutAt, createdAt := createdAt } = true := by
-  simp [qCreatedLeTimeout]; omega
-
-theorem dead_satisfies_created_le_timeout
-    (id : String) (st : ServerModel.PromiseState) (param : ServerModel.Value)
-    (tags : ServerModel.Tags) (timeoutAt : Nat) :
-    qCreatedLeTimeout
-      { id := id, state := st, param := param, tags := tags,
-        timeoutAt := timeoutAt, createdAt := timeoutAt,
-        settledAt := some timeoutAt } = true := by
-  simp [qCreatedLeTimeout]
-
-/-! ### The two ledger removals
-
-Missed on the first pass, and the enumeration is what found them. The
-internal drains do not go through `addCallback`/`addListener`'s
-inverses — there are none — they rewrite the field directly:
-
-    setPromise { p with listeners := p.listeners.filter (· != address) }
-    setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
-
-So nine functions produce stored promises, not four. -/
-
-theorem removeListener_preserves_created_le_timeout
-    (p : PromiseObject) (address : String) :
-    qCreatedLeTimeout p = true →
-    qCreatedLeTimeout { p with listeners := p.listeners.filter (· != address) } = true := by
-  intro h; simpa [qCreatedLeTimeout] using h
-
-theorem removeCallback_preserves_created_le_timeout
-    (p : PromiseObject) (awaiter : String) :
-    qCreatedLeTimeout p = true →
-    qCreatedLeTimeout { p with callbacks := p.callbacks.filter (· != awaiter) } = true := by
-  intro h; simpa [qCreatedLeTimeout] using h
-
-/-! ### The second copy of birth
-
-`task.create` does NOT call `createPromise`; it inlines its own birth,
-so there are two copies of promise birth in the machine. They are the
-same two SHAPES, which is why `live` and `dead` above cover both: the
-only difference is that `task.create`'s dead branch has no timer case,
-and that is correct rather than an omission — it 400s on
-`timerTargeted`, so a timer never reaches it and the verdict is always
-`rejectedTimedout`. Quantifying `dead` over the state (with `st ≠
-.pending`) makes the two copies one obligation. -/
+`Hereditary` below packages them. The instances live in
+`entries.lean`. -/
 
 /-! ## Making the enumeration checkable
 
@@ -349,8 +262,9 @@ structure Hereditary (q : PromiseObject → Bool) : Prop where
   addCallback  : ∀ (p : PromiseObject) (a : String), q p = true → q (p.addCallback a) = true
   addListener  : ∀ (p : PromiseObject) (a : String), q p = true → q (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
-                   (v : ServerModel.Value) (t : Option Nat),
-                   q p = true → q { p with state := st, value := v, settledAt := t } = true
+                   (v : ServerModel.Value) (t : Nat),
+                   st.settable = true → q p = true →
+                   q { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ (p : PromiseObject) (a : String), q p = true →
                    q { p with listeners := p.listeners.filter (· != a) } = true
   dropCallback : ∀ (p : PromiseObject) (a : String), q p = true →
@@ -365,21 +279,6 @@ structure Hereditary (q : PromiseObject → Bool) : Prop where
                    q { id := id, state := st, param := param, tags := tags,
                        timeoutAt := timeoutAt, createdAt := timeoutAt,
                        settledAt := some timeoutAt } = true
-
-/-- The first property through the whole machinery:
-    `created_at ≤ timeout_at`. Eight of the eleven obligations are
-    `simpa`-shaped because the birth fields are immutable, and that
-    immutability IS why the property is inductive. -/
-theorem hereditary_createdLeTimeout : Hereditary qCreatedLeTimeout where
-  project      := project_preserves_created_le_timeout
-  addCallback  := addCallback_preserves_created_le_timeout
-  addListener  := addListener_preserves_created_le_timeout
-  settle       := settle_preserves_created_le_timeout
-  dropListener := removeListener_preserves_created_le_timeout
-  dropCallback := removeCallback_preserves_created_le_timeout
-  live         := live_satisfies_created_le_timeout
-  dead         := fun id st param tags t _ =>
-                    dead_satisfies_created_le_timeout id st param tags t
 
 /-! ## Reducing a transition
 

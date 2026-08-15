@@ -107,14 +107,16 @@ theorem writesGood_promiseCreate (req : ServerModel.PromiseCreateReq) (now : Nat
 theorem writesGood_promiseSettle (req : ServerModel.PromiseSettleReq) (now : Nat) :
     WritesGood q e (promiseSettle req now) := by
   unfold promiseSettle
-  wg_guard
+  refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hset => ?_)
+  refine writesGood_pureBind _ _ _ _ ?_
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro p hp
     dsimp only
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
     exact writesGood_bind' _ _ _ _
-      (writesGood_setSettled _ _ (hq.settle p _ _ _ hp)) (writesGood_pure _ _ _)
+      (writesGood_setSettled _ _ (hq.settle p _ _ _ (by simpa using hset) hp))
+      (writesGood_pure _ _ _)
 
 theorem writesGood_promiseRegisterCallback
     (req : ServerModel.PromiseRegisterCallbackReq) (now : Nat) :
@@ -285,7 +287,8 @@ theorem writesGood_taskSuspend (req : ServerModel.TaskSuspendReq) (now : Nat) :
 theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
     WritesGood q e (taskFulfill req now) := by
   unfold taskFulfill
-  wg_guard
+  refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hset => ?_)
+  refine writesGood_pureBind _ _ _ _ ?_
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
@@ -295,7 +298,8 @@ theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
     wg_guard
     wg_guard
     exact writesGood_bind' _ _ _ _
-      (writesGood_setSettled _ _ (hq.settle p _ _ _ hp)) (writesGood_pure _ _ _)
+      (writesGood_setSettled _ _ (hq.settle p _ _ _ (by simpa using hset) hp))
+      (writesGood_pure _ _ _)
 
 theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
     WritesGood q e (taskRelease req now) := by
@@ -505,26 +509,6 @@ theorem perPromise_step {q : PromiseObject → Bool} (hq : Hereditary q)
   intro hsq
   refine perPromise_applyAll q _ s hsq ?_
   exact writesGood_handle (e := { state := s, mat := mat }) hq hsq st now
-
-/-! ## The first catalogue entry, proved
-
-`well_formed_promise_created_at_lte_timeout_at` is `PerPromise
-qCreatedLeTimeout` by definition, so the two results above compose into
-the statement the sweep could only sample: it holds at `init`, and
-every step of the machine preserves it — at any length, under either
-read discipline, at any instant.
-
-The clock argument is free here because the property does not mention
-`now`. That is not true of the whole catalogue, which is why
-`stateHolds_clock` is a separate obligation. -/
-
-theorem created_le_timeout_init (now : Nat) :
-    Properties.well_formed_promise_created_at_lte_timeout_at now ServerState.init = true := rfl
-
-theorem created_le_timeout_step (mat : Bool) (st : Step) (now n' : Nat) (s : ServerState) :
-    Properties.well_formed_promise_created_at_lte_timeout_at now s = true →
-    Properties.well_formed_promise_created_at_lte_timeout_at n' (stepOf mat st now s).2 = true :=
-  perPromise_step hereditary_createdLeTimeout mat st now s
 
 end Induction
 end Abstraction
