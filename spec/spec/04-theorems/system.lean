@@ -1,14 +1,32 @@
 import «02-abstract».«internal»
 
-/-!  # The step alphabet
+/-!  # The system
 
-What a run of the machine is made of: the 21 client requests, the
-responses they get back, and the steps a trace is a sequence of.
+What the machine IS, as opposed to what it does. Four things, and the
+order is the order you need them in:
 
-This file is the salvage from `trace.lean`, `alpha.lean` and
-`refinement.lean`, which held these definitions when there were two
-machines to relate. With one machine the relating is gone and the
-vocabulary remains, so it lives here on its own.
+  1. **The alphabet** — the 21 requests a client can send, the
+     responses they get back, and `AStep`, the steps a run is a
+     sequence of.
+  2. **The driver** — `handle`, which takes a step to the transition it
+     denotes, and `stepOf`, which runs that transition against a state.
+  3. **The trace** — `StateAction`, one tick's whole situation, and
+     `Trace`, a function from ticks to those.
+  4. **Validity** — which traces are runs OF THIS MACHINE, as opposed
+     to arbitrary sequences of states.
+
+Nothing else in the repository defines the system. The properties
+(`02-abstract/properties.lean`) say what must be true of it; the
+harnesses evaluate them; the liveness file quantifies over its traces.
+All of them presuppose this file.
+
+These definitions were spread across `trace.lean`, `alpha.lean` and
+`refinement.lean`, which existed to RELATE two machines. That the
+system's own definition lived inside a refinement was an accident of
+where the driver happened to sit — nothing in `StateAction`, `Trace`
+or validity mentions a second machine. With one machine the relating
+is gone and the system statement is what remains, so it gets a file
+named for what it is.
 
 Two changes came with the move, and both are subtractions.
 
@@ -156,6 +174,53 @@ such field, so it compares structurally. -/
 
 deriving instance BEq for AbstractModel.TaskObject
 
+/-! ## The driver
+
+What a step DENOTES. `handle` takes an `AStep` to a transition in the
+machine's monad; `stepOf` runs that transition against a state and
+hands back the response and the state it leaves.
+
+`mat` appears only in `stepOf`, never in `handle`. That is the single
+machine paying off: the read discipline is not a different dispatcher,
+it is an argument to `run`. There used to be `handleA` and `handleAP`,
+two 30-case dispatch tables that differed in which namespace they
+named. -/
+
+def handle (st : AStep) (now : Nat) : AbstractModel.H Response :=
+  match st with
+  | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.promiseGet req now
+  | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.promiseCreate req now
+  | .api (.promiseSettle req)           => Response.promiseSettle <$> AbstractModel.promiseSettle req now
+  | .api (.promiseRegisterCallback req) => Response.promiseRegisterCallback <$> AbstractModel.promiseRegisterCallback req now
+  | .api (.promiseRegisterListener req) => Response.promiseRegisterListener <$> AbstractModel.promiseRegisterListener req now
+  | .api (.promiseSearch req)           => Response.promiseSearch <$> AbstractModel.promiseSearch req now
+  | .api (.scheduleGet req)             => Response.scheduleGet <$> AbstractModel.scheduleGet req now
+  | .api (.scheduleCreate req)          => Response.scheduleCreate <$> AbstractModel.scheduleCreate req now
+  | .api (.scheduleDelete req)          => Response.scheduleDelete <$> AbstractModel.scheduleDelete req now
+  | .api (.scheduleSearch req)          => Response.scheduleSearch <$> AbstractModel.scheduleSearch req now
+  | .api (.taskGet req)                 => Response.taskGet <$> AbstractModel.taskGet req now
+  | .api (.taskCreate req)              => Response.taskCreate <$> AbstractModel.taskCreate req now
+  | .api (.taskAcquire req)             => Response.taskAcquire <$> AbstractModel.taskAcquire req now
+  | .api (.taskFence req)               => Response.taskFence <$> AbstractModel.taskFence req now
+  | .api (.taskHeartbeat req)           => Response.taskHeartbeat <$> AbstractModel.taskHeartbeat req now
+  | .api (.taskSuspend req)             => Response.taskSuspend <$> AbstractModel.taskSuspend req now
+  | .api (.taskFulfill req)             => Response.taskFulfill <$> AbstractModel.taskFulfill req now
+  | .api (.taskRelease req)             => Response.taskRelease <$> AbstractModel.taskRelease req now
+  | .api (.taskHalt req)                => Response.taskHalt <$> AbstractModel.taskHalt req now
+  | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.taskContinue req now
+  | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.taskSearch req now
+  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .τ
+  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .τ
+  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .τ
+  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .τ
+  | .r6 id      => do AbstractModel.Internal.processRetryTimeout id now; return .τ
+  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
+  | .idle       => return .τ
+
+def stepOf (mat : Bool) (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :
+    Response × AbstractModel.ServerState :=
+  AbstractModel.run mat (handle st now) s
+
 /-! ## What a run is
 
 A trace is a function from ticks to state-action blocks. Each block
@@ -185,6 +250,29 @@ structure StateAction where
   now   : Nat
 
 abbrev Trace := Nat → StateAction
+
+
+/-! ## Validity
+
+Which traces are runs of this machine. Three conjuncts: the response is
+the one the step gives, the next state is the one the step leaves, and
+the clock does not run backwards.
+
+The third is a HYPOTHESIS, not a property, and the distinction matters.
+It restricts which traces we are talking about; it is not something an
+implementation can be caught violating, because every walk only sees
+the instants it is handed. A server whose clock regresses is outside
+what anything in `02-abstract/properties.lean` can refuse — and that is
+a real limit on what conformance to this catalogue buys you.
+
+`mat` is a parameter here too, so there is ONE notion of validity with
+a bit in it rather than two notions to keep in step. -/
+
+def Valid (mat : Bool) (tr : Trace) : Prop :=
+  ∀ t : Nat,
+    (tr t).res = (stepOf mat (tr t).req (tr t).now (tr t).state).1 ∧
+    (tr (t + 1)).state = (stepOf mat (tr t).req (tr t).now (tr t).state).2 ∧
+    (tr t).now ≤ (tr (t + 1)).now
 
 /-! ## Comparing states
 
