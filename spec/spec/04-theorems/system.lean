@@ -43,8 +43,8 @@ by shape rather than by asking the request.
 `r6 (id : String) (next : Nat)`, and that `next` was the only value in
 the whole alphabet that the environment wrote into the store rather
 than a name of something to act on. `processRetryTimeout` now computes
-its own next instant from the task's `ttl`, so the parameter has no
-reader. Every constructor below names an object and nothing else. -/
+its own next instant from `Env.config.retryTimeout` — the server's
+dial, read from the environment — so the parameter has no reader. Every constructor below names an object and nothing else. -/
 
 namespace Equivalence
 

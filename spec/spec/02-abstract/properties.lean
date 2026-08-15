@@ -1340,15 +1340,6 @@ def well_formed_promise_delay_before_deadline (_now : Nat) (s : ServerState) : B
     `well_formed_config_retry_positive` below — a well-formedness
     condition on configuration, checked once at startup, not a property
     of any state. -/
-/-- The one condition the closed gap leaves behind, and it is about
-    CONFIGURATION rather than about a state. `config.retryTimeout = 0`
-    re-arms a due task at `now`, so the retry step is enabled again at
-    the instant it fired. Not a `.state` property — `ServerConfig` is
-    not in `ServerState`, by design — so it is checked once, where the
-    dial is set. -/
-def well_formed_config_retry_positive (c : ServerConfig) : Bool :=
-  0 < c.retryTimeout
-
 def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     t.state != .pending ||
@@ -1358,6 +1349,16 @@ def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
                      || (match u.retryAt with
                          | some d => now < d
                          | none   => false))
+
+/-- The one condition the closed gap leaves behind, and it is about
+    CONFIGURATION rather than about a state. `config.retryTimeout = 0`
+    re-arms a due task at `now`, so the retry step is enabled again at
+    the instant it fired. Not a `.state` property — `ServerConfig` is
+    not in `ServerState`, by design — so no walk can check it and it is
+    not in `gaps` either. It is a condition on the dial, and it is
+    checked wherever the dial is set. -/
+def well_formed_config_retry_positive (c : ServerConfig) : Bool :=
+  0 < c.retryTimeout
 
 def gaps : List Named :=
   [ { name := "well_formed_task_ttl_positive"
