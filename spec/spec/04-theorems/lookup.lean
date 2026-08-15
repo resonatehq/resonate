@@ -112,6 +112,30 @@ theorem project_of_pending {p : PromiseObject} {n : Nat}
     · exact project_undue p hd
   · exact project_not_pending p n (toFalse hc)
 
+/-- A promise that READS pending is not yet due. The contrapositive of
+    Fact P, and the form the induction needs: a handler that settles a
+    promise it just read as pending is settling it strictly before its
+    deadline, so the stamp it writes is below `timeoutAt`. -/
+theorem project_pending_not_due {p : PromiseObject} {n : Nat}
+    (h : ((p.project n).state == PromiseState.pending) = true) :
+    n < (p.project n).timeoutAt := by
+  have he : p.project n = p := project_of_pending h
+  rw [he] at h ⊢
+  by_cases hd : p.timeoutAt ≤ n
+  · exfalso
+    have hdue := project_due p h hd
+    rw [he] at hdue
+    by_cases ht : p.isTimer = true
+    · rw [if_pos ht] at hdue
+      have hst := congrArg PromiseObject.state hdue
+      simp at hst
+      simp [hst] at h
+    · rw [if_neg ht] at hdue
+      have hst := congrArg PromiseObject.state hdue
+      simp at hst
+      simp [hst] at h
+  · omega
+
 theorem settable_ne_pending {st : PromiseState} (h : st.settable = true) :
     (st != PromiseState.pending) = true := by
   cases st <;> simp_all [ServerModel.PromiseState.settable]

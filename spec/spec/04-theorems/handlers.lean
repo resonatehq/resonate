@@ -85,7 +85,7 @@ theorem writesGood_createIfAbsent (req : ServerModel.PromiseCreateReq) (now : Na
   unfold createIfAbsent
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _) (writesGood_pure _ _ _)
-  · intro p hp; exact writesGood_pure _ _ _
+  · intro p hp _; exact writesGood_pure _ _ _
 
 /-! ### The promise API -/
 
@@ -94,7 +94,7 @@ theorem writesGood_promiseGet (req : ServerModel.PromiseGetReq) (now : Nat) :
   unfold promiseGet
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro p hp; exact writesGood_pure _ _ _
+  · intro p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_promiseCreate (req : ServerModel.PromiseCreateReq) (now : Nat) :
     WritesGood q e (promiseCreate req now) := by
@@ -102,7 +102,7 @@ theorem writesGood_promiseCreate (req : ServerModel.PromiseCreateReq) (now : Nat
   wg_guard
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _) (writesGood_pure _ _ _)
-  · intro p hp; exact writesGood_pure _ _ _
+  · intro p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_promiseSettle (req : ServerModel.PromiseSettleReq) (now : Nat) :
     WritesGood q e (promiseSettle req now) := by
@@ -111,11 +111,12 @@ theorem writesGood_promiseSettle (req : ServerModel.PromiseSettleReq) (now : Nat
   refine writesGood_pureBind _ _ _ _ ?_
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro p hp
+  · intro p hp hdue
     dsimp only
-    refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
+    refine writesGood_iteH _ _ _ _ _ (fun hpend => ?_) (fun _ => writesGood_pure _ _ _)
     exact writesGood_bind' _ _ _ _
-      (writesGood_setSettled _ _ (hq.settle p _ _ _ (by simpa using hset) hp))
+      (writesGood_setSettled _ _
+        (hq.settle p _ _ _ (by simpa using hset) (hdue hpend) hp))
       (writesGood_pure _ _ _)
 
 theorem writesGood_promiseRegisterCallback
@@ -125,11 +126,11 @@ theorem writesGood_promiseRegisterCallback
   wg_guard
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro pa hpa
+  · intro pa hpa _
     dsimp only
     refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
     · exact writesGood_pure _ _ _
-    · intro pw hpw
+    · intro pw hpw _
       dsimp only
       wg_guard
       wg_guard
@@ -146,7 +147,7 @@ theorem writesGood_promiseRegisterListener
   wg_guard
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro pa hpa
+  · intro pa hpa _
     dsimp only
     wg_guard
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
@@ -164,12 +165,25 @@ theorem writesGood_taskGet (req : ServerModel.TaskGetReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; exact writesGood_pure _ _ _
+  · intro t p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_taskCreate (req : ServerModel.TaskCreateReq) (now : Nat) :
     WritesGood q e (taskCreate req now) := by
   simp only [taskCreate]
-  wg_guard
+  refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hg => ?_)
+  refine writesGood_pureBind _ _ _ _ ?_
+  -- `task.create` faces no timers, and here is why: it REQUIRES
+  -- `resonate:target` and REFUSES `timerTargeted`, and the two together
+  -- leave `isTimer` false. The docstring in `01-protocol/validation.lean`
+  -- asserts this; the born-dead branch below is where it is needed, and
+  -- this is where it becomes a proof.
+  have hnotimer : req.action.tags.isTimer = false := by
+    have h1 : ¬ ((!req.action.tags.has "resonate:target") = true) := fun h => hg (Or.inl h)
+    have h2 : ¬ (req.action.tags.timerTargeted = true) := fun h => hg (Or.inr h)
+    simp [ServerModel.Tags.timerTargeted] at h1 h2
+    by_cases ht : req.action.tags.isTimer = true
+    · exact absurd (h2 ht) (by simp [h1])
+    · simpa using ht
   refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
   · dsimp only
     refine writesGood_iteH _ _ _ _ _ (fun h => ?_) (fun _ => ?_)
@@ -177,15 +191,15 @@ theorem writesGood_taskCreate (req : ServerModel.TaskCreateReq) (now : Nat) :
         (writesGood_setPromise _ _ _ (hq.live _ _ _ _ _ (by omega))) ?_
       wg_trivial
     · refine writesGood_bind' _ _ _ _
-        (writesGood_setPromise _ _ _ (hq.dead _ _ _ _ _ (by simp))) ?_
+        (writesGood_setPromise _ _ _ (hq.dead _ _ _ _ _ (by simp [hnotimer]))) ?_
       wg_trivial
-  · intro p hp
+  · intro p hp _
     dsimp only
     wg_guard
     refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
     · exact writesGood_pure _ _ _
     · intro t; exact writesGood_pure _ _ _
-    · intro t p' hp'; dsimp only; wg_trivial
+    · intro t p' hp' _; dsimp only; wg_trivial
 
 theorem writesGood_taskAcquire (req : ServerModel.TaskAcquireReq) (now : Nat) :
     WritesGood q e (taskAcquire req now) := by
@@ -193,7 +207,7 @@ theorem writesGood_taskAcquire (req : ServerModel.TaskAcquireReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_taskFence (req : ServerModel.TaskFenceReq) (now : Nat) :
     WritesGood q e (taskFence req now) := by
@@ -202,7 +216,7 @@ theorem writesGood_taskFence (req : ServerModel.TaskFenceReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp
+  · intro t p hp _
     dsimp only
     wg_guard
     wg_guard
@@ -219,7 +233,7 @@ theorem writesGood_heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now 
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_heartbeatAll (pid : String) (now : Nat) :
     ∀ refs, WritesGood q e (heartbeatAll pid now refs)
@@ -241,7 +255,7 @@ theorem writesGood_checkAwaited (now : Nat) :
       rw [checkAwaited]
       refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
       · exact writesGood_pure _ _ _
-      · intro p hp
+      · intro p hp _
         dsimp only
         refine writesGood_ite _ _ _ _ _ (writesGood_pure _ _ _) ?_
         refine writesGood_bind' _ _ _ _ (writesGood_checkAwaited now rest) ?_
@@ -257,7 +271,7 @@ theorem writesGood_registerAwaited (awaiter : String) (now : Nat) :
       · dsimp only
         exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _)
           (writesGood_registerAwaited awaiter now rest)
-      · intro p hp
+      · intro p hp _
         dsimp only
         exact writesGood_bind' _ _ _ _
           (writesGood_setPromise _ _ _ (hq.addCallback p _ hp))
@@ -272,7 +286,7 @@ theorem writesGood_taskSuspend (req : ServerModel.TaskSuspendReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp
+  · intro t p hp _
     dsimp only
     wg_guard
     wg_guard
@@ -292,13 +306,15 @@ theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp
+  · intro t p hp hdue
     dsimp only
     wg_guard
-    wg_guard
+    refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hpend => ?_)
+    refine writesGood_pureBind _ _ _ _ ?_
     wg_guard
     exact writesGood_bind' _ _ _ _
-      (writesGood_setSettled _ _ (hq.settle p _ _ _ (by simpa using hset) hp))
+      (writesGood_setSettled _ _
+        (hq.settle p _ _ _ (by simpa using hset) (hdue (by simpa using hpend)) hp))
       (writesGood_pure _ _ _)
 
 theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
@@ -307,7 +323,7 @@ theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_taskHalt (req : ServerModel.TaskHaltReq) (now : Nat) :
     WritesGood q e (taskHalt req now) := by
@@ -315,7 +331,7 @@ theorem writesGood_taskHalt (req : ServerModel.TaskHaltReq) (now : Nat) :
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_taskContinue (req : ServerModel.TaskContinueReq) (now : Nat) :
     WritesGood q e (taskContinue req now) := by
@@ -323,7 +339,7 @@ theorem writesGood_taskContinue (req : ServerModel.TaskContinueReq) (now : Nat) 
   refine writesGood_afterReadTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; dsimp only; wg_trivial
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_taskSearch (req : ServerModel.TaskSearchReq) (now : Nat) :
     WritesGood q e (taskSearch req now) := writesGood_pure _ _ _
@@ -357,14 +373,14 @@ theorem writesGood_processPromiseTimeout (id : String) (now : Nat) :
   unfold Internal.processPromiseTimeout touchPromise
   refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro p hp; exact writesGood_pure _ _ _
+  · intro p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_processListener (id : String) (address : String) (now : Nat) :
     WritesGood q e (Internal.processListener id address now) := by
   unfold Internal.processListener touchPromise
   refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro p hp
+  · intro p hp _
     dsimp only
     refine writesGood_ite _ _ _ _ _ (writesGood_pure _ _ _) ?_
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
@@ -377,14 +393,14 @@ theorem writesGood_resumeOne (awaited awaiter : String) (now : Nat) :
   refine writesGood_afterTouchTask hq hs _ _ _ ?_ ?_ ?_
   · exact writesGood_pure _ _ _
   · intro t; exact writesGood_pure _ _ _
-  · intro t p hp; dsimp only; wg_trivial
+  · intro t p hp _; dsimp only; wg_trivial
 
 theorem writesGood_processCallback (id : String) (awaiter : String) (now : Nat) :
     WritesGood q e (Internal.processCallback id awaiter now) := by
   unfold Internal.processCallback touchPromise
   refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
   · exact writesGood_pure _ _ _
-  · intro p hp
+  · intro p hp _
     dsimp only
     refine writesGood_ite _ _ _ _ _ (writesGood_pure _ _ _) ?_
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
@@ -403,7 +419,7 @@ theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
     · refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
       refine writesGood_afterMatReadPromise hq false hs _ _ _ ?_ ?_
       · exact writesGood_pure _ _ _
-      · intro p hp; dsimp only; wg_trivial
+      · intro p hp _; dsimp only; wg_trivial
 
 theorem writesGood_processRetryTimeout (id : String) (now : Nat) :
     WritesGood q e (Internal.processRetryTimeout id now) := by
@@ -416,7 +432,7 @@ theorem writesGood_processRetryTimeout (id : String) (now : Nat) :
     · refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
       refine writesGood_afterMatReadPromise hq false hs _ _ _ ?_ ?_
       · exact writesGood_pure _ _ _
-      · intro p hp; dsimp only; wg_trivial
+      · intro p hp _; dsimp only; wg_trivial
 
 theorem writesGood_fireOccurrence (c : ServerModel.Schedule) (t : Nat) :
     WritesGood q e (Internal.fireOccurrence c t) := by

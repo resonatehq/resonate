@@ -1,4 +1,5 @@
 import «04-theorems».«system»
+import «04-theorems».«lookup»
 import «02-abstract».«properties»
 
 /-!  # Inductive invariance
@@ -130,6 +131,13 @@ inherits the state's per-promise property — once, for all `q`. What is
 left per property is a statement about the four transformations the
 machine applies, and those are about `PromiseObject` alone: no monad,
 no state, no handler. -/
+
+/-- Weakening a per-promise property. Used where an entry is inductive
+    only relative to a strengthening: prove the stronger predicate, then
+    project onto the catalogue's. -/
+theorem perPromise_mono {q r : PromiseObject → Bool} (h : ∀ p, q p = true → r p = true)
+    (s : ServerState) : PerPromise q s = true → PerPromise r s = true := fun hs =>
+  List.all_eq_true.mpr (fun p hp => h p (List.all_eq_true.mp hs p hp))
 
 theorem getPromise_sound {q : PromiseObject → Bool} {s : ServerState}
     {id : String} {p : PromiseObject}
@@ -263,7 +271,7 @@ structure Hereditary (q : PromiseObject → Bool) : Prop where
   addListener  : ∀ (p : PromiseObject) (a : String), q p = true → q (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat),
-                   st.settable = true → q p = true →
+                   st.settable = true → t < p.timeoutAt → q p = true →
                    q { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ (p : PromiseObject) (a : String), q p = true →
                    q { p with listeners := p.listeners.filter (· != a) } = true
@@ -275,7 +283,7 @@ structure Hereditary (q : PromiseObject → Bool) : Prop where
                        timeoutAt := timeoutAt, createdAt := createdAt } = true
   dead         : ∀ (id : String) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
-                   st ≠ .pending →
+                   st = (if tags.isTimer then .resolved else .rejectedTimedout) →
                    q { id := id, state := st, param := param, tags := tags,
                        timeoutAt := timeoutAt, createdAt := timeoutAt,
                        settledAt := some timeoutAt } = true
@@ -416,6 +424,27 @@ theorem returnsGood_readPromise (hq : Hereditary q) {e : Env}
       obtain rfl := Option.some.inj hp
       exact hq.project p₀ now (getPromise_sound hs h)
 
+/-- Fact P, in the form the handlers can use: a promise that reads
+    pending is not yet due. Every settle in the machine happens behind a
+    `state == pending` guard, so every stamp the machine writes is
+    strictly below the promise's own deadline — and that is a fact about
+    the READ, not about the promise, which is why it travels with the
+    read combinator rather than with `Hereditary`. -/
+def NotDue (now : Nat) (p : PromiseObject) : Prop :=
+  (p.state == ServerModel.PromiseState.pending) = true → now < p.timeoutAt
+
+theorem readPromise_notDue (id : String) (now : Nat) (e : Env) (p : PromiseObject)
+    (h : (readPromise id now e).1 = some p) : NotDue now p := by
+  intro hst
+  rw [readPromise_fst] at h
+  cases hf : e.state.promises.find? (fun x => x.id == id) with
+  | none => rw [hf] at h; simp at h
+  | some p₀ =>
+      rw [hf] at h
+      simp only [Option.map_some] at h
+      obtain rfl := Option.some.inj h
+      exact Lookup.project_pending_not_due hst
+
 /-- The combinator the handlers are actually written against: after a
     read, either there was nothing, or there was a promise AND it is
     good. This is where the reader discipline pays — `writesGood_bind'`
@@ -425,12 +454,14 @@ theorem writesGood_afterReadPromise {α} (hq : Hereditary q) {e : Env}
     (hs : PerPromise q e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
     (hnone : WritesGood q e (f none))
-    (hsome : ∀ p, q p = true → WritesGood q e (f (some p))) :
+    (hsome : ∀ p, q p = true → NotDue now p → WritesGood q e (f (some p))) :
     WritesGood q e (readPromise id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs id now) ?_
   cases h : (readPromise id now e).1 with
   | none => exact hnone
-  | some p => exact hsome p (returnsGood_readPromise hq hs id now p h)
+  | some p =>
+      exact hsome p (returnsGood_readPromise hq hs id now p h)
+        (readPromise_notDue id now e p h)
 
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchPromise` is `withMat true`, `viewPromise` is `withMat false`. -/
@@ -438,7 +469,7 @@ theorem writesGood_afterMatReadPromise {α} (hq : Hereditary q) {e : Env} (b : B
     (hs : PerPromise q e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
     (hnone : WritesGood q e (f none))
-    (hsome : ∀ p, q p = true → WritesGood q e (f (some p))) :
+    (hsome : ∀ p, q p = true → NotDue now p → WritesGood q e (f (some p))) :
     WritesGood q e (withMat b (readPromise id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readPromise (e := { e with mat := b }) hq hs id now) ?_
@@ -447,6 +478,7 @@ theorem writesGood_afterMatReadPromise {α} (hq : Hereditary q) {e : Env} (b : B
   | none => exact hnone
   | some p =>
       exact hsome p (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
+        (readPromise_notDue id now { e with mat := b } p h)
 
 theorem writesGood_readTask (hq : Hereditary q) {e : Env}
     (hs : PerPromise q e.state = true) (id : String) (now : Nat) :
@@ -490,7 +522,7 @@ theorem writesGood_afterReadTask {α} (hq : Hereditary q) {e : Env}
     (f : Option (TaskObject × Option PromiseObject) → H α)
     (hnone : WritesGood q e (f none))
     (hbare : ∀ t, WritesGood q e (f (some (t, none))))
-    (hsome : ∀ t p, q p = true → WritesGood q e (f (some (t, some p)))) :
+    (hsome : ∀ t p, q p = true → NotDue now p → WritesGood q e (f (some (t, some p)))) :
     WritesGood q e (readTask id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readTask hq hs id now) ?_
   cases h : (readTask id now e).1 with
@@ -502,13 +534,14 @@ theorem writesGood_afterReadTask {α} (hq : Hereditary q) {e : Env}
       | some p =>
           obtain ⟨i, hi⟩ := readTask_promise id now e t p h
           exact hsome t p (returnsGood_readPromise hq hs i now p hi)
+            (readPromise_notDue i now e p hi)
 
 theorem writesGood_afterTouchTask {α} (hq : Hereditary q) {e : Env}
     (hs : PerPromise q e.state = true) (id : String) (now : Nat)
     (f : Option (TaskObject × Option PromiseObject) → H α)
     (hnone : WritesGood q e (f none))
     (hbare : ∀ t, WritesGood q e (f (some (t, none))))
-    (hsome : ∀ t p, q p = true → WritesGood q e (f (some (t, some p)))) :
+    (hsome : ∀ t p, q p = true → NotDue now p → WritesGood q e (f (some (t, some p)))) :
     WritesGood q e (withMat true (readTask id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readTask (e := { e with mat := true }) hq hs id now) ?_
@@ -523,6 +556,7 @@ theorem writesGood_afterTouchTask {α} (hq : Hereditary q) {e : Env}
           obtain ⟨i, hi⟩ := readTask_promise id now { e with mat := true } t p h
           exact hsome t p
             (returnsGood_readPromise (e := { e with mat := true }) hq hs i now p hi)
+            (readPromise_notDue i now { e with mat := true } p hi)
 
 end Derived
 
