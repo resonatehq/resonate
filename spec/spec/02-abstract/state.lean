@@ -92,7 +92,7 @@ def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
     resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
 
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
-  { t with state := .fulfilled, pid := none, ttl := none,
+  { t with state := .fulfilled, pid := none,
            expiresAt := none, retryAt := none, resumes := [] }
 
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=

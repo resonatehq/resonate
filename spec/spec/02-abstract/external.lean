@@ -273,7 +273,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
           return { status := 300 }
       | some false =>
           registerAwaited req.id now req.actions
-          setTask { t with state := .suspended, pid := none, ttl := none,
+          setTask { t with state := .suspended, pid := none,
                            expiresAt := none, retryAt := none, resumes := [] }
           return { status := 200 }
 
@@ -310,7 +310,7 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
         return { status := 409 }
       if t.version != req.version then
         return { status := 409 }
-      setTask { t with state := .pending, pid := none, ttl := none,
+      setTask { t with state := .pending, pid := none,
                        expiresAt := none, retryAt := some now }
       return { status := 200 }
 
@@ -325,7 +325,7 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
         return { status := 409 }
       if t.state == .halted then
         return { status := 200 }
-      setTask { t with state := .halted, pid := none, ttl := none,
+      setTask { t with state := .halted, pid := none,
                        expiresAt := none, retryAt := none }
       return { status := 200 }
 

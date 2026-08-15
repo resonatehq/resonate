@@ -66,10 +66,26 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
             | none => pure ()
             | some p =>
                 if p.state == .pending then
-                  setTask { t with state := .pending, pid := none, ttl := none,
+                  setTask { t with state := .pending, pid := none,
                                    expiresAt := none, retryAt := some now }
 
-def processRetryTimeout (id : String) (next : Nat) (now : Nat) : H Unit := do
+/-- Redispatch a pending task whose dispatch clock is due.
+
+    The next instant is COMPUTED, from the task's own `ttl` and the
+    clock — it is not supplied by whoever fires the step. Every other
+    arming site (`createPromise`, `taskRelease`, `taskContinue`,
+    `resumeOne`, `processLeaseTimeout`) already computed it; this was
+    the one exception, and the exception was the only place the
+    environment could write a value into the store. It could write a
+    past one, leaving the step enabled at the instant it fired.
+
+    `ttl` is the interval because `ttl` is what a holder tells the
+    server about its own cadence, and it survives release: it is task
+    CONFIGURATION, not lease state. A task never yet acquired carries
+    none, so it redispatches as fast as the environment fires — which
+    is right, since nothing has picked it up, and harmless, because
+    `execute` entries are keyed by task id alone and collapse. -/
+def processRetryTimeout (id : String) (now : Nat) : H Unit := do
   match ← getTask id with
   | none => pure ()
   | some t =>
@@ -81,7 +97,7 @@ def processRetryTimeout (id : String) (next : Nat) (now : Nat) : H Unit := do
             | none => pure ()
             | some p =>
                 if p.state == .pending then
-                  setTask { t with retryAt := some next }
+                  setTask { t with retryAt := some (now + t.ttl.getD 0) }
                   setMessage ((p.tags.get? "resonate:target").getD "")
                     (.execute t.id t.version)
 

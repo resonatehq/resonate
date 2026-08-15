@@ -279,9 +279,14 @@ def well_formed_task_acquired_iff_has_pid (_now : Nat) (s : ServerState) : Bool 
   s.tasks.all fun t =>
     (t.state == .acquired) == t.pid.isSome
 
-def well_formed_task_acquired_iff_has_ttl (_now : Nat) (s : ServerState) : Bool :=
+/-- An acquired task has a lease duration. NOT an iff: `ttl` is task
+    CONFIGURATION, not lease state, so it survives release and parking
+    — `pid` and `expiresAt` are what a lease owns and what gets
+    cleared. A pending task may carry the `ttl` of its last holder, and
+    `processRetryTimeout` redispatches at that interval. -/
+def well_formed_task_acquired_has_ttl (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
-    (t.state == .acquired) == t.ttl.isSome
+    t.state != .acquired || t.ttl.isSome
 
 def well_formed_task_acquired_iff_has_expires_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
@@ -294,18 +299,18 @@ def well_formed_task_pending_iff_has_retry_at (_now : Nat) (s : ServerState) : B
 def well_formed_task_fulfilled_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .fulfilled
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
+      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone
           && t.resumes.isEmpty)
 
 def well_formed_task_suspended_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .suspended
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
 def well_formed_task_halted_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .halted
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
 def well_formed_task_suspended_has_no_resumes (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
@@ -504,7 +509,7 @@ def preserved_fulfilled_task (_now : Nat) (a b : ServerState) : Bool :=
        | none => false
        | some u =>
            u.state == .fulfilled && u.version == t.version && u.resumes.isEmpty
-             && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.retryAt.isNone)
+             && u.pid.isNone && u.expiresAt.isNone && u.retryAt.isNone)
 
 /-- `NoDeadDispatch`, state half: no step puts a task into `pending`
     when its promise's deadline has already passed. A task already
@@ -855,7 +860,7 @@ def consistent_task_lease_released_atomically (_now : Nat) (a b : ServerState) :
     | none => true
     | some u =>
         !(t.state == .acquired && u.state != .acquired)
-        || (u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.version == t.version)
+        || (u.pid.isNone && u.expiresAt.isNone && u.version == t.version)
 
 def preserved_task_lease_holder_stable (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -870,13 +875,13 @@ def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) 
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u =>
-        (u.pid == t.pid && u.ttl == t.ttl && u.expiresAt == t.expiresAt)
+        (u.pid == t.pid && u.expiresAt == t.expiresAt)
         || (t.state != .acquired && u.state == .acquired
-              && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome)
+              && u.pid.isSome && u.expiresAt.isSome)
         || (t.state == .acquired && u.state != .acquired
-              && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone)
+              && u.pid.isNone && u.expiresAt.isNone)
         || (t.state == .acquired && u.state == .acquired
-              && u.pid == t.pid && u.ttl == t.ttl)
+              && u.pid == t.pid)
 
 def monotone_task_resumes_grow_or_clear (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -1071,8 +1076,8 @@ def catalogue : List Named :=
       , property := .state well_formed_promise_settled_at_lte_now },
     { name := "well_formed_task_acquired_iff_has_pid"
       , property := .state well_formed_task_acquired_iff_has_pid },
-    { name := "well_formed_task_acquired_iff_has_ttl"
-      , property := .state well_formed_task_acquired_iff_has_ttl },
+    { name := "well_formed_task_acquired_has_ttl"
+      , property := .state well_formed_task_acquired_has_ttl },
     { name := "well_formed_task_acquired_iff_has_expires_at"
       , property := .state well_formed_task_acquired_iff_has_expires_at },
     { name := "well_formed_task_pending_iff_has_retry_at"
@@ -1314,14 +1319,31 @@ def well_formed_promise_delay_before_deadline (_now : Nat) (s : ServerState) : B
     | none   => true
     | some d => parseNat d < p.timeoutAt
 
-/-- A re-arm must move the deadline FORWARD. `processRetryTimeout` takes
-    the next instant as a parameter and imposes no lower bound, so
-    re-arming a due task to an instant already past leaves the retry
-    step enabled at the same instant it just fired — the dispatcher
-    re-dispatches forever and the outbox grows without bound. Note the
-    shape: the defect is in the MOVE, so no state predicate can see it.
+/-- A re-arm must move the deadline FORWARD. Re-arming a due task to an
+    instant already past leaves the retry step enabled at the very
+    instant it fired. Note the shape: the defect is in the MOVE, so no
+    state predicate can see it.
     `consistent_task_retry_rearm_only_when_due` constrains WHEN you may
-    re-arm; nothing constrains what you may re-arm TO. -/
+    re-arm; nothing constrains what you may re-arm TO.
+
+    Two corrections to the original statement of this gap, both found
+    by checking rather than by reading.
+
+    The consequence is NOT an unbounded outbox. `OutboxEntry.key` for an
+    `execute` is the task id alone — not id-and-version — so a
+    redispatch REPLACES the row it repeats, and
+    `well_formed_store_outbox_keys_unique` keeps it at one. The damage
+    is a step that never stops being enabled: a spinning sweeper, which
+    costs liveness, not storage.
+
+    And the gap has NARROWED. `processRetryTimeout` no longer takes the
+    next instant from whoever fires it — it computes `now + ttl` — so
+    the environment can no longer write a past instant into the store.
+    What is left is the task that has never been acquired: it carries
+    no `ttl`, so its interval is zero and it re-arms at `now`. That
+    residue is what a dedicated retry-interval field closes. Until
+    then this stays a gap, but it is a gap about a MISSING VALUE rather
+    than about an untrusted one. -/
 def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     t.state != .pending ||
