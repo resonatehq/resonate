@@ -263,6 +263,21 @@ theorem writesGood_withMat {α} (g : Q) (e : Env) (b : Bool)
     (act : H α) (h : WritesGood g { e with mat := b } act) :
     WritesGood g e (withMat b act) := h
 
+/-- The row came out of the store. Every one of the six transformations
+    is applied to a promise the handler READ, so this is always
+    available — and it is what makes a relational obligation's birth
+    case vacuous rather than unprovable: a birth is by construction the
+    one write with no row behind it. -/
+def Stored (a : ServerState) (p : PromiseObject) : Prop :=
+  a.promises.find? (·.id == p.id) ≠ none
+
+theorem stored_of_find? {a : ServerState} {id : String} {p : PromiseObject}
+    (h : a.promises.find? (·.id == id) = some p) : Stored a p := by
+  have hid : p.id = id := eq_of_beq (by simpa using List.find?_some h)
+  unfold Stored
+  rw [hid, h]
+  simp
+
 /-! ## The obligation set
 
 `WritesGood` reduces "is this property inductive?" to "what does each
@@ -283,21 +298,23 @@ obligation that fails. -/
 
 structure Hereditary (g : Q) (a : ServerState) : Prop where
   -- promises
-  project      : ∀ (p : PromiseObject) (n : Nat),
+  project      : ∀ (p : PromiseObject) (n : Nat), Stored a p →
                    g.promise p = true → g.promise (p.project n) = true
-  addCallback  : ∀ (p : PromiseObject) (a : String),
-                   g.promise p = true → g.promise (p.addCallback a) = true
-  addListener  : ∀ (p : PromiseObject) (a : String),
-                   g.promise p = true → g.promise (p.addListener a) = true
+  addCallback  : ∀ (p : PromiseObject) (c : String), Stored a p →
+                   g.promise p = true → g.promise (p.addCallback c) = true
+  addListener  : ∀ (p : PromiseObject) (c : String), Stored a p →
+                   g.promise p = true → g.promise (p.addListener c) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
-                   (v : ServerModel.Value) (t : Nat),
+                   (v : ServerModel.Value) (t : Nat), Stored a p →
                    st.settable = true → p.state = .pending → t < p.timeoutAt →
                    g.promise p = true →
                    g.promise { p with state := st, value := v, settledAt := some t } = true
-  dropListener : ∀ (p : PromiseObject) (a : String), g.promise p = true →
-                   g.promise { p with listeners := p.listeners.filter (· != a) } = true
-  dropCallback : ∀ (p : PromiseObject) (a : String), g.promise p = true →
-                   g.promise { p with callbacks := p.callbacks.filter (· != a) } = true
+  dropListener : ∀ (p : PromiseObject) (c : String), Stored a p →
+                   p.state ≠ .pending → g.promise p = true →
+                   g.promise { p with listeners := p.listeners.filter (· != c) } = true
+  dropCallback : ∀ (p : PromiseObject) (c : String), Stored a p →
+                   p.state ≠ .pending → g.promise p = true →
+                   g.promise { p with callbacks := p.callbacks.filter (· != c) } = true
   live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
                    a.promises.find? (·.id == id) = none →
@@ -489,7 +506,8 @@ theorem writesGood_readPromise {e : Env} (hq : Hereditary g e.state)
     refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
     split
     · exact writesGood_bind' _ _ _ _
-        (writesGood_setSettled hq hs _ (hq.project p₀ now hp₀)) (writesGood_pure _ _ _)
+        (writesGood_setSettled hq hs _ (hq.project p₀ now (stored_of_find? h) hp₀))
+        (writesGood_pure _ _ _)
     · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
 theorem returnsGood_readPromise {e : Env} (hq : Hereditary g e.state)
@@ -503,7 +521,7 @@ theorem returnsGood_readPromise {e : Env} (hq : Hereditary g e.state)
       rw [h] at hp
       simp only [Option.map_some] at hp
       obtain rfl := Option.some.inj hp
-      exact hq.project p₀ now (getPromise_sound hs h)
+      exact hq.project p₀ now (stored_of_find? h) (getPromise_sound hs h)
 
 /-- Fact P, in the form the handlers can use: a promise that reads
     pending is not yet due. Every settle in the machine happens behind a
@@ -526,6 +544,20 @@ theorem readPromise_notDue (id : String) (now : Nat) (e : Env) (p : PromiseObjec
       obtain rfl := Option.some.inj h
       exact Lookup.project_pending_not_due hst
 
+theorem readPromise_stored (id : String) (now : Nat) (e : Env) (p : PromiseObject)
+    (h : (readPromise id now e).1 = some p) : Stored e.state p := by
+  rw [readPromise_fst] at h
+  cases hf : e.state.promises.find? (fun x => x.id == id) with
+  | none => rw [hf] at h; simp at h
+  | some p₀ =>
+      rw [hf] at h
+      simp only [Option.map_some] at h
+      obtain rfl := Option.some.inj h
+      have hid : p₀.id = id := eq_of_beq (by simpa using List.find?_some hf)
+      unfold Stored
+      simp only [Lookup.project_id, hid, hf]
+      simp
+
 /-- The combinator the handlers are written against: after a read,
     either there was nothing, or there was a promise AND it is good AND
     it is not yet due. This is where the reader discipline pays —
@@ -535,7 +567,8 @@ theorem writesGood_afterReadPromise {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
     (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
-    (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
+    (hsome : ∀ p, g.promise p = true → NotDue now p → Stored e.state p →
+               WritesGood g e (f (some p))) :
     WritesGood g e (readPromise id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs id now) ?_
   cases h : (readPromise id now e).1 with
@@ -547,7 +580,7 @@ theorem writesGood_afterReadPromise {α} {e : Env} (hq : Hereditary g e.state)
       | some p₀ => rw [hf] at h; simp at h
   | some p =>
       exact hsome p (returnsGood_readPromise hq hs id now p h)
-        (readPromise_notDue id now e p h)
+        (readPromise_notDue id now e p h) (readPromise_stored id now e p h)
 
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchPromise` is `withMat true`, `viewPromise` is `withMat false`. -/
@@ -555,7 +588,8 @@ theorem writesGood_afterMatReadPromise {α} {e : Env} (hq : Hereditary g e.state
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
     (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
-    (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
+    (hsome : ∀ p, g.promise p = true → NotDue now p → Stored e.state p →
+               WritesGood g e (f (some p))) :
     WritesGood g e (withMat b (readPromise id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readPromise (e := { e with mat := b }) hq hs id now) ?_
@@ -571,6 +605,7 @@ theorem writesGood_afterMatReadPromise {α} {e : Env} (hq : Hereditary g e.state
       exact hsome p
         (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
         (readPromise_notDue id now { e with mat := b } p h)
+        (readPromise_stored id now { e with mat := b } p h)
 
 theorem writesGood_readTask {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
@@ -599,7 +634,8 @@ theorem writesGood_readTask {e : Env} (hq : Hereditary g e.state)
 theorem readTask_good {e : Env} (hq : Hereditary g e.state) (hs : PerStore g e.state = true)
     (id : String) (now : Nat) (t : TaskObject) (po : Option PromiseObject)
     (h : (readTask id now e).1 = some (t, po)) :
-    g.task t = true ∧ ∀ p, po = some p → g.promise p = true ∧ NotDue now p := by
+    g.task t = true ∧
+      ∀ p, po = some p → g.promise p = true ∧ NotDue now p ∧ Stored e.state p := by
   revert h
   unfold readTask
   rw [bind_fst, getTask_fst]
@@ -617,6 +653,7 @@ theorem readTask_good {e : Env} (hq : Hereditary g e.state) (hs : PerStore g e.s
       | some p₀ =>
           have hgp₀ : g.promise p₀ = true := returnsGood_readPromise hq hs t₀.id now p₀ hr
           have hnd : NotDue now p₀ := readPromise_notDue t₀.id now e p₀ hr
+          have hsto : Stored e.state p₀ := readPromise_stored t₀.id now e p₀ hr
           rw [bind_fst]
           intro hh
           revert hh
@@ -628,7 +665,7 @@ theorem readTask_good {e : Env} (hq : Hereditary g e.state) (hs : PerStore g e.s
             refine ⟨hq.tView t₀ p₀ hgt₀, fun p hp => ?_⟩
             simp only [Option.some.injEq] at hp
             subst hp
-            exact ⟨hgp₀, hnd⟩
+            exact ⟨hgp₀, hnd, hsto⟩
 
 theorem writesGood_afterReadTask {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
@@ -636,7 +673,7 @@ theorem writesGood_afterReadTask {α} {e : Env} (hq : Hereditary g e.state)
     (hnone : WritesGood g e (f none))
     (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
     (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
-               WritesGood g e (f (some (t, some p)))) :
+               Stored e.state p → WritesGood g e (f (some (t, some p)))) :
     WritesGood g e (readTask id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readTask hq hs id now) ?_
   cases h : (readTask id now e).1 with
@@ -647,8 +684,8 @@ theorem writesGood_afterReadTask {α} {e : Env} (hq : Hereditary g e.state)
       cases po with
       | none => exact hbare t hgt
       | some p =>
-          obtain ⟨h1, h2⟩ := hgp p rfl
-          exact hsome t p hgt h1 h2
+          obtain ⟨h1, h2, h3⟩ := hgp p rfl
+          exact hsome t p hgt h1 h2 h3
 
 theorem writesGood_afterTouchTask {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
@@ -656,7 +693,7 @@ theorem writesGood_afterTouchTask {α} {e : Env} (hq : Hereditary g e.state)
     (hnone : WritesGood g e (f none))
     (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
     (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
-               WritesGood g e (f (some (t, some p)))) :
+               Stored e.state p → WritesGood g e (f (some (t, some p)))) :
     WritesGood g e (withMat true (readTask id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readTask (e := { e with mat := true }) hq hs id now) ?_
@@ -670,8 +707,8 @@ theorem writesGood_afterTouchTask {α} {e : Env} (hq : Hereditary g e.state)
       cases po with
       | none => exact hbare t hgt
       | some p =>
-          obtain ⟨h1, h2⟩ := hgp p rfl
-          exact hsome t p hgt h1 h2
+          obtain ⟨h1, h2, h3⟩ := hgp p rfl
+          exact hsome t p hgt h1 h2 h3
 
 end Derived
 

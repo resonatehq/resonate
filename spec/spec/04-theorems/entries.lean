@@ -131,12 +131,12 @@ structure HPromise (f : PromiseObject → Bool) : Prop where
 
 theorem hereditary_onlyPromise {f : PromiseObject → Bool} (h : HPromise f)
     (a : ServerState) : Hereditary (onlyPromise f) a where
-  project := h.project
-  addCallback := h.addCallback
-  addListener := h.addListener
-  settle := h.settle
-  dropListener := h.dropListener
-  dropCallback := h.dropCallback
+  project p n _ := h.project p n
+  addCallback p c _ := h.addCallback p c
+  addListener p c _ := h.addListener p c
+  settle p st v t _ := h.settle p st v t
+  dropListener p c _ _ := h.dropListener p c
+  dropCallback p c _ _ := h.dropCallback p c
   live := fun id param tags tAt cAt hlt _ => h.live id param tags tAt cAt hlt
   dead := fun id st param tags tAt hst _ => h.dead id st param tags tAt hst
   tFulfill _ _ := rfl
@@ -196,12 +196,12 @@ structure HTask (f : TaskObject → Bool) : Prop where
 
 theorem hereditary_onlyTask {f : TaskObject → Bool} (h : HTask f)
     (a : ServerState) : Hereditary (onlyTask f) a where
-  project _ _ _ := rfl
-  addCallback _ _ _ := rfl
-  addListener _ _ _ := rfl
-  settle _ _ _ _ _ _ _ _ := rfl
-  dropListener _ _ _ := rfl
-  dropCallback _ _ _ := rfl
+  project _ _ _ _ := rfl
+  addCallback _ _ _ _ := rfl
+  addListener _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ _ := rfl
+  dropListener _ _ _ _ _ := rfl
+  dropCallback _ _ _ _ _ := rfl
   live _ _ _ _ _ _ _ := rfl
   dead _ _ _ _ _ _ _ := rfl
   tFulfill := h.fulfill
@@ -244,12 +244,12 @@ structure HSchedule (f : ServerModel.Schedule → Bool) : Prop where
 
 theorem hereditary_onlySchedule {f : ServerModel.Schedule → Bool} (h : HSchedule f)
     (a : ServerState) : Hereditary (onlySchedule f) a where
-  project _ _ _ := rfl
-  addCallback _ _ _ := rfl
-  addListener _ _ _ := rfl
-  settle _ _ _ _ _ _ _ _ := rfl
-  dropListener _ _ _ := rfl
-  dropCallback _ _ _ := rfl
+  project _ _ _ _ := rfl
+  addCallback _ _ _ _ := rfl
+  addListener _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ _ := rfl
+  dropListener _ _ _ _ _ := rfl
+  dropCallback _ _ _ _ _ := rfl
   live _ _ _ _ _ _ _ := rfl
   dead _ _ _ _ _ _ _ := rfl
   tFulfill _ _ := rfl
