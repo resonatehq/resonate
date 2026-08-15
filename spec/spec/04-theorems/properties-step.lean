@@ -243,30 +243,25 @@ def stepsWithA (mat : Bool) :
       let (_, s') := stepOf mat st n s
       (st, n, s, s') :: stepsWithA mat w s'
 
-def isInternalStep : Step → Bool
-  | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
-  | .r5 _ => true | .r6 _ => true | .r7 _ => true
-  | _ => false
-
 def allSteps (w : List (Step × Nat)) : List (Step × Nat × ServerState × ServerState) :=
   stepsWithA true w AbstractModel.ServerState.init
     ++ stepsWithA false w AbstractModel.ServerState.init
 
 def internalWellFormedRun (w : List (Step × Nat)) : Bool :=
-  (allSteps w).all (fun (st, n, a, b) => !isInternalStep st || internalWellFormed n a b)
+  (allSteps w).all (fun (st, n, a, b) => !Step.isInternal st || internalWellFormed n a b)
 
 theorem stage3_internal_sweep :
     ((seqsUpToA kernelsResp 3).map instantiateA).all internalWellFormedRun = true := by decide
 
 theorem reaches_internal_steps :
-    (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => isInternalStep st)) = true := by decide
+    (battery.any fun w => (allSteps w).any (fun (st, _, _, _) => Step.isInternal st)) = true := by decide
 
 /-- Strictly stronger than the general edge tables, machine-checked:
     some REQUEST step in the corpus violates the sweeper properties. If they
     held everywhere they would be a restatement, not a constraint. -/
 theorem internal_laws_are_strictly_stronger :
     (((seqsUpToA kernelsResp 3).map instantiateA).any fun w =>
-      (allSteps w).any (fun (st, n, a, b) => !isInternalStep st && !internalWellFormed n a b)) = true := by
+      (allSteps w).any (fun (st, n, a, b) => !Step.isInternal st && !internalWellFormed n a b)) = true := by
   decide
 
 /-! ### The gap that closed

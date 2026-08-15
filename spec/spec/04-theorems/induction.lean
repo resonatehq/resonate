@@ -296,5 +296,72 @@ theorem writesGood_ask (q : PromiseObject → Bool) (s : ServerState) (mat : Boo
     WritesGood q s mat ask := by
   intro e he; simp [ask] at he
 
+/-! ## The goal
+
+Everything above is scaffolding for this. `Legal` says the catalogue
+holds along a trace; `valid_implies_legal` says every run of the machine
+is Legal. That is the statement the whole conformance story rests on —
+not because it constrains an implementation (it does not: it mentions
+no implementation) but because it is what makes a `Legal` violation
+UNAMBIGUOUS when an implementation is checked against the catalogue.
+Without it, a failing property leaves two live hypotheses: the
+implementation is wrong, or the property is. With it, the failure is a
+bug report.
+
+Stated with `sorry`, so the build names it on every run. What backs it
+today is `stage1_sweep` and `stage3_sweep` — 1 464 scripts, both
+readings, `decide` at build time — which is a finite fact and not this.
+
+Note the second hypothesis. `Valid` alone is not enough: a trace that
+starts in an arbitrary state and steps correctly from there satisfies
+`Valid` and can violate anything. Reachability is what the catalogue is
+about, and `(tr 0).state = init` is where it enters. -/
+
+def Legal (tr : Trace) : Prop :=
+  (∀ t : Nat, Properties.well_formed (tr t).now (tr t).state = true)
+  ∧ (∀ t : Nat, Properties.stepWellFormed (tr t).now (tr t).state (tr (t+1)).state = true)
+  ∧ (∀ t : Nat, (tr t).req.isInternal = true →
+       Properties.internalWellFormed (tr t).now (tr t).state (tr (t+1)).state = true)
+
+theorem valid_implies_legal (mat : Bool) (tr : Trace)
+    (hv : Valid mat tr) (h0 : (tr 0).state = ServerState.init) : Legal tr := sorry
+
+/-! ### What it decomposes into
+
+Four obligations, and only the second needs an induction. Naming them
+separately is the point: each is a statement about ONE step applied to
+ONE state, and the second is where the strengthening — if the catalogue
+needs one — will show up as a failure. -/
+
+/-- The empty store satisfies the catalogue. Proved, not assumed: every
+    entry is an `.all` over a list that is empty at `init`. -/
+theorem well_formed_init (now : Nat) :
+    Properties.well_formed now ServerState.init = true := rfl
+
+/-- **The induction.** Every step preserves the state half. -/
+theorem well_formed_step (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
+    Properties.well_formed now s = true →
+    Properties.well_formed now (stepOf mat st now s).2 = true := sorry
+
+/-- **The clock.** A state well formed at one instant is well formed at
+    every later one. Needed because a step lands a state at `(tr t).now`
+    and the trace checks it at `(tr (t+1)).now`. Not bookkeeping:
+    `consistent_suspended_task_holds_rung` reads `project now`, so
+    advancing the clock changes what it says. -/
+theorem well_formed_clock (n n' : Nat) (s : ServerState) :
+    Properties.well_formed n s = true → n ≤ n' →
+    Properties.well_formed n' s = true := sorry
+
+/-- **The transition half.** No induction: a claim about an arbitrary
+    state and the step out of it. -/
+theorem step_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
+    Properties.well_formed now s = true →
+    Properties.stepWellFormed now s (stepOf mat st now s).2 = true := sorry
+
+/-- **Provenance.** The sweeper properties, on internal steps only. -/
+theorem internal_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
+    st.isInternal = true → Properties.well_formed now s = true →
+    Properties.internalWellFormed now s (stepOf mat st now s).2 = true := sorry
+
 end Induction
 end Abstraction

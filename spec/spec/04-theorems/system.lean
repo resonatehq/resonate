@@ -169,6 +169,14 @@ def Step.isExternal : Step → Bool
   | .api _ => true
   | _      => false
 
+/-- The steps the server takes on its own initiative. `idle` is neither:
+    it is the clock moving with nothing happening, which is why this is
+    not simply the negation of `isExternal`. -/
+def Step.isInternal : Step → Bool
+  | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
+  | .r5 _ => true | .r6 _   => true | .r7 _   => true
+  | _     => false
+
 /-! `PromiseObject` is compared by `promiseEq` below rather than
 structurally, because two of its fields are ledgers. `TaskObject` has no
 such field, so it compares structurally. -/
