@@ -31,39 +31,38 @@ def tgt : Tags := [("resonate:target", "w1")]
 /-- One full workflow on a fresh object pair: create the awaited and the
     targeted promise, acquire, suspend, settle, resume, re-acquire,
     fulfil. The `τResume` is the hidden step the validator must recover. -/
-def workflow (i : Nat) (t0 t1 : Nat) : List (Request × Nat) :=
+def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   let a := s!"a{i}"
   let x := s!"x{i}"
-  [ (.promiseCreate { id := a, timeoutAt := 100000, param := {}, tags := ext }, t0)
-  , (.promiseCreate { id := x, timeoutAt := 100000, param := {}, tags := tgt }, t0)
-  , (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }, t0)
-  , (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }, t0)
-  , (.promiseSettle { id := a, state := .resolved, value := {} }, t1)
-  , (.τResume       { awaited := a, awaiter := x }, t1)          -- hidden
-  , (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }, t1)
-  , (.taskFulfill   { id := x, version := 2,
-                      action := { id := x, state := .resolved, value := {} } }, t1) ]
+  [ (.api (.promiseCreate { id := a, timeoutAt := 100000, param := {}, tags := ext }), t0)
+  , (.api (.promiseCreate { id := x, timeoutAt := 100000, param := {}, tags := tgt }), t0)
+  , (.api (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
+  , (.api (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
+  , (.api (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
+  , (.r4 a x, t1)          -- hidden
+  , (.api (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
+  , (.api (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
 
 /-- `k` workflows back to back — pure length, one object pair live at a
     time, so at most one obligation is ever armed. -/
-def lengthScript (k : Nat) : List (Request × Nat) :=
+def lengthScript (k : Nat) : List (Step × Nat) :=
   (List.range k).flatMap fun i => workflow i (10 + i * 10) (15 + i * 10)
 
 /-- `n` external promises that all expire before the final observation,
     so at that instant `n` promise timeouts are enabled at once and
     nothing has discharged them. This is the fanout axis. -/
-def fanoutScript (n : Nat) : List (Request × Nat) :=
+def fanoutScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
-      (Request.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }, 10))
-  ++ [ (.promiseGet { id := "a0" }, 500) ]
+      (.api (.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
+  ++ [ (.api (.promiseGet { id := "a0" }), 500) ]
 
 /-- Fanout with the timeouts actually fired in the hidden part, so the
     validator must find the right SUBSET rather than the empty one. -/
-def fanoutFiredScript (n : Nat) : List (Request × Nat) :=
+def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
-      (Request.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }, 10))
-  ++ (List.range n).map (fun i => (Request.τPromiseTimeout s!"a{i}", 500))
-  ++ [ (.promiseGet { id := "a0" }, 500) ]
+      (.api (.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
+  ++ (List.range n).map (fun i => (.r1 s!"a{i}", 500))
+  ++ [ (.api (.promiseGet { id := "a0" }), 500) ]
 
 /-- **Regression.** `a` expires on its own; that expiry defers a resume
     for `x`, which wakes it. The first cone keyed relevance on the object
@@ -72,14 +71,14 @@ def fanoutFiredScript (n : Nat) : List (Request × Nat) :=
     conforming trace REFUTED. `affects` plus a transitive closure fixed
     it. Kept because nothing else in the suite has a τ whose consequences
     land on a different object. -/
-def crossObjectScript : List (Request × Nat) :=
-  [ (.promiseCreate { id := "a", timeoutAt := 30, param := {}, tags := ext }, 10)
-  , (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }, 10)
-  , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 50 }, 10)
-  , (.taskSuspend   { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }, 12)
-  , (.τPromiseTimeout "a", 40)                            -- hidden
-  , (.τResume { awaited := "a", awaiter := "x" }, 40)      -- hidden
-  , (.taskGet { id := "x" }, 50) ]
+def crossObjectScript : List (Step × Nat) :=
+  [ (.api (.promiseCreate { id := "a", timeoutAt := 30, param := {}, tags := ext }), 10)
+  , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
+  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 50 }), 10)
+  , (.api (.taskSuspend   { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 12)
+  , (.r1 "a", 40)                            -- hidden
+  , (.r4 "a" "x", 40)      -- hidden
+  , (.api (.taskGet { id := "x" }), 50) ]
 
 /-! ## Running -/
 
@@ -89,7 +88,7 @@ structure Result where
   verdict : Verdict
   ms      : Nat
 
-def run (label : String) (script : List (Request × Nat))
+def run (label : String) (script : List (Step × Nat))
     (coned : Bool := true) (fuel : Nat := 16) (cap : Nat := 200000) : IO Result := do
   let trace := recordFrom script
   let t0 ← IO.monoMsNow

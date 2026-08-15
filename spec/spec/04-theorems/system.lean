@@ -161,6 +161,7 @@ inductive Step
   | r6  (id : String)
   | r7  (id : String)
   | idle
+  deriving Repr
 
 /-- Client-visible steps. Now decidable by shape: with the τ
     constructors gone from `Request`, every `api` step is external. -/

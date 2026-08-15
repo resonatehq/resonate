@@ -87,9 +87,19 @@ structure TaskObject where
   resumes   : List String   := []
   deriving Repr
 
+/-- `ttl` is reported only while the task is ACQUIRED. It is stored
+    across release — it is configuration, and `processRetryTimeout`
+    reads it as the redispatch interval — but a task holding no lease
+    has no lease duration to report, and a real server does not report
+    one. That is not a guess: `valid/lean/real.lean` is a transcribed
+    production trace, and it shows `ttl := none` on a task that was
+    acquired with `ttl := 60000`, suspended, and resumed. Reporting the
+    remembered value there made the checker refuse a conforming run. -/
 def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
   { id := t.id, state := t.state, version := t.version,
-    resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
+    resumes := t.resumes.length,
+    ttl := if t.state == .acquired then t.ttl else none,
+    pid := t.pid }
 
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
   { t with state := .fulfilled, pid := none,

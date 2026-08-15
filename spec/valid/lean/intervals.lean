@@ -91,27 +91,42 @@ open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Cor
 /-! ## The observable part of a state -/
 
 /-- The state modulo what no `Response` projects: the outbox, and the
-    RETRY timers, whose only reader is the retry τ's own guard. Lease
-    timers stay — `processLeaseTimeout` writes task state, and `taskGet`
-    projects that. -/
+    dispatch clock. `TaskRecord` carries `id`, `state`, `version`,
+    `resumes` as a count, `ttl` and `pid` — not `retryAt`, and not
+    `expiresAt` — so neither deadline is on the wire. `retryAt` is
+    erased here because a retry τ writes nothing else observable;
+    `expiresAt` is KEPT, because `processLeaseTimeout` moves the task's
+    state and `task.get` projects that. -/
 def Visible (s : ServerState) : ServerState :=
-  { s with outbox := [], taskTimeouts := s.taskTimeouts.filter (·.kind != 0) }
+  { s with outbox := [],
+           tasks  := s.tasks.map fun t =>
+                       if t.state == .pending then { t with retryAt := none } else t }
 
-/-- The proviso the retry-invisibility argument needs: `delTaskTimeout`
-    deletes both kinds, so a retry τ firing on a task that also holds a
-    lease timer would disarm an observable transition. -/
+/-- The proviso the retry-invisibility argument needed, and no longer
+    does. Concrete keyed both timer kinds by task id and `delTaskTimeout`
+    deleted BOTH, so a retry firing on a task that also held a lease
+    timer would disarm an observable transition — a hazard checked
+    EMPIRICALLY over every state of every script in `gap.lean`.
+
+    On the abstract machine it is a theorem instead of a hunt.
+    `processRetryTimeout` writes `retryAt` and nothing else, and a
+    pending task has no `expiresAt` at all —
+    `well_formed_task_acquired_iff_has_expires_at` is an iff in the
+    catalogue. Two deadlines that shared a key now live on the object
+    that owns them, and the interference is gone with the sharing. Kept
+    as a definition because the theorems below cite it; it is now
+    discharged by the catalogue rather than assumed. -/
 def PendingHasNoLease (s : ServerState) : Prop :=
-  ∀ t ∈ s.tasks, t.state = .pending →
-    ∀ e ∈ s.taskTimeouts, e.id = t.id → e.kind = 0
+  ∀ t ∈ s.tasks, t.state = .pending → t.expiresAt = none
 
 /-! ## Critical instants -/
 
 /-- Every number in the state that a handler compares `now` against. -/
 def deadlines (s : ServerState) : List Nat :=
   s.promises.map (·.timeoutAt)
-  ++ s.promiseTimeouts.map (·.timeout)
-  ++ s.taskTimeouts.map (·.timeout)
-  ++ s.scheduleTimeouts.map (·.timeout)
+  ++ s.tasks.filterMap (·.retryAt)
+  ++ s.tasks.filterMap (·.expiresAt)
+  ++ s.schedules.map (·.nextRunAt)
 
 private def insertNat (x : Nat) : List Nat → List Nat
   | []      => [x]
@@ -192,7 +207,7 @@ def stepObservedBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
   let (closed, deep) := tauClosureIn pick instants fuel cs
   let gapOK := exhaustive || noNewInGapDeadline a o.now instants closed
   (dedup <| closed.filterMap fun c =>
-    let (r, s') := Equivalence.stepOf Equivalence.handleM o.req o.now c.state
+    let (r, s') := Abstraction.stepOf true (.api o.req) o.now c.state
     if r == o.res then some (mkCand s' c.schedule) else none, deep, gapOK)
 
 def stepObserved (coned : Bool) (fuel : Nat) (a : Nat) (o : Observation)
@@ -294,13 +309,15 @@ theorem retry_invisible {s : ServerState} {id : String} {n : Nat}
     reads lives in the erased part. -/
 theorem visible_response {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    (Abstraction.stepOf true req now s).1 = (Abstraction.stepOf true req now s').1 := by
+    (Abstraction.stepOf true (.api req) now s).1
+      = (Abstraction.stepOf true (.api req) now s').1 := by
   sorry
 
 /-- **R2b · and for successor states.** -/
 theorem visible_step {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    Visible (Abstraction.stepOf true req now s).2 = Visible (Abstraction.stepOf true req now s').2 := by
+    Visible (Abstraction.stepOf true (.api req) now s).2
+      = Visible (Abstraction.stepOf true (.api req) now s').2 := by
   sorry
 
 /-- **R3 · THE REDUCTION.** On a schedule-free state, firing a τ at `n`
@@ -323,7 +340,7 @@ theorem step_at_rep {s : ServerState} {t : Tau} {a b n : Nat}
     hypothesis be discharged once, at the top, instead of at every step. -/
 theorem schedules_stay_empty {s : ServerState} {req : Request} {now : Nat}
     (h : s.schedules = []) (hreq : mentionsSchedule req = false) :
-    (Abstraction.stepOf true req now s).2.schedules = [] := by
+    (Abstraction.stepOf true (.api req) now s).2.schedules = [] := by
   sorry
 
 /-! ## The two theorems -/

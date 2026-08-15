@@ -67,7 +67,7 @@ def validateBrute (trace : List Observation)
     Lease timers (`kind = 1`) are kept — `processLeaseTimeout` writes task
     state, which `taskGet` does project. -/
 def visible (s : ServerState) : ServerState :=
-  { s with outbox := [], taskTimeouts := s.taskTimeouts.filter (·.kind != 0) }
+  { s with outbox := [], tasks  := s.tasks.map fun t => if t.state == .pending then { t with retryAt := none } else t }
 
 def sameCanon (a b : ServerState) : Bool := canon a == canon b
 def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visible b)
@@ -80,7 +80,7 @@ def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visibl
     modelled by the checker at all.
 
     Note this is a function of POSITION, not of instant. -/
-def pinnedInstants : List (Request × Nat) → List (Option Nat)
+def pinnedInstants : List (Step × Nat) → List (Option Nat)
   | [] => []
   | (rq, n) :: rest =>
       let tail := pinnedInstants rest
@@ -103,30 +103,22 @@ structure Coverage where
 
 instance : Append Coverage where
   append a b :=
-    { taus := a.taus + b.taus, offPinned := a.offPinned + b.offPinned,
-      changed := a.changed + b.changed,
-      discriminating := a.discriminating + b.discriminating,
-      visibleDiscr := a.visibleDiscr + b.visibleDiscr,
-      unmodellable := a.unmodellable + b.unmodellable }
+    { taus := a.taus + b.taus, offPinned := a.offPinned + b.offPinned, changed := a.changed + b.changed, discriminating := a.discriminating + b.discriminating, visibleDiscr := a.visibleDiscr + b.visibleDiscr, unmodellable := a.unmodellable + b.unmodellable }
 
-def coverage (w : List (Request × Nat)) : Coverage :=
+def coverage (w : List (Step × Nat)) : Coverage :=
   let pins := pinnedInstants w
-  let rec go : List (Request × Nat) → List (Option Nat) → ServerState → Coverage
+  let rec go : List (Step × Nat) → List (Option Nat) → ServerState → Coverage
     | [],              _,          _  => {}
     | (rq, n) :: rest, p :: ps,    st =>
-        let st' := (Equivalence.stepOf Equivalence.handleM rq n st).2
+        let st' := (Abstraction.stepOf true rq n st).2
         let here : Coverage :=
           if rq.isExternal then {}
           else
             match p with
             | none      => { taus := 1, unmodellable := 1 }
             | some b =>
-              let stb := (Equivalence.stepOf Equivalence.handleM rq b st).2
-              { taus          := 1
-                offPinned     := if b == n then 0 else 1
-                changed       := if sameCanon st st' then 0 else 1
-                discriminating := if sameCanon st' stb then 0 else 1
-                visibleDiscr  := if sameVisible st' stb then 0 else 1 }
+              let stb := (Abstraction.stepOf true rq b st).2
+              { taus          := 1, offPinned     := if b == n then 0 else 1, changed       := if sameCanon st st' then 0 else 1, discriminating := if sameCanon st' stb then 0 else 1, visibleDiscr  := if sameVisible st' stb then 0 else 1 }
         here ++ go rest ps st'
     | _, [], _ => {}
   go w pins ServerState.init
@@ -138,7 +130,7 @@ Every script is sorted by instant — `ValidM` needs `now` monotone, and
 STAYS after it. That is how a τ gets placed on an observation instant yet
 still off the checker's pinned instant. -/
 
-def mono (w : List (Request × Nat)) : List (Request × Nat) :=
+def mono (w : List (Step × Nat)) : List (Step × Nat) :=
   w.mergeSort (fun a b => a.2 ≤ b.2)
 
 def ext : Tags := [("resonate:external", "true")]
@@ -175,7 +167,7 @@ def tauFree (obs : List Observation) : Bool :=
   let rec go : List Observation → ServerState → Bool
     | [],     _ => true
     | o :: r, s =>
-        let (res, s') := Equivalence.stepOf Equivalence.handleM o.req o.now s
+        let (res, s') := Abstraction.stepOf true (.api o.req) o.now s
         res == o.res && go r s'
   go obs ServerState.init
 
@@ -188,15 +180,19 @@ transition, and the "retry τs are invisible" argument would be wrong.
 `pendingHasLease` looks for that state; it is checked at every
 intermediate state of every script below. -/
 
+/-- The concrete hazard, asked of the abstract machine: a pending task
+    still holding a lease deadline. There the two timers shared a key and
+    a retry could disarm a lease; here each lives on the object that owns
+    it, and the catalogue makes this an iff. The sweep below should now
+    find zero by construction rather than by luck. -/
 def pendingHasLease (s : ServerState) : Bool :=
-  s.tasks.any fun t =>
-    t.state == .pending && s.taskTimeouts.any (fun e => e.id == t.id && e.kind == 1)
+  s.tasks.any fun t => t.state == .pending && t.expiresAt.isSome
 
-def anyPendingHasLease (w : List (Request × Nat)) : Bool :=
-  let rec go : List (Request × Nat) → ServerState → Bool
+def anyPendingHasLease (w : List (Step × Nat)) : Bool :=
+  let rec go : List (Step × Nat) → ServerState → Bool
     | [],              s => pendingHasLease s
     | (rq, n) :: rest, s =>
-        pendingHasLease s || go rest (Equivalence.stepOf Equivalence.handleM rq n s).2
+        pendingHasLease s || go rest (Abstraction.stepOf true rq n s).2
   go w ServerState.init
 
 /-! ## A generator that actually exercises the recovery
@@ -222,7 +218,7 @@ def pool : List Nat := [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,18,20,24,30]
 
 /-- One workflow with every instant and every deadline randomised, and the
     τs placed at instants that need not be observed. -/
-def workflow (seed : Nat) : List (Request × Nat) :=
+def workflow (seed : Nat) : List (Step × Nat) :=
   let r1 := lcg seed
   let r2 := lcg r1
   let r3 := lcg r2
@@ -243,25 +239,24 @@ def workflow (seed : Nat) : List (Request × Nat) :=
   let t2 := pick pool 5 r8          -- observation
   let t3 := pick pool 5 r9          -- observation
   mono
-  [ (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }, t0)
-  , (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }, t0)
-  , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }, t0)
-  , (.taskSuspend   { id := "x", version := 1,
-                      actions := [{ awaited := "a", awaiter := "x" }] }, t1)
-  , (.τPromiseTimeout "a", g1)
-  , (.τResume { awaited := "a", awaiter := "x" }, g2)
-  , (.τTaskLeaseTimeout "x", g3)
-  , (.τTaskRetryTimeout "x", g3)
-  , (.taskGet    { id := "x" }, t2)
-  , (.promiseGet { id := "x" }, t2)
-  , (.promiseGet { id := "a" }, t3)
-  , (.taskGet    { id := "x" }, t3) ]
+  [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), t0)
+  , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), t0)
+  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), t0)
+  , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
+  , (.r1 "a", g1)
+  , (.r4 "a" "x", g2)
+  , (.r5 "x", g3)
+  , (.r6 "x", g3)
+  , (.api (.taskGet    { id := "x" }), t2)
+  , (.api (.promiseGet { id := "x" }), t2)
+  , (.api (.promiseGet { id := "a" }), t3)
+  , (.api (.taskGet { id := "x" }), t3) ]
 
 /-- A second shape: the awaited promise is SETTLED explicitly rather than
     timing out, so the resume is `.resumed`/`.buffered` rather than being
     erased by the awaiter's own timeout — the case where a difference has
     the best chance of surviving to an observation. -/
-def workflowSettled (seed : Nat) : List (Request × Nat) :=
+def workflowSettled (seed : Nat) : List (Step × Nat) :=
   let r1 := lcg seed
   let r2 := lcg r1
   let r3 := lcg r2
@@ -277,23 +272,22 @@ def workflowSettled (seed : Nat) : List (Request × Nat) :=
   let t2 := pick pool 5 r6
   let t3 := pick pool 5 r7
   mono
-  [ (.promiseCreate { id := "a", timeoutAt := 100000, param := {}, tags := ext }, 0)
-  , (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }, 0)
-  , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }, 0)
-  , (.taskSuspend   { id := "x", version := 1,
-                      actions := [{ awaited := "a", awaiter := "x" }] }, t1)
-  , (.promiseSettle { id := "a", state := .resolved, value := {} }, ts)
-  , (.τResume { awaited := "a", awaiter := "x" }, g2)
-  , (.τTaskRetryTimeout "x", g2)
-  , (.taskGet    { id := "x" }, t2)
-  , (.promiseGet { id := "x" }, t2)
-  , (.taskGet    { id := "x" }, t3) ]
+  [ (.api (.promiseCreate { id := "a", timeoutAt := 100000, param := {}, tags := ext }), 0)
+  , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
+  , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
+  , (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), ts)
+  , (.r4 "a" "x", g2)
+  , (.r6 "x", g2)
+  , (.api (.taskGet    { id := "x" }), t2)
+  , (.api (.promiseGet { id := "x" }), t2)
+  , (.api (.taskGet { id := "x" }), t3) ]
 
 /-- A third shape: a task released back to the pool, so a RETRY τ is the
     only hidden step, and a lease timeout competes with it. This is the
     shape that exercises `delTaskTimeout` deleting a timer of the other
     kind. -/
-def workflowRetry (seed : Nat) : List (Request × Nat) :=
+def workflowRetry (seed : Nat) : List (Step × Nat) :=
   let r1 := lcg seed
   let r2 := lcg r1
   let r3 := lcg r2
@@ -307,13 +301,13 @@ def workflowRetry (seed : Nat) : List (Request × Nat) :=
   let g2 := pick pool 5 r5
   let t2 := pick pool 5 r6
   mono
-  [ (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }, 0)
-  , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }, 0)
-  , (.taskRelease   { id := "x", version := 1 }, tr)
-  , (.τTaskLeaseTimeout "x", g1)
-  , (.τTaskRetryTimeout "x", g2)
-  , (.taskGet    { id := "x" }, t2)
-  , (.promiseGet { id := "x" }, t2) ]
+  [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
+  , (.api (.taskRelease   { id := "x", version := 1 }), tr)
+  , (.r5 "x", g1)
+  , (.r6 "x", g2)
+  , (.api (.taskGet    { id := "x" }), t2)
+  , (.api (.promiseGet { id := "x" }), t2) ]
 
 /-! ## Exhaustive, not random
 
@@ -327,59 +321,56 @@ def grid : List Nat := [1, 2, 3, 4, 6, 8, 12]
     observation instant) from `grid`, with the suspend pinned at 1 and a
     second observation late enough to see everything. This is the
     resume-threshold shape, enumerated. -/
-def resumeGrid : List (List (Request × Nat)) :=
+def resumeGrid : List (List (Step × Nat)) :=
   grid.flatMap fun ta => grid.flatMap fun tx => grid.flatMap fun g => grid.map fun t2 =>
     mono
-    [ (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }, 0)
-    , (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }, 0)
-    , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }, 0)
-    , (.taskSuspend   { id := "x", version := 1,
-                        actions := [{ awaited := "a", awaiter := "x" }] }, 1)
-    , (.τPromiseTimeout "a", g)
-    , (.τResume { awaited := "a", awaiter := "x" }, g)
-    , (.taskGet    { id := "x" }, t2)
-    , (.promiseGet { id := "x" }, t2)
-    , (.promiseGet { id := "a" }, t2)
-    , (.taskGet    { id := "x" }, 100)
-    , (.promiseGet { id := "x" }, 100) ]
+    [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
+    , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 1)
+    , (.r1 "a", g)
+    , (.r4 "a" "x", g)
+    , (.api (.taskGet    { id := "x" }), t2)
+    , (.api (.promiseGet { id := "x" }), t2)
+    , (.api (.promiseGet { id := "a" }), t2)
+    , (.api (.taskGet    { id := "x" }), 100)
+    , (.api (.promiseGet { id := "x" }), 100) ]
 
 /-- The lease/retry shape, enumerated: lease deadline, promise deadline,
     both τ instants, observation instant. -/
-def leaseGrid : List (List (Request × Nat)) :=
+def leaseGrid : List (List (Step × Nat)) :=
   grid.flatMap fun tx => grid.flatMap fun ttl => grid.flatMap fun g1 => grid.map fun t2 =>
     mono
-    [ (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }, 0)
-    , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }, 0)
-    , (.τTaskLeaseTimeout "x", g1)
-    , (.τTaskRetryTimeout "x", g1)
-    , (.taskGet    { id := "x" }, t2)
-    , (.promiseGet { id := "x" }, t2)
-    , (.taskGet    { id := "x" }, 100) ]
+    [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
+    , (.r5 "x", g1)
+    , (.r6 "x", g1)
+    , (.api (.taskGet    { id := "x" }), t2)
+    , (.api (.promiseGet { id := "x" }), t2)
+    , (.api (.taskGet { id := "x" }), 100) ]
 
 /-- Two awaited promises on one awaiter, τs at two independent instants —
     the chain shape, enumerated over deadlines and both τ instants. -/
-def chainGrid : List (List (Request × Nat)) :=
+def chainGrid : List (List (Step × Nat)) :=
   grid.flatMap fun ta => grid.flatMap fun tb => grid.flatMap fun g1 => grid.map fun g2 =>
     mono
-    [ (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }, 0)
-    , (.promiseCreate { id := "b", timeoutAt := tb, param := {}, tags := ext }, 0)
-    , (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }, 0)
-    , (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }, 0)
-    , (.taskSuspend   { id := "x", version := 1,
-                        actions := [{ awaited := "a", awaiter := "x" },
-                                    { awaited := "b", awaiter := "x" }] }, 1)
-    , (.τPromiseTimeout "a", g1)
-    , (.τResume { awaited := "a", awaiter := "x" }, g1)
-    , (.τPromiseTimeout "b", g2)
-    , (.τResume { awaited := "b", awaiter := "x" }, g2)
-    , (.taskGet    { id := "x" }, 20)
-    , (.promiseGet { id := "a" }, 20)
-    , (.promiseGet { id := "b" }, 20) ]
+    [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := "b", timeoutAt := tb, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
+    , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }, { awaited := "b", awaiter := "x" }] }), 1)
+    , (.r1 "a", g1)
+    , (.r4 "a" "x", g1)
+    , (.r1 "b", g2)
+    , (.r4 "b" "x", g2)
+    , (.api (.taskGet    { id := "x" }), 20)
+    , (.api (.promiseGet { id := "a" }), 20)
+    , (.api (.promiseGet { id := "b" }), 20) ]
 
 end TraceCheck.Gap
 
-open Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
-def runFamily (name : String) (ws : List (List (Request × Nat))) : IO Nat := do
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
+def runFamily (name : String) (ws : List (List (Step × Nat))) : IO Nat := do
   let mut cov : Coverage := {}
   let mut broke := 0
   let mut shown := 0
@@ -421,7 +412,7 @@ def runFamily (name : String) (ws : List (List (Request × Nat))) : IO Nat := do
   IO.eprintln s!"    critical instants ≠ BRUTE FORCE (R3 fails): {redDisagree}"
   return broke
 
-open Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Intervals TraceCheck.Gap in
 def main : IO Unit := do
   IO.eprintln "══ the gap, measured properly ═════════════════════════════════"
   IO.eprintln ""

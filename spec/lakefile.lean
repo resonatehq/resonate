@@ -11,18 +11,17 @@ it imports `04-theorems`'s trace framework and modifies nothing. Siblings
 rather than nesting the checker inside the numbered specification
 directories, because one is the artifact and the other is a consumer. -/
 
-/-- The specification: protocol surface and the two machines.
+/-- The specification: protocol surface and the machine.
     `lake build spec` for the fast development loop. -/
 @[default_target]
 lean_lib «spec» where
   srcDir := "spec"
   roots  := #[]
-  globs  := #[.submodules `«01-protocol», .submodules `«02-abstract»,
-              .submodules `«03-concrete»]
+  globs  := #[.submodules `«01-protocol», .submodules `«02-abstract»]
 
-/-- The relations between machines — equivalence, refinement — with
-    their exhaustive sweeps, which run under kernel `decide` at build
-    time (minutes). `lake build` runs everything. -/
+/-- The system, the harnesses and the proofs. The sweeps here run under
+    kernel `decide` at build time (minutes). `lake build` runs
+    everything. -/
 @[default_target]
 lean_lib «theorems» where
   srcDir := "spec"
