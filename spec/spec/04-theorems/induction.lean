@@ -281,7 +281,7 @@ a state invariant. `tRearm` may only re-arm a PENDING task; delete the
 `t.state == .pending` check in the retry step and this is the
 obligation that fails. -/
 
-structure Hereditary (g : Q) : Prop where
+structure Hereditary (g : Q) (a : ServerState) : Prop where
   -- promises
   project      : ∀ (p : PromiseObject) (n : Nat),
                    g.promise p = true → g.promise (p.project n) = true
@@ -291,7 +291,8 @@ structure Hereditary (g : Q) : Prop where
                    g.promise p = true → g.promise (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat),
-                   st.settable = true → t < p.timeoutAt → g.promise p = true →
+                   st.settable = true → p.state = .pending → t < p.timeoutAt →
+                   g.promise p = true →
                    g.promise { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ (p : PromiseObject) (a : String), g.promise p = true →
                    g.promise { p with listeners := p.listeners.filter (· != a) } = true
@@ -299,11 +300,13 @@ structure Hereditary (g : Q) : Prop where
                    g.promise { p with callbacks := p.callbacks.filter (· != a) } = true
   live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
+                   a.promises.find? (·.id == id) = none →
                    g.promise { id := id, state := .pending, param := param, tags := tags,
                                timeoutAt := timeoutAt, createdAt := createdAt } = true
   dead         : ∀ (id : String) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
+                   a.promises.find? (·.id == id) = none →
                    g.promise { id := id, state := st, param := param, tags := tags,
                                timeoutAt := timeoutAt, createdAt := timeoutAt,
                                settledAt := some timeoutAt } = true
@@ -354,7 +357,7 @@ structure Hereditary (g : Q) : Prop where
 
 /-- `TaskObject.view` is `fulfill` behind a test, so it is derived
     rather than assumed. -/
-theorem Hereditary.tView {g : Q} (h : Hereditary g) (t : TaskObject) (p : PromiseObject) :
+theorem Hereditary.tView {g : Q} {a : ServerState} (h : Hereditary g a) (t : TaskObject) (p : PromiseObject) :
     g.task t = true → g.task (t.view p) = true := by
   intro ht
   unfold TaskObject.view
@@ -448,7 +451,7 @@ section Derived
 
 variable {g : Q}
 
-theorem writesGood_setSettled (hq : Hereditary g) {e : Env}
+theorem writesGood_setSettled {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (p : PromiseObject) (h : g.promise p = true) :
     WritesGood g e (setSettled p) := by
   unfold setSettled
@@ -473,7 +476,7 @@ theorem readPromise_fst (id : String) (now : Nat) (e : Env) :
   | none => rfl
   | some p => rw [bind_fst]; split <;> rw [bind_fst] <;> rfl
 
-theorem writesGood_readPromise (hq : Hereditary g) {e : Env}
+theorem writesGood_readPromise {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
     WritesGood g e (readPromise id now) := by
   unfold readPromise
@@ -489,7 +492,7 @@ theorem writesGood_readPromise (hq : Hereditary g) {e : Env}
         (writesGood_setSettled hq hs _ (hq.project p₀ now hp₀)) (writesGood_pure _ _ _)
     · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
-theorem returnsGood_readPromise (hq : Hereditary g) {e : Env}
+theorem returnsGood_readPromise {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
     ReturnsGood g e (readPromise id now) := by
   intro p hp
@@ -528,38 +531,48 @@ theorem readPromise_notDue (id : String) (now : Nat) (e : Env) (p : PromiseObjec
     it is not yet due. This is where the reader discipline pays —
     `writesGood_bind'` keeps the continuation pinned to the value the
     read produced, so both facts survive the `←`. -/
-theorem writesGood_afterReadPromise {α} (hq : Hereditary g) {e : Env}
+theorem writesGood_afterReadPromise {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
-    (hnone : WritesGood g e (f none))
+    (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
     WritesGood g e (readPromise id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs id now) ?_
   cases h : (readPromise id now e).1 with
-  | none => exact hnone
+  | none =>
+      refine hnone ?_
+      rw [readPromise_fst] at h
+      cases hf : e.state.promises.find? (·.id == id) with
+      | none => rfl
+      | some p₀ => rw [hf] at h; simp at h
   | some p =>
       exact hsome p (returnsGood_readPromise hq hs id now p h)
         (readPromise_notDue id now e p h)
 
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchPromise` is `withMat true`, `viewPromise` is `withMat false`. -/
-theorem writesGood_afterMatReadPromise {α} (hq : Hereditary g) {e : Env} (b : Bool)
+theorem writesGood_afterMatReadPromise {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
-    (hnone : WritesGood g e (f none))
+    (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
     WritesGood g e (withMat b (readPromise id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readPromise (e := { e with mat := b }) hq hs id now) ?_
   show WritesGood g e (f ((readPromise id now { e with mat := b }).1))
   cases h : (readPromise id now { e with mat := b }).1 with
-  | none => exact hnone
+  | none =>
+      refine hnone ?_
+      rw [readPromise_fst] at h
+      cases hf : e.state.promises.find? (·.id == id) with
+      | none => rfl
+      | some p₀ => rw [hf] at h; simp at h
   | some p =>
       exact hsome p
         (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
         (readPromise_notDue id now { e with mat := b } p h)
 
-theorem writesGood_readTask (hq : Hereditary g) {e : Env}
+theorem writesGood_readTask {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
     WritesGood g e (readTask id now) := by
   unfold readTask
@@ -583,7 +596,7 @@ theorem writesGood_readTask (hq : Hereditary g) {e : Env}
     task is `t.view p` for a `t` that was in the store; the promise is
     one `readPromise` handed back. Both inherit their facts rather than
     needing their own argument. -/
-theorem readTask_good (hq : Hereditary g) {e : Env} (hs : PerStore g e.state = true)
+theorem readTask_good {e : Env} (hq : Hereditary g e.state) (hs : PerStore g e.state = true)
     (id : String) (now : Nat) (t : TaskObject) (po : Option PromiseObject)
     (h : (readTask id now e).1 = some (t, po)) :
     g.task t = true ∧ ∀ p, po = some p → g.promise p = true ∧ NotDue now p := by
@@ -617,7 +630,7 @@ theorem readTask_good (hq : Hereditary g) {e : Env} (hs : PerStore g e.state = t
             subst hp
             exact ⟨hgp₀, hnd⟩
 
-theorem writesGood_afterReadTask {α} (hq : Hereditary g) {e : Env}
+theorem writesGood_afterReadTask {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option (TaskObject × Option PromiseObject) → H α)
     (hnone : WritesGood g e (f none))
@@ -637,7 +650,7 @@ theorem writesGood_afterReadTask {α} (hq : Hereditary g) {e : Env}
           obtain ⟨h1, h2⟩ := hgp p rfl
           exact hsome t p hgt h1 h2
 
-theorem writesGood_afterTouchTask {α} (hq : Hereditary g) {e : Env}
+theorem writesGood_afterTouchTask {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option (TaskObject × Option PromiseObject) → H α)
     (hnone : WritesGood g e (f none))

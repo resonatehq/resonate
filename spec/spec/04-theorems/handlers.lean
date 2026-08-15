@@ -75,7 +75,8 @@ macro "wg_guard" : tactic => `(tactic|
 
 section Handlers
 
-variable {g : Q} {e : Env} (hq : Hereditary g) (hs : PerStore g e.state = true)
+variable {g : Q} {e : Env} (hq : Hereditary g e.state)
+  (hs : PerStore g e.state = true)
 
 include hq hs
 
@@ -83,12 +84,13 @@ set_option linter.unusedSectionVars false
 
 /-! ### Birth -/
 
-theorem writesGood_createPromise (req : ServerModel.PromiseCreateReq) (now : Nat) :
+theorem writesGood_createPromise (req : ServerModel.PromiseCreateReq) (now : Nat)
+    (hfresh : e.state.promises.find? (·.id == req.id) = none) :
     WritesGood g e (createPromise req now) := by
   unfold createPromise
   refine writesGood_iteH _ _ _ _ _ (fun h => ?_) (fun _ => ?_)
   · refine writesGood_bind' _ _ _ _
-      (writesGood_setPromise _ _ _ (hq.live _ _ _ _ _ (by omega))) ?_
+      (writesGood_setPromise _ _ _ (hq.live _ _ _ _ _ (by omega) hfresh)) ?_
     repeat' first
       | exact writesGood_pure _ _ _
       | exact writesGood_setTask _ _ _ (hq.tBornPending _ _)
@@ -96,7 +98,7 @@ theorem writesGood_createPromise (req : ServerModel.PromiseCreateReq) (now : Nat
       | dsimp only
       | split
   · refine writesGood_bind' _ _ _ _
-      (writesGood_setPromise _ _ _ (hq.dead _ _ _ _ _ (by split <;> simp))) ?_
+      (writesGood_setPromise _ _ _ (hq.dead _ _ _ _ _ (by split <;> simp) hfresh)) ?_
     repeat' first
       | exact writesGood_pure _ _ _
       | exact writesGood_setTask _ _ _ (hq.tBornDone _)
@@ -107,8 +109,9 @@ theorem writesGood_createPromise (req : ServerModel.PromiseCreateReq) (now : Nat
 theorem writesGood_createIfAbsent (req : ServerModel.PromiseCreateReq) (now : Nat) :
     WritesGood g e (createIfAbsent req now) := by
   unfold createIfAbsent
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
-  · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _) (writesGood_pure _ _ _)
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun hfresh => ?_) ?_
+  · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _ hfresh)
+      (writesGood_pure _ _ _)
   · intro p hp _; exact writesGood_pure _ _ _
 
 /-! ### The promise API -/
@@ -116,7 +119,7 @@ theorem writesGood_createIfAbsent (req : ServerModel.PromiseCreateReq) (now : Na
 theorem writesGood_promiseGet (req : ServerModel.PromiseGetReq) (now : Nat) :
     WritesGood g e (promiseGet req now) := by
   unfold promiseGet
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp _; exact writesGood_pure _ _ _
 
@@ -124,8 +127,9 @@ theorem writesGood_promiseCreate (req : ServerModel.PromiseCreateReq) (now : Nat
     WritesGood g e (promiseCreate req now) := by
   unfold promiseCreate
   wg_guard
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
-  · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _) (writesGood_pure _ _ _)
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun hfresh => ?_) ?_
+  · exact writesGood_bind' _ _ _ _ (writesGood_createPromise hq hs _ _ hfresh)
+      (writesGood_pure _ _ _)
   · intro p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_promiseSettle (req : ServerModel.PromiseSettleReq) (now : Nat) :
@@ -133,14 +137,14 @@ theorem writesGood_promiseSettle (req : ServerModel.PromiseSettleReq) (now : Nat
   unfold promiseSettle
   refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hset => ?_)
   refine writesGood_pureBind _ _ _ _ ?_
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp hdue
     dsimp only
     refine writesGood_iteH _ _ _ _ _ (fun hpend => ?_) (fun _ => writesGood_pure _ _ _)
     exact writesGood_bind' _ _ _ _
       (writesGood_setSettled hq hs _
-        (hq.settle p _ _ _ (by simpa using hset) (hdue hpend) hp))
+        (hq.settle p _ _ _ (by simpa using hset) (by simpa using hpend) (hdue hpend) hp))
       (writesGood_pure _ _ _)
 
 theorem writesGood_promiseRegisterCallback
@@ -148,11 +152,11 @@ theorem writesGood_promiseRegisterCallback
     WritesGood g e (promiseRegisterCallback req now) := by
   unfold promiseRegisterCallback
   wg_guard
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro pa hpa _
     dsimp only
-    refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+    refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
     · exact writesGood_pure _ _ _
     · intro pw hpw _
       dsimp only
@@ -169,7 +173,7 @@ theorem writesGood_promiseRegisterListener
     WritesGood g e (promiseRegisterListener req now) := by
   unfold promiseRegisterListener
   wg_guard
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro pa hpa _
     dsimp only
@@ -206,15 +210,16 @@ theorem writesGood_taskCreate (req : ServerModel.TaskCreateReq) (now : Nat) :
     by_cases ht : req.action.tags.isTimer = true
     · exact absurd (h2 ht) (by simp [h1])
     · simpa using ht
-  refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+  refine writesGood_afterReadPromise hq hs _ _ _ (fun hfresh => ?_) ?_
   · dsimp only
     refine writesGood_iteH _ _ _ _ _ (fun h => ?_) (fun _ => ?_)
     · refine writesGood_bind' _ _ _ _
-        (writesGood_setPromise _ _ _ (hq.live _ _ _ _ _ (by omega))) ?_
+        (writesGood_setPromise _ _ _ (hq.live _ _ _ _ _ (by omega) hfresh)) ?_
       exact writesGood_bind' _ _ _ _
         (writesGood_setTask _ _ _ (hq.tBornHeld _ _ _ _)) (writesGood_pure _ _ _)
     · refine writesGood_bind' _ _ _ _
-        (writesGood_setPromise _ _ _ (hq.dead _ _ _ _ _ (by simp [hnotimer]))) ?_
+        (writesGood_setPromise _ _ _
+          (hq.dead _ _ _ _ _ (by simp [hnotimer]) hfresh)) ?_
       exact writesGood_bind' _ _ _ _
         (writesGood_setTask _ _ _ (hq.tBornDone _)) (writesGood_pure _ _ _)
   · intro p hp _
@@ -291,7 +296,7 @@ theorem writesGood_checkAwaited (now : Nat) :
   | [] => by rw [checkAwaited]; exact writesGood_pure _ _ _
   | a :: rest => by
       rw [checkAwaited]
-      refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+      refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
       · exact writesGood_pure _ _ _
       · intro p hp _
         dsimp only
@@ -305,7 +310,7 @@ theorem writesGood_registerAwaited (awaiter : String) (now : Nat) :
   | [] => by rw [registerAwaited]; exact writesGood_pure _ _ _
   | a :: rest => by
       rw [registerAwaited]
-      refine writesGood_afterReadPromise hq hs _ _ _ ?_ ?_
+      refine writesGood_afterReadPromise hq hs _ _ _ (fun _ => ?_) ?_
       · dsimp only
         exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _)
           (writesGood_registerAwaited awaiter now rest)
@@ -354,7 +359,8 @@ theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
     wg_guard
     exact writesGood_bind' _ _ _ _
       (writesGood_setSettled hq hs _
-        (hq.settle p _ _ _ (by simpa using hset) (hdue (by simpa using hpend)) hp))
+        (hq.settle p _ _ _ (by simpa using hset) (by simpa using hpend)
+          (hdue (by simpa using hpend)) hp))
       (writesGood_pure _ _ _)
 
 theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
@@ -440,14 +446,14 @@ content of "the read discipline is not a protocol decision". -/
 theorem writesGood_processPromiseTimeout (id : String) (now : Nat) :
     WritesGood g e (Internal.processPromiseTimeout id now) := by
   unfold Internal.processPromiseTimeout touchPromise
-  refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
+  refine writesGood_afterMatReadPromise hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp _; exact writesGood_pure _ _ _
 
 theorem writesGood_processListener (id : String) (address : String) (now : Nat) :
     WritesGood g e (Internal.processListener id address now) := by
   unfold Internal.processListener touchPromise
-  refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
+  refine writesGood_afterMatReadPromise hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp _
     dsimp only
@@ -478,7 +484,7 @@ theorem writesGood_resumeOne (awaited awaiter : String) (now : Nat) :
 theorem writesGood_processCallback (id : String) (awaiter : String) (now : Nat) :
     WritesGood g e (Internal.processCallback id awaiter now) := by
   unfold Internal.processCallback touchPromise
-  refine writesGood_afterMatReadPromise hq true hs _ _ _ ?_ ?_
+  refine writesGood_afterMatReadPromise hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp _
     dsimp only
@@ -500,7 +506,7 @@ theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
     split
     · exact writesGood_pure _ _ _
     · refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-      refine writesGood_afterMatReadPromise hq false hs _ _ _ ?_ ?_
+      refine writesGood_afterMatReadPromise hq false hs _ _ _ (fun _ => ?_) ?_
       · exact writesGood_pure _ _ _
       · intro p hp _
         dsimp only
@@ -519,7 +525,7 @@ theorem writesGood_processRetryTimeout (id : String) (now : Nat) :
     split
     · exact writesGood_pure _ _ _
     · refine writesGood_iteH _ _ _ _ _ (fun hgd => ?_) (fun _ => writesGood_pure _ _ _)
-      refine writesGood_afterMatReadPromise hq false hs _ _ _ ?_ ?_
+      refine writesGood_afterMatReadPromise hq false hs _ _ _ (fun _ => ?_) ?_
       · exact writesGood_pure _ _ _
       · intro p hp _
         dsimp only
@@ -617,8 +623,8 @@ The obligations buy inductiveness over the whole machine. This is the
 reusable result: every `.state` entry that is an `.all` over one table
 now costs its obligations and nothing else. -/
 
-theorem perStore_step {g : Q} (hq : Hereditary g)
-    (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
+theorem perStore_step {g : Q} (mat : Bool) (st : Step) (now : Nat) (s : ServerState)
+    (hq : Hereditary g s) :
     PerStore g s = true → PerStore g (stepOf mat st now s).2 = true := by
   intro hsq
   refine perStore_applyAll g _ s hsq ?_

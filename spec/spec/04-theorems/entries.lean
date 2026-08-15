@@ -112,7 +112,7 @@ structure HPromise (f : PromiseObject → Bool) : Prop where
   addListener  : ∀ (p : PromiseObject) (a : String), f p = true → f (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat),
-                   st.settable = true → t < p.timeoutAt → f p = true →
+                   st.settable = true → p.state = .pending → t < p.timeoutAt → f p = true →
                    f { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ (p : PromiseObject) (a : String), f p = true →
                    f { p with listeners := p.listeners.filter (· != a) } = true
@@ -129,16 +129,16 @@ structure HPromise (f : PromiseObject → Bool) : Prop where
                        timeoutAt := timeoutAt, createdAt := timeoutAt,
                        settledAt := some timeoutAt } = true
 
-theorem hereditary_onlyPromise {f : PromiseObject → Bool} (h : HPromise f) :
-    Hereditary (onlyPromise f) where
+theorem hereditary_onlyPromise {f : PromiseObject → Bool} (h : HPromise f)
+    (a : ServerState) : Hereditary (onlyPromise f) a where
   project := h.project
   addCallback := h.addCallback
   addListener := h.addListener
   settle := h.settle
   dropListener := h.dropListener
   dropCallback := h.dropCallback
-  live := h.live
-  dead := h.dead
+  live := fun id param tags tAt cAt hlt _ => h.live id param tags tAt cAt hlt
+  dead := fun id st param tags tAt hst _ => h.dead id st param tags tAt hst
   tFulfill _ _ := rfl
   tBornPending _ _ := rfl
   tBornDone _ := rfl
@@ -160,7 +160,7 @@ theorem promise_step {f : PromiseObject → Bool} (h : HPromise f)
     (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
     s.promises.all f = true → (stepOf mat st now s).2.promises.all f = true := by
   intro hf
-  have := perStore_step (hereditary_onlyPromise h) mat st now s
+  have := perStore_step mat st now s (hereditary_onlyPromise h s)
     (by rw [perStore_onlyPromise]; exact hf)
   rwa [perStore_onlyPromise] at this
 
@@ -194,16 +194,16 @@ structure HTask (f : TaskObject → Bool) : Prop where
   rearm      : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true → f t = true →
                  f { t with retryAt := some n } = true
 
-theorem hereditary_onlyTask {f : TaskObject → Bool} (h : HTask f) :
-    Hereditary (onlyTask f) where
+theorem hereditary_onlyTask {f : TaskObject → Bool} (h : HTask f)
+    (a : ServerState) : Hereditary (onlyTask f) a where
   project _ _ _ := rfl
   addCallback _ _ _ := rfl
   addListener _ _ _ := rfl
-  settle _ _ _ _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ := rfl
   dropListener _ _ _ := rfl
   dropCallback _ _ _ := rfl
-  live _ _ _ _ _ _ := rfl
-  dead _ _ _ _ _ _ := rfl
+  live _ _ _ _ _ _ _ := rfl
+  dead _ _ _ _ _ _ _ := rfl
   tFulfill := h.fulfill
   tBornPending := h.bornPending
   tBornDone := h.bornDone
@@ -225,7 +225,7 @@ theorem task_step {f : TaskObject → Bool} (h : HTask f)
     (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
     s.tasks.all f = true → (stepOf mat st now s).2.tasks.all f = true := by
   intro hf
-  have := perStore_step (hereditary_onlyTask h) mat st now s
+  have := perStore_step mat st now s (hereditary_onlyTask h s)
     (by rw [perStore_onlyTask]; exact hf)
   rwa [perStore_onlyTask] at this
 
@@ -242,16 +242,16 @@ structure HSchedule (f : ServerModel.Schedule → Bool) : Prop where
   advance : ∀ (c : ServerModel.Schedule) (last : Nat), f c = true →
               f { c with lastRunAt := some last, nextRunAt := ServerModel.nextCron c.cron last } = true
 
-theorem hereditary_onlySchedule {f : ServerModel.Schedule → Bool} (h : HSchedule f) :
-    Hereditary (onlySchedule f) where
+theorem hereditary_onlySchedule {f : ServerModel.Schedule → Bool} (h : HSchedule f)
+    (a : ServerState) : Hereditary (onlySchedule f) a where
   project _ _ _ := rfl
   addCallback _ _ _ := rfl
   addListener _ _ _ := rfl
-  settle _ _ _ _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ := rfl
   dropListener _ _ _ := rfl
   dropCallback _ _ _ := rfl
-  live _ _ _ _ _ _ := rfl
-  dead _ _ _ _ _ _ := rfl
+  live _ _ _ _ _ _ _ := rfl
+  dead _ _ _ _ _ _ _ := rfl
   tFulfill _ _ := rfl
   tBornPending _ _ := rfl
   tBornDone _ := rfl
@@ -273,7 +273,7 @@ theorem schedule_step {f : ServerModel.Schedule → Bool} (h : HSchedule f)
     (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
     s.schedules.all f = true → (stepOf mat st now s).2.schedules.all f = true := by
   intro hf
-  have := perStore_step (hereditary_onlySchedule h) mat st now s
+  have := perStore_step mat st now s (hereditary_onlySchedule h s)
     (by rw [perStore_onlySchedule]; exact hf)
   rwa [perStore_onlySchedule] at this
 
@@ -299,7 +299,7 @@ theorem hp_createdLeTimeout : HPromise qCreatedLeTimeout where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qCreatedLeTimeout] using h
-  settle p st v t _ _ h := by simpa [qCreatedLeTimeout] using h
+  settle p st v t _ _ _ h := by simpa [qCreatedLeTimeout] using h
   dropListener p a h := by simpa [qCreatedLeTimeout] using h
   dropCallback p a h := by simpa [qCreatedLeTimeout] using h
   live id param tags timeoutAt createdAt h := by simp [qCreatedLeTimeout]; omega
@@ -326,7 +326,7 @@ theorem hp_pendingBeforeDeadline : HPromise qPendingBeforeDeadline where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qPendingBeforeDeadline] using h
-  settle p st v t hst _ _ := by
+  settle p st v t hst _ _ _ := by
     cases st <;> simp_all [qPendingBeforeDeadline, ServerModel.PromiseState.settable]
   dropListener p a h := by simpa [qPendingBeforeDeadline] using h
   dropCallback p a h := by simpa [qPendingBeforeDeadline] using h
@@ -354,7 +354,7 @@ theorem hp_settledIffStamped : HPromise qSettledIffStamped where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qSettledIffStamped] using h
-  settle p st v t hst _ _ := by
+  settle p st v t hst _ _ _ := by
     cases st <;> simp_all [qSettledIffStamped, ServerModel.PromiseState.settable]
   dropListener p a h := by simpa [qSettledIffStamped] using h
   dropCallback p a h := by simpa [qSettledIffStamped] using h
@@ -385,7 +385,7 @@ theorem hp_timedoutIsServerOwned : HPromise qTimedoutIsServerOwned where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qTimedoutIsServerOwned] using h
-  settle p st v t hst _ _ := by
+  settle p st v t hst _ _ _ := by
     cases st <;> simp_all [qTimedoutIsServerOwned, ServerModel.PromiseState.settable]
   dropListener p a h := by simpa [qTimedoutIsServerOwned] using h
   dropCallback p a h := by simpa [qTimedoutIsServerOwned] using h
@@ -416,7 +416,7 @@ theorem hp_settledAtLeTimeout : HPromise qSettledAtLeTimeout where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qSettledAtLeTimeout] using h
-  settle p st v t _ hdue _ := by simp [qSettledAtLeTimeout]; omega
+  settle p st v t _ _ hdue _ := by simp [qSettledAtLeTimeout]; omega
   dropListener p a h := by simpa [qSettledAtLeTimeout] using h
   dropCallback p a h := by simpa [qSettledAtLeTimeout] using h
   live id param tags timeoutAt createdAt h := by simp [qSettledAtLeTimeout]
@@ -447,7 +447,7 @@ theorem hp_deadlineVerdict : HPromise qDeadlineVerdict where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qDeadlineVerdict] using h
-  settle p st v t _ hdue _ := by simp [qDeadlineVerdict]; omega
+  settle p st v t _ _ hdue _ := by simp [qDeadlineVerdict]; omega
   dropListener p a h := by simpa [qDeadlineVerdict] using h
   dropCallback p a h := by simpa [qDeadlineVerdict] using h
   live id param tags timeoutAt createdAt h := by simp [qDeadlineVerdict]
@@ -484,7 +484,7 @@ theorem hp_noValueUnlessSettled : HPromise qNoValueUnlessSettled where
   addListener p a h := by
     unfold PromiseObject.addListener
     split <;> simpa [qNoValueUnlessSettled] using h
-  settle p st v t hst hdue _ := by
+  settle p st v t hst _ hdue _ := by
     cases st <;>
       simp_all [qNoValueUnlessSettled, ServerModel.PromiseState.settable] <;> omega
   dropListener p a h := by simpa [qNoValueUnlessSettled] using h
