@@ -67,10 +67,19 @@ def allPairs (w : List (Step × Nat)) :=
 def legalRun (w : List (Step × Nat)) : Bool :=
   (allPairs w).all (fun (n, a, b) => legalAt n a b)
 
-/-- Which entries fail, by name — the shape a counterexample report
-    needs, and the reason the catalogue carries its names as data. -/
+/-- Which entries fail, by name. A HARNESS concern: the specification
+    says what `legalAt` is, and collecting the names of what broke is
+    for whoever is debugging a red sweep. The catalogue carries the
+    names as data, which is what makes this three lines here rather
+    than a facility the specification has to provide. -/
+def failingNames (now : Nat) (a b : AbstractModel.ServerState) : List String :=
+  AbstractModel.Properties.catalogue.filterMap fun l =>
+    match l.property with
+    | .state f => if f now a && f now b then none else some l.name
+    | .trans f => if f now a b          then none else some l.name
+
 def report (ws : List (List (Step × Nat))) : List String :=
-  (ws.flatMap fun w => (allPairs w).flatMap (fun (n, a, b) => legalFailures n a b)).eraseDups
+  (ws.flatMap fun w => (allPairs w).flatMap (fun (n, a, b) => failingNames n a b)).eraseDups
 
 def witnesses (ws : List (List (Step × Nat))) (p : AbstractModel.ServerState → Bool) : Bool :=
   ws.any fun w => (trace w).any (fun (_, s) => p s)

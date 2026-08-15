@@ -1266,36 +1266,31 @@ def catalogue : List Named :=
 
 /-! ### The walk
 
-ONE fold, matching `Legal` in `04-theorems/system.lean`: take the
-catalogue, and apply each entry to whatever its constructor says it
-takes — a `.state` property to a state, a `.trans` property to the pair.
-There is no second notion and no lemma between them; the sweep evaluates
-this and `Legal` quantifies it.
+ONE fold, and it is the definition `Legal` in `04-theorems/system.lean`
+quantifies: take the catalogue, apply each entry to whatever its
+constructor says it takes — a `.state` property to a state, a `.trans`
+property to the pair.
 
-A `.state` entry is checked at BOTH endpoints of the pair. `Legal`
-applies it at every index of an infinite trace, where every state is
-some step's pre-state; a finite run has a last state that is nobody's
-pre-state, and checking both ends is what covers it without a special
-case. The redundancy is free — the initial state satisfies everything.
+A `.state` entry is checked at BOTH endpoints. `Legal` applies it at
+every index of an infinite trace, where every state is some step's
+pre-state; a finite run has a last state that is nobody's pre-state, and
+checking both ends covers it with no special case. Both at the STEP's
+instant, which is stricter rather than weaker — the two `_lte_now`
+entries are monotone in `now`.
 
-Both endpoints are checked at the instant of the STEP, not at some later
-reading. That is stricter, not weaker: the two `_lte_now` entries are
-monotone in `now`, so passing at the earlier instant implies passing at
-the later one.
-
-Report by NAME. It is the same string in Lean, Go, TypeScript and Verus,
-so a violation means the same thing everywhere. -/
-
-def legalFailures (now : Nat) (a b : ServerState) : List String :=
-  catalogue.filterMap fun l =>
-    match l.property with
-    | .state f => if f now a && f now b then none else some l.name
-    | .trans f => if f now a b then none else some l.name
+Each entry carries its `name`, and that is the portable part: an
+implementation reporting a violation reports the same string in Go,
+TypeScript or Verus. Collecting those names is the implementation's
+business — and the harness's, when something breaks. Not the
+specification's. -/
 
 def legalAt (now : Nat) (a b : ServerState) : Bool :=
-  (legalFailures now a b).isEmpty
+  catalogue.all fun l =>
+    match l.property with
+    | .state f => f now a && f now b
+    | .trans f => f now a b
 
-/-- The SAME fold, restricted to the `.state` half — `legalAt` with the
+/-- The same fold restricted to the `.state` half — `legalAt` with the
     `.trans` entries answering `true`. Not a second notion of legality:
     it is what an induction HYPOTHESIS needs, a claim about one state
     with no successor in hand. -/

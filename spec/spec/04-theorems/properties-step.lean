@@ -34,7 +34,7 @@ def transHoldsRun (w : List (Step × Nat)) : Bool :=
   (steps w).all (fun (n, a, b) => legalAt n a b)
 
 def transReport (ws : List (List (Step × Nat))) : List String :=
-  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => legalFailures n a b)).eraseDups
+  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => failingNames n a b)).eraseDups
 
 def stepWitnesses (ws : List (List (Step × Nat)))
     (p : ServerState → ServerState → Bool) : Bool :=
