@@ -174,6 +174,16 @@ such field, so it compares structurally. -/
 
 deriving instance BEq for AbstractModel.TaskObject
 
+/-! And structural equality on the whole store, for consumers that
+CANONICALISE first — sort every keyed list, then compare. `stateEq`
+below is the order-insensitive relation; this is the cheap one you may
+use once order has been normalised away. The trace checker in `valid/`
+does exactly that, and caches the canonical form because recomputing it
+inside a pairwise comparison made dedup quadratic twice over. -/
+
+deriving instance BEq for AbstractModel.PromiseObject
+deriving instance BEq for AbstractModel.ServerState
+
 /-! ## The driver
 
 What a step DENOTES. `handle` takes an `Step` to a transition in the

@@ -50,7 +50,7 @@ robust". -/
 
 namespace TraceCheck.Gap
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Intervals
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Intervals
 
 /-- The reduction's reference implementation: every instant in every gap,
     every enabled τ. `validate` claims to be equivalent to this — that

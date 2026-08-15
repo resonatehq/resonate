@@ -67,7 +67,7 @@ about what a trace IS, and it is true by construction. -/
 
 namespace TraceCheck.Executions
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Correctness
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Correctness
 
 /-! ## Internal requests, read back as τs
 
@@ -76,26 +76,27 @@ a typing fact. Recovering a schedule from a trace needs the other
 direction: every non-external `Request` is either a τ or `.idle`, and
 `.idle` is a no-op that can be dropped. -/
 
-def ofRequest? : Request → Option Tau
-  | .τPromiseTimeout id   => some (.promiseTimeout id)
-  | .τTaskRetryTimeout id => some (.taskRetryTimeout id)
-  | .τTaskLeaseTimeout id => some (.taskLeaseTimeout id)
-  | .τScheduleTimeout id  => some (.scheduleTimeout id)
-  | .τResume r            => some (.resume r)
-  | _                     => none
+def ofStep? : Step → Option Tau
+  | .r1 id      => some (.promiseTimeout id)
+  | .r3 id addr => some (.listener id addr)
+  | .r4 id x    => some (.callback id x)
+  | .r5 id      => some (.taskLeaseTimeout id)
+  | .r6 id      => some (.taskRetryTimeout id)
+  | .r7 id      => some (.scheduleTimeout id)
+  | _           => none
 
-theorem toRequest_ofRequest? {rq : Request} {t : Tau} (h : ofRequest? rq = some t) :
-    t.toRequest = rq := by
-  cases rq <;> simp [ofRequest?] at h <;> subst h <;> rfl
+theorem toStep_ofStep? {st : Step} {t : Tau} (h : ofStep? st = some t) :
+    t.toStep = st := by
+  cases st <;> simp [ofStep?] at h <;> subst h <;> rfl
 
-/-- The only non-external request that is not a τ. -/
-theorem idle_of_internal {rq : Request}
-    (hx : rq.isExternal = false) (h : ofRequest? rq = none) : rq = .idle := by
-  cases rq <;> simp [ofRequest?, Request.isExternal] at h hx <;> rfl
+/-- The only non-external step that is not a τ. -/
+theorem idle_of_internal {st : Step}
+    (hx : st.isExternal = false) (h : ofStep? st = none) : st = .idle := by
+  cases st <;> simp [ofStep?, Step.isExternal] at h hx <;> rfl
 
 /-- `.idle` really is a stutter: same state, and the response is silent. -/
 theorem step_idle (now : Nat) (s : ServerState) :
-    stepOf handleM .idle now s = (.τ, s) := rfl
+    Abstraction.stepOf true .idle now s = (.τ, s) := rfl
 
 /-! ## Timed schedules
 
@@ -137,7 +138,7 @@ inductive AdmissibleAt : Nat → ServerState → List Observation → Prop
   | nil  {a s} : AdmissibleAt a s []
   | cons {a s s' o rest} (σ : List (Tau × Nat))
       (htime : Timed a o.now σ)
-      (hstep : stepOf handleM o.req o.now (fireAllAt σ s) = (o.res, s'))
+      (hstep : Abstraction.stepOf true (.api o.req) o.now (fireAllAt σ s) = (o.res, s'))
       (hrest : AdmissibleAt o.now s' rest) :
       AdmissibleAt a s (o :: rest)
 
@@ -249,13 +250,13 @@ theorem segment {tr : Trace} (hv : ValidM tr) :
       have hint' : ∀ j, k + 1 ≤ j → j < (k + 1) + m → (tr j).req.isExternal = false := by
         intro j h1 h2; exact hint j (by omega) (by omega)
       have hstate : (tr (k + 1)).state
-          = (stepOf handleM (tr k).req (tr k).now (tr k).state).2 := (hv k).2.1
+          = (Abstraction.stepOf true (tr k).req (tr k).now (tr k).state).2 := (hv k).2.1
       have hclock : (tr k).now ≤ (tr (k + 1)).now := (hv k).2.2
       obtain ⟨σ, htime, hfire⟩ :=
         ih (k + 1) (tr (k + 1)).now (Nat.le_refl _) hint'
       have hidx : (k + 1) + m = k + (m + 1) := by omega
       rw [hidx] at htime hfire
-      cases hof : ofRequest? (tr k).req with
+      cases hof : ofStep? (tr k).req with
       | none =>
           -- a stutter: the block is the same schedule, started earlier
           have : (tr k).req = .idle := idle_of_internal hk hof
@@ -265,7 +266,7 @@ theorem segment {tr : Trace} (hv : ValidM tr) :
           refine ⟨(t, (tr k).now) :: σ, ⟨ha, htime.weaken hclock⟩, ?_⟩
           rw [fireAllAt_cons, ← hfire, hstate]
           congr 1
-          simp [Tau.step, toRequest_ofRequest? hof]
+          simp [Tau.step, toStep_ofStep? hof]
 
 /-- **SOUNDNESS's half.** Every timed explanation is an execution the
     specification calls valid. -/
@@ -330,7 +331,7 @@ theorem walk {tr : Trace} (hv : ValidM tr) {φ : Nat → Nat}
       k ≤ φ i → a ≤ (tr k).now →
       (∀ j, k ≤ j → j < φ i → (tr j).req.isExternal = false) →
       (∀ n, (hn : n < rest.length) →
-         (tr (φ (i + n))).req = (rest[n]'hn).req ∧
+         (tr (φ (i + n))).req = .api (rest[n]'hn).req ∧
          (tr (φ (i + n))).res = (rest[n]'hn).res ∧
          (tr (φ (i + n))).now = (rest[n]'hn).now) →
       AdmissibleAt a (tr k).state rest := by
@@ -347,7 +348,7 @@ theorem walk {tr : Trace} (hv : ValidM tr) {φ : Nat → Nat}
       -- `o` sits at index `φ i`
       obtain ⟨hreq, hres, hnow⟩ := hmatch 0 (by simp)
       simp only [Nat.add_zero, List.getElem_cons_zero] at hreq hres hnow
-      have hstep : stepOf handleM o.req o.now (fireAllAt σ (tr k).state)
+      have hstep : Abstraction.stepOf true (.api o.req) o.now (fireAllAt σ (tr k).state)
           = (o.res, (tr (φ i + 1)).state) := by
         rw [hfire, ← hreq, ← hnow, ← hres, (hv (φ i)).1, (hv (φ i)).2.1]
       refine AdmissibleAt.cons σ (hnow ▸ htime) hstep ?_

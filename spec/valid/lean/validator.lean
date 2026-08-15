@@ -1,4 +1,4 @@
-import «04-theorems».«trace»
+import «04-theorems».«system»
 
 /-!  # Admissibility checking — a shell around the specification
 
@@ -55,7 +55,7 @@ filter-then-prepend on a key). -/
 
 namespace TraceCheck
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence
+open ServerModel AbstractModel Abstraction Equivalence
 
 /-! ## Canonicalisation -/
 
@@ -79,10 +79,6 @@ def canon (s : ServerState) : ServerState :=
       tasks            := sortBy (·.id) s.tasks |>.map fun t =>
                             { t with resumes := sortBy id t.resumes }
       schedules        := sortBy (·.id) s.schedules
-      deferred         := sortBy (fun d => d.awaited ++ "\x00" ++ d.awaiter) s.deferred
-      promiseTimeouts  := sortBy (·.id) s.promiseTimeouts
-      taskTimeouts     := sortBy (fun t => t.id ++ "\x00" ++ pad t.kind) s.taskTimeouts
-      scheduleTimeouts := sortBy (·.id) s.scheduleTimeouts
       outbox           := sortBy (·.key) s.outbox }
 
 /-! ## Internal steps, as their own type
@@ -98,54 +94,80 @@ unsound.
 disappears, and every function over τs is an exhaustive match. Adding a
 constructor here breaks `affects` until someone says what it reaches. -/
 
--- `04-theorems/trace.lean` derives only `BEq` for it, and the spec is not
--- ours to edit; the instance is orphaned here instead.
-deriving instance DecidableEq for ServerModel.ResumeReq
-
 inductive Tau
   | promiseTimeout   (id : String)
-  | taskRetryTimeout (id : String)
+  | listener         (id address : String)
+  | callback         (id awaiter : String)
   | taskLeaseTimeout (id : String)
+  | taskRetryTimeout (id : String)
   | scheduleTimeout  (id : String)
-  | resume           (req : ResumeReq)
   deriving Repr, DecidableEq
 
-def Tau.toRequest : Tau → Request
-  | .promiseTimeout id   => .τPromiseTimeout id
-  | .taskRetryTimeout id => .τTaskRetryTimeout id
-  | .taskLeaseTimeout id => .τTaskLeaseTimeout id
-  | .scheduleTimeout id  => .τScheduleTimeout id
-  | .resume r            => .τResume r
+/-- Six now, not five, and the shapes changed. The concrete machine
+    drained listeners inline inside a touch and pushed callbacks onto a
+    `deferred` queue, so a schedule named a `ResumeReq` and never named
+    a listener at all. The abstract machine drains both explicitly, one
+    obligation at a time, so both are steps an observer's explanation
+    may have to include — and each names the obligation it discharges
+    rather than a queue entry. -/
+def Tau.toStep : Tau → Step
+  | .promiseTimeout id   => .r1 id
+  | .listener id addr    => .r3 id addr
+  | .callback id awaiter => .r4 id awaiter
+  | .taskLeaseTimeout id => .r5 id
+  | .taskRetryTimeout id => .r6 id
+  | .scheduleTimeout id  => .r7 id
 
 /-- A witness is meant to be read, so it prints as the step rather than
     as its constructor. -/
 def Tau.pretty : Tau → String
   | .promiseTimeout id   => s!"τ promise.timeout {id}"
-  | .taskRetryTimeout id => s!"τ task.retry {id}"
+  | .listener id addr    => s!"τ listener {id} → {addr}"
+  | .callback id awaiter => s!"τ callback {id} → {awaiter}"
   | .taskLeaseTimeout id => s!"τ task.lease {id}"
+  | .taskRetryTimeout id => s!"τ task.retry {id}"
   | .scheduleTimeout id  => s!"τ schedule.timeout {id}"
-  | .resume r            => s!"τ resume {r.awaited} → {r.awaiter}"
 
 instance : ToString Tau := ⟨Tau.pretty⟩
 
-/-- Firing a τ is firing its request. -/
+/-- Firing a τ is firing its step. Materialised (`mat := true`); the
+    abstract twins agree on responses, so the discipline is not
+    observable through the channel this checker compares. -/
 def Tau.step (t : Tau) (now : Nat) (s : ServerState) : ServerState :=
-  (Equivalence.stepOf Equivalence.handleM t.toRequest now s).2
+  (Abstraction.stepOf true t.toStep now s).2
 
 /-! ## Enabled internal steps
 
-Read straight off the obligation records. A timeout is enabled when its
-own entry is due; a resume when its pair is on the deferred queue. This
-is the specification's own guard, not a re-derivation of it. -/
+Read off the OBJECTS. The concrete machine kept a table per timer kind,
+so this was a filter over four indexes; the abstract machine carries the
+deadline on the object it belongs to, so the same question is asked of
+the promise and task lists directly.
+
+This must be an over-approximation, never an under-one. A τ the machine
+would refuse costs a candidate that dies at its own guard; a τ omitted
+here costs a WITNESS, and the checker reports REFUTED for a trace that
+conforms. Where the machine's guard is subtler than the shape — the
+lease timeout also requires the promise to be live — the extra
+conjunct is left out on purpose. -/
 
 def enabledTaus (s : ServerState) (now : Nat) : List Tau :=
-  (s.promiseTimeouts.filter (·.timeout ≤ now)).map (fun e => .promiseTimeout e.id)
-  ++ (s.taskTimeouts.filter (fun e => e.kind == 0 && e.timeout ≤ now)).map
-       (fun e => .taskRetryTimeout e.id)
-  ++ (s.taskTimeouts.filter (fun e => e.kind == 1 && e.timeout ≤ now)).map
-       (fun e => .taskLeaseTimeout e.id)
-  ++ (s.scheduleTimeouts.filter (·.timeout ≤ now)).map (fun e => .scheduleTimeout e.id)
-  ++ s.deferred.map (fun d => .resume d)
+  -- r1: a pending promise whose deadline has passed
+  (s.promises.filter (fun p => p.state == .pending && p.timeoutAt ≤ now)).map
+      (fun p => .promiseTimeout p.id)
+  -- r3/r4: obligations on a promise that READS settled, which is Fact P
+  -- and why this consults `project` rather than the stored state
+  ++ s.promises.flatMap (fun p =>
+       if (p.project now).state != .pending then p.listeners.map (Tau.listener p.id) else [])
+  ++ s.promises.flatMap (fun p =>
+       if (p.project now).state != .pending then p.callbacks.map (Tau.callback p.id) else [])
+  -- r5: an acquired task whose lease has lapsed
+  ++ (s.tasks.filter (fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
+       (fun t => .taskLeaseTimeout t.id)
+  -- r6: a pending task whose dispatch clock is due
+  ++ (s.tasks.filter (fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
+       (fun t => .taskRetryTimeout t.id)
+  -- r7: a schedule due to fire
+  ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout c.id)
 
 /-! ## Cone of influence
 
@@ -191,9 +213,6 @@ def touches : Request → List String
   | .taskHalt r                => [r.id]
   | .taskContinue r            => [r.id]
   | .taskSearch _              => []
-  -- τs are not `Request`s in a schedule; see `affects`
-  | .τPromiseTimeout _ | .τTaskRetryTimeout _ | .τTaskLeaseTimeout _
-  | .τScheduleTimeout _ | .τResume _ | .idle => []
 
 /-- What firing this τ can AFFECT, which is not the same as the object it
     names — and getting that wrong is how the reduction went unsound the
@@ -210,10 +229,11 @@ def touches : Request → List String
 def affects (s : ServerState) : Tau → List String
   | .promiseTimeout id =>
       id :: ((s.promises.filter (·.id == id)).flatMap (·.callbacks))
-  | .taskRetryTimeout id => [id]
-  | .taskLeaseTimeout id => [id]
-  | .scheduleTimeout _   => ["*"]
-  | .resume r            => [r.awaited, r.awaiter]
+  | .listener id _         => [id]
+  | .callback id awaiter   => [id, awaiter]
+  | .taskLeaseTimeout id   => [id]
+  | .taskRetryTimeout id   => [id]
+  | .scheduleTimeout _     => ["*"]
 
 /-- The τs that could bear on this request — the CONE, closed
     transitively. Start from what the request reads; repeatedly pull in
@@ -306,14 +326,16 @@ keep only what an observer outside the server could have seen. The τs
 are DISCARDED, which is the point: the validator has to rediscover a
 schedule that explains the external events. -/
 
-def record : List (Request × Nat) → ServerState → List Observation
+def record : List (Step × Nat) → ServerState → List Observation
   | [],              _ => []
-  | (rq, n) :: rest, s =>
-      let (res, s') := Equivalence.stepOf Equivalence.handleM rq n s
-      let here := if rq.isExternal then [({ req := rq, res := res, now := n } : Observation)] else []
+  | (st, n) :: rest, s =>
+      let (res, s') := Abstraction.stepOf true st n s
+      let here := match st with
+        | .api rq => [({ req := rq, res := res, now := n } : Observation)]
+        | _       => []
       here ++ record rest s'
 
-def recordFrom (script : List (Request × Nat)) : List Observation :=
+def recordFrom (script : List (Step × Nat)) : List Observation :=
   record script ServerState.init
 
 /-! ## Reporting -/

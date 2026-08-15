@@ -86,7 +86,7 @@ machine's read discipline, not a general fact about timed systems. -/
 
 namespace TraceCheck.Intervals
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
 
 /-! ## The observable part of a state -/
 
@@ -294,13 +294,13 @@ theorem retry_invisible {s : ServerState} {id : String} {n : Nat}
     reads lives in the erased part. -/
 theorem visible_response {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    (stepOf handleM req now s).1 = (stepOf handleM req now s').1 := by
+    (Abstraction.stepOf true req now s).1 = (Abstraction.stepOf true req now s').1 := by
   sorry
 
 /-- **R2b · and for successor states.** -/
 theorem visible_step {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    Visible (stepOf handleM req now s).2 = Visible (stepOf handleM req now s').2 := by
+    Visible (Abstraction.stepOf true req now s).2 = Visible (Abstraction.stepOf true req now s').2 := by
   sorry
 
 /-- **R3 · THE REDUCTION.** On a schedule-free state, firing a τ at `n`
@@ -323,7 +323,7 @@ theorem step_at_rep {s : ServerState} {t : Tau} {a b n : Nat}
     hypothesis be discharged once, at the top, instead of at every step. -/
 theorem schedules_stay_empty {s : ServerState} {req : Request} {now : Nat}
     (h : s.schedules = []) (hreq : mentionsSchedule req = false) :
-    (stepOf handleM req now s).2.schedules = [] := by
+    (Abstraction.stepOf true req now s).2.schedules = [] := by
   sorry
 
 /-! ## The two theorems -/

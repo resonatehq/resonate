@@ -85,7 +85,7 @@ responses are available and both are honest:
 
 namespace TraceCheck.Schedules
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Correctness TraceCheck.Executions
 
 /-- The occurrence a firing at `now` settles on: the last one in the
     window, which is what `processSchedule` writes into `lastRunAt`. -/

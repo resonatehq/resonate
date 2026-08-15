@@ -25,7 +25,7 @@ Two decoding notes that matter for comparison rather than parsing:
 
 namespace TraceCheck.Json
 
-open Lean ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck
+open Lean ServerModel AbstractModel Abstraction Equivalence TraceCheck
 
 abbrev D := Except String
 

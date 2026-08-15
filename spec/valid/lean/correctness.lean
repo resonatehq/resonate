@@ -82,9 +82,16 @@ side-condition. -/
 
 namespace TraceCheck.Correctness
 
-open ServerModel ConcreteModel ConcreteModel.P Equivalence TraceCheck
+open ServerModel AbstractModel Abstraction Equivalence TraceCheck
 
 /-! ## Validity — reusing the specification's own definition -/
+
+/-- Validity of a run at the materialised reading. This used to come
+    from `04-theorems/trace.lean` as `Equivalence.ValidM`, one of two
+    notions; there is one machine now, so the discipline is an argument
+    and this is a name for `Valid true`. Kept as a name because every
+    theorem in `executions.lean` and below cites it. -/
+abbrev ValidM : Trace → Prop := Abstraction.Valid true
 
 /-- The external steps of `tr` are exactly `obs`, in order.
 
@@ -99,7 +106,7 @@ def ExternalsAre (tr : Trace) (obs : List Observation) : Prop :=
     (∀ i j, i < j → φ i < φ j) ∧
     (∀ i, (h : i < obs.length) →
       (tr (φ i)).req.isExternal = true ∧
-      (tr (φ i)).req = (obs[i]'h).req ∧
+      (tr (φ i)).req = .api (obs[i]'h).req ∧
       (tr (φ i)).res = (obs[i]'h).res ∧
       (tr (φ i)).now = (obs[i]'h).now) ∧
     (∀ s, (tr s).req.isExternal = true → ∃ i, i < obs.length ∧ φ i = s)
@@ -131,7 +138,7 @@ def fireAll (σ : List Tau) (now : Nat) (s : ServerState) : ServerState :=
 /-- One observed event explained by a schedule pinned to `o.now`. -/
 def Explains (o : Observation) (s s' : ServerState) : Prop :=
   ∃ σ : List Tau,
-    stepOf handleM o.req o.now (fireAll σ o.now s) = (o.res, s')
+    Abstraction.stepOf true (.api o.req) o.now (fireAll σ o.now s) = (o.res, s')
 
 inductive Admissible : ServerState → List Observation → Prop
   | nil  {s} : Admissible s []
@@ -184,7 +191,7 @@ place the implementation could be wrong without any test noticing. -/
     reaches them by key. -/
 theorem canon_congruence {s s' : ServerState} (h : canon s = canon s')
     (req : Request) (now : Nat) :
-    (stepOf handleM req now s).1 = (stepOf handleM req now s').1 := by
+    (Abstraction.stepOf true (.api req) now s).1 = (Abstraction.stepOf true (.api req) now s').1 := by
   sorry
 
 /-- **2 · `canon` is preserved by stepping.**
@@ -194,7 +201,7 @@ theorem canon_congruence {s s' : ServerState} (h : canon s = canon s')
     only correct for one event. -/
 theorem canon_step {s s' : ServerState} (h : canon s = canon s')
     (req : Request) (now : Nat) :
-    canon (stepOf handleM req now s).2 = canon (stepOf handleM req now s').2 := by
+    canon (Abstraction.stepOf true (.api req) now s).2 = canon (Abstraction.stepOf true (.api req) now s').2 := by
   sorry
 
 /-- **3 · INDEPENDENCE — the cone's whole justification.**
@@ -215,16 +222,16 @@ theorem canon_step {s s' : ServerState} (h : canon s = canon s')
     wrong. -/
 theorem cone_independence {s : ServerState} {now : Nat} {req : Request} {t : Tau}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
-    (stepOf handleM req now (t.step now s)).1
-      = (stepOf handleM req now s).1 := by
+    (Abstraction.stepOf true (.api req) now (t.step now s)).1
+      = (Abstraction.stepOf true (.api req) now s).1 := by
   sorry
 
 /-- **3b · and the states commute**, modulo `canon`, so deferring is a
     reordering rather than a loss. -/
 theorem cone_commute {s : ServerState} {now : Nat} {req : Request} {t : Tau}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
-    canon (t.step now (stepOf handleM req now s).2)
-      = canon (stepOf handleM req now (t.step now s)).2 := by
+    canon (t.step now (Abstraction.stepOf true (.api req) now s).2)
+      = canon (Abstraction.stepOf true (.api req) now (t.step now s)).2 := by
   sorry
 
 end TraceCheck.Correctness
