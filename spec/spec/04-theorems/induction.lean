@@ -79,8 +79,45 @@ need a different argument, and the outbox five are the harder half
 because a write to `promises` can invalidate a claim about `outbox`
 without touching it. -/
 
-def PerPromise (q : PromiseObject → Bool) (s : ServerState) : Bool :=
-  s.promises.all q
+/-- The three row predicates a step has to respect, bundled. Bundling
+    rather than three parameters because every lemma below would
+    otherwise carry three, and because the handler discharge is one
+    argument about all three tables rather than three arguments about
+    one each. -/
+structure Q where
+  promise  : PromiseObject → Bool
+  task     : TaskObject → Bool
+  schedule : ServerModel.Schedule → Bool
+
+def PerStore (g : Q) (s : ServerState) : Bool :=
+  s.promises.all g.promise && s.tasks.all g.task && s.schedules.all g.schedule
+
+theorem perStore_promises {g : Q} {s : ServerState} (h : PerStore g s = true) :
+    s.promises.all g.promise = true := by
+  simp only [PerStore, Bool.and_eq_true] at h; exact h.1.1
+
+theorem perStore_tasks {g : Q} {s : ServerState} (h : PerStore g s = true) :
+    s.tasks.all g.task = true := by
+  simp only [PerStore, Bool.and_eq_true] at h; exact h.1.2
+
+theorem perStore_schedules {g : Q} {s : ServerState} (h : PerStore g s = true) :
+    s.schedules.all g.schedule = true := by
+  simp only [PerStore, Bool.and_eq_true] at h; exact h.2
+
+theorem perStore_mk {g : Q} {s : ServerState}
+    (h1 : s.promises.all g.promise = true) (h2 : s.tasks.all g.task = true)
+    (h3 : s.schedules.all g.schedule = true) : PerStore g s = true := by
+  simp [PerStore, h1, h2, h3]
+
+/-- What one effect has to satisfy. `delSchedule` and `setMessage` write
+    no row into a table this tier is about, so they are unconstrained —
+    the outbox is a different argument. -/
+def GoodEffect (g : Q) : Effect → Prop
+  | .setPromise p   => g.promise p = true
+  | .setTask t      => g.task t = true
+  | .setSchedule c  => g.schedule c = true
+  | .delSchedule _  => True
+  | .setMessage _ _ => True
 
 theorem all_filter {α} (q : α → Bool) (f : α → Bool) :
     ∀ l : List α, l.all q = true → (l.filter f).all q = true
@@ -90,203 +127,240 @@ theorem all_filter {α} (q : α → Bool) (f : α → Bool) :
       by_cases hf : f a = true <;>
         simp [hf, List.all_cons, h.1, all_filter q f l h.2]
 
-/-- One write preserves a per-promise property when the promise it
-    writes satisfies it. Writes to the other tables cannot touch it. -/
-theorem perPromise_apply (q : PromiseObject → Bool) (e : Effect) (s : ServerState)
-    (hs : PerPromise q s = true)
-    (he : ∀ p, e = .setPromise p → q p = true) :
-    PerPromise q (e.apply s) = true := by
-  cases e with
-  | setPromise p =>
-      have hq : q p = true := he p rfl
-      simp [PerPromise, Effect.apply, List.all_cons, hq,
-            all_filter q _ s.promises hs]
-  | setTask _     => simpa [PerPromise, Effect.apply] using hs
-  | setSchedule _ => simpa [PerPromise, Effect.apply] using hs
-  | delSchedule _ => simpa [PerPromise, Effect.apply] using hs
-  | setMessage _ _ => simpa [PerPromise, Effect.apply] using hs
+theorem all_upsert {α} (q : α → Bool) (x : α) (f : α → Bool) (l : List α)
+    (hl : l.all q = true) (hx : q x = true) : ((x :: l.filter f).all q) = true := by
+  simp [List.all_cons, hx, all_filter q f l hl]
 
-theorem perPromise_applyAll (q : PromiseObject → Bool) :
-    ∀ (w : List Effect) (s : ServerState), PerPromise q s = true →
-      (∀ e ∈ w, ∀ p, e = .setPromise p → q p = true) →
-      PerPromise q (applyAll s w) = true
+/-- One write preserves the store predicate when the row it writes
+    satisfies it. Writes to the other tables cannot touch the rest. -/
+theorem perStore_apply (g : Q) (f : Effect) (s : ServerState)
+    (hs : PerStore g s = true) (hf : GoodEffect g f) :
+    PerStore g (f.apply s) = true := by
+  have h1 := perStore_promises hs
+  have h2 := perStore_tasks hs
+  have h3 := perStore_schedules hs
+  cases f with
+  | setPromise p =>
+      exact perStore_mk (all_upsert _ p _ _ h1 hf) h2 h3
+  | setTask t =>
+      exact perStore_mk h1 (all_upsert _ t _ _ h2 hf) h3
+  | setSchedule c =>
+      exact perStore_mk h1 h2 (all_upsert _ c _ _ h3 hf)
+  | delSchedule i =>
+      exact perStore_mk h1 h2 (all_filter _ _ _ h3)
+  | setMessage a m =>
+      exact perStore_mk h1 h2 h3
+
+theorem perStore_applyAll (g : Q) :
+    ∀ (w : List Effect) (s : ServerState), PerStore g s = true →
+      (∀ f ∈ w, GoodEffect g f) → PerStore g (applyAll s w) = true
   | [],      _, hs, _  => hs
-  | e :: es, s, hs, hw =>
-      perPromise_applyAll q es (e.apply s)
-        (perPromise_apply q e s hs (hw e (by simp)))
-        (fun f hf => hw f (by simp [hf]))
+  | f :: fs, s, hs, hw =>
+      perStore_applyAll g fs (f.apply s)
+        (perStore_apply g f s hs (hw f (by simp)))
+        (fun k hk => hw k (by simp [hk]))
 
 /-! ## Threading the hypothesis through a read
 
-The cost centre. Almost every `setPromise` in the machine writes `f p`
-for a `p` that came out of the state a moment earlier — `readPromise`
-then `setSettled`, `getPromise` then `addCallback`, and so on. So the
-per-write obligation is never "this promise is good" outright; it is
-"this promise is good BECAUSE the one it was derived from was, and `f`
-kept it good".
+The cost centre. Almost every write in the machine writes `f x` for an
+`x` that came out of the state a moment earlier — `readPromise` then
+`setSettled`, `getTask` then `t.fulfill`, and so on. So the per-write
+obligation is never "this row is good" outright; it is "this row is
+good BECAUSE the one it was derived from was, and `f` kept it good".
 
-That splits cleanly, and the split is why this is one lemma rather than
-thirty-six. `getPromise_sound` says a promise read out of the state
-inherits the state's per-promise property — once, for all `q`. What is
-left per property is a statement about the four transformations the
-machine applies, and those are about `PromiseObject` alone: no monad,
-no state, no handler. -/
+That splits cleanly. `getPromise_sound` and `getTask_sound` say a row
+read out of the state inherits the store's predicate — once, for all
+`g`. What is left per property is a statement about the transformations
+the machine applies, and those are about one object: no monad, no
+state, no handler. -/
 
-/-- Weakening a per-promise property. Used where an entry is inductive
-    only relative to a strengthening: prove the stronger predicate, then
+/-- Weakening a row predicate. Used where an entry is inductive only
+    relative to a strengthening: prove the stronger predicate, then
     project onto the catalogue's. -/
-theorem perPromise_mono {q r : PromiseObject → Bool} (h : ∀ p, q p = true → r p = true)
-    (s : ServerState) : PerPromise q s = true → PerPromise r s = true := fun hs =>
-  List.all_eq_true.mpr (fun p hp => h p (List.all_eq_true.mp hs p hp))
+theorem all_mono {α} {q r : α → Bool} (h : ∀ x, q x = true → r x = true)
+    (l : List α) : l.all q = true → l.all r = true := fun hs =>
+  List.all_eq_true.mpr (fun x hx => h x (List.all_eq_true.mp hs x hx))
 
-theorem getPromise_sound {q : PromiseObject → Bool} {s : ServerState}
-    {id : String} {p : PromiseObject}
-    (hs : PerPromise q s = true)
-    (h : s.promises.find? (·.id == id) = some p) : q p = true :=
-  List.all_eq_true.mp hs p (List.mem_of_find?_eq_some h)
+theorem getPromise_sound {g : Q} {s : ServerState} {id : String} {p : PromiseObject}
+    (hs : PerStore g s = true)
+    (h : s.promises.find? (·.id == id) = some p) : g.promise p = true :=
+  List.all_eq_true.mp (perStore_promises hs) p (List.mem_of_find?_eq_some h)
 
-/-! ### What is left per property
+theorem getTask_sound {g : Q} {s : ServerState} {id : String} {t : TaskObject}
+    (hs : PerStore g s = true)
+    (h : s.tasks.find? (·.id == id) = some t) : g.task t = true :=
+  List.all_eq_true.mp (perStore_tasks hs) t (List.mem_of_find?_eq_some h)
 
-Nine functions produce every promise the machine ever stores, and each
-one is a statement about a `PromiseObject`: no monad, no state, no
-handler. `project` is Fact P; `addCallback` and `addListener` are the
-obligation ledgers, and the internal drains remove from them by
-rewriting the field directly, since there are no inverses; a settle
-rewrites the verdict; and two births — `createPromise`'s and the copy
-`task.create` inlines — build a promise from nothing.
-
-`Hereditary` below packages them. The instances live in
-`entries.lean`. -/
+theorem getSchedule_sound {g : Q} {s : ServerState} {id : String}
+    {c : ServerModel.Schedule} (hs : PerStore g s = true)
+    (h : s.schedules.find? (·.id == id) = some c) : g.schedule c = true :=
+  List.all_eq_true.mp (perStore_schedules hs) c (List.mem_of_find?_eq_some h)
 
 /-! ## Making the enumeration checkable
 
-The step above — "those nine are ALL the sites" — is the one claim that
-was outside Lean, and it is the one most likely to rot: a handler added
-next year writes a promise and nothing complains.
+The claim "those are ALL the write sites" is the one that was outside
+Lean, and the one most likely to rot: a handler added next year writes
+a row and nothing complains.
 
-`WritesGood` closes it. It says every promise a computation writes is
-good, and it composes, so a handler's obligation is built from its
-parts rather than asserted about its whole. The reason it composes is
-the reader discipline: `bind` hands the SAME environment to its
+`WritesGood` closes it. It says every row a computation writes is good,
+and it composes, so a handler's obligation is built from its parts
+rather than asserted about its whole. The reason it composes is the
+reader discipline: `bind` hands the SAME environment to its
 continuation, so `s` does not move under the binder and the predicate
 is about one fixed state throughout. In a state monad this would not
 factor — the continuation would run against a state the first half had
 already changed, and there would be nothing to induct on. -/
 
-/-- Every promise this computation writes is good. Indexed by the whole
-    environment rather than by `(state, mat)`, because `withMat` moves
-    `mat` and the internal steps use it. -/
-def WritesGood (q : PromiseObject → Bool) (e : Env) {α : Type} (act : H α) : Prop :=
-  ∀ f ∈ (act e).2, ∀ p, f = .setPromise p → q p = true
+def WritesGood (g : Q) (e : Env) {α : Type} (act : H α) : Prop :=
+  ∀ f ∈ (act e).2, GoodEffect g f
 
-/-- And the companion: the promise it hands BACK is good. Needed
-    because handlers write promises they have just read — the obligation
-    is never about writes alone. -/
-def ReturnsGood (q : PromiseObject → Bool) (e : Env)
-    (act : H (Option PromiseObject)) : Prop :=
-  ∀ p, (act e).1 = some p → q p = true
+/-- The companion: the promise it hands BACK is good. Needed because
+    handlers write rows they have just read. -/
+def ReturnsGood (g : Q) (e : Env) (act : H (Option PromiseObject)) : Prop :=
+  ∀ p, (act e).1 = some p → g.promise p = true
 
-theorem writesGood_pure {α} (q : PromiseObject → Bool) (e : Env) (a : α) :
-    WritesGood q e (pure a) := by
+theorem writesGood_pure {α} (g : Q) (e : Env) (a : α) : WritesGood g e (pure a) := by
   intro f hf; simp [pure] at hf
 
-theorem writesGood_bind {α β} (q : PromiseObject → Bool) (e : Env)
-    (x : H α) (f : α → H β)
-    (hx : WritesGood q e x) (hf : ∀ a, WritesGood q e (f a)) :
-    WritesGood q e (x >>= f) := by
-  intro g hg p hp
-  simp only [bind, List.mem_append] at hg
-  cases hg with
-  | inl h => exact hx g h p hp
-  | inr h => exact hf _ g h p hp
+theorem writesGood_setPromise (g : Q) (e : Env) (p : PromiseObject)
+    (h : g.promise p = true) : WritesGood g e (setPromise p) := by
+  intro f hf; simp [setPromise, emit] at hf; subst hf; exact h
 
-theorem writesGood_map {α β} (q : PromiseObject → Bool) (e : Env)
-    (g : α → β) (x : H α) (hx : WritesGood q e x) : WritesGood q e (g <$> x) :=
-  writesGood_bind q e x _ hx (fun a => writesGood_pure q e (g a))
+theorem writesGood_setTask (g : Q) (e : Env) (t : TaskObject)
+    (h : g.task t = true) : WritesGood g e (setTask t) := by
+  intro f hf; simp [setTask, emit] at hf; subst hf; exact h
 
-theorem writesGood_setPromise (q : PromiseObject → Bool) (e : Env)
-    (p : PromiseObject) (h : q p = true) : WritesGood q e (setPromise p) := by
-  intro f hf p' hp'
-  simp [setPromise, emit] at hf
-  subst hf; cases hp'; exact h
+theorem writesGood_setSchedule (g : Q) (e : Env) (c : ServerModel.Schedule)
+    (h : g.schedule c = true) : WritesGood g e (setSchedule c) := by
+  intro f hf; simp [setSchedule, emit] at hf; subst hf; exact h
 
-theorem writesGood_setTask (q : PromiseObject → Bool) (e : Env) (t : TaskObject) :
-    WritesGood q e (setTask t) := by
-  intro f hf p hp; simp [setTask, emit] at hf; subst hf; cases hp
+theorem writesGood_setMessage (g : Q) (e : Env) (a : String) (m : ServerModel.Message) :
+    WritesGood g e (setMessage a m) := by
+  intro f hf; simp [setMessage, emit] at hf; subst hf; trivial
 
-theorem writesGood_setMessage (q : PromiseObject → Bool) (e : Env)
-    (a : String) (m : ServerModel.Message) : WritesGood q e (setMessage a m) := by
-  intro f hf p hp; simp [setMessage, emit] at hf; subst hf; cases hp
+theorem writesGood_delSchedule (g : Q) (e : Env) (id : String) :
+    WritesGood g e (delSchedule id) := by
+  intro f hf; simp [delSchedule, emit] at hf; subst hf; trivial
 
-theorem writesGood_setSchedule (q : PromiseObject → Bool) (e : Env)
-    (c : ServerModel.Schedule) : WritesGood q e (setSchedule c) := by
-  intro f hf p hp; simp [setSchedule, emit] at hf; subst hf; cases hp
-
-theorem writesGood_delSchedule (q : PromiseObject → Bool) (e : Env) (id : String) :
-    WritesGood q e (delSchedule id) := by
-  intro f hf p hp; simp [delSchedule, emit] at hf; subst hf; cases hp
-
-theorem writesGood_ask (q : PromiseObject → Bool) (e : Env) : WritesGood q e ask := by
+theorem writesGood_ask (g : Q) (e : Env) : WritesGood g e ask := by
   intro f hf; simp [ask] at hf
 
-theorem writesGood_getPromise (q : PromiseObject → Bool) (e : Env) (id : String) :
-    WritesGood q e (getPromise id) := by
+theorem writesGood_getPromise (g : Q) (e : Env) (id : String) :
+    WritesGood g e (getPromise id) := by
   intro f hf; simp [getPromise, bind, ask, pure] at hf
 
-theorem writesGood_getTask (q : PromiseObject → Bool) (e : Env) (id : String) :
-    WritesGood q e (getTask id) := by
+theorem writesGood_getTask (g : Q) (e : Env) (id : String) :
+    WritesGood g e (getTask id) := by
   intro f hf; simp [getTask, bind, ask, pure] at hf
 
-theorem writesGood_getSchedule (q : PromiseObject → Bool) (e : Env) (id : String) :
-    WritesGood q e (getSchedule id) := by
+theorem writesGood_getSchedule (g : Q) (e : Env) (id : String) :
+    WritesGood g e (getSchedule id) := by
   intro f hf; simp [getSchedule, bind, ask, pure] at hf
 
 /-- `withMat` changes which environment the body sees, and nothing else.
     The one place the reader indexing earns its keep. -/
-theorem writesGood_withMat {α} (q : PromiseObject → Bool) (e : Env) (b : Bool)
-    (act : H α) (h : WritesGood q { e with mat := b } act) :
-    WritesGood q e (withMat b act) := h
-
-theorem returnsGood_withMat (q : PromiseObject → Bool) (e : Env) (b : Bool)
-    (act : H (Option PromiseObject)) (h : ReturnsGood q { e with mat := b } act) :
-    ReturnsGood q e (withMat b act) := h
+theorem writesGood_withMat {α} (g : Q) (e : Env) (b : Bool)
+    (act : H α) (h : WritesGood g { e with mat := b } act) :
+    WritesGood g e (withMat b act) := h
 
 /-! ## The obligation set
 
 `WritesGood` reduces "is this property inductive?" to "what does each
-handler write?", and the answer is always: a promise built by one of
-nine functions from a promise that was already in the state, or one of
-two births built from nothing. `Hereditary` names exactly those eleven
-obligations.
+handler write?", and the answer is always: a row built by one of a
+fixed list of functions from a row that was already in the store, or
+one of the births built from nothing. `Hereditary` names exactly those.
 
 The payoff is that the 28-handler argument is made ONCE, generically in
-`q`. A new property costs its eleven `PromiseObject` lemmas — no monad,
-no handlers, no states — and a property that fails to be inductive
-fails at a named transformation rather than in the middle of a case
-split. -/
+`g`. A new property costs its obligations — no monad, no handlers, no
+states — and a property that fails to be inductive fails at a NAMED
+obligation rather than in the middle of a case split.
 
-structure Hereditary (q : PromiseObject → Bool) : Prop where
-  project      : ∀ (p : PromiseObject) (n : Nat), q p = true → q (p.project n) = true
-  addCallback  : ∀ (p : PromiseObject) (a : String), q p = true → q (p.addCallback a) = true
-  addListener  : ∀ (p : PromiseObject) (a : String), q p = true → q (p.addListener a) = true
+Several obligations carry a guard. Those are not conveniences: they are
+the prechecks the handler performs, and they are what makes a precheck
+a state invariant. `tRearm` may only re-arm a PENDING task; delete the
+`t.state == .pending` check in the retry step and this is the
+obligation that fails. -/
+
+structure Hereditary (g : Q) : Prop where
+  -- promises
+  project      : ∀ (p : PromiseObject) (n : Nat),
+                   g.promise p = true → g.promise (p.project n) = true
+  addCallback  : ∀ (p : PromiseObject) (a : String),
+                   g.promise p = true → g.promise (p.addCallback a) = true
+  addListener  : ∀ (p : PromiseObject) (a : String),
+                   g.promise p = true → g.promise (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat),
-                   st.settable = true → t < p.timeoutAt → q p = true →
-                   q { p with state := st, value := v, settledAt := some t } = true
-  dropListener : ∀ (p : PromiseObject) (a : String), q p = true →
-                   q { p with listeners := p.listeners.filter (· != a) } = true
-  dropCallback : ∀ (p : PromiseObject) (a : String), q p = true →
-                   q { p with callbacks := p.callbacks.filter (· != a) } = true
+                   st.settable = true → t < p.timeoutAt → g.promise p = true →
+                   g.promise { p with state := st, value := v, settledAt := some t } = true
+  dropListener : ∀ (p : PromiseObject) (a : String), g.promise p = true →
+                   g.promise { p with listeners := p.listeners.filter (· != a) } = true
+  dropCallback : ∀ (p : PromiseObject) (a : String), g.promise p = true →
+                   g.promise { p with callbacks := p.callbacks.filter (· != a) } = true
   live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
-                   q { id := id, state := .pending, param := param, tags := tags,
-                       timeoutAt := timeoutAt, createdAt := createdAt } = true
+                   g.promise { id := id, state := .pending, param := param, tags := tags,
+                               timeoutAt := timeoutAt, createdAt := createdAt } = true
   dead         : ∀ (id : String) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
-                   q { id := id, state := st, param := param, tags := tags,
-                       timeoutAt := timeoutAt, createdAt := timeoutAt,
-                       settledAt := some timeoutAt } = true
+                   g.promise { id := id, state := st, param := param, tags := tags,
+                               timeoutAt := timeoutAt, createdAt := timeoutAt,
+                               settledAt := some timeoutAt } = true
+  -- tasks
+  tFulfill     : ∀ (t : TaskObject), g.task t = true → g.task t.fulfill = true
+  tBornPending : ∀ (id : String) (due : Nat),
+                   g.task { id := id, state := .pending, version := 0,
+                            retryAt := some due } = true
+  tBornDone    : ∀ (id : String), g.task { id := id, state := .fulfilled, version := 0 } = true
+  tBornHeld    : ∀ (id pid : String) (ttl now : Nat),
+                   g.task { id := id, state := .acquired, version := 1, ttl := some ttl,
+                            pid := some pid, expiresAt := some (now + ttl) } = true
+  tAcquire     : ∀ (t : TaskObject) (pid : String) (ttl now : Nat), g.task t = true →
+                   g.task { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl), retryAt := none, resumes := [] } = true
+  tHeartbeat   : ∀ (t : TaskObject) (x : Nat), (t.state == .acquired) = true →
+                   g.task t = true → g.task { t with expiresAt := some x } = true
+  tClearResumes : ∀ (t : TaskObject), g.task t = true →
+                   g.task { t with resumes := [] } = true
+  tSuspend     : ∀ (t : TaskObject), g.task t = true →
+                   g.task { t with state := .suspended, pid := none, ttl := none, expiresAt := none, retryAt := none, resumes := [] } = true
+  tRepend      : ∀ (t : TaskObject) (n : Nat), g.task t = true →
+                   g.task { t with state := .pending, pid := none, ttl := none, expiresAt := none, retryAt := some n } = true
+  tHalt        : ∀ (t : TaskObject), g.task t = true →
+                   g.task { t with state := .halted, pid := none, ttl := none, expiresAt := none, retryAt := none } = true
+  tContinue    : ∀ (t : TaskObject) (n : Nat), (t.state == .halted) = true →
+                   g.task t = true →
+                   g.task { t with state := .pending, retryAt := some n } = true
+  tResume      : ∀ (t : TaskObject) (a : String) (n : Nat), t.state = .suspended →
+                   g.task t = true →
+                   g.task { t with state := .pending, resumes := [a], retryAt := some n } = true
+  tAddResume   : ∀ (t : TaskObject) (a : String), t.state ≠ .suspended →
+                   t.state ≠ .fulfilled → (t.resumes.contains a) = false → g.task t = true →
+                   g.task { t with resumes := t.resumes ++ [a] } = true
+  tRearm       : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true →
+                   g.task t = true → g.task { t with retryAt := some n } = true
+  -- schedules
+  cBorn        : ∀ (id cron promiseId : String) (promiseTimeout : Nat)
+                   (promiseParam : ServerModel.Value) (promiseTags : ServerModel.Tags)
+                   (now : Nat), promiseTags.timerTargeted = false →
+                   g.schedule { id := id, cron := cron, promiseId := promiseId,
+                                promiseTimeout := promiseTimeout,
+                                promiseParam := promiseParam, promiseTags := promiseTags,
+                                createdAt := now,
+                                nextRunAt := ServerModel.nextCron cron now,
+                                lastRunAt := none } = true
+  cAdvance     : ∀ (c : ServerModel.Schedule) (last : Nat), g.schedule c = true →
+                   g.schedule { c with lastRunAt := some last, nextRunAt := ServerModel.nextCron c.cron last } = true
+
+/-- `TaskObject.view` is `fulfill` behind a test, so it is derived
+    rather than assumed. -/
+theorem Hereditary.tView {g : Q} (h : Hereditary g) (t : TaskObject) (p : PromiseObject) :
+    g.task t = true → g.task (t.view p) = true := by
+  intro ht
+  unfold TaskObject.view
+  split
+  · exact h.tFulfill t ht
+  · exact ht
 
 /-! ## Reducing a transition
 
@@ -305,49 +379,49 @@ theorem bind_snd {α β} (x : H α) (f : α → H β) (e : Env) :
     ((x >>= f) e).2 = (x e).2 ++ (f (x e).1 e).2 := by
   simp only [bind]
 
-/-- The bind rule that keeps the connection to the state. `writesGood_bind`
-    asks for the continuation at EVERY value; this asks for it only at the
-    value the first half actually produced — which is the one that came out
-    of `e.state`, and therefore the one `getPromise_sound` says something
-    about. Without this the read hypothesis is lost at the first `←`. -/
-theorem writesGood_bind' {α β} (q : PromiseObject → Bool) (e : Env)
-    (x : H α) (f : α → H β)
-    (hx : WritesGood q e x) (hf : WritesGood q e (f (x e).1)) :
-    WritesGood q e (x >>= f) := by
-  intro g hg p hp
-  rw [bind_snd, List.mem_append] at hg
-  cases hg with
-  | inl h => exact hx g h p hp
-  | inr h => exact hf g h p hp
+/-- The bind rule that keeps the connection to the state: it asks for
+    the continuation only at the value the first half actually produced
+    — which is the one that came out of `e.state`, and therefore the one
+    `getPromise_sound` says something about. Without this the read
+    hypothesis is lost at the first `←`. -/
+theorem writesGood_bind' {α β} (g : Q) (e : Env) (x : H α) (f : α → H β)
+    (hx : WritesGood g e x) (hf : WritesGood g e (f (x e).1)) :
+    WritesGood g e (x >>= f) := by
+  intro k hk
+  rw [bind_snd, List.mem_append] at hk
+  cases hk with
+  | inl h => exact hx k h
+  | inr h => exact hf k h
 
 /-- `if guard then return e` leaves a join point behind: the rest of the
     handler becomes `pure () >>= jp`. This steps over it. -/
-theorem writesGood_pureBind {α β} (q : PromiseObject → Bool) (e : Env)
-    (a : α) (f : α → H β) (h : WritesGood q e (f a)) :
-    WritesGood q e (pure a >>= f) := by
-  intro g hg p hp
-  rw [bind_snd] at hg
-  simp only [pure_snd, pure_fst, List.nil_append] at hg
-  exact h g hg p hp
+theorem writesGood_pureBind {α β} (g : Q) (e : Env) (a : α) (f : α → H β)
+    (h : WritesGood g e (f a)) : WritesGood g e (pure a >>= f) := by
+  intro k hk
+  rw [bind_snd] at hk
+  simp only [pure_snd, pure_fst, List.nil_append] at hk
+  exact h k hk
+
+theorem writesGood_map {α β} (g : Q) (e : Env) (k : α → β) (x : H α)
+    (hx : WritesGood g e x) : WritesGood g e (k <$> x) :=
+  writesGood_bind' g e x _ hx (writesGood_pure g e _)
 
 /-- Targeted `if`. `split` picks whatever match it finds first, which
     inside a handler is usually the innermost one; this addresses the
     head. -/
-theorem writesGood_ite {α} (q : PromiseObject → Bool) (e : Env)
-    (c : Prop) [Decidable c] (x y : H α)
-    (hx : WritesGood q e x) (hy : WritesGood q e y) :
-    WritesGood q e (if c then x else y) := by
+theorem writesGood_ite {α} (g : Q) (e : Env) (c : Prop) [Decidable c] (x y : H α)
+    (hx : WritesGood g e x) (hy : WritesGood g e y) :
+    WritesGood g e (if c then x else y) := by
   by_cases h : c
   · simpa only [if_pos h] using hx
   · simpa only [if_neg h] using hy
 
-/-- The same, keeping the branch condition. Needed only where a branch
-    is good BECAUSE of the test — the two births, where `now <
-    timeoutAt` is what `Hereditary.live` asks for. -/
-theorem writesGood_iteH {α} (q : PromiseObject → Bool) (e : Env)
-    (c : Prop) [Decidable c] (x y : H α)
-    (hx : c → WritesGood q e x) (hy : ¬c → WritesGood q e y) :
-    WritesGood q e (if c then x else y) := by
+/-- The same, keeping the branch condition. Needed wherever a branch is
+    good BECAUSE of the test — which is every place a precheck becomes
+    an invariant. -/
+theorem writesGood_iteH {α} (g : Q) (e : Env) (c : Prop) [Decidable c] (x y : H α)
+    (hx : c → WritesGood g e x) (hy : ¬c → WritesGood g e y) :
+    WritesGood g e (if c then x else y) := by
   by_cases h : c
   · simpa only [if_pos h] using hx h
   · simpa only [if_neg h] using hy h
@@ -358,30 +432,34 @@ theorem getPromise_fst (id : String) (e : Env) :
 theorem getTask_fst (id : String) (e : Env) :
     (getTask id e).1 = e.state.tasks.find? (·.id == id) := rfl
 
+theorem getSchedule_fst (id : String) (e : Env) :
+    (getSchedule id e).1 = e.state.schedules.find? (·.id == id) := rfl
+
 theorem ask_fst (e : Env) : (ask e).1 = e := rfl
 
 /-! ## The derived reads and writes
 
 Each of these is used by many handlers, so each is proved once. The
 shape is always the same: split on what came out of the state, and in
-the `some` branch pull `q` across with `getPromise_sound` and one
-`Hereditary` field. -/
+the `some` branch pull the predicate across with `getPromise_sound` /
+`getTask_sound` and one `Hereditary` field. -/
 
 section Derived
 
-variable {q : PromiseObject → Bool}
+variable {g : Q}
 
-theorem writesGood_setSettled (e : Env) (p : PromiseObject) (h : q p = true) :
-    WritesGood q e (setSettled p) := by
+theorem writesGood_setSettled (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (p : PromiseObject) (h : g.promise p = true) :
+    WritesGood g e (setSettled p) := by
   unfold setSettled
   refine writesGood_bind' _ _ _ _ (writesGood_setPromise _ _ _ h) ?_
+  refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
+  refine writesGood_bind' _ _ _ _ (writesGood_getTask _ _ _) ?_
+  rw [getTask_fst]
   split
-  · refine writesGood_bind' _ _ _ _ (writesGood_getTask _ _ _) ?_
-    split
-    · split
-      · exact writesGood_setTask _ _ _
-      · exact writesGood_pure _ _ _
-    · exact writesGood_pure _ _ _
+  · rename_i t ht
+    refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
+    exact writesGood_setTask _ _ _ (hq.tFulfill t (getTask_sound hs ht))
   · exact writesGood_pure _ _ _
 
 /-- What `readPromise` hands back: the stored promise, projected. Fact P
@@ -395,25 +473,25 @@ theorem readPromise_fst (id : String) (now : Nat) (e : Env) :
   | none => rfl
   | some p => rw [bind_fst]; split <;> rw [bind_fst] <;> rfl
 
-theorem writesGood_readPromise (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat) :
-    WritesGood q e (readPromise id now) := by
+theorem writesGood_readPromise (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    WritesGood g e (readPromise id now) := by
   unfold readPromise
   refine writesGood_bind' _ _ _ _ (writesGood_getPromise _ _ _) ?_
   rw [getPromise_fst]
   split
   · exact writesGood_pure _ _ _
   · rename_i p₀ h
-    have hp₀ : q p₀ = true := getPromise_sound hs h
+    have hp₀ : g.promise p₀ = true := getPromise_sound hs h
     refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
     split
     · exact writesGood_bind' _ _ _ _
-        (writesGood_setSettled _ _ (hq.project p₀ now hp₀)) (writesGood_pure _ _ _)
+        (writesGood_setSettled hq hs _ (hq.project p₀ now hp₀)) (writesGood_pure _ _ _)
     · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
-theorem returnsGood_readPromise (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat) :
-    ReturnsGood q e (readPromise id now) := by
+theorem returnsGood_readPromise (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    ReturnsGood g e (readPromise id now) := by
   intro p hp
   rw [readPromise_fst] at hp
   cases h : e.state.promises.find? (fun x => x.id == id) with
@@ -445,17 +523,17 @@ theorem readPromise_notDue (id : String) (now : Nat) (e : Env) (p : PromiseObjec
       obtain rfl := Option.some.inj h
       exact Lookup.project_pending_not_due hst
 
-/-- The combinator the handlers are actually written against: after a
-    read, either there was nothing, or there was a promise AND it is
-    good. This is where the reader discipline pays — `writesGood_bind'`
-    keeps the continuation pinned to the value the read produced, so the
-    `q p` fact survives the `←`. -/
-theorem writesGood_afterReadPromise {α} (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat)
+/-- The combinator the handlers are written against: after a read,
+    either there was nothing, or there was a promise AND it is good AND
+    it is not yet due. This is where the reader discipline pays —
+    `writesGood_bind'` keeps the continuation pinned to the value the
+    read produced, so both facts survive the `←`. -/
+theorem writesGood_afterReadPromise {α} (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
-    (hnone : WritesGood q e (f none))
-    (hsome : ∀ p, q p = true → NotDue now p → WritesGood q e (f (some p))) :
-    WritesGood q e (readPromise id now >>= f) := by
+    (hnone : WritesGood g e (f none))
+    (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
+    WritesGood g e (readPromise id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs id now) ?_
   cases h : (readPromise id now e).1 with
   | none => exact hnone
@@ -465,100 +543,125 @@ theorem writesGood_afterReadPromise {α} (hq : Hereditary q) {e : Env}
 
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchPromise` is `withMat true`, `viewPromise` is `withMat false`. -/
-theorem writesGood_afterMatReadPromise {α} (hq : Hereditary q) {e : Env} (b : Bool)
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat)
+theorem writesGood_afterMatReadPromise {α} (hq : Hereditary g) {e : Env} (b : Bool)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option PromiseObject → H α)
-    (hnone : WritesGood q e (f none))
-    (hsome : ∀ p, q p = true → NotDue now p → WritesGood q e (f (some p))) :
-    WritesGood q e (withMat b (readPromise id now) >>= f) := by
+    (hnone : WritesGood g e (f none))
+    (hsome : ∀ p, g.promise p = true → NotDue now p → WritesGood g e (f (some p))) :
+    WritesGood g e (withMat b (readPromise id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readPromise (e := { e with mat := b }) hq hs id now) ?_
-  show WritesGood q e (f ((readPromise id now { e with mat := b }).1))
+  show WritesGood g e (f ((readPromise id now { e with mat := b }).1))
   cases h : (readPromise id now { e with mat := b }).1 with
   | none => exact hnone
   | some p =>
-      exact hsome p (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
+      exact hsome p
+        (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
         (readPromise_notDue id now { e with mat := b } p h)
 
-theorem writesGood_readTask (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat) :
-    WritesGood q e (readTask id now) := by
+theorem writesGood_readTask (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    WritesGood g e (readTask id now) := by
   unfold readTask
   refine writesGood_bind' _ _ _ _ (writesGood_getTask _ _ _) ?_
   rw [getTask_fst]
   split
   · exact writesGood_pure _ _ _
-  · refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs _ _) ?_
+  · rename_i t ht
+    refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs _ _) ?_
     split
     · exact writesGood_pure _ _ _
-    · refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
-      split
-      · exact writesGood_bind' _ _ _ _ (writesGood_setTask _ _ _) (writesGood_pure _ _ _)
+    · rename_i p _
+      refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
+      refine writesGood_ite _ _ _ _ _ ?_ ?_
+      · exact writesGood_bind' _ _ _ _
+          (writesGood_setTask _ _ _ (hq.tView t p (getTask_sound hs ht)))
+          (writesGood_pure _ _ _)
       · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
-/-- The promise `readTask` hands back is one `readPromise` handed back,
-    so it inherits `ReturnsGood` rather than needing its own argument. -/
-theorem readTask_promise (id : String) (now : Nat) (e : Env)
-    (t : TaskObject) (p : PromiseObject) :
-    (readTask id now e).1 = some (t, some p) →
-    ∃ i, (readPromise i now e).1 = some p := by
+/-- What `readTask` hands back, in the two forms the handlers use. The
+    task is `t.view p` for a `t` that was in the store; the promise is
+    one `readPromise` handed back. Both inherit their facts rather than
+    needing their own argument. -/
+theorem readTask_good (hq : Hereditary g) {e : Env} (hs : PerStore g e.state = true)
+    (id : String) (now : Nat) (t : TaskObject) (po : Option PromiseObject)
+    (h : (readTask id now e).1 = some (t, po)) :
+    g.task t = true ∧ ∀ p, po = some p → g.promise p = true ∧ NotDue now p := by
+  revert h
   unfold readTask
   rw [bind_fst, getTask_fst]
-  cases h : e.state.tasks.find? (·.id == id) with
+  cases ht : e.state.tasks.find? (·.id == id) with
   | none => intro hh; simp [pure] at hh
   | some t₀ =>
+      have hgt₀ : g.task t₀ = true := getTask_sound hs ht
       rw [bind_fst]
       cases hr : (readPromise t₀.id now e).1 with
-      | none => intro hh; simp [pure] at hh
+      | none =>
+          intro hh
+          simp only [pure_fst, Option.some.injEq, Prod.mk.injEq] at hh
+          obtain ⟨rfl, rfl⟩ := hh
+          exact ⟨hgt₀, fun p hp => by simp at hp⟩
       | some p₀ =>
-          refine fun hh => ⟨t₀.id, ?_⟩
-          rw [hr]
-          revert hh
+          have hgp₀ : g.promise p₀ = true := returnsGood_readPromise hq hs t₀.id now p₀ hr
+          have hnd : NotDue now p₀ := readPromise_notDue t₀.id now e p₀ hr
           rw [bind_fst]
-          split <;> · rw [bind_fst]; intro hh; simp [pure] at hh; rw [hh.2]
+          intro hh
+          revert hh
+          split <;>
+          · rw [bind_fst]
+            intro hh
+            simp only [pure_fst, Option.some.injEq, Prod.mk.injEq] at hh
+            obtain ⟨rfl, rfl⟩ := hh
+            refine ⟨hq.tView t₀ p₀ hgt₀, fun p hp => ?_⟩
+            simp only [Option.some.injEq] at hp
+            subst hp
+            exact ⟨hgp₀, hnd⟩
 
-theorem writesGood_afterReadTask {α} (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat)
+theorem writesGood_afterReadTask {α} (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option (TaskObject × Option PromiseObject) → H α)
-    (hnone : WritesGood q e (f none))
-    (hbare : ∀ t, WritesGood q e (f (some (t, none))))
-    (hsome : ∀ t p, q p = true → NotDue now p → WritesGood q e (f (some (t, some p)))) :
-    WritesGood q e (readTask id now >>= f) := by
+    (hnone : WritesGood g e (f none))
+    (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
+    (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
+               WritesGood g e (f (some (t, some p)))) :
+    WritesGood g e (readTask id now >>= f) := by
   refine writesGood_bind' _ _ _ _ (writesGood_readTask hq hs id now) ?_
   cases h : (readTask id now e).1 with
   | none => exact hnone
   | some tp =>
       obtain ⟨t, po⟩ := tp
+      obtain ⟨hgt, hgp⟩ := readTask_good hq hs id now t po h
       cases po with
-      | none => exact hbare t
+      | none => exact hbare t hgt
       | some p =>
-          obtain ⟨i, hi⟩ := readTask_promise id now e t p h
-          exact hsome t p (returnsGood_readPromise hq hs i now p hi)
-            (readPromise_notDue i now e p hi)
+          obtain ⟨h1, h2⟩ := hgp p rfl
+          exact hsome t p hgt h1 h2
 
-theorem writesGood_afterTouchTask {α} (hq : Hereditary q) {e : Env}
-    (hs : PerPromise q e.state = true) (id : String) (now : Nat)
+theorem writesGood_afterTouchTask {α} (hq : Hereditary g) {e : Env}
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
     (f : Option (TaskObject × Option PromiseObject) → H α)
-    (hnone : WritesGood q e (f none))
-    (hbare : ∀ t, WritesGood q e (f (some (t, none))))
-    (hsome : ∀ t p, q p = true → NotDue now p → WritesGood q e (f (some (t, some p)))) :
-    WritesGood q e (withMat true (readTask id now) >>= f) := by
+    (hnone : WritesGood g e (f none))
+    (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
+    (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
+               WritesGood g e (f (some (t, some p)))) :
+    WritesGood g e (withMat true (readTask id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
     (writesGood_readTask (e := { e with mat := true }) hq hs id now) ?_
-  show WritesGood q e (f ((readTask id now { e with mat := true }).1))
+  show WritesGood g e (f ((readTask id now { e with mat := true }).1))
   cases h : (readTask id now { e with mat := true }).1 with
   | none => exact hnone
   | some tp =>
       obtain ⟨t, po⟩ := tp
+      obtain ⟨hgt, hgp⟩ :=
+        readTask_good (e := { e with mat := true }) hq hs id now t po h
       cases po with
-      | none => exact hbare t
+      | none => exact hbare t hgt
       | some p =>
-          obtain ⟨i, hi⟩ := readTask_promise id now { e with mat := true } t p h
-          exact hsome t p
-            (returnsGood_readPromise (e := { e with mat := true }) hq hs i now p hi)
-            (readPromise_notDue i now { e with mat := true } p hi)
+          obtain ⟨h1, h2⟩ := hgp p rfl
+          exact hsome t p hgt h1 h2
 
 end Derived
+
 
 /-! ## The goal
 
