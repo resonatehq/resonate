@@ -87,22 +87,12 @@ structure TaskObject where
   resumes   : List String   := []
   deriving Repr
 
-/-- `ttl` is reported only while the task is ACQUIRED. It is stored
-    across release — it is configuration, and `processRetryTimeout`
-    reads it as the redispatch interval — but a task holding no lease
-    has no lease duration to report, and a real server does not report
-    one. That is not a guess: `valid/lean/real.lean` is a transcribed
-    production trace, and it shows `ttl := none` on a task that was
-    acquired with `ttl := 60000`, suspended, and resumed. Reporting the
-    remembered value there made the checker refuse a conforming run. -/
 def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
   { id := t.id, state := t.state, version := t.version,
-    resumes := t.resumes.length,
-    ttl := if t.state == .acquired then t.ttl else none,
-    pid := t.pid }
+    resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
 
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
-  { t with state := .fulfilled, pid := none,
+  { t with state := .fulfilled, pid := none, ttl := none,
            expiresAt := none, retryAt := none, resumes := [] }
 
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
@@ -138,9 +128,26 @@ def applyAll (s : ServerState) : List Effect → ServerState
   | []      => s
   | e :: es => applyAll (e.apply s) es
 
+/-- Server configuration. NOT state: no step writes it, no response
+    projects it, no trace records it. It is the operator's dial, and the
+    machine only reads it — which is what puts it in the reader
+    environment rather than in `ServerState`.
+
+    `retryTimeout` is the redispatch cadence: how long the server waits
+    before re-offering a task nobody has claimed. It belongs to the
+    SERVER. `TaskObject.ttl` is a different quantity belonging to the
+    WORKER — how long a holder asked to keep its lease — and using one
+    as the other means a task whose worker died is re-offered on a
+    schedule set by the worker that died. It is also absent exactly
+    where retry matters most, on a task nobody has acquired yet. -/
+structure ServerConfig where
+  retryTimeout : Nat := 5000
+  deriving Repr
+
 structure Env where
-  state : ServerState
-  mat   : Bool
+  state  : ServerState
+  mat    : Bool
+  config : ServerConfig := {}
 
 def H (α : Type) : Type := Env → α × List Effect
 
@@ -155,9 +162,13 @@ def ask : H Env := fun e => (e, [])
 
 def emit (f : Effect) : H Unit := fun _ => ((), [f])
 
-def run (mat : Bool) (act : H α) (s : ServerState) : α × ServerState :=
-  let (a, w) := act { state := s, mat := mat }
+def runWith (mat : Bool) (config : ServerConfig) (act : H α) (s : ServerState) :
+    α × ServerState :=
+  let (a, w) := act { state := s, mat := mat, config := config }
   (a, applyAll s w)
+
+def run (mat : Bool) (act : H α) (s : ServerState) : α × ServerState :=
+  runWith mat {} act s
 
 def getPromise (id : String) : H (Option PromiseObject) :=
   return (← ask).state.promises.find? (·.id == id)

@@ -279,14 +279,9 @@ def well_formed_task_acquired_iff_has_pid (_now : Nat) (s : ServerState) : Bool 
   s.tasks.all fun t =>
     (t.state == .acquired) == t.pid.isSome
 
-/-- An acquired task has a lease duration. NOT an iff: `ttl` is task
-    CONFIGURATION, not lease state, so it survives release and parking
-    — `pid` and `expiresAt` are what a lease owns and what gets
-    cleared. A pending task may carry the `ttl` of its last holder, and
-    `processRetryTimeout` redispatches at that interval. -/
-def well_formed_task_acquired_has_ttl (_now : Nat) (s : ServerState) : Bool :=
+def well_formed_task_acquired_iff_has_ttl (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
-    t.state != .acquired || t.ttl.isSome
+    (t.state == .acquired) == t.ttl.isSome
 
 def well_formed_task_acquired_iff_has_expires_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
@@ -299,18 +294,18 @@ def well_formed_task_pending_iff_has_retry_at (_now : Nat) (s : ServerState) : B
 def well_formed_task_fulfilled_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .fulfilled
-      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
           && t.resumes.isEmpty)
 
 def well_formed_task_suspended_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .suspended
-      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
 def well_formed_task_halted_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .halted
-      || (t.pid.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
 
 def well_formed_task_suspended_has_no_resumes (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
@@ -509,7 +504,7 @@ def preserved_fulfilled_task (_now : Nat) (a b : ServerState) : Bool :=
        | none => false
        | some u =>
            u.state == .fulfilled && u.version == t.version && u.resumes.isEmpty
-             && u.pid.isNone && u.expiresAt.isNone && u.retryAt.isNone)
+             && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.retryAt.isNone)
 
 /-- `NoDeadDispatch`, state half: no step puts a task into `pending`
     when its promise's deadline has already passed. A task already
@@ -860,7 +855,7 @@ def consistent_task_lease_released_atomically (_now : Nat) (a b : ServerState) :
     | none => true
     | some u =>
         !(t.state == .acquired && u.state != .acquired)
-        || (u.pid.isNone && u.expiresAt.isNone && u.version == t.version)
+        || (u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.version == t.version)
 
 def preserved_task_lease_holder_stable (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -875,13 +870,13 @@ def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) 
     match b.tasks.find? (·.id == t.id) with
     | none => true
     | some u =>
-        (u.pid == t.pid && u.expiresAt == t.expiresAt)
+        (u.pid == t.pid && u.ttl == t.ttl && u.expiresAt == t.expiresAt)
         || (t.state != .acquired && u.state == .acquired
-              && u.pid.isSome && u.expiresAt.isSome)
+              && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome)
         || (t.state == .acquired && u.state != .acquired
-              && u.pid.isNone && u.expiresAt.isNone)
+              && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone)
         || (t.state == .acquired && u.state == .acquired
-              && u.pid == t.pid)
+              && u.pid == t.pid && u.ttl == t.ttl)
 
 def monotone_task_resumes_grow_or_clear (_now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
@@ -1076,8 +1071,8 @@ def catalogue : List Named :=
       , property := .state well_formed_promise_settled_at_lte_now },
     { name := "well_formed_task_acquired_iff_has_pid"
       , property := .state well_formed_task_acquired_iff_has_pid },
-    { name := "well_formed_task_acquired_has_ttl"
-      , property := .state well_formed_task_acquired_has_ttl },
+    { name := "well_formed_task_acquired_iff_has_ttl"
+      , property := .state well_formed_task_acquired_iff_has_ttl },
     { name := "well_formed_task_acquired_iff_has_expires_at"
       , property := .state well_formed_task_acquired_iff_has_expires_at },
     { name := "well_formed_task_pending_iff_has_retry_at"
@@ -1336,14 +1331,24 @@ def well_formed_promise_delay_before_deadline (_now : Nat) (s : ServerState) : B
     is a step that never stops being enabled: a spinning sweeper, which
     costs liveness, not storage.
 
-    And the gap has NARROWED. `processRetryTimeout` no longer takes the
-    next instant from whoever fires it — it computes `now + ttl` — so
-    the environment can no longer write a past instant into the store.
-    What is left is the task that has never been acquired: it carries
-    no `ttl`, so its interval is zero and it re-arms at `now`. That
-    residue is what a dedicated retry-interval field closes. Until
-    then this stays a gap, but it is a gap about a MISSING VALUE rather
-    than about an untrusted one. -/
+    And the gap is CLOSED, by `config.retryTimeout`.
+    `processRetryTimeout` no longer takes the next instant from whoever
+    fires it; it reads the server's dial out of the environment, which
+    no step can write and which is present for every task. What remains
+    is one condition on the environment rather than a guard on a step:
+    the dial must be positive. `0` re-arms at `now` and spins, which is
+    `well_formed_config_retry_positive` below — a well-formedness
+    condition on configuration, checked once at startup, not a property
+    of any state. -/
+/-- The one condition the closed gap leaves behind, and it is about
+    CONFIGURATION rather than about a state. `config.retryTimeout = 0`
+    re-arms a due task at `now`, so the retry step is enabled again at
+    the instant it fired. Not a `.state` property — `ServerConfig` is
+    not in `ServerState`, by design — so it is checked once, where the
+    dial is set. -/
+def well_formed_config_retry_positive (c : ServerConfig) : Bool :=
+  0 < c.retryTimeout
+
 def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
   a.tasks.all fun t =>
     t.state != .pending ||

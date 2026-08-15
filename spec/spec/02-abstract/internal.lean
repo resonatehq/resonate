@@ -66,7 +66,7 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
             | none => pure ()
             | some p =>
                 if p.state == .pending then
-                  setTask { t with state := .pending, pid := none,
+                  setTask { t with state := .pending, pid := none, ttl := none,
                                    expiresAt := none, retryAt := some now }
 
 /-- Redispatch a pending task whose dispatch clock is due.
@@ -79,12 +79,19 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
     environment could write a value into the store. It could write a
     past one, leaving the step enabled at the instant it fired.
 
-    `ttl` is the interval because `ttl` is what a holder tells the
-    server about its own cadence, and it survives release: it is task
-    CONFIGURATION, not lease state. A task never yet acquired carries
-    none, so it redispatches as fast as the environment fires — which
-    is right, since nothing has picked it up, and harmless, because
-    `execute` entries are keyed by task id alone and collapse. -/
+    The interval is `config.retryTimeout`, read from the environment.
+    It is the SERVER's dial — how long to wait before re-offering a task
+    nobody has claimed — and it is present for every task, including one
+    that has never been acquired, which is exactly where retry matters
+    and where the task carries nothing of its own to read.
+
+    It is deliberately not `TaskObject.ttl`. That is the WORKER's
+    number, how long a holder asked to keep its lease; using it here
+    would re-offer a dead worker's task on the dead worker's schedule,
+    would be missing on the newborn path, and — since `TaskRecord`
+    reports `ttl` — would be observable. A transcribed production trace
+    refuses it: `valid/lean/real.lean` shows `ttl := none` on a task
+    acquired with 60000, suspended and resumed. -/
 def processRetryTimeout (id : String) (now : Nat) : H Unit := do
   match ← getTask id with
   | none => pure ()
@@ -97,7 +104,7 @@ def processRetryTimeout (id : String) (now : Nat) : H Unit := do
             | none => pure ()
             | some p =>
                 if p.state == .pending then
-                  setTask { t with retryAt := some (now + t.ttl.getD 0) }
+                  setTask { t with retryAt := some (now + (← ask).config.retryTimeout) }
                   setMessage ((p.tags.get? "resonate:target").getD "")
                     (.execute t.id t.version)
 
