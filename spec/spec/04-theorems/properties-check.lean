@@ -1,10 +1,10 @@
-import «04-theorems».«abstract-twins»
+import «04-theorems».«corpus»
 import «02-abstract».«properties»
 
 namespace Abstraction
 
 open AbstractModel.Properties
-open Equivalence (extTags tgtTags)
+
 
 /-!  # Stage 1, evaluated
 
@@ -34,16 +34,19 @@ reason `scheduleTimeoutsMirror` is unexercised in
 `invariant-check.lean`, and the same reason the Go checker rejects
 traces mentioning schedules. -/
 
-def statesOfA (handle : Step → Nat → AbstractModel.H Response) :
+def statesOfA (mat : Bool) :
     List (Step × Nat) → AbstractModel.ServerState → List (Nat × AbstractModel.ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
-      let (_, s') := Id.run ((handle st n).run s)
-      (n, s') :: statesOfA handle w s'
+      let (_, s') := stepOf mat st n s
+      (n, s') :: statesOfA mat w s'
 
+/-- Both readings of the one machine. This used to concatenate two
+    DRIVERS, `handleA` and `handleAP`; it now concatenates two values of
+    `mat` through the same one. -/
 def trace (w : List (Step × Nat)) : List (Nat × AbstractModel.ServerState) :=
-  statesOfA handleA w AbstractModel.ServerState.init
-    ++ statesOfA handleAP w AbstractModel.ServerState.init
+  statesOfA true w AbstractModel.ServerState.init
+    ++ statesOfA false w AbstractModel.ServerState.init
 
 def wellFormedRun (w : List (Step × Nat)) : Bool :=
   (trace w).all (fun (n, s) => well_formed n s)
@@ -77,8 +80,8 @@ def covTwoTasks : List (Step × Nat) :=
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
     (.api (.taskRelease { id := "x", version := 1 }), 120),
     (.api (.taskRelease { id := "y", version := 1 }), 130),
-    (.r6 "x" 9000, 140),
-    (.r6 "y" 9000, 150) ]
+    (.r6 "x", 140),
+    (.r6 "y", 150) ]
 
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
@@ -326,7 +329,7 @@ def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
 def wGapEmptyTarget : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
-    (.r6 "y" 9000, 110) ]
+    (.r6 "y", 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
     (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide

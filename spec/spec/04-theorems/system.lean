@@ -232,6 +232,18 @@ def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) 
     Response × AbstractModel.ServerState :=
   AbstractModel.run mat (handle st now) s
 
+/-- Run a whole script, keeping the responses and the state it ends in.
+    The finite counterpart of `Valid`: where `Valid` says which infinite
+    traces are runs, this computes the one run a script denotes. -/
+def runFin (mat : Bool) :
+    List (Step × Nat) → AbstractModel.ServerState →
+    List Response × AbstractModel.ServerState
+  | [],           s => ([], s)
+  | (st, n) :: w, s =>
+      let (r, s')   := stepOf mat st n s
+      let (rs, s'') := runFin mat w s'
+      (r :: rs, s'')
+
 /-! ## What a run is
 
 A trace is a function from ticks to state-action blocks. Each block

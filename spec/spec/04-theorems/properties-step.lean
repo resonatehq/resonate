@@ -16,16 +16,16 @@ open AbstractModel (ServerState PromiseObject TaskObject)
 
 Consecutive pairs, including the step out of the initial state. -/
 
-def stepsOfA (handle : Step → Nat → AbstractModel.H Response) :
+def stepsOfA (mat : Bool) :
     List (Step × Nat) → ServerState → List (Nat × ServerState × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
-      let (_, s') := Id.run ((handle st n).run s)
-      (n, s, s') :: stepsOfA handle w s'
+      let (_, s') := stepOf mat st n s
+      (n, s, s') :: stepsOfA mat w s'
 
 def steps (w : List (Step × Nat)) : List (Nat × ServerState × ServerState) :=
-  stepsOfA handleA w AbstractModel.ServerState.init
-    ++ stepsOfA handleAP w AbstractModel.ServerState.init
+  stepsOfA true w AbstractModel.ServerState.init
+    ++ stepsOfA false w AbstractModel.ServerState.init
 
 def stepWellFormedRun (w : List (Step × Nat)) : Bool :=
   (steps w).all (fun (n, a, b) => stepWellFormed n a b)
@@ -236,21 +236,21 @@ The sweeper properties hold on internal steps and are FALSE on request steps.
 That is not a defect — it is what makes them stronger than the general
 edge tables, and it means they need their own walk. -/
 
-def stepsWithA (handle : Step → Nat → AbstractModel.H Response) :
+def stepsWithA (mat : Bool) :
     List (Step × Nat) → ServerState → List (Step × Nat × ServerState × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
-      let (_, s') := Id.run ((handle st n).run s)
-      (st, n, s, s') :: stepsWithA handle w s'
+      let (_, s') := stepOf mat st n s
+      (st, n, s, s') :: stepsWithA mat w s'
 
 def isInternalStep : Step → Bool
   | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
-  | .r5 _ => true | .r6 _ _ => true | .r7 _ => true
+  | .r5 _ => true | .r6 _ => true | .r7 _ => true
   | _ => false
 
 def allSteps (w : List (Step × Nat)) : List (Step × Nat × ServerState × ServerState) :=
-  stepsWithA handleA w AbstractModel.ServerState.init
-    ++ stepsWithA handleAP w AbstractModel.ServerState.init
+  stepsWithA true w AbstractModel.ServerState.init
+    ++ stepsWithA false w AbstractModel.ServerState.init
 
 def internalWellFormedRun (w : List (Step × Nat)) : Bool :=
   (allSteps w).all (fun (st, n, a, b) => !isInternalStep st || internalWellFormed n a b)
@@ -269,29 +269,18 @@ theorem internal_laws_are_strictly_stronger :
       (allSteps w).any (fun (st, n, a, b) => !isInternalStep st && !internalWellFormed n a b)) = true := by
   decide
 
-/-! ### The `.trans` gap, witnessed
+/-! ### The gap that closed
 
-`monotone_task_retry_rearm_advances` is the one known gap whose defect
-lives in the MOVE rather than in a row, so its witness belongs here
-rather than in `properties-check.lean`. -/
+`monotone_task_retry_rearm_advances` used to live in `gaps`, witnessed
+by a script that fired `.r6 "x" 0` — the environment writing a past
+instant into the store. There is no such script now: `Step.r6` names
+only its task, and the next instant comes from
+`Env.config.retryTimeout`, which no step can write. The witness cannot
+be expressed, so it is gone, and the property has moved into
+`catalogue` where `stage3_sweep` checks it over all 1 464 scripts.
 
-/-- Release a task at 110, then re-arm its retry to instant 0 at instant
-    200. The task is pending with `retryAt = some 0` — due at the
-    instant it was armed — so the retry step is enabled again
-    immediately and dispatches forever. -/
-def wGapRetryBackwards : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p", ttl := 50, action := { id := "x", timeoutAt := 9000, param := {}, tags := [("resonate:target", "w1")] } }), 100),
-    (.api (.taskRelease { id := "x", version := 1 }), 110),
-    (.r6 "x" 0, 200) ]
-
-theorem gap_task_retry_rearm_advances_is_violable :
-    (steps wGapRetryBackwards).any
-      (fun (n, a, b) => !monotone_task_retry_rearm_advances n a b) = true := by decide
-
-/-- And the catalogue does not see it: every state is well formed and
-    every step is well formed. That is the whole point of recording the
-    gap — the machine admits a livelock the properties call legal. -/
-theorem gap_task_retry_rearm_is_invisible_to_the_catalogue :
-    stepWellFormedRun wGapRetryBackwards = true := by decide
+That is the shape a closed gap should leave behind: not a theorem
+saying the bug is absent, but the impossibility of writing the bug
+down. -/
 
 end Abstraction

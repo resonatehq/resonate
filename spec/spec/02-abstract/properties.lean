@@ -1030,6 +1030,42 @@ def consistent_new_promise_born_clean (now : Nat) (a b : ServerState) : Bool :=
                   && (if q.isTimer then q.state == .resolved
                       else q.state == .rejectedTimedout))))
 
+/-- A re-arm must move the deadline FORWARD. Re-arming a due task to an
+    instant already past leaves the retry step enabled at the very
+    instant it fired. Note the shape: the defect is in the MOVE, so no
+    state predicate can see it.
+    `consistent_task_retry_rearm_only_when_due` constrains WHEN you may
+    re-arm; nothing constrains what you may re-arm TO.
+
+    Two corrections to the original statement of this gap, both found
+    by checking rather than by reading.
+
+    The consequence is NOT an unbounded outbox. `OutboxEntry.key` for an
+    `execute` is the task id alone — not id-and-version — so a
+    redispatch REPLACES the row it repeats, and
+    `well_formed_store_outbox_keys_unique` keeps it at one. The damage
+    is a step that never stops being enabled: a spinning sweeper, which
+    costs liveness, not storage.
+
+    And the gap is CLOSED, by `config.retryTimeout`.
+    `processRetryTimeout` no longer takes the next instant from whoever
+    fires it; it reads the server's dial out of the environment, which
+    no step can write and which is present for every task. What remains
+    is one condition on the environment rather than a guard on a step:
+    the dial must be positive. `0` re-arms at `now` and spins, which is
+    `well_formed_config_retry_positive` below — a well-formedness
+    condition on configuration, checked once at startup, not a property
+    of any state. -/
+def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
+  a.tasks.all fun t =>
+    t.state != .pending ||
+      (match b.tasks.find? (·.id == t.id) with
+       | none   => true
+       | some u => u.state != .pending || u.retryAt == t.retryAt
+                     || (match u.retryAt with
+                         | some d => now < d
+                         | none   => false))
+
 /-! # The catalogue
 
 Every property, in one list, each with the name an implementation should use
@@ -1223,6 +1259,8 @@ def catalogue : List Named :=
       , property := .trans consistent_task_pending_entry_arms_retry },
     { name := "consistent_task_retry_rearm_only_when_due"
       , property := .trans consistent_task_retry_rearm_only_when_due },
+    { name := "monotone_task_retry_rearm_advances"
+      , property := .trans monotone_task_retry_rearm_advances },
     { name := "consistent_task_wake_records_resume"
       , property := .trans consistent_task_wake_records_resume } ]
 
@@ -1255,7 +1293,7 @@ def transCount : Nat := (catalogue.filter (fun l => match l.property with | .tra
 
 /-! ## Known gaps
 
-Four constraints that are true of the PROTOCOL and false of this
+Three constraints that are true of the PROTOCOL and false of this
 machine. They are not in `catalogue`, because a reachable state
 violates each — putting them there would turn the sweep red. They are
 here because an implementation should enforce them at its doors even
@@ -1314,42 +1352,6 @@ def well_formed_promise_delay_before_deadline (_now : Nat) (s : ServerState) : B
     | none   => true
     | some d => parseNat d < p.timeoutAt
 
-/-- A re-arm must move the deadline FORWARD. Re-arming a due task to an
-    instant already past leaves the retry step enabled at the very
-    instant it fired. Note the shape: the defect is in the MOVE, so no
-    state predicate can see it.
-    `consistent_task_retry_rearm_only_when_due` constrains WHEN you may
-    re-arm; nothing constrains what you may re-arm TO.
-
-    Two corrections to the original statement of this gap, both found
-    by checking rather than by reading.
-
-    The consequence is NOT an unbounded outbox. `OutboxEntry.key` for an
-    `execute` is the task id alone — not id-and-version — so a
-    redispatch REPLACES the row it repeats, and
-    `well_formed_store_outbox_keys_unique` keeps it at one. The damage
-    is a step that never stops being enabled: a spinning sweeper, which
-    costs liveness, not storage.
-
-    And the gap is CLOSED, by `config.retryTimeout`.
-    `processRetryTimeout` no longer takes the next instant from whoever
-    fires it; it reads the server's dial out of the environment, which
-    no step can write and which is present for every task. What remains
-    is one condition on the environment rather than a guard on a step:
-    the dial must be positive. `0` re-arms at `now` and spins, which is
-    `well_formed_config_retry_positive` below — a well-formedness
-    condition on configuration, checked once at startup, not a property
-    of any state. -/
-def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
-  a.tasks.all fun t =>
-    t.state != .pending ||
-      (match b.tasks.find? (·.id == t.id) with
-       | none   => true
-       | some u => u.state != .pending || u.retryAt == t.retryAt
-                     || (match u.retryAt with
-                         | some d => now < d
-                         | none   => false))
-
 /-- The one condition the closed gap leaves behind, and it is about
     CONFIGURATION rather than about a state. `config.retryTimeout = 0`
     re-arms a due task at `now`, so the retry step is enabled again at
@@ -1366,9 +1368,7 @@ def gaps : List Named :=
     { name := "well_formed_promise_target_is_nonempty"
       , property := .state well_formed_promise_target_is_nonempty },
     { name := "well_formed_promise_delay_before_deadline"
-      , property := .state well_formed_promise_delay_before_deadline },
-    { name := "monotone_task_retry_rearm_advances"
-      , property := .trans monotone_task_retry_rearm_advances } ]
+      , property := .state well_formed_promise_delay_before_deadline } ]
 
 /-! ### Record projections
 

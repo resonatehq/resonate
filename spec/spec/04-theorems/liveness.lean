@@ -8,7 +8,7 @@ open AbstractModel (ServerState PromiseObject TaskObject)
 
 Everything before this file is safety: nothing bad is in the state,
 nothing bad happens across a step. None of it says anything ever
-happens at all. `ValidA` requires only `now ≤ next now`, so the trace
+happens at all. `Valid true` requires only `now ≤ next now`, so the trace
 in which `now = 0` forever and no internal step ever fires satisfies
 every theorem in `04-theorems` — and every one of the 101 predicates.
 
@@ -62,7 +62,7 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
           t.state == .acquired && (t.expiresAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .r6 id _ =>
+  | .r6 id =>
       match taskAt s id, (taskAt s id).bind (fun t => promiseAt s t.id) with
       | some t, some p =>
           t.state == .pending && (t.retryAt.getD (now + 1)) ≤ now
@@ -75,12 +75,12 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
 
 /-- The clock advances without bound. Monotone is not enough:
     a clock stalled at 5 forever is monotone. -/
-def ClockAdvances (tr : ATrace) : Prop :=
+def ClockAdvances (tr : Trace) : Prop :=
   ∀ n : Nat, ∃ t : Nat, n ≤ (tr t).now
 
 /-- Weak fairness, restricted to a family of internal steps: one that is
     continuously enabled from some instant on is eventually taken. -/
-def WeaklyFairOn (tr : ATrace) (family : Step → Bool) : Prop :=
+def WeaklyFairOn (tr : Trace) (family : Step → Bool) : Prop :=
   ∀ st : Step, family st = true →
     ∀ t : Nat,
       (∀ u : Nat, t ≤ u → enabledInternal st (tr u).now (tr u).state = true) →
@@ -107,7 +107,7 @@ discipline nothing touches it except R1. So this needs the clock AND
 fairness on R1. -/
 
 def EventuallyEveryPromiseSettles : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : String),
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
@@ -123,7 +123,7 @@ implication rather than as an axiom of its own — carrying it separately
 would be exactly the redundancy the catalogue refuses. -/
 
 def EventuallyEveryTaskFulfils : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : String),
       (taskAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
@@ -159,7 +159,7 @@ the awaited promise is settled in STORE, so R1 must fire too; hence
 both families in the hypothesis. -/
 
 def EventuallyAwaiterResumed : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockAdvances tr →
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isCallbackStep →
     ∀ (t : Nat) (a x : String),
       (∃ p, promiseAt (tr t).state a = some p ∧
@@ -174,7 +174,7 @@ def EventuallyAwaiterResumed : Prop :=
     outside the model — this says the message is ENQUEUED, and nothing
     in the machine can say it arrives. -/
 def EventuallyListenerNotified : Prop :=
-  ∀ tr : ATrace, ValidA tr → ClockAdvances tr →
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isListenerStep →
     ∀ (t : Nat) (a addr : String),
       (∃ p, promiseAt (tr t).state a = some p ∧
@@ -204,12 +204,12 @@ def enabledSteps (now : Nat) (s : ServerState) : List Step :=
         ++ p.callbacks.map (fun x => Step.r4 p.id x))
     ++ (s.tasks.flatMap fun t =>
           (if enabledInternal (.r5 t.id) now s then [Step.r5 t.id] else [])
-            ++ (if enabledInternal (.r6 t.id (now + 1000)) now s
-                then [Step.r6 t.id (now + 1000)] else []))
+            ++ (if enabledInternal (.r6 t.id) now s
+                then [Step.r6 t.id] else []))
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl
-    (fun acc st => if enabledInternal st now acc then (stepOfA st now acc).2 else acc) s
+    (fun acc st => if enabledInternal st now acc then (stepOf true st now acc).2 else acc) s
 
 def fairRounds : Nat → Nat → ServerState → ServerState
   | 0,     _,   s => s
@@ -219,13 +219,13 @@ def fairRounds : Nat → Nat → ServerState → ServerState
     retains an obligation, and every awaiter has either learned its
     wake or died. The finite shadow of `EventuallyAwaiterResumed`. -/
 def wakeMaterializes (w : List (Step × Nat)) (horizon : Nat) : Bool :=
-  let s := fairRounds 6 horizon (runFinA w).2
+  let s := fairRounds 6 horizon (runFin true w AbstractModel.ServerState.init).2
   s.promises.all fun p =>
     (p.project horizon).state == .pending ||
       (p.callbacks.isEmpty && p.listeners.isEmpty)
 
 def resumeRecorded (w : List (Step × Nat)) (horizon : Nat) : Bool :=
-  let s0 := (runFinA w).2
+  let s0 := (runFin true w AbstractModel.ServerState.init).2
   let s  := fairRounds 6 horizon s0
   s0.promises.all fun p =>
     p.callbacks.all fun x =>
@@ -237,7 +237,6 @@ def resumeRecorded (w : List (Step × Nat)) (horizon : Nat) : Bool :=
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-open Equivalence (extTags tgtTags)
 
 /-- The wake, end to end: a suspended awaiter, a settled awaited, and
     nothing but internal steps between them. -/
@@ -268,8 +267,8 @@ example : resumeRecorded wWakeTimedOut 300 := by decide
     counterexample that makes `WeaklyFairOn` a hypothesis rather than a
     formality. -/
 theorem wake_requires_fairness :
-    ((runFinA wWake).2.promises.any (fun p => p.callbacks.contains "x")
-      && (runFinA wWake).2.tasks.any (fun t => t.state == .suspended)) = true := by
+    ((runFin true wWake AbstractModel.ServerState.init).2.promises.any (fun p => p.callbacks.contains "x")
+      && (runFin true wWake AbstractModel.ServerState.init).2.tasks.any (fun t => t.state == .suspended)) = true := by
   decide
 
 /-- The bounded wake over the whole corpus: every script, both
