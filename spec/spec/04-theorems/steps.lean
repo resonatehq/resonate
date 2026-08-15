@@ -156,6 +156,36 @@ such field, so it compares structurally. -/
 
 deriving instance BEq for AbstractModel.TaskObject
 
+/-! ## What a run is
+
+A trace is a function from ticks to state-action blocks. Each block
+records the whole situation at one tick: the state the machine was in,
+the step taken, the response it gave, and what the clock read.
+
+`now` lives HERE, in the trace element, and not in `ServerState`. That
+is deliberate and it is the answer to an obvious question — the clock
+is not part of the store, because a server does not own the time; it
+reads it. Two machines at the same state and different instants are at
+the same state.
+
+Validity is stated with the driver, in the file that defines the
+handler, since it needs to say what a step produces. It has three
+conjuncts: the response is the one the step gives, the next state is
+the one the step leaves, and the clock does not run backwards. Note
+what that third one is — a HYPOTHESIS on traces, not a checkable
+property. No walk over states can catch a clock that regresses,
+because a walk only ever sees the instants it is handed. An
+implementation that lets its clock go backwards is outside what any
+property in `02-abstract/properties.lean` can refuse. -/
+
+structure StateAction where
+  state : AbstractModel.ServerState
+  req   : AStep
+  res   : Response
+  now   : Nat
+
+abbrev Trace := Nat → StateAction
+
 /-! ## Comparing states
 
 Every component of `ServerState` is a keyed list, so order carries no
