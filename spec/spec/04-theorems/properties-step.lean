@@ -27,11 +27,11 @@ def steps (w : List (Step × Nat)) : List (Nat × ServerState × ServerState) :=
   stepsOfA true w AbstractModel.ServerState.init
     ++ stepsOfA false w AbstractModel.ServerState.init
 
-def stepWellFormedRun (w : List (Step × Nat)) : Bool :=
-  (steps w).all (fun (n, a, b) => stepWellFormed n a b)
+def transHoldsRun (w : List (Step × Nat)) : Bool :=
+  (steps w).all (fun (n, a, b) => transHolds n a b)
 
-def stepReport (ws : List (List (Step × Nat))) : List String :=
-  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => stepFailures n a b)).eraseDups
+def transReport (ws : List (List (Step × Nat))) : List String :=
+  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => transFailures n a b)).eraseDups
 
 def stepWitnesses (ws : List (List (Step × Nat)))
     (p : ServerState → ServerState → Bool) : Bool :=
@@ -40,10 +40,10 @@ def stepWitnesses (ws : List (List (Step × Nat)))
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-theorem stage3_battery : battery.all stepWellFormedRun = true := by decide
+theorem stage3_battery : battery.all transHoldsRun = true := by decide
 
 theorem stage3_sweep :
-    ((seqsUpToA kernelsResp 3).map instantiateA).all stepWellFormedRun = true := by decide
+    ((seqsUpToA kernelsResp 3).map instantiateA).all transHoldsRun = true := by decide
 
 /-! ### Falsifiability -/
 

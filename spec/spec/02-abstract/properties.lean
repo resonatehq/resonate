@@ -21,7 +21,7 @@ property needs:
                ONE step. A violation is a bad transaction — each state
                is fine on its own and the move between them is not.
 
-`failures now s` and `stepFailures now a b` run the whole catalogue and
+`stateFailures now s` and `transFailures now a b` run the whole catalogue and
 return the NAMES of the properties that broke. Report the name: it is the same
 string in Lean, Go, TypeScript and Verus, so a violation means the same
 thing everywhere.
@@ -1266,27 +1266,33 @@ def catalogue : List Named :=
 
 /-! ### The two walks
 
-`failures` for an implementation that can inspect a state; `stepFailures`
-for one that can inspect a state transition. Both report by NAME, so a
-violation names the property it broke. -/
+One per `Property` constructor, and that is the whole of it: fold the
+catalogue, keep the entries of the matching kind, apply each to what it
+takes, and report the NAMES of those that said `false`.
 
-def failures (now : Nat) (s : ServerState) : List String :=
+`stateHolds` and `transHolds` are the same folds asking only whether
+anything failed. They are the conjunction of the catalogue's `.state`
+half and its `.trans` half respectively — NOT properties themselves, and
+deliberately not named like one. An entry is `well_formed_…` or
+`consistent_…`; the conjunction of all of them is not. -/
+
+def stateFailures (now : Nat) (s : ServerState) : List String :=
   catalogue.filterMap fun l =>
     match l.property with
     | .state f => if f now s then none else some l.name
     | .trans _ => none
 
-def well_formed (now : Nat) (s : ServerState) : Bool :=
-  (failures now s).isEmpty
+def stateHolds (now : Nat) (s : ServerState) : Bool :=
+  (stateFailures now s).isEmpty
 
-def stepFailures (now : Nat) (a b : ServerState) : List String :=
+def transFailures (now : Nat) (a b : ServerState) : List String :=
   catalogue.filterMap fun l =>
     match l.property with
     | .state _ => none
     | .trans f => if f now a b then none else some l.name
 
-def stepWellFormed (now : Nat) (a b : ServerState) : Bool :=
-  (stepFailures now a b).isEmpty
+def transHolds (now : Nat) (a b : ServerState) : Bool :=
+  (transFailures now a b).isEmpty
 
 def stateCount : Nat := (catalogue.filter (fun l => match l.property with | .state _ => true | _ => false)).length
 def transCount : Nat := (catalogue.filter (fun l => match l.property with | .trans _ => true | _ => false)).length

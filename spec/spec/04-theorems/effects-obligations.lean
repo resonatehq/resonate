@@ -36,7 +36,7 @@ unbounded statements against `E`, which is what a specification owes
 and what evaluation cannot give.
 
 The fourth is the strongest and the least obvious:
-`effects_properties_are_discipline_blind` says `failures` is pointwise
+`effects_properties_are_discipline_blind` says `stateFailures` is pointwise
 identical between a materialized run and a projected one. That is the
 formal content of "the read discipline is an implementation choice, not
 a protocol decision" — and it is the one claim here that would still
@@ -80,12 +80,12 @@ def internalStepsE (mat : Bool) (w : List (Step × Nat)) :
     under both disciplines, for a script of any length. -/
 theorem effects_state_properties (mat : Bool) (w : List (Step × Nat)) :
     (statesE mat w ServerState.init).all
-      (fun (n, s) => Properties.well_formed n s) = true := sorry
+      (fun (n, s) => Properties.stateHolds n s) = true := sorry
 
 /-- Every `.trans` property, at every consecutive pair. -/
 theorem effects_step_properties (mat : Bool) (w : List (Step × Nat)) :
     (stepsE mat w ServerState.init).all
-      (fun (n, a, b) => Properties.stepWellFormed n a b) = true := sorry
+      (fun (n, a, b) => Properties.transHolds n a b) = true := sorry
 
 /-- The sweeper properties, on internal steps only: a background job may
     re-pend, fulfil, resume or refresh; it may never acquire, suspend,
@@ -101,8 +101,8 @@ theorem effects_internal_properties (mat : Bool) (w : List (Step × Nat)) :
     taken together, and the reason `Env.mat` is an implementation
     choice rather than a protocol decision. -/
 theorem effects_properties_are_discipline_blind (w : List (Step × Nat)) :
-    ((statesE true w ServerState.init).map (fun (n, s) => Properties.failures n s)
-      = (statesE false w ServerState.init).map (fun (n, s) => Properties.failures n s)) := sorry
+    ((statesE true w ServerState.init).map (fun (n, s) => Properties.stateFailures n s)
+      = (statesE false w ServerState.init).map (fun (n, s) => Properties.stateFailures n s)) := sorry
 
 end Obligations
 end Abstraction

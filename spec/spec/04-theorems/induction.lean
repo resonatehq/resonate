@@ -317,8 +317,8 @@ starts in an arbitrary state and steps correctly from there satisfies
 `Valid` and can violate anything. Reachability is what the catalogue is
 about, and `(tr 0).state = init` is where it enters. -/
 
-/-- `Legal` is exactly the CATALOGUE: the two walks, `failures` and
-    `stepFailures`, reporting nothing at every point of the trace. One
+/-- `Legal` is exactly the CATALOGUE: the two walks, `stateFailures` and
+    `transFailures`, reporting nothing at every point of the trace. One
     conjunct per walk, and nothing else.
 
     In particular the provenance pair is NOT here. It is defined in
@@ -332,8 +332,8 @@ about, and `(tr 0).state = init` is where it enters. -/
     so putting it in `Legal` would make `Legal` unrunnable against the
     thing it exists to check. It is stated separately below. -/
 def Legal (tr : Trace) : Prop :=
-  (∀ t : Nat, Properties.well_formed (tr t).now (tr t).state = true)
-  ∧ (∀ t : Nat, Properties.stepWellFormed (tr t).now (tr t).state (tr (t+1)).state = true)
+  (∀ t : Nat, Properties.stateHolds (tr t).now (tr t).state = true)
+  ∧ (∀ t : Nat, Properties.transHolds (tr t).now (tr t).state (tr (t+1)).state = true)
 
 theorem valid_implies_legal (mat : Bool) (tr : Trace)
     (hv : Valid mat tr) (h0 : (tr 0).state = ServerState.init) : Legal tr := sorry
@@ -348,12 +348,12 @@ needs one — will show up as a failure. -/
 /-- The empty store satisfies the catalogue. Proved, not assumed: every
     entry is an `.all` over a list that is empty at `init`. -/
 theorem well_formed_init (now : Nat) :
-    Properties.well_formed now ServerState.init = true := rfl
+    Properties.stateHolds now ServerState.init = true := rfl
 
 /-- **The induction.** Every step preserves the state half. -/
 theorem well_formed_step (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
-    Properties.well_formed now s = true →
-    Properties.well_formed now (stepOf mat st now s).2 = true := sorry
+    Properties.stateHolds now s = true →
+    Properties.stateHolds now (stepOf mat st now s).2 = true := sorry
 
 /-- **The clock.** A state well formed at one instant is well formed at
     every later one. Needed because a step lands a state at `(tr t).now`
@@ -361,14 +361,14 @@ theorem well_formed_step (mat : Bool) (st : Step) (now : Nat) (s : ServerState) 
     `consistent_suspended_task_holds_rung` reads `project now`, so
     advancing the clock changes what it says. -/
 theorem well_formed_clock (n n' : Nat) (s : ServerState) :
-    Properties.well_formed n s = true → n ≤ n' →
-    Properties.well_formed n' s = true := sorry
+    Properties.stateHolds n s = true → n ≤ n' →
+    Properties.stateHolds n' s = true := sorry
 
 /-- **The transition half.** No induction: a claim about an arbitrary
     state and the step out of it. -/
 theorem step_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
-    Properties.well_formed now s = true →
-    Properties.stepWellFormed now s (stepOf mat st now s).2 = true := sorry
+    Properties.stateHolds now s = true →
+    Properties.transHolds now s (stepOf mat st now s).2 = true := sorry
 
 /-- **Provenance**, and NOT part of `Legal`. The sweeper properties hold
     on internal steps only: a background job may re-pend, fulfil, resume
@@ -377,10 +377,10 @@ theorem step_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) 
     `internal_laws_are_strictly_stronger` proves by `decide` that some
     request step in the corpus violates them, which is what makes them a
     constraint rather than a restatement of the general edge tables. A
-    `task.acquire` is the witness: `stepWellFormed` accepts it,
+    `task.acquire` is the witness: `transHolds` accepts it,
     `internalWellFormed` refuses it. -/
 theorem internal_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
-    st.isInternal = true → Properties.well_formed now s = true →
+    st.isInternal = true → Properties.stateHolds now s = true →
     Properties.internalWellFormed now s (stepOf mat st now s).2 = true := sorry
 
 end Induction
