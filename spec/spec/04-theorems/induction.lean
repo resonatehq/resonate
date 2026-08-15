@@ -198,5 +198,103 @@ theorem birth_satisfies_created_le_timeout
   · rename_i h; simp [qCreatedLeTimeout]; omega
   · simp [qCreatedLeTimeout]
 
+/-! ### The two ledger removals
+
+Missed on the first pass, and the enumeration is what found them. The
+internal drains do not go through `addCallback`/`addListener`'s
+inverses — there are none — they rewrite the field directly:
+
+    setPromise { p with listeners := p.listeners.filter (· != address) }
+    setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
+
+So nine functions produce stored promises, not four. -/
+
+theorem removeListener_preserves_created_le_timeout
+    (p : PromiseObject) (address : String) :
+    qCreatedLeTimeout p = true →
+    qCreatedLeTimeout { p with listeners := p.listeners.filter (· != address) } = true := by
+  intro h; simpa [qCreatedLeTimeout] using h
+
+theorem removeCallback_preserves_created_le_timeout
+    (p : PromiseObject) (awaiter : String) :
+    qCreatedLeTimeout p = true →
+    qCreatedLeTimeout { p with callbacks := p.callbacks.filter (· != awaiter) } = true := by
+  intro h; simpa [qCreatedLeTimeout] using h
+
+/-- `task.create` does NOT call `createPromise`; it inlines its own
+    birth, so there are two copies of promise birth in the machine and
+    both need discharging. This copy has no timer branch, and that is
+    correct rather than an omission: `task.create` 400s on
+    `timerTargeted`, so a timer never reaches here and the born-dead
+    verdict is `rejectedTimedout` with no `isTimer` case to answer for.
+    The enumeration is what makes that reasoning checkable instead of a
+    remark in a docstring. -/
+theorem task_birth_satisfies_created_le_timeout
+    (a : ServerModel.PromiseCreateReq) (now : Nat) :
+    qCreatedLeTimeout
+      (if a.timeoutAt > now then
+        { id := a.id, state := .pending, param := a.param, tags := a.tags,
+          timeoutAt := a.timeoutAt, createdAt := now }
+       else
+        { id := a.id, state := .rejectedTimedout, param := a.param, tags := a.tags,
+          timeoutAt := a.timeoutAt, createdAt := a.timeoutAt,
+          settledAt := some a.timeoutAt }) = true := by
+  split
+  · rename_i h; simp [qCreatedLeTimeout]; omega
+  · simp [qCreatedLeTimeout]
+
+/-! ## Making the enumeration checkable
+
+The step above — "those nine are ALL the sites" — is the one claim that
+was outside Lean, and it is the one most likely to rot: a handler added
+next year writes a promise and nothing complains.
+
+`WritesGood` closes it. It says every promise a computation writes is
+good, and it composes, so a handler's obligation is built from its
+parts rather than asserted about its whole. The reason it composes is
+the reader discipline: `bind` hands the SAME environment to its
+continuation, so `s` does not move under the binder and the predicate
+is about one fixed state throughout. In a state monad this would not
+factor — the continuation would run against a state the first half had
+already changed, and there would be nothing to induct on. -/
+
+def WritesGood (q : PromiseObject → Bool) (s : ServerState) (mat : Bool)
+    {α : Type} (act : H α) : Prop :=
+  ∀ e ∈ (act { state := s, mat := mat }).2, ∀ p, e = .setPromise p → q p = true
+
+theorem writesGood_pure {α} (q : PromiseObject → Bool) (s : ServerState)
+    (mat : Bool) (a : α) : WritesGood q s mat (pure a) := by
+  intro e he; simp [pure] at he
+
+theorem writesGood_bind {α β} (q : PromiseObject → Bool) (s : ServerState) (mat : Bool)
+    (x : H α) (f : α → H β)
+    (hx : WritesGood q s mat x) (hf : ∀ a, WritesGood q s mat (f a)) :
+    WritesGood q s mat (x >>= f) := by
+  intro e he p hp
+  simp only [bind, List.mem_append] at he
+  cases he with
+  | inl h => exact hx e h p hp
+  | inr h => exact hf _ e h p hp
+
+theorem writesGood_setPromise (q : PromiseObject → Bool) (s : ServerState)
+    (mat : Bool) (p : PromiseObject) (h : q p = true) :
+    WritesGood q s mat (setPromise p) := by
+  intro e he p' hp'
+  simp [setPromise, emit] at he
+  subst he; cases hp'; exact h
+
+theorem writesGood_setTask (q : PromiseObject → Bool) (s : ServerState)
+    (mat : Bool) (t : TaskObject) : WritesGood q s mat (setTask t) := by
+  intro e he p hp; simp [setTask, emit] at he; subst he; cases hp
+
+theorem writesGood_setMessage (q : PromiseObject → Bool) (s : ServerState)
+    (mat : Bool) (a : String) (m : ServerModel.Message) :
+    WritesGood q s mat (setMessage a m) := by
+  intro e he p hp; simp [setMessage, emit] at he; subst he; cases hp
+
+theorem writesGood_ask (q : PromiseObject → Bool) (s : ServerState) (mat : Bool) :
+    WritesGood q s mat ask := by
+  intro e he; simp [ask] at he
+
 end Induction
 end Abstraction
