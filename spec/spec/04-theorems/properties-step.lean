@@ -27,11 +27,14 @@ def steps (w : List (Step × Nat)) : List (Nat × ServerState × ServerState) :=
   stepsOfA true w AbstractModel.ServerState.init
     ++ stepsOfA false w AbstractModel.ServerState.init
 
+/-- Same fold as stage 1 — `legalRun` there is this list under a
+    different name. Kept as its own theorem because the mutants and
+    reach witnesses below are about the `.trans` half specifically. -/
 def transHoldsRun (w : List (Step × Nat)) : Bool :=
-  (steps w).all (fun (n, a, b) => transHolds n a b)
+  (steps w).all (fun (n, a, b) => legalAt n a b)
 
 def transReport (ws : List (List (Step × Nat))) : List String :=
-  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => transFailures n a b)).eraseDups
+  (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => legalFailures n a b)).eraseDups
 
 def stepWitnesses (ws : List (List (Step × Nat)))
     (p : ServerState → ServerState → Bool) : Bool :=

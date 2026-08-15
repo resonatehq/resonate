@@ -1264,35 +1264,46 @@ def catalogue : List Named :=
     { name := "consistent_task_wake_records_resume"
       , property := .trans consistent_task_wake_records_resume } ]
 
-/-! ### The two walks
+/-! ### The walk
 
-One per `Property` constructor, and that is the whole of it: fold the
-catalogue, keep the entries of the matching kind, apply each to what it
-takes, and report the NAMES of those that said `false`.
+ONE fold, matching `Legal` in `04-theorems/system.lean`: take the
+catalogue, and apply each entry to whatever its constructor says it
+takes — a `.state` property to a state, a `.trans` property to the pair.
+There is no second notion and no lemma between them; the sweep evaluates
+this and `Legal` quantifies it.
 
-`stateHolds` and `transHolds` are the same folds asking only whether
-anything failed. They are the conjunction of the catalogue's `.state`
-half and its `.trans` half respectively — NOT properties themselves, and
-deliberately not named like one. An entry is `well_formed_…` or
-`consistent_…`; the conjunction of all of them is not. -/
+A `.state` entry is checked at BOTH endpoints of the pair. `Legal`
+applies it at every index of an infinite trace, where every state is
+some step's pre-state; a finite run has a last state that is nobody's
+pre-state, and checking both ends is what covers it without a special
+case. The redundancy is free — the initial state satisfies everything.
 
-def stateFailures (now : Nat) (s : ServerState) : List String :=
+Both endpoints are checked at the instant of the STEP, not at some later
+reading. That is stricter, not weaker: the two `_lte_now` entries are
+monotone in `now`, so passing at the earlier instant implies passing at
+the later one.
+
+Report by NAME. It is the same string in Lean, Go, TypeScript and Verus,
+so a violation means the same thing everywhere. -/
+
+def legalFailures (now : Nat) (a b : ServerState) : List String :=
   catalogue.filterMap fun l =>
     match l.property with
-    | .state f => if f now s then none else some l.name
-    | .trans _ => none
-
-def stateHolds (now : Nat) (s : ServerState) : Bool :=
-  (stateFailures now s).isEmpty
-
-def transFailures (now : Nat) (a b : ServerState) : List String :=
-  catalogue.filterMap fun l =>
-    match l.property with
-    | .state _ => none
+    | .state f => if f now a && f now b then none else some l.name
     | .trans f => if f now a b then none else some l.name
 
-def transHolds (now : Nat) (a b : ServerState) : Bool :=
-  (transFailures now a b).isEmpty
+def legalAt (now : Nat) (a b : ServerState) : Bool :=
+  (legalFailures now a b).isEmpty
+
+/-- The SAME fold, restricted to the `.state` half — `legalAt` with the
+    `.trans` entries answering `true`. Not a second notion of legality:
+    it is what an induction HYPOTHESIS needs, a claim about one state
+    with no successor in hand. -/
+def stateHolds (now : Nat) (s : ServerState) : Bool :=
+  catalogue.all fun l =>
+    match l.property with
+    | .state f => f now s
+    | .trans _ => true
 
 def stateCount : Nat := (catalogue.filter (fun l => match l.property with | .state _ => true | _ => false)).length
 def transCount : Nat := (catalogue.filter (fun l => match l.property with | .trans _ => true | _ => false)).length

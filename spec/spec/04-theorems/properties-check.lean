@@ -48,13 +48,29 @@ def trace (w : List (Step × Nat)) : List (Nat × AbstractModel.ServerState) :=
   statesOfA true w AbstractModel.ServerState.init
     ++ statesOfA false w AbstractModel.ServerState.init
 
-def stateHoldsRun (w : List (Step × Nat)) : Bool :=
-  (trace w).all (fun (n, s) => stateHolds n s)
+/-- Consecutive pairs, which is what the fold takes. -/
+def pairs (mat : Bool) :
+    List (Step × Nat) → AbstractModel.ServerState →
+    List (Nat × AbstractModel.ServerState × AbstractModel.ServerState)
+  | [], _ => []
+  | (st, n) :: w, s =>
+      let (_, s') := stepOf mat st n s
+      (n, s, s') :: pairs mat w s'
+
+def allPairs (w : List (Step × Nat)) :=
+  pairs true w AbstractModel.ServerState.init
+    ++ pairs false w AbstractModel.ServerState.init
+
+/-- `Legal`, evaluated on a finite run. The SAME fold `Legal`
+    quantifies — `legalAt` in `properties.lean` — so the sweep and the
+    theorem are about one notion with no lemma between them. -/
+def legalRun (w : List (Step × Nat)) : Bool :=
+  (allPairs w).all (fun (n, a, b) => legalAt n a b)
 
 /-- Which entries fail, by name — the shape a counterexample report
     needs, and the reason the catalogue carries its names as data. -/
 def report (ws : List (List (Step × Nat))) : List String :=
-  (ws.flatMap fun w => (trace w).flatMap (fun (n, s) => stateFailures n s)).eraseDups
+  (ws.flatMap fun w => (allPairs w).flatMap (fun (n, a, b) => legalFailures n a b)).eraseDups
 
 def witnesses (ws : List (List (Step × Nat))) (p : AbstractModel.ServerState → Bool) : Bool :=
   ws.any fun w => (trace w).any (fun (_, s) => p s)
@@ -97,12 +113,12 @@ def battery : List (List (Step × Nat)) :=
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-theorem stage1_battery : battery.all stateHoldsRun = true := by decide
+theorem stage1_battery : battery.all legalRun = true := by decide
 
 /-- Every script up to length 3 over the adversarial alphabet — 1 464
     scripts, both disciplines, every intermediate state. -/
 theorem stage1_sweep :
-    ((seqsUpToA kernelsResp 3).map instantiateA).all stateHoldsRun = true := by decide
+    ((seqsUpToA kernelsResp 3).map instantiateA).all legalRun = true := by decide
 
 /-! ### Falsifiability
 

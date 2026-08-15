@@ -1,4 +1,5 @@
 import «02-abstract».«internal»
+import «02-abstract».«properties»
 
 /-!  # The system
 
@@ -304,6 +305,41 @@ def Valid (mat : Bool) (tr : Trace) : Prop :=
     (tr t).res = (stepOf mat (tr t).req (tr t).now (tr t).state).1 ∧
     (tr (t + 1)).state = (stepOf mat (tr t).req (tr t).now (tr t).state).2 ∧
     (tr t).now ≤ (tr (t + 1)).now
+
+/-! ## Legal
+
+What it means for a run to satisfy the specification: every entry of the
+catalogue (`02-abstract/properties.lean`), at every point of the trace,
+applied to whatever its constructor says it takes.
+
+`valid_implies_legal` is the claim the conformance story rests on. Not
+because it constrains an implementation — it mentions none — but because
+it is what makes a catalogue violation UNAMBIGUOUS when an
+implementation is checked. Without it a failing property leaves two live
+hypotheses: the implementation is wrong, or the property is. With it,
+the failure is a bug report, and the catalogue is portable.
+
+Stated with `sorry`. What backs it today is `properties-check.lean` and
+`properties-step.lean` — 1 464 scripts, both readings, `decide` at build
+time — which is a finite fact and not this.
+
+Note the second hypothesis. `Valid` constrains steps, not starting
+points: a trace beginning in an arbitrary state and stepping correctly
+from there is `Valid` and can violate anything. Reachability is the
+subject of the catalogue, and `(tr 0).state = init` is where it enters.
+
+The provenance pair is not here and could not be — it is not in
+`catalogue`. See `internalChecks`. -/
+
+def Legal (tr : Trace) : Prop :=
+  ∀ t : Nat, (AbstractModel.Properties.catalogue.all fun l =>
+    match l.property with
+    | .state f => f (tr t).now (tr t).state
+    | .trans f => f (tr t).now (tr t).state (tr (t+1)).state) = true
+
+theorem valid_implies_legal (mat : Bool) (tr : Trace)
+    (hv : Valid mat tr) (h0 : (tr 0).state = AbstractModel.ServerState.init) :
+    Legal tr := sorry
 
 /-! ## Comparing states
 
