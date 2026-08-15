@@ -317,11 +317,23 @@ starts in an arbitrary state and steps correctly from there satisfies
 `Valid` and can violate anything. Reachability is what the catalogue is
 about, and `(tr 0).state = init` is where it enters. -/
 
+/-- `Legal` is exactly the CATALOGUE: the two walks, `failures` and
+    `stepFailures`, reporting nothing at every point of the trace. One
+    conjunct per walk, and nothing else.
+
+    In particular the provenance pair is NOT here. It is defined in
+    `properties.lean` but it is not in `catalogue` — it has its own list
+    (`internalChecks`) and its own walk (`internalFailures`), and the
+    file's header files it under what the catalogue does not contain.
+    Two reasons to keep it out. It is a claim about WHO took a step, so
+    it is false on external steps by design and would need a guard that
+    the catalogue's own walks do not have. And it cannot be checked from
+    a state trace at all — an observer sees states, not who moved them —
+    so putting it in `Legal` would make `Legal` unrunnable against the
+    thing it exists to check. It is stated separately below. -/
 def Legal (tr : Trace) : Prop :=
   (∀ t : Nat, Properties.well_formed (tr t).now (tr t).state = true)
   ∧ (∀ t : Nat, Properties.stepWellFormed (tr t).now (tr t).state (tr (t+1)).state = true)
-  ∧ (∀ t : Nat, (tr t).req.isInternal = true →
-       Properties.internalWellFormed (tr t).now (tr t).state (tr (t+1)).state = true)
 
 theorem valid_implies_legal (mat : Bool) (tr : Trace)
     (hv : Valid mat tr) (h0 : (tr 0).state = ServerState.init) : Legal tr := sorry
@@ -358,7 +370,15 @@ theorem step_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) 
     Properties.well_formed now s = true →
     Properties.stepWellFormed now s (stepOf mat st now s).2 = true := sorry
 
-/-- **Provenance.** The sweeper properties, on internal steps only. -/
+/-- **Provenance**, and NOT part of `Legal`. The sweeper properties hold
+    on internal steps only: a background job may re-pend, fulfil, resume
+    or refresh, and may never acquire, suspend, halt or continue a task.
+    The guard is necessary rather than cosmetic —
+    `internal_laws_are_strictly_stronger` proves by `decide` that some
+    request step in the corpus violates them, which is what makes them a
+    constraint rather than a restatement of the general edge tables. A
+    `task.acquire` is the witness: `stepWellFormed` accepts it,
+    `internalWellFormed` refuses it. -/
 theorem internal_well_formed (mat : Bool) (st : Step) (now : Nat) (s : ServerState) :
     st.isInternal = true → Properties.well_formed now s = true →
     Properties.internalWellFormed now s (stepOf mat st now s).2 = true := sorry
