@@ -317,23 +317,32 @@ starts in an arbitrary state and steps correctly from there satisfies
 `Valid` and can violate anything. Reachability is what the catalogue is
 about, and `(tr 0).state = init` is where it enters. -/
 
-/-- `Legal` is exactly the CATALOGUE: the two walks, `stateFailures` and
-    `transFailures`, reporting nothing at every point of the trace. One
-    conjunct per walk, and nothing else.
+/-- `Legal` is the catalogue, folded once. Every entry, at every point
+    of the trace, applied to whatever its constructor says it takes: a
+    `.state` property to the state at `t`, a `.trans` property to the
+    pair `t, t+1`. Both at `(tr t).now`, because that is the instant the
+    step happened at.
 
-    In particular the provenance pair is NOT here. It is defined in
-    `properties.lean` but it is not in `catalogue` — it has its own list
-    (`internalChecks`) and its own walk (`internalFailures`), and the
-    file's header files it under what the catalogue does not contain.
-    Two reasons to keep it out. It is a claim about WHO took a step, so
-    it is false on external steps by design and would need a guard that
-    the catalogue's own walks do not have. And it cannot be checked from
-    a state trace at all — an observer sees states, not who moved them —
-    so putting it in `Legal` would make `Legal` unrunnable against the
-    thing it exists to check. It is stated separately below. -/
+    One fold rather than two conjuncts, so the `.state`/`.trans`
+    dispatch is visible where the claim is made rather than hidden in
+    two definitions elsewhere.
+
+    In particular the provenance pair is NOT here, and could not be: it
+    is not in `catalogue`. It has its own list (`internalChecks`) and
+    its own walk, and `properties.lean`'s header files it under what the
+    catalogue does not contain. Two reasons that is right. It is a claim
+    about WHO took a step, so it is false on external steps by design —
+    a `task.acquire` is the witness, accepted by `transHolds` and
+    refused by `internalWellFormed`. And it cannot be checked from a
+    state trace at all, since an observer sees states rather than who
+    moved them, so putting it here would make `Legal` unrunnable against
+    the implementations it exists to check. It is stated separately
+    below. -/
 def Legal (tr : Trace) : Prop :=
-  (∀ t : Nat, Properties.stateHolds (tr t).now (tr t).state = true)
-  ∧ (∀ t : Nat, Properties.transHolds (tr t).now (tr t).state (tr (t+1)).state = true)
+  ∀ t : Nat, Properties.catalogue.all (fun l =>
+    match l.property with
+    | .state f => f (tr t).now (tr t).state
+    | .trans f => f (tr t).now (tr t).state (tr (t+1)).state) = true
 
 theorem valid_implies_legal (mat : Bool) (tr : Trace)
     (hv : Valid mat tr) (h0 : (tr 0).state = ServerState.init) : Legal tr := sorry
