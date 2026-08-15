@@ -794,9 +794,9 @@ away, leaving a bare binary relation on states, which is the object a
 temporal property is stated against. -/
 
 open Equivalence (Request Response)
-open Abstraction (AStep ATrace stepOfA stepOfAP ValidA ValidAP)
+open Abstraction (Step ATrace stepOfA stepOfAP ValidA ValidAP)
 
-def step (d : Discipline) (s s' : ServerState) (st : AStep) (now : Nat)
+def step (d : Discipline) (s s' : ServerState) (st : Step) (now : Nat)
     (res : Response) : Prop :=
   match st with
   | .api (.promiseGet req) =>
@@ -1037,13 +1037,13 @@ theorem r7_correct (s s' : ServerState) (id : String) (now : Nat) :
 /-- **The bridge, materialized.** Konnov's `tp_next_correct`, at our
     shapes: our step carries a response as well as a successor, so the
     relation is ternary and the equation is a pair. -/
-theorem step_correct (s s' : ServerState) (st : AStep) (now : Nat) (res : Response) :
+theorem step_correct (s s' : ServerState) (st : Step) (now : Nat) (res : Response) :
     step materialized s s' st now res ↔ stepOfA st now s = (res, s') := by
   sorry
 
 /-- **The bridge, projected.** The SAME `step`, with the other
     discipline substituted — the twin is written once for both. -/
-theorem stepP_correct (s s' : ServerState) (st : AStep) (now : Nat) (res : Response) :
+theorem stepP_correct (s s' : ServerState) (st : Step) (now : Nat) (res : Response) :
     step projected s s' st now res ↔ stepOfAP st now s = (res, s') := by
   sorry
 

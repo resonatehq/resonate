@@ -42,7 +42,7 @@ def promiseAt (s : ServerState) (id : String) : Option PromiseObject :=
 def taskAt (s : ServerState) (id : String) : Option TaskObject :=
   s.tasks.find? (·.id == id)
 
-def enabledInternal (st : AStep) (now : Nat) (s : ServerState) : Bool :=
+def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
   | .r1 id =>
       match promiseAt s id with
@@ -80,21 +80,21 @@ def ClockAdvances (tr : ATrace) : Prop :=
 
 /-- Weak fairness, restricted to a family of internal steps: one that is
     continuously enabled from some instant on is eventually taken. -/
-def WeaklyFairOn (tr : ATrace) (family : AStep → Bool) : Prop :=
-  ∀ st : AStep, family st = true →
+def WeaklyFairOn (tr : ATrace) (family : Step → Bool) : Prop :=
+  ∀ st : Step, family st = true →
     ∀ t : Nat,
       (∀ u : Nat, t ≤ u → enabledInternal st (tr u).now (tr u).state = true) →
       ∃ u : Nat, t ≤ u ∧ (tr u).req = st
 
-def isSettlementStep : AStep → Bool
+def isSettlementStep : Step → Bool
   | .r1 _ => true
   | _     => false
 
-def isCallbackStep : AStep → Bool
+def isCallbackStep : Step → Bool
   | .r4 _ _ => true
   | _       => false
 
-def isListenerStep : AStep → Bool
+def isListenerStep : Step → Bool
   | .r3 _ _ => true
   | _       => false
 
@@ -197,15 +197,15 @@ finite shadow of `WeaklyFairOn`.
 If the bounded version FAILED, the unbounded one would be false, so
 this is a real refutation channel rather than decoration. -/
 
-def enabledSteps (now : Nat) (s : ServerState) : List AStep :=
+def enabledSteps (now : Nat) (s : ServerState) : List Step :=
   (s.promises.flatMap fun p =>
-      (if enabledInternal (.r1 p.id) now s then [AStep.r1 p.id] else [])
-        ++ p.listeners.map (fun addr => AStep.r3 p.id addr)
-        ++ p.callbacks.map (fun x => AStep.r4 p.id x))
+      (if enabledInternal (.r1 p.id) now s then [Step.r1 p.id] else [])
+        ++ p.listeners.map (fun addr => Step.r3 p.id addr)
+        ++ p.callbacks.map (fun x => Step.r4 p.id x))
     ++ (s.tasks.flatMap fun t =>
-          (if enabledInternal (.r5 t.id) now s then [AStep.r5 t.id] else [])
+          (if enabledInternal (.r5 t.id) now s then [Step.r5 t.id] else [])
             ++ (if enabledInternal (.r6 t.id (now + 1000)) now s
-                then [AStep.r6 t.id (now + 1000)] else []))
+                then [Step.r6 t.id (now + 1000)] else []))
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl
@@ -218,13 +218,13 @@ def fairRounds : Nat → Nat → ServerState → ServerState
 /-- After enough fair rounds at a fixed instant: no settled promise
     retains an obligation, and every awaiter has either learned its
     wake or died. The finite shadow of `EventuallyAwaiterResumed`. -/
-def wakeMaterializes (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
+def wakeMaterializes (w : List (Step × Nat)) (horizon : Nat) : Bool :=
   let s := fairRounds 6 horizon (runFinA w).2
   s.promises.all fun p =>
     (p.project horizon).state == .pending ||
       (p.callbacks.isEmpty && p.listeners.isEmpty)
 
-def resumeRecorded (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
+def resumeRecorded (w : List (Step × Nat)) (horizon : Nat) : Bool :=
   let s0 := (runFinA w).2
   let s  := fairRounds 6 horizon s0
   s0.promises.all fun p =>
@@ -241,7 +241,7 @@ open Equivalence (extTags tgtTags)
 
 /-- The wake, end to end: a suspended awaiter, a settled awaited, and
     nothing but internal steps between them. -/
-def wWake : List (AStep × Nat) :=
+def wWake : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
@@ -253,7 +253,7 @@ example : resumeRecorded wWake 300 := by decide
 /-- TIMEOUT ALWAYS WINS: the awaiter's own promise dies while it waits.
     The obligation is still discharged, and the escape clause is the one
     that fires — the task reads fulfilled, not resumed. -/
-def wWakeTimedOut : List (AStep × Nat) :=
+def wWakeTimedOut : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),

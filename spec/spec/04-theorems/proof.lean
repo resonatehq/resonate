@@ -40,7 +40,7 @@ anywhere in this file):
      list induction over the opaque, shared occurrence term, its
      past-time writes absorbed because facts are stable under
      monotone time (`REq_touchWrite_le`).
-  6. **The assembly**: `stepAgreement` by cases on `AStep`, and
+  6. **The assembly**: `stepAgreement` by cases on `Step`, and
 
        `responseLockstepAbstract : ResponseLockstepAbstract`
 
@@ -305,7 +305,7 @@ theorem REq.mono {n n' : Nat} (h : n ≤ n') {sP sM : ServerState}
 
 /-- One step of the shared schedule agrees on `REq`-related states:
     equal responses, related again. -/
-def Agrees (st : AStep) : Prop :=
+def Agrees (st : Step) : Prop :=
   ∀ (n : Nat) (sP sM : ServerState), REq n sP sM →
     (stepOfAP st n sP).1 = (stepOfA st n sM).1
       ∧ REq n (stepOfAP st n sP).2 (stepOfA st n sM).2

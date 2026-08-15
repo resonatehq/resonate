@@ -5,7 +5,7 @@ namespace Abstraction
 
 open Equivalence (Request Response extTags tgtTags timerTags)
 
-def handleE (st : AStep) (now : Nat) : AbstractModel.E.H Response :=
+def handleE (st : Step) (now : Nat) : AbstractModel.E.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.E.promiseGet req now
   | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.E.promiseCreate req now
@@ -38,7 +38,7 @@ def handleE (st : AStep) (now : Nat) : AbstractModel.E.H Response :=
   | .idle       => return .τ
 
 def runFinE (mat : Bool) :
-    List (AStep × Nat) → AbstractModel.ServerState →
+    List (Step × Nat) → AbstractModel.ServerState →
     List Response × AbstractModel.ServerState
   | [], s => ([], s)
   | (st, n) :: w, s =>
@@ -46,17 +46,17 @@ def runFinE (mat : Bool) :
       let (rs, s'') := runFinE mat w s'
       (r :: rs, s'')
 
-def eqM (w : List (AStep × Nat)) : Bool :=
+def eqM (w : List (Step × Nat)) : Bool :=
   let (rs, s) := runFinE true w AbstractModel.ServerState.init
   let (rs', s') := runFinA w
-  rs == rs' && absStateEq s s'
+  rs == rs' && stateEq s s'
 
-def eqP (w : List (AStep × Nat)) : Bool :=
+def eqP (w : List (Step × Nat)) : Bool :=
   let (rs, s) := runFinE false w AbstractModel.ServerState.init
   let (rs', s') := runFinAP w
-  rs == rs' && absStateEq s s'
+  rs == rs' && stateEq s s'
 
-def eqBoth (w : List (AStep × Nat)) : Bool := eqM w && eqP w
+def eqBoth (w : List (Step × Nat)) : Bool := eqM w && eqP w
 
 /-! ### The bridge
 
@@ -91,7 +91,7 @@ example : eqBoth b3 := by decide
 example : eqBoth b4 := by decide
 example : eqBoth b5 := by decide
 
-def wTimerE : List (AStep × Nat) :=
+def wTimerE : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "tm", timeoutAt := 250, param := {}, tags := timerTags }), 300),
     (.api (.promiseGet { id := "tm" }), 300),
     (.r1 "tm", 400) ]
@@ -118,7 +118,7 @@ beside the claims about `E` itself — when the twins go, this file goes
 whole, and nothing has to be picked apart.
 
 `AgreesOn` compares the returned value with `=` and the resulting state
-with `absStateEq`, set equality per table. Not structural equality: `E`
+with `stateEq`, set equality per table. Not structural equality: `E`
 accumulates its writes and folds them at the end, so its lists come out
 in a different ORDER. Order was never observable — every read is
 `find?` by id — so set equality is the right relation, and structural
@@ -127,7 +127,7 @@ equality would be a false obligation. -/
 def AgreesOn {α : Type} (mat : Bool) (e : E.H α) (m : AbstractModel.H α) : Prop :=
   ∀ s : ServerState,
     (E.run mat e s).1 = (Id.run (m.run s)).1
-      ∧ absStateEq (E.run mat e s).2 (Id.run (m.run s)).2 = true
+      ∧ stateEq (E.run mat e s).2 (Id.run (m.run s)).2 = true
 
 /-! ## Layer 1 — the read layer
 
@@ -281,11 +281,11 @@ theorem processSchedule_agrees (mat : Bool) (id : String) (now : Nat) :
 `EqualsM`/`EqualsP` live in `effects-equiv.lean` and are stated there.
 What belongs here is the step from 27 per-step obligations to the whole
 machine: agreement composes along a script, because each step starts
-from the state the last one left and `absStateEq` is preserved by every
+from the state the last one left and `stateEq` is preserved by every
 handler. -/
 
 theorem machine_agreement_follows_from_steps :
-    (∀ (st : AStep) (now : Nat) (mat : Bool),
+    (∀ (st : Step) (now : Nat) (mat : Bool),
         AgreesOn mat (handleE st now) (if mat then handleA st now else handleAP st now))
     → (∀ w, eqM w = true) ∧ (∀ w, eqP w = true) := sorry
 

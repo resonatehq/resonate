@@ -72,7 +72,7 @@ def SameObservationAC (tr : ATrace) (tr' : Equivalence.Trace) : Prop :=
   ∃ φ : Nat → Nat,
     (∀ s t, s < t → φ s < φ t) ∧
     (∀ t, (tr t).req.isExternal = true →
-      AStep.api (tr' (φ t)).req = (tr t).req ∧
+      Step.api (tr' (φ t)).req = (tr t).req ∧
       (tr' (φ t)).now = (tr t).now ∧
       (tr' (φ t)).res = (tr t).res) ∧
     (∀ s, (tr' s).req.isExternal = true →
@@ -110,7 +110,7 @@ def wListen : List (Request × Nat) :=
   [ (.promiseCreate { id := "i", timeoutAt := 1000, param := {}, tags := [] }, 100),
     (.promiseRegisterListener { awaited := "i", address := "https://l" }, 200) ]
 
-def wListenA : List (AStep × Nat) := wListen.map (fun (rq, n) => (AStep.api rq, n))
+def wListenA : List (Step × Nat) := wListen.map (fun (rq, n) => (Step.api rq, n))
 
 def lastStatus (rs : List Response) : Option Nat :=
   match rs.getLast? with
@@ -151,7 +151,7 @@ def createStatus (rs : List Response) : Option Nat :=
 
 /-- All four machines refuse it, on the same request, with the same code. -/
 def refusedEverywhere (w : List (Request × Nat)) : Bool :=
-  let wA := w.map (fun (rq, n) => (AStep.api rq, n))
+  let wA := w.map (fun (rq, n) => (Step.api rq, n))
   createStatus (Equivalence.runFin Equivalence.handleP w).1 == some 400
     && createStatus (Equivalence.runFin Equivalence.handleM w).1 == some 400
     && createStatus (runFinA wA).1 == some 400
@@ -189,11 +189,11 @@ def normA (h : Nat) (s : AbstractModel.ServerState) : AbstractModel.ServerState 
     observations, normalized states equal. Symmetric evidence — read
     left-to-right it witnesses `ConcreteRefinesAbstract`, right-to-left
     `AbstractRefinesConcrete`. -/
-def pairCheck (wC : List (Request × Nat)) (wA : List (AStep × Nat)) (h : Nat) : Bool :=
+def pairCheck (wC : List (Request × Nat)) (wA : List (Step × Nat)) (h : Nat) : Bool :=
   let (rsC, sC) := Equivalence.runFin Equivalence.handleM wC
   let (rsA, sA) := runFinA wA
   Equivalence.extResponses wC rsC == extResponsesA wA rsA
-    && absStateEq (normC h sC) (normA h sA)
+    && stateEq (normC h sC) (normA h sA)
 
 -- R3, standalone: the concrete settle notifies inline; the abstract
 -- machine notifies by internal step.
@@ -202,8 +202,8 @@ def q2C : List (Request × Nat) :=
     (.promiseRegisterListener { awaited := "a", address := "https://l" }, 150),
     (.promiseSettle { id := "a", state := .resolved, value := {} }, 200) ]
 
-def q2A : List (AStep × Nat) :=
-  (q2C.map (fun (rq, n) => (AStep.api rq, n))) ++ [(.r3 "a" "https://l", 200)]
+def q2A : List (Step × Nat) :=
+  (q2C.map (fun (rq, n) => (Step.api rq, n))) ++ [(.r3 "a" "https://l", 200)]
 
 example : pairCheck q2C q2A 300 := by decide
 
@@ -215,8 +215,8 @@ def q3C : List (Request × Nat) :=
   [ (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }, 100),
     (.promiseSettle { id := "x", state := .resolved, value := {} }, 200) ]
 
-def q3A : List (AStep × Nat) :=
-  q3C.map (fun (rq, n) => (AStep.api rq, n))
+def q3A : List (Step × Nat) :=
+  q3C.map (fun (rq, n) => (Step.api rq, n))
 
 example : pairCheck q3C q3A 300 := by decide
 
@@ -228,7 +228,7 @@ def q4C : List (Request × Nat) :=
     (.promiseSettle { id := "a", state := .resolved, value := {} }, 200),
     (.τResume { awaited := "a", awaiter := "x" }, 200) ]
 
-def q4A : List (AStep × Nat) :=
+def q4A : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
@@ -246,7 +246,7 @@ def q5C : List (Request × Nat) :=
   [ (.promiseCreate { id := "i", timeoutAt := 250, param := {}, tags := [] }, 100),
     (.idle, 300) ]
 
-def q5A : List (AStep × Nat) :=
+def q5A : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "i", timeoutAt := 250, param := {}, tags := [] }), 100),
     (.r1 "i", 300) ]
 
@@ -260,7 +260,7 @@ def q6C : List (Request × Nat) :=
   [ (.promiseCreate { id := "tm", timeoutAt := 250, param := {}, tags := timerTags }, 300),
     (.promiseGet { id := "tm" }, 300) ]
 
-def q6A : List (AStep × Nat) := q6C.map (fun (rq, n) => (AStep.api rq, n))
+def q6A : List (Step × Nat) := q6C.map (fun (rq, n) => (Step.api rq, n))
 
 example : pairCheck q6C q6A 400 := by decide
 

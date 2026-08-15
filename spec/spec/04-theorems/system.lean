@@ -6,7 +6,7 @@ What the machine IS, as opposed to what it does. Four things, and the
 order is the order you need them in:
 
   1. **The alphabet** — the 21 requests a client can send, the
-     responses they get back, and `AStep`, the steps a run is a
+     responses they get back, and `Step`, the steps a run is a
      sequence of.
   2. **The driver** — `handle`, which takes a step to the transition it
      denotes, and `stepOf`, which runs that transition against a state.
@@ -34,12 +34,12 @@ Two changes came with the move, and both are subtractions.
 carry five τ constructors and an `idle` as well — `τPromiseTimeout`,
 `τTaskRetryTimeout`, `τTaskLeaseTimeout`, `τScheduleTimeout`, `τResume`
 — because the concrete driver dispatched everything through one type.
-`AStep` already names the internal steps as its own constructors, so
+`Step` already names the internal steps as its own constructors, so
 those five were a second, redundant spelling of them. `Request` is now
-exactly the external surface, which makes `AStep.isExternal` decidable
+exactly the external surface, which makes `Step.isExternal` decidable
 by shape rather than by asking the request.
 
-`AStep.r6` no longer carries a next-fire instant. It used to read
+`Step.r6` no longer carries a next-fire instant. It used to read
 `r6 (id : String) (next : Nat)`, and that `next` was the only value in
 the whole alphabet that the environment wrote into the store rather
 than a name of something to act on. `processRetryTimeout` now computes
@@ -152,7 +152,7 @@ open Equivalence
     The numbering has a hole: `r2` was `taskFulfillment` and was
     deleted. The gap is kept so that `r5` still means the lease
     timeout in every document, trace and checker that names it. -/
-inductive AStep
+inductive Step
   | api (rq : Request)
   | r1  (id : String)
   | r3  (id address : String)
@@ -164,7 +164,7 @@ inductive AStep
 
 /-- Client-visible steps. Now decidable by shape: with the τ
     constructors gone from `Request`, every `api` step is external. -/
-def AStep.isExternal : AStep → Bool
+def Step.isExternal : Step → Bool
   | .api _ => true
   | _      => false
 
@@ -176,7 +176,7 @@ deriving instance BEq for AbstractModel.TaskObject
 
 /-! ## The driver
 
-What a step DENOTES. `handle` takes an `AStep` to a transition in the
+What a step DENOTES. `handle` takes an `Step` to a transition in the
 machine's monad; `stepOf` runs that transition against a state and
 hands back the response and the state it leaves.
 
@@ -186,7 +186,7 @@ it is an argument to `run`. There used to be `handleA` and `handleAP`,
 two 30-case dispatch tables that differed in which namespace they
 named. -/
 
-def handle (st : AStep) (now : Nat) : AbstractModel.H Response :=
+def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.promiseGet req now
   | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.promiseCreate req now
@@ -217,7 +217,7 @@ def handle (st : AStep) (now : Nat) : AbstractModel.H Response :=
   | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
   | .idle       => return .τ
 
-def stepOf (mat : Bool) (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :
+def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) :
     Response × AbstractModel.ServerState :=
   AbstractModel.run mat (handle st now) s
 
@@ -245,7 +245,7 @@ property in `02-abstract/properties.lean` can refuse. -/
 
 structure StateAction where
   state : AbstractModel.ServerState
-  req   : AStep
+  req   : Step
   res   : Response
   now   : Nat
 
@@ -294,7 +294,7 @@ def promiseEq (a b : AbstractModel.PromiseObject) : Bool :=
     && a.settledAt == b.settledAt
     && eqSet a.callbacks b.callbacks && eqSet a.listeners b.listeners
 
-def absStateEq (a b : AbstractModel.ServerState) : Bool :=
+def stateEq (a b : AbstractModel.ServerState) : Bool :=
   eqSetBy promiseEq a.promises b.promises
     && eqSet a.tasks b.tasks
     && eqSet a.schedules b.schedules

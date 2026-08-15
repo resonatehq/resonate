@@ -16,24 +16,24 @@ open AbstractModel (ServerState PromiseObject TaskObject)
 
 Consecutive pairs, including the step out of the initial state. -/
 
-def stepsOfA (handle : AStep → Nat → AbstractModel.H Response) :
-    List (AStep × Nat) → ServerState → List (Nat × ServerState × ServerState)
+def stepsOfA (handle : Step → Nat → AbstractModel.H Response) :
+    List (Step × Nat) → ServerState → List (Nat × ServerState × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
       let (_, s') := Id.run ((handle st n).run s)
       (n, s, s') :: stepsOfA handle w s'
 
-def steps (w : List (AStep × Nat)) : List (Nat × ServerState × ServerState) :=
+def steps (w : List (Step × Nat)) : List (Nat × ServerState × ServerState) :=
   stepsOfA handleA w AbstractModel.ServerState.init
     ++ stepsOfA handleAP w AbstractModel.ServerState.init
 
-def stepWellFormedRun (w : List (AStep × Nat)) : Bool :=
+def stepWellFormedRun (w : List (Step × Nat)) : Bool :=
   (steps w).all (fun (n, a, b) => stepWellFormed n a b)
 
-def stepReport (ws : List (List (AStep × Nat))) : List String :=
+def stepReport (ws : List (List (Step × Nat))) : List String :=
   (ws.flatMap fun w => (steps w).flatMap (fun (n, a, b) => stepFailures n a b)).eraseDups
 
-def stepWitnesses (ws : List (List (AStep × Nat)))
+def stepWitnesses (ws : List (List (Step × Nat)))
     (p : ServerState → ServerState → Bool) : Bool :=
   ws.any fun w => (steps w).any (fun (_, a, b) => p a b)
 
@@ -236,23 +236,23 @@ The sweeper properties hold on internal steps and are FALSE on request steps.
 That is not a defect — it is what makes them stronger than the general
 edge tables, and it means they need their own walk. -/
 
-def stepsWithA (handle : AStep → Nat → AbstractModel.H Response) :
-    List (AStep × Nat) → ServerState → List (AStep × Nat × ServerState × ServerState)
+def stepsWithA (handle : Step → Nat → AbstractModel.H Response) :
+    List (Step × Nat) → ServerState → List (Step × Nat × ServerState × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
       let (_, s') := Id.run ((handle st n).run s)
       (st, n, s, s') :: stepsWithA handle w s'
 
-def isInternalStep : AStep → Bool
+def isInternalStep : Step → Bool
   | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
   | .r5 _ => true | .r6 _ _ => true | .r7 _ => true
   | _ => false
 
-def allSteps (w : List (AStep × Nat)) : List (AStep × Nat × ServerState × ServerState) :=
+def allSteps (w : List (Step × Nat)) : List (Step × Nat × ServerState × ServerState) :=
   stepsWithA handleA w AbstractModel.ServerState.init
     ++ stepsWithA handleAP w AbstractModel.ServerState.init
 
-def internalWellFormedRun (w : List (AStep × Nat)) : Bool :=
+def internalWellFormedRun (w : List (Step × Nat)) : Bool :=
   (allSteps w).all (fun (st, n, a, b) => !isInternalStep st || internalWellFormed n a b)
 
 theorem stage3_internal_sweep :
@@ -279,7 +279,7 @@ rather than in `properties-check.lean`. -/
     200. The task is pending with `retryAt = some 0` — due at the
     instant it was armed — so the retry step is enabled again
     immediately and dispatches forever. -/
-def wGapRetryBackwards : List (AStep × Nat) :=
+def wGapRetryBackwards : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p", ttl := 50, action := { id := "x", timeoutAt := 9000, param := {}, tags := [("resonate:target", "w1")] } }), 100),
     (.api (.taskRelease { id := "x", version := 1 }), 110),
     (.r6 "x" 0, 200) ]

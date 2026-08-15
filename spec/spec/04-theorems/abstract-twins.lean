@@ -39,7 +39,7 @@ open Equivalence (Request Response extTags tgtTags timerTags eqSet)
 
 /-- The projected abstract machine's step: `Projected` handlers, the
     SAME internal steps — the read discipline concerns handlers only. -/
-def handleAP (st : AStep) (now : Nat) : AbstractModel.H Response :=
+def handleAP (st : Step) (now : Nat) : AbstractModel.H Response :=
   match st with
   | .api (.promiseGet req)              => Response.promiseGet <$> AbstractModel.P.promiseGet req now
   | .api (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.P.promiseCreate req now
@@ -71,7 +71,7 @@ def handleAP (st : AStep) (now : Nat) : AbstractModel.H Response :=
   | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
   | .idle       => return .τ
 
-def stepOfAP (st : AStep) (now : Nat) (s : AbstractModel.ServerState) :
+def stepOfAP (st : Step) (now : Nat) (s : AbstractModel.ServerState) :
     Response × AbstractModel.ServerState :=
   Id.run ((handleAP st now).run s)
 
@@ -147,18 +147,18 @@ def LockstepAbstract : Prop :=
 
 /-! ### Instruments -/
 
-def runFinAP (w : List (AStep × Nat)) : List Response × AbstractModel.ServerState :=
+def runFinAP (w : List (Step × Nat)) : List Response × AbstractModel.ServerState :=
   Id.run ((w.mapM (fun (st, n) => handleAP st n)).run AbstractModel.ServerState.init)
 
 /-- Response lockstep: SAME script, responses pointwise equal — the
     strong form that is false at the concrete level. -/
-def respLockstepA (w : List (AStep × Nat)) : Bool :=
+def respLockstepA (w : List (Step × Nat)) : Bool :=
   (runFinAP w).1 == (runFinA w).1
 
 /-- Full lockstep: responses plus quiesced states. -/
-def twinCheckA (w : List (AStep × Nat)) (horizon : Nat) : Bool :=
+def twinCheckA (w : List (Step × Nat)) (horizon : Nat) : Bool :=
   respLockstepA w
-    && absStateEq (absQuiesced defaultRetry horizon (runFinAP w).2)
+    && stateEq (absQuiesced defaultRetry horizon (runFinAP w).2)
                   (absQuiesced defaultRetry horizon (runFinA w).2)
 
 set_option maxRecDepth 100000
@@ -175,7 +175,7 @@ refuted message lockstep. With decisions through the view, both
 machines refuse (no new work for the dead), and the script locksteps
 on both channels. -/
 
-def wLag : List (AStep × Nat) :=
+def wLag : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
     (.api (.taskGet { id := "x" }), 300),
     (.r5 "x", 300),
@@ -186,7 +186,7 @@ example : twinCheckA wLag 400 = true := by decide
 
 /-! ### The battery -/
 
-def b1 : List (AStep × Nat) :=
+def b1 : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
@@ -199,7 +199,7 @@ def b1 : List (AStep × Nat) :=
 
 example : twinCheckA b1 300 := by decide
 
-def b2 : List (AStep × Nat) :=
+def b2 : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
@@ -208,7 +208,7 @@ def b2 : List (AStep × Nat) :=
 
 example : twinCheckA b2 500 := by decide
 
-def b3 : List (AStep × Nat) :=
+def b3 : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "tm", timeoutAt := 300, param := {}, tags := timerTags }), 100),
     (.api (.promiseGet { id := "tm" }), 500),
     (.api (.promiseRegisterListener { awaited := "tm", address := "https://l" }), 500),
@@ -217,14 +217,14 @@ def b3 : List (AStep × Nat) :=
 
 example : twinCheckA b3 600 := by decide
 
-def b4 : List (AStep × Nat) :=
+def b4 : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
     (.api (.taskRelease { id := "y", version := 1 }), 150),
     (.api (.taskCreate { pid := "p1", ttl := 100, action := { id := "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 500) ]
 
 example : twinCheckA b4 500 := by decide
 
-def b5 : List (AStep × Nat) :=
+def b5 : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 1000, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskFence { id := "x", version := 1, action := .create { id := "c", timeoutAt := 3000, param := {}, tags := extTags } }), 200),
     (.api (.taskFence { id := "x", version := 1, action := .settle { id := "c", state := .resolved, value := {} } }), 300),
@@ -240,7 +240,7 @@ over the ADVERSARIAL alphabet, the choice-internal steps R5 and R6 included:
 no shared schedule, however hostile, splits the twins on either
 channel. -/
 
-def kernelsResp : List AStep :=
+def kernelsResp : List Step :=
   [ .api (.promiseCreate { id := "a", timeoutAt := 250, param := {}, tags := extTags }),
     .api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }),
     .api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }),
@@ -253,14 +253,14 @@ def kernelsResp : List AStep :=
     .r5 "x",
     .r6 "x" 9000 ]
 
-def seqsLenA (ks : List AStep) : Nat → List (List AStep)
+def seqsLenA (ks : List Step) : Nat → List (List Step)
   | 0 => [[]]
   | n + 1 => (seqsLenA ks n).flatMap (fun s => ks.map (fun k => s ++ [k]))
 
-def seqsUpToA (ks : List AStep) (n : Nat) : List (List AStep) :=
+def seqsUpToA (ks : List Step) (n : Nat) : List (List Step) :=
   (List.range (n + 1)).flatMap (seqsLenA ks)
 
-def instantiateA (ks : List AStep) : List (AStep × Nat) :=
+def instantiateA (ks : List Step) : List (Step × Nat) :=
   ks.mapIdx (fun i st => (st, 100 * (i + 1)))
 
 /-- Every script up to length 3 over the 11-request adversarial

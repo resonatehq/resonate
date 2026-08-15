@@ -34,37 +34,37 @@ reason `scheduleTimeoutsMirror` is unexercised in
 `invariant-check.lean`, and the same reason the Go checker rejects
 traces mentioning schedules. -/
 
-def statesOfA (handle : AStep → Nat → AbstractModel.H Response) :
-    List (AStep × Nat) → AbstractModel.ServerState → List (Nat × AbstractModel.ServerState)
+def statesOfA (handle : Step → Nat → AbstractModel.H Response) :
+    List (Step × Nat) → AbstractModel.ServerState → List (Nat × AbstractModel.ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
       let (_, s') := Id.run ((handle st n).run s)
       (n, s') :: statesOfA handle w s'
 
-def trace (w : List (AStep × Nat)) : List (Nat × AbstractModel.ServerState) :=
+def trace (w : List (Step × Nat)) : List (Nat × AbstractModel.ServerState) :=
   statesOfA handleA w AbstractModel.ServerState.init
     ++ statesOfA handleAP w AbstractModel.ServerState.init
 
-def wellFormedRun (w : List (AStep × Nat)) : Bool :=
+def wellFormedRun (w : List (Step × Nat)) : Bool :=
   (trace w).all (fun (n, s) => well_formed n s)
 
 /-- Which entries fail, by name — the shape a counterexample report
     needs, and the reason the catalogue carries its names as data. -/
-def report (ws : List (List (AStep × Nat))) : List String :=
+def report (ws : List (List (Step × Nat))) : List String :=
   (ws.flatMap fun w => (trace w).flatMap (fun (n, s) => failures n s)).eraseDups
 
-def witnesses (ws : List (List (AStep × Nat))) (p : AbstractModel.ServerState → Bool) : Bool :=
+def witnesses (ws : List (List (Step × Nat))) (p : AbstractModel.ServerState → Bool) : Bool :=
   ws.any fun w => (trace w).any (fun (_, s) => p s)
 
 /-! ### Closing the alphabet's blind spots -/
 
-def covInternal : List (AStep × Nat) :=
+def covInternal : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "i", timeoutAt := 1000, param := {}, tags := [] }), 100),
     (.api (.promiseRegisterListener { awaited := "i", address := "https://l" }), 110),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 120),
     (.api (.promiseRegisterCallback { awaited := "i", awaiter := "x" }), 130) ]
 
-def covListeners : List (AStep × Nat) :=
+def covListeners : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.api (.promiseRegisterListener { awaited := "a", address := "https://l1" }), 110),
     (.api (.promiseRegisterListener { awaited := "a", address := "https://l2" }), 120),
@@ -72,7 +72,7 @@ def covListeners : List (AStep × Nat) :=
     (.r3 "a" "https://l1", 210),
     (.r3 "a" "https://l2", 220) ]
 
-def covTwoTasks : List (AStep × Nat) :=
+def covTwoTasks : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
     (.api (.taskRelease { id := "x", version := 1 }), 120),
@@ -83,12 +83,12 @@ def covTwoTasks : List (AStep × Nat) :=
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
     task is what exercises `well_formed_task_halted_is_cleared`. -/
-def covHalt : List (AStep × Nat) :=
+def covHalt : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "h", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskHalt { id := "h" }), 110),
     (.api (.taskContinue { id := "h" }), 120) ]
 
-def battery : List (List (AStep × Nat)) :=
+def battery : List (List (Step × Nat)) :=
   [wLag, b1, b2, b3, b4, b5, covInternal, covListeners, covTwoTasks, covHalt]
 
 set_option maxRecDepth 100000
@@ -314,7 +314,7 @@ open AbstractModel.Properties (well_formed_task_ttl_positive
 
 /-- `ttl = 0` is accepted: the task is acquired with `expiresAt = now`,
     a lease already expired at the instant it was granted. -/
-def wGapTtlZero : List (AStep × Nat) :=
+def wGapTtlZero : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
 
 theorem gap_task_ttl_positive_is_violable :
@@ -324,7 +324,7 @@ theorem gap_task_ttl_positive_is_violable :
     its dispatch is enqueued to the empty address. -/
 def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
-def wGapEmptyTarget : List (AStep × Nat) :=
+def wGapEmptyTarget : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
     (.r6 "y" 9000, 110) ]
 
@@ -346,7 +346,7 @@ theorem gap_empty_target_reaches_the_outbox :
     dispatched, and it is not an error. -/
 def lateDelayTags : ServerModel.Tags := [("resonate:target", "w"), ("resonate:delay", "5000")]
 
-def wGapLateDelay : List (AStep × Nat) :=
+def wGapLateDelay : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
 
 theorem gap_promise_delay_before_deadline_is_violable :

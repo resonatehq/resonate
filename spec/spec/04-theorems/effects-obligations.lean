@@ -58,32 +58,32 @@ open AbstractModel
 open ServerModel
 
 def statesE (mat : Bool) :
-    List (AStep × Nat) → ServerState → List (Nat × ServerState)
+    List (Step × Nat) → ServerState → List (Nat × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
       let (_, s') := E.run mat (handleE st n) s
       (n, s') :: statesE mat w s'
 
 def stepsE (mat : Bool) :
-    List (AStep × Nat) → ServerState → List (Nat × ServerState × ServerState)
+    List (Step × Nat) → ServerState → List (Nat × ServerState × ServerState)
   | [], _ => []
   | (st, n) :: w, s =>
       let (_, s') := E.run mat (handleE st n) s
       (n, s, s') :: stepsE mat w s'
 
-def internalStepsE (mat : Bool) (w : List (AStep × Nat)) :
+def internalStepsE (mat : Bool) (w : List (Step × Nat)) :
     List (Nat × ServerState × ServerState) :=
   ((stepsE mat w ServerState.init).zip (w.map Prod.fst)).filterMap
     fun (t, st) => if isInternalStep st then some t else none
 
 /-- Every `.state` property in the catalogue, at every state `E` reaches,
     under both disciplines, for a script of any length. -/
-theorem effects_state_properties (mat : Bool) (w : List (AStep × Nat)) :
+theorem effects_state_properties (mat : Bool) (w : List (Step × Nat)) :
     (statesE mat w ServerState.init).all
       (fun (n, s) => Properties.well_formed n s) = true := sorry
 
 /-- Every `.trans` property, at every consecutive pair. -/
-theorem effects_step_properties (mat : Bool) (w : List (AStep × Nat)) :
+theorem effects_step_properties (mat : Bool) (w : List (Step × Nat)) :
     (stepsE mat w ServerState.init).all
       (fun (n, a, b) => Properties.stepWellFormed n a b) = true := sorry
 
@@ -92,7 +92,7 @@ theorem effects_step_properties (mat : Bool) (w : List (AStep × Nat)) :
     halt or continue a task, and it may settle a promise only by its
     deadline. False on request steps, which is what makes it a
     constraint rather than a restatement. -/
-theorem effects_internal_properties (mat : Bool) (w : List (AStep × Nat)) :
+theorem effects_internal_properties (mat : Bool) (w : List (Step × Nat)) :
     (internalStepsE mat w).all
       (fun (n, a, b) => Properties.internalWellFormed n a b) = true := sorry
 
@@ -100,7 +100,7 @@ theorem effects_internal_properties (mat : Bool) (w : List (AStep × Nat)) :
     materialized run from a projected one. Stronger than the two above
     taken together, and the reason `Env.mat` is an implementation
     choice rather than a protocol decision. -/
-theorem effects_properties_are_discipline_blind (w : List (AStep × Nat)) :
+theorem effects_properties_are_discipline_blind (w : List (Step × Nat)) :
     ((statesE true w ServerState.init).map (fun (n, s) => Properties.failures n s)
       = (statesE false w ServerState.init).map (fun (n, s) => Properties.failures n s)) := sorry
 
