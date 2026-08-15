@@ -113,5 +113,90 @@ theorem perPromise_applyAll (q : PromiseObject → Bool) :
         (perPromise_apply q e s hs (hw e (by simp)))
         (fun f hf => hw f (by simp [hf]))
 
+/-! ## Threading the hypothesis through a read
+
+The cost centre. Almost every `setPromise` in the machine writes `f p`
+for a `p` that came out of the state a moment earlier — `readPromise`
+then `setSettled`, `getPromise` then `addCallback`, and so on. So the
+per-write obligation is never "this promise is good" outright; it is
+"this promise is good BECAUSE the one it was derived from was, and `f`
+kept it good".
+
+That splits cleanly, and the split is why this is one lemma rather than
+thirty-six. `getPromise_sound` says a promise read out of the state
+inherits the state's per-promise property — once, for all `q`. What is
+left per property is a statement about the four transformations the
+machine applies, and those are about `PromiseObject` alone: no monad,
+no state, no handler. -/
+
+theorem getPromise_sound {q : PromiseObject → Bool} {s : ServerState}
+    {id : String} {p : PromiseObject}
+    (hs : PerPromise q s = true)
+    (h : s.promises.find? (·.id == id) = some p) : q p = true :=
+  List.all_eq_true.mp hs p (List.mem_of_find?_eq_some h)
+
+/-! ### The transformations
+
+Four functions produce every promise the machine ever stores, and each
+one is a statement about a `PromiseObject`. `project` is Fact P;
+`addCallback` and `addListener` are the obligation ledgers; a settle
+rewrites the verdict.
+
+Stated for `created_at ≤ timeout_at`, the first property to go through
+end to end. All four are `rfl`-shaped, because none of them touches
+either field — which is itself the content: the birth fields are
+immutable, and that is why the property is inductive. -/
+
+def qCreatedLeTimeout (p : PromiseObject) : Bool := p.createdAt ≤ p.timeoutAt
+
+theorem project_preserves_created_le_timeout (p : PromiseObject) (now : Nat) :
+    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.project now) = true := by
+  intro h
+  unfold PromiseObject.project
+  split
+  · split <;> simpa [qCreatedLeTimeout] using h
+  · simpa [qCreatedLeTimeout] using h
+
+theorem addCallback_preserves_created_le_timeout (p : PromiseObject) (a : String) :
+    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.addCallback a) = true := by
+  intro h
+  unfold PromiseObject.addCallback
+  split <;> simpa [qCreatedLeTimeout] using h
+
+theorem addListener_preserves_created_le_timeout (p : PromiseObject) (a : String) :
+    qCreatedLeTimeout p = true → qCreatedLeTimeout (p.addListener a) = true := by
+  intro h
+  unfold PromiseObject.addListener
+  split <;> simpa [qCreatedLeTimeout] using h
+
+/-- A settle rewrites `state`, `value` and `settledAt` and nothing else,
+    so the birth fields ride through untouched. -/
+theorem settle_preserves_created_le_timeout
+    (p : PromiseObject) (st : ServerModel.PromiseState)
+    (v : ServerModel.Value) (t : Option Nat) :
+    qCreatedLeTimeout p = true →
+    qCreatedLeTimeout { p with state := st, value := v, settledAt := t } = true := by
+  intro h; simpa [qCreatedLeTimeout] using h
+
+/-- And the one promise the machine builds from nothing rather than
+    from another promise: `createPromise`'s two birth shapes. Live,
+    `createdAt := now < req.timeoutAt`; born dead, both fields are
+    `req.timeoutAt` and the inequality is an equality. Neither needs a
+    hypothesis, which is what makes the property inductive rather than
+    merely true. -/
+theorem birth_satisfies_created_le_timeout
+    (req : ServerModel.PromiseCreateReq) (now : Nat) :
+    qCreatedLeTimeout
+      (if req.timeoutAt > now then
+        { id := req.id, state := .pending, param := req.param, tags := req.tags,
+          timeoutAt := req.timeoutAt, createdAt := now }
+       else
+        { id := req.id, state := if req.tags.isTimer then .resolved else .rejectedTimedout,
+          param := req.param, tags := req.tags, timeoutAt := req.timeoutAt,
+          createdAt := req.timeoutAt, settledAt := some req.timeoutAt }) = true := by
+  split
+  · rename_i h; simp [qCreatedLeTimeout]; omega
+  · simp [qCreatedLeTimeout]
+
 end Induction
 end Abstraction
