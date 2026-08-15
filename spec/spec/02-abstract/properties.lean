@@ -1271,12 +1271,13 @@ quantifies: take the catalogue, apply each entry to whatever its
 constructor says it takes — a `.state` property to a state, a `.trans`
 property to the pair.
 
-A `.state` entry is checked at BOTH endpoints. `Legal` applies it at
-every index of an infinite trace, where every state is some step's
-pre-state; a finite run has a last state that is nobody's pre-state, and
-checking both ends covers it with no special case. Both at the STEP's
-instant, which is stricter rather than weaker — the two `_lte_now`
-entries are monotone in `now`.
+This is `Legal`'s body, exactly: `.state` at the PRE-state, which is
+where `Legal` applies it. A finite run therefore leaves its last state
+without a `.state` check — nobody's pre-state — and the harness closes
+that explicitly with `stateHolds` rather than this fold quietly checking
+both ends. Quietly checking both ends is what it used to do, and it made
+the sweep evaluate something STRONGER than `Legal` while the docstring
+claimed they were the same.
 
 Each entry carries its `name`, and that is the portable part: an
 implementation reporting a violation reports the same string in Go,
@@ -1287,7 +1288,7 @@ specification's. -/
 def legalAt (now : Nat) (a b : ServerState) : Bool :=
   catalogue.all fun l =>
     match l.property with
-    | .state f => f now a && f now b
+    | .state f => f now a
     | .trans f => f now a b
 
 /-- The same fold restricted to the `.state` half — `legalAt` with the

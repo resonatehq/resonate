@@ -61,11 +61,14 @@ def allPairs (w : List (Step × Nat)) :=
   pairs true w AbstractModel.ServerState.init
     ++ pairs false w AbstractModel.ServerState.init
 
-/-- `Legal`, evaluated on a finite run. The SAME fold `Legal`
-    quantifies — `legalAt` in `properties.lean` — so the sweep and the
-    theorem are about one notion with no lemma between them. -/
+/-- `Legal`, evaluated on a finite run: its body at every index, which
+    is what `legalAt` is — plus the terminal state's `.state` half,
+    which an infinite trace would have checked at the next index and a
+    finite one has to close by hand. The second conjunct is the price of
+    the first being `Legal`'s body and not something stronger. -/
 def legalRun (w : List (Step × Nat)) : Bool :=
   (allPairs w).all (fun (n, a, b) => legalAt n a b)
+    && (allPairs w).all (fun (n, _, b) => stateHolds n b)
 
 /-- Which entries fail, by name. A HARNESS concern: the specification
     says what `legalAt` is, and collecting the names of what broke is
@@ -75,7 +78,7 @@ def legalRun (w : List (Step × Nat)) : Bool :=
 def failingNames (now : Nat) (a b : AbstractModel.ServerState) : List String :=
   AbstractModel.Properties.catalogue.filterMap fun l =>
     match l.property with
-    | .state f => if f now a && f now b then none else some l.name
+    | .state f => if f now a && f now b then none else some l.name  -- both, for the report
     | .trans f => if f now a b          then none else some l.name
 
 def report (ws : List (List (Step × Nat))) : List String :=
