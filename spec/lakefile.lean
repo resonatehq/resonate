@@ -7,9 +7,9 @@ package «resonate-spec» where
 /-! The package has two halves, and the directory layout says so.
 
 `spec/` is the specification. `valid/` is a trace checker built ON it —
-it imports `04-theorems`'s trace framework and modifies nothing. Siblings
-rather than nesting the checker inside the numbered specification
-directories, because one is the artifact and the other is a consumer. -/
+it imports `02-abstract` and modifies nothing. Siblings rather than
+nesting the checker inside the numbered specification directories,
+because one is the artifact and the other is a consumer. -/
 
 /-- The specification: protocol surface and the machine.
     `lake build spec` for the fast development loop. -/

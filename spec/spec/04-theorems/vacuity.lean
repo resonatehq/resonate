@@ -231,7 +231,7 @@ Two things, and neither is a gap that `decide` could close.
 many traces and, for each, infinitely many instants. It is the theorem;
 `decide` can only ever supply witnesses for it.
 
-And the catalogue is 95 entries, of which 33 are currently proved
+And the catalogue is 95 entries, of which 32 are currently proved
 inductive. The rest are backed by `properties-check.lean` and
 `properties-step.lean` — 1 464 scripts, both readings — which is a
 finite fact, exactly like everything in this file. -/
