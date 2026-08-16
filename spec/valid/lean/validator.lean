@@ -1,9 +1,9 @@
-import «04-theorems».«system»
+import «02-abstract».«system»
 
 /-!  # Admissibility checking — a shell around the specification
 
 Nothing in `spec/01-` … `spec/04-` is touched. This file imports the
-specification's own trace framework (`Request`, `Response`, `handleM`)
+specification's own trace framework (`Request`, `Response`, `handle`)
 and wraps it.
 
 ## The question
@@ -12,7 +12,7 @@ An implementation is observed. You see its EXTERNAL events — a request,
 the response it gave, and when. You do NOT see its internal steps:
 when a timeout fired, when a resume drained. The specification does not
 fix those either; the τ schedule is deliberately unspecified, which is
-exactly what `04-theorems/lazy.lean` and `eager.lean` are about.
+exactly what `Env.mat` is: the read discipline as a parameter.
 
 So "does the specification reproduce this trace" is the wrong question —
 there is no single trace to reproduce. The right one is:

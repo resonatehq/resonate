@@ -145,7 +145,7 @@ dials:
 
 and the induction in `entries.lean` / `trans.lean` is the work of
 turning the first column into the second's guarantees without the
-bounds — 33 of the 95 entries so far. -/
+bounds — 32 of the 95 entries so far, in `holds.lean`. -/
 
 /-! ## Where it flips
 
