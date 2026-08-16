@@ -96,7 +96,7 @@ theorem idle_of_internal {st : Step}
 
 /-- `.idle` really is a stutter: same state, and the response is silent. -/
 theorem step_idle (now : Nat) (s : ServerState) :
-    Abstraction.stepOf true .idle now s = (.τ, s) := rfl
+    Abstraction.stepOf true .idle now s = (.silent, s) := rfl
 
 /-! ## Timed schedules
 

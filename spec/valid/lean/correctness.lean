@@ -60,8 +60,9 @@ hypothesis to carry around — it is what `List Tau` MEANS. The predicate
 used to read `∃ σ : List Request, (∀ t ∈ σ, t.isExternal = false) ∧ …`,
 which put the invariant in a place every lemma had to re-establish.
 
-Internal steps are also self-guarding here — `handleM` refuses a τ whose
-obligation is not on the books and returns `.τ` — so the definition
+Internal steps are also self-guarding here — `handle` refuses an internal
+step whose obligation is not on the books and returns `silent` — so the
+definition
 quantifies over ARBITRARY schedules and needs no enabledness
 side-condition either. That is a property of the machine, not a
 convenience: the trace framework calls it being "OBLIGATION-GUARDED".

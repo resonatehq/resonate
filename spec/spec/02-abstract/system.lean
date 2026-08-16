@@ -43,13 +43,13 @@ named for what it is.
 Two changes came with the move, and both are subtractions.
 
 `Request` carries only the 21 requests a client can send. It used to
-carry five τ constructors and an `idle` as well — `τPromiseTimeout`,
-`τTaskRetryTimeout`, `τTaskLeaseTimeout`, `τScheduleTimeout`, `τResume`
-— because the concrete driver dispatched everything through one type.
-`Step` already names the internal steps as its own constructors, so
-those five were a second, redundant spelling of them. `Request` is now
-exactly the external surface, which makes `Step.isExternal` decidable
-by shape rather than by asking the request.
+carry five internal-step constructors and an `idle` as well — the
+promise timeout, the task retry and lease timeouts, the schedule, and
+the resume — because the concrete driver dispatched everything through
+one type. `Step` already names the internal steps as its own
+constructors, so those five were a second, redundant spelling of them.
+`Request` is now exactly the external surface, which makes
+`Step.isExternal` decidable by shape rather than by asking the request.
 
 `Step.r6` no longer carries a next-fire instant. It used to read
 `r6 (id : String) (next : Nat)`, and that `next` was the only value in
@@ -124,8 +124,14 @@ inductive Request
   | taskSearch              (req : TaskSearchReq)
   deriving Repr
 
-/-- Internal steps are silent: nobody outside is listening, so they all
-    answer `τ`. -/
+/-- Nobody outside is listening to an internal step, and a stutter step
+    does nothing at all, so both answer `silent` — the absence of a
+    client-visible response.
+
+    That it is one constructor rather than two is a limitation, not a
+    design: a declined internal step and a stutter step are currently
+    indistinguishable through this channel. Naming the outcomes of the
+    internal steps is the change that would separate them. -/
 inductive Response
   | promiseGet              (res : PromiseGetRes)
   | promiseCreate           (res : PromiseCreateRes)
@@ -148,7 +154,7 @@ inductive Response
   | taskHalt                (res : TaskHaltRes)
   | taskContinue            (res : TaskContinueRes)
   | taskSearch              (res : TaskSearchRes)
-  | τ
+  | silent
   deriving Repr, BEq
 
 end Equivalence
@@ -175,7 +181,7 @@ inductive Step
   | idle
   deriving Repr
 
-/-- Client-visible steps. Now decidable by shape: with the τ
+/-- Client-visible steps. Now decidable by shape: with the internal-step
     constructors gone from `Request`, every `api` step is external. -/
 def Step.isExternal : Step → Bool
   | .api _ => true
@@ -240,13 +246,13 @@ def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   | .api (.taskHalt req)                => Response.taskHalt <$> AbstractModel.taskHalt req now
   | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.taskContinue req now
   | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.taskSearch req now
-  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .τ
-  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .τ
-  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .τ
-  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .τ
-  | .r6 id      => do AbstractModel.Internal.processRetryTimeout id now; return .τ
-  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .τ
-  | .idle       => return .τ
+  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .silent
+  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .silent
+  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .silent
+  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .silent
+  | .r6 id      => do AbstractModel.Internal.processRetryTimeout id now; return .silent
+  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .silent
+  | .idle       => return .silent
 
 def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) :
     Response × AbstractModel.ServerState :=

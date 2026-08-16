@@ -50,8 +50,8 @@ lean_exe «realtrace_exe» where
   srcDir := "."
   root   := `«valid».«lean».real
 
-/-- The instants sweep: does firing a τ off the observation's instant ever
-    change what an observer sees? -/
+/-- The instants sweep: does firing an internal step off the
+    observation's instant ever change what an observer sees? -/
 lean_exe «gap» where
   srcDir := "."
   root   := `«valid».«lean».gap
