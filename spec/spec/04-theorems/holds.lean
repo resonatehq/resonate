@@ -321,5 +321,57 @@ theorem monotone_promise_listeners_grow_while_pending :
 
 end Along
 
+/-! ## Why the schema sometimes needs a strengthening
+
+The induction schema — holds at `init`, preserved by every step,
+therefore holds everywhere — is sound, and `invariant_along_trace`
+above is its proof. But it asks for something STRONGER than the
+property being true of every reachable state. It asks that the property
+be preserved from every state satisfying IT, reachable or not. Those
+are different sets, and the gap is where the interesting work lives.
+
+Here is the gap, concretely, in one catalogue entry.
+
+`sneaky` is a promise that is pending and carries a value. The entry
+`deadline_settlement_has_no_value` HOLDS there — the promise is not
+stamped at its deadline, so the entry has nothing to say. One ordinary
+step, the promise timeout, projects it: the settlement stamp becomes
+its deadline and the value rides along untouched. The entry now FAILS.
+
+So the entry is not preserved from an arbitrary state satisfying it,
+and no amount of tactic effort would have proved it. What is true is
+that `sneaky` is unreachable, and the reason is a DIFFERENT catalogue
+entry: a pending promise has no value. That is why the induction runs
+on the conjunction and the entry is recovered by weakening.
+
+Finding which entries need this — and which other entry each one needs
+— is the informative output of the exercise, not an obstacle to it. -/
+
+section NotInductiveAlone
+
+open AbstractModel
+
+def sneaky : ServerState :=
+  { promises := [{ id := "p", state := .pending, param := {},
+                   value := { data := some "x", headers := [] },
+                   tags := [], timeoutAt := 10, createdAt := 0 }] }
+
+theorem sneaky_satisfies_the_entry :
+    Properties.well_formed_promise_deadline_settlement_has_no_value 0 sneaky = true := by
+  decide
+
+theorem one_step_breaks_it :
+    Properties.well_formed_promise_deadline_settlement_has_no_value 20
+      (stepOf true (.r1 "p") 20 sneaky).2 = false := by
+  decide
+
+/-- And the reason `sneaky` never arises: it violates a different
+    entry. That entry is exactly the one the strengthening adds. -/
+theorem sneaky_is_unreachable_because :
+    Properties.well_formed_promise_pending_has_no_value 0 sneaky = false := by
+  decide
+
+end NotInductiveAlone
+
 end Holds
 end Abstraction
