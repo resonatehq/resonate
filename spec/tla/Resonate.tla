@@ -103,12 +103,16 @@ None == CHOOSE x : x \notin (Nat \cup Address \cup Pid)
 (* have no task, but they are keyed, written, and carry a deadline, which  *)
 (* is everything this machine needs of them.                               *)
 (*                                                                         *)
-(* Two changes from the Lean. `callbacks` and `listeners` are SETS, not    *)
+(* One change from the Lean: `callbacks` and `listeners` are SETS, not     *)
 (* lists -- they are ledgers, and `promiseEq` already compares them        *)
-(* without regard to order. And an object carries its own `clock`, the     *)
-(* Verus `Workflow.clock`: a monotone high-water mark, so that an object's *)
-(* notion of time never regresses even if the server's does. `clamp` is    *)
-(* what reads it.                                                          *)
+(* without regard to order.                                                *)
+(*                                                                         *)
+(* An object carries no clock. The Verus `Workflow.clock` is a per-        *)
+(* document high-water mark that exists because that executor writes to a  *)
+(* store which may serve a stale read, and `clamp` is what keeps the       *)
+(* document's own notion of time from regressing. That is a fact about     *)
+(* the store, not about the protocol. Here there is one clock, `now`, and  *)
+(* every step reads it directly.                                           *)
 (***************************************************************************)
 
 PromiseState == {"pending", "resolved", "rejected",
@@ -153,9 +157,8 @@ Origin ==
   \cup [kind : {"schedule"}, id : ScheduleId]
 
 Object ==
-       [kind : {"promise"},  promise  : Promise, task : Task \cup {None},
-                             clock    : Time]
-  \cup [kind : {"schedule"}, schedule : Schedule, clock : Time]
+       [kind : {"promise"},  promise  : Promise, task : Task \cup {None}]
+  \cup [kind : {"schedule"}, schedule : Schedule]
 
 Message ==
        [kind : {"execute"}, taskId  : TaskId, version : Nat]
@@ -529,10 +532,8 @@ Crash(r) ==
     /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
 (* The clock. Free-running and independent of everything else -- what makes
-   a deadline pass is time moving, not anyone acting. Bounded for TLC.
-   Not to be confused with `Object.clock`, which is a per-object high-water
-   mark that only ever moves when a step writes the object. This one is the
-   server reading the world; that one is the object remembering. *)
+   a deadline pass is time moving, not anyone acting. There is exactly one
+   of these, and every step reads it. Bounded for TLC. *)
 Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
