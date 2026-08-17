@@ -30,7 +30,7 @@
 (*     Perform          say one thing on the wire; the last one retires    *)
 (*                      the step                                           *)
 (*     Crash            the step vanishes; what it committed stays         *)
-(*     Tick             the clock advances                                 *)
+(*     Clock            time advances, on its own and unprompted           *)
 (*                                                                         *)
 (* WHERE THE INTERLEAVING IS. Between a step's Process and its last        *)
 (* Perform, any number of other steps may run to completion. So a step     *)
@@ -529,8 +529,11 @@ Crash(r) ==
     /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
 (* The clock. Free-running and independent of everything else -- what makes
-   a deadline pass is time moving, not anyone acting. Bounded for TLC. *)
-Tick ==
+   a deadline pass is time moving, not anyone acting. Bounded for TLC.
+   Not to be confused with `Object.clock`, which is a per-object high-water
+   mark that only ever moves when a step writes the object. This one is the
+   server reading the world; that one is the object remembering. *)
+Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
     /\ UNCHANGED <<objects, timeouts, outbox, steps>>
@@ -551,7 +554,7 @@ Next ==
     \/ \E ev \in ExternalEvent : SubmitExternal(ev)
     \/ \E ev \in InternalEvent : SubmitInternal(ev)
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
-    \/ Tick
+    \/ Clock
 
 (* A step in flight must make progress, or "the server answers" is not a
    claim this machine makes. An internal event that stays enabled must
@@ -562,7 +565,7 @@ Next ==
 Fairness ==
     /\ \A r  \in Rid           : WF_vars(Process(r) \/ Perform(r))
     /\ \A ev \in InternalEvent : WF_vars(SubmitInternal(ev))
-    /\ WF_vars(Tick)
+    /\ WF_vars(Clock)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
