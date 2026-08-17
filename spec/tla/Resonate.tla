@@ -75,6 +75,9 @@ CONSTANTS
     Materialise,        \* `Env.mat`: does a read PERSIST a projected settlement?
     RetryTimeout,       \* `ServerConfig.retryTimeout` -- the redispatch cadence
     MaxTime,            \* clock bound, so TLC has a finite state space
+    Rid,                \* step identities. FINITE, and its size is the
+                        \* concurrency knob: |Rid| is how many steps may be in
+                        \* flight at once. See WHY A STEP HAS AN IDENTITY
     Handle(_, _)        \* the handler table -- see WHAT A HANDLER IS, below
 
 (* A task is keyed by the promise it drives: `setTask { id := p.id, .. }`
@@ -83,7 +86,6 @@ CONSTANTS
 TaskId == PromiseId
 
 Time == 0 .. MaxTime
-Rid  == Nat
 None == CHOOSE x : x \notin (Nat \cup Address \cup Pid)
 
 -----------------------------------------------------------------------------
@@ -289,12 +291,11 @@ VARIABLES
     timeouts,   \* SUBSET Entry -- the wheel
     outbox,     \* SUBSET OutEntry, at most one entry per MsgKey
     steps,      \* [Rid -> InFlight] -- the requests currently in flight
-    now,        \* the clock. NOT part of the store: a server does not own
+    now         \* the clock. NOT part of the store: a server does not own
                 \* the time, it reads it. Two machines at the same state
                 \* and different instants are at the same state
-    nextRid     \* fresh step identifiers
 
-vars == <<objects, timeouts, outbox, steps, now, nextRid>>
+vars == <<objects, timeouts, outbox, steps, now>>
 
 (* One thing a step still has to say after it has committed. `send` puts a
    message on the wire; `respond` answers the client and is a no-op on
@@ -310,12 +311,48 @@ Effect ==
   \cup [op : {"respond"}, res   : Response \cup {Silent}]
 
 InFlight ==
-    [ rid     : Rid,
-      ev      : Event,
+    [ ev      : Event,
       phase   : {"process", "perform"},
       pending : Seq(Effect) ]
 
-Fresh(r, ev) == [rid |-> r, ev |-> ev, phase |-> "process", pending |-> << >>]
+Fresh(ev) == [ev |-> ev, phase |-> "process", pending |-> << >>]
+
+(***************************************************************************)
+(* WHY A STEP HAS AN IDENTITY                                              *)
+(*                                                                         *)
+(* It carries no information. A step IS its event, its phase and what it   *)
+(* has left to say -- the identity is not a field of `InFlight`, and an    *)
+(* earlier draft that made it one was storing the map's key inside the     *)
+(* map's value.                                                            *)
+(*                                                                         *)
+(* The KEY still has to exist, for one reason: two steps that are equal in *)
+(* every field are still two steps. Two clients sending the same request   *)
+(* at the same moment is not a hypothetical -- it is the retry -- and a    *)
+(* set of records would silently make them one. `steps` is a function      *)
+(* rather than a set so that a duplicate is a duplicate, and so that       *)
+(* `Process(r)` has something to name.                                     *)
+(*                                                                         *)
+(* `Rid` is a CONSTANT and finite. Two things follow, both wanted:         *)
+(*                                                                         *)
+(*   - identities are MINTED BY CHOICE, `\E r \in Rid \ DOMAIN steps`, not *)
+(*     by a counter. A counter would be a variable that never repeats a    *)
+(*     value, so no state would ever repeat either, and TLC would walk an  *)
+(*     infinite state space for a machine whose real state is finite.      *)
+(*     Nothing reads the order steps arrived in, so nothing misses it.     *)
+(*                                                                         *)
+(*   - |Rid| bounds how many steps are in flight at once. That is the      *)
+(*     concurrency knob, and it belongs in the model file where you can    *)
+(*     turn it: |Rid| = 1 is the Lean machine, |Rid| = 2 is where the      *)
+(*     interesting things start.                                           *)
+(*                                                                         *)
+(* Identities are REUSED after a step retires, which is sound only while   *)
+(* nothing outlives a step and names it. Nothing does: the response        *)
+(* vanishes when it is given. In the Verus executor the identity is not a  *)
+(* modelling handle but a return address -- `Effect::Respond { rid,        *)
+(* status }` has to reach the caller that asked -- and the day this        *)
+(* machine grows a reply channel, reuse stops being free and `rid` becomes *)
+(* protocol.                                                               *)
+(***************************************************************************)
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -400,8 +437,7 @@ Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
    response it gives for nonsense is part of the protocol. *)
 SubmitExternal(ev) ==
     /\ ev \in ExternalEvent
-    /\ steps'   = Put(steps, nextRid, Fresh(nextRid, ev))
-    /\ nextRid' = nextRid + 1
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
 (* The server takes a step on its own initiative: a due entry, or a name
@@ -410,8 +446,7 @@ SubmitExternal(ev) ==
 SubmitInternal(ev) ==
     /\ ev \in InternalEvent
     /\ Fires(ev)
-    /\ steps'   = Put(steps, nextRid, Fresh(nextRid, ev))
-    /\ nextRid' = nextRid + 1
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
 (* READ, DECIDE, AND COMMIT -- one atomic action, against one state.
@@ -436,7 +471,7 @@ Process(r) ==
                                   [i \in 1 .. Len(out.sends) |->
                                       [op |-> "send", entry |-> out.sends[i]]]
                                   \o << [op |-> "respond", res |-> out.res] >>]
-    /\ UNCHANGED <<outbox, now, nextRid>>
+    /\ UNCHANGED <<outbox, now>>
 
 (* Say one thing. When it was the last thing, the step retires -- which is
    why the pending list always ends with a `respond` and never empties on
@@ -454,7 +489,7 @@ Perform(r) ==
     /\ steps' = IF Len(steps[r].pending) = 1
                 THEN Drop(steps, r)
                 ELSE [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<objects, timeouts, now, nextRid>>
+    /\ UNCHANGED <<objects, timeouts, now>>
 
 (* The step disappears. What it committed stays committed; a PREFIX of
    what it had to say was said, and the rest never will be. No response is
@@ -463,14 +498,14 @@ Perform(r) ==
 Crash(r) ==
     /\ r \in DOMAIN steps
     /\ steps' = Drop(steps, r)
-    /\ UNCHANGED <<objects, timeouts, outbox, now, nextRid>>
+    /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
 (* The clock. Free-running and independent of everything else -- what makes
    a deadline pass is time moving, not anyone acting. Bounded for TLC. *)
 Tick ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ UNCHANGED <<objects, timeouts, outbox, steps, nextRid>>
+    /\ UNCHANGED <<objects, timeouts, outbox, steps>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -483,7 +518,6 @@ Init ==
     /\ outbox   = {}
     /\ steps    = [x \in {} |-> x]
     /\ now      = 0
-    /\ nextRid  = 0
 
 Next ==
     \/ \E ev \in ExternalEvent : SubmitExternal(ev)
@@ -520,7 +554,6 @@ TypeOK ==
     /\ \A a, b \in outbox : MsgKey(a) = MsgKey(b) => a = b
     /\ PartialFn(steps, Rid, InFlight)
     /\ now \in Time
-    /\ nextRid \in Nat
     (* an object is of the kind its key says *)
     /\ \A o \in DOMAIN objects : objects[o].kind = o.kind
     (* a step in "process" has decided nothing; a step in "perform" always
