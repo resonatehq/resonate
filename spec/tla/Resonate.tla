@@ -22,7 +22,7 @@
 (*     steps      what is in flight. Volatile: a crash drops one and       *)
 (*                nothing durable refers to it                             *)
 (*                                                                         *)
-(* and five transitions:                                                   *)
+(* and six transitions:                                                    *)
 (*                                                                         *)
 (*     SubmitExternal   a client request arrives                           *)
 (*     SubmitInternal   the server takes a step on its own initiative      *)
@@ -62,13 +62,12 @@
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS
-    PromiseId,          \* promise identifiers -- also task identifiers
-    ScheduleId,         \* schedule identifiers
+    Origin,             \* the first half of an identifier
+    Rest,               \* the second half
     Address,            \* message addresses: `resonate:target`, listener addresses
     Pid,                \* worker process identifiers
     Value,              \* opaque payloads: param, value
     Tags,               \* opaque tag maps
-    Cron,               \* opaque cron expressions
     Ttl,                \* the lease lengths a worker may ask for
     Response,           \* opaque handler responses (status + records)
     Silent,             \* the response of an internal step: nobody is listening
@@ -80,10 +79,21 @@ CONSTANTS
                         \* flight at once. See WHY A STEP HAS AN IDENTITY
     Handle(_, _)        \* the handler table -- see WHAT A HANDLER IS, below
 
-(* A task is keyed by the promise it drives: `setTask { id := p.id, .. }`
-   everywhere in the Lean. One identifier, two roles -- and here, one
-   object. *)
-TaskId == PromiseId
+(***************************************************************************)
+(* THE IDENTIFIER                                                          *)
+(*                                                                         *)
+(* An identifier is a PAIR, and the pair is what is unique -- `rest` alone *)
+(* is not. Both halves are opaque here: what an origin denotes is not      *)
+(* something any transition in this module reads, and the moment it        *)
+(* becomes something the protocol reads it stops being a constant.         *)
+(*                                                                         *)
+(* One identifier names one object, and an object is a promise and, if the *)
+(* promise is targeted, the task that drives it. That is why there is no   *)
+(* separate task identifier: `setTask { id := p.id, .. }` everywhere in    *)
+(* the Lean, one name for both roles.                                      *)
+(***************************************************************************)
+
+Id == [origin : Origin, rest : Rest]
 
 Time == 0 .. MaxTime
 None == CHOOSE x : x \notin (Nat \cup Address \cup Pid)
@@ -99,9 +109,13 @@ None == CHOOSE x : x \notin (Nat \cup Address \cup Pid)
 (* `setSettled` -- settle the promise, fulfill the task -- ONE write       *)
 (* rather than two that a reader could catch half-done.                    *)
 (*                                                                         *)
-(* Schedules are the second kind of object. They are not promises and      *)
-(* have no task, but they are keyed, written, and carry a deadline, which  *)
-(* is everything this machine needs of them.                               *)
+(* There is nothing else. Schedules are not objects and are not modelled   *)
+(* here: a schedule creates promises on a cron, which makes it a source of *)
+(* events rather than a thing the protocol acts on, and folding it in      *)
+(* would have cost a second key space, a second deadline kind and a tagged *)
+(* union, to say nothing this module is trying to say. `scheduleGet`,      *)
+(* `scheduleCreate`, `scheduleDelete`, `scheduleSearch` and the Lean's     *)
+(* `r7` are out of the alphabet with it.                                   *)
 (*                                                                         *)
 (* One change from the Lean: `callbacks` and `listeners` are SETS, not     *)
 (* lists -- they are ledgers, and `promiseEq` already compares them        *)
@@ -128,7 +142,7 @@ Promise ==
       timeoutAt : Time,                \* deadline -- armed as "promise"
       createdAt : Time,
       settledAt : Time \cup {None},
-      callbacks : SUBSET TaskId,       \* awaiters to resume when this settles
+      callbacks : SUBSET Id,           \* awaiters to resume when this settles
       listeners : SUBSET Address ]     \* addresses to notify when this settles
 
 Task ==
@@ -138,31 +152,13 @@ Task ==
       pid       : Pid  \cup {None},
       expiresAt : Time \cup {None},    \* deadline -- armed as "lease"
       retryAt   : Time \cup {None},    \* deadline -- armed as "retry"
-      resumes   : SUBSET PromiseId ]   \* triggers buffered while not suspended
+      resumes   : SUBSET Id ]          \* triggers buffered while not suspended
 
-Schedule ==
-    [ cron           : Cron,
-      promiseId      : PromiseId,
-      promiseTimeout : Nat,
-      promiseParam   : Value,
-      promiseTags    : Tags,
-      nextRunAt      : Time,           \* deadline -- armed as "schedule"
-      lastRunAt      : Time \cup {None},
-      createdAt      : Time ]
-
-(* What an object is keyed by. Promises and schedules are separate
-   namespaces in the protocol, so the key carries which one it is. *)
-Origin ==
-       [kind : {"promise"},  id : PromiseId]
-  \cup [kind : {"schedule"}, id : ScheduleId]
-
-Object ==
-       [kind : {"promise"},  promise  : Promise, task : Task \cup {None}]
-  \cup [kind : {"schedule"}, schedule : Schedule]
+Object == [promise : Promise, task : Task \cup {None}]
 
 Message ==
-       [kind : {"execute"}, taskId  : TaskId, version : Nat]
-  \cup [kind : {"unblock"}, promise : PromiseId, state : PromiseState]
+       [kind : {"execute"}, taskId  : Id, version : Nat]
+  \cup [kind : {"unblock"}, promise : Id, state : PromiseState]
 
 OutEntry == [address : Address, message : Message]
 
@@ -178,8 +174,8 @@ MsgKey(e) ==
 (* THE TIMEOUTS                                                            *)
 (*                                                                         *)
 (* The wheel. Every entry names a deadline that an object already carries: *)
-(* `promise` is `Promise.timeoutAt`, `lease` is `Task.expiresAt`, `retry`  *)
-(* is `Task.retryAt`, `schedule` is `Schedule.nextRunAt`.                  *)
+(* `promise` is `Promise.timeoutAt`, `lease` is `Task.expiresAt`, and      *)
+(* `retry` is `Task.retryAt`.                                              *)
 (*                                                                         *)
 (* So the wheel is REDUNDANT, and that is the point of having it. It is an *)
 (* index kept by a different mechanism than the thing it indexes, which    *)
@@ -195,25 +191,20 @@ MsgKey(e) ==
 (* with the coalescing not yet done, and a strictly easier obligation.     *)
 (***************************************************************************)
 
-DeadlineKind == {"promise", "lease", "retry", "schedule"}
+DeadlineKind == {"promise", "lease", "retry"}
 
-Entry == [at : Time, origin : Origin, kind : DeadlineKind]
+Entry == [at : Time, id : Id, kind : DeadlineKind]
 
 (* The deadline an object actually carries for a given kind -- what the
    wheel is an index OF. `None` when the object has no such deadline
    live: a settled promise has no timeout, an unacquired task no lease. *)
 Deadline(obj, kind) ==
     CASE kind = "promise" ->
-             IF obj.kind = "promise" /\ obj.promise.state = "pending"
-             THEN obj.promise.timeoutAt ELSE None
+             IF obj.promise.state = "pending" THEN obj.promise.timeoutAt ELSE None
       [] kind = "lease" ->
-             IF obj.kind = "promise" /\ obj.task /= None
-             THEN obj.task.expiresAt ELSE None
+             IF obj.task /= None THEN obj.task.expiresAt ELSE None
       [] kind = "retry" ->
-             IF obj.kind = "promise" /\ obj.task /= None
-             THEN obj.task.retryAt ELSE None
-      [] kind = "schedule" ->
-             IF obj.kind = "schedule" THEN obj.schedule.nextRunAt ELSE None
+             IF obj.task /= None THEN obj.task.retryAt ELSE None
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -228,48 +219,42 @@ Deadline(obj, kind) ==
 (* internal one only when the server has a reason to take it.              *)
 (***************************************************************************)
 
-PromiseCreateReq   == [id : PromiseId, timeoutAt : Time, param : Value, tags : Tags]
-PromiseSettleReq   == [id : PromiseId, state : PromiseState, value : Value]
-PromiseCallbackReq == [awaited : PromiseId, awaiter : PromiseId]
-TaskRef            == [id : TaskId, version : Nat]
+PromiseCreateReq   == [id : Id, timeoutAt : Time, param : Value, tags : Tags]
+PromiseSettleReq   == [id : Id, state : PromiseState, value : Value]
+PromiseCallbackReq == [awaited : Id, awaiter : Id]
+TaskRef            == [id : Id, version : Nat]
 
 ExternalEvent ==
-       [kind : {"promiseGet"},              id      : PromiseId]
+       [kind : {"promiseGet"},              id      : Id]
   \cup [kind : {"promiseCreate"},           req     : PromiseCreateReq]
   \cup [kind : {"promiseSettle"},           req     : PromiseSettleReq]
   \cup [kind : {"promiseRegisterCallback"}, req     : PromiseCallbackReq]
-  \cup [kind : {"promiseRegisterListener"}, awaited : PromiseId, address : Address]
+  \cup [kind : {"promiseRegisterListener"}, awaited : Id, address : Address]
   \cup [kind : {"promiseSearch"}]
-  \cup [kind : {"scheduleGet"},             id      : ScheduleId]
-  \cup [kind : {"scheduleCreate"},          id      : ScheduleId, cron : Cron,
-                                            promiseId : PromiseId, promiseTimeout : Nat,
-                                            promiseParam : Value, promiseTags : Tags]
-  \cup [kind : {"scheduleDelete"},          id      : ScheduleId]
-  \cup [kind : {"scheduleSearch"}]
-  \cup [kind : {"taskGet"},                 id      : TaskId]
+  \cup [kind : {"taskGet"},                 id      : Id]
   \cup [kind : {"taskCreate"},              pid     : Pid, ttl : Ttl,
                                             action  : PromiseCreateReq]
-  \cup [kind : {"taskAcquire"},             id      : TaskId, version : Nat,
+  \cup [kind : {"taskAcquire"},             id      : Id, version : Nat,
                                             pid     : Pid, ttl : Ttl]
-  \cup [kind : {"taskFence"},               id      : TaskId, version : Nat,
+  \cup [kind : {"taskFence"},               id      : Id, version : Nat,
                                             action  : PromiseCreateReq \cup PromiseSettleReq]
   \cup [kind : {"taskHeartbeat"},           pid     : Pid, tasks : SUBSET TaskRef]
-  \cup [kind : {"taskSuspend"},             id      : TaskId, version : Nat,
+  \cup [kind : {"taskSuspend"},             id      : Id, version : Nat,
                                             actions : SUBSET PromiseCallbackReq]
-  \cup [kind : {"taskFulfill"},             id      : TaskId, version : Nat,
+  \cup [kind : {"taskFulfill"},             id      : Id, version : Nat,
                                             action  : PromiseSettleReq]
-  \cup [kind : {"taskRelease"},             id      : TaskId, version : Nat]
-  \cup [kind : {"taskHalt"},                id      : TaskId]
-  \cup [kind : {"taskContinue"},            id      : TaskId]
+  \cup [kind : {"taskRelease"},             id      : Id, version : Nat]
+  \cup [kind : {"taskHalt"},                id      : Id]
+  \cup [kind : {"taskContinue"},            id      : Id]
   \cup [kind : {"taskSearch"}]
 
-(* The steps no client asks for. Two shapes, not six, and the split is by
+(* The steps no client asks for. Two shapes, not five, and the split is by
    WHAT ENABLES THEM rather than by what they do:
 
-     - a due wheel entry. This is the Lean's r1, r5, r6 and r7 -- promise
-       timeout, lease timeout, retry dispatch, schedule -- collapsed into
-       one event, because with the deadline in the entry there is nothing
-       left to distinguish them at this altitude. It is the Verus
+     - a due wheel entry. This is the Lean's r1, r5 and r6 -- promise
+       timeout, lease timeout, retry dispatch -- collapsed into one event,
+       because with the deadline in the entry there is nothing left to
+       distinguish them at this altitude. It is the Verus
        `Input::Tick`, which rides only on an armed entry that is due:
        "everything else the machine does on its own is a TIMEOUT TICK".
 
@@ -279,8 +264,8 @@ ExternalEvent ==
        written down next to it. *)
 InternalEvent ==
        [kind : {"timeout"},       entry : Entry]
-  \cup [kind : {"listenerDrain"}, id    : PromiseId, address : Address]  \* r3
-  \cup [kind : {"callbackDrain"}, id    : PromiseId, awaiter : TaskId]   \* r4
+  \cup [kind : {"listenerDrain"}, id    : Id, address : Address]  \* r3
+  \cup [kind : {"callbackDrain"}, id    : Id, awaiter : Id]      \* r4
 
 Event == ExternalEvent \cup InternalEvent
 
@@ -290,7 +275,7 @@ Event == ExternalEvent \cup InternalEvent
 (***************************************************************************)
 
 VARIABLES
-    objects,    \* [Origin -> Object], partial: DOMAIN is what exists
+    objects,    \* [Id -> Object], partial: DOMAIN is what exists
     timeouts,   \* SUBSET Entry -- the wheel
     outbox,     \* SUBSET OutEntry, at most one entry per MsgKey
     steps,      \* [Rid -> InFlight] -- the requests currently in flight
@@ -434,9 +419,9 @@ Env ==
 (* `processLeaseTimeout`.                                                  *)
 (***************************************************************************)
 
-Live(id) == [kind |-> "promise", id |-> id] \in DOMAIN objects
+Live(id) == id \in DOMAIN objects
 
-Prom(id) == objects[[kind |-> "promise", id |-> id]].promise
+Prom(id) == objects[id].promise
 
 (* Settled AS READ: a pending promise past its deadline is settled whether
    or not anyone has written that down yet. `PromiseObject.project`. *)
@@ -580,14 +565,12 @@ PartialFn(f, D, R) ==
     /\ \A k \in DOMAIN f : f[k] \in R
 
 TypeOK ==
-    /\ PartialFn(objects, Origin, Object)
+    /\ PartialFn(objects, Id, Object)
     /\ timeouts \subseteq Entry
     /\ outbox \subseteq OutEntry
     /\ \A a, b \in outbox : MsgKey(a) = MsgKey(b) => a = b
     /\ PartialFn(steps, Rid, InFlight)
     /\ now \in Time
-    (* an object is of the kind its key says *)
-    /\ \A o \in DOMAIN objects : objects[o].kind = o.kind
     (* a step in "process" has decided nothing; a step in "perform" always
        has at least its own response left to give *)
     /\ \A r \in DOMAIN steps :
@@ -599,8 +582,8 @@ TypeOK ==
    happens. Stated to be measured, not because it must hold. *)
 WheelSound ==
     \A e \in timeouts :
-        /\ e.origin \in DOMAIN objects
-        /\ Deadline(objects[e.origin], e.kind) = e.at
+        /\ e.id \in DOMAIN objects
+        /\ Deadline(objects[e.id], e.kind) = e.at
 
 (* Every deadline that exists is on the wheel. Violations are SILENCE: a
    timeout that never fires, and nothing downstream recovers. This is the
@@ -609,7 +592,7 @@ WheelSound ==
 WheelComplete ==
     \A o \in DOMAIN objects, k \in DeadlineKind :
         Deadline(objects[o], k) /= None =>
-            [at |-> Deadline(objects[o], k), origin |-> o, kind |-> k] \in timeouts
+            [at |-> Deadline(objects[o], k), id |-> o, kind |-> k] \in timeouts
 
 (* The promise and its task are one unit -- the reason for fusing them.
    A settled promise never coexists with an unfulfilled task, at any
@@ -618,8 +601,7 @@ WheelComplete ==
    interleave between. *)
 UnitCoherent ==
     \A o \in DOMAIN objects :
-        (/\ objects[o].kind = "promise"
-         /\ objects[o].promise.state /= "pending"
+        (/\ objects[o].promise.state /= "pending"
          /\ objects[o].task /= None) => objects[o].task.state = "fulfilled"
 
 -----------------------------------------------------------------------------
@@ -646,8 +628,21 @@ MultiUnitWrites ==
        action list; `callbackDrain` writes the awaited promise (striking
        the callback) and the awaiter's task (resuming it). Each needs
        either a transaction or a document big enough to hold both ends --
-       which is what Verus's `Workflow.promises: Map<Id, Promise>` is. *)
+       which is what Verus's `Workflow.promises: Map<Id, Promise>` is.
+
+       Now that an identifier is a pair, the obligation has a shape it did
+       not have before: SAME-ORIGIN and CROSS-ORIGIN multi-unit writes are
+       different problems. If the two ends of every callback share an
+       origin, a per-origin document discharges all three at once and the
+       assumption costs nothing. If they can differ, only a transaction
+       will do. `SameOrigin` below is the conjecture; nothing in this
+       module makes it true, and whether it holds is a question for the
+       protocol rather than for the model. *)
     {"promiseRegisterCallback", "taskSuspend", "callbackDrain"}
+
+SameOrigin ==
+    \A o \in DOMAIN objects :
+        \A w \in objects[o].promise.callbacks : w.origin = o.origin
 
 Draining(r) == steps[r].phase = "perform"
 
