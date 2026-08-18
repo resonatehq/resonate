@@ -238,7 +238,54 @@ Process(r) ==
    `Fenced` is a CONSTANT so the fence can be switched OFF and the
    refinement made to prove its own necessity: with `Fenced = FALSE` a
    stale decision lands, and `Spec => A!Spec` should fail and hand back
-   the trace that shows why. *)
+   the trace that shows why.
+
+   THE OUTBOX IS TRANSACTIONAL, AND THE REFINEMENT IS WHAT DEMANDED IT.
+
+   The effect list is `sched + put + ack + emits + respond`, and the
+   obvious reading of that is what this operator used to do: land the
+   write, then hand the messages to the wire one `Perform` at a time.
+   TLC refused it. The trace is short -- a retry `Timeout` on a targeted
+   promise -- and the failing transition is the put itself: the document
+   moves, `outbox` does not, and upstairs the handler that writes that
+   object is the same handler that says `Execute`. One event, one
+   transition: `Apply` moves `objects'` and `outbox'` at the same
+   instant, so a write with the message still in hand is a state the
+   abstract machine cannot be in.
+
+   NO ABSTRACTION FUNCTION REPAIRS THAT, and the reason is `Crash`.
+   Mapping the abstract outbox to `outbox` plus the sends a committed
+   step still holds would line the two machines up -- until the step
+   crashes between the write and the wire, when those messages leave the
+   mapped state again. `Apply` can overwrite an entry at a `MsgKey` but
+   it can never drop one, so a shrinking outbox is not an abstract step
+   either. Linearise early and the object has not moved; linearise late
+   and it moved too soon; linearise at the write and a crash takes the
+   message back.
+
+   What is left is to make the message durable at the instant the
+   decision is: the write and the emits it justifies land in one action.
+   That is the transactional-outbox pattern, and this is the argument
+   for it stated as a refinement rather than as folklore -- a protocol
+   whose handlers say and write in one breath can only be run by an
+   executor whose store and outbox commit together. Delivery stays as
+   late as it likes; it is the RECORD that cannot wait, and having the
+   record be the same write is what makes redelivery after a crash
+   idempotent rather than lost.
+
+   `Says` is taken over the whole remaining `pending`, and that is exact
+   on a premise worth naming: every `Say` in `Abstract` follows a
+   `Commit` and no handler that writes TWO objects says anything, so a
+   put at the head means every send behind it belongs to that put. A
+   handler that wrote, said, and wrote again would have its second
+   message pulled forward to the first write by this operator, silently.
+   Nothing emits that shape today; the day something does, this is the
+   line that has to grow a bound.
+
+   The `Send` branch below survives for the handlers that emit without
+   writing -- there the message alone IS the whole decision, and `Apply`
+   with an empty `Puts` is exactly a step that moves `outbox` and leaves
+   `objects` where it was. *)
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
@@ -253,8 +300,13 @@ Perform(r) ==
                                          LET w == VariantGetUnsafe("PutObject", e)
                                          IN  Put(docs[o], w.id, w.obj)]
                          /\ etags' = [etags EXCEPT ![o] = @ + 1]
-                         /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
-                         /\ UNCHANGED <<timeouts, outbox>>
+                         /\ outbox' = LET S == A!Says(steps[r].pending) IN
+                                        { x \in outbox :
+                                            ~\E m \in S : A!MsgKey(x) = A!MsgKey(m) } \cup S
+                         /\ steps' = [steps EXCEPT ![r].pending =
+                                        SelectSeq(Tail(@),
+                                                  LAMBDA f : VariantTag(f) /= "Send")]
+                         /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>,
                                                    ![r].res     = Silent,

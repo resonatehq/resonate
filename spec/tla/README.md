@@ -236,7 +236,7 @@ interrupted; it does nothing about another step's disarm landing between this
 step's arm and its put.** Against interleaving the effect order is necessary
 and not sufficient.
 
-### The refinement found three things, none of them in the concrete model
+### The refinement found four things, none of them in the concrete model
 
 **A hole in the specification.** The first check failed on a refused
 compare-and-swap sending a step `perform -> process`. `Abstract` had no action
@@ -266,6 +266,35 @@ and an executor whose work may be destroyed arbitrarily often cannot promise
 that anything finishes. Hence `Crashing` as a constant — safety is claimed
 with crashes, liveness without them, which is the only way liveness is ever
 claimed.
+
+**A transactional outbox.** The fourth arrived with the handlers that emit.
+`Perform` used to hand the messages to the wire one at a time *after* the
+write, which is what the effect order `sched + put + ack + emits + respond`
+literally says and what `executor.rs` literally does. TLC returned a
+ten-state trace — a retry `Timeout` on a targeted promise — and the failing
+transition is the write itself: the document moves, `outbox` does not, and
+upstairs the handler that writes that object is the same handler that says
+`Execute`.
+
+What makes this more than a modelling slip is that **no abstraction function
+repairs it.** Map the abstract outbox to `outbox` plus the sends a committed
+step still holds, and the two machines line up — until that step crashes
+between the write and the wire, when those messages leave the mapped state
+again. `Apply` can overwrite an entry at a `MsgKey`; it can never drop one, so
+a shrinking outbox is not an abstract step either. Linearise early and the
+object has not moved. Linearise late and it moved too soon. Linearise at the
+write and a crash takes the message back.
+
+So the write and the emits it justifies land in one action. That is the
+transactional-outbox pattern, and this is the argument for it stated as a
+refinement rather than as folklore: *a protocol whose handlers say and write
+in one breath can only be run by an executor whose store and outbox commit
+together.* Delivery stays as late as it likes — it is the **record** that
+cannot wait, and having the record be the same write is what makes redelivery
+after a crash idempotent rather than lost. Verus does not claim this
+refinement and so never had to face it; what it keeps instead is
+`consistent_outbox_never_ahead`, which is the lag stated as an invariant of
+the executor rather than reconciled against the protocol.
 
 ### Liveness needs crashes to stop, said without a counter
 
