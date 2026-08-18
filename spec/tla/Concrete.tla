@@ -3,14 +3,15 @@
 (* The same protocol under the Verus executor's discipline: ONE DOCUMENT   *)
 (* PER ORIGIN, and a compare-and-swap on it.                               *)
 (*                                                                         *)
-(* `Resonate` deliberately has no fence, and TLC answered what that costs: *)
-(* two steps read one object, both write, the second erases the first --   *)
+(* `Abstract` deliberately has no fence, and TLC said what that costs: two *)
+(* steps read one object, both write, the second erases the first --       *)
 (* `preserved_settled_promise_record` and `WheelComplete` fall together.   *)
-(* This module is the other half of the experiment. It changes NOTHING     *)
-(* about the protocol: the handlers, the effects, the alphabet and the     *)
-(* wheel come from `Resonate` through the instance below, so a difference  *)
-(* in behaviour is a difference in the EXECUTOR and cannot be anything     *)
-(* else.                                                                   *)
+(* This module is the other half of the experiment.                        *)
+(*                                                                         *)
+(* IT CHANGES NOTHING ABOUT THE PROTOCOL. The handlers, the effects, the   *)
+(* alphabet, the wheel and the invariants all come from `Abstract` through *)
+(* the instance below, so a difference in behaviour is a difference in the *)
+(* EXECUTOR and cannot be anything else.                                   *)
 (*                                                                         *)
 (* Two changes, both from `src/concrete_spec/executor.rs`:                 *)
 (*                                                                         *)
@@ -19,62 +20,67 @@
 (*     plural -- and it is what makes a multi-unit write single-document   *)
 (*     whenever the units share an origin.                                 *)
 (*                                                                         *)
-(*   - every `PutObject` carries the etag its decision was read under      *)
+(*   - every write carries the etag its decision was read under            *)
 (*     (`expect: etag_of(held)`). If the document has moved, the write is  *)
 (*     REFUSED and the step goes back to deciding with `retries + 1` --    *)
-(*     `restart(s, rid, ...)`. Nothing is lost, and nothing stale lands.   *)
+(*     `restart(s, rid, ..)`. Nothing stale lands.                         *)
+(*                                                                         *)
+(* THE NAMES ARE DELIBERATELY THE SAME. `timeouts`, `outbox`, `steps` and  *)
+(* `now` mean here exactly what they mean in `Abstract`, and the instance  *)
+(* below leaves them alone. Only `objects` needs saying, because only      *)
+(* `objects` is represented differently -- which is the whole content of   *)
+(* this refinement, and it should be the only thing in the `WITH`.         *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
-CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, NoPid, NoAddr, NoValue,
-          Silent, Materialise, RetryTimeout, MaxTime, MaxVersion
+CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
+          NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion
 
 VARIABLES
-    docs,     \* [ORIGIN -> ($id -> $object)] -- one document per origin
-    etags,    \* [ORIGIN -> Int] -- what a CAS compares
-    timer,    \* the wheel, unchanged
-    sent,     \* the outbox, unchanged
-    cs,       \* [RID -> concrete step] -- carries `expect`, `org`, `retries`
-    cnow
+    docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
+    etags,      \* [ORIGIN -> Int] -- what a compare-and-swap compares
+    timeouts,   \* the wheel. Same variable, same meaning as Abstract's
+    outbox,     \* likewise
+    steps,      \* likewise, plus `expect`, `org` and `retries`
+    now         \* likewise
 
-cvars == <<docs, etags, timer, sent, cs, cnow>>
+vars == <<docs, etags, timeouts, outbox, steps, now>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
-(* WHAT THIS STATE DENOTES                                                 *)
+(* THE ABSTRACTION FUNCTION                                                *)
 (*                                                                         *)
-(* The abstraction. A store chunked by origin denotes the flat store that  *)
-(* forgets the chunking; the etags denote nothing at all, which is the     *)
-(* point of them; a concrete step denotes the abstract step with its       *)
-(* bookkeeping dropped.                                                    *)
+(* What a chunked store denotes: the flat one that forgets the chunking.   *)
+(* An identifier already carries the origin it belongs to, so finding the  *)
+(* document an object lives in is `i.origin` and nothing else -- which is  *)
+(* what the pair-shaped identifier was for.                                *)
+(*                                                                         *)
+(* The etags denote NOTHING. There is no abstract variable they map to,    *)
+(* and that is the point of them: a fence is machinery for keeping a       *)
+(* promise the abstract machine states without it.                         *)
 (***************************************************************************)
 
-Flat == [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
+Objects == [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
 
-AbsSteps ==
-    [ r \in DOMAIN cs |-> [ ev      |-> cs[r].ev,
-                            phase   |-> cs[r].phase,
-                            pending |-> cs[r].pending,
-                            res     |-> cs[r].res ] ]
+(* A concrete step denotes the abstract step with its bookkeeping dropped.
+   `expect` and `retries` are how this executor keeps its promise, not
+   part of what was promised. *)
+Steps ==
+    [ r \in DOMAIN steps |-> [ ev      |-> steps[r].ev,
+                               phase   |-> steps[r].phase,
+                               pending |-> steps[r].pending,
+                               res     |-> steps[r].res ] ]
 
-(* `MCResonate` and not `Resonate`, so that both sides quantify over the
-   SAME alphabet. Instancing the full machine made the refinement check
-   evaluate `\E ev \in ExternalEvent` -- all seventeen kinds, with
-   `SUBSET TaskRefT` inside one of them -- at every concrete state, for a
-   comparison against three implemented handlers. That is not a stricter
-   check, it is the same check with an irrelevant quantifier bolted on. *)
-R == INSTANCE MCResonate
-     WITH objects  <- Flat,
-          timeouts <- timer,
-          outbox   <- sent,
-          steps    <- AbsSteps,
-          now      <- cnow
+A == INSTANCE Abstract WITH objects <- Objects, steps <- Steps
 
 -----------------------------------------------------------------------------
+(***************************************************************************)
+(* THE EXECUTOR                                                            *)
+(***************************************************************************)
 
 (* Which document a step touches. Every implemented handler reads and
    writes one origin; the unimplemented ones write nothing, so any answer
-   is as good as any other. *)
+   serves. *)
 OriginOf(ev) ==
     CASE VariantTag(ev) = "PromiseCreate" ->
              VariantGetUnsafe("PromiseCreate", ev).req.id.origin
@@ -84,135 +90,149 @@ OriginOf(ev) ==
              VariantGetUnsafe("Timeout", ev).entry.id.origin
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
-CFresh(ev) ==
+Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>, res |-> Silent,
       expect |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
 
-CPut(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
-CDrop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
+Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
 
-CSubmitExternal(ev) ==
-    /\ ev \in R!ExternalEvent
-    /\ \E r \in Rid \ DOMAIN cs : cs' = CPut(cs, r, CFresh(ev))
-    /\ UNCHANGED <<docs, etags, timer, sent, cnow>>
+SubmitExternal(ev) ==
+    /\ ev \in A!ExternalEvent
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
+    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
-CSubmitInternal(ev) ==
-    /\ ev \in R!InternalEvent
-    /\ R!Fires(ev)
-    /\ \E r \in Rid \ DOMAIN cs : cs' = CPut(cs, r, CFresh(ev))
-    /\ UNCHANGED <<docs, etags, timer, sent, cnow>>
+SubmitInternal(ev) ==
+    /\ ev \in A!InternalEvent
+    /\ A!Fires(ev)
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
+    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
-(* Read one document, decide against it, and remember the etag it was read
-   under. The handler is `Resonate`'s -- the protocol does not know it is
+(* Read ONE DOCUMENT, decide against it, and remember the etag it was read
+   under. The handler is `Abstract`'s: the protocol does not know it is
    being run by a different executor. *)
-CProcess(r) ==
-    /\ r \in DOMAIN cs
-    /\ cs[r].phase = "process"
-    /\ LET o   == cs[r].org
+Process(r) ==
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "process"
+    /\ LET o   == steps[r].org
            env == [ objects  |-> docs[o],
-                    timeouts |-> timer,
-                    outbox   |-> sent,
-                    now      |-> cnow,
+                    timeouts |-> timeouts,
+                    outbox   |-> outbox,
+                    now      |-> now,
                     mat      |-> Materialise,
                     config   |-> [retryTimeout |-> RetryTimeout] ]
-           out == R!Handle(cs[r].ev, env)
-       IN  cs' = [cs EXCEPT ![r].phase   = "perform",
-                            ![r].pending = out.effects,
-                            ![r].res     = out.res,
-                            ![r].expect  = etags[o]]
-    /\ UNCHANGED <<docs, etags, timer, sent, cnow>>
+           out == A!Handle(steps[r].ev, env)
+       IN  steps' = [steps EXCEPT ![r].phase   = "perform",
+                                  ![r].pending = out.effects,
+                                  ![r].res     = out.res,
+                                  ![r].expect  = etags[o]]
+    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
-(* The compare-and-swap. A write whose document has moved since the read is
-   refused, and the step goes back to deciding. *)
-CPerform(r) ==
-    /\ r \in DOMAIN cs
-    /\ cs[r].phase = "perform"
-    /\ IF cs[r].pending = << >>
-       THEN /\ cs' = CDrop(cs, r)
-            /\ UNCHANGED <<docs, etags, timer, sent>>
-       ELSE LET e == Head(cs[r].pending)
-                o == cs[r].org
+(* One effect. A write whose document has moved since the read is REFUSED,
+   and the step goes back to deciding -- which under the abstraction is
+   `Abstract!Restart`. *)
+Perform(r) ==
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ IF steps[r].pending = << >>
+       THEN /\ steps' = Drop(steps, r)
+            /\ UNCHANGED <<docs, etags, timeouts, outbox>>
+       ELSE LET e == Head(steps[r].pending)
+                o == steps[r].org
             IN CASE VariantTag(e) = "PutObject" ->
-                    IF etags[o] = cs[r].expect
+                    IF etags[o] = steps[r].expect
                     THEN /\ docs'  = [docs EXCEPT ![o] =
                                          LET w == VariantGetUnsafe("PutObject", e)
-                                         IN  CPut(docs[o], w.id, w.obj)]
+                                         IN  Put(docs[o], w.id, w.obj)]
                          /\ etags' = [etags EXCEPT ![o] = @ + 1]
-                         /\ cs'    = [cs EXCEPT ![r].pending = Tail(@)]
-                         /\ UNCHANGED <<timer, sent>>
-                    ELSE /\ cs' = [cs EXCEPT ![r].phase   = "process",
-                                             ![r].pending = << >>,
-                                             ![r].res     = Silent,
-                                             ![r].retries = @ + 1]
-                         /\ UNCHANGED <<docs, etags, timer, sent>>
+                         /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
+                         /\ UNCHANGED <<timeouts, outbox>>
+                    ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
+                                                   ![r].pending = << >>,
+                                                   ![r].res     = Silent,
+                                                   ![r].retries = @ + 1]
+                         /\ UNCHANGED <<docs, etags, timeouts, outbox>>
                  [] VariantTag(e) = "ArmTimeout" ->
-                    /\ timer' = timer \cup {VariantGetUnsafe("ArmTimeout", e).entry}
-                    /\ cs'    = [cs EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, sent>>
+                    /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
+                    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
+                    /\ UNCHANGED <<docs, etags, outbox>>
                  [] VariantTag(e) = "DisarmTimeout" ->
-                    /\ timer' = timer \ {VariantGetUnsafe("DisarmTimeout", e).entry}
-                    /\ cs'    = [cs EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, sent>>
+                    /\ timeouts' = timeouts \ {VariantGetUnsafe("DisarmTimeout", e).entry}
+                    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
+                    /\ UNCHANGED <<docs, etags, outbox>>
                  [] OTHER ->
-                    /\ sent' = LET en == VariantGetUnsafe("Send", e).entry
-                               IN  {x \in sent : R!MsgKey(x) /= R!MsgKey(en)} \cup {en}
-                    /\ cs'   = [cs EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, timer>>
-    /\ UNCHANGED cnow
+                    /\ outbox' = LET en == VariantGetUnsafe("Send", e).entry
+                                 IN  {x \in outbox : A!MsgKey(x) /= A!MsgKey(en)} \cup {en}
+                    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
+                    /\ UNCHANGED <<docs, etags, timeouts>>
+    /\ UNCHANGED now
 
-CCrash(r) ==
-    /\ r \in DOMAIN cs
-    /\ cs' = CDrop(cs, r)
-    /\ UNCHANGED <<docs, etags, timer, sent, cnow>>
+Crash(r) ==
+    /\ r \in DOMAIN steps
+    /\ steps' = Drop(steps, r)
+    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
-CClock ==
-    /\ cnow < MaxTime
-    /\ cnow' = cnow + 1
-    /\ UNCHANGED <<docs, etags, timer, sent, cs>>
+Clock ==
+    /\ now < MaxTime
+    /\ now' = now + 1
+    /\ UNCHANGED <<docs, etags, timeouts, outbox, steps>>
 
-CInit ==
-    /\ docs  = [o \in Origin |-> SetAsFun({})]
-    /\ etags = [o \in Origin |-> 0]
-    /\ timer = {}
-    /\ sent  = {}
-    /\ cs    = SetAsFun({})
-    /\ cnow  = 0
+Init ==
+    /\ docs     = [o \in Origin |-> SetAsFun({})]
+    /\ etags    = [o \in Origin |-> 0]
+    /\ timeouts = {}
+    /\ outbox   = {}
+    /\ steps    = SetAsFun({})
+    /\ now      = 0
 
-CExternal ==
-       { Variant("PromiseCreate", [req |-> q]) : q \in R!CreateReq }
-  \cup { Variant("PromiseSettle", [req |-> q]) : q \in R!SettleReq }
+Next ==
+    \/ \E ev \in A!ExternalEvent : SubmitExternal(ev)
+    \/ \E ev \in A!InternalEvent : SubmitInternal(ev)
+    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
+    \/ Clock
 
-CInternal == { Variant("Timeout", [entry |-> e]) : e \in R!Entry }
-
-CNext ==
-    \/ \E ev \in CExternal : CSubmitExternal(ev)
-    \/ \E ev \in CInternal : CSubmitInternal(ev)
-    \/ \E r \in DOMAIN cs : CProcess(r) \/ CPerform(r) \/ CCrash(r)
-    \/ CClock
-
-CSpec == CInit /\ [][CNext]_cvars
+Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
-(* WHAT WE WANT TO KNOW                                                    *)
+(* THE REFINEMENT                                                          *)
 (*                                                                         *)
-(* `Refines` is the refinement obligation: every behaviour of this machine *)
-(* is a behaviour of `Resonate` under the abstraction above.               *)
+(* This is the statement being made:                                       *)
 (*                                                                         *)
-(* The invariants are the other question, and the more interesting one --  *)
-(* `WheelComplete` and `preserved_settled_promise_record` are exactly what *)
-(* the abstract machine failed, so whether they hold here is whether the   *)
-(* fence is SUFFICIENT.                                                    *)
+(*     THEOREM Spec => A!Safety                                            *)
+(*                                                                         *)
+(* -- every behaviour of the chunked, fenced machine is, once you read a   *)
+(* document as the objects it holds, a behaviour the abstract machine      *)
+(* already permits.                                                        *)
+(*                                                                         *)
+(* Note which direction that runs. It does NOT say the two machines admit  *)
+(* the same behaviours; the fence exists precisely to admit FEWER, and     *)
+(* `WheelComplete` holds here and fails there. What it says is that the    *)
+(* fence never buys its safety by doing something the protocol did not     *)
+(* allow -- no extra write, no reordering, no state the abstract machine   *)
+(* has no name for.                                                        *)
+(*                                                                         *)
+(* And it is a real obligation rather than a formality: the first time it  *)
+(* was checked it FAILED, on a refused compare-and-swap sending a step     *)
+(* from "perform" back to "process". `Abstract` had no action that went    *)
+(* backwards, so every behaviour containing a retry was outside the        *)
+(* specification. `Abstract!Restart` is what that failure bought.          *)
 (***************************************************************************)
 
-Refines == R!Init /\ [][R!MCNext]_<<Flat, timer, sent, AbsSteps, cnow>>
+Refinement == A!Safety
 
-C_WheelComplete   == R!WheelComplete
-C_WheelSound      == R!WheelSound
-C_UnitCoherent    == R!UnitCoherent
-C_TypeOK          == R!TypeOK
+THEOREM Spec => A!Safety
 
-CT_preserved_settled_promise_record    == [][R!preserved_settled_promise_record]_cvars
-CT_consistent_promise_settlement_stamp == [][R!consistent_promise_settlement_stamp]_cvars
+(* The invariants the abstract machine fails, asked of this one. That the
+   fence restores them is the other half of the result, and it is not
+   implied by the refinement -- refinement bounds what this machine MAY
+   do, and says nothing about what it GUARANTEES. *)
+C_TypeOK          == A!TypeOK
+C_UnitCoherent    == A!UnitCoherent
+C_WheelSound      == A!WheelSound
+C_WheelComplete   == A!WheelComplete
+
+CT_preserved_settled_promise_record    == [][A!preserved_settled_promise_record]_vars
+CT_consistent_promise_settlement_stamp == [][A!consistent_promise_settlement_stamp]_vars
 
 =============================================================================

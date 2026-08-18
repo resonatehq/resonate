@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Check the model.
 #
-#   ./check.sh                  every invariant expected to hold
-#   ./check.sh WheelComplete    one named invariant or property, to see it fail
+#   ./check.sh                        Abstract, every invariant expected to hold
+#   ./check.sh Concrete               Concrete, including the refinement
+#   ./check.sh Abstract WheelComplete one name, to watch it fail
 #
 # TLC is the checker. Apalache could not reach depth 6 of this machine in 25
 # minutes -- its cost roughly triples per step and a create-then-settle is
@@ -18,8 +19,7 @@ APALACHE=${APALACHE:-apalache-mc}
 
 if command -v "$APALACHE" >/dev/null 2>&1; then
     echo "== types =="
-    "$APALACHE" typecheck Resonate.tla   2>&1 | grep -E "purrfect|error|\[FAILED\]" || true
-    "$APALACHE" typecheck MCResonate.tla 2>&1 | grep -E "purrfect|error|\[FAILED\]" || true
+    "$APALACHE" typecheck Abstract.tla 2>&1 | grep -E "purrfect|error|\[FAILED\]" || true
 else
     echo "== types == (skipped: $APALACHE not on PATH)"
 fi
@@ -30,18 +30,20 @@ if [ ! -f "$TLA_TOOLS" ]; then
     exit 1
 fi
 
-echo "== model =="
-if [ $# -eq 0 ]; then
-    CFG=MCResonate.cfg
+SPEC=${1:-Abstract}
+echo "== $SPEC =="
+if [ $# -le 1 ]; then
+    CFG=$SPEC.cfg
 else
     CFG=$(mktemp /tmp/one-XXXX.cfg)
-    sed -n "1,/MaxVersion/p" MCResonate.cfg > "$CFG"
-    # a name with a T_ prefix is a wrapped .trans entry, which TLC reads as a
-    # temporal property; everything else is a state invariant
-    case "$1" in
-        T_*) echo "PROPERTY $1"  >> "$CFG" ;;
-        *)   echo "INVARIANT $1" >> "$CFG" ;;
+    sed -n "1,/MaxVersion/p" "$SPEC.cfg" > "$CFG"
+    # a T_ or CT_ prefix marks a wrapped .trans entry, which TLC reads as a
+    # temporal property; Refinement is one too. Everything else is a state
+    # invariant.
+    case "$2" in
+        T_*|CT_*|Refinement) echo "PROPERTY $2"  >> "$CFG" ;;
+        *)                   echo "INVARIANT $2" >> "$CFG" ;;
     esac
 fi
 java -XX:+UseParallelGC -cp "$TLA_TOOLS" tlc2.TLC \
-     -config "$CFG" -workers 4 -deadlock MCResonate.tla
+     -config "$CFG" -workers 4 -deadlock "$SPEC.tla"

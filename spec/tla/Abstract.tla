@@ -1,4 +1,4 @@
--------------------------------- MODULE Resonate --------------------------------
+-------------------------------- MODULE Abstract --------------------------------
 (***************************************************************************)
 (* The Resonate protocol as a state machine, at the altitude of            *)
 (* `spec/02-abstract` -- but with the atomicity taken OUT.                 *)
@@ -213,6 +213,8 @@ CONSTANTS
     Ttl,
     \* @type: Set(RID);
     Rid,
+    \* @type: Set(Str);
+    Implemented,
     \* @type: PID;
     NoPid,
     \* @type: ADDR;
@@ -417,31 +419,39 @@ FenceAction ==
        { Variant("Create", [req |-> r]) : r \in CreateReq }
   \cup { Variant("Settle", [req |-> r]) : r \in SettleReq }
 
+(* Which constructors the alphabet actually offers.
+   `Implemented` is a CONSTANT, and it is the honest way to say that a
+   handler exists yet for three of the twenty events. The gate is per
+   CONSTRUCTOR rather than a filter over the whole alphabet, because a
+   filter would have to enumerate what it discards -- and enumerating
+   `TaskFence` over every create and settle request is most of the cost of
+   checking anything at all.
+
+   Both machines read the same constant, so `Abstract` and `Concrete`
+   always quantify over exactly the same events, and the line moves by
+   editing a config as handlers land.
+   @type: (Str, Set($event)) => Set($event); *)
+On(tag, S) == IF tag \in Implemented THEN S ELSE {}
+
 ExternalEvent ==
-       { Variant("PromiseGet",    [id |-> i])  : i \in Id }
-  \cup { Variant("PromiseCreate", [req |-> r]) : r \in CreateReq }
-  \cup { Variant("PromiseSettle", [req |-> r]) : r \in SettleReq }
-  \cup { Variant("PromiseRegisterCallback", [req |-> r]) : r \in CallbackReq }
-  \cup { Variant("PromiseRegisterListener", [awaited |-> i, address |-> a])
-         : i \in Id, a \in Address }
-  \cup { Variant("PromiseSearch", UNIT) }
-  \cup { Variant("TaskGet", [id |-> i]) : i \in Id }
-  \cup { Variant("TaskCreate", [pid |-> p, ttl |-> t, action |-> r])
-         : p \in Pid, t \in Ttl, r \in CreateReq }
-  \cup { Variant("TaskAcquire", [id |-> i, version |-> v, pid |-> p, ttl |-> t])
-         : i \in Id, v \in Version, p \in Pid, t \in Ttl }
-  \cup { Variant("TaskFence", [id |-> i, version |-> v, action |-> a])
-         : i \in Id, v \in Version, a \in FenceAction }
-  \cup { Variant("TaskHeartbeat", [pid |-> p, tasks |-> ts])
-         : p \in Pid, ts \in SUBSET TaskRefT }
-  \cup { Variant("TaskSuspend", [id |-> i, version |-> v, actions |-> as])
-         : i \in Id, v \in Version, as \in SUBSET CallbackReq }
-  \cup { Variant("TaskFulfill", [id |-> i, version |-> v, action |-> r])
-         : i \in Id, v \in Version, r \in SettleReq }
-  \cup { Variant("TaskRelease", [id |-> i, version |-> v]) : i \in Id, v \in Version }
-  \cup { Variant("TaskHalt",     [id |-> i]) : i \in Id }
-  \cup { Variant("TaskContinue", [id |-> i]) : i \in Id }
-  \cup { Variant("TaskSearch", UNIT) }
+       {}
+    \cup On("PromiseGet", { Variant("PromiseGet", [id |-> i]) : i \in Id})
+    \cup On("PromiseCreate", { Variant("PromiseCreate", [req |-> r]) : r \in CreateReq})
+    \cup On("PromiseSettle", { Variant("PromiseSettle", [req |-> r]) : r \in SettleReq})
+    \cup On("PromiseRegisterCallback", { Variant("PromiseRegisterCallback", [req |-> r]) : r \in CallbackReq})
+    \cup On("PromiseRegisterListener", { Variant("PromiseRegisterListener", [awaited |-> i, address |-> a]) : i \in Id, a \in Address})
+    \cup On("PromiseSearch", { Variant("PromiseSearch", UNIT)})
+    \cup On("TaskGet", { Variant("TaskGet", [id |-> i]) : i \in Id})
+    \cup On("TaskCreate", { Variant("TaskCreate", [pid |-> p, ttl |-> t, action |-> r]) : p \in Pid, t \in Ttl, r \in CreateReq})
+    \cup On("TaskAcquire", { Variant("TaskAcquire", [id |-> i, version |-> v, pid |-> p, ttl |-> t]) : i \in Id, v \in Version, p \in Pid, t \in Ttl})
+    \cup On("TaskFence", { Variant("TaskFence", [id |-> i, version |-> v, action |-> a]) : i \in Id, v \in Version, a \in FenceAction})
+    \cup On("TaskHeartbeat", { Variant("TaskHeartbeat", [pid |-> p, tasks |-> ts]) : p \in Pid, ts \in SUBSET TaskRefT})
+    \cup On("TaskSuspend", { Variant("TaskSuspend", [id |-> i, version |-> v, actions |-> as]) : i \in Id, v \in Version, as \in SUBSET CallbackReq})
+    \cup On("TaskFulfill", { Variant("TaskFulfill", [id |-> i, version |-> v, action |-> r]) : i \in Id, v \in Version, r \in SettleReq})
+    \cup On("TaskRelease", { Variant("TaskRelease", [id |-> i, version |-> v]) : i \in Id, v \in Version})
+    \cup On("TaskHalt", { Variant("TaskHalt", [id |-> i]) : i \in Id})
+    \cup On("TaskContinue", { Variant("TaskContinue", [id |-> i]) : i \in Id})
+    \cup On("TaskSearch", { Variant("TaskSearch", UNIT)})
 
 (* The steps no client asks for. Two shapes, not five, and the split is by
    WHAT ENABLES THEM rather than by what they do:
@@ -458,9 +468,10 @@ ExternalEvent ==
        enables them is a settlement that has happened and a name still
        written down next to it. *)
 InternalEvent ==
-       { Variant("Timeout", [entry |-> e]) : e \in Entry }
-  \cup { Variant("ListenerDrain", [id |-> i, address |-> a]) : i \in Id, a \in Address }
-  \cup { Variant("CallbackDrain", [id |-> i, awaiter |-> w]) : i \in Id, w \in Id }
+       {}
+    \cup On("Timeout", { Variant("Timeout", [entry |-> e]) : e \in Entry})
+    \cup On("ListenerDrain", { Variant("ListenerDrain", [id |-> i, address |-> a]) : i \in Id, a \in Address})
+    \cup On("CallbackDrain", { Variant("CallbackDrain", [id |-> i, awaiter |-> w]) : i \in Id, w \in Id})
 
 Event == ExternalEvent \cup InternalEvent
 
@@ -1022,6 +1033,11 @@ Fairness ==
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
+(* The safety part on its own. A refinement is stated against THIS:
+   `Concrete` has to stay inside what this machine permits, and is not
+   obliged to reproduce its fairness. *)
+Safety == Init /\ [][Next]_vars
+
 -----------------------------------------------------------------------------
 (***************************************************************************)
 (* INVARIANTS                                                              *)
@@ -1276,5 +1292,19 @@ Draining(r) == steps[r].phase = "perform"
 
 NoInterleave ==
     \A a, b \in DOMAIN steps : (Draining(a) /\ Draining(b)) => a = b
+
+(***************************************************************************)
+(* The `.trans` entries, wrapped for TLC.                                  *)
+(*                                                                         *)
+(* Apalache takes a primed formula as an action invariant and checks it    *)
+(* directly. TLC will not accept a prime under `INVARIANT`, so each one    *)
+(* becomes `[][P]_vars` under `PROPERTY` -- the same claim in the syntax   *)
+(* that checker reads.                                                     *)
+(***************************************************************************)
+
+T_preserved_settled_promise_record    == [][preserved_settled_promise_record]_vars
+T_consistent_new_promise_born_clean   == [][consistent_new_promise_born_clean]_vars
+T_consistent_promise_settlement_stamp == [][consistent_promise_settlement_stamp]_vars
+T_consistent_settlement_fulfils_task  == [][consistent_settlement_fulfils_task]_vars
 
 =============================================================================
