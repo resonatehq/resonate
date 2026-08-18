@@ -15,5 +15,9 @@ valid/porc/fuzz
 # Transient analysis scratch files (see CONTRIBUTING): never committed.
 spec/**/zz-*.lean
 
-# Apalache run output
+
+# TLC scratch (state queue, fingerprints) and Apalache run output
+tla/states/
+tla/tmp/
 tla/_apalache-out/
+*.st
