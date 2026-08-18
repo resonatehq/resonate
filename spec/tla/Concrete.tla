@@ -34,7 +34,8 @@
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
-          NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion
+          NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
+          Fenced
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
@@ -62,15 +63,36 @@ vars == <<docs, etags, timeouts, outbox, steps, now>>
 
 Objects == [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
 
-(* A WITNESS for the hidden variable, not a claim that the two machines
-   keep the same books. See THE REFINEMENT below. *)
-Steps ==
-    [ r \in DOMAIN steps |-> [ ev      |-> steps[r].ev,
-                               phase   |-> steps[r].phase,
-                               pending |-> steps[r].pending,
-                               res     |-> steps[r].res ] ]
+A == INSTANCE Abstract WITH objects <- Objects
 
-A == INSTANCE Abstract WITH objects <- Objects, steps <- Steps
+(***************************************************************************)
+(* Three of this machine's six variables map to NOTHING, and that is the   *)
+(* whole shape of the result:                                              *)
+(*                                                                         *)
+(*     etags      a fence. Machinery for keeping a promise the abstract    *)
+(*                machine states without it                                *)
+(*     timeouts   an index, so an executor need not scan for what is due.  *)
+(*                `Abstract` reads deadlines off the objects               *)
+(*     steps      work in flight. `Abstract` has no interval between       *)
+(*                deciding and writing, so it has nothing to track         *)
+(*                                                                         *)
+(* `outbox` and `now` map by name; only `objects` needs saying. So every   *)
+(* transition here that touches nothing but the three unmapped variables   *)
+(* is a STUTTER upstairs -- submitting, deciding, arming, disarming, and   *)
+(* a refused compare-and-swap sending a step back to decide again.         *)
+(*                                                                         *)
+(* Exactly one transition is not a stutter: the `PutObject` that lands.    *)
+(* THAT is where the abstract machine takes its single atomic step, and it *)
+(* is why the fence matters -- the etag is what makes the write land       *)
+(* against the state it was decided against, which is the only way one     *)
+(* instant can stand for the whole decision.                               *)
+(*                                                                         *)
+(* Nothing above needed a `Restart` in `Abstract`. An earlier draft mapped *)
+(* `steps` across, so a refused CAS showed up as an abstract step running  *)
+(* backwards and had to be legislated for. Hiding the bookkeeping is what  *)
+(* removed the need -- the retry is not a smaller abstract step, it is no  *)
+(* abstract step at all.                                                   *)
+(***************************************************************************)
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -91,7 +113,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>, res |-> Silent,
-      expect |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
+      expect |-> 0, at |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
 
 Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
 Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
@@ -101,9 +123,26 @@ SubmitExternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
+(* What this executor fires on: ITS WHEEL, not the objects. That is the
+   whole reason to keep a wheel -- so nothing has to scan for what is due
+   -- and it is where the two machines part company. `Abstract!Fires`
+   reads the deadline off the object; this reads an armed entry.
+
+   Which makes `A!Fairness` do real work. Upstairs, a deadline that has
+   come due must eventually be acted on. Down here that can only happen
+   if the wheel holds an entry for it -- so `C_WheelComplete` is not a
+   side condition somebody thought to write down, it is what the abstract
+   machine's fairness demands of anything that keeps an index.
+   @type: $event => Bool; *)
+Fires(ev) ==
+    CASE VariantTag(ev) = "Timeout" ->
+             LET e == VariantGetUnsafe("Timeout", ev).entry IN
+             e \in timeouts /\ e.at <= now
+      [] OTHER -> A!Fires(ev)
+
 SubmitInternal(ev) ==
     /\ ev \in A!InternalEvent
-    /\ A!Fires(ev)
+    /\ Fires(ev)
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
@@ -124,12 +163,34 @@ Process(r) ==
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = out.effects,
                                   ![r].res     = out.res,
-                                  ![r].expect  = etags[o]]
+                                  ![r].expect  = etags[o],
+                                  ![r].at      = now]
     /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
 (* One effect. A write whose document has moved since the read is REFUSED,
    and the step goes back to deciding -- which under the abstraction is
-   `Abstract!Restart`. *)
+   nothing at all.
+
+   THE FENCE COVERS THE CLOCK AS WELL AS THE DOCUMENT, and that is not
+   belt-and-braces -- the refinement demanded it. With only the etag
+   compared, TLC returned: decide at `now = 0`, `Clock` ticks, write lands
+   at `now = 1`. Upstairs the write IS the whole step, so the abstract
+   machine runs the handler at the instant the write lands and gets a
+   different answer -- a `createdAt`, a `settledAt`, a born-settled promise
+   where the concrete decided a pending one. A decision is only valid at
+   the instant it was made, and a store etag says nothing about the clock.
+
+   Verus takes the other road: `Phase::Perform` freezes `at` at prepare
+   time and every effect uses it, so the skew is absorbed rather than
+   refused. That works against the Lean, where `now` is an argument to
+   each step rather than a variable running underneath it. Here it is a
+   variable, so the choice is to re-decide, and `steps[r].at` is what the
+   comparison is against.
+
+   `Fenced` is a CONSTANT so the fence can be switched OFF and the
+   refinement made to prove its own necessity: with `Fenced = FALSE` a
+   stale decision lands, and `Spec => A!Spec` should fail and hand back
+   the trace that shows why. *)
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
@@ -139,7 +200,7 @@ Perform(r) ==
        ELSE LET e == Head(steps[r].pending)
                 o == steps[r].org
             IN CASE VariantTag(e) = "PutObject" ->
-                    IF etags[o] = steps[r].expect
+                    IF Fenced => (etags[o] = steps[r].expect /\ now = steps[r].at)
                     THEN /\ docs'  = [docs EXCEPT ![o] =
                                          LET w == VariantGetUnsafe("PutObject", e)
                                          IN  Put(docs[o], w.id, w.obj)]
@@ -206,47 +267,27 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (*                                                                         *)
 (* The statement we MEAN is                                                *)
 (*                                                                         *)
-(*     THEOREM Spec => \EE steps : A!Spec                                  *)
+(*     THEOREM Spec => A!Spec                                              *)
 (*                                                                         *)
 (* -- every behaviour of the chunked, fenced machine is, once you read a   *)
-(* document as the objects it holds, a behaviour of the abstract machine,  *)
-(* FOR SOME way of keeping the books on work in flight.                    *)
+(* document as the objects it holds, a behaviour of the abstract machine.  *)
 (*                                                                         *)
-(* `A!Spec` and not `A!Safety`: the obligation includes the abstract        *)
-(* machine's FAIRNESS. Refining only the safety part would let an          *)
-(* implementation satisfy the specification by doing nothing -- accepting  *)
-(* a request, deciding, and then stalling forever is safe, and it is not   *)
-(* an implementation of anything. So `Concrete` carries the matching       *)
-(* fairness above and has to earn it.                                      *)
+(* No existential is needed any more. `Abstract` has no `steps` and no     *)
+(* `timeouts` to fill in, so there is no hidden variable to quantify away  *)
+(* and no witness to choose -- the mapping is total and there is only one  *)
+(* of it. That is worth more than the convenience: it means the theorem no *)
+(* longer depends on a choice I made, and an executor with entirely        *)
+(* different bookkeeping is measured by the same statement rather than     *)
+(* having to supply its own.                                               *)
 (*                                                                         *)
-(* `steps` is hidden because it should be. `Abstract` says of it: volatile *)
-(* -- a crash drops one and nothing durable refers to it. A specification  *)
-(* has no business dictating how an implementation tracks what it is in    *)
-(* the middle of; what it may dictate is the store, the wheel and the      *)
-(* wire. Those are the aligned names, and those are what the theorem is    *)
-(* really about.                                                           *)
+(* `A!Spec` and not `A!Safety`: the obligation includes the abstract       *)
+(* machine's FAIRNESS. Refining only safety would let an implementation    *)
+(* satisfy the specification by doing nothing -- accepting a request,      *)
+(* deciding, and stalling forever is safe, and is not an implementation of *)
+(* anything.                                                               *)
 (*                                                                         *)
-(* TLC cannot check `\EE`. The standard discharge is to EXHIBIT A WITNESS: *)
-(* any function from concrete states to a value for `steps` whose result   *)
-(* satisfies `A!Safety` proves the existential, and `Steps` above is one.  *)
-(* So `WITH steps <- Steps` is not the requirement -- it is the proof of   *)
-(* the requirement, and it is why the mapping is free to drop `expect`,    *)
-(* `org` and `retries` without anyone having to argue that they are        *)
-(* unobservable.                                                           *)
-(*                                                                         *)
-(* What the checkable form below therefore proves is the STRONGER thing:   *)
-(*                                                                         *)
-(*     THEOREM Spec => A!Spec       (under this witness)                   *)
-(*                                                                         *)
-(* which implies the existential. A future executor whose bookkeeping does *)
-(* not fit this witness is not thereby refuted -- it needs its own.        *)
-(*                                                                         *)
-(* Note which direction that runs. It does NOT say the two machines admit  *)
-(* the same behaviours; the fence exists precisely to admit FEWER, and     *)
-(* `WheelComplete` holds here and fails there. What it says is that the    *)
-(* fence never buys its safety by doing something the protocol did not     *)
-(* allow -- no extra write, no reordering, no state the abstract machine   *)
-(* has no name for.                                                        *)
+(* Note the direction. It does NOT say the two machines admit the same     *)
+(* behaviours; the fence exists precisely to admit FEWER.                  *)
 (*                                                                         *)
 (* And it is a real obligation rather than a formality: the first time it  *)
 (* was checked it FAILED, on a refused compare-and-swap sending a step     *)
@@ -254,13 +295,11 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (* backwards, so every behaviour containing a retry was outside the        *)
 (* specification. `Abstract!Restart` is what that failure bought.          *)
 (*                                                                         *)
-(* Note where that failure came from: it is a fact about THIS WITNESS, not *)
-(* about the protocol. A witness that reported a restarting step           *)
-(* differently might not have needed `Restart` at all -- the existential   *)
-(* does not care which one you pick. `Restart` stays because it is right   *)
-(* on its own terms: a specification that admits no implementation which   *)
-(* retries admits almost no implementation, and every executor that fences *)
-(* anything will retry something.                                          *)
+(* That failure is gone, and the way it went is the lesson. It was never a *)
+(* fact about the protocol -- it came from mapping `steps` across, so that *)
+(* an executor's retry had to be legislated for upstairs. Take the         *)
+(* bookkeeping out of the abstract machine and the retry stops being a     *)
+(* step it has to permit. `Abstract!Restart` is gone with it.              *)
 (***************************************************************************)
 
 Refinement == A!Spec
@@ -273,8 +312,24 @@ THEOREM Spec => A!Spec
    do, and says nothing about what it GUARANTEES. *)
 C_TypeOK          == A!TypeOK
 C_UnitCoherent    == A!UnitCoherent
-C_WheelSound      == A!WheelSound
-C_WheelComplete   == A!WheelComplete
+
+(* The wheel invariants live HERE now, because the wheel does. They are
+   not among the 95 and could not be: they say an INDEX agrees with the
+   deadlines it indexes, and the protocol has no index.
+
+   `WheelSound` fails, and should: arming before writing admits an entry
+   for an object that is not there yet, which is noise the handler
+   re-checks away. `WheelComplete` is the one that matters -- a deadline
+   nothing holds is a timeout that never fires, and nothing recovers. *)
+C_WheelSound ==
+    \A e \in timeouts :
+        /\ e.id \in DOMAIN Objects
+        /\ A!Deadline(Objects[e.id], e.kind) = e.at
+
+C_WheelComplete ==
+    \A o \in DOMAIN Objects, k \in A!DeadlineKind :
+        A!Deadline(Objects[o], k) /= A!NoTime =>
+            [at |-> A!Deadline(Objects[o], k), id |-> o, kind |-> k] \in timeouts
 
 CT_preserved_settled_promise_record    == [][A!preserved_settled_promise_record]_vars
 CT_consistent_promise_settlement_stamp == [][A!consistent_promise_settlement_stamp]_vars

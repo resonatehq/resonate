@@ -1,73 +1,45 @@
 -------------------------------- MODULE Abstract --------------------------------
 (***************************************************************************)
-(* The Resonate protocol as a state machine, at the altitude of            *)
-(* `spec/02-abstract` -- but with the atomicity taken OUT.                 *)
+(* The Resonate protocol as a state machine: ONE EVENT, ONE TRANSITION.   *)
 (*                                                                         *)
-(* The Lean machine makes one request one transition: `stepOf` runs a      *)
-(* handler and `applyAll` folds its whole effect list onto the pre-state,  *)
-(* and no other request can be observed in between. That is the right      *)
-(* altitude for saying WHAT each request means, and the wrong one for      *)
-(* asking what two concurrent requests do to each other -- because at that *)
-(* altitude, they cannot do anything to each other.                        *)
+(* This is `spec/02-abstract` as it is written. `stepOf` runs a handler    *)
+(* and `applyAll` folds its whole effect list onto the pre-state, and no   *)
+(* other request can be observed in between. Nothing here is in flight,    *)
+(* because at this altitude nothing IS in flight: a machine that takes a   *)
+(* request and answers it in one step has no state between the two.        *)
 (*                                                                         *)
-(* Four state components, and each is a different KIND of thing:           *)
+(* Three variables, and nothing else is protocol:                          *)
 (*                                                                         *)
-(*     objects    what is true. Durable. A promise and its optional task   *)
-(*                are ONE unit -- they are settled together, fulfilled     *)
-(*                together, and never observed disagreeing                 *)
-(*     timeouts   what is due. An INDEX over the deadlines the objects     *)
-(*                already carry, which is exactly why it can drift         *)
+(*     objects    what is true. A promise and its optional task are ONE    *)
+(*                unit -- settled together, fulfilled together, never      *)
+(*                observed disagreeing                                     *)
 (*     outbox     what has been said. Keyed, and the only thing that       *)
 (*                leaves the system                                        *)
-(*     steps      what is in flight. Volatile: a crash drops one and       *)
-(*                nothing durable refers to it                             *)
+(*     now        the clock. Not part of the store: a server does not own  *)
+(*                the time, it reads it                                    *)
 (*                                                                         *)
-(* and seven transitions:                                                  *)
+(* WHAT IS NOT HERE, AND WHY.                                              *)
 (*                                                                         *)
-(*     SubmitExternal   a client request arrives                           *)
-(*     SubmitInternal   the server takes a step on its own initiative      *)
-(*     Process          READ AND DECIDE. Writes nothing                    *)
-(*     Perform          apply ONE effect -- or, with none left, answer and *)
-(*                      retire                                             *)
-(*     Restart          the step throws its decision away and re-decides   *)
-(*     Crash            the step vanishes; what it committed stays         *)
-(*     Clock            time advances, on its own and unprompted           *)
+(*   - THERE IS NO TIMER WHEEL. An internal step fires because an object   *)
+(*     carries a deadline that has come due, which is where the Lean       *)
+(*     reads it from, and why nothing in the 95 catalogue entries mentions *)
+(*     an index. A wheel is something an executor keeps so it does not     *)
+(*     have to scan; that it can drift from the objects is a fact about    *)
+(*     the executor, and it is stated in `Concrete`, where the wheel is.   *)
 (*                                                                         *)
-(* WHERE THE INTERLEAVING IS. Between a step's Process and its last        *)
-(* Perform, any number of other steps may run to completion. So a step     *)
-(* commits its state and then says things about a world that has since     *)
-(* moved on: that is stale dispatch -- a drain-issued Execute surviving a  *)
-(* settle -- which is one of the four defects the Verus port found, and it *)
-(* is a defect this machine can EXHIBIT rather than merely be told about.  *)
+(*   - THERE ARE NO STEPS IN FLIGHT. No phases, no pending effects, no     *)
+(*     crash, no retry. An implementation that decides and then writes has *)
+(*     an interval between the two and needs all of that; this machine has *)
+(*     no interval, so it needs none of it. Saying otherwise would be      *)
+(*     dictating how an implementation tracks work it is in the middle of, *)
+(*     which is not the protocol's business.                               *)
 (*                                                                         *)
-(* WHAT THIS MODULE IS FOR. The objects and the wheel are TWO STORES, and  *)
-(* nothing writes them together. A step that settles a promise and clears  *)
-(* its timeout does two writes, at two moments, with the world running in  *)
-(* between -- and the question this module exists to ask is what an        *)
-(* abstract model needs in order to be correct anyway.                     *)
-(*                                                                         *)
-(* So `Process` writes NOTHING. It reads, it decides, and it leaves an     *)
-(* ordered list of effects behind; `Perform` applies them ONE AT A TIME,   *)
-(* each its own transition, each interleavable with every other step. That *)
-(* is `KStep::Prepare` and `KStep::Perform` in the Verus executor --        *)
-(* `set_phase` touches `steps` and nothing else -- carried up to the       *)
-(* altitude of the Lean spec, where there is no document, no etag and no   *)
-(* store to be a fact about.                                               *)
-(*                                                                         *)
-(* THE ORDER OF THE EFFECTS IS THEREFORE PROTOCOL. Verus emits             *)
-(* `sched + put + ack + emits + respond`: arm BEFORE the write, disarm     *)
-(* AFTER it. Both directions of getting that wrong are failures and they   *)
-(* are not the same failure -- arm-then-write leaves a spurious entry, and *)
-(* a spurious entry is noise; write-then-arm leaves a deadline that        *)
-(* nothing will ever fire, and that is silence. A crash between any two    *)
-(* effects is what makes the difference visible.                           *)
-(*                                                                         *)
-(* THERE IS NO FENCE. No etag, no version, no compare-and-swap: two steps  *)
-(* may read the same object and both write it, and the second wins. That   *)
-(* is not an oversight and it is not a claim that it is safe -- it is the  *)
-(* experiment. Put the fence in first and the model can only confirm that  *)
-(* a fence is sufficient; leave it out and the model has to say what goes  *)
-(* wrong without one, which is the thing worth knowing.                    *)
+(* Which is what makes the refinement in `Concrete` say something sharp.   *)
+(* Every phase, every arm, every refused compare-and-swap is a STUTTER     *)
+(* here -- it moves nothing this machine can see -- and the one concrete   *)
+(* transition that is not a stutter is the document write. THE WRITE IS    *)
+(* THE LINEARISATION POINT, and the fence is what makes it land against    *)
+(* the state it was decided against.                                       *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
@@ -183,8 +155,6 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
   @typeAlias: env = {
       objects: $id -> $object,
-      timeouts: Set($entry),
-      outbox: Set($outEntry),
       now: Int,
       mat: Bool,
       config: { retryTimeout: Int }
@@ -483,99 +453,14 @@ Event == ExternalEvent \cup InternalEvent
 VARIABLES
     \* @type: $id -> $object;
     objects,    \* partial: DOMAIN is what exists
-    \* @type: Set($entry);
-    timeouts,   \* the wheel
     \* @type: Set($outEntry);
     outbox,     \* at most one entry per MsgKey
-    \* @type: RID -> $inFlight;
-    steps,      \* the requests currently in flight
     \* @type: Int;
     now         \* the clock. NOT part of the store: a server does not own
                 \* the time, it reads it. Two machines at the same state
                 \* and different instants are at the same state
 
-vars == <<objects, timeouts, outbox, steps, now>>
-
-(* What a step has left to do once it has decided: a list of effects to
-   apply, in order, and the answer to give when it has applied them.
-
-   The answer is a FIELD and not the last element of the list. The Verus
-   executor makes it an effect -- `Effect::Respond { rid, status }` -- so
-   that its pending list is never empty and one `Perform` rule retires the
-   step. Here retiring IS answering: a step whose list is empty has nothing
-   left but the answer, and giving it is the same act as going away. That
-   leaves `pending` as exactly what it says -- what has not happened yet.
-   An internal step answers `Silent` to nobody.
-   @type: $event => $inFlight; *)
-Fresh(ev) ==
-    [ev |-> ev, phase |-> "process", pending |-> << >>, res |-> Silent]
-
-(***************************************************************************)
-(* WHY A STEP HAS AN IDENTITY                                              *)
-(*                                                                         *)
-(* It carries no information. A step IS its event, its phase and what it   *)
-(* has left to say -- the identity is not a field of `$inFlight`, and an   *)
-(* earlier draft that made it one was storing the map's key inside the     *)
-(* map's value.                                                            *)
-(*                                                                         *)
-(* The KEY still has to exist, for one reason: two steps that are equal in *)
-(* every field are still two steps. Two clients sending the same request   *)
-(* at the same moment is not a hypothetical -- it is the retry -- and a    *)
-(* bare set of records would silently make them one. `steps` is a function *)
-(* so that a duplicate is a duplicate, and so that `Process(r)` has        *)
-(* something to name.                                                      *)
-(*                                                                         *)
-(* Three other shapes admit duplicates, and none is better:                *)
-(*                                                                         *)
-(*   - a SEQUENCE. It adds an order the protocol does not have: <<a, b>>   *)
-(*     and <<b, a>> are different values for the same situation, and       *)
-(*     nothing reads arrival order. A function has the same redundancy --  *)
-(*     [r1 |-> a, r2 |-> b] and the swap are also distinct -- but there    *)
-(*     the redundancy is REMOVABLE: declare `Rid` a symmetry set and TLC   *)
-(*     quotients the permutations away. You cannot declare a sequence's    *)
-(*     indices interchangeable, because for a sequence they are not.       *)
-(*     (Symmetry reduction is unreliable for LIVENESS checking, so expect  *)
-(*     it to pay for the invariants and not for the fairness properties.   *)
-(*     Apalache does not use symmetry at all -- it is symbolic -- so this  *)
-(*     argument is TLC's alone, and under Apalache the shapes tie.)        *)
-(*     A sequence also renumbers on removal, so an unrelated `Crash`       *)
-(*     renames every step after it.                                        *)
-(*                                                                         *)
-(*   - a BAG. Exactly right in principle -- duplicates without order --    *)
-(*     and clunky at every use site: no EXCEPT, and each update spells     *)
-(*     itself as a remove and an add. The honest fallback if symmetry      *)
-(*     ever has to go.                                                     *)
-(*                                                                         *)
-(*   - a SET OF RECORDS EACH CARRYING ITS OWN `rid`. This works, and it    *)
-(*     reads better where a step is picked -- `\E st \in steps` hands you  *)
-(*     the record instead of a key to index with. But it puts the key back *)
-(*     inside the value, and it turns uniqueness from a fact into an       *)
-(*     obligation: nothing structurally forbids two records sharing a rid, *)
-(*     so `TypeOK` grows a conjunct that a function gets for free. Minting *)
-(*     gets worse too -- `\E r \in Rid : \A st \in steps : st.rid /= r`    *)
-(*     against `\E r \in Rid \ DOMAIN steps`.                              *)
-(*                                                                         *)
-(* `Rid` is a CONSTANT and finite. Two things follow, both wanted:         *)
-(*                                                                         *)
-(*   - identities are MINTED BY CHOICE, `\E r \in Rid \ DOMAIN steps`, not *)
-(*     by a counter. A counter would be a variable that never repeats a    *)
-(*     value, so no state would ever repeat either, and TLC would walk an  *)
-(*     infinite state space for a machine whose real state is finite.      *)
-(*     Nothing reads the order steps arrived in, so nothing misses it.     *)
-(*                                                                         *)
-(*   - |Rid| bounds how many steps are in flight at once. That is the      *)
-(*     concurrency knob, and it belongs in the model file where you can    *)
-(*     turn it: |Rid| = 1 is the Lean machine, |Rid| = 2 is where the      *)
-(*     interesting things start.                                           *)
-(*                                                                         *)
-(* Identities are REUSED after a step retires, which is sound only while   *)
-(* nothing outlives a step and names it. Nothing does: the response        *)
-(* vanishes when it is given. In the Verus executor the identity is not a  *)
-(* modelling handle but a return address -- `Effect::Respond { rid,        *)
-(* status }` has to reach the caller that asked -- and the day this        *)
-(* machine grows a reply channel, reuse stops being free and `rid` becomes *)
-(* protocol.                                                               *)
-(***************************************************************************)
+vars == <<objects, outbox, now>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -614,12 +499,10 @@ Fresh(ev) ==
 
 (* @type: $env; *)
 Env ==
-    [ objects  |-> objects,
-      timeouts |-> timeouts,
-      outbox   |-> outbox,
-      now      |-> now,
-      mat      |-> Materialise,
-      config   |-> [retryTimeout |-> RetryTimeout] ]
+    [ objects |-> objects,
+      now     |-> now,
+      mat     |-> Materialise,
+      config  |-> [retryTimeout |-> RetryTimeout] ]
 
 (* Nothing to do, nothing to say. Every event whose handler is not yet
    written answers this, which is honest -- an unimplemented handler does
@@ -843,7 +726,8 @@ SettledNow(p) == p.state /= "pending" \/ p.timeoutAt <= now
 Fires(ev) ==
     CASE VariantTag(ev) = "Timeout" ->
              LET e == VariantGetUnsafe("Timeout", ev).entry IN
-             /\ e \in timeouts
+             /\ e.id \in DOMAIN objects
+             /\ Deadline(objects[e.id], e.kind) = e.at
              /\ e.at <= now
       [] VariantTag(ev) = "ListenerDrain" ->
              LET d == VariantGetUnsafe("ListenerDrain", ev) IN
@@ -862,142 +746,72 @@ Fires(ev) ==
 (* THE TRANSITIONS                                                         *)
 (***************************************************************************)
 
-(* @type: (RID -> $inFlight, RID, $inFlight) => (RID -> $inFlight); *)
-PutStep(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+(* The writes a handler decided on, and the messages it decided to say.
+   The wheel effects are not here: this machine has no wheel, so `Arm` and
+   `Disarm` are instructions to an executor that keeps one and mean
+   nothing to a machine that does not.
+   @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
+Puts(fx) ==
+    { VariantGetUnsafe("PutObject", fx[i])
+      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "PutObject" } }
 
-(* @type: (RID -> $inFlight, RID) => (RID -> $inFlight); *)
-DropStep(f, k) == [x \in (DOMAIN f) \ {k} |-> f[x]]
+(* @type: Seq($effect) => Set($outEntry); *)
+Says(fx) ==
+    { VariantGetUnsafe("Send", fx[i]).entry
+      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
 
-(* A client request arrives. Unguarded: a client may send anything at any
-   time, including nonsense -- rejecting it is the handler's job, and the
-   response it gives for nonsense is part of the protocol.
-   @type: $event => Bool; *)
-SubmitExternal(ev) ==
-    /\ ev \in ExternalEvent
-    /\ \E r \in Rid \ DOMAIN steps : steps' = PutStep(steps, r, Fresh(ev))
-    /\ UNCHANGED <<objects, timeouts, outbox, now>>
+(* ONE EVENT, ONE TRANSITION. Read, decide, and apply the whole decision
+   at a single instant -- `stepOf` in `02-abstract/system.lean`, where
+   `applyAll` folds the effect list onto the pre-state and no other
+   request can be observed in between.
 
-(* The server takes a step on its own initiative: a due entry, or a name
-   still written down next to a settled promise. Same shape, guarded, and
-   nobody is waiting for the answer.
-   @type: $event => Bool; *)
-SubmitInternal(ev) ==
-    /\ ev \in InternalEvent
-    /\ Fires(ev)
-    /\ \E r \in Rid \ DOMAIN steps : steps' = PutStep(steps, r, Fresh(ev))
-    /\ UNCHANGED <<objects, timeouts, outbox, now>>
+   Nothing here is in flight, because at this altitude nothing IS in
+   flight. A machine that takes a request and answers it in one step has
+   no state between the two, which is why `steps` is gone and why the
+   phases, the crash and the retry live in `Concrete` where they belong.
 
-(* READ AND DECIDE, against one state, and WRITE NOTHING. This is
-   `KStep::Prepare`, whose whole postcondition is `set_phase` -- the store
-   and the wheel are untouched, and every write the step will do is now a
-   pending effect that some later transition applies.
-
-   Deciding is atomic even though doing is not: the handler sees one
-   environment, so no read of a step can observe a write of its own step.
-   That is the Lean monad's `bind` discipline, and it is the only atomicity
-   this module grants.
-
-   Nothing here re-reads. A step that decided from a state which has since
-   changed will still apply what it decided -- see THERE IS NO FENCE.
-   @type: RID => Bool; *)
-Process(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "process"
-    /\ LET out == Handle(steps[r].ev, Env)
-       IN  steps' = [steps EXCEPT ![r].phase   = "perform",
-                                  ![r].pending = out.effects,
-                                  ![r].res     = out.res]
-    /\ UNCHANGED <<objects, timeouts, outbox, now>>
-
-(* @type: ($id -> $object, $id, $object) => ($id -> $object); *)
-PutObj(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
-
-(* ONE effect, atomically, and exactly one store. An object write does not
-   touch the wheel; an arm does not touch the objects. That separation is
-   the premise of the whole module, and it is why this is a CASE over four
-   kinds rather than one commit over three variables.
-   @type: $effect => Bool; *)
-Apply(e) ==
-    CASE VariantTag(e) = "PutObject" ->
-             /\ objects' = LET w == VariantGetUnsafe("PutObject", e)
-                           IN  PutObj(objects, w.id, w.obj)
-             /\ UNCHANGED <<timeouts, outbox>>
-      [] VariantTag(e) = "ArmTimeout" ->
-             /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
-             /\ UNCHANGED <<objects, outbox>>
-      [] VariantTag(e) = "DisarmTimeout" ->
-             /\ timeouts' = timeouts \ {VariantGetUnsafe("DisarmTimeout", e).entry}
-             /\ UNCHANGED <<objects, outbox>>
-      [] OTHER ->
-             /\ outbox' = LET en == VariantGetUnsafe("Send", e).entry
-                          IN  {o \in outbox : MsgKey(o) /= MsgKey(en)} \cup {en}
-             /\ UNCHANGED <<objects, timeouts>>
-
-(* Do the next thing -- or, when there is nothing left to do, give the
-   answer and go. Those are the same action because they are the same act:
-   a step that has done everything has only its response left, and there is
-   no state in which it has given the response and not yet retired. That is
-   why there is no Complete.
-
-   Between any two of these, every other step may run. A `Crash` here
-   leaves a PREFIX applied: the object written and the timer never armed,
-   or the timer armed and the object never written. Which of those is
-   survivable is what the wheel invariants are for.
-   @type: RID => Bool; *)
-Perform(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ IF steps[r].pending = << >>
-       THEN /\ steps'  = DropStep(steps, r)
-            /\ UNCHANGED <<objects, timeouts, outbox>>
-       ELSE /\ Apply(Head(steps[r].pending))
-            /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
+   `Says` is applied as a set rather than in order. That is exact while a
+   handler emits at most one message per `MsgKey` and no handler yet
+   emits two; the day one does, the order between same-key messages is a
+   claim this operator would silently drop.
+   @type: $outcome => Bool; *)
+Apply(out) ==
+    /\ objects' = LET W == Puts(out.effects) IN
+                     [ i \in (DOMAIN objects) \cup {w.id : w \in W} |->
+                          IF \E w \in W : w.id = i
+                          THEN (CHOOSE w \in W : w.id = i).obj
+                          ELSE objects[i] ]
+    /\ outbox'  = LET S == Says(out.effects) IN
+                     { o \in outbox : ~\E e \in S : MsgKey(o) = MsgKey(e) } \cup S
     /\ UNCHANGED now
 
-(* A step throws its decision away and decides again. It writes nothing,
-   so nothing durable moves; what moves is that the step is now reading a
-   world it has not read before.
+(* A client request. Unguarded: a client may send anything at any time,
+   including nonsense -- rejecting it is the handler's job, and the
+   response it gives for nonsense is part of the protocol.
+   @type: $event => Bool; *)
+External(ev) ==
+    /\ ev \in ExternalEvent
+    /\ Apply(Handle(ev, Env))
 
-   THIS IS NOT AN IMPLEMENTATION DETAIL THAT LEAKED IN. It is here because
-   the specification was not refinable without it. `Concrete` fences its
-   writes with a compare-and-swap, and a refused write sends the step back
-   to `Prepare` with `retries + 1` -- `restart(s, rid, ..)` in the Verus
-   executor. Under the abstraction that is a step going from "perform" to
-   "process", and no action here did that, so every behaviour with a
-   retry in it was outside the specification. A spec that admits no
-   implementation that retries admits almost no implementation at all.
+(* A step the server takes on its own initiative, and only when it has a
+   reason to: a deadline that has come due, or a name still written down
+   next to a settled promise. The reason is read off the OBJECTS. There
+   is no timer wheel here -- a wheel is an index an executor keeps so it
+   does not have to scan, and the protocol neither requires one nor says
+   what happens if it drifts.
+   @type: $event => Bool; *)
+Internal(ev) ==
+    /\ ev \in InternalEvent
+    /\ Fires(ev)
+    /\ Apply(Handle(ev, Env))
 
-   Nothing constrains WHEN it happens: an abstract step may re-decide for
-   any reason or none. That is what lets one concrete mechanism (a stale
-   etag) be a special case of it, and the next one (a lease lost, a
-   connection dropped) be a special case too, without either being named
-   here.
-   @type: RID => Bool; *)
-Restart(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps' = [steps EXCEPT ![r].phase   = "process",
-                              ![r].pending = << >>,
-                              ![r].res     = Silent]
-    /\ UNCHANGED <<objects, timeouts, outbox, now>>
-
-(* The step disappears. What it committed stays committed; a PREFIX of
-   what it had to say was said, and the rest never will be. No response is
-   given. This is the whole reason `effects` is a sequence and not a set,
-   and it is what a client retrying a request has to survive.
-   @type: RID => Bool; *)
-Crash(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps' = DropStep(steps, r)
-    /\ UNCHANGED <<objects, timeouts, outbox, now>>
-
-(* The clock. Free-running and independent of everything else -- what makes
-   a deadline pass is time moving, not anyone acting. There is exactly one
-   of these, and every step reads it. Bounded so the state space is. *)
+(* The clock. Free-running and independent of everything else -- what
+   makes a deadline pass is time moving, not anyone acting. Bounded so
+   the state space is. *)
 Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ UNCHANGED <<objects, timeouts, outbox, steps>>
+    /\ UNCHANGED <<objects, outbox>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -1005,37 +819,24 @@ Clock ==
 (***************************************************************************)
 
 Init ==
-    /\ objects  = SetAsFun({})
-    /\ timeouts = {}
-    /\ outbox   = {}
-    /\ steps    = SetAsFun({})
-    /\ now      = 0
+    /\ objects = SetAsFun({})
+    /\ outbox  = {}
+    /\ now     = 0
 
 Next ==
-    \/ \E ev \in ExternalEvent : SubmitExternal(ev)
-    \/ \E ev \in InternalEvent : SubmitInternal(ev)
-    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Restart(r) \/ Crash(r)
+    \/ \E ev \in ExternalEvent : External(ev)
+    \/ \E ev \in InternalEvent : Internal(ev)
     \/ Clock
 
-(* A step in flight must make progress, or "the server answers" is not a
-   claim this machine makes. An internal event that stays enabled must
-   eventually be taken, or no timeout is ever taken and every liveness
-   property is vacuous. Nothing is assumed of clients (`SubmitExternal`)
-   or of failure (`Crash`): a client need never send, a crash need never
-   happen.
-
-   TLC reads this. Apalache checks invariants over `Init`/`Next` and does
-   not use it. *)
+(* An internal event that stays enabled must eventually be taken, or no
+   timeout is ever taken and every liveness property is vacuous. Nothing
+   is assumed of clients: a client need never send. *)
 Fairness ==
-    /\ \A r  \in Rid           : WF_vars(Process(r) \/ Perform(r))
-    /\ \A ev \in InternalEvent : WF_vars(SubmitInternal(ev))
+    /\ \A ev \in InternalEvent : WF_vars(Internal(ev))
     /\ WF_vars(Clock)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
-(* The safety part on its own. A refinement is stated against THIS:
-   `Concrete` has to stay inside what this machine permits, and is not
-   obliged to reproduce its fairness. *)
 Safety == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
@@ -1053,34 +854,17 @@ Safety == Init /\ [][Next]_vars
 TypeOK ==
     /\ now \in Time
     /\ DOMAIN objects \subseteq Id
-    /\ DOMAIN steps   \subseteq Rid
     (* one entry per key -- the outbox is keyed, not a log *)
     /\ \A a, b \in outbox : MsgKey(a) = MsgKey(b) => a = b
-    (* a step in "process" has decided nothing yet *)
-    /\ \A r \in DOMAIN steps :
-           steps[r].phase = "process" =>
-               steps[r].pending = << >> /\ steps[r].res = Silent
     (* a unit with no task carries the canonical one, so that "no task" is
        one value and not a family of junk ones *)
     /\ \A o \in DOMAIN objects :
            objects[o].task.state = "none" => objects[o].task = NoTask
 
-(* The wheel names only deadlines that exist. Violations are NOISE: the
-   entry fires, the handler reads the object, nothing is due, nothing
-   happens. Stated to be measured, not because it must hold. *)
-WheelSound ==
-    \A e \in timeouts :
-        /\ e.id \in DOMAIN objects
-        /\ Deadline(objects[e.id], e.kind) = e.at
-
-(* Every deadline that exists is on the wheel. Violations are SILENCE: a
-   timeout that never fires, and nothing downstream recovers. This is the
-   one the effect ordering in `Process` exists to maintain, and the one
-   worth model-checking first. *)
-WheelComplete ==
-    \A o \in DOMAIN objects, k \in DeadlineKind :
-        Deadline(objects[o], k) /= NoTime =>
-            [at |-> Deadline(objects[o], k), id |-> o, kind |-> k] \in timeouts
+(* `WheelSound` and `WheelComplete` have moved to `Concrete`. They were
+   never claims about the protocol: they say an INDEX agrees with the
+   deadlines it indexes, and this machine has no index. Nothing in the 95
+   mentions one either, for the same reason. *)
 
 (***************************************************************************)
 (* THE CATALOGUE                                                           *)
@@ -1287,11 +1071,6 @@ UnitCoherent ==
 SameOrigin ==
     \A o \in DOMAIN objects :
         \A w \in objects[o].promise.callbacks : w.origin = o.origin
-
-Draining(r) == steps[r].phase = "perform"
-
-NoInterleave ==
-    \A a, b \in DOMAIN steps : (Draining(a) /\ Draining(b)) => a = b
 
 (***************************************************************************)
 (* The `.trans` entries, wrapped for TLC.                                  *)
