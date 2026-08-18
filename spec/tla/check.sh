@@ -45,5 +45,9 @@ else
         *)                   echo "INVARIANT $2" >> "$CFG" ;;
     esac
 fi
+# -metadir keeps TLC's state pool and fingerprints OUT of the repo. They
+# are large, they churn, and a stray `rm -rf` of build output inside the
+# tree will kill a running check by deleting the pool underneath it.
 java -XX:+UseParallelGC -cp "$TLA_TOOLS" tlc2.TLC \
-     -config "$CFG" -workers 4 -deadlock "$SPEC.tla"
+     -config "$CFG" -workers 4 -deadlock \
+     -metadir "${TLC_METADIR:-/tmp/tlc-$SPEC}" "$SPEC.tla"
