@@ -300,10 +300,55 @@ Next ==
    -- a fair choice between the API path and the timer path -- and it is
    the kind of requirement that is invisible until liveness is checked
    against a bounded resource. *)
+(***************************************************************************)
+(* CRASHES THAT STOP, without a counter                                    *)
+(*                                                                         *)
+(* `Crashing = FALSE` says an executor never fails, which is not what we   *)
+(* mean and not something anyone would claim. What we mean is that steps   *)
+(* do not fail FOREVER, and that is sayable directly:                      *)
+(*                                                                         *)
+(*     <>[][ \A r \in Rid : ~Crash(r) ]_vars                               *)
+(*                                                                         *)
+(* `[][A]_vars` holds of a step when it satisfies `A` or leaves `vars`     *)
+(* alone. A crash does neither -- it removes a step -- so `[][~Crash]_vars`*)
+(* forbids crash steps, and `<>[]` says: from some point on, forever.      *)
+(* No bound, no counter, no constant. Just "not forever".                  *)
+(*                                                                         *)
+(* Crashes stay in the machine, safety is still checked against them, and  *)
+(* only the liveness claim is conditioned on their ceasing. That is the    *)
+(* shape every liveness result under failure has -- an eventual-stability  *)
+(* assumption -- written as a formula instead of an English caveat.        *)
+(*                                                                         *)
+(* WHERE IT GOES IS NOT FREE. The obvious spelling is a hypothesis on the  *)
+(* property, `EventuallyStable => A!Spec`, and TLC refuses it:             *)
+(*                                                                         *)
+(*     Temporal formulas containing actions must be of forms               *)
+(*     <>[]A or []<>A.                                                     *)
+(*                                                                         *)
+(* An action-containing formula is admitted only in those two shapes, and  *)
+(* an implication with one as its antecedent is not among them. As a       *)
+(* CONJUNCT OF THE SPECIFICATION it is accepted, which is what `SpecStable`*)
+(* is. `RefinesSpecStable` is kept because it says what is meant; it is    *)
+(* just not the form a checker will take.                                  *)
+(*                                                                         *)
+(* Note also what this does NOT say. `<>[]` means crashes stop ENTIRELY    *)
+(* after some point, which is stronger than "not always". The weaker       *)
+(* reading -- infinitely many crashes, but never always the attempt that   *)
+(* matters -- is what fairness would express, and it is exactly what the   *)
+(* slot-recycling counterexample showed cannot be written over `Rid`:      *)
+(* fairness names a slot, and a throwaway no-op step in the same slot      *)
+(* discharges it. Eventual stability is the honest thing that is actually  *)
+(* expressible here.                                                       *)
+(***************************************************************************)
+
+EventuallyStable == <>[][ \A r \in Rid : ~Crash(r) ]_vars
+
+
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
     /\ \A ev \in A!InternalEvent : SF_vars(SubmitInternal(ev))
     /\ WF_vars(Clock)
+    /\ EventuallyStable
 
 (* The stronger promise, as a SECOND SPECIFICATION rather than a constant
    guard. `StrongSteps => \A r : SF_vars(..)` looked like the tidy way to
@@ -369,58 +414,10 @@ SpecSF == Init /\ [][Next]_vars /\ FairnessSF
    while it was swapped. A definition you have to edit to check is a
    definition that will eventually be committed mid-edit. *)
 
-RefinesSafety == A!Safety     \* claimed of every behaviour
-RefinesSpec   == A!Spec       \* claimed of the ones where crashing stops
+RefinesSafety == A!Safety
+RefinesSpec   == A!Spec
 
-(***************************************************************************)
-(* CRASHES THAT STOP, without a counter                                    *)
-(*                                                                         *)
-(* `Crashing = FALSE` says an executor never fails, which is not what we   *)
-(* mean and not something anyone would claim. What we mean is that steps   *)
-(* do not fail FOREVER, and that is sayable directly:                      *)
-(*                                                                         *)
-(*     <>[][ \A r \in Rid : ~Crash(r) ]_vars                               *)
-(*                                                                         *)
-(* `[][A]_vars` holds of a step when it satisfies `A` or leaves `vars`     *)
-(* alone. A crash does neither -- it removes a step -- so `[][~Crash]_vars`*)
-(* forbids crash steps, and `<>[]` says: from some point on, forever.      *)
-(* No bound, no counter, no constant. Just "not forever".                  *)
-(*                                                                         *)
-(* Crashes stay in the machine, safety is still checked against them, and  *)
-(* only the liveness claim is conditioned on their ceasing. That is the    *)
-(* shape every liveness result under failure has -- an eventual-stability  *)
-(* assumption -- written as a formula instead of an English caveat.        *)
-(*                                                                         *)
-(* WHERE IT GOES IS NOT FREE. The obvious spelling is a hypothesis on the  *)
-(* property, `EventuallyStable => A!Spec`, and TLC refuses it:             *)
-(*                                                                         *)
-(*     Temporal formulas containing actions must be of forms               *)
-(*     <>[]A or []<>A.                                                     *)
-(*                                                                         *)
-(* An action-containing formula is admitted only in those two shapes, and  *)
-(* an implication with one as its antecedent is not among them. As a       *)
-(* CONJUNCT OF THE SPECIFICATION it is accepted, which is what `SpecStable`*)
-(* is. `RefinesSpecStable` is kept because it says what is meant; it is    *)
-(* just not the form a checker will take.                                  *)
-(*                                                                         *)
-(* Note also what this does NOT say. `<>[]` means crashes stop ENTIRELY    *)
-(* after some point, which is stronger than "not always". The weaker       *)
-(* reading -- infinitely many crashes, but never always the attempt that   *)
-(* matters -- is what fairness would express, and it is exactly what the   *)
-(* slot-recycling counterexample showed cannot be written over `Rid`:      *)
-(* fairness names a slot, and a throwaway no-op step in the same slot      *)
-(* discharges it. Eventual stability is the honest thing that is actually  *)
-(* expressible here.                                                       *)
-(***************************************************************************)
-
-EventuallyStable == <>[][ \A r \in Rid : ~Crash(r) ]_vars
-
-RefinesSpecStable == EventuallyStable => A!Spec
-
-SpecStable == Init /\ [][Next]_vars /\ Fairness /\ EventuallyStable
-
-THEOREM Spec       => A!Safety
-THEOREM SpecStable => A!Spec
+THEOREM Spec => A!Spec
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
