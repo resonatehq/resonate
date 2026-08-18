@@ -123,16 +123,31 @@ SubmitExternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
 
-(* What this executor fires on: ITS WHEEL, not the objects. That is the
-   whole reason to keep a wheel -- so nothing has to scan for what is due
-   -- and it is where the two machines part company. `Abstract!Fires`
-   reads the deadline off the object; this reads an armed entry.
+(* THE ASYMMETRY, stated plainly, because it is the point of having two
+   machines rather than one:
 
-   Which makes `A!Fairness` do real work. Upstairs, a deadline that has
-   come due must eventually be acted on. Down here that can only happen
-   if the wheel holds an entry for it -- so `C_WheelComplete` is not a
-   side condition somebody thought to write down, it is what the abstract
-   machine's fairness demands of anything that keeps an index.
+     Abstract may take an internal step whenever the TIMEOUT VALUES ON AN
+     OBJECT allow it.
+
+     Concrete may take one only when there is an ARMED ENTRY for it.
+
+   So this machine is strictly more restricted, and the two directions of
+   that are not the same:
+
+     - for SAFETY it is free. Fewer behaviours is what refinement wants,
+       and an entry that fires with nothing due merely produces a step
+       that writes nothing -- a stutter upstairs.
+
+     - for LIVENESS it is the whole risk. `A!Fairness` says a deadline
+       that has come due is eventually acted on. Down here that can only
+       happen if the wheel holds an entry for it, so an object carrying a
+       deadline the wheel has forgotten is a timeout that never fires and
+       an abstract obligation this machine cannot meet.
+
+   Which is why `C_WheelComplete` is not a side condition somebody
+   thought to write down. It is exactly what `A!Spec` demands of anything
+   that keeps an index instead of reading the objects, and if it holds,
+   every internal step `Abstract` may take is one `Concrete` may take too.
    @type: $event => Bool; *)
 Fires(ev) ==
     CASE VariantTag(ev) = "Timeout" ->
