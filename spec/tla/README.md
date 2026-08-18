@@ -409,10 +409,15 @@ reading a document that did not contain the awaiter, which is a stutter and
 therefore a legal refinement. With the door it is COMPLETE — it serves
 everything the protocol admits.
 
-**Two cross-origin surfaces remain**, and neither is an awaiter: `taskFence`
-acts on a target that is by definition not the fence, and `taskHeartbeat`
-takes refs that P3 says "need not share a partition". Whether those get the
-same door is a protocol question, not a modelling one.
+**Two handlers still have no origin door at all**, and neither is an awaiter.
+`taskFence` requires only that its target be a DIFFERENT ID -- `if
+req.action.targetId == req.id then 400` -- which says nothing about origins;
+a parent fencing a child in the same tree is a different id at the same
+origin, and is presumably the ordinary case. `taskHeartbeat` names a set of
+task refs, and P3 says outright they "need not share a partition". So both
+are multi-object operations whose objects MAY span origins, not operations
+that necessarily do. Whether they get the callback's door is a protocol
+question, not a modelling one.
 
 ### Which checker
 

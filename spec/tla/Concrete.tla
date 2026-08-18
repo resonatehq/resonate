@@ -106,7 +106,9 @@ A == INSTANCE Abstract WITH objects <- Objects
    an object at another origin cannot be served. Several now do:
    `promiseRegisterCallback` reads the awaiter, `taskSuspend` writes
    every awaited promise, `CallbackDrain` writes the awaiter's task, and
-   `taskFence` acts on a target that is by definition not the fence.
+   `taskFence` names a target that must be a different ID -- which is
+   not the same as a different origin, and nothing constrains the
+   origin.
    
    With a single origin every object is in one document and all of them
    are single-document operations -- which is `SameOrigin` holding, by
