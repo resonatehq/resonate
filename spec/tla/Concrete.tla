@@ -527,6 +527,55 @@ C_WheelComplete ==
         A!Deadline(Objects[o], k) /= A!NoTime =>
             [at |-> A!Deadline(Objects[o], k), id |-> o, kind |-> k] \in timeouts
 
+(* A WITNESS, NOT AN INVARIANT.
+
+   `CallbackDrain` writes two objects, so it emits two `PutObject`s and
+   this executor performs them one at a time. The state in between --
+   one object written, the other still in hand -- is the multi-unit
+   write the header warns about, and the expectation was that it would
+   break the refinement the same way a write with its message still in
+   hand does.
+
+   There is a reason it might not, and it is worth stating before the
+   answer: refinement asks for SOME abstract step between the two mapped
+   states, not the same one. A lone object write is what half the
+   alphabet does -- a settle, a create, a claim -- so the half-finished
+   pair may be a state `Abstract` reaches all the time, just under a
+   different request than the one this machine is running. A message has
+   no such cover: nothing in `Abstract` ever says without writing in the
+   same breath. If that asymmetry is the whole story then writes may be
+   split and messages may not.
+
+   THESE THREE OPERATORS EXIST BECAUSE THE FIRST ANSWER WAS VACUOUS. A
+   run with `MaxTime = 0` reported no violation and had never run the
+   drain at all: a promise created at time 0 with a timeout of 0 is born
+   settled, so no callback is ever registered and the multi-unit write
+   never happens. `NoDrainRan` is what caught it. With the clock back,
+   all three fire -- the drain runs, a step carries two puts, and the
+   half-written state is reached -- so a refinement check against that
+   configuration is asking the question rather than missing it.
+
+   With one `Rid` nothing else writes, so an etag past what the step
+   read means the step itself wrote; a `PutObject` still pending means
+   it has not finished. Check `~SplitWrite` and TLC hands back the
+   state, which is the witness. *)
+SplitWrite ==
+    \E r \in DOMAIN steps :
+        /\ steps[r].phase = "perform"
+        /\ etags[steps[r].org] > steps[r].expect
+        /\ \E j \in DOMAIN steps[r].pending :
+               VariantTag(steps[r].pending[j]) = "PutObject"
+
+NoSplitWrite == ~SplitWrite
+
+DrainRan   == \E r \in DOMAIN steps : VariantTag(steps[r].ev) = "CallbackDrain"
+NoDrainRan == ~DrainRan
+
+TwoPuts == \E r \in DOMAIN steps :
+    Cardinality({ j \in DOMAIN steps[r].pending :
+                    VariantTag(steps[r].pending[j]) = "PutObject" }) > 1
+NoTwoPuts == ~TwoPuts
+
 CT_preserved_settled_promise_record    == [][A!preserved_settled_promise_record]_vars
 CT_consistent_promise_settlement_stamp == [][A!consistent_promise_settlement_stamp]_vars
 
