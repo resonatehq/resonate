@@ -35,7 +35,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
           NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
-          Fenced, Crashing
+          Fenced
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
@@ -263,31 +263,21 @@ Init ==
     /\ now      = 0
 
 (***************************************************************************)
-(* `Crashing` is a CONSTANT, and it is not a convenience.                  *)
+(* CRASHES ARE ALWAYS IN THE MACHINE                                       *)
 (*                                                                         *)
-(* With crashes on, `Spec => A!Safety` holds: whatever a step managed to   *)
-(* apply before it died is a prefix the abstract machine permits, which is *)
-(* the entire reason `Crash` is in the model.                              *)
-(*                                                                         *)
-(* With crashes on, `Spec => A!Spec` CANNOT hold, and TLC showed why in    *)
-(* four states: submit the due timeout, and kill it while it is still      *)
-(* deciding. Repeat forever. Strong fairness does not help -- the step is  *)
-(* submitted every round, so the fairness condition is met -- and no       *)
-(* scheduling discipline helps either, because nothing here schedules      *)
-(* crashes. An executor whose work may be destroyed arbitrarily often      *)
-(* cannot promise that anything ever finishes, and no specification can    *)
-(* be written that lets it.                                                *)
-(*                                                                         *)
-(* So liveness is claimed under the assumption that failures cease, which  *)
-(* is the only assumption under which liveness is ever claimed. Setting    *)
-(* `Crashing = FALSE` is that assumption, made explicit and checkable      *)
-(* rather than left in a sentence nobody runs.                             *)
+(* There was a `Crashing` constant here, and switching it off was how       *)
+(* liveness got claimed. That is a worse thing to say than it looks: it     *)
+(* claims something about an executor that never fails, which is not an     *)
+(* executor anyone has. `EventuallyStable` says the thing actually meant    *)
+(* -- steps do not fail FOREVER -- so the crash can stay, both claims can   *)
+(* be made about the same machine, and the difference between them is one   *)
+(* formula rather than one configuration.                                   *)
 (***************************************************************************)
 
 Next ==
     \/ \E ev \in A!ExternalEvent : SubmitExternal(ev)
     \/ \E ev \in A!InternalEvent : SubmitInternal(ev)
-    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ (Crashing /\ Crash(r))
+    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
 (* The fairness `Abstract` asks of itself, asked of this executor. It has
@@ -379,8 +369,8 @@ SpecSF == Init /\ [][Next]_vars /\ FairnessSF
    while it was swapped. A definition you have to edit to check is a
    definition that will eventually be committed mid-edit. *)
 
-RefinesSafety == A!Safety     \* claimed WITH crashes:    Crashing = TRUE
-RefinesSpec   == A!Spec       \* claimed WITHOUT them:    Crashing = FALSE
+RefinesSafety == A!Safety     \* claimed of every behaviour
+RefinesSpec   == A!Spec       \* claimed of the ones where crashing stops
 
 (***************************************************************************)
 (* CRASHES THAT STOP, without a counter                                    *)
@@ -429,8 +419,8 @@ RefinesSpecStable == EventuallyStable => A!Spec
 
 SpecStable == Init /\ [][Next]_vars /\ Fairness /\ EventuallyStable
 
-THEOREM Crashing  => (Spec => A!Safety)
-THEOREM ~Crashing => (Spec => A!Spec)
+THEOREM Spec       => A!Safety
+THEOREM SpecStable => A!Spec
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
