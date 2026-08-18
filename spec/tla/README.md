@@ -30,23 +30,28 @@ sufficient. Left out, it has to say what goes wrong without one.
 
 ## Running it
 
-Apalache ≥ 0.61.
-
 ```
-apalache-mc typecheck Resonate.tla
-JVM_ARGS="-Xss512m" apalache-mc check --config=MCResonate.cfg --length=3 Resonate.tla
+./check.sh                  # every invariant expected to hold
+./check.sh WheelComplete    # one name, to watch it fail
 ```
 
-**`-Xss512m` is not optional.** Apalache's default JVM stack overflows while
-rewriting this module — deep in `scalaz`, before the solver is reached, with a
-`StackOverflowError` that looks like a bug in the spec and is not one. The
-launcher sets `-Xmx` for you and leaves `-Xss` alone.
+TLC is the checker; `check.sh` runs Apalache first on types only if it is on
+the PATH. Set `TLA_TOOLS` to your `tla2tools.jar`, or fetch it:
 
-TLC can also run the module; `Spec` carries the fairness conditions, which
-Apalache ignores. Under TLC, declare `Rid` a symmetry set — it is what makes
-the permutations of which step got which identity collapse. Expect to drop
-symmetry when checking the liveness properties, where TLC's reduction is not
-reliable.
+```
+curl -sSLO https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
+```
+
+The default sweep covers the whole reachable state space — ~474 000 distinct
+states, graph depth 30 — in about ten seconds.
+
+`Variants.tla` and `Apalache.tla` sit beside the specs, vendored from the
+Apalache distribution (`src/tla`, Apache-2.0). TLC needs them on the module
+path and does not ship them: `Variants` is what `$event` and `$effect` are
+built from, and `Apalache` supplies `SetAsFun`, which is how `Init` names an
+empty function whose type is not ambiguous. Both are ordinary TLA+ — TLC
+evaluates them directly — so the dependency is on the definitions, not the
+tool.
 
 ## The knob
 
