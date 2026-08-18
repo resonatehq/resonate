@@ -22,13 +22,14 @@
 (*     steps      what is in flight. Volatile: a crash drops one and       *)
 (*                nothing durable refers to it                             *)
 (*                                                                         *)
-(* and six transitions:                                                    *)
+(* and seven transitions:                                                  *)
 (*                                                                         *)
 (*     SubmitExternal   a client request arrives                           *)
 (*     SubmitInternal   the server takes a step on its own initiative      *)
 (*     Process          READ AND DECIDE. Writes nothing                    *)
 (*     Perform          apply ONE effect -- or, with none left, answer and *)
 (*                      retire                                             *)
+(*     Restart          the step throws its decision away and re-decides   *)
 (*     Crash            the step vanishes; what it committed stays         *)
 (*     Clock            time advances, on its own and unprompted           *)
 (*                                                                         *)
@@ -942,6 +943,33 @@ Perform(r) ==
             /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED now
 
+(* A step throws its decision away and decides again. It writes nothing,
+   so nothing durable moves; what moves is that the step is now reading a
+   world it has not read before.
+
+   THIS IS NOT AN IMPLEMENTATION DETAIL THAT LEAKED IN. It is here because
+   the specification was not refinable without it. `Concrete` fences its
+   writes with a compare-and-swap, and a refused write sends the step back
+   to `Prepare` with `retries + 1` -- `restart(s, rid, ..)` in the Verus
+   executor. Under the abstraction that is a step going from "perform" to
+   "process", and no action here did that, so every behaviour with a
+   retry in it was outside the specification. A spec that admits no
+   implementation that retries admits almost no implementation at all.
+
+   Nothing constrains WHEN it happens: an abstract step may re-decide for
+   any reason or none. That is what lets one concrete mechanism (a stale
+   etag) be a special case of it, and the next one (a lease lost, a
+   connection dropped) be a special case too, without either being named
+   here.
+   @type: RID => Bool; *)
+Restart(r) ==
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps' = [steps EXCEPT ![r].phase   = "process",
+                              ![r].pending = << >>,
+                              ![r].res     = Silent]
+    /\ UNCHANGED <<objects, timeouts, outbox, now>>
+
 (* The step disappears. What it committed stays committed; a PREFIX of
    what it had to say was said, and the rest never will be. No response is
    given. This is the whole reason `effects` is a sequence and not a set,
@@ -975,7 +1003,7 @@ Init ==
 Next ==
     \/ \E ev \in ExternalEvent : SubmitExternal(ev)
     \/ \E ev \in InternalEvent : SubmitInternal(ev)
-    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
+    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Restart(r) \/ Crash(r)
     \/ Clock
 
 (* A step in flight must make progress, or "the server answers" is not a

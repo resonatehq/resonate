@@ -25,7 +25,7 @@ MCInternal == { Variant("Timeout", [entry |-> e]) : e \in Entry }
 MCNext ==
     \/ \E ev \in MCExternal : SubmitExternal(ev)
     \/ \E ev \in MCInternal : SubmitInternal(ev)
-    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
+    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Restart(r) \/ Crash(r)
     \/ Clock
 
 MCSpec == Init /\ [][MCNext]_vars
