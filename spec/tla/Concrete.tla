@@ -358,9 +358,17 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (* step it has to permit. `Abstract!Restart` is gone with it.              *)
 (***************************************************************************)
 
-Refinement == A!Safety
+(* Both halves, named separately, so that checking one never means editing
+   the module. An earlier version had a single `Refinement` that got
+   sed-swapped between the two for one-off runs -- and a commit landed
+   while it was swapped. A definition you have to edit to check is a
+   definition that will eventually be committed mid-edit. *)
 
-THEOREM Spec => A!Spec
+RefinesSafety == A!Safety     \* claimed WITH crashes:    Crashing = TRUE
+RefinesSpec   == A!Spec       \* claimed WITHOUT them:    Crashing = FALSE
+
+THEOREM Crashing  => (Spec => A!Safety)
+THEOREM ~Crashing => (Spec => A!Spec)
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
