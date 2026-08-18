@@ -321,6 +321,40 @@ that violates its own assumption is a broken harness, not a finding.
 Switchable fairness belongs in a second SPECIFICATION, not behind a constant
 guard.
 
+### What `Crash` actually contributes
+
+If crashes were never modelled the theorem would be one line:
+
+```tla
+THEOREM Spec => A!Spec
+```
+
+no constant, no guard, no `A!Safety` variant. Measured with
+`Crashing = FALSE`, every hazard finding survives anyway:
+
+| | |
+|---|---|
+| `C_WheelSound` | still fails |
+| `C_WheelComplete`, unfenced | still fails |
+| `Spec => A!Safety`, unfenced | still fails |
+
+Because interleaving alone already produces partial application: A arms, B
+runs, A puts. A crash makes a partial application PERMANENT; it does not make
+it possible. So the arm/put window, the lost update, the wheel going silent
+and the fence's necessity are all interleaving results, and none of them
+needed a crash to show up.
+
+What `Crash` does buy is two things that cannot be said without it:
+
+- `Crashing => (Spec => A!Safety)` — safety survives a step dying mid-list,
+  which is a real claim about an executor and the reason `effects` is a
+  sequence rather than a set;
+- the negative liveness result, which is only interesting because crashes are
+  in the model at all.
+
+Worth knowing when deciding what to keep: the crash is cheap to model, buys
+one genuine safety claim, and costs the one-line theorem.
+
 ### Which checker
 
 **TLC**, for running anything. Apalache could not reach depth 6 in 25 minutes —
