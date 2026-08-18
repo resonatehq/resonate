@@ -136,7 +136,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
     | TaskHalt({ id: $id })
     | TaskContinue({ id: $id })
     | TaskSearch(UNIT)
-    | Timeout({ entry: $entry })
+    | Timeout({ id: $id, kind: Str })
     | ListenerDrain({ id: $id, address: ADDR })
     | CallbackDrain({ id: $id, awaiter: $id });
 
@@ -423,23 +423,35 @@ ExternalEvent ==
     \cup On("TaskContinue", { Variant("TaskContinue", [id |-> i]) : i \in Id})
     \cup On("TaskSearch", { Variant("TaskSearch", UNIT)})
 
-(* The steps no client asks for. Two shapes, not five, and the split is by
-   WHAT ENABLES THEM rather than by what they do:
+(* The events no client asks for. Two shapes, and the split is by WHAT
+   MAKES THEM AVAILABLE -- which is, in both cases, something an object
+   says about itself:
 
-     - a due wheel entry. This is the Lean's r1, r5 and r6 -- promise
-       timeout, lease timeout, retry dispatch -- collapsed into one event,
-       because with the deadline in the entry there is nothing left to
-       distinguish them at this altitude. It is the Verus `Input::Tick`,
-       which rides only on an armed entry that is due: "everything else
-       the machine does on its own is a TIMEOUT TICK".
+     - a DEADLINE the object carries. `Promise.timeoutAt`,
+       `Task.expiresAt` and `Task.retryAt` are the three, so the event
+       names an object and which of its deadlines it is about. It does
+       NOT carry the instant: the object already knows it, and an event
+       carrying its own copy could disagree with the thing it is about.
 
-     - a non-empty ledger on a settled promise. This is r3 and r4, the
-       listener and callback drains, and they are NOT timer-driven: what
-       enables them is a settlement that has happened and a name still
-       written down next to it. *)
+       This is the Lean's r1, r5 and r6. An earlier draft made it one
+       event carrying a wheel entry -- `{at, id, kind}` -- which quietly
+       put an executor's index into the protocol's alphabet. A wheel is
+       something an implementation keeps so it need not scan for what is
+       due; `Concrete` keeps one, and here there is nothing to keep in
+       step with the objects because there is nothing but the objects.
+
+     - a NAME still written down next to a settled promise. This is r3
+       and r4, the listener and callback drains, and they were always
+       written this way -- `address \in listeners`, `awaiter \in
+       callbacks`.
+
+   The deadline case now has the same shape as the drains, which is the
+   point: an internal step is available because of what is IN THE STORE,
+   never because of what is in a register beside it. *)
 InternalEvent ==
        {}
-    \cup On("Timeout", { Variant("Timeout", [entry |-> e]) : e \in Entry})
+    \cup On("Timeout", { Variant("Timeout", [id |-> i, kind |-> k])
+                         : i \in Id, k \in DeadlineKind})
     \cup On("ListenerDrain", { Variant("ListenerDrain", [id |-> i, address |-> a]) : i \in Id, a \in Address})
     \cup On("CallbackDrain", { Variant("CallbackDrain", [id |-> i, awaiter |-> w]) : i \in Id, w \in Id})
 
@@ -673,7 +685,7 @@ HPromiseSettle(req, env) ==
    still on the wheel and will fire again -- that is the noise arming
    before writing admits, and it is why every internal handler re-checks.
    The lease and retry kinds are not implemented yet and answer `NoOp`.
-   @type: ($entry, $env) => $outcome; *)
+   @type: ({ id: $id, kind: Str }, $env) => $outcome; *)
 HTimeout(e, env) ==
     LET i   == e.id
         old == Cur(env, i)
@@ -689,7 +701,7 @@ Handle(ev, env) ==
       [] VariantTag(ev) = "PromiseSettle" ->
              HPromiseSettle(VariantGetUnsafe("PromiseSettle", ev).req, env)
       [] VariantTag(ev) = "Timeout" ->
-             HTimeout(VariantGetUnsafe("Timeout", ev).entry, env)
+             HTimeout(VariantGetUnsafe("Timeout", ev), env)
       [] OTHER -> NoOp
 
 -----------------------------------------------------------------------------
@@ -725,10 +737,10 @@ SettledNow(p) == p.state /= "pending" \/ p.timeoutAt <= now
 (* @type: $event => Bool; *)
 Fires(ev) ==
     CASE VariantTag(ev) = "Timeout" ->
-             LET e == VariantGetUnsafe("Timeout", ev).entry IN
-             /\ e.id \in DOMAIN objects
-             /\ Deadline(objects[e.id], e.kind) = e.at
-             /\ e.at <= now
+             LET d == VariantGetUnsafe("Timeout", ev) IN
+             /\ d.id \in DOMAIN objects
+             /\ Deadline(objects[d.id], d.kind) /= NoTime
+             /\ Deadline(objects[d.id], d.kind) <= now
       [] VariantTag(ev) = "ListenerDrain" ->
              LET d == VariantGetUnsafe("ListenerDrain", ev) IN
              /\ Live(d.id)

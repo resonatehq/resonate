@@ -108,7 +108,7 @@ OriginOf(ev) ==
       [] VariantTag(ev) = "PromiseSettle" ->
              VariantGetUnsafe("PromiseSettle", ev).req.id.origin
       [] VariantTag(ev) = "Timeout" ->
-             VariantGetUnsafe("Timeout", ev).entry.id.origin
+             VariantGetUnsafe("Timeout", ev).id.origin
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
 Fresh(ev) ==
@@ -136,8 +136,10 @@ SubmitExternal(ev) ==
    @type: $event => Bool; *)
 Fires(ev) ==
     CASE VariantTag(ev) = "Timeout" ->
-             LET e == VariantGetUnsafe("Timeout", ev).entry IN
-             e \in timeouts /\ e.at <= now
+             LET d == VariantGetUnsafe("Timeout", ev) IN
+             \E e \in timeouts : /\ e.id   = d.id
+                                /\ e.kind = d.kind
+                                /\ e.at  <= now
       [] OTHER -> A!Fires(ev)
 
 SubmitInternal(ev) ==
