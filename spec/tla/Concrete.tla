@@ -99,16 +99,45 @@ A == INSTANCE Abstract WITH objects <- Objects
 (* THE EXECUTOR                                                            *)
 (***************************************************************************)
 
-(* Which document a step touches. Every implemented handler reads and
-   writes one origin; the unimplemented ones write nothing, so any answer
-   serves. *)
+(* Which document a step touches.
+   
+   THIS IS WHERE THE ONE-DOCUMENT PREMISE BITES. `Process` hands the
+   handler `docs[o]` and nothing else, so a handler that reads or writes
+   an object at another origin cannot be served. Several now do:
+   `promiseRegisterCallback` reads the awaiter, `taskSuspend` writes
+   every awaited promise, `CallbackDrain` writes the awaiter's task, and
+   `taskFence` acts on a target that is by definition not the fence.
+   
+   With a single origin every object is in one document and all of them
+   are single-document operations -- which is `SameOrigin` holding, by
+   construction rather than by proof. The model runs that way. Raising
+   `|Origin|` above one is exactly the experiment `SameOrigin` names,
+   and this operator is where it would have to be answered: a
+   cross-origin handler needs either two document reads or a
+   transaction, and this executor offers neither.
+   @type: $event => ORIGIN; *)
 OriginOf(ev) ==
-    CASE VariantTag(ev) = "PromiseCreate" ->
-             VariantGetUnsafe("PromiseCreate", ev).req.id.origin
-      [] VariantTag(ev) = "PromiseSettle" ->
-             VariantGetUnsafe("PromiseSettle", ev).req.id.origin
-      [] VariantTag(ev) = "Timeout" ->
-             VariantGetUnsafe("Timeout", ev).id.origin
+    LET p(tag) == VariantGetUnsafe(tag, ev) IN
+    CASE VariantTag(ev) = "PromiseGet"              -> p("PromiseGet").id.origin
+      [] VariantTag(ev) = "PromiseCreate"           -> p("PromiseCreate").req.id.origin
+      [] VariantTag(ev) = "PromiseSettle"           -> p("PromiseSettle").req.id.origin
+      [] VariantTag(ev) = "PromiseRegisterCallback" ->
+             p("PromiseRegisterCallback").req.awaited.origin
+      [] VariantTag(ev) = "PromiseRegisterListener" ->
+             p("PromiseRegisterListener").awaited.origin
+      [] VariantTag(ev) = "TaskGet"       -> p("TaskGet").id.origin
+      [] VariantTag(ev) = "TaskCreate"    -> p("TaskCreate").action.id.origin
+      [] VariantTag(ev) = "TaskAcquire"   -> p("TaskAcquire").id.origin
+      [] VariantTag(ev) = "TaskFence"     -> p("TaskFence").id.origin
+      [] VariantTag(ev) = "TaskSuspend"   -> p("TaskSuspend").id.origin
+      [] VariantTag(ev) = "TaskFulfill"   -> p("TaskFulfill").id.origin
+      [] VariantTag(ev) = "TaskRelease"   -> p("TaskRelease").id.origin
+      [] VariantTag(ev) = "TaskHalt"      -> p("TaskHalt").id.origin
+      [] VariantTag(ev) = "TaskContinue"  -> p("TaskContinue").id.origin
+      [] VariantTag(ev) = "Timeout"       -> p("Timeout").id.origin
+      [] VariantTag(ev) = "ListenerDrain" -> p("ListenerDrain").id.origin
+      [] VariantTag(ev) = "CallbackDrain" -> p("CallbackDrain").id.origin
+      \* heartbeat names a SET of tasks and the searches name none
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
 Fresh(ev) ==
