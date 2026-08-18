@@ -780,8 +780,20 @@ HPromiseGet(i, env) ==
    settle it -- because a callback on a promise nothing can settle is a
    waiter nothing will ever wake.
 
-   It reads two objects and writes one. That is the multi-unit shape
-   named in the header, in its mildest form.
+   AND THE TWO MUST SHARE AN ORIGIN. This door is not in the Lean: the
+   handler there checks that the awaiter is targeted and the awaited is
+   external, and says nothing about where either lives, so a client can
+   register a waiter across origins and the specification admits it.
+   That is a gap in `spec/02-abstract/external.lean` rather than a
+   choice, and it matters more than a missing status code: an await that
+   spans origins is a write whose two ends can be in different
+   partitions, which is the difference between an implementation that
+   may shard and one that may not.
+
+   With the door, every handler touches one origin, and the
+   one-document-per-origin executor in `Concrete` is not merely SOUND
+   -- declining what it cannot serve -- but COMPLETE, serving everything
+   the protocol admits.
    @type: ($callbackReq, $env) => $outcome; *)
 HPromiseRegisterCallback(req, env) ==
     LET a   == req.awaited
@@ -790,6 +802,7 @@ HPromiseRegisterCallback(req, env) ==
         pa  == Project(oa, env.now)
         pw  == Project(Cur(env, w), env.now)
     IN  IF \/ a = w
+           \/ a.origin /= w.origin
            \/ a \notin DOMAIN env.objects
            \/ w \notin DOMAIN env.objects
            \/ ~pw.promise.tags.targeted
@@ -956,6 +969,7 @@ HTaskSuspend(i, v, acts, env) ==
         seen == { a \in aw : a \in DOMAIN env.objects }
         proj(a) == Project(Cur(env, a), env.now)
     IN  IF \/ acts = {} \/ i \in aw
+           \/ \E a \in aw : a.origin /= i.origin   \* the same door
            \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"

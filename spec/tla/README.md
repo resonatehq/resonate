@@ -375,6 +375,45 @@ What `Crash` does buy is two things that cannot be said without it:
 Worth knowing when deciding what to keep: the crash is cheap to model, buys
 one genuine safety claim, and costs the one-line theorem.
 
+### A door the Lean is missing
+
+`promiseRegisterCallback` in `spec/02-abstract/external.lean` checks four
+things — awaited is not awaiter, both exist, the awaiter is targeted, the
+awaited is external — and says nothing about where either lives. So a client
+may register a waiter whose two ends are in different origins, and the
+specification admits it. TLC found it in three steps:
+
+```
+create o1/a  external
+create o2/a  targeted
+promiseRegisterCallback(awaited |-> o1/a, awaiter |-> o2/a)
+
+  o1/a.callbacks = { o2/a }
+```
+
+That is a gap rather than a choice, and it prices more than a status code: an
+await spanning origins is a write whose two ends can be in different
+partitions, which is the difference between an implementation that may shard
+and one that may not. `implementation-questions.md` P1 treats the unit of
+serialisation as open and notes that per-tree keeps "most" operations local;
+this door is what would make it all of them.
+
+Added here to both machines — `promiseRegisterCallback` and `taskSuspend`,
+which registers the same kind of waiter on every promise in its action list.
+With it, `SameOrigin` holds over two origins (3 025 distinct states, complete
+graph) where it was refuted in a second before.
+
+And it changes what `Concrete` is. Without the door, the one-document-per-
+origin executor was merely SOUND: it declined cross-origin registrations by
+reading a document that did not contain the awaiter, which is a stutter and
+therefore a legal refinement. With the door it is COMPLETE — it serves
+everything the protocol admits.
+
+**Two cross-origin surfaces remain**, and neither is an awaiter: `taskFence`
+acts on a target that is by definition not the fence, and `taskHeartbeat`
+takes refs that P3 says "need not share a partition". Whether those get the
+same door is a protocol question, not a modelling one.
+
 ### Which checker
 
 **TLC**, for running anything. Apalache could not reach depth 6 in 25 minutes —
