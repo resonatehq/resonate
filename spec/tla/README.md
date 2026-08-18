@@ -196,23 +196,15 @@ Checked exhaustively with TLC over the whole reachable state space of each.
 | `T_consistent_new_promise_born_clean` | holds | — |
 | `T_consistent_settlement_fulfils_task` | holds | — |
 | `UnitCoherent` | holds | holds |
-| `WheelSound` | **fails** | **fails** |
+| `WheelSound` | n/a — no wheel | **fails** |
+| `WheelComplete` | n/a — no wheel | holds |
 | `T_consistent_promise_settlement_stamp` | **fails** | — |
-| `preserved_settled_promise_record` | **fails** | holds |
-| `WheelComplete` | **fails** | holds |
-| `Spec => A!Spec` | — | see below |
+| `preserved_settled_promise_record` | **fails** unfenced | holds |
+| `Spec => A!Safety`, crashes ON | — | **holds** |
+| `Spec => A!Spec`, crashes OFF | — | **holds** |
 
-`Abstract`: 474 761 distinct states, 25s. `Concrete`: 579 593 distinct states,
-complete graph depth 26, 4min 30s.
-
-The refinement was first checked as `Spec => A!Safety` — safety only — and
-**held** over that whole state space. It is now stated as `Spec => A!Spec`,
-which carries the abstract machine's fairness as well, because refining only
-the safety part lets an implementation satisfy the specification by doing
-nothing: accepting a request, deciding, and stalling forever is safe, and is
-not an implementation of anything. `Concrete` carries matching fairness and
-has to earn it. That check is slower — TLC has to do liveness — and its
-result is recorded here when it lands.
+`Concrete` closes over 425 506 distinct states for the liveness form and
+716 353 for the invariants, complete graph in both, a few minutes each.
 
 So the fence is sufficient for exactly the two failures that were real, and
 `WheelSound` still fails on both — arming before writing admits an entry for
@@ -244,16 +236,36 @@ interrupted; it does nothing about another step's disarm landing between this
 step's arm and its put.** Against interleaving the effect order is necessary
 and not sufficient.
 
-### The refinement found a hole in the specification
+### The refinement found three things, none of them in the concrete model
 
-The first check failed — on the concrete side going `perform -> process` after
-a refused compare-and-swap. `Abstract` had no action that went backwards, so
-every behaviour containing a retry was outside the spec. `Abstract!Restart`
-closes it: a step may throw its decision away and decide again, for any reason
-or none, so that a stale etag is a special case without being named.
+**A hole in the specification.** The first check failed on a refused
+compare-and-swap sending a step `perform -> process`. `Abstract` had no action
+that went backwards, so every behaviour containing a retry was outside the
+spec. That is gone now for a better reason than the patch I first applied:
+with `steps` out of the abstract machine entirely, a retry is not a smaller
+abstract step, it is **no abstract step at all**.
 
-That is the refinement earning its keep. It did not validate the concrete
-model against the abstract one; it refuted the abstract one.
+**A missing fence on the clock.** With only the etag compared: decide at
+`now = 0`, `Clock` ticks, the write lands at `now = 1`. Upstairs the write is
+the whole step, so the handler runs at the later instant and gives a different
+answer. A decision is only valid at the instant it was made, and a store etag
+says nothing about the clock. Verus takes the other road, freezing `at` at
+prepare time — which works against a Lean where `now` is an argument to each
+step rather than a variable running underneath it.
+
+**A scheduling obligation, and then a limit.** Liveness failed twice. First to
+slot starvation: `SubmitInternal` needs a free `Rid`, and weak fairness bites
+only when an action is *continuously* enabled, so a scheduler that always
+prefers the next client request starves a due timeout forever. `SF_vars` fixes
+that, and it is a real requirement — an executor must not indefinitely prefer
+client work to work that has come due.
+
+Then it failed again, on something no fairness can fix: submit the due
+timeout, kill it while it is still deciding, repeat. `Crash` is unconstrained,
+and an executor whose work may be destroyed arbitrarily often cannot promise
+that anything finishes. Hence `Crashing` as a constant — safety is claimed
+with crashes, liveness without them, which is the only way liveness is ever
+claimed.
 
 ### Which checker
 

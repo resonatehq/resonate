@@ -358,7 +358,7 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (* step it has to permit. `Abstract!Restart` is gone with it.              *)
 (***************************************************************************)
 
-Refinement == A!Spec
+Refinement == A!Safety
 
 THEOREM Spec => A!Spec
 
