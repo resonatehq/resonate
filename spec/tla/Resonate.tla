@@ -26,9 +26,9 @@
 (*                                                                         *)
 (*     SubmitExternal   a client request arrives                           *)
 (*     SubmitInternal   the server takes a step on its own initiative      *)
-(*     Process          READ, DECIDE, AND COMMIT -- one atomic action      *)
-(*     Perform          say one more thing on the wire -- or, with nothing *)
-(*                      left to say, answer and retire                     *)
+(*     Process          READ AND DECIDE. Writes nothing                    *)
+(*     Perform          apply ONE effect -- or, with none left, answer and *)
+(*                      retire                                             *)
 (*     Crash            the step vanishes; what it committed stays         *)
 (*     Clock            time advances, on its own and unprompted           *)
 (*                                                                         *)
@@ -39,25 +39,34 @@
 (* settle -- which is one of the four defects the Verus port found, and it *)
 (* is a defect this machine can EXHIBIT rather than merely be told about.  *)
 (*                                                                         *)
-(* WHERE THE INTERLEAVING IS NOT, and what that costs. `Process` commits   *)
-(* atomically, so there is no write-fence here -- no etag, no version, no  *)
-(* compare-and-swap. That is an ASSUMPTION, not a free lunch: it says the  *)
-(* store gives you a transaction over everything one step writes. The      *)
-(* Verus executor does not assume it, it EARNS it -- `PutDocument` carries *)
-(* `expect: etag_of(held)` and a failed compare sends the step back to     *)
-(* `Prepare` with `retries + 1`. Two ways to discharge the assumption:     *)
+(* WHAT THIS MODULE IS FOR. The objects and the wheel are TWO STORES, and  *)
+(* nothing writes them together. A step that settles a promise and clears  *)
+(* its timeout does two writes, at two moments, with the world running in  *)
+(* between -- and the question this module exists to ask is what an        *)
+(* abstract model needs in order to be correct anyway.                     *)
 (*                                                                         *)
-(*   - a real transaction, and then this is just what the store does;      *)
-(*   - one document per unit and a CAS on it, and then a step must write   *)
-(*     exactly one unit. `promiseRegisterCallback` and `taskSuspend` do    *)
-(*     not: they write the AWAITED promise while reading the awaiter.      *)
-(*     Verus buys this back by making its document a whole `Workflow` --   *)
-(*     `promises: Map<Id, Promise>`, plural -- so both ends of a callback  *)
-(*     live in one document and the CAS covers them.                       *)
+(* So `Process` writes NOTHING. It reads, it decides, and it leaves an     *)
+(* ordered list of effects behind; `Perform` applies them ONE AT A TIME,   *)
+(* each its own transition, each interleavable with every other step. That *)
+(* is `KStep::Prepare` and `KStep::Perform` in the Verus executor --        *)
+(* `set_phase` touches `steps` and nothing else -- carried up to the       *)
+(* altitude of the Lean spec, where there is no document, no etag and no   *)
+(* store to be a fact about.                                               *)
 (*                                                                         *)
-(* Either way it is a refinement obligation, and the place it bites is     *)
-(* named: `MultiUnitWrites` at the bottom of this file lists the steps     *)
-(* that need it.                                                           *)
+(* THE ORDER OF THE EFFECTS IS THEREFORE PROTOCOL. Verus emits             *)
+(* `sched + put + ack + emits + respond`: arm BEFORE the write, disarm     *)
+(* AFTER it. Both directions of getting that wrong are failures and they   *)
+(* are not the same failure -- arm-then-write leaves a spurious entry, and *)
+(* a spurious entry is noise; write-then-arm leaves a deadline that        *)
+(* nothing will ever fire, and that is silence. A crash between any two    *)
+(* effects is what makes the difference visible.                           *)
+(*                                                                         *)
+(* THERE IS NO FENCE. No etag, no version, no compare-and-swap: two steps  *)
+(* may read the same object and both write it, and the second wins. That   *)
+(* is not an oversight and it is not a claim that it is safe -- it is the  *)
+(* experiment. Put the fence in first and the model can only confirm that  *)
+(* a fence is sufficient; leave it out and the model has to say what goes  *)
+(* wrong without one, which is the thing worth knowing.                    *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
@@ -156,10 +165,16 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
     | ListenerDrain({ id: $id, address: ADDR })
     | CallbackDrain({ id: $id, awaiter: $id });
 
+  @typeAlias: effect =
+      PutObject({ id: $id, obj: $object })
+    | ArmTimeout({ entry: $entry })
+    | DisarmTimeout({ entry: $entry })
+    | Send({ entry: $outEntry });
+
   @typeAlias: inFlight = {
       ev: $event,
       phase: Str,
-      pending: Seq($outEntry),
+      pending: Seq($effect),
       res: RESPONSE
   };
 
@@ -172,13 +187,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
       config: { retryTimeout: Int }
   };
 
-  @typeAlias: outcome = {
-      writes: $id -> $object,
-      arm: Set($entry),
-      disarm: Set($entry),
-      sends: Seq($outEntry),
-      res: RESPONSE
-  };
+  @typeAlias: outcome = { effects: Seq($effect), res: RESPONSE };
 *)
 ResonateAliases == TRUE
 
@@ -460,16 +469,15 @@ VARIABLES
 
 vars == <<objects, timeouts, outbox, steps, now>>
 
-(* What a step has left to do after it has committed: a list of messages
-   to say, and the answer to give when it has said them.
+(* What a step has left to do once it has decided: a list of effects to
+   apply, in order, and the answer to give when it has applied them.
 
    The answer is a FIELD and not the last element of the list. The Verus
    executor makes it an effect -- `Effect::Respond { rid, status }` -- so
    that its pending list is never empty and one `Perform` rule retires the
    step. Here retiring IS answering: a step whose list is empty has nothing
    left but the answer, and giving it is the same act as going away. That
-   removes an effect kind, removes the wrapping of messages into effects,
-   and leaves `pending` as exactly what it says -- what is still unsaid.
+   leaves `pending` as exactly what it says -- what has not happened yet.
    An internal step answers `Silent` to nobody.
    @type: $event => $inFlight; *)
 Fresh(ev) ==
@@ -549,15 +557,15 @@ Fresh(ev) ==
 (* `Handle(ev, env)` is a pure function of the event and the state, and it *)
 (* reads nothing else. It returns what to commit and what to say:          *)
 (*                                                                         *)
-(*     writes   objects to install, as a function Id -> Object             *)
-(*     arm      entries to add to the wheel                                *)
-(*     disarm   entries to remove from the wheel                           *)
-(*     sends    messages, IN ORDER -- a crash applies a prefix             *)
+(*     effects  what to do, IN ORDER -- a crash applies a prefix           *)
 (*     res      the response to give                                       *)
 (*                                                                         *)
-(* This is `AbstractModel.H` with the effect list sorted by kind instead   *)
-(* of left in emission order, which is what makes the commit expressible   *)
-(* as one action. The order WITHIN `sends` still matters and is kept.      *)
+(* This is `AbstractModel.H`: a list of effects and a value, which is what *)
+(* the Lean monad accumulates and what Verus's `prepare()` returns. An     *)
+(* earlier draft sorted the effects into `writes`/`arm`/`disarm`/`sends`   *)
+(* so that the durable ones could be committed in a single action. That    *)
+(* buried the very thing this module is about: the ORDER is the protocol,  *)
+(* and a bag of writes has no order to get right.                          *)
 (*                                                                         *)
 (* `env.mat` is the read discipline -- whether a read that projects a      *)
 (* settled promise also PERSISTS that settlement. It is a parameter, not a *)
@@ -587,12 +595,7 @@ Env ==
       config   |-> [retryTimeout |-> RetryTimeout] ]
 
 (* @type: ($event, $env) => $outcome; *)
-Handle(ev, env) ==
-    [ writes |-> SetAsFun({}),
-      arm    |-> {},
-      disarm |-> {},
-      sends  |-> << >>,
-      res    |-> Silent ]
+Handle(ev, env) == [ effects |-> << >>, res |-> Silent ]
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -672,48 +675,76 @@ SubmitInternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = PutStep(steps, r, Fresh(ev))
     /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
-(* READ, DECIDE, AND COMMIT -- one atomic action, against one state.
-   The read discipline of the Lean monad hoisted to the top level: the
-   whole handler sees a single environment, so no read of a step can
-   observe a write of its own step.
-   The commit is objects and wheel TOGETHER. That is what removes the
-   need for a fence, and it is the assumption named in the header.
-   Arm before disarm: an entry armed twice is noise, a deadline left
-   unarmed is silence.
+(* READ AND DECIDE, against one state, and WRITE NOTHING. This is
+   `KStep::Prepare`, whose whole postcondition is `set_phase` -- the store
+   and the wheel are untouched, and every write the step will do is now a
+   pending effect that some later transition applies.
+
+   Deciding is atomic even though doing is not: the handler sees one
+   environment, so no read of a step can observe a write of its own step.
+   That is the Lean monad's `bind` discipline, and it is the only atomicity
+   this module grants.
+
+   Nothing here re-reads. A step that decided from a state which has since
+   changed will still apply what it decided -- see THERE IS NO FENCE.
    @type: RID => Bool; *)
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
     /\ LET out == Handle(steps[r].ev, Env)
-       IN  /\ objects'  = [o \in (DOMAIN objects) \cup (DOMAIN out.writes) |->
-                              IF o \in DOMAIN out.writes THEN out.writes[o]
-                                                         ELSE objects[o]]
-           /\ timeouts' = (timeouts \cup out.arm) \ (out.disarm \ out.arm)
-           /\ steps'    = [steps EXCEPT ![r].phase   = "perform",
-                                       ![r].pending = out.sends,
-                                       ![r].res     = out.res]
-    /\ UNCHANGED <<outbox, now>>
+       IN  steps' = [steps EXCEPT ![r].phase   = "perform",
+                                  ![r].pending = out.effects,
+                                  ![r].res     = out.res]
+    /\ UNCHANGED <<objects, timeouts, outbox, now>>
 
-(* Say the next thing -- or, when there is nothing left to say, give the
+(* @type: ($id -> $object, $id, $object) => ($id -> $object); *)
+PutObj(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+
+(* ONE effect, atomically, and exactly one store. An object write does not
+   touch the wheel; an arm does not touch the objects. That separation is
+   the premise of the whole module, and it is why this is a CASE over four
+   kinds rather than one commit over three variables.
+   @type: $effect => Bool; *)
+Apply(e) ==
+    CASE VariantTag(e) = "PutObject" ->
+             /\ objects' = LET w == VariantGetUnsafe("PutObject", e)
+                           IN  PutObj(objects, w.id, w.obj)
+             /\ UNCHANGED <<timeouts, outbox>>
+      [] VariantTag(e) = "ArmTimeout" ->
+             /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
+             /\ UNCHANGED <<objects, outbox>>
+      [] VariantTag(e) = "DisarmTimeout" ->
+             /\ timeouts' = timeouts \ {VariantGetUnsafe("DisarmTimeout", e).entry}
+             /\ UNCHANGED <<objects, outbox>>
+      [] OTHER ->
+             /\ outbox' = LET en == VariantGetUnsafe("Send", e).entry
+                          IN  {o \in outbox : MsgKey(o) /= MsgKey(en)} \cup {en}
+             /\ UNCHANGED <<objects, timeouts>>
+
+(* Do the next thing -- or, when there is nothing left to do, give the
    answer and go. Those are the same action because they are the same act:
-   a step that has said everything has only its response left, and there is
+   a step that has done everything has only its response left, and there is
    no state in which it has given the response and not yet retired. That is
    why there is no Complete.
+
+   Between any two of these, every other step may run. A `Crash` here
+   leaves a PREFIX applied: the object written and the timer never armed,
+   or the timer armed and the object never written. Which of those is
+   survivable is what the wheel invariants are for.
    @type: RID => Bool; *)
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
     /\ IF steps[r].pending = << >>
        THEN /\ steps'  = DropStep(steps, r)
-            /\ UNCHANGED outbox
-       ELSE /\ LET en == Head(steps[r].pending)
-               IN  outbox' = {o \in outbox : MsgKey(o) /= MsgKey(en)} \cup {en}
+            /\ UNCHANGED <<objects, timeouts, outbox>>
+       ELSE /\ Apply(Head(steps[r].pending))
             /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<objects, timeouts, now>>
+    /\ UNCHANGED now
 
 (* The step disappears. What it committed stays committed; a PREFIX of
    what it had to say was said, and the rest never will be. No response is
-   given. This is the whole reason `sends` is a sequence and not a set,
+   given. This is the whole reason `effects` is a sequence and not a set,
    and it is what a client retrying a request has to survive.
    @type: RID => Bool; *)
 Crash(r) ==
@@ -820,35 +851,57 @@ UnitCoherent ==
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
-(* THE REFINEMENT OBLIGATIONS                                              *)
+(* WHAT IS BEING ASKED                                                     *)
 (*                                                                         *)
-(* Two, and they pull in opposite directions.                              *)
-(*                                                                         *)
-(* UPWARD, to `spec/02-abstract`: take Crash away and let each step run    *)
+(* UPWARD, to `spec/02-abstract`: take `Crash` away and let each step run  *)
 (* Process..Perform with no other step interleaved, and the sequence IS    *)
-(* `stepOf` -- one event, one atomic transition. So the Lean machine is    *)
-(* this machine under a scheduler that never interleaves and never         *)
-(* crashes, and the 95 catalogue properties hold of exactly those runs.    *)
-(* Which of them survive the other runs is what this module is for.        *)
+(* `stepOf` -- one event, one atomic transition, effects folded on in      *)
+(* order by `applyAll`. So the Lean machine is this machine under a        *)
+(* scheduler that never interleaves and never crashes (`NoInterleave`),    *)
+(* and the 95 catalogue properties hold of exactly those runs. WHICH OF    *)
+(* THEM SURVIVE THE OTHER RUNS is the question.                            *)
 (*                                                                         *)
-(* DOWNWARD, to an implementation: `Process` commits objects and wheel     *)
-(* atomically. A single-document store buys that only for a step that      *)
-(* writes ONE unit, and these do not:                                      *)
+(* Three answers are possible for each property, and they are not equally  *)
+(* interesting:                                                            *)
+(*                                                                         *)
+(*   - it survives because of how the STATE is shaped. `UnitCoherent` is   *)
+(*     the example: a promise and its task are one object, so one          *)
+(*     `PutObject` moves both and no interleaving can catch them           *)
+(*     disagreeing. Fusing them bought that, and it cost nothing.          *)
+(*                                                                         *)
+(*   - it survives only if the EFFECTS ARE ORDERED right. `WheelComplete`  *)
+(*     is the example: the wheel is a second store, so arming and writing  *)
+(*     are two moments, and which comes first decides whether a crash      *)
+(*     leaves noise or silence. This is where the handlers have to be      *)
+(*     careful, and where a handler that is merely correct in the Lean is  *)
+(*     not yet correct here.                                               *)
+(*                                                                         *)
+(*   - it does not survive at all without something this module does not   *)
+(*     have. That is the finding worth having, and the candidate is the    *)
+(*     absent fence: two steps read one object, both write, one update is  *)
+(*     lost. Whether any catalogue property actually falls to that -- and  *)
+(*     which -- is the experiment.                                         *)
+(*                                                                         *)
+(* MULTI-UNIT WRITES are where the third answer is most likely. These      *)
+(* handlers touch more than one object, which now means more than one      *)
+(* `PutObject`, applied at different moments with the world running        *)
+(* between them:                                                           *)
 (*                                                                         *)
 (*   `promiseRegisterCallback` writes the awaited promise while reading    *)
 (*   the awaiter; `taskSuspend` writes every awaited promise in its action *)
 (*   list; `CallbackDrain` writes the awaited promise (striking the        *)
-(*   callback) and the awaiter's task (resuming it). Each needs either a   *)
-(*   transaction or a document big enough to hold both ends -- which is    *)
-(*   what Verus's `Workflow.promises: Map<Id, Promise>` is.                *)
+(*   callback) and the awaiter's task (resuming it).                       *)
 (*                                                                         *)
-(* Now that an identifier is a pair, that obligation has a shape it did    *)
-(* not have before: SAME-ORIGIN and CROSS-ORIGIN multi-unit writes are     *)
-(* different problems. If the two ends of every callback share an origin,  *)
-(* a per-origin document discharges all three at once and the assumption   *)
-(* costs nothing. If they can differ, only a transaction will do.          *)
-(* `SameOrigin` is the conjecture; nothing in this module makes it true,   *)
-(* and whether it holds is a question for the protocol, not the model.     *)
+(* Verus never has to face this: its document is a whole `Workflow` --     *)
+(* `promises: Map<Id, Promise>`, plural -- so both ends of a callback live *)
+(* in one document and one `PutDocument` moves them together. That is a    *)
+(* fact about how it CHUNKS the store, and this module deliberately does   *)
+(* not have it, because the question is what the protocol needs rather     *)
+(* than what one storage layout provides.                                  *)
+(*                                                                         *)
+(* `SameOrigin` is the conjecture that would restore it: if the two ends   *)
+(* of every callback share an origin, then chunking by origin makes every  *)
+(* multi-unit write single-chunk again. Nothing here makes it true.        *)
 (***************************************************************************)
 
 SameOrigin ==

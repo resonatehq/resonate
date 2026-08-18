@@ -10,6 +10,19 @@ every event into the phases the Verus executor uses
 (`resonate-verus/src/concrete_spec/executor.rs`), so that the gap between a
 step's decision and its effects is a place other steps can get into.
 
+**The premise: the objects and the wheel are two stores, and nothing writes
+them together.** A step that settles a promise and clears its timeout does two
+writes, at two moments. `Process` reads and decides and writes nothing;
+`Perform` applies one effect at a time. So the *order* of a handler's effects
+is protocol — Verus emits `sched + put + ack + emits + respond`, arm before
+the write and disarm after, and a crash between any two effects is what makes
+the difference visible.
+
+**There is no fence.** Two steps may read the same object and both write it;
+the second wins. That is the experiment, not an oversight — put a
+compare-and-swap in first and the model can only confirm that a fence is
+sufficient. Left out, it has to say what goes wrong without one.
+
 | | |
 |---|---|
 | `Resonate.tla` | the machine — four variables, six transitions, Apalache-typed |
@@ -51,19 +64,27 @@ the other half of `SameOrigin`.
 
 ## What is checked, and what is not
 
-`Handle` is a **stub** — the handler that does nothing. The module type-checks
-and runs today, and `TypeOK` is genuinely exercised: steps are minted, phased,
-drained and retired, and the outbox keeps one entry per key.
+`Handle` is a **stub** — `[effects |-> <<>>, res |-> Silent]`. The module
+type-checks and runs today, and `TypeOK` is genuinely exercised: steps are
+minted, phased, drained and retired.
 
-`WheelSound`, `WheelComplete` and `UnitCoherent` currently pass **vacuously**.
-They quantify over `objects`, and a no-op handler never writes one. They are
-here so that the day the handlers land, the frame is already in place and the
-first run says something.
+`WheelSound`, `WheelComplete` and `UnitCoherent` still pass **vacuously** —
+they quantify over `objects`, and a handler that emits no effects never writes
+one. The frame is in place; the first handler is what makes them say
+something.
 
-Replacing the stub body with `Gen(3)` gives the adversarial handler: every
-outcome the type admits. Expect it to refute nearly everything — that is the
-measurement, and the point of it is to separate what the *machine* maintains
-from what only the *handlers* do.
+The three invariants are expected to behave differently, and that is the
+point of having all three:
+
+| | expected to survive because |
+|---|---|
+| `UnitCoherent` | the **state shape**. A promise and its task are one object, so one `PutObject` moves both. No interleaving can catch them disagreeing. |
+| `WheelComplete` | the **effect order**, and only that. The wheel is a second store; arm-before-write leaves noise on a crash, write-before-arm leaves silence. |
+| *(a lost update)* | **nothing here** — this is the candidate for the finding. Two steps read one object, both write, one update vanishes. |
+
+`promiseCreate` is the cheapest first handler: it writes an object *and* arms
+a timeout, so it makes `WheelComplete` non-vacuous immediately and puts the
+ordering question in front of the checker.
 
 ## What Apalache forced
 
