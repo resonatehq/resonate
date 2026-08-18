@@ -170,6 +170,80 @@ That last one is the calibration: it is a known real defect, it is in the
 catalogue, and this model is built to exhibit it. If it does not go red, the
 model is not yet measuring what it claims to.
 
+## Results
+
+Checked exhaustively with TLC over the whole reachable state space of
+`MCResonate.cfg` — 79 369 distinct states, complete graph depth 14, three
+seconds.
+
+| | | |
+|---|---|---|
+| 9 ported `.state` catalogue entries | **hold** | |
+| `T_consistent_new_promise_born_clean` | **holds** | |
+| `T_consistent_settlement_fulfils_task` | **holds** | |
+| `UnitCoherent` | **holds** | predicted — fusion, one write moves promise and task |
+| `WheelSound` | **fails** | predicted — arming before writing admits an entry for an object not yet there. Noise |
+| `T_consistent_promise_settlement_stamp` | **fails** | predicted — decide at T, write at T+k |
+| `T_preserved_settled_promise_record` | **fails** | a settled promise reverts to pending |
+| `WheelComplete` | **fails** | **predicted to hold. It does not.** |
+
+### The counterexample, and why the prediction was wrong
+
+Two `promiseCreate`s for one id, and a `promiseSettle`:
+
+```
+S2,S3  two creates submitted, both in flight
+S4     A decides [Arm, Put]     -- reads: object absent
+S5     A arms      promise@1
+S6     B decides [Arm, Put]     -- still reads absent, so B decides to create too
+S7     A puts      -> pending@1
+S8     A retires
+S9,S10 settle submitted, decides [Put(resolved), Disarm]
+S11    settle puts -> resolved
+S12    B arms      promise@1     (already present; no change)
+S13    settle disarms            -> wheel empty
+S14    B puts      -> pending@1  -- B's stale decision lands
+```
+
+End state: a **pending promise with a deadline at 1 and nothing on the
+wheel**. It will never time out, and nothing downstream recovers.
+
+The reasoning that produced the wrong prediction was crash-local: arm before
+write, and a crash between them leaves a spurious entry rather than a missing
+one. That is true, and it is not enough. Ordering protects a step against
+being *interrupted*; it does nothing about another step's **disarm landing
+between this step's arm and its put**. Against interleaving, the effect order
+is not the mechanism — a fence is.
+
+So the module answered the question it was built for, and the answer was not
+the one being guessed:
+
+- effect order is necessary and **not sufficient**;
+- what actually fails is the pair `WheelComplete` +
+  `preserved_settled_promise_record`, and they fail in the same trace, from
+  the same cause: a decision made against a state that has since moved;
+- fusing promise and task genuinely bought `UnitCoherent` and the 8 same-id
+  entries, and no interleaving touches them.
+
+### Which checker
+
+**TLC**, for running the experiment. Apalache could not reach depth 6 in 25
+minutes — cost roughly triples per step (11s, 15s, 47s at lengths 1–3) and a
+create-then-settle is about ten transitions. TLC explored the *entire*
+reachable state space to depth 14 in three seconds, which is also a stronger
+result than "no error up to length 6".
+
+**Apalache, for the types.** The annotation pass is what forced `None` apart
+into four different questions, forced the alphabet into a variant, and caught
+a function-versus-sequence confusion in `Process`. Worth keeping both: one
+checks the shape, the other runs the machine.
+
+    apalache-mc typecheck Resonate.tla
+    java -cp tla2tools.jar tlc2.TLC -config MCResonate_TLC.cfg -workers 4 MCResonate.tla
+
+TLC needs `Variants.tla` and `Apalache.tla` (from the Apalache distribution's
+`src/tla`) beside the specs. Both are ordinary TLA+ and evaluate fine.
+
 ## What Apalache forced
 
 Three encodings the plain-TLA+ draft left vague, all of them improvements:

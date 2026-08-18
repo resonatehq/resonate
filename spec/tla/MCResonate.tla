@@ -28,4 +28,20 @@ MCNext ==
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
+MCSpec == Init /\ [][MCNext]_vars
+
+(***************************************************************************)
+(* The `.trans` entries, wrapped for TLC.                                  *)
+(*                                                                         *)
+(* Apalache takes a primed formula as an action invariant and checks it    *)
+(* directly. TLC will not accept a prime in `INVARIANT`, so each one       *)
+(* becomes `[][P]_vars` under `PROPERTY` -- the same claim, in the syntax  *)
+(* that checker reads: P holds across every step that moves the state.     *)
+(***************************************************************************)
+
+T_preserved_settled_promise_record    == [][preserved_settled_promise_record]_vars
+T_consistent_new_promise_born_clean   == [][consistent_new_promise_born_clean]_vars
+T_consistent_promise_settlement_stamp == [][consistent_promise_settlement_stamp]_vars
+T_consistent_settlement_fulfils_task  == [][consistent_settlement_fulfils_task]_vars
+
 =============================================================================
