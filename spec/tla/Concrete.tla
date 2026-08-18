@@ -62,9 +62,8 @@ vars == <<docs, etags, timeouts, outbox, steps, now>>
 
 Objects == [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
 
-(* A concrete step denotes the abstract step with its bookkeeping dropped.
-   `expect` and `retries` are how this executor keeps its promise, not
-   part of what was promised. *)
+(* A WITNESS for the hidden variable, not a claim that the two machines
+   keep the same books. See THE REFINEMENT below. *)
 Steps ==
     [ r \in DOMAIN steps |-> [ ev      |-> steps[r].ev,
                                phase   |-> steps[r].phase,
@@ -197,13 +196,35 @@ Spec == Init /\ [][Next]_vars
 (***************************************************************************)
 (* THE REFINEMENT                                                          *)
 (*                                                                         *)
-(* This is the statement being made:                                       *)
+(* The statement we MEAN is                                                *)
 (*                                                                         *)
-(*     THEOREM Spec => A!Safety                                            *)
+(*     THEOREM Spec => \EE steps : A!Safety                                *)
 (*                                                                         *)
 (* -- every behaviour of the chunked, fenced machine is, once you read a   *)
 (* document as the objects it holds, a behaviour the abstract machine      *)
-(* already permits.                                                        *)
+(* already permits, FOR SOME way of keeping the books on work in flight.   *)
+(*                                                                         *)
+(* `steps` is hidden because it should be. `Abstract` says of it: volatile *)
+(* -- a crash drops one and nothing durable refers to it. A specification  *)
+(* has no business dictating how an implementation tracks what it is in    *)
+(* the middle of; what it may dictate is the store, the wheel and the      *)
+(* wire. Those are the aligned names, and those are what the theorem is    *)
+(* really about.                                                           *)
+(*                                                                         *)
+(* TLC cannot check `\EE`. The standard discharge is to EXHIBIT A WITNESS: *)
+(* any function from concrete states to a value for `steps` whose result   *)
+(* satisfies `A!Safety` proves the existential, and `Steps` above is one.  *)
+(* So `WITH steps <- Steps` is not the requirement -- it is the proof of   *)
+(* the requirement, and it is why the mapping is free to drop `expect`,    *)
+(* `org` and `retries` without anyone having to argue that they are        *)
+(* unobservable.                                                           *)
+(*                                                                         *)
+(* What the checkable form below therefore proves is the STRONGER thing:   *)
+(*                                                                         *)
+(*     THEOREM Spec => A!Safety     (under this witness)                   *)
+(*                                                                         *)
+(* which implies the existential. A future executor whose bookkeeping does *)
+(* not fit this witness is not thereby refuted -- it needs its own.        *)
 (*                                                                         *)
 (* Note which direction that runs. It does NOT say the two machines admit  *)
 (* the same behaviours; the fence exists precisely to admit FEWER, and     *)
@@ -217,6 +238,14 @@ Spec == Init /\ [][Next]_vars
 (* from "perform" back to "process". `Abstract` had no action that went    *)
 (* backwards, so every behaviour containing a retry was outside the        *)
 (* specification. `Abstract!Restart` is what that failure bought.          *)
+(*                                                                         *)
+(* Note where that failure came from: it is a fact about THIS WITNESS, not *)
+(* about the protocol. A witness that reported a restarting step           *)
+(* differently might not have needed `Restart` at all -- the existential   *)
+(* does not care which one you pick. `Restart` stays because it is right   *)
+(* on its own terms: a specification that admits no implementation which   *)
+(* retries admits almost no implementation, and every executor that fences *)
+(* anything will retry something.                                          *)
 (***************************************************************************)
 
 Refinement == A!Safety

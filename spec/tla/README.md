@@ -25,8 +25,13 @@ sufficient. Left out, it has to say what goes wrong without one.
 
 | | |
 |---|---|
-| `Resonate.tla` | the machine — four variables, six transitions, Apalache-typed |
-| `MCResonate.cfg` | a model small enough to check and large enough to interleave |
+| `Abstract.tla` | the machine: no fence, effects applied one at a time |
+| `Concrete.tla` | the same protocol under one-document-per-origin and a CAS |
+| `*.cfg` | models small enough to check and large enough to interleave |
+
+`Implemented` is the knob that keeps them comparable: a CONSTANT naming which
+event constructors the alphabet offers, read by both, so the two machines
+always quantify over exactly the same events. It moves as handlers land.
 
 ## Running it
 
@@ -177,77 +182,80 @@ model is not yet measuring what it claims to.
 
 ## Results
 
-Checked exhaustively with TLC over the whole reachable state space of
-`MCResonate.cfg` — 79 369 distinct states, complete graph depth 14, three
-seconds.
+Two machines, same protocol. `Abstract` has no fence; `Concrete` chunks the
+store by origin and fences every write on the etag its decision was read
+under. The handlers, effects, alphabet and invariants come from `Abstract`
+through the instance, so a difference in behaviour is a difference in the
+executor and can be nothing else.
 
-| | | |
+Checked exhaustively with TLC over the whole reachable state space of each.
+
+| | Abstract | Concrete |
 |---|---|---|
-| 9 ported `.state` catalogue entries | **hold** | |
-| `T_consistent_new_promise_born_clean` | **holds** | |
-| `T_consistent_settlement_fulfils_task` | **holds** | |
-| `UnitCoherent` | **holds** | predicted — fusion, one write moves promise and task |
-| `WheelSound` | **fails** | predicted — arming before writing admits an entry for an object not yet there. Noise |
-| `T_consistent_promise_settlement_stamp` | **fails** | predicted — decide at T, write at T+k |
-| `T_preserved_settled_promise_record` | **fails** | a settled promise reverts to pending |
-| `WheelComplete` | **fails** | **predicted to hold. It does not.** |
+| 9 ported `.state` catalogue entries | hold | hold |
+| `T_consistent_new_promise_born_clean` | holds | — |
+| `T_consistent_settlement_fulfils_task` | holds | — |
+| `UnitCoherent` | holds | holds |
+| `WheelSound` | **fails** | **fails** |
+| `T_consistent_promise_settlement_stamp` | **fails** | — |
+| `preserved_settled_promise_record` | **fails** | holds |
+| `WheelComplete` | **fails** | holds |
+| `Spec => A!Safety` | — | **holds** |
 
-### The counterexample, and why the prediction was wrong
+`Abstract`: 474 761 distinct states, 25s. `Concrete`: 579 593 distinct states,
+complete graph depth 26, 4min 30s, including the refinement.
+
+So the fence is sufficient for exactly the two failures that were real, and
+`WheelSound` still fails on both — arming before writing admits an entry for
+an object not yet there, which is noise no fence removes and none should.
+
+### What the abstract machine gets wrong without a fence
 
 Two `promiseCreate`s for one id, and a `promiseSettle`:
 
 ```
-S2,S3  two creates submitted, both in flight
 S4     A decides [Arm, Put]     -- reads: object absent
 S5     A arms      promise@1
 S6     B decides [Arm, Put]     -- still reads absent, so B decides to create too
 S7     A puts      -> pending@1
-S8     A retires
-S9,S10 settle submitted, decides [Put(resolved), Disarm]
 S11    settle puts -> resolved
 S12    B arms      promise@1     (already present; no change)
 S13    settle disarms            -> wheel empty
 S14    B puts      -> pending@1  -- B's stale decision lands
 ```
 
-End state: a **pending promise with a deadline at 1 and nothing on the
-wheel**. It will never time out, and nothing downstream recovers.
+A **pending promise with a deadline at 1 and nothing on the wheel**. It will
+never time out. `WheelComplete` and `preserved_settled_promise_record` fall in
+the same trace from the same cause, so they are one bug wearing two hats.
 
-The reasoning that produced the wrong prediction was crash-local: arm before
-write, and a crash between them leaves a spurious entry rather than a missing
-one. That is true, and it is not enough. Ordering protects a step against
-being *interrupted*; it does nothing about another step's **disarm landing
-between this step's arm and its put**. Against interleaving, the effect order
-is not the mechanism — a fence is.
+`WheelComplete` was predicted to hold. The reasoning was crash-local: arm
+before write, and a crash between them leaves a spurious entry rather than a
+missing one. True, and not enough. **Ordering protects a step against being
+interrupted; it does nothing about another step's disarm landing between this
+step's arm and its put.** Against interleaving the effect order is necessary
+and not sufficient.
 
-So the module answered the question it was built for, and the answer was not
-the one being guessed:
+### The refinement found a hole in the specification
 
-- effect order is necessary and **not sufficient**;
-- what actually fails is the pair `WheelComplete` +
-  `preserved_settled_promise_record`, and they fail in the same trace, from
-  the same cause: a decision made against a state that has since moved;
-- fusing promise and task genuinely bought `UnitCoherent` and the 8 same-id
-  entries, and no interleaving touches them.
+The first check failed — on the concrete side going `perform -> process` after
+a refused compare-and-swap. `Abstract` had no action that went backwards, so
+every behaviour containing a retry was outside the spec. `Abstract!Restart`
+closes it: a step may throw its decision away and decide again, for any reason
+or none, so that a stale etag is a special case without being named.
+
+That is the refinement earning its keep. It did not validate the concrete
+model against the abstract one; it refuted the abstract one.
 
 ### Which checker
 
-**TLC**, for running the experiment. Apalache could not reach depth 6 in 25
-minutes — cost roughly triples per step (11s, 15s, 47s at lengths 1–3) and a
-create-then-settle is about ten transitions. TLC explored the *entire*
-reachable state space to depth 14 in three seconds, which is also a stronger
-result than "no error up to length 6".
+**TLC**, for running anything. Apalache could not reach depth 6 in 25 minutes —
+cost roughly triples per step — and a create-then-settle is about ten
+transitions.
 
-**Apalache, for the types.** The annotation pass is what forced `None` apart
-into four different questions, forced the alphabet into a variant, and caught
-a function-versus-sequence confusion in `Process`. Worth keeping both: one
-checks the shape, the other runs the machine.
-
-    apalache-mc typecheck Resonate.tla
-    java -cp tla2tools.jar tlc2.TLC -config MCResonate_TLC.cfg -workers 4 MCResonate.tla
-
-TLC needs `Variants.tla` and `Apalache.tla` (from the Apalache distribution's
-`src/tla`) beside the specs. Both are ordinary TLA+ and evaluate fine.
+**Apalache, for the types.** That pass is what split `None` into four different
+questions, forced the alphabet into a variant, and caught a function-versus-
+sequence confusion in `Process`. One checks the shape, the other runs the
+machine.
 
 ## What Apalache forced
 
