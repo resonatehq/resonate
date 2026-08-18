@@ -86,6 +86,90 @@ point of having all three:
 a timeout, so it makes `WheelComplete` non-vacuous immediately and puts the
 ordering question in front of the checker.
 
+## The catalogue
+
+`spec/02-abstract/properties.lean` already carries **95 entries** — 45 `.state`
+(check at every state) and 50 `.trans` (check at every pair of consecutive
+states) — plus the known gaps, the two provenance properties and the liveness
+file. Those are the invariants. The three defined here are not competitors;
+two of them are obligations the catalogue cannot state.
+
+Measured against this model:
+
+**The catalogue has no wheel.** Deadlines live *on the task record* —
+`well_formed_task_acquired_iff_has_expires_at`,
+`well_formed_task_pending_iff_has_retry_at`. There is no second store to drift
+from them, so nothing in the 95 says an index agrees with the fields it
+indexes. `WheelSound` and `WheelComplete` are therefore **not ports of
+anything** — they are the price of the two-store premise, and they have to be
+invented here.
+
+**11 `.trans` properties reference `now`, and are predicted to break.** The
+clearest is `consistent_task_pending_entry_arms_retry`: if a task became
+pending, then `retryAt = now`. But `Process` decides at instant T and the
+`PutObject` lands at T+k, and the property is evaluated where the write lands.
+This is exactly what Verus freezes in `Phase::Perform { at: clamp(now, held) }`
+— the *decision instant*, carried to every effect. Note that is a different
+thing from `Workflow.clock`, which was the store artifact we cut: which
+instant a decision was made at is protocol.
+
+Also: `consistent_new_promise_born_clean`, `consistent_promise_settlement_stamp`,
+`consistent_task_acquisition_is_atomic`, `consistent_task_lease_deadline_is_now_plus_ttl`,
+`consistent_task_retry_rearm_only_when_due`, `consistent_task_wake_records_resume`,
+`monotone_task_retry_rearm_advances`, `preserved_execute_only_for_live_task`,
+`preserved_no_dead_dispatch`, `preserved_timedout_is_server_owned`.
+
+**Fusing promise and task pays, and the payment is countable.** 12 properties
+span both records. 8 of them are same-id, so one `PutObject` moves both and
+they hold by representation:
+
+    consistent_new_execute_matches_task_and_target
+    consistent_settled_promise_has_fulfilled_task
+    consistent_settled_task_promise_settled
+    consistent_settlement_fulfils_task
+    consistent_task_birth_couples_promise_birth
+    consistent_task_fulfilment_needs_settlement
+    consistent_task_iff_targeted_promise
+    preserved_no_dead_dispatch
+
+The other 4 are cross-id and stay at risk — and they are precisely the
+multi-unit writes named above:
+
+    consistent_callback_consumption_resumes_awaiter
+    consistent_suspended_task_holds_rung
+    consistent_suspension_registers_callback
+    consistent_wake_follows_callback_consumption
+
+**6 are unportable by our own choice** — the schedule properties, gone with
+schedules.
+
+### What "one step" means for a `.trans` property
+
+In the Lean, `a → b` is one whole request. Here a request is `Process` plus N
+`Perform`s, so a `.trans` property gets evaluated at a granularity it was
+never tested at.
+
+That is not a distortion to correct — it is the question. The walk is defined
+over "every pair of consecutive states your server passes through", and a
+server that does not write in one transaction passes through more of them. A
+trace checker watching a real such server would see the same states. So
+`.trans` is checked at every `Next`, and the reds are the answer.
+
+### Predictions, recorded before the run
+
+So that a confirmed prediction can be told from a surprise:
+
+| | predicted | why |
+|---|---|---|
+| `consistent_settled_promise_has_fulfilled_task` | green | fusion — one write moves both |
+| `WheelComplete` | green iff arm precedes write | the ordering is the whole content |
+| `consistent_task_pending_entry_arms_retry` | **red** | decide at T, write at T+k |
+| `preserved_no_dead_dispatch` | **red** | stale dispatch — one of the four defects the Verus port found |
+
+That last one is the calibration: it is a known real defect, it is in the
+catalogue, and this model is built to exhibit it. If it does not go red, the
+model is not yet measuring what it claims to.
+
 ## What Apalache forced
 
 Three encodings the plain-TLA+ draft left vague, all of them improvements:
