@@ -57,7 +57,13 @@ AbsSteps ==
                             pending |-> cs[r].pending,
                             res     |-> cs[r].res ] ]
 
-R == INSTANCE Resonate
+(* `MCResonate` and not `Resonate`, so that both sides quantify over the
+   SAME alphabet. Instancing the full machine made the refinement check
+   evaluate `\E ev \in ExternalEvent` -- all seventeen kinds, with
+   `SUBSET TaskRefT` inside one of them -- at every concrete state, for a
+   comparison against three implemented handlers. That is not a stricter
+   check, it is the same check with an irrelevant quantifier bolted on. *)
+R == INSTANCE MCResonate
      WITH objects  <- Flat,
           timeouts <- timer,
           outbox   <- sent,
@@ -199,7 +205,7 @@ CSpec == CInit /\ [][CNext]_cvars
 (* fence is SUFFICIENT.                                                    *)
 (***************************************************************************)
 
-Refines == R!Init /\ [][R!Next]_<<Flat, timer, sent, AbsSteps, cnow>>
+Refines == R!Init /\ [][R!MCNext]_<<Flat, timer, sent, AbsSteps, cnow>>
 
 C_WheelComplete   == R!WheelComplete
 C_WheelSound      == R!WheelSound
