@@ -190,7 +190,15 @@ Next ==
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
-Spec == Init /\ [][Next]_vars
+(* The same fairness `Abstract` asks of itself, asked of this executor.
+   It has to be here: `A!Spec` carries `A!Fairness`, and a machine that
+   may stall forever cannot implement a machine that may not. *)
+Fairness ==
+    /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
+    /\ \A ev \in A!InternalEvent : WF_vars(SubmitInternal(ev))
+    /\ WF_vars(Clock)
+
+Spec == Init /\ [][Next]_vars /\ Fairness
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -198,11 +206,18 @@ Spec == Init /\ [][Next]_vars
 (*                                                                         *)
 (* The statement we MEAN is                                                *)
 (*                                                                         *)
-(*     THEOREM Spec => \EE steps : A!Safety                                *)
+(*     THEOREM Spec => \EE steps : A!Spec                                  *)
 (*                                                                         *)
 (* -- every behaviour of the chunked, fenced machine is, once you read a   *)
-(* document as the objects it holds, a behaviour the abstract machine      *)
-(* already permits, FOR SOME way of keeping the books on work in flight.   *)
+(* document as the objects it holds, a behaviour of the abstract machine,  *)
+(* FOR SOME way of keeping the books on work in flight.                    *)
+(*                                                                         *)
+(* `A!Spec` and not `A!Safety`: the obligation includes the abstract        *)
+(* machine's FAIRNESS. Refining only the safety part would let an          *)
+(* implementation satisfy the specification by doing nothing -- accepting  *)
+(* a request, deciding, and then stalling forever is safe, and it is not   *)
+(* an implementation of anything. So `Concrete` carries the matching       *)
+(* fairness above and has to earn it.                                      *)
 (*                                                                         *)
 (* `steps` is hidden because it should be. `Abstract` says of it: volatile *)
 (* -- a crash drops one and nothing durable refers to it. A specification  *)
@@ -221,7 +236,7 @@ Spec == Init /\ [][Next]_vars
 (*                                                                         *)
 (* What the checkable form below therefore proves is the STRONGER thing:   *)
 (*                                                                         *)
-(*     THEOREM Spec => A!Safety     (under this witness)                   *)
+(*     THEOREM Spec => A!Spec       (under this witness)                   *)
 (*                                                                         *)
 (* which implies the existential. A future executor whose bookkeeping does *)
 (* not fit this witness is not thereby refuted -- it needs its own.        *)
@@ -248,9 +263,9 @@ Spec == Init /\ [][Next]_vars
 (* anything will retry something.                                          *)
 (***************************************************************************)
 
-Refinement == A!Safety
+Refinement == A!Spec
 
-THEOREM Spec => A!Safety
+THEOREM Spec => A!Spec
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not

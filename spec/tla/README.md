@@ -200,10 +200,19 @@ Checked exhaustively with TLC over the whole reachable state space of each.
 | `T_consistent_promise_settlement_stamp` | **fails** | — |
 | `preserved_settled_promise_record` | **fails** | holds |
 | `WheelComplete` | **fails** | holds |
-| `Spec => A!Safety` | — | **holds** |
+| `Spec => A!Spec` | — | see below |
 
 `Abstract`: 474 761 distinct states, 25s. `Concrete`: 579 593 distinct states,
-complete graph depth 26, 4min 30s, including the refinement.
+complete graph depth 26, 4min 30s.
+
+The refinement was first checked as `Spec => A!Safety` — safety only — and
+**held** over that whole state space. It is now stated as `Spec => A!Spec`,
+which carries the abstract machine's fairness as well, because refining only
+the safety part lets an implementation satisfy the specification by doing
+nothing: accepting a request, deciding, and stalling forever is safe, and is
+not an implementation of anything. `Concrete` carries matching fairness and
+has to earn it. That check is slower — TLC has to do liveness — and its
+result is recorded here when it lands.
 
 So the fence is sufficient for exactly the two failures that were real, and
 `WheelSound` still fails on both — arming before writing admits an entry for
