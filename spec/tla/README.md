@@ -45,8 +45,9 @@ one nearly looked like it: the `CallbackDrain` counterexample below first
 turned up in a group without `Timeout`, and `Timeout` settles the same promise
 by the same projection, so grouping was the obvious explanation. Restoring it
 did not change the answer — `Settle` keeps `callbacks` and the drain strikes
-them — and the counterexample was real. Re-running is what tells the two
-apart, and guessing is what does not.
+them — and the counterexample was real, though not what it first appeared to
+be either. Re-running is what tells the two apart, and guessing is what does
+not.
 
 ## Running it
 
@@ -251,7 +252,7 @@ interrupted; it does nothing about another step's disarm landing between this
 step's arm and its put.** Against interleaving the effect order is necessary
 and not sufficient.
 
-### The refinement found five things, none of them in the concrete model
+### The refinement found three things, none of them in the concrete model
 
 **A hole in the specification.** The first check failed on a refused
 compare-and-swap sending a step `perform -> process`. `Abstract` had no action
@@ -282,61 +283,67 @@ that anything finishes. Hence `Crashing` as a constant — safety is claimed
 with crashes, liveness without them, which is the only way liveness is ever
 claimed.
 
-**A transactional outbox.** The fourth arrived with the handlers that emit.
-`Perform` used to hand the messages to the wire one at a time *after* the
-write, which is what the effect order `sched + put + ack + emits + respond`
-literally says and what `executor.rs` literally does. TLC returned a
-ten-state trace — a retry `Timeout` on a targeted promise — and the failing
-transition is the write itself: the document moves, `outbox` does not, and
-upstairs the handler that writes that object is the same handler that says
-`Execute`.
+### And then it found two things that were mine
 
-What makes this more than a modelling slip is that **no abstraction function
-repairs it.** Map the abstract outbox to `outbox` plus the sends a committed
-step still holds, and the two machines line up — until that step crashes
-between the write and the wire, when those messages leave the mapped state
-again. `Apply` can overwrite an entry at a `MsgKey`; it can never drop one, so
-a shrinking outbox is not an abstract step either. Linearise early and the
-object has not moved. Linearise late and it moved too soon. Linearise at the
-write and a crash takes the message back.
+The next two counterexamples were not findings about Resonate. They were
+findings about `Concrete` having drifted away from the executor it claims to
+model, and they are recorded here because the drift was invisible until the
+refinement went looking, and because both were written up as discoveries
+before they were understood.
 
-So the write and the emits it justifies land in one action. That is the
-transactional-outbox pattern, and this is the argument for it stated as a
-refinement rather than as folklore: *a protocol whose handlers say and write
-in one breath can only be run by an executor whose store and outbox commit
-together.* Delivery stays as late as it likes — it is the **record** that
-cannot wait, and having the record be the same write is what makes redelivery
-after a crash idempotent rather than lost. Verus does not claim this
-refinement and so never had to face it; what it keeps instead is
-`consistent_outbox_never_ahead`, which is the lag stated as an invariant of
-the executor rather than reconciled against the protocol.
+**`Concrete` was performing several document writes per step.** It consumes
+`Abstract!Handle`'s effect list verbatim -- which is the right instinct, the
+protocol should not know which executor is running it -- but `Abstract!Commit`
+emits a `PutObject` PER OBJECT. Upstairs that granularity carries no meaning,
+because `Apply` folds the whole list at one instant. Walking the same list one
+entry at a time turned a per-object *description* into a sequence of per-object
+*store operations*, and `Write2` and `CommitAll` therefore became two and N
+document writes.
 
-**A livelock, reached by the same argument.** The fifth is the second object.
-`CallbackDrain(a, b)` settles `a` at its deadline, strikes the callback, and
-resumes `b` — two `PutObject`s, which the executor performed as two writes.
-Split, the first leaves `a` settled with the callback struck and `b`
-untouched, and nothing upstairs covers that. `Timeout(a)` is the near miss: it
-settles `a` by the same projection, but `Settle` keeps `callbacks`, so it
-leaves on the ledger the name this write removed. `CallbackDrain` is the only
-step that strikes it, and it moves `b` in the same breath.
+The executor emits exactly one:
 
-The blunter argument was available all along without a checker, and was
-missed. **Under a CAS fence a step that writes twice cannot finish.** Its
-first write bumps the etag it is holding, so its second fails
-`etags[o] = expect`, the step is thrown back to `process`, and it does the
-same thing again forever. `CallbackDrain` is a livelock in this executor, not
-a slow path. A safety check cannot see that, and the liveness checks never
-reached this alphabet — so the refinement found by accident what a liveness
-property would have found on purpose.
+```rust
+let put = seq![Effect::PutDocument { key, expect: etag_of(held), body: w2 }];
+...
+sched + put + ack(key, completing) + emits(w0, cs, nowc) + respond
+```
 
-So a step lands every write it decided on in one document write, with the
-messages those writes justify. Both objects are in `docs[o]`; a
-compare-and-swap on it is already atomic across everything it holds, and
-splitting the decision across two of them threw away the one thing a
-per-origin document buys. Which is also why `SameOrigin` matters, and why a
-handler reaching across origins would need a transaction this executor does
-not have. The wheel effects stay separate — that is the premise the whole
-model exists to test.
+`body` is the whole `Workflow`. There is no way to write half of one, and the
+per-origin `etags` in this model already said as much.
+
+**`Concrete` was recording messages outside the document.** Same cause. It
+applied each `Send` effect to the `outbox` variable after the put, so objects
+and messages moved at different instants. In the executor the outbox is a
+FIELD of the workflow --
+
+```rust
+pub proof fn lemma_sends_outbox(w: Workflow, cs: Input, now: nat)
+    ensures step(w, cs, now).outbox == fold_send(w.outbox, sends_step(w, cs, now)),
+```
+
+-- and `w2` is what `step` returns, so the messages are already inside the body
+the single put writes. `Effect::Send` moves them from that record onto the
+wire, `s.sent`, which this model does not have at all.
+
+So the transactional outbox is not a requirement the refinement discovered.
+The implementation already had it; the model had lost it. Both repairs restore
+fidelity rather than demand anything, and the counterexamples that led to them
+were reported here as protocol findings first -- at length, twice -- which is
+the part worth remembering.
+
+**What the refinement actually earned is still real, and it is a different
+claim.** A refinement against a hand-written abstraction function is a fidelity
+check on the lower machine: it fails when the executor model stops being the
+executor. Nothing else in this repository would have caught either drift.
+`C_TypeOK` passes on an unfaithful executor, so does `C_UnitCoherent`, and so
+do the catalogue properties -- they are all statements about states, and both
+of these were errors about *when* states change.
+
+A consequence worth stating for anyone extending `Concrete`: an effect list
+written for an atomic machine does not carry execution granularity, and
+reading it as though it did is silent. `Abstract`'s list says WHAT a step
+decided. It does not say in how many store operations an executor lands it,
+and it cannot, because upstairs there is only ever one.
 
 ### Liveness needs crashes to stop, said without a counter
 

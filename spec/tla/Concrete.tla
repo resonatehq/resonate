@@ -240,91 +240,63 @@ Process(r) ==
    stale decision lands, and `Spec => A!Spec` should fail and hand back
    the trace that shows why.
 
-   ONE STEP, ONE DOCUMENT WRITE, AND THE REFINEMENT IS WHAT DEMANDED IT.
+   ONE STEP, ONE DOCUMENT WRITE -- WHICH IS WHAT THE EXECUTOR DOES.
 
    A step lands every `PutObject` it decided on in a single write, and
    every message those writes justify with them. Only the wheel effects
    stay separate, which is the premise the whole model is here to test.
 
-   TWO ARGUMENTS FORCE IT, and they arrived in the other order.
+   This operator used to apply one effect per `Perform`, walking the
+   list. Two refinement counterexamples came out of that, and both were
+   reported as findings about the protocol before they were understood.
+   Neither was. They were this module having drifted away from the
+   executor it claims to model.
 
-   The second is the fence, and it is embarrassing in hindsight: with
-   `Fenced = TRUE` a step that writes twice CANNOT FINISH. Its first
-   write bumps the etag it is holding, so its second write fails
-   `etags[o] = expect`, the step is thrown back to `process`, and it
-   will do the same thing again forever. `CallbackDrain` writes two
-   objects. Under a per-write CAS it is a livelock, not a slow path --
-   and nothing in the model said so, because a livelock is invisible to
-   a safety check and the liveness checks never got near this alphabet.
+   `Process` hands `pending` the effect list `Abstract!Handle` returned,
+   which is the right instinct -- the protocol should not know which
+   executor is running it. But `Abstract!Commit` emits a `PutObject` PER
+   OBJECT, and upstairs that granularity carries no meaning at all,
+   because `Apply` folds the whole list at one instant. Walking the same
+   list one entry at a time turns a per-object DESCRIPTION into a
+   sequence of per-object STORE OPERATIONS. `Write2` became two document
+   writes; `CommitAll` became N.
 
-   The first is the refinement, and it is the reason a single write is
-   the RIGHT repair rather than a convenient one.
+   The executor emits exactly one, and its body is the whole workflow:
 
-   The effect list is `sched + put + ack + emits + respond`, and the
-   obvious reading of that is what this operator used to do: apply one
-   effect per `Perform`. TLC refused it twice, on the same shape.
+     let put = seq![Effect::PutDocument { key, expect: etag_of(held),
+                                          body: w2 }];
+     ... sched + put + ack(..) + emits(..) + respond
 
-   THE MESSAGE. A retry `Timeout` on a targeted promise, and the failing
-   transition is the put: the document moves, `outbox` does not, and
-   upstairs the handler that writes that object is the same handler that
-   says `Execute`. `Apply` moves `objects'` and `outbox'` at the same
-   instant, so a write with the message still in hand is a state the
-   abstract machine cannot be in.
+   The messages are already in that body -- the outbox is a field of the
+   workflow, and `lemma_sends_outbox` fixes `step(w, cs, now).outbox` as
+   `fold_send(w.outbox, sends_step(w, cs, now))`. `Effect::Send` carries
+   an entry from that record onto the WIRE, `s.sent`, which this model
+   does not have. So `outbox` here is the record, and the record belongs
+   in the write.
 
-   THE SECOND OBJECT. `CallbackDrain(a, b)` settles `a` at its deadline,
-   strikes the callback, and resumes `b`. Split, its first write leaves
-   `a` settled with the callback struck and `b` untouched, and NOTHING
-   UPSTAIRS COVERS THAT. `Timeout(a)` is the near miss: it settles `a`
-   by the same projection, but `Settle` keeps `callbacks`, so it leaves
-   the name on the ledger that this write removed. `CallbackDrain` is
-   the only step that strikes it, and it moves `b` in the same breath.
-
-   That near miss cost a false diagnosis. The first run to find this
-   counterexample had `Timeout` outside its `Implemented` group, so the
-   obvious reading was that the group had removed the covering step and
-   the failure was an artifact of grouping. Restoring `Timeout` did not
-   change the answer, which is what showed the miss was real.
-
-   NO ABSTRACTION FUNCTION REPAIRS THE MESSAGE, and the reason is
-   `Crash`.
-   Mapping the abstract outbox to `outbox` plus the sends a committed
-   step still holds would line the two machines up -- until the step
-   crashes between the write and the wire, when those messages leave the
-   mapped state again. `Apply` can overwrite an entry at a `MsgKey` but
-   it can never drop one, so a shrinking outbox is not an abstract step
-   either. Linearise early and the object has not moved; linearise late
-   and it moved too soon; linearise at the write and a crash takes the
-   message back.
-
-   What is left is to make the message durable at the instant the
-   decision is: the write and the emits it justifies land in one action.
-   That is the transactional-outbox pattern, and this is the argument
-   for it stated as a refinement rather than as folklore -- a protocol
-   whose handlers say and write in one breath can only be run by an
-   executor whose store and outbox commit together. Delivery stays as
-   late as it likes; it is the RECORD that cannot wait, and having the
-   record be the same write is what makes redelivery after a crash
-   idempotent rather than lost.
-
-   The second object goes the same way for a plainer reason: both
-   objects are in `docs[o]`, one document, and a compare-and-swap on it
-   is already atomic across everything it holds. Splitting the decision
-   across two of them was throwing away the one thing a per-origin
-   document buys -- which is also why `SameOrigin` matters, and why a
-   handler that reaches across origins would need a transaction this
-   executor does not have.
+   THE LESSON IS ABOUT EFFECT LISTS, not about outboxes. A list written
+   for an atomic machine does not carry execution granularity, and
+   reading it as though it did is silent: `C_TypeOK` passes, so does
+   `C_UnitCoherent`, so do the catalogue properties, because every one
+   of them is a statement about states and this was an error about WHEN
+   states change. The refinement is what caught it, and catching drift
+   between the executor and its model is the thing a refinement against
+   a hand-written abstraction function is genuinely FOR.
 
    `Puts` and `Says` are taken over the whole remaining `pending`, and
    the write is built exactly as `Apply` builds `objects'` -- same fold,
-   same `CHOOSE` for the case of two writes to one id -- because the
-   point is for the two to agree by construction rather than by luck.
+   same `CHOOSE` for two writes to one id -- so the two agree by
+   construction rather than by luck. Folding at the write rather than in
+   `Process` is a structural difference from the executor, which folds
+   when it prepares; the body is fixed at `Process` either way, so the
+   two are the same machine.
 
-   The `Send` branch below survives for the handlers that emit without
+   The `Send` branch below survives for handlers that emit without
    writing: there the message alone IS the whole decision, and `Apply`
    with an empty `Puts` is exactly a step that moves `outbox` and leaves
    `objects` where it was. The arm and disarm branches survive because
-   the wheel is the one thing that is still allowed to lag, which is the
-   whole experiment. *)
+   the wheel is the one thing still allowed to lag, which is the whole
+   experiment. *)
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
