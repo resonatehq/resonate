@@ -202,6 +202,7 @@ Checked exhaustively with TLC over the whole reachable state space of each.
 | `preserved_settled_promise_record` | **fails** unfenced | holds |
 | `Spec => A!Safety`, crashes ON | — | **holds** |
 | `Spec => A!Spec`, crashes OFF | — | **holds** |
+| `Spec => A!Spec`, crashes ON | — | fails, irreparably — see below |
 
 `Concrete` closes over 425 506 distinct states for the liveness form and
 716 353 for the invariants, complete graph in both, a few minutes each.
@@ -266,6 +267,59 @@ and an executor whose work may be destroyed arbitrarily often cannot promise
 that anything finishes. Hence `Crashing` as a constant — safety is claimed
 with crashes, liveness without them, which is the only way liveness is ever
 claimed.
+
+### Liveness needs crashes to stop, and nothing weaker will do
+
+`Spec => A!Spec` holds with `Crashing = FALSE` and fails with it TRUE. Three
+attempts to rescue it with fairness on the executor's own actions, all
+refuted:
+
+| fairness added | verdict | why |
+|---|---|---|
+| `SF` on `Perform(r)` | fails | **vacuous** — the adversary crashes every step while still in `"process"`, so `Perform` is never enabled |
+| `SF` on `Process(r)` and `Perform(r)` | fails | **slot recycling** — see below |
+| anything else over these actions | — | same shape |
+
+The second counterexample is the one worth reading. At the lasso, every step
+is at rid `q2`:
+
+```
+S9   q2 settle    "perform", 2 pending   <- Process fired, SF discharged
+S10  crashed
+S12  q2 Timeout   "perform", 2 pending   <- Process fired
+S13  crashed
+S15  q2 settle    "perform", 0 pending   <- a NoOp outcome
+     back to S7                          <- Perform retires it, SF discharged
+```
+
+`SF_vars(Perform(q2))` obliges the *rid* to perform infinitely often, and it
+does — using a settle of an already-settled promise, whose handler returns
+`NoOp`. It reaches `"perform"` with nothing pending and retires. Every step
+that would actually write is crashed.
+
+**Fairness names a slot, not an attempt.** No formula quantified over `Rid`
+can say "this attempt completes", because attempts have no names and a rid is
+recycled. The constraint has to land on crashes.
+
+Note which fairness does NOT have this hole: `SF_vars(SubmitInternal(ev))`
+names an abstract EVENT -- a specific object and deadline -- so no throwaway
+request can discharge it on that event's behalf. That one is load-bearing and
+sound. The difference is naming the work rather than the worker.
+
+### A harness bug worth remembering
+
+The first two attempts at the table above were run as
+
+    /\ (StrongSteps => \A r \in Rid : SF_vars(..))
+
+and measured nothing. TLC recognises fairness only in a restricted syntactic
+form -- WF/SF terms and quantifications over them -- and an implication is not
+in it, so the conjunct was never assumed. The tell was a self-contradicting
+counterexample: `Perform(q2)` enabled twice in the cycle and never taken,
+which breaks the very condition the run was supposed to assume. A behaviour
+that violates its own assumption is a broken harness, not a finding.
+Switchable fairness belongs in a second SPECIFICATION, not behind a constant
+guard.
 
 ### Which checker
 
