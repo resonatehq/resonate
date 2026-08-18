@@ -268,12 +268,29 @@ Next ==
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
-(* The same fairness `Abstract` asks of itself, asked of this executor.
-   It has to be here: `A!Spec` carries `A!Fairness`, and a machine that
-   may stall forever cannot implement a machine that may not. *)
+(* The fairness `Abstract` asks of itself, asked of this executor. It has
+   to be here: `A!Spec` carries `A!Fairness`, and a machine that may
+   stall forever cannot implement a machine that may not.
+
+   `SubmitInternal` is STRONGLY fair, and that is not a modelling
+   convenience -- weak fairness was not enough and TLC said why. Upstairs
+   an internal step is available whenever an object's deadline says so,
+   full stop. Down here it is available only when a step slot is free,
+   and `|Rid|` is finite. So the counterexample was a cycle in which
+   clients kept arriving, the slots kept filling, and a due timeout with
+   a properly armed entry was never once submitted -- legal under weak
+   fairness, because the action was not CONTINUOUSLY enabled, only
+   enabled again and again.
+
+   Strong fairness is the honest reading of what the abstract machine
+   demands: an executor must not indefinitely prefer client work to work
+   that has come due. That is a scheduling obligation on the real server
+   -- a fair choice between the API path and the timer path -- and it is
+   the kind of requirement that is invisible until liveness is checked
+   against a bounded resource. *)
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
-    /\ \A ev \in A!InternalEvent : WF_vars(SubmitInternal(ev))
+    /\ \A ev \in A!InternalEvent : SF_vars(SubmitInternal(ev))
     /\ WF_vars(Clock)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
