@@ -240,20 +240,53 @@ Process(r) ==
    stale decision lands, and `Spec => A!Spec` should fail and hand back
    the trace that shows why.
 
-   THE OUTBOX IS TRANSACTIONAL, AND THE REFINEMENT IS WHAT DEMANDED IT.
+   ONE STEP, ONE DOCUMENT WRITE, AND THE REFINEMENT IS WHAT DEMANDED IT.
+
+   A step lands every `PutObject` it decided on in a single write, and
+   every message those writes justify with them. Only the wheel effects
+   stay separate, which is the premise the whole model is here to test.
+
+   TWO ARGUMENTS FORCE IT, and they arrived in the other order.
+
+   The second is the fence, and it is embarrassing in hindsight: with
+   `Fenced = TRUE` a step that writes twice CANNOT FINISH. Its first
+   write bumps the etag it is holding, so its second write fails
+   `etags[o] = expect`, the step is thrown back to `process`, and it
+   will do the same thing again forever. `CallbackDrain` writes two
+   objects. Under a per-write CAS it is a livelock, not a slow path --
+   and nothing in the model said so, because a livelock is invisible to
+   a safety check and the liveness checks never got near this alphabet.
+
+   The first is the refinement, and it is the reason a single write is
+   the RIGHT repair rather than a convenient one.
 
    The effect list is `sched + put + ack + emits + respond`, and the
-   obvious reading of that is what this operator used to do: land the
-   write, then hand the messages to the wire one `Perform` at a time.
-   TLC refused it. The trace is short -- a retry `Timeout` on a targeted
-   promise -- and the failing transition is the put itself: the document
-   moves, `outbox` does not, and upstairs the handler that writes that
-   object is the same handler that says `Execute`. One event, one
-   transition: `Apply` moves `objects'` and `outbox'` at the same
+   obvious reading of that is what this operator used to do: apply one
+   effect per `Perform`. TLC refused it twice, on the same shape.
+
+   THE MESSAGE. A retry `Timeout` on a targeted promise, and the failing
+   transition is the put: the document moves, `outbox` does not, and
+   upstairs the handler that writes that object is the same handler that
+   says `Execute`. `Apply` moves `objects'` and `outbox'` at the same
    instant, so a write with the message still in hand is a state the
    abstract machine cannot be in.
 
-   NO ABSTRACTION FUNCTION REPAIRS THAT, and the reason is `Crash`.
+   THE SECOND OBJECT. `CallbackDrain(a, b)` settles `a` at its deadline,
+   strikes the callback, and resumes `b`. Split, its first write leaves
+   `a` settled with the callback struck and `b` untouched, and NOTHING
+   UPSTAIRS COVERS THAT. `Timeout(a)` is the near miss: it settles `a`
+   by the same projection, but `Settle` keeps `callbacks`, so it leaves
+   the name on the ledger that this write removed. `CallbackDrain` is
+   the only step that strikes it, and it moves `b` in the same breath.
+
+   That near miss cost a false diagnosis. The first run to find this
+   counterexample had `Timeout` outside its `Implemented` group, so the
+   obvious reading was that the group had removed the covering step and
+   the failure was an artifact of grouping. Restoring `Timeout` did not
+   change the answer, which is what showed the miss was real.
+
+   NO ABSTRACTION FUNCTION REPAIRS THE MESSAGE, and the reason is
+   `Crash`.
    Mapping the abstract outbox to `outbox` plus the sends a committed
    step still holds would line the two machines up -- until the step
    crashes between the write and the wire, when those messages leave the
@@ -273,19 +306,25 @@ Process(r) ==
    record be the same write is what makes redelivery after a crash
    idempotent rather than lost.
 
-   `Says` is taken over the whole remaining `pending`, and that is exact
-   on a premise worth naming: every `Say` in `Abstract` follows a
-   `Commit` and no handler that writes TWO objects says anything, so a
-   put at the head means every send behind it belongs to that put. A
-   handler that wrote, said, and wrote again would have its second
-   message pulled forward to the first write by this operator, silently.
-   Nothing emits that shape today; the day something does, this is the
-   line that has to grow a bound.
+   The second object goes the same way for a plainer reason: both
+   objects are in `docs[o]`, one document, and a compare-and-swap on it
+   is already atomic across everything it holds. Splitting the decision
+   across two of them was throwing away the one thing a per-origin
+   document buys -- which is also why `SameOrigin` matters, and why a
+   handler that reaches across origins would need a transaction this
+   executor does not have.
+
+   `Puts` and `Says` are taken over the whole remaining `pending`, and
+   the write is built exactly as `Apply` builds `objects'` -- same fold,
+   same `CHOOSE` for the case of two writes to one id -- because the
+   point is for the two to agree by construction rather than by luck.
 
    The `Send` branch below survives for the handlers that emit without
-   writing -- there the message alone IS the whole decision, and `Apply`
+   writing: there the message alone IS the whole decision, and `Apply`
    with an empty `Puts` is exactly a step that moves `outbox` and leaves
-   `objects` where it was. *)
+   `objects` where it was. The arm and disarm branches survive because
+   the wheel is the one thing that is still allowed to lag, which is the
+   whole experiment. *)
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
@@ -297,15 +336,21 @@ Perform(r) ==
             IN CASE VariantTag(e) = "PutObject" ->
                     IF Fenced => (etags[o] = steps[r].expect /\ now = steps[r].at)
                     THEN /\ docs'  = [docs EXCEPT ![o] =
-                                         LET w == VariantGetUnsafe("PutObject", e)
-                                         IN  Put(docs[o], w.id, w.obj)]
+                                         LET W == A!Puts(steps[r].pending) IN
+                                         [ i \in (DOMAIN docs[o])
+                                                  \cup {w.id : w \in W} |->
+                                             IF \E w \in W : w.id = i
+                                             THEN (CHOOSE w \in W : w.id = i).obj
+                                             ELSE docs[o][i] ]]
                          /\ etags' = [etags EXCEPT ![o] = @ + 1]
                          /\ outbox' = LET S == A!Says(steps[r].pending) IN
                                         { x \in outbox :
                                             ~\E m \in S : A!MsgKey(x) = A!MsgKey(m) } \cup S
                          /\ steps' = [steps EXCEPT ![r].pending =
                                         SelectSeq(Tail(@),
-                                                  LAMBDA f : VariantTag(f) /= "Send")]
+                                                  LAMBDA f :
+                                                    VariantTag(f) \notin
+                                                      {"PutObject", "Send"})]
                          /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>,

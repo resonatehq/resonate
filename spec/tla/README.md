@@ -33,17 +33,20 @@ sufficient. Left out, it has to say what goes wrong without one.
 event constructors the alphabet offers, read by both, so the two machines
 always quantify over exactly the same events. It moves as handlers land.
 
-**Grouping the alphabet is sound for a pass and not for a failure**, and that
-asymmetry cost a false finding before it was noticed. The full alphabet does
-not fit, so the checks run in groups — but `Implemented` narrows *both*
-machines, and a concrete step can need an abstract event the group left out to
-cover it. `CallbackDrain` is the case: its first write settles the awaited
-promise at its deadline, and the abstract step that matches that is
-`Timeout` — so a group holding the drain and not the timeout reports a
-refinement failure that is an artifact of the grouping. A group that passes
-has genuinely checked the behaviours it can reach; a group that fails has to
-be re-run with the covering events added before the counterexample means
-anything.
+**Grouping the alphabet is sound for a pass and not for a failure.** The full
+alphabet does not fit, so the checks run in groups — but `Implemented` narrows
+*both* machines, and in principle a concrete step can need an abstract event
+the group left out to cover it. A group that passes has genuinely checked the
+behaviours it can reach; a group that fails has to be re-run with the
+candidate covering events added before its counterexample means anything.
+
+No measured finding has yet been an artifact of this. It is recorded because
+one nearly looked like it: the `CallbackDrain` counterexample below first
+turned up in a group without `Timeout`, and `Timeout` settles the same promise
+by the same projection, so grouping was the obvious explanation. Restoring it
+did not change the answer — `Settle` keeps `callbacks` and the drain strikes
+them — and the counterexample was real. Re-running is what tells the two
+apart, and guessing is what does not.
 
 ## Running it
 
@@ -248,7 +251,7 @@ interrupted; it does nothing about another step's disarm landing between this
 step's arm and its put.** Against interleaving the effect order is necessary
 and not sufficient.
 
-### The refinement found four things, none of them in the concrete model
+### The refinement found five things, none of them in the concrete model
 
 **A hole in the specification.** The first check failed on a refused
 compare-and-swap sending a step `perform -> process`. `Abstract` had no action
@@ -307,6 +310,33 @@ after a crash idempotent rather than lost. Verus does not claim this
 refinement and so never had to face it; what it keeps instead is
 `consistent_outbox_never_ahead`, which is the lag stated as an invariant of
 the executor rather than reconciled against the protocol.
+
+**A livelock, reached by the same argument.** The fifth is the second object.
+`CallbackDrain(a, b)` settles `a` at its deadline, strikes the callback, and
+resumes `b` — two `PutObject`s, which the executor performed as two writes.
+Split, the first leaves `a` settled with the callback struck and `b`
+untouched, and nothing upstairs covers that. `Timeout(a)` is the near miss: it
+settles `a` by the same projection, but `Settle` keeps `callbacks`, so it
+leaves on the ledger the name this write removed. `CallbackDrain` is the only
+step that strikes it, and it moves `b` in the same breath.
+
+The blunter argument was available all along without a checker, and was
+missed. **Under a CAS fence a step that writes twice cannot finish.** Its
+first write bumps the etag it is holding, so its second fails
+`etags[o] = expect`, the step is thrown back to `process`, and it does the
+same thing again forever. `CallbackDrain` is a livelock in this executor, not
+a slow path. A safety check cannot see that, and the liveness checks never
+reached this alphabet — so the refinement found by accident what a liveness
+property would have found on purpose.
+
+So a step lands every write it decided on in one document write, with the
+messages those writes justify. Both objects are in `docs[o]`; a
+compare-and-swap on it is already atomic across everything it holds, and
+splitting the decision across two of them threw away the one thing a
+per-origin document buys. Which is also why `SameOrigin` matters, and why a
+handler reaching across origins would need a transaction this executor does
+not have. The wheel effects stay separate — that is the premise the whole
+model exists to test.
 
 ### Liveness needs crashes to stop, said without a counter
 
