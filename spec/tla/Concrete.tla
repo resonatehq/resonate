@@ -35,7 +35,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
           NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
-          Fenced, Crashing, StrongSteps
+          Fenced, Crashing
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
@@ -314,36 +314,23 @@ Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
     /\ \A ev \in A!InternalEvent : SF_vars(SubmitInternal(ev))
     /\ WF_vars(Clock)
-    (* The stronger promise, switchable: a step able to advance infinitely
-       often does advance infinitely often. It does NOT rescue liveness
-       with crashes on, and the counterexample says why in four states:
 
-           SubmitExternal  settle, "process"
-           Next            -> "perform", two effects pending
-           Next            steps = []        crashed, nothing applied
-           SubmitInternal  timeout, "process"     ... and around again
+(* The stronger promise, as a SECOND SPECIFICATION rather than a constant
+   guard. `StrongSteps => \A r : SF_vars(..)` looked like the tidy way to
+   make it switchable, and it is not: TLC recognises fairness only in a
+   restricted syntactic form -- WF/SF terms and quantifications over them
+   -- and an implication is not in that grammar. It produced a
+   "counterexample" that plainly violated the very condition it was
+   supposed to assume, which is how the mistake was caught. A fairness
+   condition that is not syntactically a fairness condition is not an
+   assumption; it is decoration. *)
+FairnessSF ==
+    /\ Fairness
+    /\ \A r \in Rid : SF_vars(Process(r))
+    /\ \A r \in Rid : SF_vars(Perform(r))
 
-       `Process` fires every round, so the disjunction occurs infinitely
-       often and strong fairness is HONOURED -- the crash simply lands
-       after it and before any `Perform` applies anything.
-
-       Sharpening it does not help either. Fairness on `Perform` alone is
-       met by letting the arm land and crashing before the put; fairness
-       on the put alone is vacuous, because the adversary crashes before
-       the put is ever the head and the action is never enabled.
-
-       The general shape: `Crash(r)` is unconditionally enabled, so for
-       any fairness condition over the executor's own actions the
-       adversary crashes one action earlier than the one it would force.
-       No such condition can say "this attempt survives to completion",
-       because crash is always available and a step's identity does not
-       persist across it. The constraint has to land on CRASHES -- they
-       stop, they are bounded, or they are themselves fair. `Crashing`
-       is the first of those, and it is why liveness is claimed without
-       them. *)
-    /\ (StrongSteps => \A r \in Rid : SF_vars(Process(r) \/ Perform(r)))
-
-Spec == Init /\ [][Next]_vars /\ Fairness
+Spec   == Init /\ [][Next]_vars /\ Fairness
+SpecSF == Init /\ [][Next]_vars /\ FairnessSF
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
