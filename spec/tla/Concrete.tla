@@ -35,7 +35,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
           NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
-          Fenced, Crashing
+          Fenced, Crashing, StrongSteps
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
@@ -314,6 +314,34 @@ Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
     /\ \A ev \in A!InternalEvent : SF_vars(SubmitInternal(ev))
     /\ WF_vars(Clock)
+    (* The stronger promise, switchable: a step able to advance infinitely
+       often does advance infinitely often. It does NOT rescue liveness
+       with crashes on, and the counterexample says why in four states:
+
+           SubmitExternal  settle, "process"
+           Next            -> "perform", two effects pending
+           Next            steps = []        crashed, nothing applied
+           SubmitInternal  timeout, "process"     ... and around again
+
+       `Process` fires every round, so the disjunction occurs infinitely
+       often and strong fairness is HONOURED -- the crash simply lands
+       after it and before any `Perform` applies anything.
+
+       Sharpening it does not help either. Fairness on `Perform` alone is
+       met by letting the arm land and crashing before the put; fairness
+       on the put alone is vacuous, because the adversary crashes before
+       the put is ever the head and the action is never enabled.
+
+       The general shape: `Crash(r)` is unconditionally enabled, so for
+       any fairness condition over the executor's own actions the
+       adversary crashes one action earlier than the one it would force.
+       No such condition can say "this attempt survives to completion",
+       because crash is always available and a step's identity does not
+       persist across it. The constraint has to land on CRASHES -- they
+       stop, they are bounded, or they are themselves fair. `Crashing`
+       is the first of those, and it is why liveness is claimed without
+       them. *)
+    /\ (StrongSteps => \A r \in Rid : SF_vars(Process(r) \/ Perform(r)))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
