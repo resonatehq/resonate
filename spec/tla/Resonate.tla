@@ -102,11 +102,13 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 (*
   @typeAlias: id = { origin: ORIGIN, rest: REST };
 
+  @typeAlias: tags = { targeted: Bool, timer: Bool, target: ADDR, delay: Int };
+
   @typeAlias: promise = {
       state: Str,
       param: VALUE,
       value: VALUE,
-      tags: TAGS,
+      tags: $tags,
       timeoutAt: Int,
       createdAt: Int,
       settledAt: Int,
@@ -136,7 +138,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
   @typeAlias: msgKey = { kind: Str, id: $id, address: ADDR };
 
-  @typeAlias: createReq = { id: $id, timeoutAt: Int, param: VALUE, tags: TAGS };
+  @typeAlias: createReq = { id: $id, timeoutAt: Int, param: VALUE, tags: $tags };
   @typeAlias: settleReq = { id: $id, state: Str, value: VALUE };
   @typeAlias: callbackReq = { awaited: $id, awaiter: $id };
   @typeAlias: taskRef = { id: $id, version: Int };
@@ -204,8 +206,8 @@ CONSTANTS
     Pid,
     \* @type: Set(VALUE);
     Value,
-    \* @type: Set(TAGS);
-    Tags,
+    \* @type: VALUE;
+    NoValue,
     \* @type: Set(Int);
     Ttl,
     \* @type: Set(RID);
@@ -225,8 +227,9 @@ CONSTANTS
     \* @type: Int;
     MaxVersion
 
-ASSUME NoPid  \notin Pid
-ASSUME NoAddr \notin Address
+ASSUME NoPid   \notin Pid
+ASSUME NoAddr  \notin Address
+ASSUME NoValue \notin Value
 ASSUME MaxTime    >= 0
 ASSUME MaxVersion >= 0
 
@@ -236,6 +239,18 @@ Version == 0 .. MaxVersion
 (* Absence of an instant. `-1` and not a distinguished constant, because
    instants are non-negative and the arithmetic never reaches it. *)
 NoTime == -1
+
+(* The tags, as the questions the protocol actually asks of them. `Tags`
+   was an opaque constant while nothing read it; a handler does, and
+   `p.tags.has "resonate:target"` is not something an uninterpreted type
+   can answer. Verus made the same move -- `PromiseG` carries `external`,
+   `targeted` and `timer` as fields rather than a tag map -- for the same
+   reason: what the protocol reads is a fixed, small set of predicates,
+   and the map they are encoded in is wire format.
+
+   `delay` is pinned to 0. It only shifts the first retry, and none of
+   the three handlers below reads it. *)
+Tags == [targeted : BOOLEAN, timer : BOOLEAN, target : Address, delay : {0}]
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -594,8 +609,193 @@ Env ==
       mat      |-> Materialise,
       config   |-> [retryTimeout |-> RetryTimeout] ]
 
+(* Nothing to do, nothing to say. Every event whose handler is not yet
+   written answers this, which is honest -- an unimplemented handler does
+   not act -- and keeps them out of the way of the ones that are.
+   @type: $outcome; *)
+NoOp == [ effects |-> << >>, res |-> Silent ]
+
+(* The object at an identifier, or the one that stands for absence: a
+   thing carrying no live deadline, so that `Commit` against it arms
+   everything the newborn needs and disarms nothing. *)
+(* @type: $object; *)
+Absent ==
+    [ promise |-> [ state |-> "resolved", param |-> NoValue, value |-> NoValue,
+                    tags |-> [targeted |-> FALSE, timer |-> FALSE,
+                              target |-> NoAddr, delay |-> 0],
+                    timeoutAt |-> 0, createdAt |-> 0, settledAt |-> 0,
+                    callbacks |-> {}, listeners |-> {} ],
+      task    |-> NoTask ]
+
+(* @type: ($env, $id) => $object; *)
+Cur(env, i) == IF i \in DOMAIN env.objects THEN env.objects[i] ELSE Absent
+
+(***************************************************************************)
+(* COMMITTING ONE OBJECT                                                   *)
+(*                                                                         *)
+(* Every handler that changes an object goes through here, and the point   *)
+(* is the ORDER. `Commit` emits                                            *)
+(*                                                                         *)
+(*     arms ... , PutObject , disarms ...                                  *)
+(*                                                                         *)
+(* which is Verus's `sched + put + ack`. Arming first means a crash        *)
+(* between the arm and the write leaves an entry for an object that is not *)
+(* there -- noise, which `WheelSound` will see and which the handler       *)
+(* re-checks away when it fires. Writing first would mean a crash leaves   *)
+(* an object carrying a deadline that nothing will fire -- silence, which  *)
+(* `WheelComplete` will see and which nothing recovers from.               *)
+(*                                                                         *)
+(* Flip the two concatenations below and the checker should hand back a    *)
+(* trace ending in a `Crash` with a deadline nobody holds. That is the     *)
+(* experiment this module was built for, and it is one edit wide.          *)
+(***************************************************************************)
+
+(* @type: ($id, $object, $object, Str) => Seq($effect); *)
+ArmFor(i, old, new, k) ==
+    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Deadline(old, k)
+    THEN << Variant("ArmTimeout",
+                    [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
+    ELSE << >>
+
+(* @type: ($id, $object, $object, Str) => Seq($effect); *)
+DisarmFor(i, old, new, k) ==
+    IF Deadline(old, k) /= NoTime /\ Deadline(old, k) /= Deadline(new, k)
+    THEN << Variant("DisarmTimeout",
+                    [entry |-> [at |-> Deadline(old, k), id |-> i, kind |-> k]]) >>
+    ELSE << >>
+
+(* @type: ($id, $object, $object) => Seq($effect); *)
+Commit(i, old, new) ==
+       ArmFor(i, old, new, "promise")
+    \o ArmFor(i, old, new, "lease")
+    \o ArmFor(i, old, new, "retry")
+    \o << Variant("PutObject", [id |-> i, obj |-> new]) >>
+    \o DisarmFor(i, old, new, "promise")
+    \o DisarmFor(i, old, new, "lease")
+    \o DisarmFor(i, old, new, "retry")
+
+(* @type: ($id, $object, $object) => $outcome; *)
+Write(i, old, new) == [ effects |-> Commit(i, old, new), res |-> Silent ]
+
+(***************************************************************************)
+(* THE OBJECT CONSTRUCTORS -- `02-abstract/state.lean`                     *)
+(***************************************************************************)
+
+(* `TaskObject.fulfill`. Keeps the version -- the fencing token survives
+   fulfilment, which is what stops a stale holder reusing it.
+   @type: $task => $task; *)
+Fulfilled(t) ==
+    [t EXCEPT !.state = "fulfilled", !.pid = NoPid, !.ttl = NoTime,
+              !.expiresAt = NoTime, !.retryAt = NoTime, !.resumes = {}]
+
+(* `setSettled`: settle the promise AND fulfil its task. One object, so
+   one write -- this is where the fusion pays.
+   @type: ($object, Str, VALUE, Int) => $object; *)
+Settle(obj, st, v, at) ==
+    [ promise |-> [obj.promise EXCEPT !.state = st, !.value = v, !.settledAt = at],
+      task    |-> IF obj.task.state = "none" THEN NoTask ELSE Fulfilled(obj.task) ]
+
+(* `PromiseObject.project`: a pending promise past its deadline is settled
+   whether or not anyone has written that down. A timer resolves; anything
+   else times out. The stamp is the DEADLINE, not the clock.
+   @type: ($object, Int) => $object; *)
+Project(obj, t) ==
+    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t
+    THEN Settle(obj, IF obj.promise.tags.timer THEN "resolved" ELSE "rejectedTimedout",
+                NoValue, obj.promise.timeoutAt)
+    ELSE obj
+
+(* `createPromise`, both arms of it.
+   @type: ($createReq, Int) => $object; *)
+Born(req, t) ==
+    IF req.timeoutAt > t
+    THEN [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
+                         tags |-> req.tags, timeoutAt |-> req.timeoutAt,
+                         createdAt |-> t, settledAt |-> NoTime,
+                         callbacks |-> {}, listeners |-> {} ],
+           task    |-> IF req.tags.targeted
+                       THEN [NoTask EXCEPT !.state = "pending", !.retryAt = t]
+                       ELSE NoTask ]
+    ELSE [ promise |-> [ state |-> IF req.tags.timer THEN "resolved"
+                                                     ELSE "rejectedTimedout",
+                         param |-> req.param, value |-> NoValue, tags |-> req.tags,
+                         timeoutAt |-> req.timeoutAt, createdAt |-> req.timeoutAt,
+                         settledAt |-> req.timeoutAt,
+                         callbacks |-> {}, listeners |-> {} ],
+           task    |-> IF req.tags.targeted
+                       THEN [NoTask EXCEPT !.state = "fulfilled"]
+                       ELSE NoTask ]
+
+(***************************************************************************)
+(* THE HANDLERS                                                            *)
+(*                                                                         *)
+(* Three of the twenty, chosen because between them they create an object, *)
+(* arm a deadline, settle an object and disarm one -- which is everything  *)
+(* the wheel invariants need in order to stop being vacuous.               *)
+(*                                                                         *)
+(* Responses are `Silent` throughout. Nothing in this machine reads a      *)
+(* response, so status codes would be write-only; the doors that would     *)
+(* return 400 or 404 return `NoOp` instead, which is the same thing for    *)
+(* every property here -- they write nothing.                              *)
+(***************************************************************************)
+
+(* `external.lean` promiseCreate. Timer+targeted is refused at the door.
+   An existing promise is returned as-is, except that reading it may
+   MATERIALISE a settlement it had already passed -- which is a write, and
+   the reason a read is not free.
+   @type: ($createReq, $env) => $outcome; *)
+HPromiseCreate(req, env) ==
+    LET i   == req.id
+        old == Cur(env, i)
+        pr  == Project(old, env.now)
+    IN  IF req.tags.timer /\ req.tags.targeted
+        THEN NoOp
+        ELSE IF i \in DOMAIN env.objects
+             THEN IF env.mat /\ pr /= old THEN Write(i, old, pr) ELSE NoOp
+             ELSE Write(i, Absent, Born(req, env.now))
+
+(* `external.lean` promiseSettle. `rejectedTimedout` is not settable by a
+   client -- that verdict belongs to the deadline, and letting a client
+   forge it was one of the four defects the Verus port found.
+   @type: ($settleReq, $env) => $outcome; *)
+HPromiseSettle(req, env) ==
+    LET i   == req.id
+        old == Cur(env, i)
+        pr  == Project(old, env.now)
+    IN  IF req.state \notin {"resolved", "rejected", "rejectedCanceled"}
+        THEN NoOp
+        ELSE IF i \notin DOMAIN env.objects
+             THEN NoOp
+             ELSE IF pr.promise.state = "pending"
+                  THEN Write(i, old, Settle(pr, req.state, req.value, env.now))
+                  ELSE IF env.mat /\ pr /= old THEN Write(i, old, pr) ELSE NoOp
+
+(* `internal.lean` processPromiseTimeout, which is `touchPromise` and
+   nothing else: read the promise with materialisation FORCED, so that a
+   settlement the deadline already decided gets written down.
+
+   A due entry whose object has moved on finds nothing to do. The entry is
+   still on the wheel and will fire again -- that is the noise arming
+   before writing admits, and it is why every internal handler re-checks.
+   The lease and retry kinds are not implemented yet and answer `NoOp`.
+   @type: ($entry, $env) => $outcome; *)
+HTimeout(e, env) ==
+    LET i   == e.id
+        old == Cur(env, i)
+        pr  == Project(old, env.now)
+    IN  IF e.kind /= "promise" \/ i \notin DOMAIN env.objects
+        THEN NoOp
+        ELSE IF pr /= old THEN Write(i, old, pr) ELSE NoOp
+
 (* @type: ($event, $env) => $outcome; *)
-Handle(ev, env) == [ effects |-> << >>, res |-> Silent ]
+Handle(ev, env) ==
+    CASE VariantTag(ev) = "PromiseCreate" ->
+             HPromiseCreate(VariantGetUnsafe("PromiseCreate", ev).req, env)
+      [] VariantTag(ev) = "PromiseSettle" ->
+             HPromiseSettle(VariantGetUnsafe("PromiseSettle", ev).req, env)
+      [] VariantTag(ev) = "Timeout" ->
+             HTimeout(VariantGetUnsafe("Timeout", ev).entry, env)
+      [] OTHER -> NoOp
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -837,6 +1037,142 @@ WheelComplete ==
     \A o \in DOMAIN objects, k \in DeadlineKind :
         Deadline(objects[o], k) /= NoTime =>
             [at |-> Deadline(objects[o], k), id |-> o, kind |-> k] \in timeouts
+
+(***************************************************************************)
+(* THE CATALOGUE                                                           *)
+(*                                                                         *)
+(* `spec/02-abstract/properties.lean`, transcribed. These are NOT new      *)
+(* claims -- each is one of the 95, under its own name, so a violation     *)
+(* here means the same thing it means in Lean, Go, TypeScript and Verus.   *)
+(*                                                                         *)
+(* Only the entries the three implemented handlers can reach are here.     *)
+(* Porting the rest against unimplemented handlers would buy 80 vacuous    *)
+(* greens.                                                                 *)
+(*                                                                         *)
+(* Two things change in transcription and neither is a change of claim:    *)
+(*                                                                         *)
+(*   - `s.promises.all` and `s.tasks.all` become one walk over `objects`,  *)
+(*     because a promise and its task are one. Where the Lean has to LOOK  *)
+(*     UP the task by the promise's id and cope with its absence, this has *)
+(*     `objects[i].task` and `task.state = "none"`.                        *)
+(*                                                                         *)
+(*   - a `.trans` property becomes an ACTION invariant -- unprimed for     *)
+(*     `a`, primed for `b`. The Lean walk checks it at every pair of       *)
+(*     consecutive states the server passes through; here that is every    *)
+(*     `Next`, and a server that does not write in one transaction passes  *)
+(*     through more of them than the Lean machine does. That is the        *)
+(*     question, not a distortion of it.                                   *)
+(***************************************************************************)
+
+(* @type: $id => $promise; *)
+Pr(i) == objects[i].promise
+
+(* @type: $id => $task; *)
+Tk(i) == objects[i].task
+
+(* @type: $id => Bool; *)
+HasTask(i) == objects[i].task.state /= "none"
+
+(* --- .state ------------------------------------------------------------ *)
+
+well_formed_promise_created_at_lte_timeout_at ==
+    \A i \in DOMAIN objects : Pr(i).createdAt <= Pr(i).timeoutAt
+
+well_formed_promise_settled_at_iff_not_pending ==
+    \A i \in DOMAIN objects :
+        (Pr(i).state /= "pending") <=> (Pr(i).settledAt /= NoTime)
+
+well_formed_promise_pending_has_no_value ==
+    \A i \in DOMAIN objects :
+        Pr(i).state = "pending" => Pr(i).value = NoValue
+
+well_formed_promise_settled_at_lte_timeout_at ==
+    \A i \in DOMAIN objects :
+        Pr(i).settledAt /= NoTime => Pr(i).settledAt <= Pr(i).timeoutAt
+
+well_formed_task_pending_iff_has_retry_at ==
+    \A i \in DOMAIN objects :
+        HasTask(i) => ((Tk(i).state = "pending") <=> (Tk(i).retryAt /= NoTime))
+
+well_formed_task_acquired_iff_has_expires_at ==
+    \A i \in DOMAIN objects :
+        HasTask(i) => ((Tk(i).state = "acquired") <=> (Tk(i).expiresAt /= NoTime))
+
+(* The fusion dividend: in Lean this has to find the task by id and admit
+   that it might not be there. Here they are one object. *)
+consistent_settled_promise_has_fulfilled_task ==
+    \A i \in DOMAIN objects :
+        (Pr(i).state /= "pending" /\ HasTask(i)) => Tk(i).state = "fulfilled"
+
+consistent_settled_task_promise_settled ==
+    \A i \in DOMAIN objects :
+        (HasTask(i) /\ Tk(i).state = "fulfilled") => Pr(i).state /= "pending"
+
+consistent_task_iff_targeted_promise ==
+    \A i \in DOMAIN objects : HasTask(i) <=> Pr(i).tags.targeted
+
+(* --- .trans ------------------------------------------------------------ *)
+
+preserved_settled_promise_record ==
+    \A i \in DOMAIN objects :
+        \/ Pr(i).state = "pending"
+        \/ /\ i \in DOMAIN objects'
+           /\ objects'[i].promise.state     = Pr(i).state
+           /\ objects'[i].promise.settledAt = Pr(i).settledAt
+           /\ objects'[i].promise.value     = Pr(i).value
+
+consistent_new_promise_born_clean ==
+    \A i \in DOMAIN objects' :
+        \/ i \in DOMAIN objects
+        \/ LET q == objects'[i].promise IN
+           /\ q.callbacks = {}
+           /\ q.listeners = {}
+           /\ q.value = NoValue
+           /\ q.createdAt <= now
+           /\ \/ /\ q.state = "pending"
+                 /\ q.settledAt = NoTime
+                 /\ q.createdAt < q.timeoutAt
+              \/ /\ q.settledAt = q.timeoutAt
+                 /\ q.createdAt = q.timeoutAt
+                 /\ q.timeoutAt <= now
+                 /\ IF q.tags.timer THEN q.state = "resolved"
+                                    ELSE q.state = "rejectedTimedout"
+
+(* The one that reads the clock. It says a settlement is stamped with the
+   instant it happened -- and this machine decides at one instant and
+   writes at another. *)
+consistent_promise_settlement_stamp ==
+    \A i \in DOMAIN objects :
+        \/ Pr(i).state /= "pending"
+        \/ /\ i \in DOMAIN objects'
+           /\ LET q == objects'[i].promise IN
+              \/ q.state = "pending"
+              \/ /\ q.settledAt = now
+                 /\ now < q.timeoutAt
+                 /\ q.state /= "rejectedTimedout"
+              \/ /\ q.settledAt = q.timeoutAt
+                 /\ q.timeoutAt <= now
+                 /\ (IF q.tags.timer THEN q.state = "resolved"
+                                     ELSE q.state = "rejectedTimedout")
+                 /\ q.value = Pr(i).value
+
+consistent_settlement_fulfils_task ==
+    \A i \in DOMAIN objects :
+        \/ Pr(i).state /= "pending"
+        \/ i \notin DOMAIN objects'
+        \/ objects'[i].promise.state = "pending"
+        \/ objects'[i].task.state \in {"none", "fulfilled"}
+
+-----------------------------------------------------------------------------
+(***************************************************************************)
+(* THE OBLIGATIONS THE CATALOGUE CANNOT STATE                              *)
+(*                                                                         *)
+(* The Lean has no wheel. Its deadlines live on the task record            *)
+(* (`well_formed_task_pending_iff_has_retry_at` above is the shape of it), *)
+(* so there is no second store to drift and nothing in the 95 says an      *)
+(* index agrees with what it indexes. These two are the price of the       *)
+(* premise, and they have to be invented here.                             *)
+(***************************************************************************)
 
 (* The promise and its task are one unit -- the reason for fusing them.
    A settled promise never coexists with an unfulfilled task, at any
