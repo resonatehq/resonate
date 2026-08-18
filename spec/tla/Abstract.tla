@@ -223,8 +223,28 @@ NoTime == -1
 
    `delay` is pinned to 0. It only shifts the first retry, and none of
    the three handlers below reads it. *)
-Tags == [targeted : BOOLEAN, timer : BOOLEAN, external : BOOLEAN,
-         target : Address, delay : {0}]
+(* FOUR PROFILES, not the eight-way product of the three flags.
+   
+   The product is mostly nonsense -- timer AND targeted is refused at the
+   door, and external adds nothing to a promise already targeted, since
+   `IsExternal` is a disjunction. What the protocol actually distinguishes
+   is four kinds of promise, and these are they:
+   
+     plain     nobody outside settles it, nothing can wait on it
+     external  something outside settles it, so it can be awaited
+     targeted  a task drives it, and it can be awaited
+     timer     the deadline resolves it rather than rejecting it
+   
+   Enumerating four instead of eight is not a weaker model of the same
+   thing; it is the same model with the meaningless combinations left
+   out, and it roughly halves an alphabet that had stopped being
+   checkable. *)
+Tags ==
+    LET a == CHOOSE x \in Address : TRUE IN
+    { [targeted |-> FALSE, timer |-> FALSE, external |-> FALSE, target |-> a, delay |-> 0],
+      [targeted |-> FALSE, timer |-> FALSE, external |-> TRUE,  target |-> a, delay |-> 0],
+      [targeted |-> TRUE,  timer |-> FALSE, external |-> FALSE, target |-> a, delay |-> 0],
+      [targeted |-> FALSE, timer |-> TRUE,  external |-> FALSE, target |-> a, delay |-> 0] }
 
 (* `PromiseObject.external` -- who is allowed to be awaited. A promise
    nobody outside can settle cannot be waited on, because nothing would
