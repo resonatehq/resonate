@@ -33,6 +33,18 @@ sufficient. Left out, it has to say what goes wrong without one.
 event constructors the alphabet offers, read by both, so the two machines
 always quantify over exactly the same events. It moves as handlers land.
 
+**Grouping the alphabet is sound for a pass and not for a failure**, and that
+asymmetry cost a false finding before it was noticed. The full alphabet does
+not fit, so the checks run in groups — but `Implemented` narrows *both*
+machines, and a concrete step can need an abstract event the group left out to
+cover it. `CallbackDrain` is the case: its first write settles the awaited
+promise at its deadline, and the abstract step that matches that is
+`Timeout` — so a group holding the drain and not the timeout reports a
+refinement failure that is an artifact of the grouping. A group that passes
+has genuinely checked the behaviours it can reach; a group that fails has to
+be re-run with the covering events added before the counterexample means
+anything.
+
 ## Running it
 
 ```
