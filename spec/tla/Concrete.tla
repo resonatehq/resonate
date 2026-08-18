@@ -35,7 +35,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
           NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
-          Fenced
+          Fenced, Crashing
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
@@ -262,10 +262,32 @@ Init ==
     /\ steps    = SetAsFun({})
     /\ now      = 0
 
+(***************************************************************************)
+(* `Crashing` is a CONSTANT, and it is not a convenience.                  *)
+(*                                                                         *)
+(* With crashes on, `Spec => A!Safety` holds: whatever a step managed to   *)
+(* apply before it died is a prefix the abstract machine permits, which is *)
+(* the entire reason `Crash` is in the model.                              *)
+(*                                                                         *)
+(* With crashes on, `Spec => A!Spec` CANNOT hold, and TLC showed why in    *)
+(* four states: submit the due timeout, and kill it while it is still      *)
+(* deciding. Repeat forever. Strong fairness does not help -- the step is  *)
+(* submitted every round, so the fairness condition is met -- and no       *)
+(* scheduling discipline helps either, because nothing here schedules      *)
+(* crashes. An executor whose work may be destroyed arbitrarily often      *)
+(* cannot promise that anything ever finishes, and no specification can    *)
+(* be written that lets it.                                                *)
+(*                                                                         *)
+(* So liveness is claimed under the assumption that failures cease, which  *)
+(* is the only assumption under which liveness is ever claimed. Setting    *)
+(* `Crashing = FALSE` is that assumption, made explicit and checkable      *)
+(* rather than left in a sentence nobody runs.                             *)
+(***************************************************************************)
+
 Next ==
     \/ \E ev \in A!ExternalEvent : SubmitExternal(ev)
     \/ \E ev \in A!InternalEvent : SubmitInternal(ev)
-    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
+    \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ (Crashing /\ Crash(r))
     \/ Clock
 
 (* The fairness `Abstract` asks of itself, asked of this executor. It has
