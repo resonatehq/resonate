@@ -200,9 +200,8 @@ Checked exhaustively with TLC over the whole reachable state space of each.
 | `WheelComplete` | n/a — no wheel | holds |
 | `T_consistent_promise_settlement_stamp` | **fails** | — |
 | `preserved_settled_promise_record` | **fails** unfenced | holds |
-| `Spec => A!Safety`, crashes ON | — | **holds** |
-| `Spec => A!Spec`, crashes OFF | — | **holds** |
-| `Spec => A!Spec`, crashes ON | — | fails, irreparably — see below |
+| `Spec => A!Safety` | — | **holds** |
+| `SpecStable => A!Spec` | — | **holds** |
 
 `Concrete` closes over 425 506 distinct states for the liveness form and
 716 353 for the invariants, complete graph in both, a few minutes each.
@@ -268,20 +267,41 @@ that anything finishes. Hence `Crashing` as a constant — safety is claimed
 with crashes, liveness without them, which is the only way liveness is ever
 claimed.
 
-### Liveness needs crashes to stop, and nothing weaker will do
+### Liveness needs crashes to stop, said without a counter
 
-`Spec => A!Spec` holds with `Crashing = FALSE` and fails with it TRUE. Three
-attempts to rescue it with fairness on the executor's own actions, all
-refuted:
+Crashes are always in the machine. What separates the two claims is a formula:
+
+```tla
+EventuallyStable == <>[][ \A r \in Rid : ~Crash(r) ]_vars
+
+Spec       == Init /\ [][Next]_vars /\ Fairness
+SpecStable == Init /\ [][Next]_vars /\ Fairness /\ EventuallyStable
+```
+
+`[][A]_vars` holds of a step when it satisfies `A` or leaves `vars` alone; a
+crash does neither, so this forbids crash steps, and `<>[]` says from some
+point on, forever. No bound, no counter, no constant. There WAS a `Crashing`
+constant, and switching it off was how liveness got claimed — which says
+something about an executor that never fails, and that is not an executor
+anyone has.
+
+Two things about the form. It only type-checks in the SPECIFICATION: as a
+property hypothesis, `EventuallyStable => A!Spec`, TLC refuses —
+*temporal formulas containing actions must be of forms `<>[]A` or `[]<>A`*,
+and an implication with one as antecedent is not among them. And it is
+stronger than "not always": `<>[]` means crashes stop entirely.
+
+The weaker reading — infinitely many crashes, never always the attempt that
+matters — is what fairness would express, and it CANNOT be written here.
+Three attempts, all refuted:
 
 | fairness added | verdict | why |
 |---|---|---|
 | `SF` on `Perform(r)` | fails | **vacuous** — the adversary crashes every step while still in `"process"`, so `Perform` is never enabled |
-| `SF` on `Process(r)` and `Perform(r)` | fails | **slot recycling** — see below |
+| `SF` on `Process(r)` and `Perform(r)` | fails | **slot recycling** — below |
 | anything else over these actions | — | same shape |
 
-The second counterexample is the one worth reading. At the lasso, every step
-is at rid `q2`:
+At the lasso of the second, every step is at rid `q2`:
 
 ```
 S9   q2 settle    "perform", 2 pending   <- Process fired, SF discharged
@@ -299,10 +319,10 @@ that would actually write is crashed.
 
 **Fairness names a slot, not an attempt.** No formula quantified over `Rid`
 can say "this attempt completes", because attempts have no names and a rid is
-recycled. The constraint has to land on crashes.
+recycled.
 
 Note which fairness does NOT have this hole: `SF_vars(SubmitInternal(ev))`
-names an abstract EVENT -- a specific object and deadline -- so no throwaway
+names an abstract EVENT — a specific object and deadline — so no throwaway
 request can discharge it on that event's behalf. That one is load-bearing and
 sound. The difference is naming the work rather than the worker.
 
