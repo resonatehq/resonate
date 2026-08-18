@@ -1530,6 +1530,36 @@ UnitCoherent ==
 (* multi-unit write single-chunk again. Nothing here makes it true.        *)
 (***************************************************************************)
 
+(* REFUTED, in three steps, with two origins:
+   
+       create o1/a  external
+       create o2/a  targeted
+       promiseRegisterCallback(awaited |-> o1/a, awaiter |-> o2/a)
+   
+       o1/a.callbacks = { o2/a }
+   
+   The doors do not forbid it. `promiseRegisterCallback` asks that the
+   awaited be external and the awaiter be targeted, and says nothing
+   about where either lives -- which is right for a protocol whose whole
+   point is waiting on work somebody else is doing.
+   
+   So this is not a conjecture that failed to be proved. It is a
+   PRECONDITION THE PROTOCOL DOES NOT GRANT, and what it prices is an
+   implementation strategy: an executor that keeps one document per
+   origin and fences it cannot serve a callback whose two ends are in
+   different documents. `Concrete` is exactly that executor, which is
+   why it has no cross-origin operation at all -- not a limitation it
+   works around, a shape it does not have.
+   
+   Three ways out, and they are choices, not fixes:
+   
+     - a door: require awaiter and awaited to share an origin. Cheap to
+       state, and it forbids waiting on another workflow's promise.
+     - a transaction across documents, which is what the chunking was
+       there to avoid.
+     - chunk by something coarser than origin, so that the two ends are
+       in one document by construction. Verus's `Workflow` is this move
+       one level down; it works exactly as far as the chunk reaches. *)
 SameOrigin ==
     \A o \in DOMAIN objects :
         \A w \in objects[o].promise.callbacks : w.origin = o.origin
