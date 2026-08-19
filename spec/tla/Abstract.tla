@@ -407,7 +407,7 @@ Deadline(obj, kind) ==
    and forging it was one of the four defects the Verus port found.
    `pending` is not a settlement at all.
 
-   Stating that here rather than checking it in `HPromiseSettle` is
+   Stating that here rather than checking it in `HandlePromiseSettle` is
    stronger and cheaper -- a guard can be forgotten at one call site,
    a type cannot -- and it keeps ill-formed requests out of the state
    space of both machines. `Tags` does the same for the create door:
@@ -552,12 +552,6 @@ Env ==
     [ objects |-> objects,
       now     |-> now,
       config  |-> [retryTimeout |-> RetryTimeout] ]
-
-(* Nothing to do, nothing to say. Every event whose handler is not yet
-   written answers this, which is honest -- an unimplemented handler does
-   not act -- and keeps them out of the way of the ones that are.
-   @type: $outcome; *)
-NoOp == [ effects |-> << >> ]
 
 (* The object at an identifier, or the one that stands for absence: a
    thing carrying no live deadline, so that `Commit` against it arms
@@ -739,7 +733,7 @@ Born(req, t) ==
 (*                                                                         *)
 (* The cost is real and belongs on the record: a read is ALL answer, so    *)
 (* `promiseGet` has no content in this model and is a stutter. Doors that  *)
-(* return 400 or 404 in the Lean are `NoOp` here, which says only that     *)
+(* return 400 or 404 in the Lean are `[ effects |-> << >> ]` here, which says only that     *)
 (* they write nothing -- that much IS checked, by the invariants and the   *)
 (* refinement, and it is what a missing door would break. Making answers   *)
 (* checkable needs a variable in `Abstract` for one to land in, and that   *)
@@ -758,9 +752,9 @@ Born(req, t) ==
    IDEMPOTENT BY ANSWERING, not by writing: creating something that is
    already there is a 200 carrying what is there, not a second create.
    @type: ($createReq, $env) => $outcome; *)
-HPromiseCreate(req, env) ==
+HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
-        NoOp
+        [ effects |-> << >> ]
     ELSE
         Write(req.id, Born(req, env.now))
 
@@ -773,15 +767,16 @@ HPromiseCreate(req, env) ==
    defects the Verus port found. That door is `SettleState` now, so no
    guard here has to remember it.
    @type: ($settleReq, $env) => $outcome; *)
-HPromiseSettle(req, env) ==
+HandlePromiseSettle(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        NoOp
+        [ effects |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now) IN
-        IF old.promise.state = "pending" THEN
-            Write(req.id, Settle(old, req.state, req.value, env.now))
-        ELSE
-            NoOp
+        LET old == Project(env.objects[req.id], env.now)
+        IN
+            IF old.promise.state = "pending" THEN
+                Write(req.id, Settle(old, req.state, req.value, env.now))
+            ELSE
+                [ effects |-> << >> ]
 
 (* `external.lean` promiseGet. A PURE READ: it projects, and it writes
    nothing. The Lean persists the projection when `run true`; that
@@ -791,7 +786,7 @@ HPromiseSettle(req, env) ==
    which is honest rather than free: the whole content of a get is the
    answer it gives, and answers are what `res` was for.
    @type: ($id, $env) => $outcome; *)
-HPromiseGet(i, env) == NoOp
+HandlePromiseGet(i, env) == [ effects |-> << >> ]
 
 (* `external.lean` promiseRegisterCallback. The awaiter must be a task
    promise and the awaited must be EXTERNAL -- something outside can
@@ -813,7 +808,7 @@ HPromiseGet(i, env) == NoOp
    -- declining what it cannot serve -- but COMPLETE, serving everything
    the protocol admits.
    @type: ($callbackReq, $env) => $outcome; *)
-HPromiseRegisterCallback(req, env) ==
+HandlePromiseRegisterCallback(req, env) ==
     LET a   == req.awaited
         w   == req.awaiter
         oa  == Cur(env, a)
@@ -825,29 +820,29 @@ HPromiseRegisterCallback(req, env) ==
            \/ w \notin DOMAIN env.objects
            \/ ~pw.promise.tags.targeted
            \/ ~IsExternal(pa.promise)
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF pa.promise.state = "pending" /\ pw.promise.state = "pending"
              THEN Write(a, AddCallback(pa, w))
-             ELSE NoOp
+             ELSE [ effects |-> << >> ]
 
 (* `external.lean` promiseRegisterListener. Same door, one object.
    @type: ($id, ADDR, $env) => $outcome; *)
-HPromiseRegisterListener(a, addr, env) ==
+HandlePromiseRegisterListener(a, addr, env) ==
     LET oa == Cur(env, a)
         pa == Project(oa, env.now)
     IN  IF a \notin DOMAIN env.objects \/ ~IsExternal(pa.promise)
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF pa.promise.state = "pending"
              THEN Write(a, AddListener(pa, addr))
-             ELSE NoOp
+             ELSE [ effects |-> << >> ]
 
 (* `external.lean` taskGet. Reads the unit; the task view fulfils itself
    when the promise has settled, which `Project` already does.
    @type: ($id, $env) => $outcome; *)
-HTaskGet(i, env) ==
+HandleTaskGet(i, env) ==
     IF i \notin DOMAIN env.objects \/ ~Driven(Cur(env, i))
-    THEN NoOp
-    ELSE NoOp
+    THEN [ effects |-> << >> ]
+    ELSE [ effects |-> << >> ]
 
 (* `external.lean` taskCreate. A worker claiming work that may not exist
    yet: if the promise is absent it is born ALREADY ACQUIRED at version
@@ -855,13 +850,13 @@ HTaskGet(i, env) ==
    `taskAcquire` -- there is no instant in between at which someone else
    could take it.
    @type: ($createReq, PID, Int, $env) => $outcome; *)
-HTaskCreate(req, pid, ttl, env) ==
+HandleTaskCreate(req, pid, ttl, env) ==
     LET i   == req.id
         old == Cur(env, i)
         pr  == Project(old, env.now)
         t   == env.now
     IN  IF ~req.tags.targeted \/ (req.tags.timer /\ req.tags.targeted)
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF i \notin DOMAIN env.objects
              THEN LET born == Born(req, t)
                   IN  Write(i,
@@ -870,30 +865,30 @@ HTaskCreate(req, pid, ttl, env) ==
                                           pid, ttl, t + ttl)
                             ELSE born)
              ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
-                  THEN NoOp
+                  THEN [ effects |-> << >> ]
                   ELSE IF pr.task.state = "pending"
                        THEN Write(i, Acquired(pr, pid, ttl, t + ttl))
-                       ELSE NoOp
+                       ELSE [ effects |-> << >> ]
 
 (* `external.lean` taskAcquire. Three guards and they are all fences:
    the task must be on offer, the promise must still be pending, and the
    version must be the one the caller was told.
    @type: ($id, Int, PID, Int, $env) => $outcome; *)
-HTaskAcquire(i, v, pid, ttl, env) ==
+HandleTaskAcquire(i, v, pid, ttl, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state /= "pending"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, Acquired(pr, pid, ttl, env.now + ttl))
 
 (* `external.lean` taskFulfill. The holder settles the promise it was
    given, and the task is fulfilled in the same write because they are
    one object.
    @type: ($id, Int, $settleReq, $env) => $outcome; *)
-HTaskFulfill(i, v, act, env) ==
+HandleTaskFulfill(i, v, act, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ act.state \notin {"resolved", "rejected", "rejectedCanceled"}
@@ -901,32 +896,32 @@ HTaskFulfill(i, v, act, env) ==
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, Settle(pr, act.state, act.value, env.now))
 
 (* `external.lean` taskRelease. The holder gives it back, and the
    dispatch clock is armed at once so somebody else is offered it.
    @type: ($id, Int, $env) => $outcome; *)
-HTaskRelease(i, v, env) ==
+HandleTaskRelease(i, v, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHalt. Stop offering this task, without settling
    the promise. No version is checked: halting is an operator's act, not
    a holder's.
    @type: ($id, $env) => $outcome; *)
-HTaskHalt(i, env) ==
+HandleTaskHalt(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state \in {"fulfilled", "halted"}
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, [pr EXCEPT !.task.state     = "halted",
                                       !.task.pid       = NoPid,
                                       !.task.ttl       = NoTime,
@@ -935,13 +930,13 @@ HTaskHalt(i, env) ==
 
 (* `external.lean` taskContinue. The other half of halt.
    @type: ($id, $env) => $outcome; *)
-HTaskContinue(i, env) ==
+HandleTaskContinue(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state /= "halted"
            \/ pr.promise.state /= "pending"
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHeartbeat. One request, MANY objects: a worker
@@ -959,7 +954,7 @@ Renewable(pid, refs, env) ==
             /\ pr.task.pid = pid
             /\ pr.promise.state = "pending" }
 
-HTaskHeartbeat(pid, refs, env) ==
+HandleTaskHeartbeat(pid, refs, env) ==
     [ effects |->
         CommitAll(Renewable(pid, refs, env),
                   LAMBDA i : LET pr == Project(Cur(env, i), env.now)
@@ -979,7 +974,7 @@ HTaskHeartbeat(pid, refs, env) ==
    @type: ($id, Int, Set($callbackReq), $env) => $outcome; *)
 Awaiteds(acts) == { a.awaited : a \in acts }
 
-HTaskSuspend(i, v, acts, env) ==
+HandleTaskSuspend(i, v, acts, env) ==
     LET old  == Cur(env, i)
         pr   == Project(old, env.now)
         aw   == Awaiteds(acts)
@@ -993,7 +988,7 @@ HTaskSuspend(i, v, acts, env) ==
            \/ pr.task.version /= v
            \/ seen /= aw
            \/ \E a \in aw : ~IsExternal(proj(a).promise)
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF \E a \in aw : proj(a).promise.state /= "pending"
              THEN Write(i, [pr EXCEPT !.task.resumes = {}])
              ELSE [ effects |->
@@ -1019,7 +1014,7 @@ FenceTarget(act) ==
     THEN VariantGetUnsafe("Create", act).req.id
     ELSE VariantGetUnsafe("Settle", act).req.id
 
-HTaskFence(i, v, act, env) ==
+HandleTaskFence(i, v, act, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ FenceTarget(act) = i
@@ -1027,17 +1022,17 @@ HTaskFence(i, v, act, env) ==
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF VariantTag(act) = "Create"
-             THEN HPromiseCreate(VariantGetUnsafe("Create", act).req, env)
-             ELSE HPromiseSettle(VariantGetUnsafe("Settle", act).req, env)
+             THEN HandlePromiseCreate(VariantGetUnsafe("Create", act).req, env)
+             ELSE HandlePromiseSettle(VariantGetUnsafe("Settle", act).req, env)
 
 (* `internal.lean` processLeaseTimeout. A holder that stopped
    heartbeating loses the task, and it goes back on offer at once.
    Reads with materialisation NOT forced -- `viewPromise` -- so a lease
    timeout never itself writes down a settlement.
    @type: ($id, $env) => $outcome; *)
-HLeaseTimeout(i, env) ==
+HandleLeaseTimeout(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(old)
@@ -1045,7 +1040,7 @@ HLeaseTimeout(i, env) ==
            \/ old.task.expiresAt = NoTime
            \/ old.task.expiresAt > env.now
            \/ pr.promise.state /= "pending"
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE Write(i, Requeued(old, env.now))
 
 (* `internal.lean` processRetryTimeout. The dispatch: offer a pending
@@ -1061,7 +1056,7 @@ HLeaseTimeout(i, env) ==
    stale dispatch lives: the message names a version, and by the time it
    is read the task may have moved.
    @type: ($id, $env) => $outcome; *)
-HRetryTimeout(i, env) ==
+HandleRetryTimeout(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(old)
@@ -1069,7 +1064,7 @@ HRetryTimeout(i, env) ==
            \/ old.task.retryAt = NoTime
            \/ old.task.retryAt > env.now
            \/ pr.promise.state /= "pending"
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE [ effects |->
                  Commit(i,
                         [old EXCEPT !.task.retryAt = env.now + env.config.retryTimeout])
@@ -1081,13 +1076,13 @@ HRetryTimeout(i, env) ==
    everyone who registered for it. The name is struck from the ledger in
    the same write, so the message is said once.
    @type: ($id, ADDR, $env) => $outcome; *)
-HListenerDrain(i, addr, env) ==
+HandleListenerDrain(i, addr, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects
            \/ pr.promise.state = "pending"
            \/ addr \notin pr.promise.listeners
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE [ effects |->
                  Commit(i,
                         [pr EXCEPT !.promise.listeners = @ \ {addr}])
@@ -1116,14 +1111,14 @@ Resumed(w, awaited, env) ==
              THEN [pw EXCEPT !.task.resumes = @ \cup {awaited}]
              ELSE pw
 
-HCallbackDrain(i, w, env) ==
+HandleCallbackDrain(i, w, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
         ow  == Cur(env, w)
     IN  IF \/ i \notin DOMAIN env.objects
            \/ pr.promise.state = "pending"
            \/ w \notin pr.promise.callbacks
-        THEN NoOp
+        THEN [ effects |-> << >> ]
         ELSE IF w \notin DOMAIN env.objects \/ ~Driven(Project(ow, env.now))
              THEN Write(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
              ELSE [ effects |->
@@ -1137,19 +1132,19 @@ HCallbackDrain(i, w, env) ==
    A due entry whose object has moved on finds nothing to do. The entry is
    still on the wheel and will fire again -- that is the noise arming
    before writing admits, and it is why every internal handler re-checks.
-   The lease and retry kinds are not implemented yet and answer `NoOp`.
+   The lease and retry kinds are not implemented yet and answer `[ effects |-> << >> ]`.
    @type: ({ id: $id, kind: Str }, $env) => $outcome; *)
-HTimeout(e, env) ==
+HandleTimeout(e, env) ==
     LET i   == e.id
         old == Cur(env, i)
         pr  == Project(old, env.now)
     IN  IF e.kind /= "promise" \/ i \notin DOMAIN env.objects
-        THEN NoOp
-        ELSE IF pr /= old THEN Write(i, pr) ELSE NoOp
+        THEN [ effects |-> << >> ]
+        ELSE IF pr /= old THEN Write(i, pr) ELSE [ effects |-> << >> ]
 
 (* The dispatch table. Twenty constructors, twenty answers.
 
-   `promiseSearch` and `taskSearch` answer `NoOp` and always will: the
+   `promiseSearch` and `taskSearch` answer `[ effects |-> << >> ]` and always will: the
    Lean returns 501 for both, so there is nothing to model beyond
    writing nothing.
    @type: ($event, $env) => $outcome; *)
@@ -1157,51 +1152,51 @@ Handle(ev, env) ==
     LET p(tag) == VariantGetUnsafe(tag, ev)
     IN
     CASE VariantTag(ev) = "PromiseGet" ->
-             HPromiseGet(p("PromiseGet").id, env)
+             HandlePromiseGet(p("PromiseGet").id, env)
       [] VariantTag(ev) = "PromiseCreate" ->
-             HPromiseCreate(p("PromiseCreate").req, env)
+             HandlePromiseCreate(p("PromiseCreate").req, env)
       [] VariantTag(ev) = "PromiseSettle" ->
-             HPromiseSettle(p("PromiseSettle").req, env)
+             HandlePromiseSettle(p("PromiseSettle").req, env)
       [] VariantTag(ev) = "PromiseRegisterCallback" ->
-             HPromiseRegisterCallback(p("PromiseRegisterCallback").req, env)
+             HandlePromiseRegisterCallback(p("PromiseRegisterCallback").req, env)
       [] VariantTag(ev) = "PromiseRegisterListener" ->
-             HPromiseRegisterListener(p("PromiseRegisterListener").awaited,
+             HandlePromiseRegisterListener(p("PromiseRegisterListener").awaited,
                                       p("PromiseRegisterListener").address, env)
       [] VariantTag(ev) = "TaskGet" ->
-             HTaskGet(p("TaskGet").id, env)
+             HandleTaskGet(p("TaskGet").id, env)
       [] VariantTag(ev) = "TaskCreate" ->
-             HTaskCreate(p("TaskCreate").action, p("TaskCreate").pid,
+             HandleTaskCreate(p("TaskCreate").action, p("TaskCreate").pid,
                          p("TaskCreate").ttl, env)
       [] VariantTag(ev) = "TaskAcquire" ->
-             HTaskAcquire(p("TaskAcquire").id, p("TaskAcquire").version,
+             HandleTaskAcquire(p("TaskAcquire").id, p("TaskAcquire").version,
                           p("TaskAcquire").pid, p("TaskAcquire").ttl, env)
       [] VariantTag(ev) = "TaskFence" ->
-             HTaskFence(p("TaskFence").id, p("TaskFence").version,
+             HandleTaskFence(p("TaskFence").id, p("TaskFence").version,
                         p("TaskFence").action, env)
       [] VariantTag(ev) = "TaskHeartbeat" ->
-             HTaskHeartbeat(p("TaskHeartbeat").pid, p("TaskHeartbeat").tasks, env)
+             HandleTaskHeartbeat(p("TaskHeartbeat").pid, p("TaskHeartbeat").tasks, env)
       [] VariantTag(ev) = "TaskSuspend" ->
-             HTaskSuspend(p("TaskSuspend").id, p("TaskSuspend").version,
+             HandleTaskSuspend(p("TaskSuspend").id, p("TaskSuspend").version,
                           p("TaskSuspend").actions, env)
       [] VariantTag(ev) = "TaskFulfill" ->
-             HTaskFulfill(p("TaskFulfill").id, p("TaskFulfill").version,
+             HandleTaskFulfill(p("TaskFulfill").id, p("TaskFulfill").version,
                           p("TaskFulfill").action, env)
       [] VariantTag(ev) = "TaskRelease" ->
-             HTaskRelease(p("TaskRelease").id, p("TaskRelease").version, env)
+             HandleTaskRelease(p("TaskRelease").id, p("TaskRelease").version, env)
       [] VariantTag(ev) = "TaskHalt" ->
-             HTaskHalt(p("TaskHalt").id, env)
+             HandleTaskHalt(p("TaskHalt").id, env)
       [] VariantTag(ev) = "TaskContinue" ->
-             HTaskContinue(p("TaskContinue").id, env)
+             HandleTaskContinue(p("TaskContinue").id, env)
       [] VariantTag(ev) = "Timeout" ->
              LET d == p("Timeout")
-             IN  CASE d.kind = "promise" -> HTimeout(d, env)
-                   [] d.kind = "lease"   -> HLeaseTimeout(d.id, env)
-                   [] OTHER              -> HRetryTimeout(d.id, env)
+             IN  CASE d.kind = "promise" -> HandleTimeout(d, env)
+                   [] d.kind = "lease"   -> HandleLeaseTimeout(d.id, env)
+                   [] OTHER              -> HandleRetryTimeout(d.id, env)
       [] VariantTag(ev) = "ListenerDrain" ->
-             HListenerDrain(p("ListenerDrain").id, p("ListenerDrain").address, env)
+             HandleListenerDrain(p("ListenerDrain").id, p("ListenerDrain").address, env)
       [] VariantTag(ev) = "CallbackDrain" ->
-             HCallbackDrain(p("CallbackDrain").id, p("CallbackDrain").awaiter, env)
-      [] OTHER -> NoOp
+             HandleCallbackDrain(p("CallbackDrain").id, p("CallbackDrain").awaiter, env)
+      [] OTHER -> [ effects |-> << >> ]
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
