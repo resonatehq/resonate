@@ -34,7 +34,7 @@
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
-          NoValue, Silent, RetryTimeout, MaxTime, MaxVersion,
+          NoValue, RetryTimeout, MaxTime, MaxVersion,
           Fenced
 
 VARIABLES
@@ -143,7 +143,7 @@ OriginOf(ev) ==
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
 Fresh(ev) ==
-    [ ev |-> ev, phase |-> "process", pending |-> << >>, res |-> Silent,
+    [ ev |-> ev, phase |-> "process", pending |-> << >>, res |-> A!Silent,
       expect |-> 0, at |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
 
 Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -388,7 +388,7 @@ Perform(r) ==
                          /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>,
-                                                   ![r].res     = Silent,
+                                                   ![r].res     = A!Silent,
                                                    ![r].retries = @ + 1]
                          /\ UNCHANGED <<docs, etags, timeouts, outbox>>
                  [] VariantTag(e) = "ArmTimeout" ->

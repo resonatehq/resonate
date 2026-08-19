@@ -150,7 +150,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
       ev: $event,
       phase: Str,
       pending: Seq($effect),
-      res: RESPONSE
+      res: $response
   };
 
   @typeAlias: env = {
@@ -159,7 +159,12 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
       config: { retryTimeout: Int }
   };
 
-  @typeAlias: outcome = { effects: Seq($effect), res: RESPONSE };
+  @typeAlias: response =
+      Silent(UNIT)
+    | Missing(UNIT)
+    | Got({ obj: $object });
+
+  @typeAlias: outcome = { effects: Seq($effect), res: $response };
 *)
 ResonateAliases == TRUE
 
@@ -188,8 +193,6 @@ CONSTANTS
     NoPid,
     \* @type: ADDR;
     NoAddr,
-    \* @type: RESPONSE;
-    Silent,
     \* @type: Bool;
     \* @type: Int;
     RetryTimeout,
@@ -547,6 +550,18 @@ Env ==
    written answers this, which is honest -- an unimplemented handler does
    not act -- and keeps them out of the way of the ones that are.
    @type: $outcome; *)
+(* THE THREE ANSWERS. A handler returns what it WRITES and what it
+   SAYS, and until now the saying half was a single opaque constant, so
+   a door that should refuse with 404 and a step that answers nothing
+   were the same value. They are not the same thing, and a read is the
+   handler where the difference is the entire content.
+   @type: $response; *)
+Silent  == Variant("Silent",  UNIT)
+Missing == Variant("Missing", UNIT)
+
+(* @type: $object => $response; *)
+Got(o)  == Variant("Got", [ obj |-> o ])
+
 NoOp == [ effects |-> << >>, res |-> Silent ]
 
 (* The object at an identifier, or the one that stands for absence: a
@@ -764,7 +779,11 @@ HPromiseSettle(req, env) ==
    which is honest rather than free: the whole content of a get is the
    answer it gives, and answers are what `res` was for.
    @type: ($id, $env) => $outcome; *)
-HPromiseGet(i, env) == NoOp
+HPromiseGet(i, env) ==
+    IF i \notin DOMAIN env.objects THEN
+        [ effects |-> << >>, res |-> Missing ]
+    ELSE
+        [ effects |-> << >>, res |-> Got(Project(env.objects[i], env.now)) ]
 
 (* `external.lean` promiseRegisterCallback. The awaiter must be a task
    promise and the awaited must be EXTERNAL -- something outside can
