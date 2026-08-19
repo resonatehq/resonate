@@ -247,25 +247,23 @@ Requeued(obj, at) ==
 (* @type: $object => Bool; *)
 Driven(obj) == obj.task.state /= "none"
 
-(* @type: $task => $task; *)
-Fulfilled(t) ==
-    IF t.state = "none" THEN
-        t
-    ELSE
-        [t EXCEPT !.state = "fulfilled", !.pid = NoPid, !.ttl = NoTime,
-                  !.expiresAt = NoTime, !.retryAt = NoTime, !.resumes = {}]
-
-(* @type: ($object, Str, VALUE, Int) => $object; *)
-Settle(obj, st, v, at) ==
-    [ promise |-> [obj.promise EXCEPT !.state = st, !.value = v, !.settledAt = at],
-      task    |-> Fulfilled(obj.task) ]
-
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
-    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t
-    THEN Settle(obj, IF obj.promise.tags.timer THEN "resolved" ELSE "rejectedTimedout",
-                NoValue, obj.promise.timeoutAt)
-    ELSE obj
+    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
+        [ promise |-> [obj.promise EXCEPT
+                          !.state     = IF obj.promise.tags.timer THEN "resolved"
+                                        ELSE "rejectedTimedout",
+                          !.value     = NoValue,
+                          !.settledAt = obj.promise.timeoutAt],
+          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
+                                                     ELSE "fulfilled",
+                                       !.pid       = NoPid,
+                                       !.ttl       = NoTime,
+                                       !.expiresAt = NoTime,
+                                       !.retryAt   = NoTime,
+                                       !.resumes   = {}] ]
+    ELSE
+        obj
 
 (* @type: ($createReq, Int) => $object; *)
 New(req, t) ==
@@ -303,9 +301,19 @@ HandlePromiseSettle(req, env) ==
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
+            new == [ promise |-> [old.promise EXCEPT !.state     = req.state,
+                                                     !.value     = req.value,
+                                                     !.settledAt = env.now],
+                     task    |-> [old.task EXCEPT !.state     = IF @ = "none" THEN "none"
+                                                               ELSE "fulfilled",
+                                                  !.pid       = NoPid,
+                                                  !.ttl       = NoTime,
+                                                  !.expiresAt = NoTime,
+                                                  !.retryAt   = NoTime,
+                                                  !.resumes   = {}] ]
         IN
             IF old.promise.state = "pending" THEN
-                Write(req.id, Settle(old, req.state, req.value, env.now))
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
             ELSE
                 [ effects |-> << >> ]
 
@@ -388,7 +396,18 @@ HandleTaskFulfill(i, v, act, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN [ effects |-> << >> ]
-        ELSE Write(i, Settle(pr, act.state, act.value, env.now))
+        ELSE
+            LET new == [ promise |-> [pr.promise EXCEPT !.state     = act.state,
+                                                        !.value     = act.value,
+                                                        !.settledAt = env.now],
+                         task    |-> [pr.task EXCEPT !.state     = "fulfilled",
+                                                     !.pid       = NoPid,
+                                                     !.ttl       = NoTime,
+                                                     !.expiresAt = NoTime,
+                                                     !.retryAt   = NoTime,
+                                                     !.resumes   = {}] ]
+            IN
+                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
 
 (* @type: ($id, Int, $env) => $outcome; *)
 HandleTaskRelease(i, v, env) ==
