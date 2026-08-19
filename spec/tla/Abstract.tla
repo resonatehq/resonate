@@ -158,12 +158,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
       config: { retryTimeout: Int }
   };
 
-  @typeAlias: response =
-      Silent(UNIT)
-    | Missing(UNIT)
-    | Got({ obj: $object });
-
-  @typeAlias: outcome = { effects: Seq($effect), res: $response };
+  @typeAlias: outcome = { effects: Seq($effect) };
 *)
 ResonateAliases == TRUE
 
@@ -562,19 +557,7 @@ Env ==
    written answers this, which is honest -- an unimplemented handler does
    not act -- and keeps them out of the way of the ones that are.
    @type: $outcome; *)
-(* THE THREE ANSWERS. A handler returns what it WRITES and what it
-   SAYS, and until now the saying half was a single opaque constant, so
-   a door that should refuse with 404 and a step that answers nothing
-   were the same value. They are not the same thing, and a read is the
-   handler where the difference is the entire content.
-   @type: $response; *)
-Silent  == Variant("Silent",  UNIT)
-Missing == Variant("Missing", UNIT)
-
-(* @type: $object => $response; *)
-Got(o)  == Variant("Got", [ obj |-> o ])
-
-NoOp == [ effects |-> << >>, res |-> Silent ]
+NoOp == [ effects |-> << >> ]
 
 (* The object at an identifier, or the one that stands for absence: a
    thing carrying no live deadline, so that `Commit` against it arms
@@ -634,7 +617,7 @@ Cur(env, i) == IF i \in DOMAIN env.objects THEN env.objects[i] ELSE Absent
 Commit(i, new) == << Variant("PutObject", [id |-> i, obj |-> new]) >>
 
 (* @type: ($id, $object) => $outcome; *)
-Write(i, new) == [ effects |-> Commit(i, new), res |-> Silent ]
+Write(i, new) == [ effects |-> Commit(i, new) ]
 
 (* Many objects, for the handlers whose request names a SET of them.
    This one cannot be written out: `S` is computed from the request, so
@@ -746,10 +729,21 @@ Born(req, t) ==
 (* arm a deadline, settle an object and disarm one -- which is everything  *)
 (* the wheel invariants need in order to stop being vacuous.               *)
 (*                                                                         *)
-(* Responses are `Silent` throughout. Nothing in this machine reads a      *)
-(* response, so status codes would be write-only; the doors that would     *)
-(* return 400 or 404 return `NoOp` instead, which is the same thing for    *)
-(* every property here -- they write nothing.                              *)
+(* THERE ARE NO RESPONSES. A handler returns what it WRITES, and that is  *)
+(* the whole of `$outcome`. An answer would have to be observable to be    *)
+(* worth stating: `Apply` consumes `effects` and nothing else, `Abstract`  *)
+(* has no variable an answer lands in, and so no property -- none of the   *)
+(* 95 in the catalogue -- can read one. A response vocabulary lived here   *)
+(* briefly and was deleted; it was invented names for a field nothing      *)
+(* could see.                                                              *)
+(*                                                                         *)
+(* The cost is real and belongs on the record: a read is ALL answer, so    *)
+(* `promiseGet` has no content in this model and is a stutter. Doors that  *)
+(* return 400 or 404 in the Lean are `NoOp` here, which says only that     *)
+(* they write nothing -- that much IS checked, by the invariants and the   *)
+(* refinement, and it is what a missing door would break. Making answers   *)
+(* checkable needs a variable in `Abstract` for one to land in, and that   *)
+(* is a change to the specification, not a helper.                         *)
 (***************************************************************************)
 
 (* `external.lean` promiseCreate. Two answers and one write. An existing
@@ -766,11 +760,9 @@ Born(req, t) ==
    @type: ($createReq, $env) => $outcome; *)
 HPromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
-        LET old == Project(env.objects[req.id], env.now) IN
-        [ effects |-> << >>, res |-> Got(old) ]
+        NoOp
     ELSE
-        LET new == Born(req, env.now) IN
-        [ effects |-> Commit(req.id, new), res |-> Got(new) ]
+        Write(req.id, Born(req, env.now))
 
 (* `external.lean` promiseSettle. Settling a promise that is already
    settled answers what it settled to and writes nothing -- idempotent
@@ -783,14 +775,13 @@ HPromiseCreate(req, env) ==
    @type: ($settleReq, $env) => $outcome; *)
 HPromiseSettle(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >>, res |-> Missing ]
+        NoOp
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
-            new == Settle(old, req.state, req.value, env.now)
-        IN  IF old.promise.state = "pending" THEN
-                [ effects |-> Commit(req.id, new), res |-> Got(new) ]
-            ELSE
-                [ effects |-> << >>, res |-> Got(old) ]
+        LET old == Project(env.objects[req.id], env.now) IN
+        IF old.promise.state = "pending" THEN
+            Write(req.id, Settle(old, req.state, req.value, env.now))
+        ELSE
+            NoOp
 
 (* `external.lean` promiseGet. A PURE READ: it projects, and it writes
    nothing. The Lean persists the projection when `run true`; that
@@ -800,12 +791,7 @@ HPromiseSettle(req, env) ==
    which is honest rather than free: the whole content of a get is the
    answer it gives, and answers are what `res` was for.
    @type: ($id, $env) => $outcome; *)
-HPromiseGet(i, env) ==
-    IF i \notin DOMAIN env.objects THEN
-        [ effects |-> << >>, res |-> Missing ]
-    ELSE
-        LET old == Project(env.objects[i], env.now) IN
-        [ effects |-> << >>, res |-> Got(old) ]
+HPromiseGet(i, env) == NoOp
 
 (* `external.lean` promiseRegisterCallback. The awaiter must be a task
    promise and the awaited must be EXTERNAL -- something outside can
@@ -978,8 +964,7 @@ HTaskHeartbeat(pid, refs, env) ==
         CommitAll(Renewable(pid, refs, env),
                   LAMBDA i : LET pr == Project(Cur(env, i), env.now)
                              IN  [pr EXCEPT !.task.expiresAt = env.now + pr.task.ttl],
-                  env),
-      res |-> Silent ]
+                  env) ]
 
 (* `external.lean` taskSuspend. A worker parks a task until the promises
    it is waiting on settle. Writes the suspended task AND registers a
@@ -1018,8 +1003,7 @@ HTaskSuspend(i, v, acts, env) ==
                                                 !.task.expiresAt = NoTime,
                                                 !.task.retryAt   = NoTime,
                                                 !.task.resumes   = {}])
-                      \o CommitAll(aw, LAMBDA a : AddCallback(proj(a), i), env),
-                    res |-> Silent ]
+                      \o CommitAll(aw, LAMBDA a : AddCallback(proj(a), i), env) ]
 
 (* `external.lean` taskFence. A holder acts on ANOTHER object, and the
    task it holds is the licence to do so: check the fence, then run
@@ -1091,8 +1075,7 @@ HRetryTimeout(i, env) ==
                         [old EXCEPT !.task.retryAt = env.now + env.config.retryTimeout])
                  \o << Say(old.promise.tags.target,
                            Variant("Execute", [id      |-> i,
-                                               version |-> old.task.version])) >>,
-               res |-> Silent ]
+                                               version |-> old.task.version])) >> ]
 
 (* `internal.lean` processListener. A settled promise owes a message to
    everyone who registered for it. The name is struck from the ledger in
@@ -1109,8 +1092,7 @@ HListenerDrain(i, addr, env) ==
                  Commit(i,
                         [pr EXCEPT !.promise.listeners = @ \ {addr}])
                  \o << Say(addr, Variant("Unblock",
-                                         [id |-> i, state |-> pr.promise.state])) >>,
-               res |-> Silent ]
+                                         [id |-> i, state |-> pr.promise.state])) >> ]
 
 (* `internal.lean` processCallback, and `resumeOne` inside it. A settled
    promise wakes the task that was waiting on it: strike the callback
@@ -1146,8 +1128,7 @@ HCallbackDrain(i, w, env) ==
              THEN Write(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
              ELSE [ effects |->
                       Commit(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
-                      \o Commit(w, Resumed(w, i, env)),
-                    res |-> Silent ]
+                      \o Commit(w, Resumed(w, i, env)) ]
 
 (* `internal.lean` processPromiseTimeout, which is `touchPromise` and
    nothing else: read the promise with materialisation FORCED, so that a
