@@ -552,7 +552,7 @@ HandleTaskFence(req, env) ==
                 HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
 
 (* @type: ($id, $env) => $outcome; *)
-HandleLeaseTimeout(i, env) ==
+ProcessLeaseTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -572,7 +572,7 @@ HandleLeaseTimeout(i, env) ==
                 [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
 
 (* @type: ($id, $env) => $outcome; *)
-HandleRetryTimeout(i, env) ==
+ProcessRetryTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -594,7 +594,7 @@ HandleRetryTimeout(i, env) ==
                                                                   version |-> old.task.version])]]) >> ]
 
 (* @type: ($id, ADDR, $env) => $outcome; *)
-HandleListenerDrain(i, addr, env) ==
+ProcessListener(i, addr, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -649,7 +649,7 @@ ProcessCallback(req, env) ==
                                                  [id |-> req.awaiter, obj |-> newAwaiter]) >> ]
 
 (* @type: ({ id: $id, kind: Str }, $env) => $outcome; *)
-HandleTimeout(req, env) ==
+ProcessPromiseTimeout(req, env) ==
     IF req.kind /= "promise" \/ req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -697,11 +697,11 @@ Handle(ev, env) ==
              HandleTaskContinue(p("TaskContinue"), env)
       [] VariantTag(ev) = "Timeout" ->
              LET d == p("Timeout")
-             IN  CASE d.kind = "promise" -> HandleTimeout(d, env)
-                   [] d.kind = "lease"   -> HandleLeaseTimeout(d.id, env)
-                   [] OTHER              -> HandleRetryTimeout(d.id, env)
+             IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d, env)
+                   [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, env)
+                   [] OTHER              -> ProcessRetryTimeout(d.id, env)
       [] VariantTag(ev) = "ListenerDrain" ->
-             HandleListenerDrain(p("ListenerDrain").id, p("ListenerDrain").address, env)
+             ProcessListener(p("ListenerDrain").id, p("ListenerDrain").address, env)
       [] VariantTag(ev) = "CallbackDrain" ->
              ProcessCallback(p("CallbackDrain"), env)
       [] OTHER -> [ effects |-> << >> ]
