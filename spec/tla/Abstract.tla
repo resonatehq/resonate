@@ -222,16 +222,6 @@ CommitAll(S, Obj(_), env) ==
 (* @type: ($object, $id) => $object; *)
 AddCallback(obj, w) == [obj EXCEPT !.promise.callbacks = @ \cup {w}]
 
-(* @type: ($object, PID, Int, Int) => $object; *)
-Acquired(obj, pid, ttl, at) ==
-    [obj EXCEPT !.task.state     = "acquired",
-                !.task.version   = @ + 1,
-                !.task.ttl       = ttl,
-                !.task.pid       = pid,
-                !.task.expiresAt = at,
-                !.task.retryAt   = NoTime,
-                !.task.resumes   = {}]
-
 (* @type: ($object, Int) => $object; *)
 Requeued(obj, at) ==
     [obj EXCEPT !.task.state     = "pending",
@@ -361,8 +351,13 @@ HandleTaskCreate(req, env) ==
     ELSE IF req.action.id \notin DOMAIN env.objects THEN
         LET born == New(req.action, env.now)
             new  == IF born.promise.state = "pending" THEN
-                        Acquired([born EXCEPT !.task.state = "pending"],
-                                 req.pid, req.ttl, env.now + req.ttl)
+                        [born EXCEPT !.task.state     = "acquired",
+                                     !.task.version   = @ + 1,
+                                     !.task.ttl       = req.ttl,
+                                     !.task.pid       = req.pid,
+                                     !.task.expiresAt = env.now + req.ttl,
+                                     !.task.retryAt   = NoTime,
+                                     !.task.resumes   = {}]
                     ELSE
                         born
         IN
@@ -370,7 +365,13 @@ HandleTaskCreate(req, env) ==
                                      [id |-> req.action.id, obj |-> new]) >> ]
     ELSE
         LET old == Project(env.objects[req.action.id], env.now)
-            new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
+            new == [old EXCEPT !.task.state     = "acquired",
+                               !.task.version   = @ + 1,
+                               !.task.ttl       = req.ttl,
+                               !.task.pid       = req.pid,
+                               !.task.expiresAt = env.now + req.ttl,
+                               !.task.retryAt   = NoTime,
+                               !.task.resumes   = {}]
         IN
             IF \/ ~old.promise.tags.targeted
                \/ old.task.state /= "pending" THEN
@@ -385,7 +386,13 @@ HandleTaskAcquire(req, env) ==
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
-            new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
+            new == [old EXCEPT !.task.state     = "acquired",
+                               !.task.version   = @ + 1,
+                               !.task.ttl       = req.ttl,
+                               !.task.pid       = req.pid,
+                               !.task.expiresAt = env.now + req.ttl,
+                               !.task.retryAt   = NoTime,
+                               !.task.resumes   = {}]
         IN
             IF \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
