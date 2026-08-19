@@ -804,7 +804,8 @@ HPromiseGet(i, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >>, res |-> Missing ]
     ELSE
-        [ effects |-> << >>, res |-> Got(Project(env.objects[i], env.now)) ]
+        LET old == Project(env.objects[i], env.now) IN
+        [ effects |-> << >>, res |-> Got(old) ]
 
 (* `external.lean` promiseRegisterCallback. The awaiter must be a task
    promise and the awaited must be EXTERNAL -- something outside can
