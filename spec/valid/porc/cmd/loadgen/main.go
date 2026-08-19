@@ -110,14 +110,32 @@ func main() {
 	flag.Parse()
 	rand.Seed(*seed)
 
-	if err := post(*url, "debug.start", map[string]any{}, nil); err != nil {
+	var hello json.RawMessage
+	if err := post(*url, "debug.start", map[string]any{}, &hello); err != nil {
 		fmt.Fprintln(os.Stderr, "loadgen: debug.start failed:", err)
 		fmt.Fprintln(os.Stderr, "         start the server with RESONATE_DEBUG=true")
 		os.Exit(2)
 	}
 	_ = post(*url, "debug.reset", map[string]any{}, nil)
 
-	clk := &clock{now: 1000}
+	// **The handshake is where you learn the clock.** A server that keeps its
+	// own time answers `debug.start` with the instant it is at, and the
+	// generator starts its counter there.
+	//
+	// Without this the counter starts at 1000 and every deadline is computed
+	// as `1000 + horizon` — a moment in 1970. Against a server with a real
+	// clock (epoch milliseconds, or a VM's RTC) every promise is already past
+	// its `timeoutAt` when it arrives, so the whole run collapses into R1 and
+	// no other rule is ever reached. The failure is silent: the trace is a
+	// perfectly linearizable wall of timeouts.
+	//
+	// Zero, or an absent field, means the server takes our instants instead —
+	// then 1000 is right and nothing changes.
+	base := serverNow(hello, 0)
+	if base == 0 {
+		base = 1000
+	}
+	clk := &clock{now: base}
 	var (
 		mu     sync.Mutex
 		events []event
