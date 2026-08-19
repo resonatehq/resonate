@@ -16,6 +16,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: createReq = { id: $id, timeoutAt: Int, param: VALUE, tags: $tags };
   @typeAlias: getReq = { id: $id };
   @typeAlias: drainReq = { id: $id, awaiter: $id };
+  @typeAlias: listenerDrainReq = { id: $id, address: ADDR };
   @typeAlias: listenerReq = { awaited: $id, address: ADDR };
 
   @typeAlias: settleReq = { id: $id, state: Str, value: VALUE };
@@ -593,25 +594,26 @@ ProcessRetryTimeout(i, env) ==
                                                                  [id      |-> i,
                                                                   version |-> old.task.version])]]) >> ]
 
-(* @type: ($id, ADDR, $env) => $outcome; *)
-ProcessListener(i, addr, env) ==
-    IF i \notin DOMAIN env.objects THEN
+(* @type: ($listenerDrainReq, $env) => $outcome; *)
+ProcessListener(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
-        LET old == Project(env.objects[i], env.now)
-            new == [old EXCEPT !.promise.listeners = @ \ {addr}]
+        LET awaited    == Project(env.objects[req.id], env.now)
+            newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
         IN
-            IF \/ old.promise.state = "pending"
-               \/ addr \notin old.promise.listeners THEN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.address \notin awaited.promise.listeners THEN
                 [ effects |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]),
+                [ effects |-> << Variant("PutObject",
+                                         [id |-> req.id, obj |-> newAwaited]),
                                  Variant("Send",
                                          [entry |->
-                                            [address |-> addr,
+                                            [address |-> req.address,
                                              message |-> Variant("Unblock",
-                                                                 [id    |-> i,
-                                                                  state |-> old.promise.state])]]) >> ]
+                                                                 [id    |-> req.id,
+                                                                  state |-> awaited.promise.state])]]) >> ]
 
 (* @type: ($drainReq, $env) => $outcome; *)
 ProcessCallback(req, env) ==
@@ -701,7 +703,7 @@ Handle(ev, env) ==
                    [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, env)
                    [] OTHER              -> ProcessRetryTimeout(d.id, env)
       [] VariantTag(ev) = "ListenerDrain" ->
-             ProcessListener(p("ListenerDrain").id, p("ListenerDrain").address, env)
+             ProcessListener(p("ListenerDrain"), env)
       [] VariantTag(ev) = "CallbackDrain" ->
              ProcessCallback(p("CallbackDrain"), env)
       [] OTHER -> [ effects |-> << >> ]
