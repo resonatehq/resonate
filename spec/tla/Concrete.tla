@@ -34,7 +34,7 @@
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
-          NoValue, Silent, Materialise, RetryTimeout, MaxTime, MaxVersion,
+          NoValue, Silent, RetryTimeout, MaxTime, MaxVersion,
           Fenced
 
 VARIABLES
@@ -266,7 +266,6 @@ Process(r) ==
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
                     now      |-> now,
-                    mat      |-> Materialise,
                     config   |-> [retryTimeout |-> RetryTimeout] ]
            out == A!Handle(steps[r].ev, env)
            W   == A!Puts(out.effects)

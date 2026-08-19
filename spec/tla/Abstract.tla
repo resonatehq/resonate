@@ -156,7 +156,6 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: env = {
       objects: $id -> $object,
       now: Int,
-      mat: Bool,
       config: { retryTimeout: Int }
   };
 
@@ -192,7 +191,6 @@ CONSTANTS
     \* @type: RESPONSE;
     Silent,
     \* @type: Bool;
-    Materialise,
     \* @type: Int;
     RetryTimeout,
     \* @type: Int;
@@ -517,9 +515,13 @@ vars == <<objects, outbox, now>>
 (* buried the very thing this module is about: the ORDER is the protocol,  *)
 (* and a bag of writes has no order to get right.                          *)
 (*                                                                         *)
-(* `env.mat` is the read discipline -- whether a read that projects a      *)
-(* settled promise also PERSISTS that settlement. It is a parameter, not a *)
-(* second machine.                                                         *)
+(* READS ARE PURE. `Project` says what a promise MEANS at an instant -- a  *)
+(* pending promise past its deadline is settled whether or not anyone has  *)
+(* written that down -- and no read persists what it projected. The Lean   *)
+(* carries `Env.mat` to make that persistence a parameter over external    *)
+(* steps; here there is one reading, and the only thing that writes a      *)
+(* settlement down is the `Timeout` event, which is the wheel's job and    *)
+(* not a side effect of somebody looking.                                  *)
 (*                                                                         *)
 (* IT IS A STUB. The body below is the handler that does nothing, so the   *)
 (* module type-checks and runs today and the machinery around it can be    *)
@@ -539,7 +541,6 @@ vars == <<objects, outbox, now>>
 Env ==
     [ objects |-> objects,
       now     |-> now,
-      mat     |-> Materialise,
       config  |-> [retryTimeout |-> RetryTimeout] ]
 
 (* Nothing to do, nothing to say. Every event whose handler is not yet
@@ -627,14 +628,6 @@ CommitAll(S, New(_), env) ==
 
 (* @type: (ADDR, $message) => $effect; *)
 Say(addr, msg) == Variant("Send", [entry |-> [address |-> addr, message |-> msg]])
-
-(* What a step writes when the handler itself changes nothing: the
-   projection, but only if this reading materialises it. `Env.mat` is
-   the whole of the difference between the two readings of the machine,
-   and this is the one place it acts.
-   @type: ($id, $object, $object, $env) => $outcome; *)
-Touch(i, old, pr, env) ==
-    IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
 
 (* @type: ($object, $id) => $object; *)
 AddCallback(obj, w) == [obj EXCEPT !.promise.callbacks = @ \cup {w}]
@@ -744,7 +737,7 @@ HPromiseCreate(req, env) ==
     IN  IF req.tags.timer /\ req.tags.targeted
         THEN NoOp
         ELSE IF i \in DOMAIN env.objects
-             THEN IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
+             THEN NoOp
              ELSE Write(i, Born(req, env.now))
 
 (* `external.lean` promiseSettle. `rejectedTimedout` is not settable by a
@@ -761,16 +754,17 @@ HPromiseSettle(req, env) ==
              THEN NoOp
              ELSE IF pr.promise.state = "pending"
                   THEN Write(i, Settle(pr, req.state, req.value, env.now))
-                  ELSE IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
+                  ELSE NoOp
 
-(* `external.lean` promiseGet. A read that can WRITE: projecting a
-   settlement the deadline already decided is a change, and `mat` says
-   whether it is persisted. Nothing else here writes.
+(* `external.lean` promiseGet. A PURE READ: it projects, and it writes
+   nothing. The Lean persists the projection when `run true`; that
+   parameter is gone and reads no longer have side effects, so what is
+   left of this handler in a model with no responses is NOTHING. It is
+   a stutter, and `PromiseGet` in the alphabet buys no coverage --
+   which is honest rather than free: the whole content of a get is the
+   answer it gives, and answers are what `res` was for.
    @type: ($id, $env) => $outcome; *)
-HPromiseGet(i, env) ==
-    IF i \notin DOMAIN env.objects
-    THEN NoOp
-    ELSE Touch(i, Cur(env, i), Project(Cur(env, i), env.now), env)
+HPromiseGet(i, env) == NoOp
 
 (* `external.lean` promiseRegisterCallback. The awaiter must be a task
    promise and the awaited must be EXTERNAL -- something outside can
@@ -804,10 +798,10 @@ HPromiseRegisterCallback(req, env) ==
            \/ w \notin DOMAIN env.objects
            \/ ~pw.promise.tags.targeted
            \/ ~IsExternal(pa.promise)
-        THEN Touch(a, oa, pa, env)
+        THEN NoOp
         ELSE IF pa.promise.state = "pending" /\ pw.promise.state = "pending"
              THEN Write(a, AddCallback(pa, w))
-             ELSE Touch(a, oa, pa, env)
+             ELSE NoOp
 
 (* `external.lean` promiseRegisterListener. Same door, one object.
    @type: ($id, ADDR, $env) => $outcome; *)
@@ -815,10 +809,10 @@ HPromiseRegisterListener(a, addr, env) ==
     LET oa == Cur(env, a)
         pa == Project(oa, env.now)
     IN  IF a \notin DOMAIN env.objects \/ ~IsExternal(pa.promise)
-        THEN Touch(a, oa, pa, env)
+        THEN NoOp
         ELSE IF pa.promise.state = "pending"
              THEN Write(a, AddListener(pa, addr))
-             ELSE Touch(a, oa, pa, env)
+             ELSE NoOp
 
 (* `external.lean` taskGet. Reads the unit; the task view fulfils itself
    when the promise has settled, which `Project` already does.
@@ -826,7 +820,7 @@ HPromiseRegisterListener(a, addr, env) ==
 HTaskGet(i, env) ==
     IF i \notin DOMAIN env.objects \/ ~Driven(Cur(env, i))
     THEN NoOp
-    ELSE Touch(i, Cur(env, i), Project(Cur(env, i), env.now), env)
+    ELSE NoOp
 
 (* `external.lean` taskCreate. A worker claiming work that may not exist
    yet: if the promise is absent it is born ALREADY ACQUIRED at version
@@ -849,10 +843,10 @@ HTaskCreate(req, pid, ttl, env) ==
                                           pid, ttl, t + ttl)
                             ELSE born)
              ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
-                  THEN Touch(i, old, pr, env)
+                  THEN NoOp
                   ELSE IF pr.task.state = "pending"
                        THEN Write(i, Acquired(pr, pid, ttl, t + ttl))
-                       ELSE Touch(i, old, pr, env)
+                       ELSE NoOp
 
 (* `external.lean` taskAcquire. Three guards and they are all fences:
    the task must be on offer, the promise must still be pending, and the
@@ -865,7 +859,7 @@ HTaskAcquire(i, v, pid, ttl, env) ==
            \/ pr.task.state /= "pending"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE Write(i, Acquired(pr, pid, ttl, env.now + ttl))
 
 (* `external.lean` taskFulfill. The holder settles the promise it was
@@ -880,7 +874,7 @@ HTaskFulfill(i, v, act, env) ==
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE Write(i, Settle(pr, act.state, act.value, env.now))
 
 (* `external.lean` taskRelease. The holder gives it back, and the
@@ -893,7 +887,7 @@ HTaskRelease(i, v, env) ==
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHalt. Stop offering this task, without settling
@@ -905,7 +899,7 @@ HTaskHalt(i, env) ==
         pr  == Project(old, env.now)
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state \in {"fulfilled", "halted"}
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE Write(i, [pr EXCEPT !.task.state     = "halted",
                                       !.task.pid       = NoPid,
                                       !.task.ttl       = NoTime,
@@ -920,7 +914,7 @@ HTaskContinue(i, env) ==
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state /= "halted"
            \/ pr.promise.state /= "pending"
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHeartbeat. One request, MANY objects: a worker
@@ -973,7 +967,7 @@ HTaskSuspend(i, v, acts, env) ==
            \/ pr.task.version /= v
            \/ seen /= aw
            \/ \E a \in aw : ~IsExternal(proj(a).promise)
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE IF \E a \in aw : proj(a).promise.state /= "pending"
              THEN Write(i, [pr EXCEPT !.task.resumes = {}])
              ELSE [ effects |->
@@ -1008,7 +1002,7 @@ HTaskFence(i, v, act, env) ==
            \/ pr.task.state /= "acquired"
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
-        THEN Touch(i, old, pr, env)
+        THEN NoOp
         ELSE IF VariantTag(act) = "Create"
              THEN HPromiseCreate(VariantGetUnsafe("Create", act).req, env)
              ELSE HPromiseSettle(VariantGetUnsafe("Settle", act).req, env)
