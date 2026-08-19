@@ -15,6 +15,8 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: msgKey = { kind: Str, id: $id, address: ADDR };
   @typeAlias: createReq = { id: $id, timeoutAt: Int, param: VALUE, tags: $tags };
   @typeAlias: getReq = { id: $id };
+  @typeAlias: drainReq = { id: $id, awaiter: $id };
+  @typeAlias: listenerReq = { awaited: $id, address: ADDR };
 
   @typeAlias: settleReq = { id: $id, state: Str, value: VALUE };
   @typeAlias: callbackReq = { awaited: $id, awaiter: $id };
@@ -305,20 +307,20 @@ HandlePromiseRegisterCallback(req, env) ==
        \/ req.awaiter \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.awaited], env.now)
-            oldW == Project(env.objects[req.awaiter], env.now)
-            new == [old EXCEPT !.promise.callbacks = @ \cup {req.awaiter}]
+        LET awaited    == Project(env.objects[req.awaited], env.now)
+            awaiter    == Project(env.objects[req.awaiter], env.now)
+            newAwaited == [awaited EXCEPT !.promise.callbacks = @ \cup {req.awaiter}]
         IN
-            IF \/ ~oldW.promise.tags.targeted
-               \/ ~IsExternal(old.promise)
-               \/ old.promise.state /= "pending"
-               \/ oldW.promise.state /= "pending" THEN
+            IF \/ ~awaiter.promise.tags.targeted
+               \/ ~IsExternal(awaited.promise)
+               \/ awaited.promise.state /= "pending"
+               \/ awaiter.promise.state /= "pending" THEN
                 [ effects |-> << >> ]
             ELSE
                 [ effects |-> << Variant("PutObject",
-                                         [id |-> req.awaited, obj |-> new]) >> ]
+                                         [id |-> req.awaited, obj |-> newAwaited]) >> ]
 
-(* @type: ($id, ADDR, $env) => $outcome; *)
+(* @type: ($listenerReq, $env) => $outcome; *)
 HandlePromiseRegisterListener(req, env) ==
     IF req.awaited \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -611,36 +613,40 @@ HandleListenerDrain(i, addr, env) ==
                                                                  [id    |-> i,
                                                                   state |-> old.promise.state])]]) >> ]
 
-ProcessCallback(i, w, env) ==
-    IF i \notin DOMAIN env.objects THEN
+(* @type: ($drainReq, $env) => $outcome; *)
+ProcessCallback(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
-        LET old == Project(env.objects[i], env.now)
-            new == [old EXCEPT !.promise.callbacks = @ \ {w}]
+        LET awaited    == Project(env.objects[req.id], env.now)
+            newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
         IN
-            IF \/ old.promise.state = "pending"
-               \/ w \notin old.promise.callbacks THEN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.awaiter \notin awaited.promise.callbacks THEN
                 [ effects |-> << >> ]
-            ELSE IF w \notin DOMAIN env.objects THEN
-                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
+            ELSE IF req.awaiter \notin DOMAIN env.objects THEN
+                [ effects |-> << Variant("PutObject",
+                                         [id |-> req.id, obj |-> newAwaited]) >> ]
             ELSE
-                LET oldW == Project(env.objects[w], env.now)
-                    newW == IF oldW.task.state = "suspended" THEN
-                                [oldW EXCEPT !.task.state     = "pending",
-                                             !.task.pid       = NoPid,
-                                             !.task.ttl       = NoTime,
-                                             !.task.expiresAt = NoTime,
-                                             !.task.retryAt   = env.now,
-                                             !.task.resumes   = {i}]
-                            ELSE
-                                [oldW EXCEPT !.task.resumes = @ \cup {i}]
+                LET awaiter    == Project(env.objects[req.awaiter], env.now)
+                    newAwaiter == IF awaiter.task.state = "suspended" THEN
+                                      [awaiter EXCEPT !.task.state     = "pending",
+                                                      !.task.pid       = NoPid,
+                                                      !.task.ttl       = NoTime,
+                                                      !.task.expiresAt = NoTime,
+                                                      !.task.retryAt   = env.now,
+                                                      !.task.resumes   = {req.id}]
+                                  ELSE
+                                      [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
                 IN
-                    IF oldW.task.state \in {"none", "fulfilled"} THEN
+                    IF awaiter.task.state \in {"none", "fulfilled"} THEN
                         [ effects |-> << Variant("PutObject",
-                                                 [id |-> i, obj |-> new]) >> ]
+                                                 [id |-> req.id, obj |-> newAwaited]) >> ]
                     ELSE
-                        [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]),
-                                         Variant("PutObject", [id |-> w, obj |-> newW]) >> ]
+                        [ effects |-> << Variant("PutObject",
+                                                 [id |-> req.id, obj |-> newAwaited]),
+                                         Variant("PutObject",
+                                                 [id |-> req.awaiter, obj |-> newAwaiter]) >> ]
 
 (* @type: ({ id: $id, kind: Str }, $env) => $outcome; *)
 HandleTimeout(req, env) ==
@@ -697,7 +703,7 @@ Handle(ev, env) ==
       [] VariantTag(ev) = "ListenerDrain" ->
              HandleListenerDrain(p("ListenerDrain").id, p("ListenerDrain").address, env)
       [] VariantTag(ev) = "CallbackDrain" ->
-             ProcessCallback(p("CallbackDrain").id, p("CallbackDrain").awaiter, env)
+             ProcessCallback(p("CallbackDrain"), env)
       [] OTHER -> [ effects |-> << >> ]
 
 -----------------------------------------------------------------------------
