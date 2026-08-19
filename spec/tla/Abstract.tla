@@ -373,7 +373,6 @@ HandleTaskCreate(req, env) ==
             new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
         IN
             IF \/ ~old.promise.tags.targeted
-               \/ old.task.state = "none"
                \/ old.task.state /= "pending" THEN
                 [ effects |-> << >> ]
             ELSE
@@ -388,8 +387,7 @@ HandleTaskAcquire(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
         IN
-            IF \/ old.task.state = "none"
-               \/ old.task.state /= "pending"
+            IF \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
                 [ effects |-> << >> ]
@@ -412,8 +410,7 @@ HandleTaskFulfill(req, env) ==
                                                   !.retryAt   = NoTime,
                                                   !.resumes   = {}] ]
         IN
-            IF \/ old.task.state = "none"
-               \/ old.task.state /= "acquired"
+            IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
                 [ effects |-> << >> ]
@@ -428,8 +425,7 @@ HandleTaskRelease(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Requeued(old, env.now)
         IN
-            IF \/ old.task.state = "none"
-               \/ old.task.state /= "acquired"
+            IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
                 [ effects |-> << >> ]
@@ -462,8 +458,7 @@ HandleTaskContinue(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Requeued(old, env.now)
         IN
-            IF \/ old.task.state = "none"
-               \/ old.task.state /= "halted"
+            IF \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
                 [ effects |-> << >> ]
             ELSE
@@ -511,8 +506,7 @@ HandleTaskSuspend(req, env) ==
                                    !.task.retryAt   = NoTime,
                                    !.task.resumes   = {}]
             IN
-                IF \/ old.task.state = "none"
-                   \/ old.task.state /= "acquired"
+                IF \/ old.task.state /= "acquired"
                    \/ old.promise.state /= "pending"
                    \/ old.task.version /= req.version
                    \/ \E a \in aw : ~IsExternal(proj(a).promise) THEN
@@ -539,7 +533,6 @@ HandleTaskFence(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
         IN
             IF \/ FenceTarget(req.action) = req.id
-               \/ old.task.state = "none"
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
