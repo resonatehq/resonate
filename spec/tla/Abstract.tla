@@ -249,9 +249,6 @@ Requeued(obj, at) ==
                 !.task.expiresAt = NoTime,
                 !.task.retryAt   = at]
 
-(* @type: $object => Bool; *)
-Driven(obj) == obj.task.state /= "none"
-
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
@@ -379,7 +376,7 @@ HandleTaskCreate(req, env) ==
             new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
         IN
             IF \/ ~old.promise.tags.targeted
-               \/ ~Driven(old)
+               \/ old.task.state = "none"
                \/ old.task.state /= "pending" THEN
                 [ effects |-> << >> ]
             ELSE
@@ -394,7 +391,7 @@ HandleTaskAcquire(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
         IN
-            IF \/ ~Driven(old)
+            IF \/ old.task.state = "none"
                \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -418,7 +415,7 @@ HandleTaskFulfill(req, env) ==
                                                   !.retryAt   = NoTime,
                                                   !.resumes   = {}] ]
         IN
-            IF \/ ~Driven(old)
+            IF \/ old.task.state = "none"
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -434,7 +431,7 @@ HandleTaskRelease(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Requeued(old, env.now)
         IN
-            IF \/ ~Driven(old)
+            IF \/ old.task.state = "none"
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -454,7 +451,7 @@ HandleTaskHalt(req, env) ==
                                !.task.expiresAt = NoTime,
                                !.task.retryAt   = NoTime]
         IN
-            IF \/ ~Driven(old)
+            IF \/ old.task.state = "none"
                \/ old.task.state \in {"fulfilled", "halted"} THEN
                 [ effects |-> << >> ]
             ELSE
@@ -468,7 +465,7 @@ HandleTaskContinue(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
             new == Requeued(old, env.now)
         IN
-            IF \/ ~Driven(old)
+            IF \/ old.task.state = "none"
                \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
                 [ effects |-> << >> ]
@@ -480,7 +477,7 @@ Renewable(pid, refs, env) ==
     { i \in DOMAIN env.objects :
         LET pr == Project(env.objects[i], env.now)
         IN  /\ \E rf \in refs : rf.id = i /\ rf.version = pr.task.version
-            /\ Driven(pr)
+            /\ pr.task.state /= "none"
             /\ pr.task.state = "acquired"
             /\ pr.task.pid = pid
             /\ pr.promise.state = "pending" }
@@ -517,7 +514,7 @@ HandleTaskSuspend(req, env) ==
                                    !.task.retryAt   = NoTime,
                                    !.task.resumes   = {}]
             IN
-                IF \/ ~Driven(old)
+                IF \/ old.task.state = "none"
                    \/ old.task.state /= "acquired"
                    \/ old.promise.state /= "pending"
                    \/ old.task.version /= req.version
@@ -545,7 +542,7 @@ HandleTaskFence(req, env) ==
         LET old == Project(env.objects[req.id], env.now)
         IN
             IF \/ FenceTarget(req.action) = req.id
-               \/ ~Driven(old)
+               \/ old.task.state = "none"
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -559,7 +556,7 @@ HandleTaskFence(req, env) ==
 HandleLeaseTimeout(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(old)
+    IN  IF \/ i \notin DOMAIN env.objects \/ old.task.state = "none"
            \/ old.task.state /= "acquired"
            \/ old.task.expiresAt = NoTime
            \/ old.task.expiresAt > env.now
@@ -572,7 +569,7 @@ HandleLeaseTimeout(i, env) ==
 HandleRetryTimeout(i, env) ==
     LET old == Cur(env, i)
         pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(old)
+    IN  IF \/ i \notin DOMAIN env.objects \/ old.task.state = "none"
            \/ old.task.state /= "pending"
            \/ old.task.retryAt = NoTime
            \/ old.task.retryAt > env.now
@@ -616,7 +613,7 @@ HandleCallbackDrain(i, w, env) ==
            \/ pr.promise.state = "pending"
            \/ w \notin pr.promise.callbacks
         THEN [ effects |-> << >> ]
-        ELSE IF w \notin DOMAIN env.objects \/ ~Driven(Project(ow, env.now))
+        ELSE IF w \notin DOMAIN env.objects \/ Project(ow, env.now).task.state = "none"
              THEN [ effects |-> << Variant("PutObject",
                                  [id |-> i, obj |-> [pr EXCEPT !.promise.callbacks = @ \ {w}]]) >> ]
              ELSE [ effects |->
