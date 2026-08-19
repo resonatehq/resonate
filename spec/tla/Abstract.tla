@@ -14,6 +14,8 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: outEntry = { address: ADDR, message: $message };
   @typeAlias: msgKey = { kind: Str, id: $id, address: ADDR };
   @typeAlias: createReq = { id: $id, timeoutAt: Int, param: VALUE, tags: $tags };
+  @typeAlias: getReq = { id: $id };
+
   @typeAlias: settleReq = { id: $id, state: Str, value: VALUE };
   @typeAlias: callbackReq = { awaited: $id, awaiter: $id };
   @typeAlias: taskRef = { id: $id, version: Int };
@@ -209,9 +211,6 @@ Cur(env, i) == IF i \in DOMAIN env.objects THEN env.objects[i] ELSE Absent
 (* @type: ($id, $object) => Seq($effect); *)
 Commit(i, new) == << Variant("PutObject", [id |-> i, obj |-> new]) >>
 
-(* @type: ($id, $object) => $outcome; *)
-Write(i, new) == [ effects |-> Commit(i, new) ]
-
 (* @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
 CommitAll(S, Obj(_), env) ==
     ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, Obj(i)),
@@ -293,7 +292,9 @@ HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
-        Write(req.id, New(req, env.now))
+        LET new == New(req, env.now)
+        IN
+            [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
 (* @type: ($settleReq, $env) => $outcome; *)
 HandlePromiseSettle(req, env) ==
@@ -317,8 +318,8 @@ HandlePromiseSettle(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* @type: ($id, $env) => $outcome; *)
-HandlePromiseGet(i, env) == [ effects |-> << >> ]
+(* @type: ($getReq, $env) => $outcome; *)
+HandlePromiseGet(req, env) == [ effects |-> << >> ]
 
 (* @type: ($callbackReq, $env) => $outcome; *)
 HandlePromiseRegisterCallback(req, env) ==
@@ -335,7 +336,8 @@ HandlePromiseRegisterCallback(req, env) ==
            \/ ~IsExternal(pa.promise)
         THEN [ effects |-> << >> ]
         ELSE IF pa.promise.state = "pending" /\ pw.promise.state = "pending"
-             THEN Write(a, AddCallback(pa, w))
+             THEN [ effects |-> << Variant("PutObject",
+                                           [id |-> a, obj |-> AddCallback(pa, w)]) >> ]
              ELSE [ effects |-> << >> ]
 
 (* @type: ($id, ADDR, $env) => $outcome; *)
@@ -345,7 +347,8 @@ HandlePromiseRegisterListener(a, addr, env) ==
     IN  IF a \notin DOMAIN env.objects \/ ~IsExternal(pa.promise)
         THEN [ effects |-> << >> ]
         ELSE IF pa.promise.state = "pending"
-             THEN Write(a, AddListener(pa, addr))
+             THEN [ effects |-> << Variant("PutObject",
+                                           [id |-> a, obj |-> AddListener(pa, addr)]) >> ]
              ELSE [ effects |-> << >> ]
 
 (* @type: ($id, $env) => $outcome; *)
@@ -363,16 +366,20 @@ HandleTaskCreate(req, pid, ttl, env) ==
     IN  IF ~req.tags.targeted \/ (req.tags.timer /\ req.tags.targeted)
         THEN [ effects |-> << >> ]
         ELSE IF i \notin DOMAIN env.objects
-             THEN LET new == New(req, t)
-                  IN  Write(i,
-                            IF new.promise.state = "pending"
-                            THEN Acquired([new EXCEPT !.task.state = "pending"],
-                                          pid, ttl, t + ttl)
-                            ELSE new)
+             THEN LET born == New(req, t)
+                      new  == IF born.promise.state = "pending" THEN
+                                  Acquired([born EXCEPT !.task.state = "pending"],
+                                           pid, ttl, t + ttl)
+                              ELSE
+                                  born
+                  IN
+                      [ effects |-> << Variant("PutObject",
+                                               [id |-> i, obj |-> new]) >> ]
              ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
                   THEN [ effects |-> << >> ]
                   ELSE IF pr.task.state = "pending"
-                       THEN Write(i, Acquired(pr, pid, ttl, t + ttl))
+                       THEN [ effects |-> << Variant("PutObject",
+                                                     [id |-> i, obj |-> Acquired(pr, pid, ttl, t + ttl)]) >> ]
                        ELSE [ effects |-> << >> ]
 
 (* @type: ($id, Int, PID, Int, $env) => $outcome; *)
@@ -384,7 +391,8 @@ HandleTaskAcquire(i, v, pid, ttl, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN [ effects |-> << >> ]
-        ELSE Write(i, Acquired(pr, pid, ttl, env.now + ttl))
+        ELSE [ effects |-> << Variant("PutObject",
+                                 [id |-> i, obj |-> Acquired(pr, pid, ttl, env.now + ttl)]) >> ]
 
 (* @type: ($id, Int, $settleReq, $env) => $outcome; *)
 HandleTaskFulfill(i, v, act, env) ==
@@ -418,7 +426,8 @@ HandleTaskRelease(i, v, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN [ effects |-> << >> ]
-        ELSE Write(i, Requeued(pr, env.now))
+        ELSE [ effects |-> << Variant("PutObject",
+                                      [id |-> i, obj |-> Requeued(pr, env.now)]) >> ]
 
 (* @type: ($id, $env) => $outcome; *)
 HandleTaskHalt(i, env) ==
@@ -427,11 +436,13 @@ HandleTaskHalt(i, env) ==
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state \in {"fulfilled", "halted"}
         THEN [ effects |-> << >> ]
-        ELSE Write(i, [pr EXCEPT !.task.state     = "halted",
-                                      !.task.pid       = NoPid,
-                                      !.task.ttl       = NoTime,
-                                      !.task.expiresAt = NoTime,
-                                      !.task.retryAt   = NoTime])
+        ELSE LET new == [pr EXCEPT !.task.state     = "halted",
+                                   !.task.pid       = NoPid,
+                                   !.task.ttl       = NoTime,
+                                   !.task.expiresAt = NoTime,
+                                   !.task.retryAt   = NoTime]
+             IN
+                 [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
 
 (* @type: ($id, $env) => $outcome; *)
 HandleTaskContinue(i, env) ==
@@ -441,7 +452,8 @@ HandleTaskContinue(i, env) ==
            \/ pr.task.state /= "halted"
            \/ pr.promise.state /= "pending"
         THEN [ effects |-> << >> ]
-        ELSE Write(i, Requeued(pr, env.now))
+        ELSE [ effects |-> << Variant("PutObject",
+                                      [id |-> i, obj |-> Requeued(pr, env.now)]) >> ]
 
 (* @type: (PID, Set($taskRef), $env) => $outcome; *)
 Renewable(pid, refs, env) ==
@@ -479,7 +491,8 @@ HandleTaskSuspend(i, v, acts, env) ==
            \/ \E a \in aw : ~IsExternal(proj(a).promise)
         THEN [ effects |-> << >> ]
         ELSE IF \E a \in aw : proj(a).promise.state /= "pending"
-             THEN Write(i, [pr EXCEPT !.task.resumes = {}])
+             THEN [ effects |-> << Variant("PutObject",
+                                           [id |-> i, obj |-> [pr EXCEPT !.task.resumes = {}]]) >> ]
              ELSE [ effects |->
                       Commit(i, [pr EXCEPT !.task.state     = "suspended",
                                                 !.task.pid       = NoPid,
@@ -518,7 +531,8 @@ HandleLeaseTimeout(i, env) ==
            \/ old.task.expiresAt > env.now
            \/ pr.promise.state /= "pending"
         THEN [ effects |-> << >> ]
-        ELSE Write(i, Requeued(old, env.now))
+        ELSE [ effects |-> << Variant("PutObject",
+                                      [id |-> i, obj |-> Requeued(old, env.now)]) >> ]
 
 (* @type: ($id, $env) => $outcome; *)
 HandleRetryTimeout(i, env) ==
@@ -569,7 +583,8 @@ HandleCallbackDrain(i, w, env) ==
            \/ w \notin pr.promise.callbacks
         THEN [ effects |-> << >> ]
         ELSE IF w \notin DOMAIN env.objects \/ ~Driven(Project(ow, env.now))
-             THEN Write(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
+             THEN [ effects |-> << Variant("PutObject",
+                                 [id |-> i, obj |-> [pr EXCEPT !.promise.callbacks = @ \ {w}]]) >> ]
              ELSE [ effects |->
                       Commit(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
                       \o Commit(w, Resumed(w, i, env)) ]
@@ -581,14 +596,15 @@ HandleTimeout(e, env) ==
         pr  == Project(old, env.now)
     IN  IF e.kind /= "promise" \/ i \notin DOMAIN env.objects
         THEN [ effects |-> << >> ]
-        ELSE IF pr /= old THEN Write(i, pr) ELSE [ effects |-> << >> ]
+        ELSE IF pr /= old THEN [ effects |-> << Variant("PutObject",
+                                                        [id |-> i, obj |-> pr]) >> ] ELSE [ effects |-> << >> ]
 
 (* @type: ($event, $env) => $outcome; *)
 Handle(ev, env) ==
     LET p(tag) == VariantGetUnsafe(tag, ev)
     IN
     CASE VariantTag(ev) = "PromiseGet" ->
-             HandlePromiseGet(p("PromiseGet").id, env)
+             HandlePromiseGet(p("PromiseGet"), env)
       [] VariantTag(ev) = "PromiseCreate" ->
              HandlePromiseCreate(p("PromiseCreate").req, env)
       [] VariantTag(ev) = "PromiseSettle" ->
