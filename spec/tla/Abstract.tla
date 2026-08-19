@@ -149,8 +149,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: inFlight = {
       ev: $event,
       phase: Str,
-      pending: Seq($effect),
-      res: $response
+      pending: Seq($effect)
   };
 
   @typeAlias: env = {

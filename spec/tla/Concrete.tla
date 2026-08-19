@@ -143,7 +143,7 @@ OriginOf(ev) ==
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
 Fresh(ev) ==
-    [ ev |-> ev, phase |-> "process", pending |-> << >>, res |-> A!Silent,
+    [ ev |-> ev, phase |-> "process", pending |-> << >>,
       expect |-> 0, at |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
 
 Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -272,7 +272,6 @@ Process(r) ==
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o out.effects
                                                  \o Disarms(o, W),
-                                  ![r].res     = out.res,
                                   ![r].expect  = etags[o],
                                   ![r].at      = now]
     /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
@@ -388,7 +387,6 @@ Perform(r) ==
                          /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>,
-                                                   ![r].res     = A!Silent,
                                                    ![r].retries = @ + 1]
                          /\ UNCHANGED <<docs, etags, timeouts, outbox>>
                  [] VariantTag(e) = "ArmTimeout" ->
