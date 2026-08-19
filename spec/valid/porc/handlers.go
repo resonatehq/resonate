@@ -350,10 +350,19 @@ func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address str
 	return Response{Status: 200, Promise: pa}
 }
 
-// addressValid is `ServerModel.addressValid`.
+// addressValid is `ServerModel.addressValid`: any `scheme://rest`, with a
+// non-empty scheme and a non-empty remainder.
+//
+// It used to admit `http://`, `https://` and `poll://…@` and nothing else,
+// which made the scheme list a closed set the specification had no reason to
+// own. A transport is named by its scheme, and a new transport is not a
+// protocol change — an implementation routing `echod://bundle` or
+// `bash://docker/image` is not thereby non-conformant. The predicate exists to
+// reject an address that could never be routed (no scheme, or nothing after
+// it); deliverability is the router's business, not the model's.
 func addressValid(a string) bool {
-	return strings.HasPrefix(a, "http://") || strings.HasPrefix(a, "https://") ||
-		(strings.HasPrefix(a, "poll://") && strings.ContainsRune(a, '@'))
+	i := strings.Index(a, "://")
+	return i > 0 && i+3 < len(a)
 }
 
 func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
