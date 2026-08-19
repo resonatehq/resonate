@@ -161,6 +161,7 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: response =
       Silent(UNIT)
     | Missing(UNIT)
+    | Refused(UNIT)
     | Got({ obj: $object });
 
   @typeAlias: outcome = { effects: Seq($effect), res: $response };
@@ -557,6 +558,7 @@ Env ==
    @type: $response; *)
 Silent  == Variant("Silent",  UNIT)
 Missing == Variant("Missing", UNIT)
+Refused == Variant("Refused", UNIT)
 
 (* @type: $object => $response; *)
 Got(o)  == Variant("Got", [ obj |-> o ])
@@ -739,20 +741,24 @@ Born(req, t) ==
 (* every property here -- they write nothing.                              *)
 (***************************************************************************)
 
-(* `external.lean` promiseCreate. Timer+targeted is refused at the door.
-   An existing promise is returned as-is, except that reading it may
-   MATERIALISE a settlement it had already passed -- which is a write, and
-   the reason a read is not free.
+(* `external.lean` promiseCreate. Three answers and one write. Timer and
+   targeted together is refused at the door. An existing promise is
+   returned as it reads now, which since reads went pure is a projection
+   and not a write. Otherwise it is born, and the answer is the promise
+   that was born.
+
+   IDEMPOTENT BY ANSWERING, not by writing: creating something that is
+   already there is a 200 carrying what is there, not a second create.
    @type: ($createReq, $env) => $outcome; *)
 HPromiseCreate(req, env) ==
-    LET i   == req.id
-        old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF req.tags.timer /\ req.tags.targeted
-        THEN NoOp
-        ELSE IF i \in DOMAIN env.objects
-             THEN NoOp
-             ELSE Write(i, Born(req, env.now))
+    IF req.tags.timer /\ req.tags.targeted THEN
+        [ effects |-> << >>, res |-> Refused ]
+    ELSE IF req.id \in DOMAIN env.objects THEN
+        LET old == env.objects[req.id] IN
+        [ effects |-> << >>, res |-> Got(Project(old, env.now)) ]
+    ELSE
+        LET new == Born(req, env.now) IN
+        [ effects |-> Commit(req.id, new), res |-> Got(new) ]
 
 (* `external.lean` promiseSettle. `rejectedTimedout` is not settable by a
    client -- that verdict belongs to the deadline, and letting a client
