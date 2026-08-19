@@ -223,14 +223,6 @@ CommitAll(S, Obj(_), env) ==
 AddCallback(obj, w) == [obj EXCEPT !.promise.callbacks = @ \cup {w}]
 
 (* @type: ($object, Int) => $object; *)
-Requeued(obj, at) ==
-    [obj EXCEPT !.task.state     = "pending",
-                !.task.pid       = NoPid,
-                !.task.ttl       = NoTime,
-                !.task.expiresAt = NoTime,
-                !.task.retryAt   = at]
-
-(* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
         [ promise |-> [obj.promise EXCEPT
@@ -430,7 +422,11 @@ HandleTaskRelease(req, env) ==
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
-            new == Requeued(old, env.now)
+            new == [old EXCEPT !.task.state     = "pending",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = env.now]
         IN
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
@@ -463,7 +459,11 @@ HandleTaskContinue(req, env) ==
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
-            new == Requeued(old, env.now)
+            new == [old EXCEPT !.task.state     = "pending",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = env.now]
         IN
             IF \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
@@ -555,7 +555,11 @@ HandleLeaseTimeout(i, env) ==
         [ effects |-> << >> ]
     ELSE
         LET old == env.objects[i]
-            new == Requeued(old, env.now)
+            new == [old EXCEPT !.task.state     = "pending",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = env.now]
         IN
             IF \/ old.task.state /= "acquired"
                \/ old.task.expiresAt = NoTime
@@ -610,7 +614,12 @@ HandleListenerDrain(i, addr, env) ==
 (* @type: ($id, $id, $env) => $outcome; *)
 Resumed(old, awaited, env) ==
     IF old.task.state = "suspended" THEN
-        [Requeued(old, env.now) EXCEPT !.task.resumes = {awaited}]
+        [old EXCEPT !.task.state     = "pending",
+                    !.task.pid       = NoPid,
+                    !.task.ttl       = NoTime,
+                    !.task.expiresAt = NoTime,
+                    !.task.retryAt   = env.now,
+                    !.task.resumes   = {awaited}]
     ELSE IF old.task.state \in {"pending", "acquired", "halted"} THEN
         [old EXCEPT !.task.resumes = @ \cup {awaited}]
     ELSE
