@@ -611,20 +611,6 @@ HandleListenerDrain(i, addr, env) ==
                                                                  [id    |-> i,
                                                                   state |-> old.promise.state])]]) >> ]
 
-(* @type: ($id, $id, $env) => $outcome; *)
-Resumed(old, awaited, env) ==
-    IF old.task.state = "suspended" THEN
-        [old EXCEPT !.task.state     = "pending",
-                    !.task.pid       = NoPid,
-                    !.task.ttl       = NoTime,
-                    !.task.expiresAt = NoTime,
-                    !.task.retryAt   = env.now,
-                    !.task.resumes   = {awaited}]
-    ELSE IF old.task.state \in {"pending", "acquired", "halted"} THEN
-        [old EXCEPT !.task.resumes = @ \cup {awaited}]
-    ELSE
-        old
-
 ProcessCallback(i, w, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -639,9 +625,17 @@ ProcessCallback(i, w, env) ==
                 [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
             ELSE
                 LET oldW == Project(env.objects[w], env.now)
-                    newW == Resumed(oldW, i, env)
+                    newW == IF oldW.task.state = "suspended" THEN
+                                [oldW EXCEPT !.task.state     = "pending",
+                                             !.task.pid       = NoPid,
+                                             !.task.ttl       = NoTime,
+                                             !.task.expiresAt = NoTime,
+                                             !.task.retryAt   = env.now,
+                                             !.task.resumes   = {i}]
+                            ELSE
+                                [oldW EXCEPT !.task.resumes = @ \cup {i}]
                 IN
-                    IF oldW.task.state = "none" THEN
+                    IF oldW.task.state \in {"none", "fulfilled"} THEN
                         [ effects |-> << Variant("PutObject",
                                                  [id |-> i, obj |-> new]) >> ]
                     ELSE
