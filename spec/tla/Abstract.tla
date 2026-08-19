@@ -214,16 +214,11 @@ Absent ==
                     callbacks |-> {}, listeners |-> {} ],
       task    |-> NoTask ]
 
-(* @type: ($id, $object) => Seq($effect); *)
-Commit(i, new) == << Variant("PutObject", [id |-> i, obj |-> new]) >>
-
 (* @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
 CommitAll(S, Obj(_), env) ==
-    ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, Obj(i)),
+    ApaFoldSet(LAMBDA acc, i :
+                   acc \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>,
                << >>, S)
-
-(* @type: ($object, $id) => $object; *)
-AddCallback(obj, w) == [obj EXCEPT !.promise.callbacks = @ \cup {w}]
 
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
@@ -493,11 +488,8 @@ HandleTaskHeartbeat(req, env) ==
                           [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
                   env) ]
 
-(* @type: ($id, Int, Set($callbackReq), $env) => $outcome; *)
-Awaiteds(acts) == { a.awaited : a \in acts }
-
 HandleTaskSuspend(req, env) ==
-    LET aw   == Awaiteds(req.actions)
+    LET aw   == { a.awaited : a \in req.actions }
         seen == { a \in aw : a \in DOMAIN env.objects }
     IN
         IF \/ req.actions = {}
@@ -531,8 +523,8 @@ HandleTaskSuspend(req, env) ==
                         << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
                         \o CommitAll(aw,
                                   LAMBDA a :
-                                      AddCallback(Project(env.objects[a], env.now),
-                                                  req.id),
+                                      [Project(env.objects[a], env.now) EXCEPT
+                                           !.promise.callbacks = @ \cup {req.id}],
                                   env) ]
 
 (* @type: ($id, Int, $fenceAction, $env) => $outcome; *)
