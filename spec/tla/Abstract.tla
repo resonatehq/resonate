@@ -249,13 +249,16 @@ Driven(obj) == obj.task.state /= "none"
 
 (* @type: $task => $task; *)
 Fulfilled(t) ==
-    [t EXCEPT !.state = "fulfilled", !.pid = NoPid, !.ttl = NoTime,
-              !.expiresAt = NoTime, !.retryAt = NoTime, !.resumes = {}]
+    IF t.state = "none" THEN
+        t
+    ELSE
+        [t EXCEPT !.state = "fulfilled", !.pid = NoPid, !.ttl = NoTime,
+                  !.expiresAt = NoTime, !.retryAt = NoTime, !.resumes = {}]
 
 (* @type: ($object, Str, VALUE, Int) => $object; *)
 Settle(obj, st, v, at) ==
     [ promise |-> [obj.promise EXCEPT !.state = st, !.value = v, !.settledAt = at],
-      task    |-> IF obj.task.state = "none" THEN NoTask ELSE Fulfilled(obj.task) ]
+      task    |-> Fulfilled(obj.task) ]
 
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
