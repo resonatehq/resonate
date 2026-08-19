@@ -626,8 +626,8 @@ Write(i, new) == [ effects |-> Commit(i, new) ]
    is sound only because these writes touch pairwise distinct objects
    and no two of them can interfere. `taskHeartbeat` is the case.
    @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
-CommitAll(S, New(_), env) ==
-    ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, New(i)),
+CommitAll(S, Obj(_), env) ==
+    ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, Obj(i)),
                << >>, S)
 
 (* @type: (ADDR, $message) => $effect; *)
@@ -695,26 +695,44 @@ Project(obj, t) ==
                 NoValue, obj.promise.timeoutAt)
     ELSE obj
 
-(* `createPromise`, both arms of it.
+(* `createPromise`, BOTH ARMS OF IT, and the second is the one to know:
+   a promise created with its deadline already past is BORN SETTLED --
+   resolved if it is a timer, timed out otherwise -- and stamped at the
+   DEADLINE rather than at `now`, so `createdAt` and `settledAt` are both
+   `req.timeoutAt`. The task a targeted promise materialises follows:
+   pending with a retry armed in the live arm, fulfilled in the dead one.
+
+   `taskCreate` is why this is an operator and not inlined into
+   `promiseCreate`: it creates and claims in one step, so it has to know
+   which arm it got, and duplicating the choice would be two copies to
+   keep in step.
+
+   IT IGNORES `delay`. The Lean arms the first dispatch at
+   `max (parseNat delay) now`; this arms it at `t`. Unreachable while
+   every `Tags` profile carries `delay |-> 0`, which is the same way the
+   timer-and-targeted door was unreachable.
    @type: ($createReq, Int) => $object; *)
-Born(req, t) ==
-    IF req.timeoutAt > t
-    THEN [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
-                         tags |-> req.tags, timeoutAt |-> req.timeoutAt,
-                         createdAt |-> t, settledAt |-> NoTime,
-                         callbacks |-> {}, listeners |-> {} ],
-           task    |-> IF req.tags.targeted
-                       THEN [NoTask EXCEPT !.state = "pending", !.retryAt = t]
-                       ELSE NoTask ]
-    ELSE [ promise |-> [ state |-> IF req.tags.timer THEN "resolved"
-                                                     ELSE "rejectedTimedout",
-                         param |-> req.param, value |-> NoValue, tags |-> req.tags,
-                         timeoutAt |-> req.timeoutAt, createdAt |-> req.timeoutAt,
-                         settledAt |-> req.timeoutAt,
-                         callbacks |-> {}, listeners |-> {} ],
-           task    |-> IF req.tags.targeted
-                       THEN [NoTask EXCEPT !.state = "fulfilled"]
-                       ELSE NoTask ]
+New(req, t) ==
+    IF req.timeoutAt > t THEN
+        [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
+                        tags |-> req.tags, timeoutAt |-> req.timeoutAt,
+                        createdAt |-> t, settledAt |-> NoTime,
+                        callbacks |-> {}, listeners |-> {} ],
+          task    |-> IF req.tags.targeted THEN
+                          [NoTask EXCEPT !.state = "pending", !.retryAt = t]
+                      ELSE
+                          NoTask ]
+    ELSE
+        [ promise |-> [ state |-> IF req.tags.timer THEN "resolved"
+                                                    ELSE "rejectedTimedout",
+                        param |-> req.param, value |-> NoValue, tags |-> req.tags,
+                        timeoutAt |-> req.timeoutAt, createdAt |-> req.timeoutAt,
+                        settledAt |-> req.timeoutAt,
+                        callbacks |-> {}, listeners |-> {} ],
+          task    |-> IF req.tags.targeted THEN
+                          [NoTask EXCEPT !.state = "fulfilled"]
+                      ELSE
+                          NoTask ]
 
 (***************************************************************************)
 (* THE HANDLERS                                                            *)
@@ -733,39 +751,39 @@ Born(req, t) ==
 (*                                                                         *)
 (* The cost is real and belongs on the record: a read is ALL answer, so    *)
 (* `promiseGet` has no content in this model and is a stutter. Doors that  *)
-(* return 400 or 404 in the Lean are `[ effects |-> << >> ]` here, which says only that     *)
+(* return 400 or 404 in the Lean write nothing here, which says only     *)
 (* they write nothing -- that much IS checked, by the invariants and the   *)
 (* refinement, and it is what a missing door would break. Making answers   *)
 (* checkable needs a variable in `Abstract` for one to land in, and that   *)
 (* is a change to the specification, not a helper.                         *)
 (***************************************************************************)
 
-(* `external.lean` promiseCreate. Two answers and one write. An existing
-   promise is returned as it reads now, which since reads went pure is a
-   projection and not a write. Otherwise it is born, and the answer is
-   the promise that was born.
+(* `external.lean` promiseCreate. One write, and only when there is
+   nothing there. Creating a promise that already exists is IDEMPOTENT
+   BY ANSWERING in the Lean -- a 200 carrying what is there, not a
+   second create -- so here, where there are no answers, it writes
+   nothing at all.
 
    The Lean refuses timer-and-targeted with a 400. That door is in
-   `Tags` here: the four profiles do not include it, so the request
-   cannot be built and the branch that refused it was unreachable.
-
-   IDEMPOTENT BY ANSWERING, not by writing: creating something that is
-   already there is a 200 carrying what is there, not a second create.
+   `Tags`: the four profiles do not include it, so the request cannot
+   be built and a branch refusing it would be unreachable.
    @type: ($createReq, $env) => $outcome; *)
 HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
-        Write(req.id, Born(req, env.now))
+        Write(req.id, New(req, env.now))
 
-(* `external.lean` promiseSettle. Settling a promise that is already
-   settled answers what it settled to and writes nothing -- idempotent
-   by answering, the same shape as create.
+(* `external.lean` promiseSettle. A settlement lands only on a promise
+   that is still pending WHEN READ -- `old` is the projection, so a
+   promise past its deadline is already settled and a client cannot
+   settle it again. Settling one that has settled writes nothing, the
+   same shape as create.
 
    `rejectedTimedout` is not settable by a client: that verdict belongs
    to the deadline, and letting a client forge it was one of the four
-   defects the Verus port found. That door is `SettleState` now, so no
-   guard here has to remember it.
+   defects the Verus port found. That door is `SettleState`, so no guard
+   here has to remember it.
    @type: ($settleReq, $env) => $outcome; *)
 HandlePromiseSettle(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
@@ -778,13 +796,15 @@ HandlePromiseSettle(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* `external.lean` promiseGet. A PURE READ: it projects, and it writes
-   nothing. The Lean persists the projection when `run true`; that
-   parameter is gone and reads no longer have side effects, so what is
-   left of this handler in a model with no responses is NOTHING. It is
-   a stutter, and `PromiseGet` in the alphabet buys no coverage --
-   which is honest rather than free: the whole content of a get is the
-   answer it gives, and answers are what `res` was for.
+(* `external.lean` promiseGet. NOTHING HAPPENS. The Lean answers 404 or
+   200 with the projected promise, and persists that projection when
+   `run true`; there are no answers here and reads are pure, so a get
+   writes nothing and this handler is a stutter.
+
+   That is honest rather than free. A read is ALL answer, so `PromiseGet`
+   in the alphabet buys no coverage and costs state space. It is kept
+   because the alphabet is the Lean's and dropping a request would be a
+   claim that clients do not send it.
    @type: ($id, $env) => $outcome; *)
 HandlePromiseGet(i, env) == [ effects |-> << >> ]
 
@@ -845,7 +865,7 @@ HandleTaskGet(i, env) ==
     ELSE [ effects |-> << >> ]
 
 (* `external.lean` taskCreate. A worker claiming work that may not exist
-   yet: if the promise is absent it is born ALREADY ACQUIRED at version
+   yet: if the promise is absent it is new ALREADY ACQUIRED at version
    1, which is why this is not `promiseCreate` followed by
    `taskAcquire` -- there is no instant in between at which someone else
    could take it.
@@ -858,12 +878,12 @@ HandleTaskCreate(req, pid, ttl, env) ==
     IN  IF ~req.tags.targeted \/ (req.tags.timer /\ req.tags.targeted)
         THEN [ effects |-> << >> ]
         ELSE IF i \notin DOMAIN env.objects
-             THEN LET born == Born(req, t)
+             THEN LET new == New(req, t)
                   IN  Write(i,
-                            IF born.promise.state = "pending"
-                            THEN Acquired([born EXCEPT !.task.state = "pending"],
+                            IF new.promise.state = "pending"
+                            THEN Acquired([new EXCEPT !.task.state = "pending"],
                                           pid, ttl, t + ttl)
-                            ELSE born)
+                            ELSE new)
              ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
                   THEN [ effects |-> << >> ]
                   ELSE IF pr.task.state = "pending"
