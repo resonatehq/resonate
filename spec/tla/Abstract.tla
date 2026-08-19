@@ -20,6 +20,12 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: callbackReq = { awaited: $id, awaiter: $id };
   @typeAlias: taskRef = { id: $id, version: Int };
   @typeAlias: fenceAction = Create({ req: $createReq }) | Settle({ req: $settleReq });
+  @typeAlias: taskCreateReq = { pid: PID, ttl: Int, action: $createReq };
+  @typeAlias: taskAcquireReq = { id: $id, version: Int, pid: PID, ttl: Int };
+  @typeAlias: taskFenceReq = { id: $id, version: Int, action: $fenceAction };
+  @typeAlias: taskBeatReq = { pid: PID, tasks: Set($taskRef) };
+  @typeAlias: taskSuspendReq = { id: $id, version: Int, actions: Set($callbackReq) };
+  @typeAlias: taskFulfillReq = { id: $id, version: Int, action: $settleReq };
   @typeAlias: event =
   @typeAlias: effect =
   @typeAlias: inFlight = {
@@ -351,109 +357,123 @@ HandlePromiseRegisterListener(a, addr, env) ==
                                            [id |-> a, obj |-> AddListener(pa, addr)]) >> ]
              ELSE [ effects |-> << >> ]
 
-(* @type: ($id, $env) => $outcome; *)
-HandleTaskGet(i, env) ==
-    IF i \notin DOMAIN env.objects \/ ~Driven(Cur(env, i))
-    THEN [ effects |-> << >> ]
-    ELSE [ effects |-> << >> ]
+(* @type: ($getReq, $env) => $outcome; *)
+HandleTaskGet(req, env) == [ effects |-> << >> ]
 
-(* @type: ($createReq, PID, Int, $env) => $outcome; *)
-HandleTaskCreate(req, pid, ttl, env) ==
-    LET i   == req.id
-        old == Cur(env, i)
-        pr  == Project(old, env.now)
-        t   == env.now
-    IN  IF ~req.tags.targeted \/ (req.tags.timer /\ req.tags.targeted)
-        THEN [ effects |-> << >> ]
-        ELSE IF i \notin DOMAIN env.objects
-             THEN LET born == New(req, t)
-                      new  == IF born.promise.state = "pending" THEN
-                                  Acquired([born EXCEPT !.task.state = "pending"],
-                                           pid, ttl, t + ttl)
-                              ELSE
-                                  born
-                  IN
-                      [ effects |-> << Variant("PutObject",
-                                               [id |-> i, obj |-> new]) >> ]
-             ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
-                  THEN [ effects |-> << >> ]
-                  ELSE IF pr.task.state = "pending"
-                       THEN [ effects |-> << Variant("PutObject",
-                                                     [id |-> i, obj |-> Acquired(pr, pid, ttl, t + ttl)]) >> ]
-                       ELSE [ effects |-> << >> ]
+(* @type: ($taskCreateReq, $env) => $outcome; *)
+HandleTaskCreate(req, env) ==
+    IF ~req.action.tags.targeted THEN
+        [ effects |-> << >> ]
+    ELSE IF req.action.id \notin DOMAIN env.objects THEN
+        LET born == New(req.action, env.now)
+            new  == IF born.promise.state = "pending" THEN
+                        Acquired([born EXCEPT !.task.state = "pending"],
+                                 req.pid, req.ttl, env.now + req.ttl)
+                    ELSE
+                        born
+        IN
+            [ effects |-> << Variant("PutObject",
+                                     [id |-> req.action.id, obj |-> new]) >> ]
+    ELSE
+        LET old == Project(env.objects[req.action.id], env.now)
+            new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
+        IN
+            IF \/ ~old.promise.tags.targeted
+               \/ ~Driven(old)
+               \/ old.task.state /= "pending" THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject",
+                                         [id |-> req.action.id, obj |-> new]) >> ]
 
-(* @type: ($id, Int, PID, Int, $env) => $outcome; *)
-HandleTaskAcquire(i, v, pid, ttl, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "pending"
-           \/ pr.promise.state /= "pending"
-           \/ pr.task.version /= v
-        THEN [ effects |-> << >> ]
-        ELSE [ effects |-> << Variant("PutObject",
-                                 [id |-> i, obj |-> Acquired(pr, pid, ttl, env.now + ttl)]) >> ]
+(* @type: ($taskAcquireReq, $env) => $outcome; *)
+HandleTaskAcquire(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == Acquired(old, req.pid, req.ttl, env.now + req.ttl)
+        IN
+            IF \/ ~Driven(old)
+               \/ old.task.state /= "pending"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($id, Int, $settleReq, $env) => $outcome; *)
-HandleTaskFulfill(i, v, act, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ act.state \notin {"resolved", "rejected", "rejectedCanceled"}
-           \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "acquired"
-           \/ pr.promise.state /= "pending"
-           \/ pr.task.version /= v
-        THEN [ effects |-> << >> ]
-        ELSE
-            LET new == [ promise |-> [pr.promise EXCEPT !.state     = act.state,
-                                                        !.value     = act.value,
-                                                        !.settledAt = env.now],
-                         task    |-> [pr.task EXCEPT !.state     = "fulfilled",
-                                                     !.pid       = NoPid,
-                                                     !.ttl       = NoTime,
-                                                     !.expiresAt = NoTime,
-                                                     !.retryAt   = NoTime,
-                                                     !.resumes   = {}] ]
-            IN
-                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
+(* @type: ($taskFulfillReq, $env) => $outcome; *)
+HandleTaskFulfill(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == [ promise |-> [old.promise EXCEPT !.state     = req.action.state,
+                                                     !.value     = req.action.value,
+                                                     !.settledAt = env.now],
+                     task    |-> [old.task EXCEPT !.state     = "fulfilled",
+                                                  !.pid       = NoPid,
+                                                  !.ttl       = NoTime,
+                                                  !.expiresAt = NoTime,
+                                                  !.retryAt   = NoTime,
+                                                  !.resumes   = {}] ]
+        IN
+            IF \/ ~Driven(old)
+               \/ old.task.state /= "acquired"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($id, Int, $env) => $outcome; *)
-HandleTaskRelease(i, v, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "acquired"
-           \/ pr.promise.state /= "pending"
-           \/ pr.task.version /= v
-        THEN [ effects |-> << >> ]
-        ELSE [ effects |-> << Variant("PutObject",
-                                      [id |-> i, obj |-> Requeued(pr, env.now)]) >> ]
+(* @type: ($taskRef, $env) => $outcome; *)
+HandleTaskRelease(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == Requeued(old, env.now)
+        IN
+            IF \/ ~Driven(old)
+               \/ old.task.state /= "acquired"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($id, $env) => $outcome; *)
-HandleTaskHalt(i, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state \in {"fulfilled", "halted"}
-        THEN [ effects |-> << >> ]
-        ELSE LET new == [pr EXCEPT !.task.state     = "halted",
-                                   !.task.pid       = NoPid,
-                                   !.task.ttl       = NoTime,
-                                   !.task.expiresAt = NoTime,
-                                   !.task.retryAt   = NoTime]
-             IN
-                 [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
+(* @type: ($getReq, $env) => $outcome; *)
+HandleTaskHalt(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == [old EXCEPT !.task.state     = "halted",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = NoTime]
+        IN
+            IF \/ ~Driven(old)
+               \/ old.task.state \in {"fulfilled", "halted"} THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($id, $env) => $outcome; *)
-HandleTaskContinue(i, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "halted"
-           \/ pr.promise.state /= "pending"
-        THEN [ effects |-> << >> ]
-        ELSE [ effects |-> << Variant("PutObject",
-                                      [id |-> i, obj |-> Requeued(pr, env.now)]) >> ]
+(* @type: ($getReq, $env) => $outcome; *)
+HandleTaskContinue(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == Requeued(old, env.now)
+        IN
+            IF \/ ~Driven(old)
+               \/ old.task.state /= "halted"
+               \/ old.promise.state /= "pending" THEN
+                [ effects |-> << >> ]
+            ELSE
+                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
 (* @type: (PID, Set($taskRef), $env) => $outcome; *)
 Renewable(pid, refs, env) ==
@@ -465,42 +485,52 @@ Renewable(pid, refs, env) ==
             /\ pr.task.pid = pid
             /\ pr.promise.state = "pending" }
 
-HandleTaskHeartbeat(pid, refs, env) ==
+HandleTaskHeartbeat(req, env) ==
     [ effects |->
-        CommitAll(Renewable(pid, refs, env),
-                  LAMBDA i : LET pr == Project(Cur(env, i), env.now)
-                             IN  [pr EXCEPT !.task.expiresAt = env.now + pr.task.ttl],
+        CommitAll(Renewable(req.pid, req.tasks, env),
+                  LAMBDA i :
+                      LET old == Project(env.objects[i], env.now)
+                      IN
+                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
                   env) ]
 
 (* @type: ($id, Int, Set($callbackReq), $env) => $outcome; *)
 Awaiteds(acts) == { a.awaited : a \in acts }
 
-HandleTaskSuspend(i, v, acts, env) ==
-    LET old  == Cur(env, i)
-        pr   == Project(old, env.now)
-        aw   == Awaiteds(acts)
-        seen == { a \in aw : a \in DOMAIN env.objects }
-        proj(a) == Project(Cur(env, a), env.now)
-    IN  IF \/ acts = {} \/ i \in aw
-           \/ \E a \in aw : a.origin /= i.origin   \* the same door
-           \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "acquired"
-           \/ pr.promise.state /= "pending"
-           \/ pr.task.version /= v
-           \/ seen /= aw
-           \/ \E a \in aw : ~IsExternal(proj(a).promise)
-        THEN [ effects |-> << >> ]
-        ELSE IF \E a \in aw : proj(a).promise.state /= "pending"
-             THEN [ effects |-> << Variant("PutObject",
-                                           [id |-> i, obj |-> [pr EXCEPT !.task.resumes = {}]]) >> ]
-             ELSE [ effects |->
-                      Commit(i, [pr EXCEPT !.task.state     = "suspended",
-                                                !.task.pid       = NoPid,
-                                                !.task.ttl       = NoTime,
-                                                !.task.expiresAt = NoTime,
-                                                !.task.retryAt   = NoTime,
-                                                !.task.resumes   = {}])
-                      \o CommitAll(aw, LAMBDA a : AddCallback(proj(a), i), env) ]
+HandleTaskSuspend(req, env) ==
+    LET aw      == Awaiteds(req.actions)
+        seen    == { a \in aw : a \in DOMAIN env.objects }
+        proj(a) == Project(env.objects[a], env.now)
+    IN
+        IF \/ req.actions = {}
+           \/ req.id \in aw
+           \/ \E a \in aw : a.origin /= req.id.origin
+           \/ req.id \notin DOMAIN env.objects
+           \/ seen /= aw THEN
+            [ effects |-> << >> ]
+        ELSE
+            LET old == Project(env.objects[req.id], env.now)
+                new == [old EXCEPT !.task.state     = "suspended",
+                                   !.task.pid       = NoPid,
+                                   !.task.ttl       = NoTime,
+                                   !.task.expiresAt = NoTime,
+                                   !.task.retryAt   = NoTime,
+                                   !.task.resumes   = {}]
+            IN
+                IF \/ ~Driven(old)
+                   \/ old.task.state /= "acquired"
+                   \/ old.promise.state /= "pending"
+                   \/ old.task.version /= req.version
+                   \/ \E a \in aw : ~IsExternal(proj(a).promise) THEN
+                    [ effects |-> << >> ]
+                ELSE IF \E a \in aw : proj(a).promise.state /= "pending" THEN
+                    [ effects |-> << Variant("PutObject",
+                                             [id |-> req.id,
+                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
+                ELSE
+                    [ effects |->
+                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
+                        \o CommitAll(aw, LAMBDA a : AddCallback(proj(a), req.id), env) ]
 
 (* @type: ($id, Int, $fenceAction, $env) => $outcome; *)
 FenceTarget(act) ==
@@ -508,18 +538,22 @@ FenceTarget(act) ==
     THEN VariantGetUnsafe("Create", act).req.id
     ELSE VariantGetUnsafe("Settle", act).req.id
 
-HandleTaskFence(i, v, act, env) ==
-    LET old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF \/ FenceTarget(act) = i
-           \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
-           \/ pr.task.state /= "acquired"
-           \/ pr.promise.state /= "pending"
-           \/ pr.task.version /= v
-        THEN [ effects |-> << >> ]
-        ELSE IF VariantTag(act) = "Create"
-             THEN HandlePromiseCreate(VariantGetUnsafe("Create", act).req, env)
-             ELSE HandlePromiseSettle(VariantGetUnsafe("Settle", act).req, env)
+HandleTaskFence(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+        IN
+            IF \/ FenceTarget(req.action) = req.id
+               \/ ~Driven(old)
+               \/ old.task.state /= "acquired"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE IF VariantTag(req.action) = "Create" THEN
+                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
+            ELSE
+                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
 
 (* @type: ($id, $env) => $outcome; *)
 HandleLeaseTimeout(i, env) ==
@@ -615,30 +649,25 @@ Handle(ev, env) ==
              HandlePromiseRegisterListener(p("PromiseRegisterListener").awaited,
                                       p("PromiseRegisterListener").address, env)
       [] VariantTag(ev) = "TaskGet" ->
-             HandleTaskGet(p("TaskGet").id, env)
+             HandleTaskGet(p("TaskGet"), env)
       [] VariantTag(ev) = "TaskCreate" ->
-             HandleTaskCreate(p("TaskCreate").action, p("TaskCreate").pid,
-                         p("TaskCreate").ttl, env)
+             HandleTaskCreate(p("TaskCreate"), env)
       [] VariantTag(ev) = "TaskAcquire" ->
-             HandleTaskAcquire(p("TaskAcquire").id, p("TaskAcquire").version,
-                          p("TaskAcquire").pid, p("TaskAcquire").ttl, env)
+             HandleTaskAcquire(p("TaskAcquire"), env)
       [] VariantTag(ev) = "TaskFence" ->
-             HandleTaskFence(p("TaskFence").id, p("TaskFence").version,
-                        p("TaskFence").action, env)
+             HandleTaskFence(p("TaskFence"), env)
       [] VariantTag(ev) = "TaskHeartbeat" ->
-             HandleTaskHeartbeat(p("TaskHeartbeat").pid, p("TaskHeartbeat").tasks, env)
+             HandleTaskHeartbeat(p("TaskHeartbeat"), env)
       [] VariantTag(ev) = "TaskSuspend" ->
-             HandleTaskSuspend(p("TaskSuspend").id, p("TaskSuspend").version,
-                          p("TaskSuspend").actions, env)
+             HandleTaskSuspend(p("TaskSuspend"), env)
       [] VariantTag(ev) = "TaskFulfill" ->
-             HandleTaskFulfill(p("TaskFulfill").id, p("TaskFulfill").version,
-                          p("TaskFulfill").action, env)
+             HandleTaskFulfill(p("TaskFulfill"), env)
       [] VariantTag(ev) = "TaskRelease" ->
-             HandleTaskRelease(p("TaskRelease").id, p("TaskRelease").version, env)
+             HandleTaskRelease(p("TaskRelease"), env)
       [] VariantTag(ev) = "TaskHalt" ->
-             HandleTaskHalt(p("TaskHalt").id, env)
+             HandleTaskHalt(p("TaskHalt"), env)
       [] VariantTag(ev) = "TaskContinue" ->
-             HandleTaskContinue(p("TaskContinue").id, env)
+             HandleTaskContinue(p("TaskContinue"), env)
       [] VariantTag(ev) = "Timeout" ->
              LET d == p("Timeout")
              IN  CASE d.kind = "promise" -> HandleTimeout(d, env)
