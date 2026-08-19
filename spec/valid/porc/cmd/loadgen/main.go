@@ -143,7 +143,13 @@ func main() {
 				delete(op, "__now")
 				reqJSON, _ := json.Marshal(op)
 				mu.Lock()
-				events = append(events, event{Kind: kind, Now: now, Req: reqJSON,
+				// Record the instant the SERVER stamped, not the one we asked
+				// for. A server that picks its own time must say which time it
+				// picked, and a harness that records its own guess instead is
+				// writing fiction: the checker then replays against a `now` the
+				// server never used and refutes a correct implementation. We
+				// fall back to our hint for a server that does not echo.
+				events = append(events, event{Kind: kind, Now: serverNow(res, now), Req: reqJSON,
 					Res: res, Call: call, Return: ret, Client: cid})
 				mu.Unlock()
 			}
@@ -216,6 +222,27 @@ func nextOp(r *rand.Rand, cid, i int) (map[string]any, string) {
 	default:
 		return map[string]any{"awaited": a, "address": "poll://any@w1"}, "promise.register_listener"
 	}
+}
+
+// serverNow reads the instant the server stamped out of the response head.
+//
+// The client's `resonate:debug_time` is a HINT: concurrent clients race, so
+// the higher hint can arrive first and a server that used hints verbatim would
+// see time go backwards. A server that takes `max(last+1, hint)` under its own
+// lock has instants that are strictly increasing in the order it served
+// requests — which is the linearization order, and exactly what the sort below
+// wants. `fallback` keeps this working against a server that does not echo.
+func serverNow(res json.RawMessage, fallback uint64) uint64 {
+	var env struct {
+		Head map[string]any `json:"head"`
+	}
+	if json.Unmarshal(res, &env) != nil {
+		return fallback
+	}
+	if n, ok := env.Head["resonate:debug_time"].(float64); ok {
+		return uint64(n)
+	}
+	return fallback
 }
 
 func post(url, kind string, data map[string]any, out *json.RawMessage) error {
