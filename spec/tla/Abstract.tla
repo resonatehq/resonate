@@ -611,15 +611,15 @@ Commit(i, old, new) ==
 (* @type: ($id, $object, $object) => $outcome; *)
 Write(i, old, new) == [ effects |-> Commit(i, old, new), res |-> Silent ]
 
-(* Two objects, committed one after the other. A handler that touches
-   two units emits two `PutObject`s, which is two moments, and that is
-   the multi-unit write the header warns about -- not hidden here, just
-   spelled.
-   @type: ($id, $object, $object, $id, $object, $object) => $outcome; *)
-Write2(i, oi, ni, j, oj, nj) ==
-    [ effects |-> Commit(i, oi, ni) \o Commit(j, oj, nj), res |-> Silent ]
-
 (* Many objects, for the handlers whose request names a SET of them.
+   This one cannot be written out: `S` is computed from the request, so
+   there is no literal list to write. That is the test for whether a
+   combinator here is earning its place -- `Commit` derives arms and
+   disarms by diffing deadlines, and this folds over a runtime set, but
+   a `Write2` that only concatenated two `Commit`s for one call site was
+   imitating the Lean's `do` block rather than saying anything, and is
+   gone.
+
    The fold order is `CHOOSE`-determined and therefore arbitrary; that
    is sound only because these writes touch pairwise distinct objects
    and no two of them can interfere. `taskHeartbeat` is the case.
@@ -1112,8 +1112,10 @@ HCallbackDrain(i, w, env) ==
         THEN NoOp
         ELSE IF w \notin DOMAIN env.objects \/ ~Driven(Project(ow, env.now))
              THEN Write(i, old, [pr EXCEPT !.promise.callbacks = @ \ {w}])
-             ELSE Write2(i, old, [pr EXCEPT !.promise.callbacks = @ \ {w}],
-                         w, ow, Resumed(w, i, env))
+             ELSE [ effects |->
+                      Commit(i, old, [pr EXCEPT !.promise.callbacks = @ \ {w}])
+                      \o Commit(w, ow, Resumed(w, i, env)),
+                    res |-> Silent ]
 
 (* `internal.lean` processPromiseTimeout, which is `touchPromise` and
    nothing else: read the promise with materialisation FORCED, so that a
