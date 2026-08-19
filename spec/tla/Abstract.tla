@@ -161,7 +161,6 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: response =
       Silent(UNIT)
     | Missing(UNIT)
-    | Refused(UNIT)
     | Got({ obj: $object });
 
   @typeAlias: outcome = { effects: Seq($effect), res: $response };
@@ -407,8 +406,21 @@ Deadline(obj, kind) ==
 (* reason to take it.                                                      *)
 (***************************************************************************)
 
+(* THE DOORS ARE IN THE TYPES, not in the handlers. A request set says
+   what a client may send, and a client may not send a verdict that
+   belongs to the deadline: `rejectedTimedout` is settled BY the timeout
+   and forging it was one of the four defects the Verus port found.
+   `pending` is not a settlement at all.
+
+   Stating that here rather than checking it in `HPromiseSettle` is
+   stronger and cheaper -- a guard can be forgotten at one call site,
+   a type cannot -- and it keeps ill-formed requests out of the state
+   space of both machines. `Tags` does the same for the create door:
+   four curated profiles, and timer-and-targeted is not one of them. *)
+SettleState == {"resolved", "rejected", "rejectedCanceled"}
+
 CreateReq   == [id : Id, timeoutAt : Time, param : Value, tags : Tags]
-SettleReq   == [id : Id, state : PromiseState, value : Value]
+SettleReq   == [id : Id, state : SettleState, value : Value]
 CallbackReq == [awaited : Id, awaiter : Id]
 TaskRefT    == [id : Id, version : Version]
 
@@ -558,7 +570,6 @@ Env ==
    @type: $response; *)
 Silent  == Variant("Silent",  UNIT)
 Missing == Variant("Missing", UNIT)
-Refused == Variant("Refused", UNIT)
 
 (* @type: $object => $response; *)
 Got(o)  == Variant("Got", [ obj |-> o ])
@@ -741,40 +752,45 @@ Born(req, t) ==
 (* every property here -- they write nothing.                              *)
 (***************************************************************************)
 
-(* `external.lean` promiseCreate. Three answers and one write. Timer and
-   targeted together is refused at the door. An existing promise is
-   returned as it reads now, which since reads went pure is a projection
-   and not a write. Otherwise it is born, and the answer is the promise
-   that was born.
+(* `external.lean` promiseCreate. Two answers and one write. An existing
+   promise is returned as it reads now, which since reads went pure is a
+   projection and not a write. Otherwise it is born, and the answer is
+   the promise that was born.
+
+   The Lean refuses timer-and-targeted with a 400. That door is in
+   `Tags` here: the four profiles do not include it, so the request
+   cannot be built and the branch that refused it was unreachable.
 
    IDEMPOTENT BY ANSWERING, not by writing: creating something that is
    already there is a 200 carrying what is there, not a second create.
    @type: ($createReq, $env) => $outcome; *)
 HPromiseCreate(req, env) ==
-    IF req.tags.timer /\ req.tags.targeted THEN
-        [ effects |-> << >>, res |-> Refused ]
-    ELSE IF req.id \in DOMAIN env.objects THEN
-        LET old == env.objects[req.id] IN
-        [ effects |-> << >>, res |-> Got(Project(old, env.now)) ]
+    IF req.id \in DOMAIN env.objects THEN
+        LET old == Project(env.objects[req.id], env.now) IN
+        [ effects |-> << >>, res |-> Got(old) ]
     ELSE
         LET new == Born(req, env.now) IN
         [ effects |-> Commit(req.id, new), res |-> Got(new) ]
 
-(* `external.lean` promiseSettle. `rejectedTimedout` is not settable by a
-   client -- that verdict belongs to the deadline, and letting a client
-   forge it was one of the four defects the Verus port found.
+(* `external.lean` promiseSettle. Settling a promise that is already
+   settled answers what it settled to and writes nothing -- idempotent
+   by answering, the same shape as create.
+
+   `rejectedTimedout` is not settable by a client: that verdict belongs
+   to the deadline, and letting a client forge it was one of the four
+   defects the Verus port found. That door is `SettleState` now, so no
+   guard here has to remember it.
    @type: ($settleReq, $env) => $outcome; *)
 HPromiseSettle(req, env) ==
-    LET i   == req.id
-        old == Cur(env, i)
-        pr  == Project(old, env.now)
-    IN  IF req.state \notin {"resolved", "rejected", "rejectedCanceled"}
-        THEN NoOp
-        ELSE IF i \notin DOMAIN env.objects
-             THEN NoOp
-             ELSE IF pr.promise.state = "pending"
-                  THEN Write(i, Settle(pr, req.state, req.value, env.now))
-                  ELSE NoOp
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >>, res |-> Missing ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+            new == Settle(old, req.state, req.value, env.now)
+        IN  IF old.promise.state = "pending" THEN
+                [ effects |-> Commit(req.id, new), res |-> Got(new) ]
+            ELSE
+                [ effects |-> << >>, res |-> Got(old) ]
 
 (* `external.lean` promiseGet. A PURE READ: it projects, and it writes
    nothing. The Lean persists the projection when `run true`; that
