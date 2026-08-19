@@ -625,7 +625,7 @@ Resumed(old, awaited, env) ==
     ELSE
         old
 
-HandleCallbackDrain(i, w, env) ==
+ProcessCallback(i, w, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -703,7 +703,7 @@ Handle(ev, env) ==
       [] VariantTag(ev) = "ListenerDrain" ->
              HandleListenerDrain(p("ListenerDrain").id, p("ListenerDrain").address, env)
       [] VariantTag(ev) = "CallbackDrain" ->
-             HandleCallbackDrain(p("CallbackDrain").id, p("CallbackDrain").awaiter, env)
+             ProcessCallback(p("CallbackDrain").id, p("CallbackDrain").awaiter, env)
       [] OTHER -> [ effects |-> << >> ]
 
 -----------------------------------------------------------------------------
