@@ -497,9 +497,8 @@ HandleTaskHeartbeat(req, env) ==
 Awaiteds(acts) == { a.awaited : a \in acts }
 
 HandleTaskSuspend(req, env) ==
-    LET aw      == Awaiteds(req.actions)
-        seen    == { a \in aw : a \in DOMAIN env.objects }
-        proj(a) == Project(env.objects[a], env.now)
+    LET aw   == Awaiteds(req.actions)
+        seen == { a \in aw : a \in DOMAIN env.objects }
     IN
         IF \/ req.actions = {}
            \/ req.id \in aw
@@ -519,16 +518,22 @@ HandleTaskSuspend(req, env) ==
                 IF \/ old.task.state /= "acquired"
                    \/ old.promise.state /= "pending"
                    \/ old.task.version /= req.version
-                   \/ \E a \in aw : ~IsExternal(proj(a).promise) THEN
+                   \/ \E a \in aw :
+                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
                     [ effects |-> << >> ]
-                ELSE IF \E a \in aw : proj(a).promise.state /= "pending" THEN
+                ELSE IF \E a \in aw :
+                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
                     [ effects |-> << Variant("PutObject",
                                              [id |-> req.id,
                                               obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
                 ELSE
                     [ effects |->
                         << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
-                        \o CommitAll(aw, LAMBDA a : AddCallback(proj(a), req.id), env) ]
+                        \o CommitAll(aw,
+                                  LAMBDA a :
+                                      AddCallback(Project(env.objects[a], env.now),
+                                                  req.id),
+                                  env) ]
 
 (* @type: ($id, Int, $fenceAction, $env) => $outcome; *)
 FenceTarget(act) ==
