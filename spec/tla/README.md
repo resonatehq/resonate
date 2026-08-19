@@ -13,10 +13,21 @@ step's decision and its effects is a place other steps can get into.
 **The premise: the objects and the wheel are two stores, and nothing writes
 them together.** A step that settles a promise and clears its timeout does two
 writes, at two moments. `Process` reads and decides and writes nothing;
-`Perform` applies one effect at a time. So the *order* of a handler's effects
-is protocol — Verus emits `sched + put + ack + emits + respond`, arm before
-the write and disarm after, and a crash between any two effects is what makes
-the difference visible.
+`Perform` lands the document once and works the wheel one entry at a time. So
+the *order* of those effects matters — arm before the write and disarm after,
+which is Verus's `sched + put + ack` — and a crash between any two of them is
+what makes the difference visible.
+
+**That ordering is a property of executors that keep an index, not protocol**,
+and it took a while to say so. `Abstract` used to derive the arms and disarms
+itself, inside `Commit`, by diffing deadlines across old and new — which put
+wheel machinery in the specification, made a handler unreadable without
+chasing four operators, and produced effects `Apply` then discarded. The Lean
+does none of that: a deadline is a FIELD, `internal.lean` writes
+`setTask { t with retryAt := ... }` and stops, and `02-abstract` has no arm or
+disarm anywhere. The derivation now lives in `Concrete!Process`, from the
+document before against the objects written — which is where Verus computes
+`sched`, from `w0` and `w2`.
 
 **There is no fence.** Two steps may read the same object and both write it;
 the second wins. That is the experiment, not an oversight — put a
@@ -105,7 +116,7 @@ point of having all three:
 | | expected to survive because |
 |---|---|
 | `UnitCoherent` | the **state shape**. A promise and its task are one object, so one `PutObject` moves both. No interleaving can catch them disagreeing. |
-| `WheelComplete` | the **effect order**, and only that. The wheel is a second store; arm-before-write leaves noise on a crash, write-before-arm leaves silence. |
+| `WheelComplete` | the **effect order** in `Concrete`, and only that. The wheel is a second store; arm-before-write leaves noise on a crash, write-before-arm leaves silence. |
 | *(a lost update)* | **nothing here** — this is the candidate for the finding. Two steps read one object, both write, one update vanishes. |
 
 `promiseCreate` is the cheapest first handler: it writes an object *and* arms

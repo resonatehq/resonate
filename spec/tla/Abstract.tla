@@ -584,32 +584,29 @@ Cur(env, i) == IF i \in DOMAIN env.objects THEN env.objects[i] ELSE Absent
 (* experiment this module was built for, and it is one edit wide.          *)
 (***************************************************************************)
 
-(* @type: ($id, $object, $object, Str) => Seq($effect); *)
-ArmFor(i, old, new, k) ==
-    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Deadline(old, k)
-    THEN << Variant("ArmTimeout",
-                    [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
-    ELSE << >>
+(* WHAT A HANDLER WRITES, and nothing else. `internal.lean` says
+   `setTask { t with retryAt := some (now + config.retryTimeout) }` and
+   a reader of that line knows what the step does without going
+   anywhere. A deadline is a FIELD. There is no arm and no disarm in
+   `02-abstract` -- `setSchedule` and `delSchedule` are the cron
+   feature, not the wheel -- and there was none here either until this
+   operator grew a derivation that diffed three deadline kinds across
+   old and new and emitted up to six effects the handler never
+   mentioned, and that `Puts` and `Says` then threw away.
 
-(* @type: ($id, $object, $object, Str) => Seq($effect); *)
-DisarmFor(i, old, new, k) ==
-    IF Deadline(old, k) /= NoTime /\ Deadline(old, k) /= Deadline(new, k)
-    THEN << Variant("DisarmTimeout",
-                    [entry |-> [at |-> Deadline(old, k), id |-> i, kind |-> k]]) >>
-    ELSE << >>
+   That derivation now lives in `Concrete`, which is the machine that
+   keeps an index and therefore the machine that has to maintain one.
+   Verus computes it in exactly the same place and the same way, by
+   diffing the old document against the new:
 
-(* @type: ($id, $object, $object) => Seq($effect); *)
-Commit(i, old, new) ==
-       ArmFor(i, old, new, "promise")
-    \o ArmFor(i, old, new, "lease")
-    \o ArmFor(i, old, new, "retry")
-    \o << Variant("PutObject", [id |-> i, obj |-> new]) >>
-    \o DisarmFor(i, old, new, "promise")
-    \o DisarmFor(i, old, new, "lease")
-    \o DisarmFor(i, old, new, "retry")
+     let m1 = state::min_deadline(w2);
+     let sched = if m1 is Some && (m1 != state::min_deadline(w0) ...)
 
-(* @type: ($id, $object, $object) => $outcome; *)
-Write(i, old, new) == [ effects |-> Commit(i, old, new), res |-> Silent ]
+   @type: ($id, $object) => Seq($effect); *)
+Commit(i, new) == << Variant("PutObject", [id |-> i, obj |-> new]) >>
+
+(* @type: ($id, $object) => $outcome; *)
+Write(i, new) == [ effects |-> Commit(i, new), res |-> Silent ]
 
 (* Many objects, for the handlers whose request names a SET of them.
    This one cannot be written out: `S` is computed from the request, so
@@ -625,7 +622,7 @@ Write(i, old, new) == [ effects |-> Commit(i, old, new), res |-> Silent ]
    and no two of them can interfere. `taskHeartbeat` is the case.
    @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
 CommitAll(S, New(_), env) ==
-    ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, Cur(env, i), New(i)),
+    ApaFoldSet(LAMBDA acc, i : acc \o Commit(i, New(i)),
                << >>, S)
 
 (* @type: (ADDR, $message) => $effect; *)
@@ -637,7 +634,7 @@ Say(addr, msg) == Variant("Send", [entry |-> [address |-> addr, message |-> msg]
    and this is the one place it acts.
    @type: ($id, $object, $object, $env) => $outcome; *)
 Touch(i, old, pr, env) ==
-    IF env.mat /\ pr /= old THEN Write(i, old, pr) ELSE NoOp
+    IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
 
 (* @type: ($object, $id) => $object; *)
 AddCallback(obj, w) == [obj EXCEPT !.promise.callbacks = @ \cup {w}]
@@ -747,8 +744,8 @@ HPromiseCreate(req, env) ==
     IN  IF req.tags.timer /\ req.tags.targeted
         THEN NoOp
         ELSE IF i \in DOMAIN env.objects
-             THEN IF env.mat /\ pr /= old THEN Write(i, old, pr) ELSE NoOp
-             ELSE Write(i, Absent, Born(req, env.now))
+             THEN IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
+             ELSE Write(i, Born(req, env.now))
 
 (* `external.lean` promiseSettle. `rejectedTimedout` is not settable by a
    client -- that verdict belongs to the deadline, and letting a client
@@ -763,8 +760,8 @@ HPromiseSettle(req, env) ==
         ELSE IF i \notin DOMAIN env.objects
              THEN NoOp
              ELSE IF pr.promise.state = "pending"
-                  THEN Write(i, old, Settle(pr, req.state, req.value, env.now))
-                  ELSE IF env.mat /\ pr /= old THEN Write(i, old, pr) ELSE NoOp
+                  THEN Write(i, Settle(pr, req.state, req.value, env.now))
+                  ELSE IF env.mat /\ pr /= old THEN Write(i, pr) ELSE NoOp
 
 (* `external.lean` promiseGet. A read that can WRITE: projecting a
    settlement the deadline already decided is a change, and `mat` says
@@ -809,7 +806,7 @@ HPromiseRegisterCallback(req, env) ==
            \/ ~IsExternal(pa.promise)
         THEN Touch(a, oa, pa, env)
         ELSE IF pa.promise.state = "pending" /\ pw.promise.state = "pending"
-             THEN Write(a, oa, AddCallback(pa, w))
+             THEN Write(a, AddCallback(pa, w))
              ELSE Touch(a, oa, pa, env)
 
 (* `external.lean` promiseRegisterListener. Same door, one object.
@@ -820,7 +817,7 @@ HPromiseRegisterListener(a, addr, env) ==
     IN  IF a \notin DOMAIN env.objects \/ ~IsExternal(pa.promise)
         THEN Touch(a, oa, pa, env)
         ELSE IF pa.promise.state = "pending"
-             THEN Write(a, oa, AddListener(pa, addr))
+             THEN Write(a, AddListener(pa, addr))
              ELSE Touch(a, oa, pa, env)
 
 (* `external.lean` taskGet. Reads the unit; the task view fulfils itself
@@ -846,7 +843,7 @@ HTaskCreate(req, pid, ttl, env) ==
         THEN NoOp
         ELSE IF i \notin DOMAIN env.objects
              THEN LET born == Born(req, t)
-                  IN  Write(i, Absent,
+                  IN  Write(i,
                             IF born.promise.state = "pending"
                             THEN Acquired([born EXCEPT !.task.state = "pending"],
                                           pid, ttl, t + ttl)
@@ -854,7 +851,7 @@ HTaskCreate(req, pid, ttl, env) ==
              ELSE IF ~pr.promise.tags.targeted \/ ~Driven(pr)
                   THEN Touch(i, old, pr, env)
                   ELSE IF pr.task.state = "pending"
-                       THEN Write(i, old, Acquired(pr, pid, ttl, t + ttl))
+                       THEN Write(i, Acquired(pr, pid, ttl, t + ttl))
                        ELSE Touch(i, old, pr, env)
 
 (* `external.lean` taskAcquire. Three guards and they are all fences:
@@ -869,7 +866,7 @@ HTaskAcquire(i, v, pid, ttl, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN Touch(i, old, pr, env)
-        ELSE Write(i, old, Acquired(pr, pid, ttl, env.now + ttl))
+        ELSE Write(i, Acquired(pr, pid, ttl, env.now + ttl))
 
 (* `external.lean` taskFulfill. The holder settles the promise it was
    given, and the task is fulfilled in the same write because they are
@@ -884,7 +881,7 @@ HTaskFulfill(i, v, act, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN Touch(i, old, pr, env)
-        ELSE Write(i, old, Settle(pr, act.state, act.value, env.now))
+        ELSE Write(i, Settle(pr, act.state, act.value, env.now))
 
 (* `external.lean` taskRelease. The holder gives it back, and the
    dispatch clock is armed at once so somebody else is offered it.
@@ -897,7 +894,7 @@ HTaskRelease(i, v, env) ==
            \/ pr.promise.state /= "pending"
            \/ pr.task.version /= v
         THEN Touch(i, old, pr, env)
-        ELSE Write(i, old, Requeued(pr, env.now))
+        ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHalt. Stop offering this task, without settling
    the promise. No version is checked: halting is an operator's act, not
@@ -909,7 +906,7 @@ HTaskHalt(i, env) ==
     IN  IF \/ i \notin DOMAIN env.objects \/ ~Driven(pr)
            \/ pr.task.state \in {"fulfilled", "halted"}
         THEN Touch(i, old, pr, env)
-        ELSE Write(i, old, [pr EXCEPT !.task.state     = "halted",
+        ELSE Write(i, [pr EXCEPT !.task.state     = "halted",
                                       !.task.pid       = NoPid,
                                       !.task.ttl       = NoTime,
                                       !.task.expiresAt = NoTime,
@@ -924,7 +921,7 @@ HTaskContinue(i, env) ==
            \/ pr.task.state /= "halted"
            \/ pr.promise.state /= "pending"
         THEN Touch(i, old, pr, env)
-        ELSE Write(i, old, Requeued(pr, env.now))
+        ELSE Write(i, Requeued(pr, env.now))
 
 (* `external.lean` taskHeartbeat. One request, MANY objects: a worker
    renews every lease it holds in one call. Each renewal is its own
@@ -978,9 +975,9 @@ HTaskSuspend(i, v, acts, env) ==
            \/ \E a \in aw : ~IsExternal(proj(a).promise)
         THEN Touch(i, old, pr, env)
         ELSE IF \E a \in aw : proj(a).promise.state /= "pending"
-             THEN Write(i, old, [pr EXCEPT !.task.resumes = {}])
+             THEN Write(i, [pr EXCEPT !.task.resumes = {}])
              ELSE [ effects |->
-                      Commit(i, old, [pr EXCEPT !.task.state     = "suspended",
+                      Commit(i, [pr EXCEPT !.task.state     = "suspended",
                                                 !.task.pid       = NoPid,
                                                 !.task.ttl       = NoTime,
                                                 !.task.expiresAt = NoTime,
@@ -1030,7 +1027,7 @@ HLeaseTimeout(i, env) ==
            \/ old.task.expiresAt > env.now
            \/ pr.promise.state /= "pending"
         THEN NoOp
-        ELSE Write(i, old, Requeued(old, env.now))
+        ELSE Write(i, Requeued(old, env.now))
 
 (* `internal.lean` processRetryTimeout. The dispatch: offer a pending
    task to its target, and re-arm the clock so it is offered again if
@@ -1055,7 +1052,7 @@ HRetryTimeout(i, env) ==
            \/ pr.promise.state /= "pending"
         THEN NoOp
         ELSE [ effects |->
-                 Commit(i, old,
+                 Commit(i,
                         [old EXCEPT !.task.retryAt = env.now + env.config.retryTimeout])
                  \o << Say(old.promise.tags.target,
                            Variant("Execute", [id      |-> i,
@@ -1074,7 +1071,7 @@ HListenerDrain(i, addr, env) ==
            \/ addr \notin pr.promise.listeners
         THEN NoOp
         ELSE [ effects |->
-                 Commit(i, old,
+                 Commit(i,
                         [pr EXCEPT !.promise.listeners = @ \ {addr}])
                  \o << Say(addr, Variant("Unblock",
                                          [id |-> i, state |-> pr.promise.state])) >>,
@@ -1111,10 +1108,10 @@ HCallbackDrain(i, w, env) ==
            \/ w \notin pr.promise.callbacks
         THEN NoOp
         ELSE IF w \notin DOMAIN env.objects \/ ~Driven(Project(ow, env.now))
-             THEN Write(i, old, [pr EXCEPT !.promise.callbacks = @ \ {w}])
+             THEN Write(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
              ELSE [ effects |->
-                      Commit(i, old, [pr EXCEPT !.promise.callbacks = @ \ {w}])
-                      \o Commit(w, ow, Resumed(w, i, env)),
+                      Commit(i, [pr EXCEPT !.promise.callbacks = @ \ {w}])
+                      \o Commit(w, Resumed(w, i, env)),
                     res |-> Silent ]
 
 (* `internal.lean` processPromiseTimeout, which is `touchPromise` and
@@ -1132,7 +1129,7 @@ HTimeout(e, env) ==
         pr  == Project(old, env.now)
     IN  IF e.kind /= "promise" \/ i \notin DOMAIN env.objects
         THEN NoOp
-        ELSE IF pr /= old THEN Write(i, old, pr) ELSE NoOp
+        ELSE IF pr /= old THEN Write(i, pr) ELSE NoOp
 
 (* The dispatch table. Twenty constructors, twenty answers.
 

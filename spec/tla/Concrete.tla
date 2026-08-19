@@ -197,6 +197,67 @@ SubmitInternal(ev) ==
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
    being run by a different executor. *)
+(* MAINTAINING THE INDEX IS THE EXECUTOR'S JOB, and this is where it
+   happens. `Abstract` states what a handler writes and stops there --
+   a deadline is a field on an object, and `internal.lean` never says
+   arm or disarm. A machine that keeps a WHEEL has to work out what
+   that write did to the deadlines it indexes, and the only way to know
+   is to compare the document before against the document after.
+
+   Verus does this in `prepare`, from `w0` and `w2`:
+
+     let m1 = state::min_deadline(w2);
+     let sched = if m1 is Some
+         && (m1 != state::min_deadline(w0) || completing is Some) { ... }
+
+   Two differences from Verus worth naming rather than hiding. It arms
+   ONE timer at the earliest deadline and carries a generation to make
+   stale firings recognisable; this keeps one entry per object and kind,
+   which is a coarser wheel with no generations, so `WheelSound` failing
+   here is partly that choice and not only the arm-before-write order.
+   And `completing` gives Verus a reason to re-arm even when the minimum
+   has not moved, which has no counterpart here.
+   @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
+Before(o, i) == IF i \in DOMAIN docs[o] THEN docs[o][i] ELSE A!Absent
+
+ArmFor(i, old, new, k) ==
+    IF A!Deadline(new, k) /= A!NoTime /\ A!Deadline(new, k) /= A!Deadline(old, k)
+    THEN << Variant("ArmTimeout",
+                    [entry |-> [at |-> A!Deadline(new, k), id |-> i, kind |-> k]]) >>
+    ELSE << >>
+
+DisarmFor(i, old, new, k) ==
+    IF A!Deadline(old, k) /= A!NoTime /\ A!Deadline(old, k) /= A!Deadline(new, k)
+    THEN << Variant("DisarmTimeout",
+                    [entry |-> [at |-> A!Deadline(old, k), id |-> i, kind |-> k]]) >>
+    ELSE << >>
+
+(* Arm before the write and disarm after, which is Verus's
+   `sched + put + ack`. Arming first means a crash between the arm and
+   the write leaves an entry for an object that is not there -- noise,
+   which `C_WheelSound` sees and which the handler re-checks away when
+   it fires. Writing first would leave an object carrying a deadline
+   nothing will fire -- silence, which `C_WheelComplete` sees and which
+   nothing recovers from. Flip the two folds and the checker should hand
+   back a trace ending in a `Crash` with a deadline nobody holds.
+
+   This is a claim about EXECUTORS THAT KEEP AN INDEX. It used to sit in
+   `Abstract`, which made it look like protocol; it is not, and no
+   handler states it. *)
+Arms(o, W) ==
+    ApaFoldSet(LAMBDA acc, w :
+                 acc \o ArmFor(w.id, Before(o, w.id), w.obj, "promise")
+                     \o ArmFor(w.id, Before(o, w.id), w.obj, "lease")
+                     \o ArmFor(w.id, Before(o, w.id), w.obj, "retry"),
+               << >>, W)
+
+Disarms(o, W) ==
+    ApaFoldSet(LAMBDA acc, w :
+                 acc \o DisarmFor(w.id, Before(o, w.id), w.obj, "promise")
+                     \o DisarmFor(w.id, Before(o, w.id), w.obj, "lease")
+                     \o DisarmFor(w.id, Before(o, w.id), w.obj, "retry"),
+               << >>, W)
+
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
@@ -208,8 +269,10 @@ Process(r) ==
                     mat      |-> Materialise,
                     config   |-> [retryTimeout |-> RetryTimeout] ]
            out == A!Handle(steps[r].ev, env)
+           W   == A!Puts(out.effects)
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
-                                  ![r].pending = out.effects,
+                                  ![r].pending = Arms(o, W) \o out.effects
+                                                 \o Disarms(o, W),
                                   ![r].res     = out.res,
                                   ![r].expect  = etags[o],
                                   ![r].at      = now]
