@@ -252,6 +252,30 @@ async def test_coercion_failure_raises_serialization_error() -> None:
         await df.invoke(_context(), payload)
 
 
+@pytest.mark.asyncio
+async def test_object_annotation_passes_value_through() -> None:
+    # ``object`` is the most general nameable type; like ``Any`` it means "any
+    # value", so the raw builtin must reach the handler untouched rather than be
+    # handed to msgspec (which, given the SDK dec_hook, fails on ``object``).
+    # Regression test for issue #466.
+    async def echo(ctx: Context, data: object) -> object:
+        return data
+
+    df = DurableFunction(echo)
+    sentinel = {"name": "world"}
+    payload = Args(args=(sentinel,), kwargs={})
+    assert await df.invoke(_context(), payload) == sentinel
+
+
+def test_coerce_result_passthrough_when_object() -> None:
+    async def obj_ret(ctx: Context, x: int) -> object:
+        return x
+
+    df = DurableFunction(obj_ret)
+    sentinel = {"raw": "dict"}
+    assert df.coerce_result(sentinel) is sentinel
+
+
 # =============================================================================
 # coerce_result: return-value coercion on recovery (the symmetric counterpart of
 # argument coercion). On the ``ctx.run`` recovery short-circuit a settled child's

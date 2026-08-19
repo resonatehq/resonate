@@ -258,16 +258,20 @@ def _is_passthrough_annotation(annotation: Any) -> bool:
 
     Shared by :meth:`DurableFunction._coerce_value` (argument + return coercion)
     and :meth:`DurableFunction.return_type` (the top-level decode type), so every
-    view of "is this typed?" agrees. Four cases pass through untouched:
+    view of "is this typed?" agrees. Five cases pass through untouched:
 
     * ``empty``  -- the parameter / return is genuinely unannotated.
     * ``Any``    -- explicitly opted out of typing.
+    * ``object`` -- the most general type nameable; means "any value", so like
+      ``Any`` there is nothing to reshape. msgspec, given a ``dec_hook``, would
+      otherwise defer ``object`` to the hook and fail on non-model values.
     * ``None``   -- ``-> None`` / ``x: None``; the value is already ``None``.
     * a ``str``  -- a forward ref :func:`_resolve_annotation` could not evaluate.
     """
     return (
         annotation is inspect.Parameter.empty
         or annotation is Any
+        or annotation is object
         or annotation is None
         or isinstance(annotation, str)
     )
