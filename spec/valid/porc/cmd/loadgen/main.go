@@ -74,6 +74,18 @@ var (
 	out     = flag.String("out", "run", "output prefix")
 	seed    = flag.Int64("seed", 1, "rng seed")
 	batch   = flag.Int("batch", 4, "operations sharing one debug instant")
+	// Deadlines relative to the debug clock, because absolute ones do not fire.
+	//
+	// The generator used to hard-code `timeoutAt: 900000` and `ttl: 60000`
+	// while the debug clock reaches ~30k over 4000 ops — so R1 promise_timeout
+	// and R5 lease_expiry NEVER fired, and with them T task_fulfil and R3
+	// notify, which need a settled promise to couple to. Five of six rules
+	// silently unexercised while the run reported clean.
+	//
+	// Defaults preserve the old behaviour; set them inside the clock's range to
+	// exercise the time-driven half.
+	horizon = flag.Uint64("horizon", 900000, "promise timeoutAt, relative to the debug instant")
+	lease   = flag.Uint64("lease", 60000, "task ttl")
 )
 
 // clock hands out debug instants. Operations in the same batch share one,
@@ -130,6 +142,12 @@ func main() {
 				// share objects.
 				op, kind := nextOp(r, cid, int(i))
 				now := clk.next(*batch)
+				if _, ok := op["timeoutAt"]; ok {
+					op["timeoutAt"] = now + *horizon
+				}
+				if _, ok := op["ttl"]; ok {
+					op["ttl"] = *lease
+				}
 				op["__now"] = now
 
 				call := time.Now().UnixNano()
