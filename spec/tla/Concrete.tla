@@ -34,7 +34,7 @@
 EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
 
 CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAddr,
-          NoValue, RetryTimeout, MaxTime, MaxVersion,
+          NoValue, RetryTimeout, MaxTime, MaxVersion, MaxBatch,
           Fenced
 
 VARIABLES

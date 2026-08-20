@@ -53,13 +53,15 @@ CONSTANTS
     NoAddr,
     RetryTimeout,
     MaxTime,
-    MaxVersion
+    MaxVersion,
+    MaxBatch
 
 ASSUME NoPid   \notin Pid
 ASSUME NoAddr  \notin Address
 ASSUME NoValue \notin Value
 ASSUME MaxTime    >= 0
 ASSUME MaxVersion >= 0
+ASSUME MaxBatch   >= 1
 
 Time    == 0 .. MaxTime
 Version == 0 .. MaxVersion
@@ -716,24 +718,27 @@ Prom(id) == objects[id].promise
 (* @type: $promise => Bool; *)
 SettledNow(p) == p.state /= "pending" \/ p.timeoutAt <= now
 
-(* @type: $event => Bool; *)
-Fires(ev) ==
+(* @type: (($id -> $object), $event) => Bool; *)
+FiresIn(objs, ev) ==
     CASE VariantTag(ev) = "Timeout" ->
              LET d == VariantGetUnsafe("Timeout", ev) IN
-             /\ d.id \in DOMAIN objects
-             /\ Deadline(objects[d.id], d.kind) /= NoTime
-             /\ Deadline(objects[d.id], d.kind) <= now
+             /\ d.id \in DOMAIN objs
+             /\ Deadline(objs[d.id], d.kind) /= NoTime
+             /\ Deadline(objs[d.id], d.kind) <= now
       [] VariantTag(ev) = "ListenerDrain" ->
              LET d == VariantGetUnsafe("ListenerDrain", ev) IN
-             /\ Live(d.id)
-             /\ SettledNow(Prom(d.id))
-             /\ d.address \in Prom(d.id).listeners
+             /\ d.id \in DOMAIN objs
+             /\ SettledNow(objs[d.id].promise)
+             /\ d.address \in objs[d.id].promise.listeners
       [] VariantTag(ev) = "CallbackDrain" ->
              LET d == VariantGetUnsafe("CallbackDrain", ev) IN
-             /\ Live(d.id)
-             /\ SettledNow(Prom(d.id))
-             /\ d.awaiter \in Prom(d.id).callbacks
+             /\ d.id \in DOMAIN objs
+             /\ SettledNow(objs[d.id].promise)
+             /\ d.awaiter \in objs[d.id].promise.callbacks
       [] OTHER -> FALSE
+
+(* @type: $event => Bool; *)
+Fires(ev) == FiresIn(objects, ev)
 
 -----------------------------------------------------------------------------
 
@@ -746,6 +751,35 @@ Puts(fx) ==
 Says(fx) ==
     { VariantGetUnsafe("Send", fx[i]).entry
       : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
+
+(* @type: (($id -> $object), Seq($effect)) => ($id -> $object); *)
+PutsInto(objs, fx) ==
+    LET W == Puts(fx) IN
+    [ i \in (DOMAIN objs) \cup {w.id : w \in W} |->
+         IF \E w \in W : w.id = i
+         THEN (CHOOSE w \in W : w.id = i).obj
+         ELSE objs[i] ]
+
+(* @type: (Set($outEntry), Seq($effect)) => Set($outEntry); *)
+SaysInto(ob, fx) ==
+    LET S == Says(fx) IN
+    { o \in ob : ~\E e \in S : MsgKey(o) = MsgKey(e) } \cup S
+
+(* ONE INTERNAL EVENT, APPLIED TO A STATE. An event not enabled HERE does
+   nothing, which is what lets a batch be any sequence at all: a drain
+   that is not due yet simply does not fire, so no ordering constraint is
+   needed and every order is meaningful.
+   @type: ({ objects: $id -> $object, outbox: Set($outEntry) }, $event)
+              => { objects: $id -> $object, outbox: Set($outEntry) }; *)
+Advance(st, ev) ==
+    IF ~FiresIn(st.objects, ev) THEN
+        st
+    ELSE
+        LET out == Handle(ev, [ objects |-> st.objects,
+                                now     |-> now,
+                                config  |-> [retryTimeout |-> RetryTimeout] ])
+        IN  [ objects |-> PutsInto(st.objects, out.effects),
+              outbox  |-> SaysInto(st.outbox, out.effects) ]
 
 (* @type: $outcome => Bool; *)
 Apply(out) ==
@@ -769,6 +803,28 @@ Internal(ev) ==
     /\ Fires(ev)
     /\ Apply(Handle(ev, Env))
 
+(* ANY NUMBER OF INTERNAL STEPS AT ONE INSTANT, which is what makes this
+   machine maximally admissible: an executor may drain one at a time, or
+   everything at once, or anything between, and all of it is one abstract
+   step. `MaxBatch = 1` is the one-event-one-transition machine.
+
+   `MaxBatch` is a window, not a claim -- the same kind of bound as
+   `MaxTime` and `MaxVersion`. There is no natural bound from the
+   alphabet: `CallbackDrain` resuming a suspended awaiter sets its
+   `retryAt` to `now`, which RE-ENABLES a `RetryTimeout` that already
+   fired earlier in the same batch. *)
+Batch ==
+    \E n \in 1..MaxBatch :
+        \E s \in [1 .. n -> InternalEvent] :
+            LET final == ApaFoldSeqLeft(Advance,
+                                        [objects |-> objects, outbox |-> outbox],
+                                        s)
+            IN  /\ \/ final.objects /= objects
+                   \/ final.outbox  /= outbox
+                /\ objects' = final.objects
+                /\ outbox'  = final.outbox
+                /\ UNCHANGED now
+
 Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
@@ -783,7 +839,7 @@ Init ==
 
 Next ==
     \/ \E ev \in ExternalEvent : External(ev)
-    \/ \E ev \in InternalEvent : Internal(ev)
+    \/ Batch
     \/ Clock
 
 Fairness ==
