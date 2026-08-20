@@ -792,10 +792,24 @@ Apply(out) ==
                      { o \in outbox : ~\E e \in S : MsgKey(o) = MsgKey(e) } \cup S
     /\ UNCHANGED now
 
-(* @type: $event => Bool; *)
+(* A REQUEST, WITH ANY AMOUNT OF DRAINING FOLDED IN. An executor that
+   sweeps a document on access does the drains and the request at one
+   instant, so the abstract step has to admit that shape or the
+   refinement fails for a reason about scheduling rather than protocol.
+   `n = 0` is the plain request, which is what this used to be. *)
 External(ev) ==
     /\ ev \in ExternalEvent
-    /\ Apply(Handle(ev, Env))
+    /\ \E n \in 0..MaxBatch :
+           \E s \in [1 .. n -> InternalEvent] :
+               LET mid == ApaFoldSeqLeft(Advance,
+                                         [objects |-> objects, outbox |-> outbox],
+                                         s)
+                   out == Handle(ev, [ objects |-> mid.objects,
+                                       now     |-> now,
+                                       config  |-> [retryTimeout |-> RetryTimeout] ])
+               IN  /\ objects' = PutsInto(mid.objects, out.effects)
+                   /\ outbox'  = SaysInto(mid.outbox, out.effects)
+                   /\ UNCHANGED now
 
 (* @type: $event => Bool; *)
 Internal(ev) ==

@@ -186,13 +186,47 @@ Fires(ev) ==
              \E e \in timeouts : /\ e.id   = d.id
                                 /\ e.kind = d.kind
                                 /\ e.at  <= now
-      [] OTHER -> A!Fires(ev)
+      [] OTHER -> FALSE
 
 SubmitInternal(ev) ==
     /\ ev \in A!InternalEvent
     /\ Fires(ev)
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
+
+(* WHAT THE DOCUMENT OWES, found by LOOKING AT IT. This is the executor's
+   own question, asked of a document it is already holding, and it is
+   deliberately not `A!Fires`: that operator decides whether an internal
+   step is due anywhere in the store, which is a thing no executor knows
+   without an index. The wheel is the only index this machine keeps, and
+   it indexes deadlines -- not drains.
+
+   So drains are never scheduled. They are swept on ACCESS: every step
+   reads a document, and what it reads it also drains. That is
+   `drain_doc` inside `prepare_doc`, and upstairs it is one `Batch`.
+   @type: (($id -> $object), Int) => Set($event); *)
+Owed(doc, t) ==
+    LET Settled == { i \in DOMAIN doc : \/ doc[i].promise.state /= "pending"
+                                        \/ doc[i].promise.timeoutAt <= t }
+    IN     UNION { { Variant("ListenerDrain", [id |-> i, address |-> a])
+                       : a \in doc[i].promise.listeners } : i \in Settled }
+       \cup UNION { { Variant("CallbackDrain", [id |-> i, awaiter |-> w])
+                       : w \in doc[i].promise.callbacks } : i \in Settled }
+
+(* ONE SWEEP, threading the document so two drains on one promise do not
+   overwrite each other's strike. One pass, not a fixpoint: a drain that
+   only becomes owed because of another drain waits for the next access,
+   which is what bounds a sweep against `MaxBatch` upstairs.
+   @type: (($id -> $object), Int) => { doc: $id -> $object, fx: Seq($effect) }; *)
+Sweep(doc, t) ==
+    ApaFoldSet(LAMBDA st, ev :
+                   LET out == A!Handle(ev, [ objects |-> st.doc,
+                                             now     |-> t,
+                                             config  |-> [retryTimeout |-> RetryTimeout] ])
+                   IN  [ doc |-> A!PutsInto(st.doc, out.effects),
+                         fx  |-> st.fx \o out.effects ],
+               [doc |-> doc, fx |-> << >>],
+               Owed(doc, t))
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -262,15 +296,17 @@ Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
     /\ LET o   == steps[r].org
-           env == [ objects  |-> docs[o],
+           swept == Sweep(docs[o], now)
+           env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
                     now      |-> now,
                     config   |-> [retryTimeout |-> RetryTimeout] ]
            out == A!Handle(steps[r].ev, env)
-           W   == A!Puts(out.effects)
+           fx  == swept.fx \o out.effects
+           W   == A!Puts(fx)
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
-                                  ![r].pending = Arms(o, W) \o out.effects
+                                  ![r].pending = Arms(o, W) \o fx
                                                  \o Disarms(o, W),
                                   ![r].expect  = docs[o],
                                   ![r].at      = now]
