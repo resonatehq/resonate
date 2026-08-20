@@ -499,34 +499,57 @@ Handle(st, ev) ==
 
 -----------------------------------------------------------------------------
 
+ReadyTimeouts(objs, t) ==
+    { d \in [id : DOMAIN objs, kind : DeadlineKind] :
+        /\ Deadline(objs[d.id], d.kind) /= NoTime
+        /\ Deadline(objs[d.id], d.kind) <= t }
+
+Settling(objs, t) ==
+    { j \in DOMAIN objs : \/ objs[j].promise.state /= "pending"
+                          \/ objs[j].promise.timeoutAt <= t }
+
+ReadyListeners(objs, t) ==
+    UNION { { [id |-> i, address |-> a] : a \in objs[i].promise.listeners }
+              : i \in Settling(objs, t) }
+
+ReadyCallbacks(objs, t) ==
+    UNION { { [id |-> i, awaiter |-> w] : w \in objs[i].promise.callbacks }
+              : i \in Settling(objs, t) }
+
+Drain(st, TS, LS, CS) ==
+    LET afterT == ApaFoldSet(LAMBDA acc, d :
+                                 CASE d.kind = "promise" ->
+                                          ProcessPromiseTimeout(acc, d)
+                                   [] d.kind = "lease" ->
+                                          ProcessLeaseTimeout(acc, d.id)
+                                   [] OTHER ->
+                                          ProcessRetryTimeout(acc, d.id),
+                             st, TS)
+        afterL == ApaFoldSet(LAMBDA acc, d : ProcessListener(acc, d), afterT, LS)
+    IN
+        ApaFoldSet(LAMBDA acc, d : ProcessCallback(acc, d), afterL, CS)
+
 External(ev) ==
     /\ ev \in ExternalEvent
-    /\ \E n \in 0..MaxBatch :
-           \E s \in [1 .. n -> InternalEvent] :
-               LET final == Handle(ApaFoldSeqLeft(Handle, State, s), ev)
-               IN
-                   /\ objects' = final.objects
-                   /\ outbox'  = final.outbox
-                   /\ UNCHANGED now
+    /\ \E TS \in SUBSET ReadyTimeouts(objects, now),
+          LS \in SUBSET ReadyListeners(objects, now),
+          CS \in SUBSET ReadyCallbacks(objects, now) :
+          LET final == Handle(Drain(State, TS, LS, CS), ev)
+          IN
+              /\ objects' = final.objects
+              /\ outbox'  = final.outbox
+              /\ UNCHANGED now
 
-Internal(ev) ==
-    /\ ev \in InternalEvent
-    /\ LET final == Handle(State, ev)
+Internal ==
+    \E TS \in SUBSET ReadyTimeouts(objects, now),
+       LS \in SUBSET ReadyListeners(objects, now),
+       CS \in SUBSET ReadyCallbacks(objects, now) :
+       LET final == Drain(State, TS, LS, CS)
        IN
            /\ final /= State
            /\ objects' = final.objects
            /\ outbox'  = final.outbox
            /\ UNCHANGED now
-
-Batch ==
-    \E n \in 1..MaxBatch :
-        \E s \in [1 .. n -> InternalEvent] :
-            LET final == ApaFoldSeqLeft(Handle, State, s)
-            IN
-                /\ final /= State
-                /\ objects' = final.objects
-                /\ outbox'  = final.outbox
-                /\ UNCHANGED now
 
 Clock ==
     /\ now < MaxTime
@@ -542,11 +565,11 @@ Init ==
 
 Next ==
     \/ \E ev \in ExternalEvent : External(ev)
-    \/ Batch
+    \/ Internal
     \/ Clock
 
 Fairness ==
-    /\ \A ev \in InternalEvent : WF_vars(Internal(ev))
+    /\ WF_vars(Internal)
     /\ WF_vars(Clock)
 
 Spec ==
