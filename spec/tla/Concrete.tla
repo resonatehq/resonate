@@ -39,13 +39,12 @@ CONSTANTS Origin, Rest, Address, Pid, Value, Ttl, Rid, Implemented, NoPid, NoAdd
 
 VARIABLES
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
-    etags,      \* [ORIGIN -> Int] -- what a compare-and-swap compares
     timeouts,   \* the wheel. Same variable, same meaning as Abstract's
     outbox,     \* likewise
     steps,      \* likewise, plus `expect` and `org`
     now         \* likewise
 
-vars == <<docs, etags, timeouts, outbox, steps, now>>
+vars == <<docs, timeouts, outbox, steps, now>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -69,8 +68,9 @@ A == INSTANCE Abstract WITH objects <- Objects
 (* Three of this machine's six variables map to NOTHING, and that is the   *)
 (* whole shape of the result:                                              *)
 (*                                                                         *)
-(*     etags      a fence. Machinery for keeping a promise the abstract    *)
-(*                machine states without it                                *)
+(*     expect     a fence. The document a step decided against, compared   *)
+(*                on the way in, and machinery for keeping a promise the   *)
+(*                abstract machine states without it                       *)
 (*     timeouts   an index, so an executor need not scan for what is due.  *)
 (*                `Abstract` reads deadlines off the objects               *)
 (*     steps      work in flight. `Abstract` has no interval between       *)
@@ -144,7 +144,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> 0, at |-> 0, org |-> OriginOf(ev) ]
+      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev) ]
 
 Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
 Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
@@ -152,7 +152,7 @@ Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
 SubmitExternal(ev) ==
     /\ ev \in A!ExternalEvent
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
-    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 (* THE ASYMMETRY, stated plainly, because it is the point of having two
    machines rather than one:
@@ -192,7 +192,7 @@ SubmitInternal(ev) ==
     /\ ev \in A!InternalEvent
     /\ Fires(ev)
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
-    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -272,9 +272,9 @@ Process(r) ==
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o out.effects
                                                  \o Disarms(o, W),
-                                  ![r].expect  = etags[o],
+                                  ![r].expect  = docs[o],
                                   ![r].at      = now]
-    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 (* One effect. A write whose document has moved since the read is REFUSED,
    and the step goes back to deciding -- which under the abstraction is
@@ -363,11 +363,11 @@ Perform(r) ==
     /\ steps[r].phase = "perform"
     /\ IF steps[r].pending = << >>
        THEN /\ steps' = Drop(steps, r)
-            /\ UNCHANGED <<docs, etags, timeouts, outbox>>
+            /\ UNCHANGED <<docs, timeouts, outbox>>
        ELSE LET e == Head(steps[r].pending)
                 o == steps[r].org
             IN CASE VariantTag(e) = "PutObject" ->
-                    IF Fenced => (etags[o] = steps[r].expect /\ now = steps[r].at)
+                    IF Fenced => (docs[o] = steps[r].expect /\ now = steps[r].at)
                     THEN /\ docs'  = [docs EXCEPT ![o] =
                                          LET W == A!Puts(steps[r].pending) IN
                                          [ i \in (DOMAIN docs[o])
@@ -375,7 +375,6 @@ Perform(r) ==
                                              IF \E w \in W : w.id = i
                                              THEN (CHOOSE w \in W : w.id = i).obj
                                              ELSE docs[o][i] ]]
-                         /\ etags' = [etags EXCEPT ![o] = @ + 1]
                          /\ outbox' = LET S == A!Says(steps[r].pending) IN
                                         { x \in outbox :
                                             ~\E m \in S : A!MsgKey(x) = A!MsgKey(m) } \cup S
@@ -387,35 +386,34 @@ Perform(r) ==
                          /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>]
-                         /\ UNCHANGED <<docs, etags, timeouts, outbox>>
+                         /\ UNCHANGED <<docs, timeouts, outbox>>
                  [] VariantTag(e) = "ArmTimeout" ->
                     /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
                     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, outbox>>
+                    /\ UNCHANGED <<docs, outbox>>
                  [] VariantTag(e) = "DisarmTimeout" ->
                     /\ timeouts' = timeouts \ {VariantGetUnsafe("DisarmTimeout", e).entry}
                     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, outbox>>
+                    /\ UNCHANGED <<docs, outbox>>
                  [] OTHER ->
                     /\ outbox' = LET en == VariantGetUnsafe("Send", e).entry
                                  IN  {x \in outbox : A!MsgKey(x) /= A!MsgKey(en)} \cup {en}
                     /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, etags, timeouts>>
+                    /\ UNCHANGED <<docs, timeouts>>
     /\ UNCHANGED now
 
 Crash(r) ==
     /\ r \in DOMAIN steps
     /\ steps' = Drop(steps, r)
-    /\ UNCHANGED <<docs, etags, timeouts, outbox, now>>
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ UNCHANGED <<docs, etags, timeouts, outbox, steps>>
+    /\ UNCHANGED <<docs, timeouts, outbox, steps>>
 
 Init ==
     /\ docs     = [o \in Origin |-> SetAsFun({})]
-    /\ etags    = [o \in Origin |-> 0]
     /\ timeouts = {}
     /\ outbox   = {}
     /\ steps    = SetAsFun({})
@@ -638,7 +636,7 @@ C_WheelComplete ==
 SplitWrite ==
     \E r \in DOMAIN steps :
         /\ steps[r].phase = "perform"
-        /\ etags[steps[r].org] > steps[r].expect
+        /\ docs[steps[r].org] /= steps[r].expect
         /\ \E j \in DOMAIN steps[r].pending :
                VariantTag(steps[r].pending[j]) = "PutObject"
 
