@@ -194,47 +194,55 @@ SubmitInternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* WHAT THE DOCUMENT OWES, found by LOOKING AT IT. This is the executor's
-   own question, asked of a document it is already holding, and it is
-   deliberately not `A!Fires`: that operator decides whether an internal
-   step is due anywhere in the store, which is a thing no executor knows
-   without an index. The wheel is the only index this machine keeps, and
-   it indexes deadlines -- not drains.
+(* NOTHING HAPPENS OUTSIDE A REQUEST OR A TIMER. That is the rule this
+   executor lives by, and it is why `Fires` is the wheel and nothing
+   else: a drain is not work this machine goes looking for and not an
+   event it can schedule.
 
-   So drains are never scheduled. They are swept on ACCESS: every step
-   reads a document, and what it reads it also drains. That is
-   `drain_doc` inside `prepare_doc`, and upstairs it is one `Batch`.
-   @type: (($id -> $object), Int) => Set($event); *)
-Owed(doc, t) ==
-    LET Settled == { i \in DOMAIN doc : \/ doc[i].promise.state /= "pending"
-                                        \/ doc[i].promise.timeoutAt <= t }
-    IN     UNION { { Variant("ListenerDrain", [id |-> i, address |-> a])
-                       : a \in doc[i].promise.listeners } : i \in Settled }
-       \cup UNION { { Variant("CallbackDrain", [id |-> i, awaiter |-> w])
-                       : w \in doc[i].promise.callbacks } : i \in Settled }
+   It is what happens TO A DOCUMENT when a request or a timer touches
+   one. So it is written here as a transformation of the document, with
+   no event vocabulary involved -- `drain_doc` inside `prepare_doc`.
 
-(* ONE SWEEP OF A CHOSEN AMOUNT, threading the document so two drains on
-   one promise do not overwrite each other's strike.
+   A settled promise still carrying a name owes that name an answer: a
+   listener gets `Unblock`, a callback gets its awaiter resumed. Both
+   strike the name in the same write that answers it, which is why a
+   drain happens once.
+   @type: (($id -> $object), Int) => Set({ id: $id, address: ADDR }); *)
+DrainableListeners(doc, t) ==
+    UNION { { [id |-> i, address |-> a] : a \in doc[i].promise.listeners }
+              : i \in { j \in DOMAIN doc :
+                            \/ doc[j].promise.state /= "pending"
+                            \/ doc[j].promise.timeoutAt <= t } }
 
-   THE AMOUNT IS NOT DECIDED HERE. `Process` picks any subset of what the
-   document owes, so this machine stands for EVERY executor's drain
-   policy -- one item per access, everything at once, or anything
-   between -- rather than for one particular policy. `Abstract!Batch`
-   admits the same range, which is what makes them line up.
+(* @type: (($id -> $object), Int) => Set({ id: $id, awaiter: $id }); *)
+DrainableCallbacks(doc, t) ==
+    UNION { { [id |-> i, awaiter |-> w] : w \in doc[i].promise.callbacks }
+              : i \in { j \in DOMAIN doc :
+                            \/ doc[j].promise.state /= "pending"
+                            \/ doc[j].promise.timeoutAt <= t } }
 
-   One pass, not a fixpoint: a drain that only becomes owed because of
-   another waits for the next access.
-   @type: (Set($event), ($id -> $object), Int)
+(* SWEEPING A CHOSEN AMOUNT. The drain itself is PROTOCOL, so it is the
+   protocol's own operator that performs it -- `A!ProcessListener` and
+   `A!ProcessCallback` are functions from a document to effects, not
+   events being scheduled, and calling one is not this machine taking an
+   internal step.
+
+   The document is threaded so two drains on one promise do not
+   overwrite each other's strike. One pass, not a fixpoint: a drain that
+   only becomes possible because of another waits for the next access.
+   @type: (($id -> $object), Int, Set({ id: $id, address: ADDR }),
+           Set({ id: $id, awaiter: $id }))
               => { doc: $id -> $object, fx: Seq($effect) }; *)
-Sweep(S, doc, t) ==
-    ApaFoldSet(LAMBDA st, ev :
-                   LET out == A!Handle(ev, [ objects |-> st.doc,
-                                             now     |-> t,
-                                             config  |-> [retryTimeout |-> RetryTimeout] ])
-                   IN  [ doc |-> A!PutsInto(st.doc, out.effects),
-                         fx  |-> st.fx \o out.effects ],
-               [doc |-> doc, fx |-> << >>],
-               S)
+Sweep(doc, t, LS, CS) ==
+    LET EnvOf(d) == [ objects |-> d, now |-> t,
+                      config  |-> [retryTimeout |-> RetryTimeout] ]
+        Step(H(_,_), st, req) ==
+            LET out == H(req, EnvOf(st.doc))
+            IN  [ doc |-> A!PutsInto(st.doc, out.effects),
+                  fx  |-> st.fx \o out.effects ]
+        afterL == ApaFoldSet(LAMBDA st, d : Step(A!ProcessListener, st, d),
+                             [doc |-> doc, fx |-> << >>], LS)
+    IN  ApaFoldSet(LAMBDA st, d : Step(A!ProcessCallback, st, d), afterL, CS)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -303,9 +311,10 @@ Disarms(o, W) ==
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ \E S \in SUBSET Owed(docs[steps[r].org], now) :
+    /\ \E LS \in SUBSET DrainableListeners(docs[steps[r].org], now),
+          CS \in SUBSET DrainableCallbacks(docs[steps[r].org], now) :
        LET o   == steps[r].org
-           swept == Sweep(S, docs[o], now)
+           swept == Sweep(docs[o], now, LS, CS)
            env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
