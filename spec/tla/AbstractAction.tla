@@ -9,6 +9,11 @@ VARIABLES
 vars ==
     <<objects, outbox, now>>
 
+(* @typeAlias: state = { objects: $id -> $object, outbox: Set($outEntry), now: Int };
+   @type: $state; *)
+State ==
+    [objects |-> objects, outbox |-> outbox, now |-> now]
+
 -----------------------------------------------------------------------------
 
 (* @type: ($object, Int) => $object; *)
@@ -55,14 +60,15 @@ New(req, t) ==
 
 -----------------------------------------------------------------------------
 
-HandlePromiseCreate(req) ==
-    /\ req.id \notin DOMAIN objects
-    /\ objects' = (req.id :> New(req, now)) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+HandlePromiseCreate(pre, req) ==
+    /\ req.id \notin DOMAIN pre.objects
+    /\ objects' = (req.id :> New(req, now)) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandlePromiseSettle(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandlePromiseSettle(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.promise.state = "pending"
            /\ objects' =
@@ -77,14 +83,15 @@ HandlePromiseSettle(req) ==
                                         !.ttl       = NoTime,
                                         !.expiresAt = NoTime,
                                         !.retryAt   = NoTime,
-                                        !.resumes   = {}] ]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                        !.resumes   = {}] ]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandlePromiseRegisterCallback(req) ==
-    /\ req.awaited \in DOMAIN objects
-    /\ req.awaiter \in DOMAIN objects
-    /\ LET awaited == Project(objects[req.awaited], now)
-           awaiter == Project(objects[req.awaiter], now)
+HandlePromiseRegisterCallback(pre, req) ==
+    /\ req.awaited \in DOMAIN pre.objects
+    /\ req.awaiter \in DOMAIN pre.objects
+    /\ LET awaited == Project(pre.objects[req.awaited], now)
+           awaiter == Project(pre.objects[req.awaiter], now)
        IN
            /\ awaiter.promise.tags.targeted
            /\ IsExternal(awaited.promise)
@@ -93,26 +100,28 @@ HandlePromiseRegisterCallback(req) ==
            /\ objects' =
                   (req.awaited :>
                       [awaited EXCEPT !.promise.callbacks = @ \cup {req.awaiter}])
-                          @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                          @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandlePromiseRegisterListener(req) ==
-    /\ req.awaited \in DOMAIN objects
-    /\ LET old == Project(objects[req.awaited], now)
+HandlePromiseRegisterListener(pre, req) ==
+    /\ req.awaited \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.awaited], now)
        IN
            /\ IsExternal(old.promise)
            /\ old.promise.state = "pending"
            /\ objects' =
                   (req.awaited :>
                       [old EXCEPT !.promise.listeners = @ \cup {req.address}])
-                          @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                          @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
 -----------------------------------------------------------------------------
 
-HandleTaskCreate(req) ==
+HandleTaskCreate(pre, req) ==
     /\ req.action.tags.targeted
-    /\ \/ /\ req.action.id \notin DOMAIN objects
+    /\ \/ /\ req.action.id \notin DOMAIN pre.objects
           /\ LET born == New(req.action, now)
              IN
                  objects' =
@@ -126,9 +135,9 @@ HandleTaskCreate(req) ==
                                           !.task.retryAt   = NoTime,
                                           !.task.resumes   = {}]
                          ELSE
-                             born) @@ objects
-       \/ /\ req.action.id \in DOMAIN objects
-          /\ LET old == Project(objects[req.action.id], now)
+                             born) @@ pre.objects
+       \/ /\ req.action.id \in DOMAIN pre.objects
+          /\ LET old == Project(pre.objects[req.action.id], now)
              IN
                  /\ old.promise.tags.targeted
                  /\ old.task.state = "pending"
@@ -140,12 +149,13 @@ HandleTaskCreate(req) ==
                                         !.task.pid       = req.pid,
                                         !.task.expiresAt = now + req.ttl,
                                         !.task.retryAt   = NoTime,
-                                        !.task.resumes   = {}]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                        !.task.resumes   = {}]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandleTaskAcquire(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskAcquire(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.task.state = "pending"
            /\ old.promise.state = "pending"
@@ -158,22 +168,23 @@ HandleTaskAcquire(req) ==
                                   !.task.pid       = req.pid,
                                   !.task.expiresAt = now + req.ttl,
                                   !.task.retryAt   = NoTime,
-                                  !.task.resumes   = {}]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                  !.task.resumes   = {}]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandleTaskFence(i, v) ==
-    /\ i \in DOMAIN objects
-    /\ LET old == Project(objects[i], now)
+HandleTaskFence(pre, i, v) ==
+    /\ i \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[i], now)
        IN
            /\ old.task.state = "acquired"
            /\ old.promise.state = "pending"
            /\ old.task.version = v
-           /\ \/ \E req \in CreateReq : req.id /= i /\ HandlePromiseCreate(req)
-              \/ \E req \in SettleReq : req.id /= i /\ HandlePromiseSettle(req)
+           /\ \/ \E req \in CreateReq : req.id /= i /\ HandlePromiseCreate(pre, req)
+              \/ \E req \in SettleReq : req.id /= i /\ HandlePromiseSettle(pre, req)
 
-HandleTaskHeartbeat(req) ==
-    LET beat == { i \in DOMAIN objects :
-                    LET old == Project(objects[i], now)
+HandleTaskHeartbeat(pre, req) ==
+    LET beat == { i \in DOMAIN pre.objects :
+                    LET old == Project(pre.objects[i], now)
                     IN  /\ \E rf \in req.tasks :
                               rf.id = i /\ rf.version = old.task.version
                         /\ old.task.state = "acquired"
@@ -183,34 +194,35 @@ HandleTaskHeartbeat(req) ==
         /\ beat /= {}
         /\ objects' =
                ApaFoldSet(LAMBDA acc, i :
-                              LET old == Project(objects[i], now)
+                              LET old == Project(pre.objects[i], now)
                               IN  (i :> [old EXCEPT !.task.expiresAt =
                                                         now + old.task.ttl]) @@ acc,
                           objects, beat)
-        /\ UNCHANGED <<outbox, now>>
+        /\ outbox' = pre.outbox
+        /\ UNCHANGED now
 
-HandleTaskSuspend(req) ==
+HandleTaskSuspend(pre, req) ==
     LET aw == { a.awaited : a \in req.actions }
     IN
         /\ req.actions /= {}
         /\ req.id \notin aw
         /\ \A a \in aw : a.origin = req.id.origin
-        /\ req.id \in DOMAIN objects
-        /\ \A a \in aw : a \in DOMAIN objects
-        /\ LET old == Project(objects[req.id], now)
+        /\ req.id \in DOMAIN pre.objects
+        /\ \A a \in aw : a \in DOMAIN pre.objects
+        /\ LET old == Project(pre.objects[req.id], now)
            IN
                /\ old.task.state = "acquired"
                /\ old.promise.state = "pending"
                /\ old.task.version = req.version
-               /\ \A a \in aw : IsExternal(Project(objects[a], now).promise)
+               /\ \A a \in aw : IsExternal(Project(pre.objects[a], now).promise)
                /\ IF \E a \in aw :
-                        Project(objects[a], now).promise.state /= "pending" THEN
+                        Project(pre.objects[a], now).promise.state /= "pending" THEN
                       objects' =
-                          (req.id :> [old EXCEPT !.task.resumes = {}]) @@ objects
+                          (req.id :> [old EXCEPT !.task.resumes = {}]) @@ pre.objects
                   ELSE
                       objects' =
                           ApaFoldSet(LAMBDA acc, a :
-                                         (a :> [Project(objects[a], now) EXCEPT
+                                         (a :> [Project(pre.objects[a], now) EXCEPT
                                                    !.promise.callbacks =
                                                        @ \cup {req.id}]) @@ acc,
                                      (req.id :>
@@ -219,13 +231,14 @@ HandleTaskSuspend(req) ==
                                                      !.task.ttl       = NoTime,
                                                      !.task.expiresAt = NoTime,
                                                      !.task.retryAt   = NoTime,
-                                                     !.task.resumes   = {}]) @@ objects,
+                                                     !.task.resumes   = {}]) @@ pre.pre.objects,
                                      aw)
-        /\ UNCHANGED <<outbox, now>>
+        /\ outbox' = pre.outbox
+        /\ UNCHANGED now
 
-HandleTaskFulfill(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskFulfill(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.task.state = "acquired"
            /\ old.promise.state = "pending"
@@ -241,12 +254,13 @@ HandleTaskFulfill(req) ==
                                                      !.ttl       = NoTime,
                                                      !.expiresAt = NoTime,
                                                      !.retryAt   = NoTime,
-                                                     !.resumes   = {}] ]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                                     !.resumes   = {}] ]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandleTaskRelease(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskRelease(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.task.state = "acquired"
            /\ old.promise.state = "pending"
@@ -257,12 +271,13 @@ HandleTaskRelease(req) ==
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                  !.task.retryAt   = now]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandleTaskHalt(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskHalt(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.task.state \notin {"none", "fulfilled", "halted"}
            /\ objects' =
@@ -271,12 +286,13 @@ HandleTaskHalt(req) ==
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = NoTime]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                  !.task.retryAt   = NoTime]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
-HandleTaskContinue(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskContinue(pre, req) ==
+    /\ req.id \in DOMAIN pre.objects
+    /\ LET old == Project(pre.objects[req.id], now)
        IN
            /\ old.task.state = "halted"
            /\ old.promise.state = "pending"
@@ -286,100 +302,144 @@ HandleTaskContinue(req) ==
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+                                  !.task.retryAt   = now]) @@ pre.objects
+    /\ outbox' = pre.outbox
+    /\ UNCHANGED now
 
 -----------------------------------------------------------------------------
 
-ProcessPromiseTimeout ==
-    \E i \in DOMAIN objects :
-        /\ objects[i].promise.state = "pending"
-        /\ objects[i].promise.timeoutAt <= now
-        /\ objects' = (i :> Project(objects[i], now)) @@ objects
-        /\ UNCHANGED <<outbox, now>>
+-----------------------------------------------------------------------------
 
-ProcessLeaseTimeout ==
-    \E i \in DOMAIN objects :
-        LET old == objects[i]
+ProcessLeaseTimeout(st, i) ==
+    IF i \notin DOMAIN st.objects THEN
+        st
+    ELSE
+        LET old == st.objects[i]
+            new == [old EXCEPT !.task.state     = "pending",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = st.now]
         IN
-            /\ old.task.state = "acquired"
-            /\ old.task.expiresAt /= NoTime
-            /\ old.task.expiresAt <= now
-            /\ Project(old, now).promise.state = "pending"
-            /\ objects' =
-                   (i :> [old EXCEPT !.task.state     = "pending",
-                                     !.task.pid       = NoPid,
-                                     !.task.ttl       = NoTime,
-                                     !.task.expiresAt = NoTime,
-                                     !.task.retryAt   = now]) @@ objects
-            /\ UNCHANGED <<outbox, now>>
+            IF \/ old.task.state /= "acquired"
+               \/ old.task.expiresAt = NoTime
+               \/ old.task.expiresAt > st.now
+               \/ Project(old, st.now).promise.state /= "pending" THEN
+                st
+            ELSE
+                [st EXCEPT !.objects = (i :> new) @@ @]
 
-ProcessRetryTimeout ==
-    \E i \in DOMAIN objects :
-        LET old == objects[i]
-            msg == [ address |-> objects[i].promise.tags.target,
+ProcessRetryTimeout(st, i) ==
+    IF i \notin DOMAIN st.objects THEN
+        st
+    ELSE
+        LET old == st.objects[i]
+            new == [old EXCEPT !.task.retryAt = st.now + RetryTimeout]
+            msg == [ address |-> old.promise.tags.target,
                      message |-> Variant("Execute",
                                          [id      |-> i,
-                                          version |-> objects[i].task.version]) ]
+                                          version |-> old.task.version]) ]
         IN
-            /\ old.task.state = "pending"
-            /\ old.task.retryAt /= NoTime
-            /\ old.task.retryAt <= now
-            /\ Project(old, now).promise.state = "pending"
-            /\ objects' =
-                   (i :> [old EXCEPT !.task.retryAt = now + RetryTimeout]) @@ objects
-            /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
-            /\ UNCHANGED now
+            IF \/ old.task.state /= "pending"
+               \/ old.task.retryAt = NoTime
+               \/ old.task.retryAt > st.now
+               \/ Project(old, st.now).promise.state /= "pending" THEN
+                st
+            ELSE
+                [st EXCEPT !.objects = (i :> new) @@ @,
+                           !.outbox  = { o \in @ : MsgKey(o) /= MsgKey(msg) }
+                                           \cup {msg}]
 
-ProcessListener ==
-    \E i \in DOMAIN objects :
-        \E a \in objects[i].promise.listeners :
-            LET awaited == Project(objects[i], now)
-                msg     == [ address |-> a,
-                             message |-> Variant("Unblock",
-                                                 [id    |-> i,
-                                                  state |-> Project(objects[i],
-                                                                    now).promise.state]) ]
-            IN
-                /\ awaited.promise.state /= "pending"
-                /\ objects' =
-                       (i :> [awaited EXCEPT !.promise.listeners = @ \ {a}]) @@ objects
-                /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
-                /\ UNCHANGED now
+ProcessListener(st, req) ==
+    IF req.id \notin DOMAIN st.objects THEN
+        st
+    ELSE
+        LET awaited    == Project(st.objects[req.id], st.now)
+            newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
+            msg        == [ address |-> req.address,
+                            message |-> Variant("Unblock",
+                                                [id    |-> req.id,
+                                                 state |-> awaited.promise.state]) ]
+        IN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.address \notin awaited.promise.listeners THEN
+                st
+            ELSE
+                [st EXCEPT !.objects = (req.id :> newAwaited) @@ @,
+                           !.outbox  = { o \in @ : MsgKey(o) /= MsgKey(msg) }
+                                           \cup {msg}]
 
-ProcessCallback ==
-    \E i \in DOMAIN objects :
-        \E w \in objects[i].promise.callbacks :
-            LET awaited    == Project(objects[i], now)
-                newAwaited == [Project(objects[i], now) EXCEPT
-                                  !.promise.callbacks = @ \ {w}]
-            IN
-                /\ awaited.promise.state /= "pending"
-                /\ \/ /\ w \notin DOMAIN objects
-                      /\ objects' = (i :> newAwaited) @@ objects
-                   \/ /\ w \in DOMAIN objects
-                      /\ LET awaiter == Project(objects[w], now)
-                         IN
-                             IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                                 objects' = (i :> newAwaited) @@ objects
-                             ELSE
-                                 objects' =
-                                     (i :> newAwaited)
-                                  @@ (w :>
-                                         IF awaiter.task.state = "suspended" THEN
-                                             [awaiter EXCEPT
-                                                 !.task.state     = "pending",
-                                                 !.task.pid       = NoPid,
-                                                 !.task.ttl       = NoTime,
-                                                 !.task.expiresAt = NoTime,
-                                                 !.task.retryAt   = now,
-                                                 !.task.resumes   = {i}]
-                                         ELSE
-                                             [awaiter EXCEPT
-                                                 !.task.resumes = @ \cup {i}])
-                                  @@ objects
-                /\ UNCHANGED <<outbox, now>>
+ProcessCallback(st, req) ==
+    IF req.id \notin DOMAIN st.objects THEN
+        st
+    ELSE
+        LET awaited    == Project(st.objects[req.id], st.now)
+            newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
+        IN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.awaiter \notin awaited.promise.callbacks THEN
+                st
+            ELSE IF req.awaiter \notin DOMAIN st.objects THEN
+                [st EXCEPT !.objects = (req.id :> newAwaited) @@ @]
+            ELSE
+                LET awaiter    == Project(st.objects[req.awaiter], st.now)
+                    newAwaiter == IF awaiter.task.state = "suspended" THEN
+                                      [awaiter EXCEPT !.task.state     = "pending",
+                                                      !.task.pid       = NoPid,
+                                                      !.task.ttl       = NoTime,
+                                                      !.task.expiresAt = NoTime,
+                                                      !.task.retryAt   = st.now,
+                                                      !.task.resumes   = {req.id}]
+                                  ELSE
+                                      [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
+                IN
+                    IF awaiter.task.state \in {"none", "fulfilled"} THEN
+                        [st EXCEPT !.objects = (req.id :> newAwaited) @@ @]
+                    ELSE
+                        [st EXCEPT !.objects = (req.id      :> newAwaited)
+                                            @@ (req.awaiter :> newAwaiter) @@ @]
 
+ProcessPromiseTimeout(st, req) ==
+    IF req.kind /= "promise" \/ req.id \notin DOMAIN st.objects THEN
+        st
+    ELSE
+        LET old == st.objects[req.id]
+            new == Project(old, st.now)
+        IN
+            IF new /= old THEN
+                [st EXCEPT !.objects = (req.id :> new) @@ @]
+            ELSE
+                st
+
+ReadyTimeouts(objs, t) ==
+    { d \in [id : DOMAIN objs, kind : DeadlineKind] :
+        /\ Deadline(objs[d.id], d.kind) /= NoTime
+        /\ Deadline(objs[d.id], d.kind) <= t }
+
+Settling(objs, t) ==
+    { j \in DOMAIN objs : \/ objs[j].promise.state /= "pending"
+                          \/ objs[j].promise.timeoutAt <= t }
+
+ReadyListeners(objs, t) ==
+    UNION { { [id |-> i, address |-> a] : a \in objs[i].promise.listeners }
+              : i \in Settling(objs, t) }
+
+ReadyCallbacks(objs, t) ==
+    UNION { { [id |-> i, awaiter |-> w] : w \in objs[i].promise.callbacks }
+              : i \in Settling(objs, t) }
+
+Drain(st, TS, LS, CS) ==
+    LET afterT == ApaFoldSet(LAMBDA acc, d :
+                                 CASE d.kind = "promise" ->
+                                          ProcessPromiseTimeout(acc, d)
+                                   [] d.kind = "lease" ->
+                                          ProcessLeaseTimeout(acc, d.id)
+                                   [] OTHER ->
+                                          ProcessRetryTimeout(acc, d.id),
+                             st, TS)
+        afterL == ApaFoldSet(LAMBDA acc, d : ProcessListener(acc, d), afterT, LS)
+    IN
+        ApaFoldSet(LAMBDA acc, d : ProcessCallback(acc, d), afterL, CS)
 -----------------------------------------------------------------------------
 
 Clock ==
@@ -394,39 +454,46 @@ Init ==
     /\ outbox  = {}
     /\ now     = 0
 
+Sweeps(Body(_)) ==
+    \E TS \in SUBSET ReadyTimeouts(objects, now),
+       LS \in SUBSET ReadyListeners(objects, now),
+       CS \in SUBSET ReadyCallbacks(objects, now) :
+       Body(Drain(State, TS, LS, CS))
+
+Internal ==
+    Sweeps(LAMBDA pre :
+               /\ pre /= State
+               /\ objects' = pre.objects
+               /\ outbox'  = pre.outbox
+               /\ UNCHANGED now)
+
 Next ==
-    \/ \E req \in CreateReq   : HandlePromiseCreate(req)
-    \/ \E req \in SettleReq   : HandlePromiseSettle(req)
-    \/ \E req \in CallbackReq : HandlePromiseRegisterCallback(req)
-    \/ \E req \in [awaited : Id, address : Address] :
-           HandlePromiseRegisterListener(req)
-    \/ \E req \in [pid : Pid, ttl : Ttl, action : CreateReq] :
-           HandleTaskCreate(req)
-    \/ \E req \in [id : Id, version : Version, pid : Pid, ttl : Ttl] :
-           HandleTaskAcquire(req)
-    \/ \E i \in Id, v \in Version : HandleTaskFence(i, v)
-    \/ \E req \in [pid : Pid, tasks : SUBSET TaskRefT] :
-           HandleTaskHeartbeat(req)
-    \/ \E req \in [id : Id, version : Version, actions : SUBSET CallbackReq] :
-           HandleTaskSuspend(req)
-    \/ \E req \in [id : Id, version : Version, action : SettleReq] :
-           HandleTaskFulfill(req)
-    \/ \E req \in TaskRefT : HandleTaskRelease(req)
-    \/ \E req \in [id : Id] : HandleTaskHalt(req)
-    \/ \E req \in [id : Id] : HandleTaskContinue(req)
-    \/ ProcessPromiseTimeout
-    \/ ProcessLeaseTimeout
-    \/ ProcessRetryTimeout
-    \/ ProcessListener
-    \/ ProcessCallback
+    \/ Sweeps(LAMBDA pre :
+                  \/ \E req \in CreateReq   : HandlePromiseCreate(pre, req)
+                  \/ \E req \in SettleReq   : HandlePromiseSettle(pre, req)
+                  \/ \E req \in CallbackReq : HandlePromiseRegisterCallback(pre, req)
+                  \/ \E req \in [awaited : Id, address : Address] :
+                         HandlePromiseRegisterListener(pre, req)
+                  \/ \E req \in [pid : Pid, ttl : Ttl, action : CreateReq] :
+                         HandleTaskCreate(pre, req)
+                  \/ \E req \in [id : Id, version : Version, pid : Pid, ttl : Ttl] :
+                         HandleTaskAcquire(pre, req)
+                  \/ \E i \in Id, v \in Version : HandleTaskFence(pre, i, v)
+                  \/ \E req \in [pid : Pid, tasks : SUBSET TaskRefT] :
+                         HandleTaskHeartbeat(pre, req)
+                  \/ \E req \in [id : Id, version : Version,
+                                 actions : SUBSET CallbackReq] :
+                         HandleTaskSuspend(pre, req)
+                  \/ \E req \in [id : Id, version : Version, action : SettleReq] :
+                         HandleTaskFulfill(pre, req)
+                  \/ \E req \in TaskRefT : HandleTaskRelease(pre, req)
+                  \/ \E req \in [id : Id] : HandleTaskHalt(pre, req)
+                  \/ \E req \in [id : Id] : HandleTaskContinue(pre, req))
+    \/ Internal
     \/ Clock
 
 Fairness ==
-    /\ WF_vars(ProcessPromiseTimeout)
-    /\ WF_vars(ProcessLeaseTimeout)
-    /\ WF_vars(ProcessRetryTimeout)
-    /\ WF_vars(ProcessListener)
-    /\ WF_vars(ProcessCallback)
+    /\ WF_vars(Internal)
     /\ WF_vars(Clock)
 
 Spec ==

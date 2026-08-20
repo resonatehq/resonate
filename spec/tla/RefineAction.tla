@@ -1,12 +1,11 @@
 ----------------------------- MODULE RefineAction -----------------------------
-(* Does the executor still refine the protocol when the protocol is written
-   as plain TLA+ actions -- one event, one step, no batch?
+(* Does the executor refine the protocol stated as actions, with the batch
+   as a subset of what is ready?
 
-   `Concrete` sweeps a document on access: some number of drains and the
-   request land together, in one `PutDocument`. `[][Next]_vars` gives that
-   concrete step ONE abstract step or none. AbstractAction has no step that
-   is more than one event, so a sweep that drained anything and then served
-   a request has no abstract step to be. *)
+   The earlier answer, with no batch at all, was no, and TLC said so with a
+   sweep that timed out one promise and created another in a single write.
+   `Sweeps` gives the request an explicit pre-state, so a drained subset and
+   the request that follows it are one step here too. *)
 EXTENDS Concrete
 
 AA == INSTANCE AbstractAction WITH objects <- Objects
