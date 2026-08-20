@@ -284,19 +284,15 @@ HandleTaskContinue(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: (PID, Set($taskRef), $env) => $outcome; *)
-Renewable(pid, refs, env) ==
-    { i \in DOMAIN env.objects :
-        LET pr == Project(env.objects[i], env.now)
-        IN  /\ \E rf \in refs : rf.id = i /\ rf.version = pr.task.version
-            /\ pr.task.state /= "none"
-            /\ pr.task.state = "acquired"
-            /\ pr.task.pid = pid
-            /\ pr.promise.state = "pending" }
-
 HandleTaskHeartbeat(req, env) ==
     [ effects |->
-        CommitAll(Renewable(req.pid, req.tasks, env),
+        CommitAll({ i \in DOMAIN env.objects :
+                      LET old == Project(env.objects[i], env.now)
+                      IN  /\ \E rf \in req.tasks :
+                                rf.id = i /\ rf.version = old.task.version
+                          /\ old.task.state = "acquired"
+                          /\ old.task.pid = req.pid
+                          /\ old.promise.state = "pending" },
                   LAMBDA i :
                       LET old == Project(env.objects[i], env.now)
                       IN
@@ -342,19 +338,15 @@ HandleTaskSuspend(req, env) ==
                                            !.promise.callbacks = @ \cup {req.id}],
                                   env) ]
 
-(* @type: ($id, Int, $fenceAction, $env) => $outcome; *)
-FenceTarget(act) ==
-    IF VariantTag(act) = "Create"
-    THEN VariantGetUnsafe("Create", act).req.id
-    ELSE VariantGetUnsafe("Settle", act).req.id
-
 HandleTaskFence(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
         IN
-            IF \/ FenceTarget(req.action) = req.id
+            IF \/ (IF VariantTag(req.action) = "Create"
+                   THEN VariantGetUnsafe("Create", req.action).req.id
+                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -522,15 +514,6 @@ Handle(ev, env) ==
 
 -----------------------------------------------------------------------------
 
-(* @type: $id => Bool; *)
-Live(id) == id \in DOMAIN objects
-
-(* @type: $id => $promise; *)
-Prom(id) == objects[id].promise
-
-(* @type: $promise => Bool; *)
-SettledNow(p) == p.state /= "pending" \/ p.timeoutAt <= now
-
 (* @type: (($id -> $object), $event) => Bool; *)
 FiresIn(objs, ev) ==
     CASE VariantTag(ev) = "Timeout" ->
@@ -541,12 +524,14 @@ FiresIn(objs, ev) ==
       [] VariantTag(ev) = "ListenerDrain" ->
              LET d == VariantGetUnsafe("ListenerDrain", ev) IN
              /\ d.id \in DOMAIN objs
-             /\ SettledNow(objs[d.id].promise)
+             /\ LET p == objs[d.id].promise
+                IN  p.state /= "pending" \/ p.timeoutAt <= now
              /\ d.address \in objs[d.id].promise.listeners
       [] VariantTag(ev) = "CallbackDrain" ->
              LET d == VariantGetUnsafe("CallbackDrain", ev) IN
              /\ d.id \in DOMAIN objs
-             /\ SettledNow(objs[d.id].promise)
+             /\ LET p == objs[d.id].promise
+                IN  p.state /= "pending" \/ p.timeoutAt <= now
              /\ d.awaiter \in objs[d.id].promise.callbacks
       [] OTHER -> FALSE
 
@@ -686,53 +671,47 @@ TypeOK ==
         /\ \A o \in DOMAIN objects :
            objects[o].task.state = "none" => objects[o].task = NoTask
 
-(* @type: $id => $promise; *)
-Pr(i) == objects[i].promise
-
-(* @type: $id => $task; *)
-Tk(i) == objects[i].task
-
 well_formed_promise_created_at_lte_timeout_at ==
-    \A i \in DOMAIN objects : Pr(i).createdAt <= Pr(i).timeoutAt
+    \A i \in DOMAIN objects : objects[i].promise.createdAt <= objects[i].promise.timeoutAt
 
 well_formed_promise_settled_at_iff_not_pending ==
     \A i \in DOMAIN objects :
-        (Pr(i).state /= "pending") <=> (Pr(i).settledAt /= NoTime)
+        (objects[i].promise.state /= "pending") <=> (objects[i].promise.settledAt /= NoTime)
 
 well_formed_promise_pending_has_no_value ==
     \A i \in DOMAIN objects :
-        Pr(i).state = "pending" => Pr(i).value = NoValue
+        objects[i].promise.state = "pending" => objects[i].promise.value = NoValue
 
 well_formed_promise_settled_at_lte_timeout_at ==
     \A i \in DOMAIN objects :
-        Pr(i).settledAt /= NoTime => Pr(i).settledAt <= Pr(i).timeoutAt
+        objects[i].promise.settledAt /= NoTime => objects[i].promise.settledAt <= objects[i].promise.timeoutAt
 
 well_formed_task_pending_iff_has_retry_at ==
     \A i \in DOMAIN objects :
-        objects[i].task.state /= "none" => ((Tk(i).state = "pending") <=> (Tk(i).retryAt /= NoTime))
+        objects[i].task.state /= "none" => ((objects[i].task.state = "pending") <=> (objects[i].task.retryAt /= NoTime))
 
 well_formed_task_acquired_iff_has_expires_at ==
     \A i \in DOMAIN objects :
-        objects[i].task.state /= "none" => ((Tk(i).state = "acquired") <=> (Tk(i).expiresAt /= NoTime))
+        objects[i].task.state /= "none" => ((objects[i].task.state = "acquired") <=> (objects[i].task.expiresAt /= NoTime))
 
 consistent_settled_promise_has_fulfilled_task ==
     \A i \in DOMAIN objects :
-        (Pr(i).state /= "pending" /\ objects[i].task.state /= "none") => Tk(i).state = "fulfilled"
+        (objects[i].promise.state /= "pending" /\ objects[i].task.state /= "none") => objects[i].task.state = "fulfilled"
 
 consistent_settled_task_promise_settled ==
     \A i \in DOMAIN objects :
-        (objects[i].task.state /= "none" /\ Tk(i).state = "fulfilled") => Pr(i).state /= "pending"
+        (objects[i].task.state /= "none" /\ objects[i].task.state = "fulfilled") => objects[i].promise.state /= "pending"
 
 consistent_task_iff_targeted_promise ==
-    \A i \in DOMAIN objects : objects[i].task.state /= "none" <=> Pr(i).tags.targeted
+    \A i \in DOMAIN objects : objects[i].task.state /= "none" <=> objects[i].promise.tags.targeted
 
 preserved_settled_promise_record ==
     \A i \in DOMAIN objects :
-        \/ Pr(i).state = "pending"
+        \/ objects[i].promise.state = "pending"
         \/ /\ i \in DOMAIN objects'
-           /\ objects'[i].promise.state     = Pr(i).state
-           /\ objects'[i].promise.settledAt = Pr(i).settledAt
-           /\ objects'[i].promise.value     = Pr(i).value
+           /\ objects'[i].promise.state     = objects[i].promise.state
+           /\ objects'[i].promise.settledAt = objects[i].promise.settledAt
+           /\ objects'[i].promise.value     = objects[i].promise.value
 
 consistent_new_promise_born_clean ==
     \A i \in DOMAIN objects' :
@@ -753,7 +732,7 @@ consistent_new_promise_born_clean ==
 
 consistent_promise_settlement_stamp ==
     \A i \in DOMAIN objects :
-        \/ Pr(i).state /= "pending"
+        \/ objects[i].promise.state /= "pending"
         \/ /\ i \in DOMAIN objects'
            /\ LET q == objects'[i].promise IN
               \/ q.state = "pending"
@@ -764,11 +743,11 @@ consistent_promise_settlement_stamp ==
                  /\ q.timeoutAt <= now
                  /\ (IF q.tags.timer THEN q.state = "resolved"
                                      ELSE q.state = "rejectedTimedout")
-                 /\ q.value = Pr(i).value
+                 /\ q.value = objects[i].promise.value
 
 consistent_settlement_fulfils_task ==
     \A i \in DOMAIN objects :
-        \/ Pr(i).state /= "pending"
+        \/ objects[i].promise.state /= "pending"
         \/ i \notin DOMAIN objects'
         \/ objects'[i].promise.state = "pending"
         \/ objects'[i].task.state \in {"none", "fulfilled"}

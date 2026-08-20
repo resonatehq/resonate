@@ -370,19 +370,15 @@ HandleTaskContinue(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: (PID, Set($taskRef), $env) => $outcome; *)
-Renewable(pid, refs, env) ==
-    { i \in DOMAIN env.objects :
-        LET pr == Project(env.objects[i], env.now)
-        IN  /\ \E rf \in refs : rf.id = i /\ rf.version = pr.task.version
-            /\ pr.task.state /= "none"
-            /\ pr.task.state = "acquired"
-            /\ pr.task.pid = pid
-            /\ pr.promise.state = "pending" }
-
 HandleTaskHeartbeat(req, env) ==
     [ effects |->
-        CommitAll(Renewable(req.pid, req.tasks, env),
+        CommitAll({ i \in DOMAIN env.objects :
+                      LET old == Project(env.objects[i], env.now)
+                      IN  /\ \E rf \in req.tasks :
+                                rf.id = i /\ rf.version = old.task.version
+                          /\ old.task.state = "acquired"
+                          /\ old.task.pid = req.pid
+                          /\ old.promise.state = "pending" },
                   LAMBDA i :
                       LET old == Project(env.objects[i], env.now)
                       IN
@@ -428,19 +424,15 @@ HandleTaskSuspend(req, env) ==
                                            !.promise.callbacks = @ \cup {req.id}],
                                   env) ]
 
-(* @type: ($id, Int, $fenceAction, $env) => $outcome; *)
-FenceTarget(act) ==
-    IF VariantTag(act) = "Create"
-    THEN VariantGetUnsafe("Create", act).req.id
-    ELSE VariantGetUnsafe("Settle", act).req.id
-
 HandleTaskFence(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
         IN
-            IF \/ FenceTarget(req.action) = req.id
+            IF \/ (IF VariantTag(req.action) = "Create"
+                   THEN VariantGetUnsafe("Create", req.action).req.id
+                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
@@ -608,28 +600,6 @@ Handle(ev, env) ==
 
 -----------------------------------------------------------------------------
 
-(* @type: $promise => Bool; *)
-SettledNow(p) == p.state /= "pending" \/ p.timeoutAt <= now
-
-(* @type: (($id -> $object), $event) => Bool; *)
-FiresIn(objs, ev) ==
-    CASE VariantTag(ev) = "Timeout" ->
-             LET d == VariantGetUnsafe("Timeout", ev) IN
-             /\ d.id \in DOMAIN objs
-             /\ Deadline(objs[d.id], d.kind) /= NoTime
-             /\ Deadline(objs[d.id], d.kind) <= now
-      [] VariantTag(ev) = "ListenerDrain" ->
-             LET d == VariantGetUnsafe("ListenerDrain", ev) IN
-             /\ d.id \in DOMAIN objs
-             /\ SettledNow(objs[d.id].promise)
-             /\ d.address \in objs[d.id].promise.listeners
-      [] VariantTag(ev) = "CallbackDrain" ->
-             LET d == VariantGetUnsafe("CallbackDrain", ev) IN
-             /\ d.id \in DOMAIN objs
-             /\ SettledNow(objs[d.id].promise)
-             /\ d.awaiter \in objs[d.id].promise.callbacks
-      [] OTHER -> FALSE
-
 
 (* @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
 Puts(fx) ==
@@ -655,11 +625,6 @@ PutsInto(objs, fx) ==
                                      IF i = w.id THEN w.obj ELSE acc[i] ]
                        ELSE acc,
                    objs, fx)
-
-(* @type: (Set($outEntry), Seq($effect)) => Set($outEntry); *)
-SaysInto(ob, fx) ==
-    LET S == Says(fx) IN
-    { o \in ob : ~\E e \in S : MsgKey(o) = MsgKey(e) } \cup S
 
 
 (***************************************************************************)
