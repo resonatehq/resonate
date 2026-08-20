@@ -302,96 +302,94 @@ HandleTaskContinue(req) ==
 
 -----------------------------------------------------------------------------
 
-ProcessPromiseTimeout(req) ==
-    /\ req.kind = "promise"
-    /\ req.id \in DOMAIN objects
-    /\ Project(objects[req.id], now) /= objects[req.id]
-    /\ objects' = (req.id :> Project(objects[req.id], now)) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+ProcessPromiseTimeout ==
+    \E i \in DOMAIN objects :
+        /\ objects[i].promise.state = "pending"
+        /\ objects[i].promise.timeoutAt <= now
+        /\ objects' = (i :> Project(objects[i], now)) @@ objects
+        /\ UNCHANGED <<outbox, now>>
 
-ProcessLeaseTimeout(i) ==
-    /\ i \in DOMAIN objects
-    /\ LET old == objects[i]
-       IN
-           /\ old.task.state = "acquired"
-           /\ old.task.expiresAt /= NoTime
-           /\ old.task.expiresAt <= now
-           /\ Project(old, now).promise.state = "pending"
-           /\ objects' =
-                  (i :> [old EXCEPT !.task.state     = "pending",
-                                    !.task.pid       = NoPid,
-                                    !.task.ttl       = NoTime,
-                                    !.task.expiresAt = NoTime,
-                                    !.task.retryAt   = now]) @@ objects
-    /\ UNCHANGED <<outbox, now>>
+ProcessLeaseTimeout ==
+    \E i \in DOMAIN objects :
+        LET old == objects[i]
+        IN
+            /\ old.task.state = "acquired"
+            /\ old.task.expiresAt /= NoTime
+            /\ old.task.expiresAt <= now
+            /\ Project(old, now).promise.state = "pending"
+            /\ objects' =
+                   (i :> [old EXCEPT !.task.state     = "pending",
+                                     !.task.pid       = NoPid,
+                                     !.task.ttl       = NoTime,
+                                     !.task.expiresAt = NoTime,
+                                     !.task.retryAt   = now]) @@ objects
+            /\ UNCHANGED <<outbox, now>>
 
-ProcessRetryTimeout(i) ==
-    /\ i \in DOMAIN objects
-    /\ LET old == objects[i]
-           msg == [ address |-> objects[i].promise.tags.target,
-                    message |-> Variant("Execute",
-                                        [id      |-> i,
-                                         version |-> objects[i].task.version]) ]
-       IN
-           /\ old.task.state = "pending"
-           /\ old.task.retryAt /= NoTime
-           /\ old.task.retryAt <= now
-           /\ Project(old, now).promise.state = "pending"
-           /\ objects' =
-                  (i :> [old EXCEPT !.task.retryAt = now + RetryTimeout]) @@ objects
-           /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
-    /\ UNCHANGED now
+ProcessRetryTimeout ==
+    \E i \in DOMAIN objects :
+        LET old == objects[i]
+            msg == [ address |-> objects[i].promise.tags.target,
+                     message |-> Variant("Execute",
+                                         [id      |-> i,
+                                          version |-> objects[i].task.version]) ]
+        IN
+            /\ old.task.state = "pending"
+            /\ old.task.retryAt /= NoTime
+            /\ old.task.retryAt <= now
+            /\ Project(old, now).promise.state = "pending"
+            /\ objects' =
+                   (i :> [old EXCEPT !.task.retryAt = now + RetryTimeout]) @@ objects
+            /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
+            /\ UNCHANGED now
 
-ProcessListener(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET awaited == Project(objects[req.id], now)
-           msg     == [ address |-> req.address,
-                        message |-> Variant("Unblock",
-                                            [id    |-> req.id,
-                                             state |-> Project(objects[req.id],
-                                                               now).promise.state]) ]
-       IN
-           /\ awaited.promise.state /= "pending"
-           /\ req.address \in awaited.promise.listeners
-           /\ objects' =
-                  (req.id :>
-                      [awaited EXCEPT !.promise.listeners = @ \ {req.address}])
-                          @@ objects
-           /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
-    /\ UNCHANGED now
+ProcessListener ==
+    \E i \in DOMAIN objects :
+        \E a \in objects[i].promise.listeners :
+            LET awaited == Project(objects[i], now)
+                msg     == [ address |-> a,
+                             message |-> Variant("Unblock",
+                                                 [id    |-> i,
+                                                  state |-> Project(objects[i],
+                                                                    now).promise.state]) ]
+            IN
+                /\ awaited.promise.state /= "pending"
+                /\ objects' =
+                       (i :> [awaited EXCEPT !.promise.listeners = @ \ {a}]) @@ objects
+                /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
+                /\ UNCHANGED now
 
-ProcessCallback(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET awaited    == Project(objects[req.id], now)
-           newAwaited == [Project(objects[req.id], now) EXCEPT
-                             !.promise.callbacks = @ \ {req.awaiter}]
-       IN
-           /\ awaited.promise.state /= "pending"
-           /\ req.awaiter \in awaited.promise.callbacks
-           /\ \/ /\ req.awaiter \notin DOMAIN objects
-                 /\ objects' = (req.id :> newAwaited) @@ objects
-              \/ /\ req.awaiter \in DOMAIN objects
-                 /\ LET awaiter == Project(objects[req.awaiter], now)
-                    IN
-                        IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                            objects' = (req.id :> newAwaited) @@ objects
-                        ELSE
-                            objects' =
-                                (req.id      :> newAwaited)
-                             @@ (req.awaiter :>
-                                    IF awaiter.task.state = "suspended" THEN
-                                        [awaiter EXCEPT
-                                            !.task.state     = "pending",
-                                            !.task.pid       = NoPid,
-                                            !.task.ttl       = NoTime,
-                                            !.task.expiresAt = NoTime,
-                                            !.task.retryAt   = now,
-                                            !.task.resumes   = {req.id}]
-                                    ELSE
-                                        [awaiter EXCEPT
-                                            !.task.resumes = @ \cup {req.id}])
-                             @@ objects
-    /\ UNCHANGED <<outbox, now>>
+ProcessCallback ==
+    \E i \in DOMAIN objects :
+        \E w \in objects[i].promise.callbacks :
+            LET awaited    == Project(objects[i], now)
+                newAwaited == [Project(objects[i], now) EXCEPT
+                                  !.promise.callbacks = @ \ {w}]
+            IN
+                /\ awaited.promise.state /= "pending"
+                /\ \/ /\ w \notin DOMAIN objects
+                      /\ objects' = (i :> newAwaited) @@ objects
+                   \/ /\ w \in DOMAIN objects
+                      /\ LET awaiter == Project(objects[w], now)
+                         IN
+                             IF awaiter.task.state \in {"none", "fulfilled"} THEN
+                                 objects' = (i :> newAwaited) @@ objects
+                             ELSE
+                                 objects' =
+                                     (i :> newAwaited)
+                                  @@ (w :>
+                                         IF awaiter.task.state = "suspended" THEN
+                                             [awaiter EXCEPT
+                                                 !.task.state     = "pending",
+                                                 !.task.pid       = NoPid,
+                                                 !.task.ttl       = NoTime,
+                                                 !.task.expiresAt = NoTime,
+                                                 !.task.retryAt   = now,
+                                                 !.task.resumes   = {i}]
+                                         ELSE
+                                             [awaiter EXCEPT
+                                                 !.task.resumes = @ \cup {i}])
+                                  @@ objects
+                /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------
 
@@ -428,15 +426,6 @@ Handle(ev) ==
              HandleTaskHalt(p("TaskHalt"))
       [] VariantTag(ev) = "TaskContinue" ->
              HandleTaskContinue(p("TaskContinue"))
-      [] VariantTag(ev) = "Timeout" ->
-             LET d == p("Timeout")
-             IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d)
-                   [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id)
-                   [] OTHER              -> ProcessRetryTimeout(d.id)
-      [] VariantTag(ev) = "ListenerDrain" ->
-             ProcessListener(p("ListenerDrain"))
-      [] VariantTag(ev) = "CallbackDrain" ->
-             ProcessCallback(p("CallbackDrain"))
       [] OTHER -> FALSE
 
 Clock ==
@@ -452,13 +441,22 @@ Init ==
     /\ now     = 0
 
 Next ==
-    \/ /\ \E ev \in Event : Handle(ev)
+    \/ /\ \E ev \in ExternalEvent : Handle(ev)
        /\ \/ objects' /= objects
           \/ outbox'  /= outbox
+    \/ ProcessPromiseTimeout
+    \/ ProcessLeaseTimeout
+    \/ ProcessRetryTimeout
+    \/ ProcessListener
+    \/ ProcessCallback
     \/ Clock
 
 Fairness ==
-    /\ \A ev \in InternalEvent : WF_vars(Handle(ev))
+    /\ WF_vars(ProcessPromiseTimeout)
+    /\ WF_vars(ProcessLeaseTimeout)
+    /\ WF_vars(ProcessRetryTimeout)
+    /\ WF_vars(ProcessListener)
+    /\ WF_vars(ProcessCallback)
     /\ WF_vars(Clock)
 
 Spec ==
