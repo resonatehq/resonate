@@ -194,11 +194,16 @@ SubmitInternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* @type: (($id -> $object), Int) => Set({ id: $id, kind: Str }); *)
+(* WHAT IS DUE IS WHAT THE DOCUMENT SAYS IS DUE. Every deadline is a
+   FIELD on an object -- `timeoutAt`, `expiresAt`, `retryAt` -- and the
+   document is already in hand, so there is nothing to ask an index
+   about. The wheel is a TRIGGER: it says wake up and look at this
+   document. It does not decide what the work is.
+   @type: (($id -> $object), Int) => Set({ id: $id, kind: Str }); *)
 DrainableTimeouts(doc, t) ==
-    { [id |-> i, kind |-> "promise"]
-        : i \in { j \in DOMAIN doc : /\ doc[j].promise.state = "pending"
-                                     /\ doc[j].promise.timeoutAt <= t } }
+    { d \in [id : DOMAIN doc, kind : A!DeadlineKind] :
+        /\ A!Deadline(doc[d.id], d.kind) /= A!NoTime
+        /\ A!Deadline(doc[d.id], d.kind) <= t }
 
 (* NOTHING HAPPENS OUTSIDE A REQUEST OR A TIMER. That is the rule this
    executor lives by, and it is why `Fires` is the wheel and nothing
@@ -246,8 +251,16 @@ Sweep(doc, t, TS, LS, CS) ==
             LET out == H(req, EnvOf(st.doc))
             IN  [ doc |-> A!PutsInto(st.doc, out.effects),
                   fx  |-> st.fx \o out.effects ]
-        afterT == ApaFoldSet(LAMBDA st, d : Step(A!ProcessPromiseTimeout, st, d),
-                             [doc |-> doc, fx |-> << >>], TS)
+        Fire(st, d) ==
+            LET out == CASE d.kind = "promise" ->
+                                A!ProcessPromiseTimeout(d, EnvOf(st.doc))
+                         [] d.kind = "lease" ->
+                                A!ProcessLeaseTimeout(d.id, EnvOf(st.doc))
+                         [] OTHER ->
+                                A!ProcessRetryTimeout(d.id, EnvOf(st.doc))
+            IN  [ doc |-> A!PutsInto(st.doc, out.effects),
+                  fx  |-> st.fx \o out.effects ]
+        afterT == ApaFoldSet(Fire, [doc |-> doc, fx |-> << >>], TS)
         afterL == ApaFoldSet(LAMBDA st, d : Step(A!ProcessListener, st, d),
                              afterT, LS)
     IN  ApaFoldSet(LAMBDA st, d : Step(A!ProcessCallback, st, d), afterL, CS)
