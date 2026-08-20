@@ -9,7 +9,8 @@ VARIABLES
     outbox,     \* at most one entry per MsgKey
     now         \* the clock. NOT part of the store: a server does not own
 
-vars == <<objects, outbox, now>>
+vars ==
+    <<objects, outbox, now>>
 
 -----------------------------------------------------------------------------
 
@@ -18,16 +19,6 @@ Env ==
     [ objects |-> objects,
       now     |-> now,
       config  |-> [retryTimeout |-> RetryTimeout] ]
-
-(* @type: $object; *)
-Absent ==
-    [ promise |-> [ state |-> "resolved", param |-> NoValue, value |-> NoValue,
-                    tags |-> [targeted |-> FALSE, timer |-> FALSE,
-                              external |-> FALSE, target |-> NoAddr,
-                              delay |-> 0],
-                    timeoutAt |-> 0, createdAt |-> 0, settledAt |-> 0,
-                    callbacks |-> {}, listeners |-> {} ],
-      task    |-> NoTask ]
 
 (* @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
 CommitAll(S, Obj(_), env) ==
@@ -76,6 +67,10 @@ New(req, t) ==
                       ELSE
                           NoTask ]
 
+(* @type: ($getReq, $env) => $outcome; *)
+HandlePromiseGet(req, env) ==
+    [ effects |-> << >> ]
+
 (* @type: ($createReq, $env) => $outcome; *)
 HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
@@ -107,14 +102,9 @@ HandlePromiseSettle(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* @type: ($getReq, $env) => $outcome; *)
-HandlePromiseGet(req, env) == [ effects |-> << >> ]
-
 (* @type: ($callbackReq, $env) => $outcome; *)
 HandlePromiseRegisterCallback(req, env) ==
-    IF \/ req.awaited = req.awaiter
-       \/ req.awaited.origin /= req.awaiter.origin
-       \/ req.awaited \notin DOMAIN env.objects
+    IF \/ req.awaited \notin DOMAIN env.objects
        \/ req.awaiter \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -147,7 +137,8 @@ HandlePromiseRegisterListener(req, env) ==
                                          [id |-> req.awaited, obj |-> new]) >> ]
 
 (* @type: ($getReq, $env) => $outcome; *)
-HandleTaskGet(req, env) == [ effects |-> << >> ]
+HandleTaskGet(req, env) ==
+    [ effects |-> << >> ]
 
 (* @type: ($taskCreateReq, $env) => $outcome; *)
 HandleTaskCreate(req, env) ==
@@ -205,6 +196,78 @@ HandleTaskAcquire(req, env) ==
                 [ effects |-> << >> ]
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+
+HandleTaskFence(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+        IN
+            IF \/ (IF VariantTag(req.action) = "Create"
+                   THEN VariantGetUnsafe("Create", req.action).req.id
+                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
+               \/ old.task.state /= "acquired"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE IF VariantTag(req.action) = "Create" THEN
+                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
+            ELSE
+                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
+
+HandleTaskHeartbeat(req, env) ==
+    [ effects |->
+        CommitAll({ i \in DOMAIN env.objects :
+                      LET old == Project(env.objects[i], env.now)
+                      IN  /\ \E rf \in req.tasks :
+                                rf.id = i /\ rf.version = old.task.version
+                          /\ old.task.state = "acquired"
+                          /\ old.task.pid = req.pid
+                          /\ old.promise.state = "pending" },
+                  LAMBDA i :
+                      LET old == Project(env.objects[i], env.now)
+                      IN
+                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
+                  env) ]
+
+HandleTaskSuspend(req, env) ==
+    LET aw   == { a.awaited : a \in req.actions }
+        seen == { a \in aw : a \in DOMAIN env.objects }
+    IN
+        IF \/ req.actions = {}
+           \/ req.id \in aw
+           \/ \E a \in aw : a.origin /= req.id.origin
+           \/ req.id \notin DOMAIN env.objects
+           \/ seen /= aw THEN
+            [ effects |-> << >> ]
+        ELSE
+            LET old == Project(env.objects[req.id], env.now)
+                new == [old EXCEPT !.task.state     = "suspended",
+                                   !.task.pid       = NoPid,
+                                   !.task.ttl       = NoTime,
+                                   !.task.expiresAt = NoTime,
+                                   !.task.retryAt   = NoTime,
+                                   !.task.resumes   = {}]
+            IN
+                IF \/ old.task.state /= "acquired"
+                   \/ old.promise.state /= "pending"
+                   \/ old.task.version /= req.version
+                   \/ \E a \in aw :
+                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
+                    [ effects |-> << >> ]
+                ELSE IF \E a \in aw :
+                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
+                    [ effects |-> << Variant("PutObject",
+                                             [id |-> req.id,
+                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
+                ELSE
+                    [ effects |->
+                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
+                        \o CommitAll(aw,
+                                  LAMBDA a :
+                                      [Project(env.objects[a], env.now) EXCEPT
+                                           !.promise.callbacks = @ \cup {req.id}],
+                                  env) ]
 
 (* @type: ($taskFulfillReq, $env) => $outcome; *)
 HandleTaskFulfill(req, env) ==
@@ -283,78 +346,6 @@ HandleTaskContinue(req, env) ==
                 [ effects |-> << >> ]
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
-
-HandleTaskHeartbeat(req, env) ==
-    [ effects |->
-        CommitAll({ i \in DOMAIN env.objects :
-                      LET old == Project(env.objects[i], env.now)
-                      IN  /\ \E rf \in req.tasks :
-                                rf.id = i /\ rf.version = old.task.version
-                          /\ old.task.state = "acquired"
-                          /\ old.task.pid = req.pid
-                          /\ old.promise.state = "pending" },
-                  LAMBDA i :
-                      LET old == Project(env.objects[i], env.now)
-                      IN
-                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
-                  env) ]
-
-HandleTaskSuspend(req, env) ==
-    LET aw   == { a.awaited : a \in req.actions }
-        seen == { a \in aw : a \in DOMAIN env.objects }
-    IN
-        IF \/ req.actions = {}
-           \/ req.id \in aw
-           \/ \E a \in aw : a.origin /= req.id.origin
-           \/ req.id \notin DOMAIN env.objects
-           \/ seen /= aw THEN
-            [ effects |-> << >> ]
-        ELSE
-            LET old == Project(env.objects[req.id], env.now)
-                new == [old EXCEPT !.task.state     = "suspended",
-                                   !.task.pid       = NoPid,
-                                   !.task.ttl       = NoTime,
-                                   !.task.expiresAt = NoTime,
-                                   !.task.retryAt   = NoTime,
-                                   !.task.resumes   = {}]
-            IN
-                IF \/ old.task.state /= "acquired"
-                   \/ old.promise.state /= "pending"
-                   \/ old.task.version /= req.version
-                   \/ \E a \in aw :
-                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
-                    [ effects |-> << >> ]
-                ELSE IF \E a \in aw :
-                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
-                    [ effects |-> << Variant("PutObject",
-                                             [id |-> req.id,
-                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
-                ELSE
-                    [ effects |->
-                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
-                        \o CommitAll(aw,
-                                  LAMBDA a :
-                                      [Project(env.objects[a], env.now) EXCEPT
-                                           !.promise.callbacks = @ \cup {req.id}],
-                                  env) ]
-
-HandleTaskFence(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
-    ELSE
-        LET old == Project(env.objects[req.id], env.now)
-        IN
-            IF \/ (IF VariantTag(req.action) = "Create"
-                   THEN VariantGetUnsafe("Create", req.action).req.id
-                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
-               \/ old.task.state /= "acquired"
-               \/ old.promise.state /= "pending"
-               \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
-            ELSE IF VariantTag(req.action) = "Create" THEN
-                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
-            ELSE
-                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
 
 (* @type: ($id, $env) => $outcome; *)
 ProcessLeaseTimeout(i, env) ==
@@ -536,7 +527,8 @@ FiresIn(objs, ev) ==
       [] OTHER -> FALSE
 
 (* @type: $event => Bool; *)
-Fires(ev) == FiresIn(objects, ev)
+Fires(ev) ==
+    FiresIn(objects, ev)
 
 -----------------------------------------------------------------------------
 
@@ -658,9 +650,11 @@ Fairness ==
     /\ \A ev \in InternalEvent : WF_vars(Internal(ev))
     /\ WF_vars(Clock)
 
-Spec == Init /\ [][Next]_vars /\ Fairness
+Spec ==
+    Init /\ [][Next]_vars /\ Fairness
 
-Safety == Init /\ [][Next]_vars
+Safety ==
+    Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 
@@ -766,9 +760,13 @@ SameOrigin ==
     \A o \in DOMAIN objects :
         \A w \in objects[o].promise.callbacks : w.origin = o.origin
 
-T_preserved_settled_promise_record    == [][preserved_settled_promise_record]_vars
-T_consistent_new_promise_born_clean   == [][consistent_new_promise_born_clean]_vars
-T_consistent_promise_settlement_stamp == [][consistent_promise_settlement_stamp]_vars
-T_consistent_settlement_fulfils_task  == [][consistent_settlement_fulfils_task]_vars
+T_preserved_settled_promise_record ==
+    [][preserved_settled_promise_record]_vars
+T_consistent_new_promise_born_clean ==
+    [][consistent_new_promise_born_clean]_vars
+T_consistent_promise_settlement_stamp ==
+    [][consistent_promise_settlement_stamp]_vars
+T_consistent_settlement_fulfils_task ==
+    [][consistent_settlement_fulfils_task]_vars
 
 =============================================================================

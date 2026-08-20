@@ -42,7 +42,8 @@ EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
   @typeAlias: env = {
   @typeAlias: outcome = { effects: Seq($effect) };
 *)
-ResonateAliases == TRUE
+ResonateAliases ==
+    TRUE
 
 -----------------------------------------------------------------------------
 
@@ -70,10 +71,13 @@ ASSUME MaxTime    >= 0
 ASSUME MaxVersion >= 0
 ASSUME MaxBatch   >= 1
 
-Time    == 0 .. MaxTime
-Version == 0 .. MaxVersion
+Time ==
+    0 .. MaxTime
+Version ==
+    0 .. MaxVersion
 
-NoTime == -1
+NoTime ==
+    -1
 
 Tags ==
     LET a == CHOOSE x \in Address : TRUE IN
@@ -82,51 +86,57 @@ Tags ==
       [targeted |-> TRUE,  timer |-> FALSE, external |-> FALSE, target |-> a, delay |-> 0],
       [targeted |-> FALSE, timer |-> TRUE,  external |-> FALSE, target |-> a, delay |-> 0] }
 
-IsExternal(p) == p.tags.external \/ p.tags.targeted \/ p.tags.timer
+IsExternal(p) ==
+    p.tags.external \/ p.tags.targeted \/ p.tags.timer
 
 -----------------------------------------------------------------------------
 
-Id == [origin : Origin, rest : Rest]
+Id ==
+    [origin : Origin, rest : Rest]
 
 -----------------------------------------------------------------------------
 
-PromiseState == {"pending", "resolved", "rejected",
-                 "rejectedCanceled", "rejectedTimedout"}
+PromiseState ==
+    {"pending", "resolved", "rejected",
+     "rejectedCanceled", "rejectedTimedout"}
 
-TaskState == {"none", "pending", "acquired", "suspended", "halted", "fulfilled"}
+TaskState ==
+    {"none", "pending", "acquired", "suspended", "halted", "fulfilled"}
 
 (* @type: $task; *)
 NoTask ==
     [ state |-> "none", version |-> 0, ttl |-> NoTime, pid |-> NoPid,
       expiresAt |-> NoTime, retryAt |-> NoTime, resumes |-> {} ]
 
-Promise == [
-    state     : PromiseState,
-    param     : Value,
-    value     : Value,
-    tags      : Tags,
-    timeoutAt : Time,                    \* deadline -- armed as "promise"
-    createdAt : Time,
-    settledAt : Time \cup {NoTime},
-    callbacks : SUBSET Id,               \* awaiters to resume when this settles
-    listeners : SUBSET Address ]         \* addresses to notify when this settles
+Promise ==
+    [ state     : PromiseState,
+      param     : Value,
+      value     : Value,
+      tags      : Tags,
+      timeoutAt : Time,                  \* deadline -- armed as "promise"
+      createdAt : Time,
+      settledAt : Time \cup {NoTime},
+      callbacks : SUBSET Id,             \* awaiters to resume when this settles
+      listeners : SUBSET Address ]       \* addresses to notify when this settles
 
-Task == [
-    state     : TaskState,
-    version   : Version,                 \* the fencing token
-    ttl       : Ttl \cup {NoTime},       \* the WORKER's number: lease asked for
-    pid       : Pid \cup {NoPid},
-    expiresAt : Time \cup {NoTime},      \* deadline -- armed as "lease"
-    retryAt   : Time \cup {NoTime},      \* deadline -- armed as "retry"
-    resumes   : SUBSET Id ]              \* triggers buffered while not suspended
+Task ==
+    [ state     : TaskState,
+      version   : Version,               \* the fencing token
+      ttl       : Ttl \cup {NoTime},     \* the WORKER's number: lease asked for
+      pid       : Pid \cup {NoPid},
+      expiresAt : Time \cup {NoTime},    \* deadline -- armed as "lease"
+      retryAt   : Time \cup {NoTime},    \* deadline -- armed as "retry"
+      resumes   : SUBSET Id ]            \* triggers buffered while not suspended
 
-Object == [promise : Promise, task : Task]
+Object ==
+    [promise : Promise, task : Task]
 
 Message ==
        { Variant("Execute", [id |-> i, version |-> v]) : i \in Id, v \in Version }
   \cup { Variant("Unblock", [id |-> i, state |-> s]) : i \in Id, s \in PromiseState }
 
-OutEntry == [address : Address, message : Message]
+OutEntry ==
+    [address : Address, message : Message]
 
 (* @type: $outEntry => $msgKey; *)
 MsgKey(e) ==
@@ -140,9 +150,11 @@ MsgKey(e) ==
 
 -----------------------------------------------------------------------------
 
-DeadlineKind == {"promise", "lease", "retry"}
+DeadlineKind ==
+    {"promise", "lease", "retry"}
 
-Entry == [at : Time, id : Id, kind : DeadlineKind]
+Entry ==
+    [at : Time, id : Id, kind : DeadlineKind]
 
 (* @type: ($object, Str) => Int; *)
 Deadline(obj, kind) ==
@@ -153,19 +165,30 @@ Deadline(obj, kind) ==
 
 -----------------------------------------------------------------------------
 
-SettleState == {"resolved", "rejected", "rejectedCanceled"}
+SettleState ==
+    {"resolved", "rejected", "rejectedCanceled"}
 
-CreateReq   == [id : Id, timeoutAt : Time, param : Value, tags : Tags]
-SettleReq   == [id : Id, state : SettleState, value : Value]
-CallbackReq == [awaited : Id, awaiter : Id]
-TaskRefT    == [id : Id, version : Version]
+CreateReq ==
+    [id : Id, timeoutAt : Time, param : Value, tags : Tags]
+SettleReq ==
+    [id : Id, state : SettleState, value : Value]
+CallbackReq ==
+    { r \in [awaited : Id, awaiter : Id] :
+        /\ r.awaited /= r.awaiter
+        /\ r.awaited.origin = r.awaiter.origin }
+TaskRefT ==
+    [id : Id, version : Version]
 
 FenceAction ==
        { Variant("Create", [req |-> r]) : r \in CreateReq }
   \cup { Variant("Settle", [req |-> r]) : r \in SettleReq }
 
 (* @type: (Str, Set($event)) => Set($event); *)
-On(tag, S) == IF tag \in Implemented THEN S ELSE {}
+On(tag, S) ==
+    IF tag \in Implemented THEN
+        S
+    ELSE
+        {}
 
 ExternalEvent ==
        {}
@@ -192,8 +215,9 @@ InternalEvent ==
     \cup On("Timeout", { Variant("Timeout", [id |-> i, kind |-> k])
                          : i \in Id, k \in DeadlineKind})
     \cup On("ListenerDrain", { Variant("ListenerDrain", [id |-> i, address |-> a]) : i \in Id, a \in Address})
-    \cup On("CallbackDrain", { Variant("CallbackDrain", [id |-> i, awaiter |-> w]) : i \in Id, w \in Id})
+    \cup On("CallbackDrain", { Variant("CallbackDrain", [id |-> r.awaited, awaiter |-> r.awaiter]) : r \in CallbackReq})
 
-Event == ExternalEvent \cup InternalEvent
+Event ==
+    ExternalEvent \cup InternalEvent
 
 ===============================================================================

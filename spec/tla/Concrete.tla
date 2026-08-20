@@ -42,7 +42,8 @@ VARIABLES
     steps,      \* likewise, plus `expect` and `org`
     now         \* likewise
 
-vars == <<docs, timeouts, outbox, steps, now>>
+vars ==
+    <<docs, timeouts, outbox, steps, now>>
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -58,9 +59,11 @@ vars == <<docs, timeouts, outbox, steps, now>>
 (* promise the abstract machine states without it.                         *)
 (***************************************************************************)
 
-Objects == [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
+Objects ==
+    [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
 
-A == INSTANCE Abstract WITH objects <- Objects
+A ==
+    INSTANCE Abstract WITH objects <- Objects
 
 (***************************************************************************)
 (* Three of this machine's six variables map to NOTHING, and that is the   *)
@@ -104,16 +107,6 @@ A == INSTANCE Abstract WITH objects <- Objects
 (* what a request is, which events exist. That is the same protocol being  *)
 (* spoken about, not the same machine speaking.                            *)
 (***************************************************************************)
-
-(* @type: $object; *)
-Absent ==
-    [ promise |-> [ state |-> "resolved", param |-> NoValue, value |-> NoValue,
-                    tags |-> [targeted |-> FALSE, timer |-> FALSE,
-                              external |-> FALSE, target |-> NoAddr,
-                              delay |-> 0],
-                    timeoutAt |-> 0, createdAt |-> 0, settledAt |-> 0,
-                    callbacks |-> {}, listeners |-> {} ],
-      task    |-> NoTask ]
 
 (* @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
 CommitAll(S, Obj(_), env) ==
@@ -162,6 +155,10 @@ New(req, t) ==
                       ELSE
                           NoTask ]
 
+(* @type: ($getReq, $env) => $outcome; *)
+HandlePromiseGet(req, env) ==
+    [ effects |-> << >> ]
+
 (* @type: ($createReq, $env) => $outcome; *)
 HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
@@ -193,14 +190,9 @@ HandlePromiseSettle(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* @type: ($getReq, $env) => $outcome; *)
-HandlePromiseGet(req, env) == [ effects |-> << >> ]
-
 (* @type: ($callbackReq, $env) => $outcome; *)
 HandlePromiseRegisterCallback(req, env) ==
-    IF \/ req.awaited = req.awaiter
-       \/ req.awaited.origin /= req.awaiter.origin
-       \/ req.awaited \notin DOMAIN env.objects
+    IF \/ req.awaited \notin DOMAIN env.objects
        \/ req.awaiter \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
     ELSE
@@ -233,7 +225,8 @@ HandlePromiseRegisterListener(req, env) ==
                                          [id |-> req.awaited, obj |-> new]) >> ]
 
 (* @type: ($getReq, $env) => $outcome; *)
-HandleTaskGet(req, env) == [ effects |-> << >> ]
+HandleTaskGet(req, env) ==
+    [ effects |-> << >> ]
 
 (* @type: ($taskCreateReq, $env) => $outcome; *)
 HandleTaskCreate(req, env) ==
@@ -291,6 +284,78 @@ HandleTaskAcquire(req, env) ==
                 [ effects |-> << >> ]
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+
+HandleTaskFence(req, env) ==
+    IF req.id \notin DOMAIN env.objects THEN
+        [ effects |-> << >> ]
+    ELSE
+        LET old == Project(env.objects[req.id], env.now)
+        IN
+            IF \/ (IF VariantTag(req.action) = "Create"
+                   THEN VariantGetUnsafe("Create", req.action).req.id
+                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
+               \/ old.task.state /= "acquired"
+               \/ old.promise.state /= "pending"
+               \/ old.task.version /= req.version THEN
+                [ effects |-> << >> ]
+            ELSE IF VariantTag(req.action) = "Create" THEN
+                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
+            ELSE
+                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
+
+HandleTaskHeartbeat(req, env) ==
+    [ effects |->
+        CommitAll({ i \in DOMAIN env.objects :
+                      LET old == Project(env.objects[i], env.now)
+                      IN  /\ \E rf \in req.tasks :
+                                rf.id = i /\ rf.version = old.task.version
+                          /\ old.task.state = "acquired"
+                          /\ old.task.pid = req.pid
+                          /\ old.promise.state = "pending" },
+                  LAMBDA i :
+                      LET old == Project(env.objects[i], env.now)
+                      IN
+                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
+                  env) ]
+
+HandleTaskSuspend(req, env) ==
+    LET aw   == { a.awaited : a \in req.actions }
+        seen == { a \in aw : a \in DOMAIN env.objects }
+    IN
+        IF \/ req.actions = {}
+           \/ req.id \in aw
+           \/ \E a \in aw : a.origin /= req.id.origin
+           \/ req.id \notin DOMAIN env.objects
+           \/ seen /= aw THEN
+            [ effects |-> << >> ]
+        ELSE
+            LET old == Project(env.objects[req.id], env.now)
+                new == [old EXCEPT !.task.state     = "suspended",
+                                   !.task.pid       = NoPid,
+                                   !.task.ttl       = NoTime,
+                                   !.task.expiresAt = NoTime,
+                                   !.task.retryAt   = NoTime,
+                                   !.task.resumes   = {}]
+            IN
+                IF \/ old.task.state /= "acquired"
+                   \/ old.promise.state /= "pending"
+                   \/ old.task.version /= req.version
+                   \/ \E a \in aw :
+                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
+                    [ effects |-> << >> ]
+                ELSE IF \E a \in aw :
+                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
+                    [ effects |-> << Variant("PutObject",
+                                             [id |-> req.id,
+                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
+                ELSE
+                    [ effects |->
+                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
+                        \o CommitAll(aw,
+                                  LAMBDA a :
+                                      [Project(env.objects[a], env.now) EXCEPT
+                                           !.promise.callbacks = @ \cup {req.id}],
+                                  env) ]
 
 (* @type: ($taskFulfillReq, $env) => $outcome; *)
 HandleTaskFulfill(req, env) ==
@@ -369,78 +434,6 @@ HandleTaskContinue(req, env) ==
                 [ effects |-> << >> ]
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
-
-HandleTaskHeartbeat(req, env) ==
-    [ effects |->
-        CommitAll({ i \in DOMAIN env.objects :
-                      LET old == Project(env.objects[i], env.now)
-                      IN  /\ \E rf \in req.tasks :
-                                rf.id = i /\ rf.version = old.task.version
-                          /\ old.task.state = "acquired"
-                          /\ old.task.pid = req.pid
-                          /\ old.promise.state = "pending" },
-                  LAMBDA i :
-                      LET old == Project(env.objects[i], env.now)
-                      IN
-                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
-                  env) ]
-
-HandleTaskSuspend(req, env) ==
-    LET aw   == { a.awaited : a \in req.actions }
-        seen == { a \in aw : a \in DOMAIN env.objects }
-    IN
-        IF \/ req.actions = {}
-           \/ req.id \in aw
-           \/ \E a \in aw : a.origin /= req.id.origin
-           \/ req.id \notin DOMAIN env.objects
-           \/ seen /= aw THEN
-            [ effects |-> << >> ]
-        ELSE
-            LET old == Project(env.objects[req.id], env.now)
-                new == [old EXCEPT !.task.state     = "suspended",
-                                   !.task.pid       = NoPid,
-                                   !.task.ttl       = NoTime,
-                                   !.task.expiresAt = NoTime,
-                                   !.task.retryAt   = NoTime,
-                                   !.task.resumes   = {}]
-            IN
-                IF \/ old.task.state /= "acquired"
-                   \/ old.promise.state /= "pending"
-                   \/ old.task.version /= req.version
-                   \/ \E a \in aw :
-                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
-                    [ effects |-> << >> ]
-                ELSE IF \E a \in aw :
-                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
-                    [ effects |-> << Variant("PutObject",
-                                             [id |-> req.id,
-                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
-                ELSE
-                    [ effects |->
-                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
-                        \o CommitAll(aw,
-                                  LAMBDA a :
-                                      [Project(env.objects[a], env.now) EXCEPT
-                                           !.promise.callbacks = @ \cup {req.id}],
-                                  env) ]
-
-HandleTaskFence(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
-    ELSE
-        LET old == Project(env.objects[req.id], env.now)
-        IN
-            IF \/ (IF VariantTag(req.action) = "Create"
-                   THEN VariantGetUnsafe("Create", req.action).req.id
-                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
-               \/ old.task.state /= "acquired"
-               \/ old.promise.state /= "pending"
-               \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
-            ELSE IF VariantTag(req.action) = "Create" THEN
-                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
-            ELSE
-                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
 
 (* @type: ($id, $env) => $outcome; *)
 ProcessLeaseTimeout(i, env) ==
@@ -678,8 +671,10 @@ Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
       expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev) ]
 
-Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
-Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
+Put(f, k, v) ==
+    [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+Drop(f, k) ==
+    [x \in (DOMAIN f) \ {k} |-> f[x]]
 
 SubmitExternal(ev) ==
     /\ ev \in ExternalEvent
@@ -819,21 +814,28 @@ Sweep(doc, t, TS, LS, CS) ==
    which is a coarser wheel with no generations, so `WheelSound` failing
    here is partly that choice and not only the arm-before-write order.
    And `completing` gives Verus a reason to re-arm even when the minimum
-   has not moved, which has no counterpart here.
-   @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
-Before(o, i) == IF i \in DOMAIN docs[o] THEN docs[o][i] ELSE Absent
+   has not moved, which has no counterpart here. *)
 
-ArmFor(i, old, new, k) ==
-    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Deadline(old, k)
-    THEN << Variant("ArmTimeout",
-                    [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
-    ELSE << >>
+(* @type: (ORIGIN, $id, Str) => Int; *)
+Was(o, i, k) ==
+    IF i \in DOMAIN docs[o] THEN
+        Deadline(docs[o][i], k)
+    ELSE
+        NoTime
 
-DisarmFor(i, old, new, k) ==
-    IF Deadline(old, k) /= NoTime /\ Deadline(old, k) /= Deadline(new, k)
-    THEN << Variant("DisarmTimeout",
-                    [entry |-> [at |-> Deadline(old, k), id |-> i, kind |-> k]]) >>
-    ELSE << >>
+ArmFor(o, i, new, k) ==
+    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(o, i, k) THEN
+        << Variant("ArmTimeout",
+                   [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
+    ELSE
+        << >>
+
+DisarmFor(o, i, new, k) ==
+    IF Was(o, i, k) /= NoTime /\ Was(o, i, k) /= Deadline(new, k) THEN
+        << Variant("DisarmTimeout",
+                   [entry |-> [at |-> Was(o, i, k), id |-> i, kind |-> k]]) >>
+    ELSE
+        << >>
 
 (* Arm before the write and disarm after, which is Verus's
    `sched + put + ack`. Arming first means a crash between the arm and
@@ -847,18 +849,20 @@ DisarmFor(i, old, new, k) ==
    This is a claim about EXECUTORS THAT KEEP AN INDEX. It used to sit in
    `Abstract`, which made it look like protocol; it is not, and no
    handler states it. *)
+(* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Arms(o, W) ==
     ApaFoldSet(LAMBDA acc, w :
-                 acc \o ArmFor(w.id, Before(o, w.id), w.obj, "promise")
-                     \o ArmFor(w.id, Before(o, w.id), w.obj, "lease")
-                     \o ArmFor(w.id, Before(o, w.id), w.obj, "retry"),
+                 acc \o ArmFor(o, w.id, w.obj, "promise")
+                     \o ArmFor(o, w.id, w.obj, "lease")
+                     \o ArmFor(o, w.id, w.obj, "retry"),
                << >>, W)
 
+(* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Disarms(o, W) ==
     ApaFoldSet(LAMBDA acc, w :
-                 acc \o DisarmFor(w.id, Before(o, w.id), w.obj, "promise")
-                     \o DisarmFor(w.id, Before(o, w.id), w.obj, "lease")
-                     \o DisarmFor(w.id, Before(o, w.id), w.obj, "retry"),
+                 acc \o DisarmFor(o, w.id, w.obj, "promise")
+                     \o DisarmFor(o, w.id, w.obj, "lease")
+                     \o DisarmFor(o, w.id, w.obj, "retry"),
                << >>, W)
 
 Process(r) ==
@@ -1102,7 +1106,8 @@ Next ==
 (* expressible here.                                                       *)
 (***************************************************************************)
 
-EventuallyStable == <>[][ \A r \in Rid : ~Crash(r) ]_vars
+EventuallyStable ==
+    <>[][ \A r \in Rid : ~Crash(r) ]_vars
 
 
 Fairness ==
@@ -1125,8 +1130,10 @@ FairnessSF ==
     /\ \A r \in Rid : SF_vars(Process(r))
     /\ \A r \in Rid : SF_vars(Perform(r))
 
-Spec   == Init /\ [][Next]_vars /\ Fairness
-SpecSF == Init /\ [][Next]_vars /\ FairnessSF
+Spec ==
+    Init /\ [][Next]_vars /\ Fairness
+SpecSF ==
+    Init /\ [][Next]_vars /\ FairnessSF
 
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -1175,8 +1182,10 @@ SpecSF == Init /\ [][Next]_vars /\ FairnessSF
    while it was swapped. A definition you have to edit to check is a
    definition that will eventually be committed mid-edit. *)
 
-RefinesSafety == A!Safety
-RefinesSpec   == A!Spec
+RefinesSafety ==
+    A!Safety
+RefinesSpec ==
+    A!Spec
 
 THEOREM Spec => A!Spec
 
@@ -1184,8 +1193,10 @@ THEOREM Spec => A!Spec
    fence restores them is the other half of the result, and it is not
    implied by the refinement -- refinement bounds what this machine MAY
    do, and says nothing about what it GUARANTEES. *)
-C_TypeOK          == A!TypeOK
-C_UnitCoherent    == A!UnitCoherent
+C_TypeOK ==
+    A!TypeOK
+C_UnitCoherent ==
+    A!UnitCoherent
 
 (* The wheel invariants live HERE now, because the wheel does. They are
    not among the 95 and could not be: they say an INDEX agrees with the
@@ -1244,17 +1255,24 @@ SplitWrite ==
         /\ \E j \in DOMAIN steps[r].pending :
                VariantTag(steps[r].pending[j]) = "PutObject"
 
-NoSplitWrite == ~SplitWrite
+NoSplitWrite ==
+    ~SplitWrite
 
-DrainRan   == \E r \in DOMAIN steps : VariantTag(steps[r].ev) = "CallbackDrain"
-NoDrainRan == ~DrainRan
+DrainRan ==
+    \E r \in DOMAIN steps : VariantTag(steps[r].ev) = "CallbackDrain"
+NoDrainRan ==
+    ~DrainRan
 
-TwoPuts == \E r \in DOMAIN steps :
-    Cardinality({ j \in DOMAIN steps[r].pending :
-                    VariantTag(steps[r].pending[j]) = "PutObject" }) > 1
-NoTwoPuts == ~TwoPuts
+TwoPuts ==
+    \E r \in DOMAIN steps :
+        Cardinality({ j \in DOMAIN steps[r].pending :
+                        VariantTag(steps[r].pending[j]) = "PutObject" }) > 1
+NoTwoPuts ==
+    ~TwoPuts
 
-CT_preserved_settled_promise_record    == [][A!preserved_settled_promise_record]_vars
-CT_consistent_promise_settlement_stamp == [][A!consistent_promise_settlement_stamp]_vars
+CT_preserved_settled_promise_record ==
+    [][A!preserved_settled_promise_record]_vars
+CT_consistent_promise_settlement_stamp ==
+    [][A!consistent_promise_settlement_stamp]_vars
 
 =============================================================================
