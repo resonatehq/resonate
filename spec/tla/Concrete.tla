@@ -22,7 +22,7 @@
 (*                                                                         *)
 (*   - every write carries the etag its decision was read under            *)
 (*     (`expect: etag_of(held)`). If the document has moved, the write is  *)
-(*     REFUSED and the step goes back to deciding with `retries + 1` --    *)
+(*     REFUSED and the step goes back to deciding --                       *)
 (*     `restart(s, rid, ..)`. Nothing stale lands.                         *)
 (*                                                                         *)
 (* THE NAMES ARE DELIBERATELY THE SAME. `timeouts`, `outbox`, `steps` and  *)
@@ -42,7 +42,7 @@ VARIABLES
     etags,      \* [ORIGIN -> Int] -- what a compare-and-swap compares
     timeouts,   \* the wheel. Same variable, same meaning as Abstract's
     outbox,     \* likewise
-    steps,      \* likewise, plus `expect`, `org` and `retries`
+    steps,      \* likewise, plus `expect` and `org`
     now         \* likewise
 
 vars == <<docs, etags, timeouts, outbox, steps, now>>
@@ -144,7 +144,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> 0, at |-> 0, org |-> OriginOf(ev), retries |-> 0 ]
+      expect |-> 0, at |-> 0, org |-> OriginOf(ev) ]
 
 Put(f, k, v) == [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
 Drop(f, k)   == [x \in (DOMAIN f) \ {k}    |-> f[x]]
@@ -386,8 +386,7 @@ Perform(r) ==
                                                       {"PutObject", "Send"})]
                          /\ UNCHANGED timeouts
                     ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
-                                                   ![r].pending = << >>,
-                                                   ![r].retries = @ + 1]
+                                                   ![r].pending = << >>]
                          /\ UNCHANGED <<docs, etags, timeouts, outbox>>
                  [] VariantTag(e) = "ArmTimeout" ->
                     /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
