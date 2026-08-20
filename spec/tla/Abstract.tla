@@ -573,13 +573,8 @@ Advance(st, ev) ==
 
 (* @type: $outcome => Bool; *)
 Apply(out) ==
-    /\ objects' = LET W == Puts(out.effects) IN
-                     [ i \in (DOMAIN objects) \cup {w.id : w \in W} |->
-                          IF \E w \in W : w.id = i
-                          THEN (CHOOSE w \in W : w.id = i).obj
-                          ELSE objects[i] ]
-    /\ outbox'  = LET S == Says(out.effects) IN
-                     { o \in outbox : ~\E e \in S : MsgKey(o) = MsgKey(e) } \cup S
+    /\ objects' = PutsInto(objects, out.effects)
+    /\ outbox'  = SaysInto(outbox, out.effects)
     /\ UNCHANGED now
 
 (* A REQUEST, WITH ANY AMOUNT OF DRAINING FOLDED IN. An executor that
@@ -607,16 +602,6 @@ Internal(ev) ==
     /\ Fires(ev)
     /\ Apply(Handle(ev, Env))
 
-(* ANY NUMBER OF INTERNAL STEPS AT ONE INSTANT, which is what makes this
-   machine maximally admissible: an executor may drain one at a time, or
-   everything at once, or anything between, and all of it is one abstract
-   step. `MaxBatch = 1` is the one-event-one-transition machine.
-
-   `MaxBatch` is a window, not a claim -- the same kind of bound as
-   `MaxTime` and `MaxVersion`. There is no natural bound from the
-   alphabet: `CallbackDrain` resuming a suspended awaiter sets its
-   `retryAt` to `now`, which RE-ENABLES a `RetryTimeout` that already
-   fired earlier in the same batch. *)
 Batch ==
     \E n \in 1..MaxBatch :
         \E s \in [1 .. n -> InternalEvent] :
