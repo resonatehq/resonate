@@ -194,6 +194,12 @@ SubmitInternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
+(* @type: (($id -> $object), Int) => Set({ id: $id, kind: Str }); *)
+DrainableTimeouts(doc, t) ==
+    { [id |-> i, kind |-> "promise"]
+        : i \in { j \in DOMAIN doc : /\ doc[j].promise.state = "pending"
+                                     /\ doc[j].promise.timeoutAt <= t } }
+
 (* NOTHING HAPPENS OUTSIDE A REQUEST OR A TIMER. That is the rule this
    executor lives by, and it is why `Fires` is the wheel and nothing
    else: a drain is not work this machine goes looking for and not an
@@ -233,15 +239,17 @@ DrainableCallbacks(doc, t) ==
    @type: (($id -> $object), Int, Set({ id: $id, address: ADDR }),
            Set({ id: $id, awaiter: $id }))
               => { doc: $id -> $object, fx: Seq($effect) }; *)
-Sweep(doc, t, LS, CS) ==
+Sweep(doc, t, TS, LS, CS) ==
     LET EnvOf(d) == [ objects |-> d, now |-> t,
                       config  |-> [retryTimeout |-> RetryTimeout] ]
         Step(H(_,_), st, req) ==
             LET out == H(req, EnvOf(st.doc))
             IN  [ doc |-> A!PutsInto(st.doc, out.effects),
                   fx  |-> st.fx \o out.effects ]
+        afterT == ApaFoldSet(LAMBDA st, d : Step(A!ProcessPromiseTimeout, st, d),
+                             [doc |-> doc, fx |-> << >>], TS)
         afterL == ApaFoldSet(LAMBDA st, d : Step(A!ProcessListener, st, d),
-                             [doc |-> doc, fx |-> << >>], LS)
+                             afterT, LS)
     IN  ApaFoldSet(LAMBDA st, d : Step(A!ProcessCallback, st, d), afterL, CS)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
@@ -311,10 +319,11 @@ Disarms(o, W) ==
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ \E LS \in SUBSET DrainableListeners(docs[steps[r].org], now),
+    /\ \E TS \in SUBSET DrainableTimeouts(docs[steps[r].org], now),
+          LS \in SUBSET DrainableListeners(docs[steps[r].org], now),
           CS \in SUBSET DrainableCallbacks(docs[steps[r].org], now) :
        LET o   == steps[r].org
-           swept == Sweep(docs[o], now, LS, CS)
+           swept == Sweep(docs[o], now, TS, LS, CS)
            env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
