@@ -642,12 +642,19 @@ Says(fx) ==
       : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
 
 (* @type: (($id -> $object), Seq($effect)) => ($id -> $object); *)
+(* IN ORDER, LAST WINS. `Puts` is a SET, so folding it with `CHOOSE`
+   picks arbitrarily between two writes to one id -- and a sweep followed
+   by a handler writes the same id twice as a matter of course. The
+   sequence is the order they were decided in; the last one is the
+   decision. *)
 PutsInto(objs, fx) ==
-    LET W == Puts(fx) IN
-    [ i \in (DOMAIN objs) \cup {w.id : w \in W} |->
-         IF \E w \in W : w.id = i
-         THEN (CHOOSE w \in W : w.id = i).obj
-         ELSE objs[i] ]
+    ApaFoldSeqLeft(LAMBDA acc, e :
+                       IF VariantTag(e) = "PutObject"
+                       THEN LET w == VariantGetUnsafe("PutObject", e)
+                            IN  [ i \in (DOMAIN acc) \cup {w.id} |->
+                                     IF i = w.id THEN w.obj ELSE acc[i] ]
+                       ELSE acc,
+                   objs, fx)
 
 (* @type: (Set($outEntry), Seq($effect)) => Set($outEntry); *)
 SaysInto(ob, fx) ==
@@ -904,7 +911,8 @@ Process(r) ==
                     config   |-> [retryTimeout |-> RetryTimeout] ]
            out == Handle(steps[r].ev, env)
            fx  == swept.fx \o out.effects
-           W   == Puts(fx)
+           final == PutsInto(docs[o], fx)
+           W   == { [id |-> w.id, obj |-> final[w.id]] : w \in Puts(fx) }
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o fx
                                                  \o Disarms(o, W),
@@ -1005,12 +1013,7 @@ Perform(r) ==
             IN CASE VariantTag(e) = "PutObject" ->
                     IF Fenced => (docs[o] = steps[r].expect /\ now = steps[r].at)
                     THEN /\ docs'  = [docs EXCEPT ![o] =
-                                         LET W == Puts(steps[r].pending) IN
-                                         [ i \in (DOMAIN docs[o])
-                                                  \cup {w.id : w \in W} |->
-                                             IF \E w \in W : w.id = i
-                                             THEN (CHOOSE w \in W : w.id = i).obj
-                                             ELSE docs[o][i] ]]
+                                         PutsInto(docs[o], steps[r].pending)]
                          /\ outbox' = LET S == Says(steps[r].pending) IN
                                         { x \in outbox :
                                             ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
