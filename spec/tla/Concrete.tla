@@ -213,12 +213,20 @@ Owed(doc, t) ==
        \cup UNION { { Variant("CallbackDrain", [id |-> i, awaiter |-> w])
                        : w \in doc[i].promise.callbacks } : i \in Settled }
 
-(* ONE SWEEP, threading the document so two drains on one promise do not
-   overwrite each other's strike. One pass, not a fixpoint: a drain that
-   only becomes owed because of another drain waits for the next access,
-   which is what bounds a sweep against `MaxBatch` upstairs.
-   @type: (($id -> $object), Int) => { doc: $id -> $object, fx: Seq($effect) }; *)
-Sweep(doc, t) ==
+(* ONE SWEEP OF A CHOSEN AMOUNT, threading the document so two drains on
+   one promise do not overwrite each other's strike.
+
+   THE AMOUNT IS NOT DECIDED HERE. `Process` picks any subset of what the
+   document owes, so this machine stands for EVERY executor's drain
+   policy -- one item per access, everything at once, or anything
+   between -- rather than for one particular policy. `Abstract!Batch`
+   admits the same range, which is what makes them line up.
+
+   One pass, not a fixpoint: a drain that only becomes owed because of
+   another waits for the next access.
+   @type: (Set($event), ($id -> $object), Int)
+              => { doc: $id -> $object, fx: Seq($effect) }; *)
+Sweep(S, doc, t) ==
     ApaFoldSet(LAMBDA st, ev :
                    LET out == A!Handle(ev, [ objects |-> st.doc,
                                              now     |-> t,
@@ -226,7 +234,7 @@ Sweep(doc, t) ==
                    IN  [ doc |-> A!PutsInto(st.doc, out.effects),
                          fx  |-> st.fx \o out.effects ],
                [doc |-> doc, fx |-> << >>],
-               Owed(doc, t))
+               S)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -295,8 +303,9 @@ Disarms(o, W) ==
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ LET o   == steps[r].org
-           swept == Sweep(docs[o], now)
+    /\ \E S \in SUBSET Owed(docs[steps[r].org], now) :
+       LET o   == steps[r].org
+           swept == Sweep(S, docs[o], now)
            env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
