@@ -55,9 +55,6 @@ New(req, t) ==
 
 -----------------------------------------------------------------------------
 
-HandlePromiseGet(req) ==
-    FALSE
-
 HandlePromiseCreate(req) ==
     /\ req.id \notin DOMAIN objects
     /\ objects' = (req.id :> New(req, now)) @@ objects
@@ -113,9 +110,6 @@ HandlePromiseRegisterListener(req) ==
 
 -----------------------------------------------------------------------------
 
-HandleTaskGet(req) ==
-    FALSE
-
 HandleTaskCreate(req) ==
     /\ req.action.tags.targeted
     /\ \/ /\ req.action.id \notin DOMAIN objects
@@ -167,20 +161,15 @@ HandleTaskAcquire(req) ==
                                   !.task.resumes   = {}]) @@ objects
     /\ UNCHANGED <<outbox, now>>
 
-HandleTaskFence(req) ==
-    /\ req.id \in DOMAIN objects
-    /\ LET old == Project(objects[req.id], now)
+HandleTaskFence(i, v) ==
+    /\ i \in DOMAIN objects
+    /\ LET old == Project(objects[i], now)
        IN
-           /\ (IF VariantTag(req.action) = "Create"
-               THEN VariantGetUnsafe("Create", req.action).req.id
-               ELSE VariantGetUnsafe("Settle", req.action).req.id) /= req.id
            /\ old.task.state = "acquired"
            /\ old.promise.state = "pending"
-           /\ old.task.version = req.version
-           /\ IF VariantTag(req.action) = "Create" THEN
-                  HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req)
-              ELSE
-                  HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req)
+           /\ old.task.version = v
+           /\ \/ \E req \in CreateReq : req.id /= i /\ HandlePromiseCreate(req)
+              \/ \E req \in SettleReq : req.id /= i /\ HandlePromiseSettle(req)
 
 HandleTaskHeartbeat(req) ==
     LET beat == { i \in DOMAIN objects :
@@ -393,41 +382,6 @@ ProcessCallback ==
 
 -----------------------------------------------------------------------------
 
-Handle(ev) ==
-    LET p(tag) == VariantGetUnsafe(tag, ev)
-    IN
-    CASE VariantTag(ev) = "PromiseGet" ->
-             HandlePromiseGet(p("PromiseGet"))
-      [] VariantTag(ev) = "PromiseCreate" ->
-             HandlePromiseCreate(p("PromiseCreate").req)
-      [] VariantTag(ev) = "PromiseSettle" ->
-             HandlePromiseSettle(p("PromiseSettle").req)
-      [] VariantTag(ev) = "PromiseRegisterCallback" ->
-             HandlePromiseRegisterCallback(p("PromiseRegisterCallback").req)
-      [] VariantTag(ev) = "PromiseRegisterListener" ->
-             HandlePromiseRegisterListener(p("PromiseRegisterListener"))
-      [] VariantTag(ev) = "TaskGet" ->
-             HandleTaskGet(p("TaskGet"))
-      [] VariantTag(ev) = "TaskCreate" ->
-             HandleTaskCreate(p("TaskCreate"))
-      [] VariantTag(ev) = "TaskAcquire" ->
-             HandleTaskAcquire(p("TaskAcquire"))
-      [] VariantTag(ev) = "TaskFence" ->
-             HandleTaskFence(p("TaskFence"))
-      [] VariantTag(ev) = "TaskHeartbeat" ->
-             HandleTaskHeartbeat(p("TaskHeartbeat"))
-      [] VariantTag(ev) = "TaskSuspend" ->
-             HandleTaskSuspend(p("TaskSuspend"))
-      [] VariantTag(ev) = "TaskFulfill" ->
-             HandleTaskFulfill(p("TaskFulfill"))
-      [] VariantTag(ev) = "TaskRelease" ->
-             HandleTaskRelease(p("TaskRelease"))
-      [] VariantTag(ev) = "TaskHalt" ->
-             HandleTaskHalt(p("TaskHalt"))
-      [] VariantTag(ev) = "TaskContinue" ->
-             HandleTaskContinue(p("TaskContinue"))
-      [] OTHER -> FALSE
-
 Clock ==
     /\ now < MaxTime
     /\ now' = now + 1
@@ -441,9 +395,25 @@ Init ==
     /\ now     = 0
 
 Next ==
-    \/ /\ \E ev \in ExternalEvent : Handle(ev)
-       /\ \/ objects' /= objects
-          \/ outbox'  /= outbox
+    \/ \E req \in CreateReq   : HandlePromiseCreate(req)
+    \/ \E req \in SettleReq   : HandlePromiseSettle(req)
+    \/ \E req \in CallbackReq : HandlePromiseRegisterCallback(req)
+    \/ \E req \in [awaited : Id, address : Address] :
+           HandlePromiseRegisterListener(req)
+    \/ \E req \in [pid : Pid, ttl : Ttl, action : CreateReq] :
+           HandleTaskCreate(req)
+    \/ \E req \in [id : Id, version : Version, pid : Pid, ttl : Ttl] :
+           HandleTaskAcquire(req)
+    \/ \E i \in Id, v \in Version : HandleTaskFence(i, v)
+    \/ \E req \in [pid : Pid, tasks : SUBSET TaskRefT] :
+           HandleTaskHeartbeat(req)
+    \/ \E req \in [id : Id, version : Version, actions : SUBSET CallbackReq] :
+           HandleTaskSuspend(req)
+    \/ \E req \in [id : Id, version : Version, action : SettleReq] :
+           HandleTaskFulfill(req)
+    \/ \E req \in TaskRefT : HandleTaskRelease(req)
+    \/ \E req \in [id : Id] : HandleTaskHalt(req)
+    \/ \E req \in [id : Id] : HandleTaskContinue(req)
     \/ ProcessPromiseTimeout
     \/ ProcessLeaseTimeout
     \/ ProcessRetryTimeout
