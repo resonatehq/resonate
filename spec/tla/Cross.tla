@@ -31,4 +31,16 @@ Agree ==
         IN  /\ A!PutsInto(objects, out.effects) = d.objects
             /\ A!SaysInto(outbox,  out.effects) = d.outbox
 
+(* `Agree` compares the two Handles. It does NOT compare what the batch
+   folds: Abstract folds `Advance`, which short-circuits on `FiresIn`,
+   while AbstractDirect folds `Handle` with no guard at all. They are the
+   same fold only if a non-firing event changes nothing -- which is the
+   claim that `FiresIn` merely restates the handlers' own guards. *)
+AdvanceAgree ==
+    \A ev \in InternalEvent :
+        LET a == A!Advance([objects |-> objects, outbox |-> outbox], ev)
+            d == D!Handle(D!State, ev)
+        IN  /\ a.objects = d.objects
+            /\ a.outbox  = d.outbox
+
 ==============================================================================
