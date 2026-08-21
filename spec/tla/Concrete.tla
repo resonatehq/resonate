@@ -1,63 +1,20 @@
 -------------------------------- MODULE Concrete --------------------------------
-(***************************************************************************)
-(* The same protocol under the Verus executor's discipline: ONE DOCUMENT   *)
-(* PER ORIGIN, and a compare-and-swap on it.                               *)
-(*                                                                         *)
-(* `Abstract` deliberately has no fence, and TLC said what that costs: two *)
-(* steps read one object, both write, the second erases the first --       *)
-(* `preserved_settled_promise_record` and `WheelComplete` fall together.   *)
-(* This module is the other half of the experiment.                        *)
-(*                                                                         *)
-(* IT CHANGES NOTHING ABOUT THE PROTOCOL. The handlers, the effects, the   *)
-(* alphabet, the wheel and the invariants all come from `Abstract` through *)
-(* the instance below, so a difference in behaviour is a difference in the *)
-(* EXECUTOR and cannot be anything else.                                   *)
-(*                                                                         *)
-(* Two changes, both from `src/concrete_spec/executor.rs`:                 *)
-(*                                                                         *)
-(*   - the store is keyed by ORIGIN, and one document holds every object   *)
-(*     at that origin. This is `Workflow.promises: Map<Id, Promise>` --    *)
-(*     plural -- and it is what makes a multi-unit write single-document   *)
-(*     whenever the units share an origin.                                 *)
-(*                                                                         *)
-(*   - every write carries the etag its decision was read under            *)
-(*     (`expect: etag_of(held)`). If the document has moved, the write is  *)
-(*     REFUSED and the step goes back to deciding --                       *)
-(*     `restart(s, rid, ..)`. Nothing stale lands.                         *)
-(*                                                                         *)
-(* THE NAMES ARE DELIBERATELY THE SAME. `timeouts`, `outbox`, `steps` and  *)
-(* `now` mean here exactly what they mean in `Abstract`, and the instance  *)
-(* below leaves them alone. Only `objects` needs saying, because only      *)
-(* `objects` is represented differently -- which is the whole content of   *)
-(* this refinement, and it should be the only thing in the `WITH`.         *)
-(***************************************************************************)
+
 EXTENDS Requests
 
 CONSTANT Fenced
 
 VARIABLES
-    docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
-    timeouts,   \* the wheel. Same variable, same meaning as Abstract's
-    outbox,     \* likewise
-    steps,      \* likewise, plus `expect` and `org`
-    now         \* likewise
+    docs,
+    timeouts,
+    outbox,
+    steps,
+    now
 
 vars ==
     <<docs, timeouts, outbox, steps, now>>
 
 -----------------------------------------------------------------------------
-(***************************************************************************)
-(* THE ABSTRACTION FUNCTION                                                *)
-(*                                                                         *)
-(* What a chunked store denotes: the flat one that forgets the chunking.   *)
-(* An identifier already carries the origin it belongs to, so finding the  *)
-(* document an object lives in is `i.origin` and nothing else -- which is  *)
-(* what the pair-shaped identifier was for.                                *)
-(*                                                                         *)
-(* The etags denote NOTHING. There is no abstract variable they map to,    *)
-(* and that is the point of them: a fence is machinery for keeping a       *)
-(* promise the abstract machine states without it.                         *)
-(***************************************************************************)
 
 Objects ==
     [ i \in UNION { DOMAIN docs[o] : o \in Origin } |-> docs[i.origin][i] ]
@@ -65,53 +22,9 @@ Objects ==
 A ==
     INSTANCE Abstract WITH objects <- Objects
 
-(***************************************************************************)
-(* Three of this machine's six variables map to NOTHING, and that is the   *)
-(* whole shape of the result:                                              *)
-(*                                                                         *)
-(*     expect     a fence. The document a step decided against, compared   *)
-(*                on the way in, and machinery for keeping a promise the   *)
-(*                abstract machine states without it                       *)
-(*     timeouts   an index, so an executor need not scan for what is due.  *)
-(*                `Abstract` reads deadlines off the objects               *)
-(*     steps      work in flight. `Abstract` has no interval between       *)
-(*                deciding and writing, so it has nothing to track         *)
-(*                                                                         *)
-(* `outbox` and `now` map by name; only `objects` needs saying. So every   *)
-(* transition here that touches nothing but the three unmapped variables   *)
-(* is a STUTTER upstairs -- submitting, deciding, arming, disarming, and   *)
-(* a refused compare-and-swap sending a step back to decide again.         *)
-(*                                                                         *)
-(* Exactly one transition is not a stutter: the `PutObject` that lands.    *)
-(* THAT is where the abstract machine takes its single atomic step, and it *)
-(* is why the fence matters -- the etag is what makes the write land       *)
-(* against the state it was decided against, which is the only way one     *)
-(* instant can stand for the whole decision.                               *)
-(*                                                                         *)
-(* Nothing above needed a `Restart` in `Abstract`. An earlier draft mapped *)
-(* `steps` across, so a refused CAS showed up as an abstract step running  *)
-(* backwards and had to be legislated for. Hiding the bookkeeping is what  *)
-(* removed the need -- the retry is not a smaller abstract step, it is no  *)
-(* abstract step at all.                                                   *)
-(***************************************************************************)
-
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
-(***************************************************************************)
-(* THIS MACHINE'S OWN PROTOCOL. Not `Abstract`'s: the two are independent  *)
-(* specifications of the same protocol, and the refinement asks whether    *)
-(* their behaviour lines up. Borrowing the handlers would make that        *)
-(* question unaskable -- they would agree by construction.                 *)
-(*                                                                         *)
-(* Only the VOCABULARY is shared, through `Requests`: what an object is,   *)
-(* what a request is, which events exist. That is the same protocol being  *)
-(* spoken about, not the same machine speaking.                            *)
-(***************************************************************************)
 
-(* WRITING N OBJECTS AT ONCE. A heartbeat renews every lease it is shown and a
-   suspend registers a callback on every promise it names, so these are the two
-   handlers whose write is not one object.
-   @type: (Set($id), ($id) => $object) => Seq($effect); *)
 CommitAll(S, Obj(_)) ==
     LET each[T \in SUBSET S] ==
           IF T = {} THEN
@@ -123,22 +36,14 @@ CommitAll(S, Obj(_)) ==
     IN
         each[S]
 
-(* @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
 Puts(fx) ==
     { VariantGetUnsafe("PutObject", fx[i])
       : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "PutObject" } }
 
-(* @type: Seq($effect) => Set($outEntry); *)
 Says(fx) ==
     { VariantGetUnsafe("Send", fx[i]).entry
       : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
 
-(* @type: (($id -> $object), Seq($effect)) => ($id -> $object); *)
-(* IN ORDER, LAST WINS. `Puts` is a SET, so folding it with `CHOOSE`
-   picks arbitrarily between two writes to one id -- and a sweep followed
-   by a handler writes the same id twice as a matter of course. The
-   sequence is the order they were decided in; the last one is the
-   decision. *)
 PutsInto(objs, fx) ==
     LET upto[n \in 0 .. Len(fx)] ==
           IF n = 0 THEN
@@ -154,7 +59,6 @@ PutsInto(objs, fx) ==
     IN
         upto[Len(fx)]
 
-(* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
         [ promise |-> [obj.promise EXCEPT
@@ -172,7 +76,6 @@ Project(obj, t) ==
     ELSE
         obj
 
-(* @type: ($createReq, Int) => $object; *)
 New(req, t) ==
     IF req.timeoutAt > t THEN
         [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
@@ -195,11 +98,9 @@ New(req, t) ==
                       ELSE
                           NoTask ]
 
-(* @type: ($getReq, $env) => $outcome; *)
 HandlePromiseGet(req, env) ==
     [ effects |-> << >> ]
 
-(* @type: ($createReq, $env) => $outcome; *)
 HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -208,7 +109,6 @@ HandlePromiseCreate(req, env) ==
         IN
             [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($settleReq, $env) => $outcome; *)
 HandlePromiseSettle(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -230,7 +130,6 @@ HandlePromiseSettle(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* @type: ($callbackReq, $env) => $outcome; *)
 HandlePromiseRegisterCallback(req, env) ==
     IF \/ req.awaited \notin DOMAIN env.objects
        \/ req.awaiter \notin DOMAIN env.objects THEN
@@ -249,7 +148,6 @@ HandlePromiseRegisterCallback(req, env) ==
                 [ effects |-> << Variant("PutObject",
                                          [id |-> req.awaited, obj |-> newAwaited]) >> ]
 
-(* @type: ($listenerReq, $env) => $outcome; *)
 HandlePromiseRegisterListener(req, env) ==
     IF req.awaited \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -264,11 +162,9 @@ HandlePromiseRegisterListener(req, env) ==
                 [ effects |-> << Variant("PutObject",
                                          [id |-> req.awaited, obj |-> new]) >> ]
 
-(* @type: ($getReq, $env) => $outcome; *)
 HandleTaskGet(req, env) ==
     [ effects |-> << >> ]
 
-(* @type: ($taskCreateReq, $env) => $outcome; *)
 HandleTaskCreate(req, env) ==
     IF ~req.action.tags.targeted THEN
         [ effects |-> << >> ]
@@ -304,7 +200,6 @@ HandleTaskCreate(req, env) ==
                 [ effects |-> << Variant("PutObject",
                                          [id |-> req.action.id, obj |-> new]) >> ]
 
-(* @type: ($taskAcquireReq, $env) => $outcome; *)
 HandleTaskAcquire(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -395,7 +290,6 @@ HandleTaskSuspend(req, env) ==
                                       [Project(env.objects[a], env.now) EXCEPT
                                            !.promise.callbacks = @ \cup {req.id}]) ]
 
-(* @type: ($taskFulfillReq, $env) => $outcome; *)
 HandleTaskFulfill(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -418,7 +312,6 @@ HandleTaskFulfill(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($taskRef, $env) => $outcome; *)
 HandleTaskRelease(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -437,7 +330,6 @@ HandleTaskRelease(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($getReq, $env) => $outcome; *)
 HandleTaskHalt(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -455,7 +347,6 @@ HandleTaskHalt(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($getReq, $env) => $outcome; *)
 HandleTaskContinue(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -473,7 +364,6 @@ HandleTaskContinue(req, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
 
-(* @type: ($id, $env) => $outcome; *)
 ProcessLeaseTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -493,7 +383,6 @@ ProcessLeaseTimeout(i, env) ==
             ELSE
                 [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
 
-(* @type: ($id, $env) => $outcome; *)
 ProcessRetryTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -515,7 +404,6 @@ ProcessRetryTimeout(i, env) ==
                                                                  [id      |-> i,
                                                                   version |-> old.task.version])]]) >> ]
 
-(* @type: ($listenerDrainReq, $env) => $outcome; *)
 ProcessListener(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -536,7 +424,6 @@ ProcessListener(req, env) ==
                                                                  [id    |-> req.id,
                                                                   state |-> awaited.promise.state])]]) >> ]
 
-(* @type: ($drainReq, $env) => $outcome; *)
 ProcessCallback(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -571,7 +458,6 @@ ProcessCallback(req, env) ==
                                          Variant("PutObject",
                                                  [id |-> req.awaiter, obj |-> newAwaiter]) >> ]
 
-(* @type: ({ id: $id, kind: Str }, $env) => $outcome; *)
 ProcessPromiseTimeout(req, env) ==
     IF req.kind /= "promise" \/ req.id \notin DOMAIN env.objects THEN
         [ effects |-> << >> ]
@@ -584,7 +470,6 @@ ProcessPromiseTimeout(req, env) ==
             ELSE
                 [ effects |-> << >> ]
 
-(* @type: ($event, $env) => $outcome; *)
 Handle(ev, env) ==
     LET p(tag) == VariantGetUnsafe(tag, ev)
     IN
@@ -631,31 +516,6 @@ Handle(ev, env) ==
 
 -----------------------------------------------------------------------------
 
-
-
-(***************************************************************************)
-(* THE EXECUTOR                                                            *)
-(***************************************************************************)
-
-(* Which document a step touches.
-   
-   THIS IS WHERE THE ONE-DOCUMENT PREMISE BITES. `Process` hands the
-   handler `docs[o]` and nothing else, so a handler that reads or writes
-   an object at another origin cannot be served. Several now do:
-   `promiseRegisterCallback` reads the awaiter, `taskSuspend` writes
-   every awaited promise, `CallbackDrain` writes the awaiter's task, and
-   `taskFence` names a target that must be a different ID -- which is
-   not the same as a different origin, and nothing constrains the
-   origin.
-   
-   With a single origin every object is in one document and all of them
-   are single-document operations -- which is `SameOrigin` holding, by
-   construction rather than by proof. The model runs that way. Raising
-   `|Origin|` above one is exactly the experiment `SameOrigin` names,
-   and this operator is where it would have to be answered: a
-   cross-origin handler needs either two document reads or a
-   transaction, and this executor offers neither.
-   @type: $event => ORIGIN; *)
 OriginOf(ev) ==
     LET p(tag) == VariantGetUnsafe(tag, ev) IN
     CASE VariantTag(ev) = "PromiseGet"              -> p("PromiseGet").id.origin
@@ -677,7 +537,7 @@ OriginOf(ev) ==
       [] VariantTag(ev) = "Timeout"       -> p("Timeout").id.origin
       [] VariantTag(ev) = "ListenerDrain" -> p("ListenerDrain").id.origin
       [] VariantTag(ev) = "CallbackDrain" -> p("CallbackDrain").id.origin
-      \* heartbeat names a SET of tasks and the searches name none
+
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
 Fresh(ev) ==
@@ -694,15 +554,6 @@ SubmitExternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* THE WHEEL IS THE TRIGGER, so this quantifies over ARMED ENTRIES rather than
-   over an alphabet of events. A timer fires because an entry is due, not
-   because an event was guessed and then vetted against the wheel.
-
-   That retires `Fires`, whose `OTHER -> FALSE` was the only thing keeping
-   `ListenerDrain` and `CallbackDrain` out -- events this machine has never
-   been able to submit, because nothing here happens outside a request or a
-   timer. They were dead vocabulary the alphabet went on advertising; now they
-   are not mentioned. *)
 SubmitInternal(e) ==
     /\ e \in timeouts
     /\ e.at <= now
@@ -711,80 +562,26 @@ SubmitInternal(e) ==
                         Fresh(Variant("Timeout", [id |-> e.id, kind |-> e.kind])))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* WHAT IS DUE IS WHAT THE DOCUMENT SAYS IS DUE. Every deadline is a
-   FIELD on an object -- `timeoutAt`, `expiresAt`, `retryAt` -- and the
-   document is already in hand, so there is nothing to ask an index
-   about. The wheel is a TRIGGER: it says wake up and look at this
-   document. It does not decide what the work is.
-   @type: (($id -> $object), Int) => Set({ id: $id, kind: Str }); *)
 DrainableTimeouts(doc, t) ==
     { d \in [id : DOMAIN doc, kind : DeadlineKind] :
         /\ Deadline(doc[d.id], d.kind) /= NoTime
         /\ Deadline(doc[d.id], d.kind) <= t }
 
-(* NOTHING HAPPENS OUTSIDE A REQUEST OR A TIMER. That is the rule this
-   executor lives by, and it is why `Fires` is the wheel and nothing
-   else: a drain is not work this machine goes looking for and not an
-   event it can schedule.
-
-   It is what happens TO A DOCUMENT when a request or a timer touches
-   one. So it is written here as a transformation of the document, with
-   no event vocabulary involved -- `drain_doc` inside `prepare_doc`.
-
-   A settled promise still carrying a name owes that name an answer: a
-   listener gets `Unblock`, a callback gets its awaiter resumed. Both
-   strike the name in the same write that answers it, which is why a
-   drain happens once.
-   @type: (($id -> $object), Int) => Set({ id: $id, address: ADDR }); *)
 DrainableListeners(doc, t) ==
     UNION { { [id |-> i, address |-> a] : a \in doc[i].promise.listeners }
               : i \in { j \in DOMAIN doc :
                             \/ doc[j].promise.state /= "pending"
                             \/ doc[j].promise.timeoutAt <= t } }
 
-(* @type: (($id -> $object), Int) => Set({ id: $id, awaiter: $id }); *)
 DrainableCallbacks(doc, t) ==
     UNION { { [id |-> i, awaiter |-> w] : w \in doc[i].promise.callbacks }
               : i \in { j \in DOMAIN doc :
                             \/ doc[j].promise.state /= "pending"
                             \/ doc[j].promise.timeoutAt <= t } }
 
-(* SWEEPING A CHOSEN AMOUNT. The drain itself is PROTOCOL, so it is the
-   protocol's own operator that performs it -- `ProcessListener` and
-   `ProcessCallback` are functions from a document to effects, not
-   events being scheduled, and calling one is not this machine taking an
-   internal step.
-
-   The document is threaded so two drains on one promise do not
-   overwrite each other's strike. One pass, not a fixpoint: a drain that
-   only becomes possible because of another waits for the next access.
-   @type: (($id -> $object), Int, Set({ id: $id, address: ADDR }),
-           Set({ id: $id, awaiter: $id }))
-              => { doc: $id -> $object, fx: Seq($effect) }; *)
-(* THE SWEEP DRAINS EVERYTHING DUE, ALWAYS. Verus recurses until nothing is
-   due -- `sweep` on `due`, `phase3` on `due_t` -- so there is no subset to
-   choose and no reason to model one. Each phase is a fixpoint because a drain
-   can make another drain due: timing out a promise settles it, which makes its
-   listeners and callbacks drainable.
-
-   Termination rests on every drain retiring its own trigger. A promise timeout
-   settles the promise, a listener drain strikes the address, a callback drain
-   strikes the awaiter, a lease timeout clears expiresAt, and a retry timeout
-   pushes retryAt to now + RetryTimeout -- which is only in the future while
-   RetryTimeout > 0. Requests.tla ASSUMEs that.
-
-   `Next` picks the next due item with CHOOSE. TLC evaluates that
-   deterministically, and nothing here observes the order: `resumes` is a set,
-   so draining A then B and B then A agree. Verus pins the order at the least
-   id instead, because it needs its `for` loop to compute the same document on
-   the nose -- an implementation obligation, not a modelling one. *)
 EnvAt(d, t) ==
     [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
 
-(* `tr` is the stores this sweep passes through, one per protocol step. Nothing
-   in this machine reads it -- it is a local value, not a variable, and costs
-   no state. `Refinement` needs it to know what one write looks like taken one
-   abstract step at a time. *)
 Advance(st, out) ==
     LET doc2 == PutsInto(st.doc, out.effects)
         fx2  == st.fx \o out.effects
@@ -843,49 +640,12 @@ DrainCallbacks(st, t) ==
                 Advance(st, ProcessCallback(CHOOSE x \in d : TRUE,
                                             EnvAt(st.doc, t))), t)
 
-(* THE PHASE ORDER IS VERUS'S, AND IT IS LOAD-BEARING. `drain_doc` runs
-   phase1 (promise deadlines) then phase2 (resumes) then phase3 (task
-   deadlines), and task deadlines going LAST is what makes a resumed task
-   execute in the same write. `resume_awaiter` sets the task pending with
-   retryAt at now, so the retry is due the moment phase3 looks, and phase3
-   sends the Execute. Drain the task deadlines first instead and the resumed
-   task waits for the next sweep to be told to run.
-
-   Verus arrives at the same document by sending the Execute inside
-   `resume_awaiter` and arming the retry at now + retry_timeout. Same write,
-   same outbox, same deadline -- reached by ordering here and by fusing there,
-   because a spec can afford the extra step and a `for` loop cannot. *)
 Sweep(doc, t) ==
     DrainTasks(
         DrainCallbacks(
             DrainListeners(
                 DrainPromises([doc |-> doc, fx |-> << >>, tr |-> << >>], t), t), t), t)
 
-(* Read ONE DOCUMENT, decide against it, and remember the etag it was read
-   under. The handler is `Abstract`'s: the protocol does not know it is
-   being run by a different executor. *)
-(* MAINTAINING THE INDEX IS THE EXECUTOR'S JOB, and this is where it
-   happens. `Abstract` states what a handler writes and stops there --
-   a deadline is a field on an object, and `internal.lean` never says
-   arm or disarm. A machine that keeps a WHEEL has to work out what
-   that write did to the deadlines it indexes, and the only way to know
-   is to compare the document before against the document after.
-
-   Verus does this in `prepare`, from `w0` and `w2`:
-
-     let m1 = state::min_deadline(w2);
-     let sched = if m1 is Some
-         && (m1 != state::min_deadline(w0) || completing is Some) { ... }
-
-   Two differences from Verus worth naming rather than hiding. It arms
-   ONE timer at the earliest deadline and carries a generation to make
-   stale firings recognisable; this keeps one entry per object and kind,
-   which is a coarser wheel with no generations, so `WheelSound` failing
-   here is partly that choice and not only the arm-before-write order.
-   And `completing` gives Verus a reason to re-arm even when the minimum
-   has not moved, which has no counterpart here. *)
-
-(* @type: (ORIGIN, $id, Str) => Int; *)
 Was(o, i, k) ==
     IF i \in DOMAIN docs[o] THEN
         Deadline(docs[o][i], k)
@@ -906,19 +666,6 @@ DisarmFor(o, i, new, k) ==
     ELSE
         << >>
 
-(* Arm before the write and disarm after, which is Verus's
-   `sched + put + ack`. Arming first means a crash between the arm and
-   the write leaves an entry for an object that is not there -- noise,
-   which `C_WheelSound` sees and which the handler re-checks away when
-   it fires. Writing first would leave an object carrying a deadline
-   nothing will fire -- silence, which `C_WheelComplete` sees and which
-   nothing recovers from. Flip the two folds and the checker should hand
-   back a trace ending in a `Crash` with a deadline nobody holds.
-
-   This is a claim about EXECUTORS THAT KEEP AN INDEX. It used to sit in
-   `Abstract`, which made it look like protocol; it is not, and no
-   handler states it. *)
-(* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Arms(o, W) ==
     LET each[V \in SUBSET W] ==
           IF V = {} THEN
@@ -931,7 +678,6 @@ Arms(o, W) ==
     IN
         each[W]
 
-(* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Disarms(o, W) ==
     LET each[V \in SUBSET W] ==
           IF V = {} THEN
@@ -965,95 +711,6 @@ Process(r) ==
                                   ![r].at      = now]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* One effect. A write whose document has moved since the read is REFUSED,
-   and the step goes back to deciding -- which under the abstraction is
-   nothing at all.
-
-   THE FENCE COVERS THE CLOCK AS WELL AS THE DOCUMENT, and that is not
-   belt-and-braces -- the refinement demanded it. With only the etag
-   compared, TLC returned: decide at `now = 0`, `Clock` ticks, write lands
-   at `now = 1`. Upstairs the write IS the whole step, so the abstract
-   machine runs the handler at the instant the write lands and gets a
-   different answer -- a `createdAt`, a `settledAt`, a born-settled promise
-   where the concrete decided a pending one. A decision is only valid at
-   the instant it was made, and a store etag says nothing about the clock.
-
-   Verus takes the other road: `Phase::Perform` freezes `at` at prepare
-   time and every effect uses it, so the skew is absorbed rather than
-   refused. That works against the Lean, where `now` is an argument to
-   each step rather than a variable running underneath it. Here it is a
-   variable, so the choice is to re-decide, and `steps[r].at` is what the
-   comparison is against.
-
-   `Fenced` is a CONSTANT so the fence can be switched OFF and the
-   refinement made to prove its own necessity: with `Fenced = FALSE` a
-   stale decision lands, and `Spec => A!Spec` should fail and hand back
-   the trace that shows why.
-
-   ONE STEP, ONE DOCUMENT WRITE -- WHICH IS WHAT THE EXECUTOR DOES.
-
-   A step lands every `PutObject` it decided on in a single write, and
-   every message those writes justify with them. Only the wheel effects
-   stay separate, which is the premise the whole model is here to test.
-
-   This operator used to apply one effect per `Perform`, walking the
-   list. Two refinement counterexamples came out of that, and both were
-   reported as findings about the protocol before they were understood.
-   Neither was. They were this module having drifted away from the
-   executor it claims to model.
-
-   `Process` hands `pending` the effect list `Abstract!Handle` returned,
-   which is the right instinct -- the protocol should not know which
-   executor is running it. But `Abstract!Commit` emits a `PutObject` PER
-   OBJECT, and upstairs that granularity carries no meaning at all,
-   because `Apply` folds the whole list at one instant. Walking the same
-   list one entry at a time turns a per-object DESCRIPTION into a
-   sequence of per-object STORE OPERATIONS. `Write2` became two document
-   writes; `CommitAll` became N.
-
-   The executor emits exactly one, and its body is the whole workflow:
-
-     let put = seq![Effect::PutDocument { key, expect: etag_of(held),
-                                          body: w2 }];
-     ... sched + put + ack(..) + emits(..) + respond
-
-   The messages are already in that body -- the outbox is a field of the
-   workflow, and `lemma_sends_outbox` fixes `step(w, cs, now).outbox` as
-   `fold_send(w.outbox, sends_step(w, cs, now))`. `Effect::Send` carries
-   an entry from that record onto the WIRE, `s.sent`, which this model
-   does not have. So `outbox` here is the record, and the record belongs
-   in the write.
-
-   THE LESSON IS ABOUT EFFECT LISTS, not about outboxes. A list written
-   for an atomic machine does not carry execution granularity, and
-   reading it as though it did is silent: `C_TypeOK` passes, so does
-   `C_UnitCoherent`, so do the catalogue properties, because every one
-   of them is a statement about states and this was an error about WHEN
-   states change. The refinement is what caught it, and catching drift
-   between the executor and its model is the thing a refinement against
-   a hand-written abstraction function is genuinely FOR.
-
-   `Puts` and `Says` are taken over the whole remaining `pending`, and
-   the write is built exactly as `Apply` builds `objects'` -- same fold,
-   same `CHOOSE` for two writes to one id -- so the two agree by
-   construction rather than by luck. Folding at the write rather than in
-   `Process` is a structural difference from the executor, which folds
-   when it prepares; the body is fixed at `Process` either way, so the
-   two are the same machine.
-
-   The `Send` branch below survives for handlers that emit without
-   writing: there the message alone IS the whole decision, and `Apply`
-   with an empty `Puts` is exactly a step that moves `outbox` and leaves
-   `objects` where it was. The arm and disarm branches survive because
-   the wheel is the one thing still allowed to lag, which is the whole
-   experiment. *)
-(* PERFORM, SPLIT BY WHAT IT TOUCHES. It used to be one action with a
-   five-way CASE, which meant the document write could not be named -- and so
-   could not be replaced. `Refinement` replaces exactly `Commit`, and nothing
-   else, to walk it one abstract step at a time.
-
-   `Perform` is still their disjunction, so `Next` and every behaviour are
-   unchanged. *)
 Ready(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
@@ -1069,14 +726,11 @@ Heads(r, tag) ==
     /\ steps[r].pending /= << >>
     /\ VariantTag(Head(steps[r].pending)) = tag
 
-(* THE FENCE. The document a step decided against, still the document, at the
-   instant it decided. *)
 FenceOk(r) ==
     \/ ~Fenced
     \/ /\ docs[steps[r].org] = steps[r].expect
        /\ now = steps[r].at
 
-(* THE WRITE. One document, one instant, everything the step decided. *)
 Commit(r) ==
     /\ Heads(r, "PutObject")
     /\ FenceOk(r)
@@ -1091,7 +745,6 @@ Commit(r) ==
                              LAMBDA f : VariantTag(f) \notin {"PutObject", "Send"})]
     /\ UNCHANGED <<timeouts, now>>
 
-(* THE FENCE REFUSING. A stale decision is dropped and the request reprocessed. *)
 Refuse(r) ==
     /\ Heads(r, "PutObject")
     /\ ~FenceOk(r)
@@ -1139,88 +792,14 @@ Init ==
     /\ steps    = EmptyFn
     /\ now      = 0
 
-(***************************************************************************)
-(* CRASHES ARE ALWAYS IN THE MACHINE                                       *)
-(*                                                                         *)
-(* There was a `Crashing` constant here, and switching it off was how       *)
-(* liveness got claimed. That is a worse thing to say than it looks: it     *)
-(* claims something about an executor that never fails, which is not an     *)
-(* executor anyone has. `EventuallyStable` says the thing actually meant    *)
-(* -- steps do not fail FOREVER -- so the crash can stay, both claims can   *)
-(* be made about the same machine, and the difference between them is one   *)
-(* formula rather than one configuration.                                   *)
-(***************************************************************************)
-
 Next ==
     \/ \E ev \in ExternalEvent : SubmitExternal(ev)
     \/ \E e \in timeouts : SubmitInternal(e)
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
-(* The fairness `Abstract` asks of itself, asked of this executor. It has
-   to be here: `A!Spec` carries `A!Fairness`, and a machine that may
-   stall forever cannot implement a machine that may not.
-
-   `SubmitInternal` is STRONGLY fair, and that is not a modelling
-   convenience -- weak fairness was not enough and TLC said why. Upstairs
-   an internal step is available whenever an object's deadline says so,
-   full stop. Down here it is available only when a step slot is free,
-   and `|Rid|` is finite. So the counterexample was a cycle in which
-   clients kept arriving, the slots kept filling, and a due timeout with
-   a properly armed entry was never once submitted -- legal under weak
-   fairness, because the action was not CONTINUOUSLY enabled, only
-   enabled again and again.
-
-   Strong fairness is the honest reading of what the abstract machine
-   demands: an executor must not indefinitely prefer client work to work
-   that has come due. That is a scheduling obligation on the real server
-   -- a fair choice between the API path and the timer path -- and it is
-   the kind of requirement that is invisible until liveness is checked
-   against a bounded resource. *)
-(***************************************************************************)
-(* CRASHES THAT STOP, without a counter                                    *)
-(*                                                                         *)
-(* `Crashing = FALSE` says an executor never fails, which is not what we   *)
-(* mean and not something anyone would claim. What we mean is that steps   *)
-(* do not fail FOREVER, and that is sayable directly:                      *)
-(*                                                                         *)
-(*     <>[][ \A r \in Rid : ~Crash(r) ]_vars                               *)
-(*                                                                         *)
-(* `[][A]_vars` holds of a step when it satisfies `A` or leaves `vars`     *)
-(* alone. A crash does neither -- it removes a step -- so `[][~Crash]_vars`*)
-(* forbids crash steps, and `<>[]` says: from some point on, forever.      *)
-(* No bound, no counter, no constant. Just "not forever".                  *)
-(*                                                                         *)
-(* Crashes stay in the machine, safety is still checked against them, and  *)
-(* only the liveness claim is conditioned on their ceasing. That is the    *)
-(* shape every liveness result under failure has -- an eventual-stability  *)
-(* assumption -- written as a formula instead of an English caveat.        *)
-(*                                                                         *)
-(* WHERE IT GOES IS NOT FREE. The obvious spelling is a hypothesis on the  *)
-(* property, `EventuallyStable => A!Spec`, and TLC refuses it:             *)
-(*                                                                         *)
-(*     Temporal formulas containing actions must be of forms               *)
-(*     <>[]A or []<>A.                                                     *)
-(*                                                                         *)
-(* An action-containing formula is admitted only in those two shapes, and  *)
-(* an implication with one as its antecedent is not among them. As a       *)
-(* CONJUNCT OF THE SPECIFICATION it is accepted, which is what `SpecStable`*)
-(* is. `RefinesSpecStable` is kept because it says what is meant; it is    *)
-(* just not the form a checker will take.                                  *)
-(*                                                                         *)
-(* Note also what this does NOT say. `<>[]` means crashes stop ENTIRELY    *)
-(* after some point, which is stronger than "not always". The weaker       *)
-(* reading -- infinitely many crashes, but never always the attempt that   *)
-(* matters -- is what fairness would express, and it is exactly what the   *)
-(* slot-recycling counterexample showed cannot be written over `Rid`:      *)
-(* fairness names a slot, and a throwaway no-op step in the same slot      *)
-(* discharges it. Eventual stability is the honest thing that is actually  *)
-(* expressible here.                                                       *)
-(***************************************************************************)
-
 EventuallyStable ==
     <>[][ \A r \in Rid : ~Crash(r) ]_vars
-
 
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
@@ -1228,15 +807,6 @@ Fairness ==
     /\ WF_vars(Clock)
     /\ EventuallyStable
 
-(* The stronger promise, as a SECOND SPECIFICATION rather than a constant
-   guard. `StrongSteps => \A r : SF_vars(..)` looked like the tidy way to
-   make it switchable, and it is not: TLC recognises fairness only in a
-   restricted syntactic form -- WF/SF terms and quantifications over them
-   -- and an implication is not in that grammar. It produced a
-   "counterexample" that plainly violated the very condition it was
-   supposed to assume, which is how the mistake was caught. A fairness
-   condition that is not syntactically a fairness condition is not an
-   assumption; it is decoration. *)
 FairnessSF ==
     /\ Fairness
     /\ \A r \in Rid : SF_vars(Process(r))
@@ -1248,89 +818,15 @@ SpecSF ==
     Init /\ [][Next]_vars /\ FairnessSF
 
 -----------------------------------------------------------------------------
-(***************************************************************************)
-(* THE REFINEMENT                                                          *)
-(*                                                                         *)
-(* The statement we MEAN is                                                *)
-(*                                                                         *)
-(*     THEOREM Spec => A!Spec                                              *)
-(*                                                                         *)
-(* -- every behaviour of the chunked, fenced machine is, once you read a   *)
-(* document as the objects it holds, a behaviour of the abstract machine.  *)
-(*                                                                         *)
-(* No existential is needed any more. `Abstract` has no `steps` and no     *)
-(* `timeouts` to fill in, so there is no hidden variable to quantify away  *)
-(* and no witness to choose -- the mapping is total and there is only one  *)
-(* of it. That is worth more than the convenience: it means the theorem no *)
-(* longer depends on a choice I made, and an executor with entirely        *)
-(* different bookkeeping is measured by the same statement rather than     *)
-(* having to supply its own.                                               *)
-(*                                                                         *)
-(* `A!Spec` and not `A!Safety`: the obligation includes the abstract       *)
-(* machine's FAIRNESS. Refining only safety would let an implementation    *)
-(* satisfy the specification by doing nothing -- accepting a request,      *)
-(* deciding, and stalling forever is safe, and is not an implementation of *)
-(* anything.                                                               *)
-(*                                                                         *)
-(* Note the direction. It does NOT say the two machines admit the same     *)
-(* behaviours; the fence exists precisely to admit FEWER.                  *)
-(*                                                                         *)
-(* And it is a real obligation rather than a formality: the first time it  *)
-(* was checked it FAILED, on a refused compare-and-swap sending a step     *)
-(* from "perform" back to "process". `Abstract` had no action that went    *)
-(* backwards, so every behaviour containing a retry was outside the        *)
-(* specification. `Abstract!Restart` is what that failure bought.          *)
-(*                                                                         *)
-(* That failure is gone, and the way it went is the lesson. It was never a *)
-(* fact about the protocol -- it came from mapping `steps` across, so that *)
-(* an executor's retry had to be legislated for upstairs. Take the         *)
-(* bookkeeping out of the abstract machine and the retry stops being a     *)
-(* step it has to permit. `Abstract!Restart` is gone with it.              *)
-(***************************************************************************)
 
-(* Both halves, named separately, so that checking one never means editing
-   the module. An earlier version had a single `Refinement` that got
-   sed-swapped between the two for one-off runs -- and a commit landed
-   while it was swapped. A definition you have to edit to check is a
-   definition that will eventually be committed mid-edit. *)
-
-(* THE REFINEMENT IS NOT STATED HERE. `Abstract` takes one step per protocol
-   action and this machine's write takes several at once, so `Spec => A!Spec`
-   is false and TLC says so -- a sweep that timed out one promise and created
-   another against two abstract steps. It is stated in `RefineStutter`, over
-   `ConcreteS`, which is this machine carrying a stuttering variable so the
-   walk can be taken one abstract step at a time.
-
-   The instance stays, because the invariants below are worth borrowing. *)
-
-(* THE MODEL IS FINITE ONLY IF SOMETHING SAYS SO. `Version` is declared as
-   0..MaxVersion and then never enforced: acquire and create bump the task
-   version with no upper guard, so a task acquired and released and acquired
-   again climbs forever and the state space is infinite. TypeOK did not catch
-   it -- it never mentioned version -- and no run of this spec has ever
-   terminated. This is the bound, as a state constraint rather than a guard,
-   because a protocol that stopped bumping at MaxVersion would be a different
-   protocol. *)
 C_VersionBound ==
     \A i \in UNION { DOMAIN docs[o] : o \in Origin } : docs[i.origin][i].task.version <= MaxVersion
 
-(* The invariants the abstract machine fails, asked of this one. That the
-   fence restores them is the other half of the result, and it is not
-   implied by the refinement -- refinement bounds what this machine MAY
-   do, and says nothing about what it GUARANTEES. *)
 C_TypeOK ==
     A!TypeOK
 C_UnitCoherent ==
     A!UnitCoherent
 
-(* The wheel invariants live HERE now, because the wheel does. They are
-   not among the 95 and could not be: they say an INDEX agrees with the
-   deadlines it indexes, and the protocol has no index.
-
-   `WheelSound` fails, and should: arming before writing admits an entry
-   for an object that is not there yet, which is noise the handler
-   re-checks away. `WheelComplete` is the one that matters -- a deadline
-   nothing holds is a timeout that never fires, and nothing recovers. *)
 C_WheelSound ==
     \A e \in timeouts :
         /\ e.id \in DOMAIN Objects
@@ -1341,38 +837,6 @@ C_WheelComplete ==
         Deadline(Objects[o], k) /= NoTime =>
             [at |-> Deadline(Objects[o], k), id |-> o, kind |-> k] \in timeouts
 
-(* A WITNESS, NOT AN INVARIANT.
-
-   `CallbackDrain` writes two objects, so it emits two `PutObject`s and
-   this executor performs them one at a time. The state in between --
-   one object written, the other still in hand -- is the multi-unit
-   write the header warns about, and the expectation was that it would
-   break the refinement the same way a write with its message still in
-   hand does.
-
-   There is a reason it might not, and it is worth stating before the
-   answer: refinement asks for SOME abstract step between the two mapped
-   states, not the same one. A lone object write is what half the
-   alphabet does -- a settle, a create, a claim -- so the half-finished
-   pair may be a state `Abstract` reaches all the time, just under a
-   different request than the one this machine is running. A message has
-   no such cover: nothing in `Abstract` ever says without writing in the
-   same breath. If that asymmetry is the whole story then writes may be
-   split and messages may not.
-
-   THESE THREE OPERATORS EXIST BECAUSE THE FIRST ANSWER WAS VACUOUS. A
-   run with `MaxTime = 0` reported no violation and had never run the
-   drain at all: a promise created at time 0 with a timeout of 0 is born
-   settled, so no callback is ever registered and the multi-unit write
-   never happens. `NoDrainRan` is what caught it. With the clock back,
-   all three fire -- the drain runs, a step carries two puts, and the
-   half-written state is reached -- so a refinement check against that
-   configuration is asking the question rather than missing it.
-
-   With one `Rid` nothing else writes, so an etag past what the step
-   read means the step itself wrote; a `PutObject` still pending means
-   it has not finished. Check `~SplitWrite` and TLC hands back the
-   state, which is the witness. *)
 SplitWrite ==
     \E r \in DOMAIN steps :
         /\ steps[r].phase = "perform"
