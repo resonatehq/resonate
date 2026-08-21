@@ -108,11 +108,39 @@ A ==
 (* spoken about, not the same machine speaking.                            *)
 (***************************************************************************)
 
-(* @type: (Set($id), ($id) => $object, $env) => Seq($effect); *)
-CommitAll(S, Obj(_), env) ==
+(* WRITING N OBJECTS AT ONCE. A heartbeat renews every lease it is shown and a
+   suspend registers a callback on every promise it names, so these are the two
+   handlers whose write is not one object.
+   @type: (Set($id), ($id) => $object) => Seq($effect); *)
+CommitAll(S, Obj(_)) ==
     ApaFoldSet(LAMBDA acc, i :
                    acc \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>,
                << >>, S)
+
+(* @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
+Puts(fx) ==
+    { VariantGetUnsafe("PutObject", fx[i])
+      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "PutObject" } }
+
+(* @type: Seq($effect) => Set($outEntry); *)
+Says(fx) ==
+    { VariantGetUnsafe("Send", fx[i]).entry
+      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
+
+(* @type: (($id -> $object), Seq($effect)) => ($id -> $object); *)
+(* IN ORDER, LAST WINS. `Puts` is a SET, so folding it with `CHOOSE`
+   picks arbitrarily between two writes to one id -- and a sweep followed
+   by a handler writes the same id twice as a matter of course. The
+   sequence is the order they were decided in; the last one is the
+   decision. *)
+PutsInto(objs, fx) ==
+    ApaFoldSeqLeft(LAMBDA acc, e :
+                       IF VariantTag(e) = "PutObject"
+                       THEN LET w == VariantGetUnsafe("PutObject", e)
+                            IN  [ i \in (DOMAIN acc) \cup {w.id} |->
+                                     IF i = w.id THEN w.obj ELSE acc[i] ]
+                       ELSE acc,
+                   objs, fx)
 
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
@@ -315,8 +343,7 @@ HandleTaskHeartbeat(req, env) ==
                   LAMBDA i :
                       LET old == Project(env.objects[i], env.now)
                       IN
-                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl],
-                  env) ]
+                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl]) ]
 
 HandleTaskSuspend(req, env) ==
     LET aw   == { a.awaited : a \in req.actions }
@@ -354,8 +381,7 @@ HandleTaskSuspend(req, env) ==
                         \o CommitAll(aw,
                                   LAMBDA a :
                                       [Project(env.objects[a], env.now) EXCEPT
-                                           !.promise.callbacks = @ \cup {req.id}],
-                                  env) ]
+                                           !.promise.callbacks = @ \cup {req.id}]) ]
 
 (* @type: ($taskFulfillReq, $env) => $outcome; *)
 HandleTaskFulfill(req, env) ==
@@ -593,31 +619,6 @@ Handle(ev, env) ==
 
 -----------------------------------------------------------------------------
 
-
-(* @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
-Puts(fx) ==
-    { VariantGetUnsafe("PutObject", fx[i])
-      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "PutObject" } }
-
-(* @type: Seq($effect) => Set($outEntry); *)
-Says(fx) ==
-    { VariantGetUnsafe("Send", fx[i]).entry
-      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
-
-(* @type: (($id -> $object), Seq($effect)) => ($id -> $object); *)
-(* IN ORDER, LAST WINS. `Puts` is a SET, so folding it with `CHOOSE`
-   picks arbitrarily between two writes to one id -- and a sweep followed
-   by a handler writes the same id twice as a matter of course. The
-   sequence is the order they were decided in; the last one is the
-   decision. *)
-PutsInto(objs, fx) ==
-    ApaFoldSeqLeft(LAMBDA acc, e :
-                       IF VariantTag(e) = "PutObject"
-                       THEN LET w == VariantGetUnsafe("PutObject", e)
-                            IN  [ i \in (DOMAIN acc) \cup {w.id} |->
-                                     IF i = w.id THEN w.obj ELSE acc[i] ]
-                       ELSE acc,
-                   objs, fx)
 
 
 (***************************************************************************)
