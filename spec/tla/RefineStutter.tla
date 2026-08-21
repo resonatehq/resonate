@@ -23,11 +23,16 @@ SaysInto(ob, fx) ==
     LET S == Says(fx)
     IN  { x \in ob : ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
 
+(* Where the walk has got to. Only meaningful while one is in progress, which
+   is the only place it is read. *)
+At ==
+    Walk(docs[steps[s.req].org], steps[s.req].ev, now)[s.k]
+
 AA == INSTANCE Abstract WITH
           objects <- IF s = top THEN Objects
-                     ELSE ObjectsAt(s.cur.doc, s.org),
+                     ELSE ObjectsAt(At.doc, steps[s.req].org),
           outbox  <- IF s = top THEN outbox
-                     ELSE SaysInto(outbox, s.cur.fx)
+                     ELSE SaysInto(outbox, At.fx)
 
 RefinesStutter ==
     AA!Safety

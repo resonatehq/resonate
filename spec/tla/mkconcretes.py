@@ -1,31 +1,37 @@
 """Derive ConcreteS from Concrete: the same executor, carrying a stuttering
 variable so one atomic write can be walked one abstract step at a time.
 
+The variable holds a POSITION, not a path. The sequence of stores a write
+passes through is a function of the document it decided against, the instant
+it decided, and the request -- all of which `steps` already holds, and none of
+which move while a walk is in progress. So it is recomputed, not stored: `s`
+is a request id and a counter.
+
 ConcreteS used to be a hand-edited copy, which meant every change to Concrete
-had to be made twice. It is generated now, so the two cannot drift."""
-import re, sys
+had to be made twice."""
+import re
 
 s = open("Concrete.tla").read()
-def sub(old, new, n=1):
+def sub(old, new):
     global s
     assert s.count(old) >= 1, "pattern not found:\n" + old[:200]
-    s = s.replace(old, new, n)
+    s = s.replace(old, new, 1)
 
 sub("MODULE Concrete", "MODULE ConcreteS")
 
-# --- the variable ------------------------------------------------------------
 sub("""VARIABLES
-    docs,""", """(* `top` marks "not mid-walk". A record, so it cannot collide with a step. *)
+    docs,""", """(* `top` marks "not mid-walk". A record, so it cannot collide with a
+   position. *)
 top ==
     [top |-> "top"]
 
 VARIABLES
-    s,          \\* THE STUTTERING VARIABLE
+    s,          \\* THE STUTTERING VARIABLE: [req |-> Rid, k |-> Nat], or top
     docs,""")
 sub("vars ==\n    <<docs, timeouts, outbox, steps, now>>",
     "vars ==\n    <<docs, timeouts, outbox, steps, now>>\n\nvarsS ==\n    <<s, docs, timeouts, outbox, steps, now>>")
 
-# --- the sweep records the abstract states it passes through ------------------
+# --- the sweep records the stores it passes through (a value, not a variable) --
 sub("""Advance(st, out) ==
     [ doc |-> PutsInto(st.doc, out.effects), fx |-> st.fx \\o out.effects ]""",
     """Advance(st, out) ==
@@ -37,21 +43,31 @@ sub("""Advance(st, out) ==
                   ELSE st.tr \\o << [doc |-> doc2, fx |-> fx2] >> ]""")
 sub("[doc |-> doc, fx |-> << >>]", "[doc |-> doc, fx |-> << >>, tr |-> << >>]")
 
-# --- Process records the walk -------------------------------------------------
-sub("""           W   == { [id |-> w.id, obj |-> final[w.id]] : w \\in Puts(fx) }
-       IN  steps' = [steps EXCEPT ![r].phase   = "perform",""",
-    """           W   == { [id |-> w.id, obj |-> final[w.id]] : w \\in Puts(fx) }
-           walk == IF out.effects = << >> THEN swept.tr
-                   ELSE swept.tr \\o << [doc |-> final, fx |-> fx] >>
-       IN  steps' = [steps EXCEPT ![r].phase   = "perform",""")
+sub("""(* Read ONE DOCUMENT, decide against it""",
+    """(* THE STORES ONE WRITE PASSES THROUGH, one per abstract step, excluding the
+   last -- the last is what the write itself produces. Recomputed on demand at
+   every tick, which costs evaluation and saves state. *)
+Walk(doc, ev, t) ==
+    LET swept == Sweep(doc, t)
+        out   == Handle(ev, [ objects  |-> swept.doc,
+                              timeouts |-> timeouts,
+                              outbox   |-> outbox,
+                              now      |-> t,
+                              config   |-> [retryTimeout |-> RetryTimeout] ])
+        full  == IF out.effects = << >> THEN
+                     swept.tr
+                 ELSE
+                     swept.tr \\o << [ doc |-> PutsInto(doc, swept.fx \\o out.effects),
+                                      fx  |-> swept.fx \\o out.effects ] >>
+    IN
+        IF full = << >> THEN << >> ELSE SubSeq(full, 1, Len(full) - 1)
+
+(* Read ONE DOCUMENT, decide against it""")
+
 sub("""                                  ![r].at      = now]
     /\\ UNCHANGED <<docs, timeouts, outbox, now>>""",
-    """                                  ![r].at      = now,
-                                  ![r].path    = IF walk = << >> THEN << >>
-                                                 ELSE SubSeq(walk, 1, Len(walk) - 1)]
+    """                                  ![r].at      = now]
     /\\ UNCHANGED <<s, docs, timeouts, outbox, now>>""")
-sub("""      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev) ]""",
-    """      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev), path |-> << >> ]""")
 
 # --- Perform: the write becomes a walk ---------------------------------------
 sub("""    /\\ steps[r].phase = "perform"
@@ -60,7 +76,7 @@ sub("""    /\\ steps[r].phase = "perform"
             /\\ UNCHANGED <<docs, timeouts, outbox>>""",
     """    /\\ steps[r].phase = "perform"
     (* A WALK BELONGS TO THE REQUEST THAT STARTED IT. Without this, another
-       request's Perform steps someone else's path, or closes it with its own
+       request's Perform steps someone else's walk, or closes it with its own
        write. *)
     /\\ (s /= top) => (s.req = r)
     /\\ IF steps[r].pending = << >>
@@ -68,15 +84,11 @@ sub("""    /\\ steps[r].phase = "perform"
             /\\ UNCHANGED <<s, docs, timeouts, outbox>>""")
 sub("""                    THEN /\\ docs'  = [docs EXCEPT ![o] =
                                          PutsInto(docs[o], steps[r].pending)]""",
-    """                    THEN IF IF s = top THEN steps[r].path /= << >>
-                                       ELSE s.rest /= << >>
-                         THEN /\\ s' = IF s = top
-                                      THEN [ req  |-> r,
-                                             cur  |-> Head(steps[r].path),
-                                             rest |-> Tail(steps[r].path),
-                                             org  |-> o ]
-                                      ELSE [ s EXCEPT !.cur  = Head(s.rest),
-                                                      !.rest = Tail(s.rest) ]
+    """                    THEN IF IF s = top
+                            THEN Walk(docs[o], steps[r].ev, now) /= << >>
+                            ELSE s.k < Len(Walk(docs[o], steps[r].ev, now))
+                         THEN /\\ s' = IF s = top THEN [req |-> r, k |-> 1]
+                                      ELSE [s EXCEPT !.k = @ + 1]
                               /\\ UNCHANGED <<docs, timeouts, outbox, steps>>
                          ELSE
                          /\\ s' = top

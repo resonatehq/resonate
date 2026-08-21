@@ -35,12 +35,13 @@ EXTENDS Requests
 
 CONSTANT Fenced
 
-(* `top` marks "not mid-walk". A record, so it cannot collide with a step. *)
+(* `top` marks "not mid-walk". A record, so it cannot collide with a
+   position. *)
 top ==
     [top |-> "top"]
 
 VARIABLES
-    s,          \* THE STUTTERING VARIABLE
+    s,          \* THE STUTTERING VARIABLE: [req |-> Rid, k |-> Nat], or top
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
     timeouts,   \* the wheel. Same variable, same meaning as Abstract's
     outbox,     \* likewise
@@ -677,7 +678,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev), path |-> << >> ]
+      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev) ]
 
 Put(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -877,6 +878,24 @@ Sweep(doc, t) ==
             DrainListeners(
                 DrainPromises([doc |-> doc, fx |-> << >>, tr |-> << >>], t), t), t), t)
 
+(* THE STORES ONE WRITE PASSES THROUGH, one per abstract step, excluding the
+   last -- the last is what the write itself produces. Recomputed on demand at
+   every tick, which costs evaluation and saves state. *)
+Walk(doc, ev, t) ==
+    LET swept == Sweep(doc, t)
+        out   == Handle(ev, [ objects  |-> swept.doc,
+                              timeouts |-> timeouts,
+                              outbox   |-> outbox,
+                              now      |-> t,
+                              config   |-> [retryTimeout |-> RetryTimeout] ])
+        full  == IF out.effects = << >> THEN
+                     swept.tr
+                 ELSE
+                     swept.tr \o << [ doc |-> PutsInto(doc, swept.fx \o out.effects),
+                                      fx  |-> swept.fx \o out.effects ] >>
+    IN
+        IF full = << >> THEN << >> ELSE SubSeq(full, 1, Len(full) - 1)
+
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
    being run by a different executor. *)
@@ -965,15 +984,11 @@ Process(r) ==
            fx  == swept.fx \o out.effects
            final == PutsInto(docs[o], fx)
            W   == { [id |-> w.id, obj |-> final[w.id]] : w \in Puts(fx) }
-           walk == IF out.effects = << >> THEN swept.tr
-                   ELSE swept.tr \o << [doc |-> final, fx |-> fx] >>
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o fx
                                                  \o Disarms(o, W),
                                   ![r].expect  = docs[o],
-                                  ![r].at      = now,
-                                  ![r].path    = IF walk = << >> THEN << >>
-                                                 ELSE SubSeq(walk, 1, Len(walk) - 1)]
+                                  ![r].at      = now]
     /\ UNCHANGED <<s, docs, timeouts, outbox, now>>
 
 (* One effect. A write whose document has moved since the read is REFUSED,
@@ -1062,7 +1077,7 @@ Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
     (* A WALK BELONGS TO THE REQUEST THAT STARTED IT. Without this, another
-       request's Perform steps someone else's path, or closes it with its own
+       request's Perform steps someone else's walk, or closes it with its own
        write. *)
     /\ (s /= top) => (s.req = r)
     /\ IF steps[r].pending = << >>
@@ -1072,15 +1087,11 @@ Perform(r) ==
                 o == steps[r].org
             IN CASE VariantTag(e) = "PutObject" ->
                     IF Fenced => (docs[o] = steps[r].expect /\ now = steps[r].at)
-                    THEN IF IF s = top THEN steps[r].path /= << >>
-                                       ELSE s.rest /= << >>
-                         THEN /\ s' = IF s = top
-                                      THEN [ req  |-> r,
-                                             cur  |-> Head(steps[r].path),
-                                             rest |-> Tail(steps[r].path),
-                                             org  |-> o ]
-                                      ELSE [ s EXCEPT !.cur  = Head(s.rest),
-                                                      !.rest = Tail(s.rest) ]
+                    THEN IF IF s = top
+                            THEN Walk(docs[o], steps[r].ev, now) /= << >>
+                            ELSE s.k < Len(Walk(docs[o], steps[r].ev, now))
+                         THEN /\ s' = IF s = top THEN [req |-> r, k |-> 1]
+                                      ELSE [s EXCEPT !.k = @ + 1]
                               /\ UNCHANGED <<docs, timeouts, outbox, steps>>
                          ELSE
                          /\ s' = top
@@ -1292,12 +1303,14 @@ SpecSF ==
    while it was swapped. A definition you have to edit to check is a
    definition that will eventually be committed mid-edit. *)
 
-RefinesSafety ==
-    A!Safety
-RefinesSpec ==
-    A!Spec
+(* THE REFINEMENT IS NOT STATED HERE. `Abstract` takes one step per protocol
+   action and this machine's write takes several at once, so `Spec => A!Spec`
+   is false and TLC says so -- a sweep that timed out one promise and created
+   another against two abstract steps. It is stated in `RefineStutter`, over
+   `ConcreteS`, which is this machine carrying a stuttering variable so the
+   walk can be taken one abstract step at a time.
 
-THEOREM Spec => A!Spec
+   The instance stays, because the invariants below are worth borrowing. *)
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
