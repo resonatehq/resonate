@@ -36,9 +36,6 @@ func serverValidate(t *testing.T, id string, tags map[string]string) {
 		t.Errorf("null_bytes: id=%q", id)
 	}
 	if o, ok := tags["resonate:origin"]; ok {
-		if strings.Contains(o, ".") {
-			t.Errorf("dot_in_origin: origin=%q", o)
-		}
 		if strings.Contains(o, ":") {
 			t.Errorf("colon_in_origin: origin=%q", o)
 		}
@@ -70,12 +67,13 @@ func serverValidate(t *testing.T, id string, tags map[string]string) {
 
 // runIDFormatWorkflow drives a workflow tree through a fake fence client and
 // returns every promise record it created: nested ctx.Run children, a durable
-// sleep, and a detached child spawned from a nested context.
-func runIDFormatWorkflow(t *testing.T) map[string]PromiseRecord {
+// sleep, and a detached child spawned from a nested context. The caller
+// supplies the root id, which becomes the origin of every minted id.
+func runIDFormatWorkflow(t *testing.T, root string) map[string]PromiseRecord {
 	t.Helper()
 	fake := newFakeFenceClient()
-	eff := NewEffects(fake, "task-1", 1, "wf", nil)
-	ctx := testContext("wf", eff)
+	eff := NewEffects(fake, "task-1", 1, root, nil)
+	ctx := testContext(root, eff)
 
 	leaf := func(_ *Context, n int) (int, error) { return n, nil }
 	grandchild := func(c *Context, n int) (int, error) {
@@ -135,12 +133,21 @@ func runIDFormatWorkflow(t *testing.T) map[string]PromiseRecord {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 func TestEveryCreatedPromisePassesServerValidation(t *testing.T) {
-	promises := runIDFormatWorkflow(t)
-	if len(promises) < 5 {
-		t.Fatalf("expected a real tree, got %d promises", len(promises))
-	}
-	for id, rec := range promises {
-		serverValidate(t, id, rec.Tags)
+	// A dotted root is a caller's prerogative: '.' is only read below the
+	// origin, so every id minted under it still validates.
+	for _, root := range []string{"wf", "my.app.workflow"} {
+		promises := runIDFormatWorkflow(t, root)
+		if len(promises) < 5 {
+			t.Fatalf("expected a real tree, got %d promises", len(promises))
+		}
+		for id, rec := range promises {
+			serverValidate(t, id, rec.Tags)
+		}
+		for id := range promises {
+			if got := serverOrigin(id); got != root {
+				t.Errorf("id %q has origin %q, want %q", id, got, root)
+			}
+		}
 	}
 }
 
@@ -148,7 +155,7 @@ func TestWholeWorkflowSharesOneOrigin(t *testing.T) {
 	// The origin is the server's partition key and the unit both
 	// promise.register_callback and task.suspend match on, so every promise a
 	// workflow creates — detached children included — must share it.
-	promises := runIDFormatWorkflow(t)
+	promises := runIDFormatWorkflow(t, "wf")
 	for id, rec := range promises {
 		if got := serverOrigin(id); got != "wf" {
 			t.Errorf("id %q has origin %q, want wf", id, got)
@@ -160,7 +167,7 @@ func TestWholeWorkflowSharesOneOrigin(t *testing.T) {
 }
 
 func TestChildIDsAreColonThenDotSeparated(t *testing.T) {
-	promises := runIDFormatWorkflow(t)
+	promises := runIDFormatWorkflow(t, "wf")
 	// First level below the root joins with ':', deeper levels with '.'.
 	for _, want := range []string{"wf:1", "wf:1.1", "wf:1.1.1"} {
 		if _, ok := promises[want]; !ok {
@@ -178,7 +185,7 @@ func TestChildIDsAreColonThenDotSeparated(t *testing.T) {
 func TestDetachedIDsStayBoundedBelowTheOrigin(t *testing.T) {
 	// Detached ids are `{origin}:d{16 hex}` — one segment past the origin no
 	// matter how deep the spawning context is.
-	promises := runIDFormatWorkflow(t)
+	promises := runIDFormatWorkflow(t, "wf")
 	detachedRe := regexp.MustCompile(`^wf:d[0-9a-f]{16}$`)
 	detached := []string{}
 	for id := range promises {
@@ -227,7 +234,7 @@ func TestDetachedFromADetachedChildStaysBounded(t *testing.T) {
 }
 
 func TestPrefixTagIsNotEmitted(t *testing.T) {
-	promises := runIDFormatWorkflow(t)
+	promises := runIDFormatWorkflow(t, "wf")
 	for id, rec := range promises {
 		if _, ok := rec.Tags["resonate:prefix"]; ok {
 			t.Errorf("promise %q emits resonate:prefix", id)
@@ -257,10 +264,10 @@ func TestOriginOfMatchesTheServersOrigin(t *testing.T) {
 }
 
 func TestValidateRootIDRejectsReservedSeparators(t *testing.T) {
-	// Both separators are reserved in a root id: it becomes the origin of its
-	// whole lineage, and the server rejects an origin containing either one
-	// outright (dot_in_origin / colon_in_origin).
-	for _, id := range []string{"a.b", "a:b", "a.b:c", "", "a\x00b"} {
+	// ':' is the one reserved separator in a root id: it becomes the origin of
+	// its whole lineage, and the server rejects an origin containing it
+	// outright (colon_in_origin).
+	for _, id := range []string{"a:b", "a.b:c", "", "a\x00b"} {
 		err := ValidateRootID(id)
 		var invalid *InvalidIDError
 		if !errors.As(err, &invalid) {
@@ -269,8 +276,26 @@ func TestValidateRootIDRejectsReservedSeparators(t *testing.T) {
 	}
 }
 
+func TestADotInARootIDIsAccepted(t *testing.T) {
+	// '.' only separates lineage segments *below* the origin, which is read
+	// after the origin has been split off at the first ':'. A dotted root is
+	// therefore unambiguous, and the server takes it.
+	const root = "my.app.workflow"
+	if err := ValidateRootID(root); err != nil {
+		t.Errorf("ValidateRootID(%q) = %v, want nil", root, err)
+	}
+	id := JoinID(root, "1")
+	if id != "my.app.workflow:1" {
+		t.Errorf("JoinID(%q, %q) = %q, want my.app.workflow:1", root, "1", id)
+	}
+	if got := OriginOf(id); got != root {
+		t.Errorf("OriginOf(%q) = %q, want %q", id, got, root)
+	}
+	serverValidate(t, id, map[string]string{"resonate:origin": root})
+}
+
 func TestValidateRootIDAcceptsBareIDs(t *testing.T) {
-	for _, id := range []string{"a", "a-b", "a_b", "wf-1786636678653183000"} {
+	for _, id := range []string{"a", "a-b", "a_b", "a.b", "wf-1786636678653183000"} {
 		if err := ValidateRootID(id); err != nil {
 			t.Errorf("ValidateRootID(%q) = %v, want nil", id, err)
 		}

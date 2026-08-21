@@ -44,10 +44,10 @@ func (s *Schedules) Get(ctx stdctx.Context, id string) (ScheduleRecord, error) {
 // Each firing creates a root promise named from the template, so the schedule
 // id is bound by the same rules as a Run/RPC id (see ValidateRootID). The
 // server stamps the *whole* templated id onto the fired promise's
-// resonate:origin tag, so join template parts with a plain "-": a "." would
-// make every child of a scheduled run rejected (dot_in_origin) and a ":"
-// would hide the timestamp below the origin, collapsing every firing onto one
-// lineage. Prefer "{{.id}}-{{.timestamp}}".
+// resonate:origin tag, so join template parts with "-" or ".": both survive
+// as part of the origin now that "." is allowed there, but a ":" would hide
+// the timestamp below the origin, collapsing every firing onto one lineage.
+// Prefer "{{.id}}-{{.timestamp}}".
 func (s *Schedules) Create(ctx stdctx.Context, id, cron, promiseID string, promiseTimeout time.Duration, opts ...ScheduleCreateOptions) (ScheduleRecord, error) {
 	opt := firstOpt(opts)
 	if err := ValidateRootID(id); err != nil {

@@ -79,7 +79,7 @@ func TestSchedulesCreateRejectsInvalidID(t *testing.T) {
 	ctx, cancel := testCtx(t)
 	defer cancel()
 
-	for _, id := range []string{"bad.id", "bad:id"} {
+	for _, id := range []string{"bad:id"} {
 		_, err := r.Schedules().Create(ctx, id, "0 * * * *", "run-{{.timestamp}}", time.Hour)
 		var invalid *resonate.InvalidIDError
 		if !errors.As(err, &invalid) {

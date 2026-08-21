@@ -1,7 +1,6 @@
 package resonate
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -21,8 +20,11 @@ import (
 // them back with OriginOf, both of which mirror the server's own rules.
 //
 // A root id is supplied by the caller and becomes the origin of its whole
-// lineage, so ValidateRootID keeps both separators out of it, exactly as the
-// server does for the origin tag itself.
+// lineage, so ValidateRootID keeps ":" out of it, exactly as the server does
+// for the origin tag itself. "." is *not* reserved there: it only separates
+// segments below the origin, and the origin is recovered by splitting on the
+// first ":", so a dotted root (my.app.workflow) survives the round trip
+// intact.
 
 const (
 	// originSep separates the origin from the lineage below it. A bare root
@@ -65,11 +67,16 @@ func OriginOf(id string) string {
 // ValidateRootID checks a caller-supplied root id (Run / RPC / a schedule id)
 // and returns *InvalidIDError when the server's id format cannot carry it.
 //
-// Both separators are **reserved**: a root becomes the origin of its whole
-// lineage, and the server rejects an origin containing either one outright
-// (dot_in_origin / colon_in_origin). "." because it separates lineage
-// segments; ":" because the origin is everything before an id's *first* ":",
-// so an origin holding one could never be split back out of any id.
+// Only ":" is **reserved**: a root becomes the origin of its whole lineage,
+// the origin is everything before an id's *first* ":", so an origin holding
+// one could never be split back out of any id. The server rejects it outright
+// (colon_in_origin).
+//
+// "." is allowed. It separates lineage segments *below* the origin, which is
+// only ever read after the origin has been split off, so a dotted root id
+// (my.app.workflow) is unambiguous:
+//
+//	my.app.workflow -> my.app.workflow:1 -> my.app.workflow:1.1
 //
 // The error is raised here, at the call site that named the workflow, rather
 // than surfacing later as an opaque 400 from the server.
@@ -80,13 +87,12 @@ func ValidateRootID(id string) error {
 	if strings.ContainsRune(id, '\x00') {
 		return &InvalidIDError{ID: id, Reason: "id must not contain null bytes"}
 	}
-	for _, sep := range []string{lineageSep, originSep} {
-		if strings.Contains(id, sep) {
-			return &InvalidIDError{
-				ID: id,
-				Reason: fmt.Sprintf("id must not contain %q: it is reserved as a lineage"+
-					" separator in the ids the SDK mints below this one", sep),
-			}
+	if strings.Contains(id, originSep) {
+		return &InvalidIDError{
+			ID: id,
+			Reason: "id must not contain \":\": it separates the origin from " +
+				"the lineage in the ids the SDK mints below this one, so an " +
+				"id holding one could never be split back out",
 		}
 	}
 	return nil

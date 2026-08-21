@@ -393,8 +393,8 @@ func TestRunReturnsHandle(t *testing.T) {
 
 func TestRunRejectsInvalidRootID(t *testing.T) {
 	// Raised at the call site, before anything reaches the server: a root id
-	// becomes the origin of its whole lineage, so the reserved separators are
-	// rejected outright.
+	// becomes the origin of its whole lineage, so the reserved ':' separator
+	// is rejected outright.
 	r := newLocal(t, localConfig{})
 	noopFn, err := resonate.Register(r, "noop", noop)
 	if err != nil {
@@ -402,7 +402,7 @@ func TestRunRejectsInvalidRootID(t *testing.T) {
 	}
 	ctx, cancel := testCtx(t)
 	defer cancel()
-	for _, id := range []string{"bad.id", "bad:id", "", "bad\x00id"} {
+	for _, id := range []string{"bad:id", "", "bad\x00id"} {
 		_, err := noopFn.Run(ctx, id, struct{}{})
 		var invalid *resonate.InvalidIDError
 		if !errors.As(err, &invalid) {
@@ -606,7 +606,7 @@ func TestRPCRejectsInvalidRootID(t *testing.T) {
 	r := newLocal(t, localConfig{})
 	ctx, cancel := testCtx(t)
 	defer cancel()
-	for _, id := range []string{"bad.id", "bad:id"} {
+	for _, id := range []string{"bad:id"} {
 		_, err := r.RPC(ctx, id, "remote", nil, resonate.RPCOptions{Target: "unhandled"})
 		var invalid *resonate.InvalidIDError
 		if !errors.As(err, &invalid) {
