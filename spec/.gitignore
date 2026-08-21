@@ -21,3 +21,5 @@ tla/states/
 tla/tmp/
 tla/_apalache-out/
 *.st
+tla/*_TTrace_*.tla
+tla/*_TTrace_*.bin
