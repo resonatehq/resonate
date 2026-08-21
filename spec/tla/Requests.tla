@@ -6,7 +6,7 @@
 (* machines, and the refinement asks whether their behaviour lines up.     *)
 (* Nothing here decides anything: no handler, no transition, no state.     *)
 (***************************************************************************)
-EXTENDS Integers, Sequences, FiniteSets, Variants, Apalache
+EXTENDS Integers, Sequences, FiniteSets, Variants
 
 -----------------------------------------------------------------------------
 
@@ -74,6 +74,11 @@ ASSUME MaxBatch   >= 1
    which is only in the future -- and so retires its own trigger -- while
    RetryTimeout is positive. *)
 ASSUME RetryTimeout > 0
+
+(* THE UNIQUE FUNCTION WITH EMPTY DOMAIN. A store with nothing in it. TLA+
+   writes it as the empty sequence, a sequence being a function on 1..n. *)
+EmptyFn ==
+    << >>
 
 Time ==
     0 .. MaxTime

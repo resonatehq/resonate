@@ -113,9 +113,15 @@ A ==
    handlers whose write is not one object.
    @type: (Set($id), ($id) => $object) => Seq($effect); *)
 CommitAll(S, Obj(_)) ==
-    ApaFoldSet(LAMBDA acc, i :
-                   acc \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>,
-               << >>, S)
+    LET each[T \in SUBSET S] ==
+          IF T = {} THEN
+              << >>
+          ELSE
+              LET i == CHOOSE x \in T : TRUE
+              IN  each[T \ {i}]
+                    \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>
+    IN
+        each[S]
 
 (* @type: Seq($effect) => Set({ id: $id, obj: $object }); *)
 Puts(fx) ==
@@ -134,13 +140,19 @@ Says(fx) ==
    sequence is the order they were decided in; the last one is the
    decision. *)
 PutsInto(objs, fx) ==
-    ApaFoldSeqLeft(LAMBDA acc, e :
-                       IF VariantTag(e) = "PutObject"
-                       THEN LET w == VariantGetUnsafe("PutObject", e)
-                            IN  [ i \in (DOMAIN acc) \cup {w.id} |->
-                                     IF i = w.id THEN w.obj ELSE acc[i] ]
-                       ELSE acc,
-                   objs, fx)
+    LET upto[n \in 0 .. Len(fx)] ==
+          IF n = 0 THEN
+              objs
+          ELSE
+              LET acc == upto[n - 1]
+              IN  IF VariantTag(fx[n]) = "PutObject" THEN
+                      LET w == VariantGetUnsafe("PutObject", fx[n])
+                      IN  [ i \in (DOMAIN acc) \cup {w.id} |->
+                               IF i = w.id THEN w.obj ELSE acc[i] ]
+                  ELSE
+                      acc
+    IN
+        upto[Len(fx)]
 
 (* @type: ($object, Int) => $object; *)
 Project(obj, t) ==
@@ -670,7 +682,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> SetAsFun({}), at |-> 0, org |-> OriginOf(ev) ]
+      expect |-> EmptyFn, at |-> 0, org |-> OriginOf(ev) ]
 
 Put(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -908,19 +920,29 @@ DisarmFor(o, i, new, k) ==
    handler states it. *)
 (* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Arms(o, W) ==
-    ApaFoldSet(LAMBDA acc, w :
-                 acc \o ArmFor(o, w.id, w.obj, "promise")
-                     \o ArmFor(o, w.id, w.obj, "lease")
-                     \o ArmFor(o, w.id, w.obj, "retry"),
-               << >>, W)
+    LET each[V \in SUBSET W] ==
+          IF V = {} THEN
+              << >>
+          ELSE
+              LET w == CHOOSE x \in V : TRUE
+              IN  each[V \ {w}] \o ArmFor(o, w.id, w.obj, "promise")
+                                 \o ArmFor(o, w.id, w.obj, "lease")
+                                 \o ArmFor(o, w.id, w.obj, "retry")
+    IN
+        each[W]
 
 (* @type: (ORIGIN, Set({ id: $id, obj: $object })) => Seq($effect); *)
 Disarms(o, W) ==
-    ApaFoldSet(LAMBDA acc, w :
-                 acc \o DisarmFor(o, w.id, w.obj, "promise")
-                     \o DisarmFor(o, w.id, w.obj, "lease")
-                     \o DisarmFor(o, w.id, w.obj, "retry"),
-               << >>, W)
+    LET each[V \in SUBSET W] ==
+          IF V = {} THEN
+              << >>
+          ELSE
+              LET w == CHOOSE x \in V : TRUE
+              IN  each[V \ {w}] \o DisarmFor(o, w.id, w.obj, "promise")
+                                 \o DisarmFor(o, w.id, w.obj, "lease")
+                                 \o DisarmFor(o, w.id, w.obj, "retry")
+    IN
+        each[W]
 
 Process(r) ==
     /\ r \in DOMAIN steps
@@ -1111,10 +1133,10 @@ Clock ==
     /\ UNCHANGED <<docs, timeouts, outbox, steps>>
 
 Init ==
-    /\ docs     = [o \in Origin |-> SetAsFun({})]
+    /\ docs     = [o \in Origin |-> EmptyFn]
     /\ timeouts = {}
     /\ outbox   = {}
-    /\ steps    = SetAsFun({})
+    /\ steps    = EmptyFn
     /\ now      = 0
 
 (***************************************************************************)

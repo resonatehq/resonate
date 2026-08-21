@@ -182,11 +182,12 @@ HandleTaskHeartbeat(req) ==
     IN
         /\ beat /= {}
         /\ objects' =
-               ApaFoldSet(LAMBDA acc, i :
-                              LET old == Project(objects[i], now)
-                              IN  (i :> [old EXCEPT !.task.expiresAt =
-                                                        now + old.task.ttl]) @@ acc,
-                          objects, beat)
+               [ i \in DOMAIN objects |->
+                    IF i \in beat THEN
+                        LET old == Project(objects[i], now)
+                        IN  [old EXCEPT !.task.expiresAt = now + old.task.ttl]
+                    ELSE
+                        objects[i] ]
         /\ UNCHANGED <<outbox, now>>
 
 HandleTaskSuspend(req) ==
@@ -209,18 +210,19 @@ HandleTaskSuspend(req) ==
                           (req.id :> [old EXCEPT !.task.resumes = {}]) @@ objects
                   ELSE
                       objects' =
-                          ApaFoldSet(LAMBDA acc, a :
-                                         (a :> [Project(objects[a], now) EXCEPT
-                                                   !.promise.callbacks =
-                                                       @ \cup {req.id}]) @@ acc,
-                                     (req.id :>
-                                         [old EXCEPT !.task.state     = "suspended",
-                                                     !.task.pid       = NoPid,
-                                                     !.task.ttl       = NoTime,
-                                                     !.task.expiresAt = NoTime,
-                                                     !.task.retryAt   = NoTime,
-                                                     !.task.resumes   = {}]) @@ objects,
-                                     aw)
+                          [ i \in DOMAIN objects |->
+                               IF i = req.id THEN
+                                   [old EXCEPT !.task.state     = "suspended",
+                                               !.task.pid       = NoPid,
+                                               !.task.ttl       = NoTime,
+                                               !.task.expiresAt = NoTime,
+                                               !.task.retryAt   = NoTime,
+                                               !.task.resumes   = {}]
+                               ELSE IF i \in aw THEN
+                                   [Project(objects[i], now) EXCEPT
+                                        !.promise.callbacks = @ \cup {req.id}]
+                               ELSE
+                                   objects[i] ]
         /\ UNCHANGED <<outbox, now>>
 
 HandleTaskFulfill(req) ==
@@ -390,7 +392,7 @@ Clock ==
 -----------------------------------------------------------------------------
 
 Init ==
-    /\ objects = SetAsFun({})
+    /\ objects = EmptyFn
     /\ outbox  = {}
     /\ now     = 0
 
