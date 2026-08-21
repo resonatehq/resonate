@@ -25,16 +25,20 @@ A ==
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 
-CommitAll(S, Obj(_)) ==
-    LET each[T \in SUBSET S] ==
+FoldSet(Op(_,_), base, S) ==
+    LET f[T \in SUBSET S] ==
           IF T = {} THEN
-              << >>
+              base
           ELSE
-              LET i == CHOOSE x \in T : TRUE
-              IN  each[T \ {i}]
-                    \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>
+              LET x == CHOOSE y \in T : TRUE
+              IN  Op(f[T \ {x}], x)
     IN
-        each[S]
+        f[S]
+
+CommitAll(S, Obj(_)) ==
+    FoldSet(LAMBDA acc, i :
+                acc \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>,
+            << >>, S)
 
 Puts(fx) ==
     { VariantGetUnsafe("PutObject", fx[i])
@@ -667,28 +671,18 @@ DisarmFor(o, i, new, k) ==
         << >>
 
 Arms(o, W) ==
-    LET each[V \in SUBSET W] ==
-          IF V = {} THEN
-              << >>
-          ELSE
-              LET w == CHOOSE x \in V : TRUE
-              IN  each[V \ {w}] \o ArmFor(o, w.id, w.obj, "promise")
-                                 \o ArmFor(o, w.id, w.obj, "lease")
-                                 \o ArmFor(o, w.id, w.obj, "retry")
-    IN
-        each[W]
+    FoldSet(LAMBDA acc, w :
+                acc \o ArmFor(o, w.id, w.obj, "promise")
+                    \o ArmFor(o, w.id, w.obj, "lease")
+                    \o ArmFor(o, w.id, w.obj, "retry"),
+            << >>, W)
 
 Disarms(o, W) ==
-    LET each[V \in SUBSET W] ==
-          IF V = {} THEN
-              << >>
-          ELSE
-              LET w == CHOOSE x \in V : TRUE
-              IN  each[V \ {w}] \o DisarmFor(o, w.id, w.obj, "promise")
-                                 \o DisarmFor(o, w.id, w.obj, "lease")
-                                 \o DisarmFor(o, w.id, w.obj, "retry")
-    IN
-        each[W]
+    FoldSet(LAMBDA acc, w :
+                acc \o DisarmFor(o, w.id, w.obj, "promise")
+                    \o DisarmFor(o, w.id, w.obj, "lease")
+                    \o DisarmFor(o, w.id, w.obj, "retry"),
+            << >>, W)
 
 Process(r) ==
     /\ r \in DOMAIN steps
