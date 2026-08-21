@@ -83,7 +83,7 @@ NextS ==
     \/ /\ s = top
        /\ UNCHANGED s
        /\ \/ \E ev \in ExternalEvent : SubmitExternal(ev)
-          \/ \E ev \in InternalEvent : SubmitInternal(ev)
+          \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
                 Process(r) \/ Crash(r) \/ Retire(r) \/ Refuse(r)
                            \/ Arm(r) \/ Disarm(r) \/ Emit(r)

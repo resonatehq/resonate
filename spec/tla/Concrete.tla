@@ -682,44 +682,21 @@ SubmitExternal(ev) ==
     /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-(* THE ASYMMETRY, stated plainly, because it is the point of having two
-   machines rather than one:
+(* THE WHEEL IS THE TRIGGER, so this quantifies over ARMED ENTRIES rather than
+   over an alphabet of events. A timer fires because an entry is due, not
+   because an event was guessed and then vetted against the wheel.
 
-     Abstract may take an internal step whenever the TIMEOUT VALUES ON AN
-     OBJECT allow it.
-
-     Concrete may take one only when there is an ARMED ENTRY for it.
-
-   So this machine is strictly more restricted, and the two directions of
-   that are not the same:
-
-     - for SAFETY it is free. Fewer behaviours is what refinement wants,
-       and an entry that fires with nothing due merely produces a step
-       that writes nothing -- a stutter upstairs.
-
-     - for LIVENESS it is the whole risk. `A!Fairness` says a deadline
-       that has come due is eventually acted on. Down here that can only
-       happen if the wheel holds an entry for it, so an object carrying a
-       deadline the wheel has forgotten is a timeout that never fires and
-       an abstract obligation this machine cannot meet.
-
-   Which is why `C_WheelComplete` is not a side condition somebody
-   thought to write down. It is exactly what `A!Spec` demands of anything
-   that keeps an index instead of reading the objects, and if it holds,
-   every internal step `Abstract` may take is one `Concrete` may take too.
-   @type: $event => Bool; *)
-Fires(ev) ==
-    CASE VariantTag(ev) = "Timeout" ->
-             LET d == VariantGetUnsafe("Timeout", ev) IN
-             \E e \in timeouts : /\ e.id   = d.id
-                                /\ e.kind = d.kind
-                                /\ e.at  <= now
-      [] OTHER -> FALSE
-
-SubmitInternal(ev) ==
-    /\ ev \in InternalEvent
-    /\ Fires(ev)
-    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
+   That retires `Fires`, whose `OTHER -> FALSE` was the only thing keeping
+   `ListenerDrain` and `CallbackDrain` out -- events this machine has never
+   been able to submit, because nothing here happens outside a request or a
+   timer. They were dead vocabulary the alphabet went on advertising; now they
+   are not mentioned. *)
+SubmitInternal(e) ==
+    /\ e \in timeouts
+    /\ e.at <= now
+    /\ \E r \in Rid \ DOMAIN steps :
+           steps' = Put(steps, r,
+                        Fresh(Variant("Timeout", [id |-> e.id, kind |-> e.kind])))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 (* WHAT IS DUE IS WHAT THE DOCUMENT SAYS IS DUE. Every deadline is a
@@ -1154,7 +1131,7 @@ Init ==
 
 Next ==
     \/ \E ev \in ExternalEvent : SubmitExternal(ev)
-    \/ \E ev \in InternalEvent : SubmitInternal(ev)
+    \/ \E e \in timeouts : SubmitInternal(e)
     \/ \E r \in DOMAIN steps : Process(r) \/ Perform(r) \/ Crash(r)
     \/ Clock
 
@@ -1225,7 +1202,7 @@ EventuallyStable ==
 
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
-    /\ \A ev \in InternalEvent : SF_vars(SubmitInternal(ev))
+    /\ \A e \in Entry : SF_vars(SubmitInternal(e))
     /\ WF_vars(Clock)
     /\ EventuallyStable
 
