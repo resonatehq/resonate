@@ -23,7 +23,7 @@ SaysInto(ob, fx) ==
     LET S == Says(fx)
     IN  { x \in ob : ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
 
-AA == INSTANCE AbstractActionBad WITH
+AA == INSTANCE AbstractBad WITH
           objects <- IF s = top THEN Objects
                      ELSE ObjectsAt(s.cur.doc, s.org),
           outbox  <- IF s = top THEN outbox

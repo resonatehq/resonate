@@ -1249,12 +1249,14 @@ SpecSF ==
    while it was swapped. A definition you have to edit to check is a
    definition that will eventually be committed mid-edit. *)
 
-RefinesSafety ==
-    A!Safety
-RefinesSpec ==
-    A!Spec
+(* THE REFINEMENT IS NOT STATED HERE. `Abstract` takes one step per protocol
+   action and this machine's write takes several at once, so `Spec => A!Spec`
+   is false and TLC says so -- a sweep that timed out one promise and created
+   another against two abstract steps. It is stated in `RefineStutter`, over
+   `ConcreteS`, which is this machine carrying a stuttering variable so the
+   walk can be taken one abstract step at a time.
 
-THEOREM Spec => A!Spec
+   The instance stays, because the invariants below are worth borrowing. *)
 
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
