@@ -771,26 +771,73 @@ DrainableCallbacks(doc, t) ==
    @type: (($id -> $object), Int, Set({ id: $id, address: ADDR }),
            Set({ id: $id, awaiter: $id }))
               => { doc: $id -> $object, fx: Seq($effect) }; *)
-Sweep(doc, t, TS, LS, CS) ==
-    LET EnvOf(d) == [ objects |-> d, now |-> t,
-                      config  |-> [retryTimeout |-> RetryTimeout] ]
-        Step(H(_,_), st, req) ==
-            LET out == H(req, EnvOf(st.doc))
-            IN  [ doc |-> PutsInto(st.doc, out.effects),
-                  fx  |-> st.fx \o out.effects ]
-        Fire(st, d) ==
-            LET out == CASE d.kind = "promise" ->
-                                ProcessPromiseTimeout(d, EnvOf(st.doc))
-                         [] d.kind = "lease" ->
-                                ProcessLeaseTimeout(d.id, EnvOf(st.doc))
-                         [] OTHER ->
-                                ProcessRetryTimeout(d.id, EnvOf(st.doc))
-            IN  [ doc |-> PutsInto(st.doc, out.effects),
-                  fx  |-> st.fx \o out.effects ]
-        afterT == ApaFoldSet(Fire, [doc |-> doc, fx |-> << >>], TS)
-        afterL == ApaFoldSet(LAMBDA st, d : Step(ProcessListener, st, d),
-                             afterT, LS)
-    IN  ApaFoldSet(LAMBDA st, d : Step(ProcessCallback, st, d), afterL, CS)
+(* THE SWEEP DRAINS EVERYTHING DUE, ALWAYS. Verus recurses until nothing is
+   due -- `sweep` on `due`, `phase3` on `due_t` -- so there is no subset to
+   choose and no reason to model one. Each phase is a fixpoint because a drain
+   can make another drain due: timing out a promise settles it, which makes its
+   listeners and callbacks drainable.
+
+   Termination rests on every drain retiring its own trigger. A promise timeout
+   settles the promise, a listener drain strikes the address, a callback drain
+   strikes the awaiter, a lease timeout clears expiresAt, and a retry timeout
+   pushes retryAt to now + RetryTimeout -- which is only in the future while
+   RetryTimeout > 0. Requests.tla ASSUMEs that.
+
+   `Next` picks the next due item with CHOOSE. TLC evaluates that
+   deterministically, and nothing here observes the order: `resumes` is a set,
+   so draining A then B and B then A agree. Verus pins the order at the least
+   id instead, because it needs its `for` loop to compute the same document on
+   the nose -- an implementation obligation, not a modelling one. *)
+EnvAt(d, t) ==
+    [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
+
+Advance(st, out) ==
+    [ doc |-> PutsInto(st.doc, out.effects), fx |-> st.fx \o out.effects ]
+
+RECURSIVE DrainTimeouts(_, _)
+DrainTimeouts(st, t) ==
+    LET d == DrainableTimeouts(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            LET e == CHOOSE x \in d : TRUE
+            IN
+                DrainTimeouts(
+                    Advance(st,
+                            CASE e.kind = "promise" ->
+                                     ProcessPromiseTimeout(e, EnvAt(st.doc, t))
+                              [] e.kind = "lease" ->
+                                     ProcessLeaseTimeout(e.id, EnvAt(st.doc, t))
+                              [] OTHER ->
+                                     ProcessRetryTimeout(e.id, EnvAt(st.doc, t))),
+                    t)
+
+RECURSIVE DrainListeners(_, _)
+DrainListeners(st, t) ==
+    LET d == DrainableListeners(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            DrainListeners(
+                Advance(st, ProcessListener(CHOOSE x \in d : TRUE,
+                                            EnvAt(st.doc, t))), t)
+
+RECURSIVE DrainCallbacks(_, _)
+DrainCallbacks(st, t) ==
+    LET d == DrainableCallbacks(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            DrainCallbacks(
+                Advance(st, ProcessCallback(CHOOSE x \in d : TRUE,
+                                            EnvAt(st.doc, t))), t)
+
+Sweep(doc, t) ==
+    DrainCallbacks(DrainListeners(DrainTimeouts([doc |-> doc, fx |-> << >>], t),
+                                  t), t)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -868,11 +915,8 @@ Disarms(o, W) ==
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ \E TS \in SUBSET DrainableTimeouts(docs[steps[r].org], now),
-          LS \in SUBSET DrainableListeners(docs[steps[r].org], now),
-          CS \in SUBSET DrainableCallbacks(docs[steps[r].org], now) :
-       LET o   == steps[r].org
-           swept == Sweep(docs[o], now, TS, LS, CS)
+    /\ LET o   == steps[r].org
+           swept == Sweep(docs[o], now)
            env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,

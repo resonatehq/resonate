@@ -70,6 +70,10 @@ ASSUME NoValue \notin Value
 ASSUME MaxTime    >= 0
 ASSUME MaxVersion >= 0
 ASSUME MaxBatch   >= 1
+(* The sweep is a fixpoint. A retry timeout re-arms at now + RetryTimeout,
+   which is only in the future -- and so retires its own trigger -- while
+   RetryTimeout is positive. *)
+ASSUME RetryTimeout > 0
 
 Time ==
     0 .. MaxTime

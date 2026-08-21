@@ -35,13 +35,12 @@ EXTENDS Requests
 
 CONSTANT Fenced
 
-(* `top` marks "not mid-walk". A record, so it cannot collide with a
-   snapshot. *)
+(* `top` marks "not mid-walk". A record, so it cannot collide with a step. *)
 top ==
     [top |-> "top"]
 
 VARIABLES
-    s,          \* THE STUTTERING VARIABLE. `top` except mid-walk.
+    s,          \* THE STUTTERING VARIABLE
     docs,       \* [ORIGIN -> ($id -> $object)] -- one document per origin
     timeouts,   \* the wheel. Same variable, same meaning as Abstract's
     outbox,     \* likewise
@@ -782,33 +781,78 @@ DrainableCallbacks(doc, t) ==
    @type: (($id -> $object), Int, Set({ id: $id, address: ADDR }),
            Set({ id: $id, awaiter: $id }))
               => { doc: $id -> $object, fx: Seq($effect) }; *)
-Sweep(doc, t, TS, LS, CS) ==
-    LET EnvOf(d) == [ objects |-> d, now |-> t,
-                      config  |-> [retryTimeout |-> RetryTimeout] ]
-        Snap(st, fx) ==
-            IF fx = << >> THEN
-                st.tr
-            ELSE
-                st.tr \o << [doc |-> PutsInto(st.doc, fx), fx |-> st.fx \o fx] >>
-        Step(H(_,_), st, req) ==
-            LET out == H(req, EnvOf(st.doc))
-            IN  [ doc |-> PutsInto(st.doc, out.effects),
-                  fx  |-> st.fx \o out.effects,
-                  tr  |-> Snap(st, out.effects) ]
-        Fire(st, d) ==
-            LET out == CASE d.kind = "promise" ->
-                                ProcessPromiseTimeout(d, EnvOf(st.doc))
-                         [] d.kind = "lease" ->
-                                ProcessLeaseTimeout(d.id, EnvOf(st.doc))
-                         [] OTHER ->
-                                ProcessRetryTimeout(d.id, EnvOf(st.doc))
-            IN  [ doc |-> PutsInto(st.doc, out.effects),
-                  fx  |-> st.fx \o out.effects,
-                  tr  |-> Snap(st, out.effects) ]
-        afterT == ApaFoldSet(Fire, [doc |-> doc, fx |-> << >>, tr |-> << >>], TS)
-        afterL == ApaFoldSet(LAMBDA st, d : Step(ProcessListener, st, d),
-                             afterT, LS)
-    IN  ApaFoldSet(LAMBDA st, d : Step(ProcessCallback, st, d), afterL, CS)
+(* THE SWEEP DRAINS EVERYTHING DUE, ALWAYS. Verus recurses until nothing is
+   due -- `sweep` on `due`, `phase3` on `due_t` -- so there is no subset to
+   choose and no reason to model one. Each phase is a fixpoint because a drain
+   can make another drain due: timing out a promise settles it, which makes its
+   listeners and callbacks drainable.
+
+   Termination rests on every drain retiring its own trigger. A promise timeout
+   settles the promise, a listener drain strikes the address, a callback drain
+   strikes the awaiter, a lease timeout clears expiresAt, and a retry timeout
+   pushes retryAt to now + RetryTimeout -- which is only in the future while
+   RetryTimeout > 0. Requests.tla ASSUMEs that.
+
+   `Next` picks the next due item with CHOOSE. TLC evaluates that
+   deterministically, and nothing here observes the order: `resumes` is a set,
+   so draining A then B and B then A agree. Verus pins the order at the least
+   id instead, because it needs its `for` loop to compute the same document on
+   the nose -- an implementation obligation, not a modelling one. *)
+EnvAt(d, t) ==
+    [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
+
+Advance(st, out) ==
+    LET doc2 == PutsInto(st.doc, out.effects)
+        fx2  == st.fx \o out.effects
+    IN
+        [ doc |-> doc2, fx |-> fx2,
+          tr  |-> IF out.effects = << >> THEN st.tr
+                  ELSE st.tr \o << [doc |-> doc2, fx |-> fx2] >> ]
+
+RECURSIVE DrainTimeouts(_, _)
+DrainTimeouts(st, t) ==
+    LET d == DrainableTimeouts(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            LET e == CHOOSE x \in d : TRUE
+            IN
+                DrainTimeouts(
+                    Advance(st,
+                            CASE e.kind = "promise" ->
+                                     ProcessPromiseTimeout(e, EnvAt(st.doc, t))
+                              [] e.kind = "lease" ->
+                                     ProcessLeaseTimeout(e.id, EnvAt(st.doc, t))
+                              [] OTHER ->
+                                     ProcessRetryTimeout(e.id, EnvAt(st.doc, t))),
+                    t)
+
+RECURSIVE DrainListeners(_, _)
+DrainListeners(st, t) ==
+    LET d == DrainableListeners(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            DrainListeners(
+                Advance(st, ProcessListener(CHOOSE x \in d : TRUE,
+                                            EnvAt(st.doc, t))), t)
+
+RECURSIVE DrainCallbacks(_, _)
+DrainCallbacks(st, t) ==
+    LET d == DrainableCallbacks(st.doc, t)
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            DrainCallbacks(
+                Advance(st, ProcessCallback(CHOOSE x \in d : TRUE,
+                                            EnvAt(st.doc, t))), t)
+
+Sweep(doc, t) ==
+    DrainCallbacks(DrainListeners(DrainTimeouts([doc |-> doc, fx |-> << >>, tr |-> << >>], t),
+                                  t), t)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -887,11 +931,8 @@ Process(r) ==
     /\ s = top
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ \E TS \in SUBSET DrainableTimeouts(docs[steps[r].org], now),
-          LS \in SUBSET DrainableListeners(docs[steps[r].org], now),
-          CS \in SUBSET DrainableCallbacks(docs[steps[r].org], now) :
-       LET o   == steps[r].org
-           swept == Sweep(docs[o], now, TS, LS, CS)
+    /\ LET o   == steps[r].org
+           swept == Sweep(docs[o], now)
            env == [ objects  |-> swept.doc,
                     timeouts |-> timeouts,
                     outbox   |-> outbox,
@@ -901,10 +942,8 @@ Process(r) ==
            fx  == swept.fx \o out.effects
            final == PutsInto(docs[o], fx)
            W   == { [id |-> w.id, obj |-> final[w.id]] : w \in Puts(fx) }
-           walk == IF out.effects = << >> THEN
-                       swept.tr
-                   ELSE
-                       swept.tr \o << [doc |-> final, fx |-> fx] >>
+           walk == IF out.effects = << >> THEN swept.tr
+                   ELSE swept.tr \o << [doc |-> final, fx |-> fx] >>
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o fx
                                                  \o Disarms(o, W),
@@ -1020,18 +1059,19 @@ Perform(r) ==
                                       ELSE [ s EXCEPT !.cur  = Head(s.rest),
                                                       !.rest = Tail(s.rest) ]
                               /\ UNCHANGED <<docs, timeouts, outbox, steps>>
-                         ELSE /\ s' = top
-                              /\ docs'  = [docs EXCEPT ![o] =
-                                              PutsInto(docs[o], steps[r].pending)]
-                              /\ outbox' = LET S == Says(steps[r].pending) IN
-                                             { x \in outbox :
-                                                 ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
-                              /\ steps' = [steps EXCEPT ![r].pending =
-                                             SelectSeq(Tail(@),
-                                                       LAMBDA f :
-                                                         VariantTag(f) \notin
-                                                           {"PutObject", "Send"})]
-                              /\ UNCHANGED timeouts
+                         ELSE
+                         /\ s' = top
+                         /\ docs'  = [docs EXCEPT ![o] =
+                                         PutsInto(docs[o], steps[r].pending)]
+                         /\ outbox' = LET S == Says(steps[r].pending) IN
+                                        { x \in outbox :
+                                            ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
+                         /\ steps' = [steps EXCEPT ![r].pending =
+                                        SelectSeq(Tail(@),
+                                                  LAMBDA f :
+                                                    VariantTag(f) \notin
+                                                      {"PutObject", "Send"})]
+                         /\ UNCHANGED timeouts
                     ELSE /\ s' = top
                          /\ steps' = [steps EXCEPT ![r].phase   = "process",
                                                    ![r].pending = << >>]
