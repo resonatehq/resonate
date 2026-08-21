@@ -25,6 +25,9 @@ A ==
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 
+Write(doc, i, obj) ==
+    [ x \in (DOMAIN doc) \cup {i} |-> IF x = i THEN obj ELSE doc[x] ]
+
 FoldSet(Op(_,_), base, S) ==
     LET f[T \in SUBSET S] ==
           IF T = {} THEN
@@ -35,33 +38,12 @@ FoldSet(Op(_,_), base, S) ==
     IN
         f[S]
 
-CommitAll(S, Obj(_)) ==
-    FoldSet(LAMBDA acc, i :
-                acc \o << Variant("PutObject", [id |-> i, obj |-> Obj(i)]) >>,
-            << >>, S)
 
-Puts(fx) ==
-    { VariantGetUnsafe("PutObject", fx[i])
-      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "PutObject" } }
 
 Says(fx) ==
     { VariantGetUnsafe("Send", fx[i]).entry
       : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
 
-PutsInto(objs, fx) ==
-    LET upto[n \in 0 .. Len(fx)] ==
-          IF n = 0 THEN
-              objs
-          ELSE
-              LET acc == upto[n - 1]
-              IN  IF VariantTag(fx[n]) = "PutObject" THEN
-                      LET w == VariantGetUnsafe("PutObject", fx[n])
-                      IN  [ i \in (DOMAIN acc) \cup {w.id} |->
-                               IF i = w.id THEN w.obj ELSE acc[i] ]
-                  ELSE
-                      acc
-    IN
-        upto[Len(fx)]
 
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
@@ -103,19 +85,23 @@ New(req, t) ==
                           NoTask ]
 
 HandlePromiseGet(req, env) ==
-    [ effects |-> << >> ]
+    [ doc   |-> env.objects,
+     sends |-> << >> ]
 
 HandlePromiseCreate(req, env) ==
     IF req.id \in DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET new == New(req, env.now)
         IN
-            [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+            [ doc   |-> Write(env.objects, req.id, new),
+             sends |-> << >> ]
 
 HandlePromiseSettle(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.state,
@@ -130,14 +116,17 @@ HandlePromiseSettle(req, env) ==
                                                   !.resumes   = {}] ]
         IN
             IF old.promise.state = "pending" THEN
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
 
 HandlePromiseRegisterCallback(req, env) ==
     IF \/ req.awaited \notin DOMAIN env.objects
        \/ req.awaiter \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET awaited    == Project(env.objects[req.awaited], env.now)
             awaiter    == Project(env.objects[req.awaiter], env.now)
@@ -147,31 +136,36 @@ HandlePromiseRegisterCallback(req, env) ==
                \/ ~IsExternal(awaited.promise)
                \/ awaited.promise.state /= "pending"
                \/ awaiter.promise.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject",
-                                         [id |-> req.awaited, obj |-> newAwaited]) >> ]
+                [ doc   |-> Write(env.objects, req.awaited, newAwaited),
+                 sends |-> << >> ]
 
 HandlePromiseRegisterListener(req, env) ==
     IF req.awaited \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.awaited], env.now)
             new == [old EXCEPT !.promise.listeners = @ \cup {req.address}]
         IN
             IF \/ ~IsExternal(old.promise)
                \/ old.promise.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject",
-                                         [id |-> req.awaited, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.awaited, new),
+                 sends |-> << >> ]
 
 HandleTaskGet(req, env) ==
-    [ effects |-> << >> ]
+    [ doc   |-> env.objects,
+     sends |-> << >> ]
 
 HandleTaskCreate(req, env) ==
     IF ~req.action.tags.targeted THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE IF req.action.id \notin DOMAIN env.objects THEN
         LET born == New(req.action, env.now)
             new  == IF born.promise.state = "pending" THEN
@@ -185,8 +179,8 @@ HandleTaskCreate(req, env) ==
                     ELSE
                         born
         IN
-            [ effects |-> << Variant("PutObject",
-                                     [id |-> req.action.id, obj |-> new]) >> ]
+            [ doc   |-> Write(env.objects, req.action.id, new),
+             sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.action.id], env.now)
             new == [old EXCEPT !.task.state     = "acquired",
@@ -199,14 +193,16 @@ HandleTaskCreate(req, env) ==
         IN
             IF \/ ~old.promise.tags.targeted
                \/ old.task.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject",
-                                         [id |-> req.action.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.action.id, new),
+                 sends |-> << >> ]
 
 HandleTaskAcquire(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [old EXCEPT !.task.state     = "acquired",
@@ -220,13 +216,16 @@ HandleTaskAcquire(req, env) ==
             IF \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
 
 HandleTaskFence(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
         IN
@@ -236,25 +235,30 @@ HandleTaskFence(req, env) ==
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE IF VariantTag(req.action) = "Create" THEN
                 HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
             ELSE
                 HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
 
 HandleTaskHeartbeat(req, env) ==
-    [ effects |->
-        CommitAll({ i \in DOMAIN env.objects :
-                      LET old == Project(env.objects[i], env.now)
-                      IN  /\ \E rf \in req.tasks :
-                                rf.id = i /\ rf.version = old.task.version
-                          /\ old.task.state = "acquired"
-                          /\ old.task.pid = req.pid
-                          /\ old.promise.state = "pending" },
-                  LAMBDA i :
-                      LET old == Project(env.objects[i], env.now)
-                      IN
-                          [old EXCEPT !.task.expiresAt = env.now + old.task.ttl]) ]
+    LET beat == { i \in DOMAIN env.objects :
+                    LET old == Project(env.objects[i], env.now)
+                    IN  /\ \E rf \in req.tasks :
+                              rf.id = i /\ rf.version = old.task.version
+                        /\ old.task.state = "acquired"
+                        /\ old.task.pid = req.pid
+                        /\ old.promise.state = "pending" }
+    IN
+        [ doc   |-> [ i \in DOMAIN env.objects |->
+                         IF i \in beat THEN
+                             LET old == Project(env.objects[i], env.now)
+                             IN  [old EXCEPT !.task.expiresAt =
+                                                 env.now + old.task.ttl]
+                         ELSE
+                             env.objects[i] ],
+          sends |-> << >> ]
 
 HandleTaskSuspend(req, env) ==
     LET aw   == { a.awaited : a \in req.actions }
@@ -265,7 +269,8 @@ HandleTaskSuspend(req, env) ==
            \/ \E a \in aw : a.origin /= req.id.origin
            \/ req.id \notin DOMAIN env.objects
            \/ seen /= aw THEN
-            [ effects |-> << >> ]
+            [ doc   |-> env.objects,
+             sends |-> << >> ]
         ELSE
             LET old == Project(env.objects[req.id], env.now)
                 new == [old EXCEPT !.task.state     = "suspended",
@@ -280,23 +285,27 @@ HandleTaskSuspend(req, env) ==
                    \/ old.task.version /= req.version
                    \/ \E a \in aw :
                         ~IsExternal(Project(env.objects[a], env.now).promise) THEN
-                    [ effects |-> << >> ]
+                    [ doc   |-> env.objects,
+                     sends |-> << >> ]
                 ELSE IF \E a \in aw :
                           Project(env.objects[a], env.now).promise.state /= "pending" THEN
-                    [ effects |-> << Variant("PutObject",
-                                             [id |-> req.id,
-                                              obj |-> [old EXCEPT !.task.resumes = {}]]) >> ]
+                    [ doc   |-> Write(env.objects, req.id, [old EXCEPT !.task.resumes = {}]),
+                     sends |-> << >> ]
                 ELSE
-                    [ effects |->
-                        << Variant("PutObject", [id |-> req.id, obj |-> new]) >>
-                        \o CommitAll(aw,
-                                  LAMBDA a :
-                                      [Project(env.objects[a], env.now) EXCEPT
-                                           !.promise.callbacks = @ \cup {req.id}]) ]
+                    [ doc   |-> [ i \in DOMAIN env.objects |->
+                                     IF i = req.id THEN
+                                         new
+                                     ELSE IF i \in aw THEN
+                                         [Project(env.objects[i], env.now) EXCEPT
+                                              !.promise.callbacks = @ \cup {req.id}]
+                                     ELSE
+                                         env.objects[i] ],
+                      sends |-> << >> ]
 
 HandleTaskFulfill(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.action.state,
@@ -312,13 +321,16 @@ HandleTaskFulfill(req, env) ==
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
 
 HandleTaskRelease(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [old EXCEPT !.task.state     = "pending",
@@ -330,13 +342,16 @@ HandleTaskRelease(req, env) ==
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
 
 HandleTaskHalt(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [old EXCEPT !.task.state     = "halted",
@@ -347,13 +362,16 @@ HandleTaskHalt(req, env) ==
         IN
             IF \/ old.task.state = "none"
                \/ old.task.state \in {"fulfilled", "halted"} THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
 
 HandleTaskContinue(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == Project(env.objects[req.id], env.now)
             new == [old EXCEPT !.task.state     = "pending",
@@ -364,13 +382,16 @@ HandleTaskContinue(req, env) ==
         IN
             IF \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
 
 ProcessLeaseTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == env.objects[i]
             new == [old EXCEPT !.task.state     = "pending",
@@ -383,13 +404,16 @@ ProcessLeaseTimeout(i, env) ==
                \/ old.task.expiresAt = NoTime
                \/ old.task.expiresAt > env.now
                \/ Project(old, env.now).promise.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, i, new),
+                 sends |-> << >> ]
 
 ProcessRetryTimeout(i, env) ==
     IF i \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == env.objects[i]
             new == [old EXCEPT !.task.retryAt = env.now + env.config.retryTimeout]
@@ -398,49 +422,43 @@ ProcessRetryTimeout(i, env) ==
                \/ old.task.retryAt = NoTime
                \/ old.task.retryAt > env.now
                \/ Project(old, env.now).promise.state /= "pending" THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject", [id |-> i, obj |-> new]),
-                                 Variant("Send",
-                                         [entry |->
-                                            [address |-> old.promise.tags.target,
-                                             message |-> Variant("Execute",
-                                                                 [id      |-> i,
-                                                                  version |-> old.task.version])]]) >> ]
+                [ doc   |-> Write(env.objects, i, new),
+                 sends |-> << [address |-> old.promise.tags.target, message |-> Variant("Execute", [id |-> i, version |-> old.task.version])] >> ]
 
 ProcessListener(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET awaited    == Project(env.objects[req.id], env.now)
             newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.address \notin awaited.promise.listeners THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << Variant("PutObject",
-                                         [id |-> req.id, obj |-> newAwaited]),
-                                 Variant("Send",
-                                         [entry |->
-                                            [address |-> req.address,
-                                             message |-> Variant("Unblock",
-                                                                 [id    |-> req.id,
-                                                                  state |-> awaited.promise.state])]]) >> ]
+                [ doc   |-> Write(env.objects, req.id, newAwaited),
+                 sends |-> << [address |-> req.address, message |-> Variant("Unblock", [id |-> req.id, state |-> awaited.promise.state])] >> ]
 
 ProcessCallback(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET awaited    == Project(env.objects[req.id], env.now)
             newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.awaiter \notin awaited.promise.callbacks THEN
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
             ELSE IF req.awaiter \notin DOMAIN env.objects THEN
-                [ effects |-> << Variant("PutObject",
-                                         [id |-> req.id, obj |-> newAwaited]) >> ]
+                [ doc   |-> Write(env.objects, req.id, newAwaited),
+                 sends |-> << >> ]
             ELSE
                 LET awaiter    == Project(env.objects[req.awaiter], env.now)
                     newAwaiter == IF awaiter.task.state = "suspended" THEN
@@ -454,25 +472,26 @@ ProcessCallback(req, env) ==
                                       [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
                 IN
                     IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                        [ effects |-> << Variant("PutObject",
-                                                 [id |-> req.id, obj |-> newAwaited]) >> ]
+                        [ doc   |-> Write(env.objects, req.id, newAwaited),
+                         sends |-> << >> ]
                     ELSE
-                        [ effects |-> << Variant("PutObject",
-                                                 [id |-> req.id, obj |-> newAwaited]),
-                                         Variant("PutObject",
-                                                 [id |-> req.awaiter, obj |-> newAwaiter]) >> ]
+                        [ doc   |-> Write(Write(env.objects, req.id, newAwaited), req.awaiter, newAwaiter),
+                         sends |-> << >> ]
 
 ProcessPromiseTimeout(req, env) ==
     IF req.kind /= "promise" \/ req.id \notin DOMAIN env.objects THEN
-        [ effects |-> << >> ]
+        [ doc   |-> env.objects,
+         sends |-> << >> ]
     ELSE
         LET old == env.objects[req.id]
             new == Project(old, env.now)
         IN
             IF new /= old THEN
-                [ effects |-> << Variant("PutObject", [id |-> req.id, obj |-> new]) >> ]
+                [ doc   |-> Write(env.objects, req.id, new),
+                 sends |-> << >> ]
             ELSE
-                [ effects |-> << >> ]
+                [ doc   |-> env.objects,
+                 sends |-> << >> ]
 
 Handle(ev, env) ==
     LET p(tag) == VariantGetUnsafe(tag, ev)
@@ -516,7 +535,8 @@ Handle(ev, env) ==
              ProcessListener(p("ListenerDrain"), env)
       [] VariantTag(ev) = "CallbackDrain" ->
              ProcessCallback(p("CallbackDrain"), env)
-      [] OTHER -> [ effects |-> << >> ]
+      [] OTHER -> [ doc   |-> env.objects,
+                   sends |-> << >> ]
 
 -----------------------------------------------------------------------------
 
@@ -587,12 +607,14 @@ EnvAt(d, t) ==
     [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
 
 Advance(st, out) ==
-    LET doc2 == PutsInto(st.doc, out.effects)
-        fx2  == st.fx \o out.effects
+    LET sends2 == st.sends \o out.sends
     IN
-        [ doc |-> doc2, fx |-> fx2,
-          tr  |-> IF out.effects = << >> THEN st.tr
-                  ELSE st.tr \o << [doc |-> doc2, fx |-> fx2] >> ]
+        [ doc   |-> out.doc,
+          sends |-> sends2,
+          tr    |-> IF out.doc = st.doc /\ out.sends = << >> THEN
+                        st.tr
+                    ELSE
+                        st.tr \o << [doc |-> out.doc, sends |-> sends2] >> ]
 
 RECURSIVE DrainPromises(_, _)
 DrainPromises(st, t) ==
@@ -648,7 +670,7 @@ Sweep(doc, t) ==
     DrainTasks(
         DrainCallbacks(
             DrainListeners(
-                DrainPromises([doc |-> doc, fx |-> << >>, tr |-> << >>], t), t), t), t)
+                DrainPromises([doc |-> doc, sends |-> << >>, tr |-> << >>], t), t), t), t)
 
 Was(o, i, k) ==
     IF i \in DOMAIN docs[o] THEN
@@ -695,9 +717,15 @@ Process(r) ==
                     now      |-> now,
                     config   |-> [retryTimeout |-> RetryTimeout] ]
            out == Handle(steps[r].ev, env)
-           fx  == swept.fx \o out.effects
-           final == PutsInto(docs[o], fx)
-           W   == { [id |-> w.id, obj |-> final[w.id]] : w \in Puts(fx) }
+           final == out.doc
+           sends == swept.sends \o out.sends
+           W   == { [id |-> i, obj |-> final[i]] :
+                      i \in { j \in DOMAIN final :
+                                 \/ j \notin DOMAIN docs[o]
+                                 \/ final[j] /= docs[o][j] } }
+           fx  == << Variant("PutDocument", [body |-> final]) >>
+                    \o [ n \in 1 .. Len(sends) |->
+                             Variant("Send", [entry |-> sends[n]]) ]
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending = Arms(o, W) \o fx
                                                  \o Disarms(o, W),
@@ -726,21 +754,23 @@ FenceOk(r) ==
        /\ now = steps[r].at
 
 Commit(r) ==
-    /\ Heads(r, "PutObject")
+    /\ Heads(r, "PutDocument")
     /\ FenceOk(r)
     /\ LET o == steps[r].org
        IN
-           /\ docs'  = [docs EXCEPT ![o] = PutsInto(docs[o], steps[r].pending)]
+           /\ docs'  = [docs EXCEPT ![o] =
+                            VariantGetUnsafe("PutDocument",
+                                             Head(steps[r].pending)).body]
            /\ outbox' = LET S == Says(steps[r].pending) IN
                           { x \in outbox :
                               ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
     /\ steps' = [steps EXCEPT ![r].pending =
                    SelectSeq(Tail(@),
-                             LAMBDA f : VariantTag(f) \notin {"PutObject", "Send"})]
+                             LAMBDA f : VariantTag(f) \notin {"PutDocument", "Send"})]
     /\ UNCHANGED <<timeouts, now>>
 
 Refuse(r) ==
-    /\ Heads(r, "PutObject")
+    /\ Heads(r, "PutDocument")
     /\ ~FenceOk(r)
     /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
@@ -836,7 +866,7 @@ SplitWrite ==
         /\ steps[r].phase = "perform"
         /\ docs[steps[r].org] /= steps[r].expect
         /\ \E j \in DOMAIN steps[r].pending :
-               VariantTag(steps[r].pending[j]) = "PutObject"
+               VariantTag(steps[r].pending[j]) = "PutDocument"
 
 NoSplitWrite ==
     ~SplitWrite
@@ -846,12 +876,6 @@ DrainRan ==
 NoDrainRan ==
     ~DrainRan
 
-TwoPuts ==
-    \E r \in DOMAIN steps :
-        Cardinality({ j \in DOMAIN steps[r].pending :
-                        VariantTag(steps[r].pending[j]) = "PutObject" }) > 1
-NoTwoPuts ==
-    ~TwoPuts
 
 CT_preserved_settled_promise_record ==
     [][A!preserved_settled_promise_record]_vars

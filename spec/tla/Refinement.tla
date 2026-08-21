@@ -52,11 +52,11 @@ Walk(r) ==
                         [ objects  |-> swept.doc, timeouts |-> timeouts,
                           outbox   |-> outbox,    now      |-> now,
                           config   |-> [retryTimeout |-> RetryTimeout] ])
-        full  == IF out.effects = << >> THEN
+        full  == IF out.doc = swept.doc /\ out.sends = << >> THEN
                      swept.tr
                  ELSE
-                     swept.tr \o << [ doc |-> PutsInto(doc, swept.fx \o out.effects),
-                                      fx  |-> swept.fx \o out.effects ] >>
+                     swept.tr \o << [ doc   |-> out.doc,
+                                      sends |-> swept.sends \o out.sends ] >>
     IN
         IF full = << >> THEN << >> ELSE SubSeq(full, 1, Len(full) - 1)
 
@@ -65,7 +65,7 @@ Walk(r) ==
    it with its own write. *)
 Walked(r) ==
     /\ (s /= top) => (s.req = r)
-    /\ Heads(r, "PutObject")
+    /\ Heads(r, "PutDocument")
     /\ FenceOk(r)
     /\ IF IF s = top THEN Walk(r) /= << >> ELSE s.k < Len(Walk(r)) THEN
            /\ s' = IF s = top THEN [req |-> r, k |-> 1] ELSE [s EXCEPT !.k = @ + 1]
@@ -102,9 +102,15 @@ ObjectsAt(d, o) ==
     LET D == [ p \in Origin |-> IF p = o THEN d ELSE docs[p] ]
     IN  [ i \in UNION { DOMAIN D[p] : p \in Origin } |-> D[i.origin][i] ]
 
-SaysInto(ob, fx) ==
-    LET S == Says(fx)
-    IN  { x \in ob : ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
+SendsInto(ob, ms) ==
+    LET upto[n \in 0 .. Len(ms)] ==
+          IF n = 0 THEN
+              ob
+          ELSE
+              LET acc == upto[n - 1]
+              IN  { x \in acc : MsgKey(x) /= MsgKey(ms[n]) } \cup {ms[n]}
+    IN
+        upto[Len(ms)]
 
 (* Where the walk has got to. Read only while one is in progress. *)
 At ==
@@ -114,7 +120,7 @@ P == INSTANCE Abstract WITH
          objects <- IF s = top THEN Objects
                     ELSE ObjectsAt(At.doc, steps[s.req].org),
          outbox  <- IF s = top THEN outbox
-                    ELSE SaysInto(outbox, At.fx)
+                    ELSE SendsInto(outbox, At.sends)
 
 Refines ==
     P!Safety
