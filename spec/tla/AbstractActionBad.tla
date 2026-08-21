@@ -1,4 +1,4 @@
------------------------------ MODULE AbstractAction -----------------------------
+----------------------------- MODULE AbstractActionBad -----------------------------
 EXTENDS Requests, TLC
 
 VARIABLES
@@ -395,7 +395,7 @@ Init ==
     /\ now     = 0
 
 Next ==
-    \/ \E req \in CreateReq   : HandlePromiseCreate(req)
+    \/ FALSE \* CONTROL: creates removed, refinement MUST now fail
     \/ \E req \in SettleReq   : HandlePromiseSettle(req)
     \/ \E req \in CallbackReq : HandlePromiseRegisterCallback(req)
     \/ \E req \in [awaited : Id, address : Address] :
