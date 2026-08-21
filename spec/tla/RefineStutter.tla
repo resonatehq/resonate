@@ -1,7 +1,7 @@
 ----------------------------- MODULE RefineStutter -----------------------------
 (* THE BATCH, MOVED OUT OF THE PROTOCOL AND INTO THE EXECUTOR'S BOOKKEEPING.
 
-   `AbstractAction` states one protocol step per action -- guards, primed
+   `Abstract` states one protocol step per action -- guards, primed
    variables, nothing else. It cannot match a sweep that drains several
    deadlines and serves a request in one write, and TLC said so: promise `b`
    timed out and promise `a` was created in a single document write, which is
@@ -39,14 +39,7 @@ RefinesStutter ==
 
 (* THE AUXILIARY VARIABLE MUST BE AUXILIARY. Projecting the walk away has to
    leave a behaviour the unaugmented executor already had. *)
-C == INSTANCE Concrete WITH
-         steps <- [ r \in DOMAIN steps |->
-                      [ ev      |-> steps[r].ev,
-                        phase   |-> steps[r].phase,
-                        pending |-> steps[r].pending,
-                        expect  |-> steps[r].expect,
-                        at      |-> steps[r].at,
-                        org     |-> steps[r].org ] ]
+C == INSTANCE Concrete
 
 Inert ==
     C!Init /\ [][C!Next]_C!vars
