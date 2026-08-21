@@ -999,6 +999,10 @@ Process(r) ==
 Perform(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
+    (* A WALK BELONGS TO THE REQUEST THAT STARTED IT. Without this, another
+       request's Perform steps someone else's path, or closes it with its own
+       write. *)
+    /\ (s /= top) => (s.req = r)
     /\ IF steps[r].pending = << >>
        THEN /\ steps' = Drop(steps, r)
             /\ UNCHANGED <<s, docs, timeouts, outbox>>
@@ -1009,7 +1013,8 @@ Perform(r) ==
                     THEN IF IF s = top THEN steps[r].path /= << >>
                                        ELSE s.rest /= << >>
                          THEN /\ s' = IF s = top
-                                      THEN [ cur  |-> Head(steps[r].path),
+                                      THEN [ req  |-> r,
+                                             cur  |-> Head(steps[r].path),
                                              rest |-> Tail(steps[r].path),
                                              org  |-> o ]
                                       ELSE [ s EXCEPT !.cur  = Head(s.rest),
