@@ -287,10 +287,11 @@ fn validate_promise_create_data(
             .with_message("Promise ID must not contain null bytes".into()));
     }
     if let Some(origin) = data.tags.get("resonate:origin") {
-        if origin.contains('.') {
-            return Err(validator::ValidationError::new("dot_in_origin")
-                .with_message("resonate:origin must not contain '.'".into()));
-        }
+        // '.' is deliberately *not* rejected: it separates lineage segments below
+        // the origin, which are only ever read once the origin has been split off
+        // at the first ':', so a caller-supplied dotted root id ('my.app.workflow'
+        // -> 'my.app.workflow:1' -> 'my.app.workflow:1.1') round-trips intact.
+        //
         // The origin is everything before an id's first ':' (see `origin()`), so
         // an origin that itself holds one is unrepresentable: no id could ever
         // split back to it. Rejecting it here keeps ':' reserved as the
