@@ -1303,6 +1303,17 @@ SpecSF ==
 
    The instance stays, because the invariants below are worth borrowing. *)
 
+(* THE MODEL IS FINITE ONLY IF SOMETHING SAYS SO. `Version` is declared as
+   0..MaxVersion and then never enforced: acquire and create bump the task
+   version with no upper guard, so a task acquired and released and acquired
+   again climbs forever and the state space is infinite. TypeOK did not catch
+   it -- it never mentioned version -- and no run of this spec has ever
+   terminated. This is the bound, as a state constraint rather than a guard,
+   because a protocol that stopped bumping at MaxVersion would be a different
+   protocol. *)
+C_VersionBound ==
+    \A i \in UNION { DOMAIN docs[o] : o \in Origin } : docs[i.origin][i].task.version <= MaxVersion
+
 (* The invariants the abstract machine fails, asked of this one. That the
    fence restores them is the other half of the result, and it is not
    implied by the refinement -- refinement bounds what this machine MAY
