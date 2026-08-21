@@ -794,23 +794,32 @@ EnvAt(d, t) ==
 Advance(st, out) ==
     [ doc |-> PutsInto(st.doc, out.effects), fx |-> st.fx \o out.effects ]
 
-RECURSIVE DrainTimeouts(_, _)
-DrainTimeouts(st, t) ==
-    LET d == DrainableTimeouts(st.doc, t)
+RECURSIVE DrainPromises(_, _)
+DrainPromises(st, t) ==
+    LET d == { e \in DrainableTimeouts(st.doc, t) : e.kind = "promise" }
+    IN
+        IF d = {} THEN
+            st
+        ELSE
+            DrainPromises(
+                Advance(st, ProcessPromiseTimeout(CHOOSE x \in d : TRUE,
+                                                  EnvAt(st.doc, t))), t)
+
+RECURSIVE DrainTasks(_, _)
+DrainTasks(st, t) ==
+    LET d == { e \in DrainableTimeouts(st.doc, t) : e.kind /= "promise" }
     IN
         IF d = {} THEN
             st
         ELSE
             LET e == CHOOSE x \in d : TRUE
             IN
-                DrainTimeouts(
+                DrainTasks(
                     Advance(st,
-                            CASE e.kind = "promise" ->
-                                     ProcessPromiseTimeout(e, EnvAt(st.doc, t))
-                              [] e.kind = "lease" ->
-                                     ProcessLeaseTimeout(e.id, EnvAt(st.doc, t))
-                              [] OTHER ->
-                                     ProcessRetryTimeout(e.id, EnvAt(st.doc, t))),
+                            IF e.kind = "lease" THEN
+                                ProcessLeaseTimeout(e.id, EnvAt(st.doc, t))
+                            ELSE
+                                ProcessRetryTimeout(e.id, EnvAt(st.doc, t))),
                     t)
 
 RECURSIVE DrainListeners(_, _)
@@ -835,9 +844,23 @@ DrainCallbacks(st, t) ==
                 Advance(st, ProcessCallback(CHOOSE x \in d : TRUE,
                                             EnvAt(st.doc, t))), t)
 
+(* THE PHASE ORDER IS VERUS'S, AND IT IS LOAD-BEARING. `drain_doc` runs
+   phase1 (promise deadlines) then phase2 (resumes) then phase3 (task
+   deadlines), and task deadlines going LAST is what makes a resumed task
+   execute in the same write. `resume_awaiter` sets the task pending with
+   retryAt at now, so the retry is due the moment phase3 looks, and phase3
+   sends the Execute. Drain the task deadlines first instead and the resumed
+   task waits for the next sweep to be told to run.
+
+   Verus arrives at the same document by sending the Execute inside
+   `resume_awaiter` and arming the retry at now + retry_timeout. Same write,
+   same outbox, same deadline -- reached by ordering here and by fusing there,
+   because a spec can afford the extra step and a `for` loop cannot. *)
 Sweep(doc, t) ==
-    DrainCallbacks(DrainListeners(DrainTimeouts([doc |-> doc, fx |-> << >>], t),
-                                  t), t)
+    DrainTasks(
+        DrainCallbacks(
+            DrainListeners(
+                DrainPromises([doc |-> doc, fx |-> << >>], t), t), t), t)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
