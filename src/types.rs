@@ -649,10 +649,10 @@ pub struct ScheduleCreateData {
 fn validate_schedule_create_data(
     data: &ScheduleCreateData,
 ) -> Result<(), validator::ValidationError> {
-    if data.id.contains('.') {
-        return Err(validator::ValidationError::new("dot_in_schedule_id")
-            .with_message("Schedule ID must not contain '.'".into()));
-    }
+    // A schedule id is caller-supplied and is stamped, via the promise id
+    // template, onto the resonate:origin of every promise the schedule fires --
+    // so it is bound by exactly the rules `validate_promise_create_data` applies
+    // to an origin, and '.' is not one of them (see the comment there).
     if !data.promise_tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")
             .with_message("promiseTags must include a resonate:target tag".into()));
