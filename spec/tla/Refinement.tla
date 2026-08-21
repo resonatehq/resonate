@@ -86,7 +86,7 @@ NextS ==
           \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
                 Process(r) \/ Crash(r) \/ Retire(r) \/ Refuse(r)
-                           \/ Arm(r) \/ Disarm(r) \/ Emit(r)
+                           \/ Arm(r) \/ Disarm(r)
           \/ Clock
     \/ \E r \in DOMAIN steps : Walked(r)
 
@@ -101,16 +101,6 @@ SpecS ==
 ObjectsAt(d, o) ==
     LET D == [ p \in Origin |-> IF p = o THEN d ELSE docs[p] ]
     IN  [ i \in UNION { DOMAIN D[p] : p \in Origin } |-> D[i.origin][i] ]
-
-SendsInto(ob, ms) ==
-    LET upto[n \in 0 .. Len(ms)] ==
-          IF n = 0 THEN
-              ob
-          ELSE
-              LET acc == upto[n - 1]
-              IN  { x \in acc : MsgKey(x) /= MsgKey(ms[n]) } \cup {ms[n]}
-    IN
-        upto[Len(ms)]
 
 (* Where the walk has got to. Read only while one is in progress. *)
 At ==

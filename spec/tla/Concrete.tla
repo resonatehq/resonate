@@ -25,6 +25,16 @@ A ==
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 
+SendsInto(ob, ms) ==
+    LET upto[n \in 0 .. Len(ms)] ==
+          IF n = 0 THEN
+              ob
+          ELSE
+              LET acc == upto[n - 1]
+              IN  { x \in acc : MsgKey(x) /= MsgKey(ms[n]) } \cup {ms[n]}
+    IN
+        upto[Len(ms)]
+
 Write(doc, i, obj) ==
     [ x \in (DOMAIN doc) \cup {i} |-> IF x = i THEN obj ELSE doc[x] ]
 
@@ -40,9 +50,6 @@ FoldSet(Op(_,_), base, S) ==
 
 
 
-Says(fx) ==
-    { VariantGetUnsafe("Send", fx[i]).entry
-      : i \in { j \in DOMAIN fx : VariantTag(fx[j]) = "Send" } }
 
 
 Project(obj, t) ==
@@ -729,12 +736,13 @@ Process(r) ==
                       i \in { j \in DOMAIN final :
                                  \/ j \notin DOMAIN docs[o]
                                  \/ final[j] /= docs[o][j] } }
-           fx  == << Variant("PutDocument", [body |-> final]) >>
-                    \o [ n \in 1 .. Len(sends) |->
-                             Variant("Send", [entry |-> sends[n]]) ]
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
-                                  ![r].pending = Arms(o, W) \o fx
-                                                 \o Disarms(o, W),
+                                  ![r].pending =
+                                      Arms(o, W)
+                                        \o << Variant("PutDocument",
+                                                      [body |-> final,
+                                                       sends |-> sends]) >>
+                                        \o Disarms(o, W),
                                   ![r].expect  = docs[o],
                                   ![r].at      = now]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
@@ -767,12 +775,10 @@ Commit(r) ==
            /\ docs'  = [docs EXCEPT ![o] =
                             VariantGetUnsafe("PutDocument",
                                              Head(steps[r].pending)).body]
-           /\ outbox' = LET S == Says(steps[r].pending) IN
-                          { x \in outbox :
-                              ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
-    /\ steps' = [steps EXCEPT ![r].pending =
-                   SelectSeq(Tail(@),
-                             LAMBDA f : VariantTag(f) \notin {"PutDocument", "Send"})]
+           /\ outbox' = SendsInto(outbox,
+                                   VariantGetUnsafe("PutDocument",
+                                                    Head(steps[r].pending)).sends)
+    /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<timeouts, now>>
 
 Refuse(r) ==
@@ -795,15 +801,9 @@ Disarm(r) ==
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
-Emit(r) ==
-    /\ Heads(r, "Send")
-    /\ outbox' = LET en == VariantGetUnsafe("Send", Head(steps[r].pending)).entry
-                 IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
-    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<docs, timeouts, now>>
 
 Perform(r) ==
-    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r) \/ Emit(r)
+    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r)
 
 Crash(r) ==
     /\ r \in DOMAIN steps
