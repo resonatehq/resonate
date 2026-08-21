@@ -791,8 +791,17 @@ DrainableCallbacks(doc, t) ==
 EnvAt(d, t) ==
     [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
 
+(* `tr` is the stores this sweep passes through, one per protocol step. Nothing
+   in this machine reads it -- it is a local value, not a variable, and costs
+   no state. `Refinement` needs it to know what one write looks like taken one
+   abstract step at a time. *)
 Advance(st, out) ==
-    [ doc |-> PutsInto(st.doc, out.effects), fx |-> st.fx \o out.effects ]
+    LET doc2 == PutsInto(st.doc, out.effects)
+        fx2  == st.fx \o out.effects
+    IN
+        [ doc |-> doc2, fx |-> fx2,
+          tr  |-> IF out.effects = << >> THEN st.tr
+                  ELSE st.tr \o << [doc |-> doc2, fx |-> fx2] >> ]
 
 RECURSIVE DrainPromises(_, _)
 DrainPromises(st, t) ==
@@ -860,7 +869,7 @@ Sweep(doc, t) ==
     DrainTasks(
         DrainCallbacks(
             DrainListeners(
-                DrainPromises([doc |-> doc, fx |-> << >>], t), t), t), t)
+                DrainPromises([doc |-> doc, fx |-> << >>, tr |-> << >>], t), t), t), t)
 
 (* Read ONE DOCUMENT, decide against it, and remember the etag it was read
    under. The handler is `Abstract`'s: the protocol does not know it is
@@ -1038,44 +1047,80 @@ Process(r) ==
    `objects` where it was. The arm and disarm branches survive because
    the wheel is the one thing still allowed to lag, which is the whole
    experiment. *)
-Perform(r) ==
+(* PERFORM, SPLIT BY WHAT IT TOUCHES. It used to be one action with a
+   five-way CASE, which meant the document write could not be named -- and so
+   could not be replaced. `Refinement` replaces exactly `Commit`, and nothing
+   else, to walk it one abstract step at a time.
+
+   `Perform` is still their disjunction, so `Next` and every behaviour are
+   unchanged. *)
+Ready(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
-    /\ IF steps[r].pending = << >>
-       THEN /\ steps' = Drop(steps, r)
-            /\ UNCHANGED <<docs, timeouts, outbox>>
-       ELSE LET e == Head(steps[r].pending)
-                o == steps[r].org
-            IN CASE VariantTag(e) = "PutObject" ->
-                    IF Fenced => (docs[o] = steps[r].expect /\ now = steps[r].at)
-                    THEN /\ docs'  = [docs EXCEPT ![o] =
-                                         PutsInto(docs[o], steps[r].pending)]
-                         /\ outbox' = LET S == Says(steps[r].pending) IN
-                                        { x \in outbox :
-                                            ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
-                         /\ steps' = [steps EXCEPT ![r].pending =
-                                        SelectSeq(Tail(@),
-                                                  LAMBDA f :
-                                                    VariantTag(f) \notin
-                                                      {"PutObject", "Send"})]
-                         /\ UNCHANGED timeouts
-                    ELSE /\ steps' = [steps EXCEPT ![r].phase   = "process",
-                                                   ![r].pending = << >>]
-                         /\ UNCHANGED <<docs, timeouts, outbox>>
-                 [] VariantTag(e) = "ArmTimeout" ->
-                    /\ timeouts' = timeouts \cup {VariantGetUnsafe("ArmTimeout", e).entry}
-                    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, outbox>>
-                 [] VariantTag(e) = "DisarmTimeout" ->
-                    /\ timeouts' = timeouts \ {VariantGetUnsafe("DisarmTimeout", e).entry}
-                    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, outbox>>
-                 [] OTHER ->
-                    /\ outbox' = LET en == VariantGetUnsafe("Send", e).entry
-                                 IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
-                    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
-                    /\ UNCHANGED <<docs, timeouts>>
-    /\ UNCHANGED now
+
+Retire(r) ==
+    /\ Ready(r)
+    /\ steps[r].pending = << >>
+    /\ steps' = Drop(steps, r)
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
+
+Heads(r, tag) ==
+    /\ Ready(r)
+    /\ steps[r].pending /= << >>
+    /\ VariantTag(Head(steps[r].pending)) = tag
+
+(* THE FENCE. The document a step decided against, still the document, at the
+   instant it decided. *)
+FenceOk(r) ==
+    \/ ~Fenced
+    \/ /\ docs[steps[r].org] = steps[r].expect
+       /\ now = steps[r].at
+
+(* THE WRITE. One document, one instant, everything the step decided. *)
+Commit(r) ==
+    /\ Heads(r, "PutObject")
+    /\ FenceOk(r)
+    /\ LET o == steps[r].org
+       IN
+           /\ docs'  = [docs EXCEPT ![o] = PutsInto(docs[o], steps[r].pending)]
+           /\ outbox' = LET S == Says(steps[r].pending) IN
+                          { x \in outbox :
+                              ~\E m \in S : MsgKey(x) = MsgKey(m) } \cup S
+    /\ steps' = [steps EXCEPT ![r].pending =
+                   SelectSeq(Tail(@),
+                             LAMBDA f : VariantTag(f) \notin {"PutObject", "Send"})]
+    /\ UNCHANGED <<timeouts, now>>
+
+(* THE FENCE REFUSING. A stale decision is dropped and the request reprocessed. *)
+Refuse(r) ==
+    /\ Heads(r, "PutObject")
+    /\ ~FenceOk(r)
+    /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
+
+Arm(r) ==
+    /\ Heads(r, "ArmTimeout")
+    /\ timeouts' = timeouts \cup
+                     {VariantGetUnsafe("ArmTimeout", Head(steps[r].pending)).entry}
+    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
+    /\ UNCHANGED <<docs, outbox, now>>
+
+Disarm(r) ==
+    /\ Heads(r, "DisarmTimeout")
+    /\ timeouts' = timeouts \
+                     {VariantGetUnsafe("DisarmTimeout", Head(steps[r].pending)).entry}
+    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
+    /\ UNCHANGED <<docs, outbox, now>>
+
+Emit(r) ==
+    /\ Heads(r, "Send")
+    /\ outbox' = LET en == VariantGetUnsafe("Send", Head(steps[r].pending)).entry
+                 IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
+    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
+    /\ UNCHANGED <<docs, timeouts, now>>
+
+Perform(r) ==
+    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r) \/ Emit(r)
 
 Crash(r) ==
     /\ r \in DOMAIN steps
