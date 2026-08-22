@@ -744,7 +744,7 @@ Ready(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
 
-Retire(r) ==
+Finish(r) ==
     /\ Ready(r)
     /\ steps[r].pending = << >>
     /\ steps' = Drop(steps, r)
@@ -771,7 +771,7 @@ PutDocument(r) ==
     /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<timeouts, outbox, now>>
 
-Refuse(r) ==
+Restart(r) ==
     /\ Heads(r, "PutDocument")
     /\ ~FenceOk(r)
     /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
@@ -803,8 +803,8 @@ Perform(r) ==
     \/ PutDocument(r)
     \/ DelTimeout(r)
     \/ Send(r)
-    \/ Refuse(r)
-    \/ Retire(r)
+    \/ Restart(r)
+    \/ Finish(r)
 
 Crash(r) ==
     /\ r \in DOMAIN steps

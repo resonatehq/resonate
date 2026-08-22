@@ -85,7 +85,7 @@ NextS ==
        /\ \/ \E ev \in ExternalEvent : SubmitExternal(ev)
           \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
-                Process(r) \/ Crash(r) \/ Retire(r) \/ Refuse(r)
+                Process(r) \/ Crash(r) \/ Finish(r) \/ Restart(r)
                            \/ PutTimeout(r) \/ DelTimeout(r) \/ Send(r)
           \/ Clock
     \/ \E r \in DOMAIN steps : Walked(r)
