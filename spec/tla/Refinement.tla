@@ -140,8 +140,11 @@ Walk(r) ==
    it with its own write. *)
 Walked(r) ==
     /\ (s /= top) => (s.req = r)
-    /\ Heads(r, "PutDocument")
-    /\ FenceOk(r)
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "PutDocument"
+    /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
     /\ IF IF s = top THEN Walk(r) /= << >> ELSE s.k < Len(Walk(r)) THEN
            /\ s' = IF s = top THEN [req |-> r, k |-> 1] ELSE [s EXCEPT !.k = @ + 1]
            /\ UNCHANGED <<docs, timeouts, outbox, steps, now>>

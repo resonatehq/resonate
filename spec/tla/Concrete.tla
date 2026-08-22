@@ -2,8 +2,6 @@
 
 EXTENDS Requests
 
-CONSTANT Fenced
-
 VARIABLES
     docs,
     timeouts,
@@ -755,28 +753,19 @@ Process(r) ==
                                   ![r].expect  = docs[o]]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-Ready(r) ==
+Finish(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "perform"
-
-Finish(r) ==
-    /\ Ready(r)
     /\ steps[r].pending = << >>
     /\ steps' = Del(steps, r)
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-Heads(r, tag) ==
-    /\ Ready(r)
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = tag
-
-FenceOk(r) ==
-    \/ ~Fenced
-    \/ /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
-
 PutDocument(r) ==
-    /\ Heads(r, "PutDocument")
-    /\ FenceOk(r)
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "PutDocument"
+    /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
     /\ LET o == OriginOf(steps[r].ev)
        IN
            /\ docs'  = [docs EXCEPT ![o] =
@@ -785,27 +774,39 @@ PutDocument(r) ==
     /\ UNCHANGED <<timeouts, outbox, now>>
 
 Restart(r) ==
-    /\ Heads(r, "PutDocument")
-    /\ ~FenceOk(r)
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "PutDocument"
+    /\ docs[OriginOf(steps[r].ev)] /= steps[r].expect
     /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 PutTimeout(r) ==
-    /\ Heads(r, "PutTimeout")
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "PutTimeout"
     /\ timeouts' = timeouts \cup
                      {Head(steps[r].pending).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
 DelTimeout(r) ==
-    /\ Heads(r, "DelTimeout")
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "DelTimeout"
     /\ timeouts' = timeouts \
                      {Head(steps[r].pending).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
 Send(r) ==
-    /\ Heads(r, "Send")
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "Send"
     /\ outbox' = LET en == Head(steps[r].pending).entry
                  IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
     /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
