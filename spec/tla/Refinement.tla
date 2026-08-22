@@ -52,11 +52,13 @@ Due(doc, t) ==
         /\ doc[i].promise.timeoutAt <= t }
 
 Listening(doc) ==
-    { x \in [id : Settled(doc), address : Address] :
+    { x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+              address : Address] :
         x.address \in doc[x.id].promise.listeners }
 
 Awaiting(doc) ==
-    { x \in [id : Settled(doc), awaiter : Id] :
+    { x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+              awaiter : Id] :
         x.awaiter \in doc[x.id].promise.callbacks }
 
 Leased(doc, t) ==

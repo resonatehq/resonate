@@ -606,9 +606,6 @@ Merge(a, b) ==
       dels  |-> a.dels  \o b.dels,
       sends |-> a.sends \o b.sends ]
 
-Settled(doc) ==
-    { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
-
 SweepTimeoutAt(doc, t) ==
     LET S  == { i \in DOMAIN doc :
                   doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t }
@@ -628,11 +625,12 @@ SweepTimeoutAt(doc, t) ==
       sends |-> << >> ]
 
 SweepListeners(doc, t) ==
-    LET q == SetToSeq({ x \in [id : Settled(doc), address : Address] :
+    LET q == SetToSeq({ x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+                              address : Address] :
                           x.address \in doc[x.id].promise.listeners })
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in Settled(doc) THEN
+                    IF doc[i].promise.state /= "pending" THEN
                         [doc[i] EXCEPT !.promise.listeners = {}]
                     ELSE
                         doc[i] ],
@@ -645,14 +643,15 @@ SweepListeners(doc, t) ==
                                     state |-> doc[q[n].id].promise.state ] ] ] ]
 
 SweepCallbacks(doc, t) ==
-    LET S == { x \in [id : Settled(doc), awaiter : Id] :
+    LET S == { x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+                    awaiter : Id] :
                    x.awaiter \in doc[x.id].promise.callbacks }
         Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
         Woken      == { x.awaiter : x \in S } \cap DOMAIN doc
         q  == SetToSeq({ w \in Woken : doc[w].task.state = "suspended" })
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
-                    LET struck == IF i \in Settled(doc) THEN
+                    LET struck == IF doc[i].promise.state /= "pending" THEN
                                       [doc[i] EXCEPT !.promise.callbacks = {}]
                                   ELSE
                                       doc[i]
