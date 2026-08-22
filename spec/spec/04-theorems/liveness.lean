@@ -57,13 +57,13 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
       | some p => (p.project now).state != .pending && p.callbacks.contains x
       | none   => false
   | .r5 id =>
-      match taskAt s id, (taskAt s id).bind (fun t => promiseAt s t.id) with
+      match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .acquired && (t.expiresAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
   | .r6 id =>
-      match taskAt s id, (taskAt s id).bind (fun t => promiseAt s t.id) with
+      match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .pending && (t.retryAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
@@ -198,14 +198,13 @@ If the bounded version FAILED, the unbounded one would be false, so
 this is a real refutation channel rather than decoration. -/
 
 def enabledSteps (now : Nat) (s : ServerState) : List Step :=
-  (s.promises.flatMap fun p =>
-      (if enabledInternal (.r1 p.id) now s then [Step.r1 p.id] else [])
-        ++ p.listeners.map (fun addr => Step.r3 p.id addr)
-        ++ p.callbacks.map (fun x => Step.r4 p.id x))
-    ++ (s.tasks.flatMap fun t =>
-          (if enabledInternal (.r5 t.id) now s then [Step.r5 t.id] else [])
-            ++ (if enabledInternal (.r6 t.id) now s
-                then [Step.r6 t.id] else []))
+  s.objects.flatMap fun o =>
+    let p := o.promise
+    (if enabledInternal (.r1 o.id) now s then [Step.r1 o.id] else [])
+      ++ p.listeners.map (fun addr => Step.r3 o.id addr)
+      ++ p.callbacks.map (fun x => Step.r4 o.id x)
+      ++ (if o.task.isSome ∧ enabledInternal (.r5 o.id) now s then [Step.r5 o.id] else [])
+      ++ (if o.task.isSome ∧ enabledInternal (.r6 o.id) now s then [Step.r6 o.id] else [])
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl
@@ -227,12 +226,12 @@ def wakeMaterializes (w : List (Step × Nat)) (horizon : Nat) : Bool :=
 def resumeRecorded (w : List (Step × Nat)) (horizon : Nat) : Bool :=
   let s0 := (runFin true w AbstractModel.ServerState.init).2
   let s  := fairRounds 6 horizon s0
-  s0.promises.all fun p =>
-    p.callbacks.all fun x =>
+  s0.objects.all fun o =>
+    o.promise.callbacks.all fun x =>
       match taskAt s x with
       | none   => true
       | some u => u.state == .fulfilled
-                    || (u.state != .suspended && u.resumes.contains p.id)
+                    || (u.state != .suspended && u.resumes.contains o.id)
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000

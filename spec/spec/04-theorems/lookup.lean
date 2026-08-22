@@ -61,11 +61,11 @@ theorem beq_true_of_bne_false {α} [BEq α] {a b : α} (h : (a != b) = false) : 
 
 /-! ### 1. Pure lemmas -/
 
-theorem project_id (p : PromiseObject) (n : Nat) : (p.project n).id = p.id := by
-  unfold PromiseObject.project
-  split
-  · split <;> rfl
-  · rfl
+/-- Projection moves a promise's state, never the id of the object it
+    is part of. `PromiseObject.project` cannot touch an id any more —
+    it has none — so this is now a fact about `Object.project`, and it
+    is `rfl`. -/
+theorem project_id (o : Object) (n : Nat) : (o.project n).id = o.id := rfl
 
 theorem project_not_pending (p : PromiseObject) (n : Nat)
     (h : (p.state == PromiseState.pending) = false) : p.project n = p := by
@@ -227,7 +227,7 @@ theorem find?_upsert {α} (idOf : α → String) (x : α) (l : List α) (b : Str
 
 /-- Projected-promise lookup. -/
 def pLook (n : Nat) (s : ServerState) (id : String) : Option PromiseObject :=
-  (s.promises.find? (·.id == id)).map (·.project n)
+  (s.promise? id).map (·.project n)
 
 /-- Fact T as an `Option`-level combinator — named so that statements
     about `tLook` can mention it without anonymous matchers. -/
@@ -238,7 +238,7 @@ def applyView (t : TaskObject) : Option PromiseObject → TaskObject
 /-- Viewed-task lookup — defined THROUGH `pLook`, so that anything
     preserving `pLook` and the raw task find preserves it. -/
 def tLook (n : Nat) (s : ServerState) (id : String) : Option TaskObject :=
-  (s.tasks.find? (·.id == id)).map fun t => applyView t (pLook n s id)
+  (s.task? id).map fun t => applyView t (pLook n s id)
 
 def sLook (s : ServerState) (id : String) : Option ServerModel.Schedule :=
   s.schedules.find? (·.id == id)
@@ -265,18 +265,18 @@ theorem REq.trans {n : Nat} {a b c : ServerState}
 theorem pLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : String) :
     pLook n' s id = (pLook n s id).map (·.project n') := by
   unfold pLook
-  cases s.promises.find? (·.id == id) with
+  cases s.promise? id with
   | none => rfl
   | some p => simp [Option.map, project_absorb p h]
 
 theorem tLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : String) :
     tLook n' s id = (tLook n s id).map fun tv => applyView tv (pLook n' s id) := by
   unfold tLook
-  cases hf : s.tasks.find? (·.id == id) with
+  cases hf : s.task? id with
   | none => rfl
   | some t =>
       simp only [Option.map]
-      cases hp : s.promises.find? (·.id == id) with
+      cases hp : s.promise? id with
       | none =>
           have h1 : pLook n s id = none := by unfold pLook; rw [hp]; rfl
           have h2 : pLook n' s id = none := by unfold pLook; rw [hp]; rfl

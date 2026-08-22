@@ -8,12 +8,19 @@
 // *ServerState receiver and mutates it — the caller clones first, so the
 // model function porcupine sees is still pure.
 //
+// ONE DIFFERENCE FROM THE LEAN, ON PURPOSE. `spec/02-abstract/state.lean`
+// carries ONE row — an `Object` holding a promise and, if it has one, the
+// task executing it. This file still carries two slices keyed by the same
+// id. The two agree: `cmd/fuzz -lean` runs generated traces and mutants
+// past both and requires the same verdict, which is what stops the port
+// from drifting. Fusing the row here is a follow-up, not a correction.
+//
 // Two things the Lean says that this file leans on:
 //
-//   - `spec/02-abstract/external-steps-p.lean` and `-m.lean` are the SAME CODE modulo
-//     viewPromise/viewTask vs touchPromise/touchTask. Verified by diff,
-//     not taken on faith. So there is one set of handlers here, taking a
-//     `Discipline`, rather than two copies.
+//   - The two read disciplines are the SAME CODE modulo `viewObject` vs
+//     `touchObject` — in the Lean they are one body and a `mat` bit. So
+//     there is one set of handlers here, taking a `Discipline`, rather
+//     than two copies.
 //
 //   - The abstract machine has NO deferred queue. A settled promise keeps
 //     its callbacks and listeners until the batch internal steps drain them. That

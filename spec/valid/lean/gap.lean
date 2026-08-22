@@ -67,7 +67,10 @@ def validateBrute (trace : List Observation)
     Lease timers (`kind = 1`) are kept — `processLeaseTimeout` writes task
     state, which `taskGet` does project. -/
 def visible (s : ServerState) : ServerState :=
-  { s with outbox := [], tasks  := s.tasks.map fun t => if t.state == .pending then { t with retryAt := none } else t }
+  { s with outbox := [],
+           objects := s.objects.map fun o =>
+                        { o with task := o.task.map fun t =>
+                                   if t.state == .pending then { t with retryAt := none } else t } }
 
 def sameCanon (a b : ServerState) : Bool := canon a == canon b
 def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visible b)

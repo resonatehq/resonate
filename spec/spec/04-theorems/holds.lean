@@ -220,13 +220,9 @@ theorem store_nodup : ∀ n, StoreNodup (tr n).state := by
   | zero => rw [h0]; exact storeNodup_init
   | succ k ih => rw [(hv k).2.1]; exact storeNodup_step mat _ _ _ ih
 
-theorem promise_ids_unique :
-    ∀ n, well_formed_store_promise_ids_unique (tr n).now (tr n).state = true :=
-  fun n => promise_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
-
-theorem task_ids_unique :
-    ∀ n, well_formed_store_task_ids_unique (tr n).now (tr n).state = true :=
-  fun n => task_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
+theorem object_ids_unique :
+    ∀ n, well_formed_store_object_ids_unique (tr n).now (tr n).state = true :=
+  fun n => object_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
 
 theorem schedule_ids_unique :
     ∀ n, well_formed_store_schedule_ids_unique (tr n).now (tr n).state = true :=
@@ -253,7 +249,7 @@ theorem monotone_task_set_grows :
     ∀ n, Properties.monotone_task_set_grows (tr n).now (tr n).state (tr (n + 1)).state = true := by
   intro n
   rw [(hv n).2.1]
-  exact Frame.monotone_task_set_grows_step mat _ _ _ _
+  exact Frame.monotone_task_set_grows_step mat _ _ _ _ (store_nodup mat tr hv h0 n)
 
 theorem preserved_promise_birth_fields_immutable :
     ∀ n, Properties.preserved_promise_birth_fields_immutable

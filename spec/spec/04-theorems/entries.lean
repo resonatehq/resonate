@@ -83,26 +83,32 @@ theorem all_const {α} : ∀ (l : List α), l.all (fun _ => true) = true
   | [] => rfl
   | _ :: xs => by simp [List.all_cons, all_const xs]
 
+/-- `Q.promise` is keyed by the row's id now, and these three entries
+    never look at it: a single-object property is a claim about the row,
+    not about where it is filed. -/
 def onlyPromise (f : PromiseObject → Bool) : Q :=
-  { promise := f, task := fun _ => true, schedule := fun _ => true }
+  { promise := fun _ => f, task := fun _ => true, schedule := fun _ => true }
 
 def onlyTask (f : TaskObject → Bool) : Q :=
-  { promise := fun _ => true, task := f, schedule := fun _ => true }
+  { promise := fun _ _ => true, task := f, schedule := fun _ => true }
 
 def onlySchedule (f : ServerModel.Schedule → Bool) : Q :=
-  { promise := fun _ => true, task := fun _ => true, schedule := f }
+  { promise := fun _ _ => true, task := fun _ => true, schedule := f }
 
 theorem perStore_onlyPromise {f : PromiseObject → Bool} {s : ServerState} :
     PerStore (onlyPromise f) s = s.promises.all f := by
-  simp [PerStore, onlyPromise, all_const]
+  rw [PerStore, allObj_split]
+  simp [onlyPromise, all_const, ServerState.promises, List.all_map, Function.comp_def]
 
 theorem perStore_onlyTask {f : TaskObject → Bool} {s : ServerState} :
     PerStore (onlyTask f) s = s.tasks.all f := by
-  simp [PerStore, onlyTask, all_const]
+  rw [PerStore, allObj_split]
+  simp [onlyTask, all_const]
 
 theorem perStore_onlySchedule {f : ServerModel.Schedule → Bool} {s : ServerState} :
     PerStore (onlySchedule f) s = s.schedules.all f := by
-  simp [PerStore, onlySchedule, all_const]
+  rw [PerStore, allObj_split]
+  simp [onlySchedule, all_const]
 
 /-! ## The promise obligations, and the step law they buy -/
 
@@ -120,29 +126,29 @@ structure HPromise (f : PromiseObject → Bool) : Prop where
                    f { p with callbacks := p.callbacks.filter (· != a) } = true
   live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
-                   f { id := id, state := .pending, param := param, tags := tags,
+                   f { state := .pending, param := param, tags := tags,
                        timeoutAt := timeoutAt, createdAt := createdAt } = true
   dead         : ∀ (id : String) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
-                   f { id := id, state := st, param := param, tags := tags,
+                   f { state := st, param := param, tags := tags,
                        timeoutAt := timeoutAt, createdAt := timeoutAt,
                        settledAt := some timeoutAt } = true
 
 theorem hereditary_onlyPromise {f : PromiseObject → Bool} (h : HPromise f)
     (a : ServerState) : Hereditary (onlyPromise f) a where
-  project p n _ := h.project p n
-  addCallback p c _ := h.addCallback p c
-  addListener p c _ := h.addListener p c
-  settle p st v t _ := h.settle p st v t
-  dropListener p c _ _ := h.dropListener p c
-  dropCallback p c _ _ := h.dropCallback p c
+  project _ p n _ := h.project p n
+  addCallback _ p c _ := h.addCallback p c
+  addListener _ p c _ := h.addListener p c
+  settle _ p st v t _ := h.settle p st v t
+  dropListener _ p c _ _ := h.dropListener p c
+  dropCallback _ p c _ _ := h.dropCallback p c
   live := fun id param tags tAt cAt hlt _ => h.live id param tags tAt cAt hlt
   dead := fun id st param tags tAt hst _ => h.dead id st param tags tAt hst
   tFulfill _ _ := rfl
-  tBornPending _ _ := rfl
-  tBornDone _ := rfl
-  tBornHeld _ _ _ _ := rfl
+  tBornPending _ := rfl
+  tBornDone := rfl
+  tBornHeld _ _ _ := rfl
   tAcquire _ _ _ _ _ := rfl
   tHeartbeat _ _ _ _ := rfl
   tClearResumes _ _ := rfl
@@ -168,11 +174,11 @@ theorem promise_step {f : PromiseObject → Bool} (h : HPromise f)
 
 structure HTask (f : TaskObject → Bool) : Prop where
   fulfill    : ∀ (t : TaskObject), f t = true → f t.fulfill = true
-  bornPending : ∀ (id : String) (due : Nat),
-                  f { id := id, state := .pending, version := 0, retryAt := some due } = true
-  bornDone   : ∀ (id : String), f { id := id, state := .fulfilled, version := 0 } = true
-  bornHeld   : ∀ (id pid : String) (ttl now : Nat),
-                 f { id := id, state := .acquired, version := 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl) } = true
+  bornPending : ∀ (due : Nat),
+                  f { state := .pending, version := 0, retryAt := some due } = true
+  bornDone   : f { state := .fulfilled, version := 0 } = true
+  bornHeld   : ∀ (pid : String) (ttl now : Nat),
+                 f { state := .acquired, version := 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl) } = true
   acquire    : ∀ (t : TaskObject) (pid : String) (ttl now : Nat), f t = true →
                  f { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl), retryAt := none, resumes := [] } = true
   heartbeat  : ∀ (t : TaskObject) (x : Nat), (t.state == .acquired) = true →
@@ -196,12 +202,12 @@ structure HTask (f : TaskObject → Bool) : Prop where
 
 theorem hereditary_onlyTask {f : TaskObject → Bool} (h : HTask f)
     (a : ServerState) : Hereditary (onlyTask f) a where
-  project _ _ _ _ := rfl
-  addCallback _ _ _ _ := rfl
-  addListener _ _ _ _ := rfl
-  settle _ _ _ _ _ _ _ _ _ := rfl
-  dropListener _ _ _ _ _ := rfl
-  dropCallback _ _ _ _ _ := rfl
+  project _ _ _ _ _ := rfl
+  addCallback _ _ _ _ _ := rfl
+  addListener _ _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ _ _ := rfl
+  dropListener _ _ _ _ _ _ := rfl
+  dropCallback _ _ _ _ _ _ := rfl
   live _ _ _ _ _ _ _ := rfl
   dead _ _ _ _ _ _ _ := rfl
   tFulfill := h.fulfill
@@ -244,18 +250,18 @@ structure HSchedule (f : ServerModel.Schedule → Bool) : Prop where
 
 theorem hereditary_onlySchedule {f : ServerModel.Schedule → Bool} (h : HSchedule f)
     (a : ServerState) : Hereditary (onlySchedule f) a where
-  project _ _ _ _ := rfl
-  addCallback _ _ _ _ := rfl
-  addListener _ _ _ _ := rfl
-  settle _ _ _ _ _ _ _ _ _ := rfl
-  dropListener _ _ _ _ _ := rfl
-  dropCallback _ _ _ _ _ := rfl
+  project _ _ _ _ _ := rfl
+  addCallback _ _ _ _ _ := rfl
+  addListener _ _ _ _ _ := rfl
+  settle _ _ _ _ _ _ _ _ _ _ := rfl
+  dropListener _ _ _ _ _ _ := rfl
+  dropCallback _ _ _ _ _ _ := rfl
   live _ _ _ _ _ _ _ := rfl
   dead _ _ _ _ _ _ _ := rfl
   tFulfill _ _ := rfl
-  tBornPending _ _ := rfl
-  tBornDone _ := rfl
-  tBornHeld _ _ _ _ := rfl
+  tBornPending _ := rfl
+  tBornDone := rfl
+  tBornHeld _ _ _ := rfl
   tAcquire _ _ _ _ _ := rfl
   tHeartbeat _ _ _ _ := rfl
   tClearResumes _ _ := rfl
@@ -516,9 +522,9 @@ def qTaskShape (t : TaskObject) : Bool :=
 
 theorem ht_taskShape : HTask qTaskShape where
   fulfill t h := by simp [qTaskShape, TaskObject.fulfill]
-  bornPending id due := by simp [qTaskShape]
-  bornDone id := by simp [qTaskShape]
-  bornHeld id pid ttl now := by simp [qTaskShape]
+  bornPending due := by simp [qTaskShape]
+  bornDone := by simp [qTaskShape]
+  bornHeld pid ttl now := by simp [qTaskShape]
   acquire t pid ttl now h := by simp [qTaskShape]
   heartbeat t x hacq h := by cases hst : t.state <;> simp_all [qTaskShape, ts_beq]
   clearResumes t h := by cases hst : t.state <;> simp_all [qTaskShape, ts_beq]

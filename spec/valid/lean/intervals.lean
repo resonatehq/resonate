@@ -99,8 +99,9 @@ open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Cor
     state and `task.get` projects that. -/
 def Visible (s : ServerState) : ServerState :=
   { s with outbox := [],
-           tasks  := s.tasks.map fun t =>
-                       if t.state == .pending then { t with retryAt := none } else t }
+           objects := s.objects.map fun o =>
+                        { o with task := o.task.map fun t =>
+                                   if t.state == .pending then { t with retryAt := none } else t } }
 
 /-- The proviso the retry-invisibility argument needed, and no longer
     does. Concrete keyed both timer kinds by task id and `delTaskTimeout`

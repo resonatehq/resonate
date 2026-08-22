@@ -223,16 +223,16 @@ def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
 
 def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : H Unit := do
   match ← readObject ref.id now with
-  | some o =>
-      match o.task with
-      | some t =>
-          if t.state == .acquired ∧ t.version == ref.version
-              ∧ t.pid == some pid ∧ o.promise.state == .pending then
-            setTask o.id { t with expiresAt := some (now + t.ttl.getD 0) }
-      | none =>
-          pure ()
   | none =>
       pure ()
+  | some o =>
+  match o.task with
+  | none =>
+      pure ()
+  | some t =>
+      if t.state == .acquired ∧ t.version == ref.version
+          ∧ t.pid == some pid ∧ o.promise.state == .pending then
+        setTask o.id { t with expiresAt := some (now + t.ttl.getD 0) }
 
 def heartbeatAll (pid : String) (now : Nat) : List ServerModel.TaskRef → H Unit
   | [] => pure ()

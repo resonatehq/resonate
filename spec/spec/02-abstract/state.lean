@@ -202,13 +202,18 @@ inductive Effect
   | setMessage  (address : String) (msg : Message)
   deriving Repr
 
+/-- The row `.setPromise` writes: the promise it carries, onto the
+    object already at that id, or a new object with no task. Named
+    rather than inlined so the frame and induction tiers have a term to
+    reason about instead of an anonymous matcher. -/
+def Object.withPromise (id : String) (p : PromiseObject) : Option Object → Object
+  | some o => { o with promise := p }
+  | none   => { id := id, promise := p }
+
 def Effect.apply (s : ServerState) : Effect → ServerState
   | .setPromise id p =>
-      let o : Object :=
-        match s.objects.find? (·.id == id) with
-        | some o => { o with promise := p }
-        | none   => { id := id, promise := p }
-      { s with objects := o :: s.objects.filter (·.id != id) }
+      { s with objects := Object.withPromise id p (s.objects.find? (·.id == id))
+                            :: s.objects.filter (·.id != id) }
   | .setTask id t =>
       { s with objects := s.objects.map fun o =>
                  if o.id == id then { o with task := some t } else o }
@@ -317,19 +322,25 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
     else
       return { id := req.id, promise := p }
 
-/-- The one read. Projects the object at `now`, and — when `mat` — writes
-    back whichever face the projection moved. -/
+/-- Persist whichever face the projection moved. Split out of
+    `readObject` rather than inlined so that the read stays a single
+    statement behind the `mat` test — and so the induction tier has a
+    name for the only write a read performs. -/
+def materialise (id : String) (o o' : Object) : H Unit :=
+  (if o'.promise.state != o.promise.state then setPromise id o'.promise else pure ()) >>=
+    fun _ =>
+      match o.task, o'.task with
+      | some t, some u => if u.state != t.state then setTask id u else pure ()
+      | _, _ => pure ()
+
+/-- The one read. Projects the object at `now`, and — when `mat` —
+    writes back what the projection moved. -/
 def readObject (id : String) (now : Nat) : H (Option Object) := do
   match ← getObject id with
   | none => return none
   | some o =>
       let o' := o.project now
-      if (← ask).mat then
-        if o'.promise.state != o.promise.state then
-          setPromise id o'.promise
-        match o.task, o'.task with
-        | some t, some u => if u.state != t.state then setTask id u
-        | _, _ => pure ()
+      if (← ask).mat then materialise id o o'
       return some o'
 
 def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do

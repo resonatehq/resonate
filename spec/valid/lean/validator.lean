@@ -73,11 +73,13 @@ private def pad (n : Nat) : String :=
 
 def canon (s : ServerState) : ServerState :=
   { s with
-      promises         := sortBy (·.id) s.promises |>.map fun p =>
-                            { p with callbacks := sortBy id p.callbacks
-                                     listeners := sortBy id p.listeners }
-      tasks            := sortBy (·.id) s.tasks |>.map fun t =>
-                            { t with resumes := sortBy id t.resumes }
+      objects          := sortBy (·.id) s.objects |>.map fun o =>
+                            { o with
+                                promise := { o.promise with
+                                             callbacks := sortBy id o.promise.callbacks
+                                             listeners := sortBy id o.promise.listeners }
+                                task := o.task.map fun t =>
+                                          { t with resumes := sortBy id t.resumes } }
       schedules        := sortBy (·.id) s.schedules
       outbox           := sortBy (·.key) s.outbox }
 
@@ -152,20 +154,24 @@ conjunct is left out on purpose. -/
 
 def enabledTaus (s : ServerState) (now : Nat) : List Tau :=
   -- r1: a pending promise whose deadline has passed
-  (s.promises.filter (fun p => p.state == .pending && p.timeoutAt ≤ now)).map
-      (fun p => .promiseTimeout p.id)
+  (s.objects.filter (fun o => o.promise.state == .pending && o.promise.timeoutAt ≤ now)).map
+      (fun o => .promiseTimeout o.id)
   -- r3/r4: obligations on a promise that READS settled, which is Fact P
   -- and why this consults `project` rather than the stored state
-  ++ s.promises.flatMap (fun p =>
-       if (p.project now).state != .pending then p.listeners.map (Tau.listener p.id) else [])
-  ++ s.promises.flatMap (fun p =>
-       if (p.project now).state != .pending then p.callbacks.map (Tau.callback p.id) else [])
+  ++ s.objects.flatMap (fun o =>
+       if (o.promise.project now).state != .pending then
+         o.promise.listeners.map (Tau.listener o.id) else [])
+  ++ s.objects.flatMap (fun o =>
+       if (o.promise.project now).state != .pending then
+         o.promise.callbacks.map (Tau.callback o.id) else [])
   -- r5: an acquired task whose lease has lapsed
-  ++ (s.tasks.filter (fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
-       (fun t => .taskLeaseTimeout t.id)
+  ++ (s.objects.filter (fun o =>
+        o.task.any fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
+       (fun o => .taskLeaseTimeout o.id)
   -- r6: a pending task whose dispatch clock is due
-  ++ (s.tasks.filter (fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
-       (fun t => .taskRetryTimeout t.id)
+  ++ (s.objects.filter (fun o =>
+        o.task.any fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
+       (fun o => .taskRetryTimeout o.id)
   -- r7: a schedule due to fire
   ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout c.id)
 
@@ -228,7 +234,7 @@ def touches : Request → List String
     trace. -/
 def affects (s : ServerState) : Tau → List String
   | .promiseTimeout id =>
-      id :: ((s.promises.filter (·.id == id)).flatMap (·.callbacks))
+      id :: ((s.objects.filter (·.id == id)).flatMap (·.promise.callbacks))
   | .listener id _         => [id]
   | .callback id awaiter   => [id, awaiter]
   | .taskLeaseTimeout id   => [id]
