@@ -547,7 +547,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> EmptyFn, at |-> 0, org |-> OriginOf(ev) ]
+      expect |-> EmptyFn, at |-> 0 ]
 
 Set(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -712,7 +712,7 @@ DelTimeouts(o, W) ==
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ LET o   == steps[r].org
+    /\ LET o   == OriginOf(steps[r].ev)
            swept == Sweep(docs[o], now)
            out   == Handle(steps[r].ev, swept.doc, now)
            final == out.doc
@@ -749,13 +749,12 @@ Heads(r, tag) ==
 
 FenceOk(r) ==
     \/ ~Fenced
-    \/ /\ docs[steps[r].org] = steps[r].expect
-       /\ now = steps[r].at
+    \/ /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
 
 PutDocument(r) ==
     /\ Heads(r, "PutDocument")
     /\ FenceOk(r)
-    /\ LET o == steps[r].org
+    /\ LET o == OriginOf(steps[r].ev)
        IN
            /\ docs'  = [docs EXCEPT ![o] =
                             Head(steps[r].pending).body]
@@ -864,7 +863,7 @@ C_WheelComplete ==
 SplitWrite ==
     \E r \in DOMAIN steps :
         /\ steps[r].phase = "perform"
-        /\ docs[steps[r].org] /= steps[r].expect
+        /\ docs[OriginOf(steps[r].ev)] /= steps[r].expect
         /\ \E j \in DOMAIN steps[r].pending :
                steps[r].pending[j].tag = "PutDocument"
 

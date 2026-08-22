@@ -46,16 +46,16 @@ varsS ==
    does one item per step. So the walk lists the items each pass will do -- in
    the order `SetToSeq` picked, the same order the sweep's sends carry -- and
    `Concrete`'s pass boundaries say where one list ends and the next begins. *)
-Items(d0) ==
-    LET q1 == SetToSeq(Due(d0, now))
-        d1 == TimeOut(d0, now)
+Items(d0, t0) ==
+    LET q1 == SetToSeq(Due(d0, t0))
+        d1 == TimeOut(d0, t0)
         q2 == SetToSeq(Listening(d1))
-        d2 == Notify(d1, q2, now).doc
+        d2 == Notify(d1, q2, t0).doc
         q3 == SetToSeq(Awaiting(d2))
-        d3 == Resume(d2, now)
-        q4 == SetToSeq(Leased(d3, now))
-        d4 == Expire(d3, now)
-        q5 == SetToSeq(Retrying(d4, now))
+        d3 == Resume(d2, t0)
+        q4 == SetToSeq(Leased(d3, t0))
+        d4 == Expire(d3, t0)
+        q5 == SetToSeq(Retrying(d4, t0))
     IN
            [ n \in 1 .. Len(q1) |-> [kind |-> "promise",  id |-> q1[n]] ]
         \o [ n \in 1 .. Len(q2) |-> [kind |-> "listener",
@@ -66,17 +66,17 @@ Items(d0) ==
         \o [ n \in 1 .. Len(q5) |-> [kind |-> "retry",    id |-> q5[n]] ]
 
 (* One item is one protocol step, said with `Concrete`'s own handlers. *)
-Step(d, it) ==
+Step(d, it, t0) ==
     CASE it.kind = "promise"  ->
-             ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], EnvAt(d, now))
+             ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], d, t0)
       [] it.kind = "listener" ->
-             ProcessListener([id |-> it.id, address |-> it.address], EnvAt(d, now))
+             ProcessListener([id |-> it.id, address |-> it.address], d, t0)
       [] it.kind = "callback" ->
-             ProcessCallback([id |-> it.id, awaiter |-> it.awaiter], EnvAt(d, now))
+             ProcessCallback([id |-> it.id, awaiter |-> it.awaiter], d, t0)
       [] it.kind = "lease"    ->
-             ProcessLeaseTimeout(it.id, EnvAt(d, now))
+             ProcessLeaseTimeout(it.id, d, t0)
       [] OTHER                ->
-             ProcessRetryTimeout(it.id, EnvAt(d, now))
+             ProcessRetryTimeout(it.id, d, t0)
 
 (* THE STORES ONE WRITE PASSES THROUGH, one per abstract step, excluding the
    last -- the last is what the write itself produces, so the write is its own
@@ -84,18 +84,19 @@ Step(d, it) ==
    did not, the walk's last store would fail to meet the one the write
    produces, and the refinement check would say so. *)
 Walk(r) ==
-    LET d0    == docs[steps[r].org]
-        its   == Items(d0)
+    LET d0    == docs[OriginOf(steps[r].ev)]
+        t0    == steps[r].at
+        its   == Items(d0, t0)
         store[n \in 0 .. Len(its)] ==
             IF n = 0 THEN
                 [doc |-> d0, sends |-> << >>]
             ELSE
                 LET prev == store[n - 1]
-                    out  == Step(prev.doc, its[n])
+                    out  == Step(prev.doc, its[n], t0)
                 IN
                     [doc |-> out.doc, sends |-> prev.sends \o out.sends]
         swept == store[Len(its)]
-        out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
+        out   == Handle(steps[r].ev, swept.doc, t0)
         ticks == [ n \in 1 .. Len(its) |-> store[n] ]
         full  == IF out.doc = swept.doc /\ out.sends = << >> THEN
                      ticks
@@ -163,7 +164,7 @@ At ==
 
 P == INSTANCE AbstractBad WITH
          objects <- IF s = top THEN Objects
-                    ELSE ObjectsAt(At.doc, steps[s.req].org),
+                    ELSE ObjectsAt(At.doc, OriginOf(steps[s.req].ev)),
          outbox  <- IF s = top THEN outbox
                     ELSE SendsInto(outbox, At.sends)
 
