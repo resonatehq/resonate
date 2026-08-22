@@ -61,15 +61,13 @@ CONSTANTS
     NoAddr,
     RetryTimeout,
     MaxTime,
-    MaxVersion,
-    MaxBatch
+    MaxVersion
 
 ASSUME NoPid   \notin Pid
 ASSUME NoAddr  \notin Address
 ASSUME NoValue \notin Value
 ASSUME MaxTime    >= 0
 ASSUME MaxVersion >= 0
-ASSUME MaxBatch   >= 1
 (* The sweep is a fixpoint. A retry timeout re-arms at now + RetryTimeout,
    which is only in the future -- and so retires its own trigger -- while
    RetryTimeout is positive. *)
@@ -92,6 +90,21 @@ FoldSet(Op(_,_), base, S) ==
               IN  Op(f[T \ {x}], x)
     IN
         f[S]
+
+(* A SET IN SOME ORDER. Which order is not stated and must not matter -- this
+   is here only because a list of things to do has to be a list. *)
+SetToSeq(S) ==
+    LET f[k \in 0 .. Cardinality(S)] ==
+          IF k = 0 THEN
+              << >>
+          ELSE
+              LET pre == f[k - 1]
+              IN  pre \o << CHOOSE y \in S : \A n \in 1 .. Len(pre) : pre[n] /= y >>
+    IN
+        f[Cardinality(S)]
+
+Range(q) ==
+    { q[n] : n \in DOMAIN q }
 
 (* AN INSTANT. Not bounded: a deadline is allowed to point past the horizon --
    that is what "scheduled for later" means -- and `retryAt = now + RetryTimeout`

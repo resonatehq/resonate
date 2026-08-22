@@ -48,10 +48,7 @@ varsS ==
 Walk(r) ==
     LET doc   == docs[steps[r].org]
         swept == Sweep(doc, now)
-        out   == Handle(steps[r].ev,
-                        [ objects  |-> swept.doc, timeouts |-> timeouts,
-                          outbox   |-> outbox,    now      |-> now,
-                          config   |-> [retryTimeout |-> RetryTimeout] ])
+        out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
         full  == IF out.doc = swept.doc /\ out.sends = << >> THEN
                      swept.tr
                  ELSE

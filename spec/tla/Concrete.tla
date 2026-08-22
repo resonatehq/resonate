@@ -63,7 +63,6 @@ Project(obj, t) ==
     ELSE
         obj
 
-
 HandlePromiseGet(req, env) ==
     [ doc   |-> env.objects,
       sends |-> << >> ]
@@ -570,91 +569,124 @@ SubmitInternal(e) ==
 SubmitDue(i, k) ==
     \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
 
-DrainableTimeouts(doc, t) ==
-    { d \in [id : DOMAIN doc, kind : DeadlineKind] :
-        /\ Deadline(doc[d.id], d.kind) /= NoTime
-        /\ Deadline(doc[d.id], d.kind) <= t }
+Due(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].promise.timeoutAt <= t }
 
-DrainableListeners(doc, t) ==
+Settled(doc) ==
+    { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
+
+Listening(doc) ==
     UNION { { [id |-> i, address |-> a] : a \in doc[i].promise.listeners }
-              : i \in { j \in DOMAIN doc :
-                            \/ doc[j].promise.state /= "pending"
-                            \/ doc[j].promise.timeoutAt <= t } }
+              : i \in Settled(doc) }
 
-DrainableCallbacks(doc, t) ==
+Awaiting(doc) ==
     UNION { { [id |-> i, awaiter |-> w] : w \in doc[i].promise.callbacks }
-              : i \in { j \in DOMAIN doc :
-                            \/ doc[j].promise.state /= "pending"
-                            \/ doc[j].promise.timeoutAt <= t } }
+              : i \in Settled(doc) }
+
+Leased(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "acquired"
+        /\ doc[i].task.expiresAt /= NoTime
+        /\ doc[i].task.expiresAt <= t }
+
+Retrying(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "pending"
+        /\ doc[i].task.retryAt /= NoTime
+        /\ doc[i].task.retryAt <= t }
+
+-----------------------------------------------------------------------------
+
+TimeOut(doc, q, t) ==
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in Range(q) THEN Project(doc[i], t) ELSE doc[i] ],
+      sends |-> << >> ]
+
+Notify(doc, q, t) ==
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    [ doc[i] EXCEPT
+                        !.promise.listeners =
+                            @ \ { x.address : x \in { y \in Range(q) : y.id = i } } ] ],
+      sends |-> [ n \in 1 .. Len(q) |->
+                    [ address |-> q[n].address,
+                      message |-> [ tag   |-> "Unblock",
+                                    id    |-> q[n].id,
+                                    state |-> doc[q[n].id].promise.state ] ] ] ]
+
+Resume(doc, q, t) ==
+    LET S == Range(q)
+        Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
+        Woken      == { x.awaiter : x \in S } \cap DOMAIN doc
+    IN
+        [ doc   |-> [ i \in DOMAIN doc |->
+                        LET struck ==
+                              [ doc[i] EXCEPT
+                                  !.promise.callbacks =
+                                      @ \ { x.awaiter : x \in { y \in S : y.id = i } } ]
+                        IN
+                            IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
+                                struck
+                            ELSE IF struck.task.state = "suspended" THEN
+                                [struck EXCEPT !.task.state     = "pending",
+                                               !.task.pid       = NoPid,
+                                               !.task.ttl       = NoTime,
+                                               !.task.expiresAt = NoTime,
+                                               !.task.retryAt   = t,
+                                               !.task.resumes   = Resumes(i)]
+                            ELSE
+                                [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ],
+          sends |-> << >> ]
+
+Expire(doc, q, t) ==
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in Range(q) THEN
+                        [ doc[i] EXCEPT !.task.state     = "pending",
+                                        !.task.pid       = NoPid,
+                                        !.task.ttl       = NoTime,
+                                        !.task.expiresAt = NoTime,
+                                        !.task.retryAt   = t ]
+                    ELSE
+                        doc[i] ],
+      sends |-> << >> ]
+
+Retry(doc, q, t) ==
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in Range(q) THEN
+                        [ doc[i] EXCEPT !.task.retryAt = t + RetryTimeout ]
+                    ELSE
+                        doc[i] ],
+      sends |-> [ n \in 1 .. Len(q) |->
+                    [ address |-> doc[q[n]].promise.tags.target,
+                      message |-> [ tag     |-> "Execute",
+                                    id      |-> q[n],
+                                    version |-> doc[q[n]].task.version ] ] ] ]
+
+-----------------------------------------------------------------------------
+
+Pass(st, q, Apply(_, _, _), t) ==
+    LET out(n) == Apply(st.doc, SubSeq(q, 1, n), t)
+    IN
+        [ doc   |-> out(Len(q)).doc,
+          sends |-> st.sends \o out(Len(q)).sends,
+          tr    |-> st.tr \o [ n \in 1 .. Len(q) |->
+                                 [ doc   |-> out(n).doc,
+                                   sends |-> st.sends \o out(n).sends ] ] ]
+
+Sweep(doc, t) ==
+    LET s0 == [doc |-> doc, sends |-> << >>, tr |-> << >>]
+        s1 == Pass(s0, SetToSeq(Due(s0.doc, t)),       TimeOut, t)
+        s2 == Pass(s1, SetToSeq(Listening(s1.doc)),    Notify,  t)
+        s3 == Pass(s2, SetToSeq(Awaiting(s2.doc)),     Resume,  t)
+        s4 == Pass(s3, SetToSeq(Leased(s3.doc, t)),    Expire,  t)
+    IN
+        Pass(s4, SetToSeq(Retrying(s4.doc, t)), Retry, t)
 
 EnvAt(d, t) ==
     [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
-
-Advance(st, out) ==
-    LET sends2 == st.sends \o out.sends
-    IN
-        [ doc   |-> out.doc,
-           sends |-> sends2,
-          tr    |-> IF out.doc = st.doc /\ out.sends = << >> THEN
-                        st.tr
-                    ELSE
-                        st.tr \o << [doc |-> out.doc, sends |-> sends2] >> ]
-
-RECURSIVE DrainPromises(_, _)
-DrainPromises(st, t) ==
-    LET d == { e \in DrainableTimeouts(st.doc, t) : e.kind = "promise" }
-    IN
-        IF d = {} THEN
-            st
-        ELSE
-            DrainPromises(
-                Advance(st, ProcessPromiseTimeout(CHOOSE x \in d : TRUE,
-                                                  EnvAt(st.doc, t))), t)
-
-RECURSIVE DrainTasks(_, _)
-DrainTasks(st, t) ==
-    LET d == { e \in DrainableTimeouts(st.doc, t) : e.kind /= "promise" }
-    IN
-        IF d = {} THEN
-            st
-        ELSE
-            LET e == CHOOSE x \in d : TRUE
-            IN
-                DrainTasks(
-                    Advance(st,
-                            IF e.kind = "lease" THEN
-                                ProcessLeaseTimeout(e.id, EnvAt(st.doc, t))
-                            ELSE
-                                ProcessRetryTimeout(e.id, EnvAt(st.doc, t))),
-                    t)
-
-RECURSIVE DrainListeners(_, _)
-DrainListeners(st, t) ==
-    LET d == DrainableListeners(st.doc, t)
-    IN
-        IF d = {} THEN
-            st
-        ELSE
-            DrainListeners(
-                Advance(st, ProcessListener(CHOOSE x \in d : TRUE,
-                                            EnvAt(st.doc, t))), t)
-
-RECURSIVE DrainCallbacks(_, _)
-DrainCallbacks(st, t) ==
-    LET d == DrainableCallbacks(st.doc, t)
-    IN
-        IF d = {} THEN
-            st
-        ELSE
-            DrainCallbacks(
-                Advance(st, ProcessCallback(CHOOSE x \in d : TRUE,
-                                            EnvAt(st.doc, t))), t)
-
-Sweep(doc, t) ==
-    DrainTasks(
-        DrainCallbacks(
-            DrainListeners(
-                DrainPromises([doc |-> doc, sends |-> << >>, tr |-> << >>], t), t), t), t)
 
 Was(o, i, k) ==
     IF i \in DOMAIN docs[o] THEN
@@ -854,7 +886,6 @@ DrainRan ==
     \E r \in DOMAIN steps : steps[r].ev.tag = "CallbackDrain"
 NoDrainRan ==
     ~DrainRan
-
 
 CT_preserved_settled_promise_record ==
     [][A!preserved_settled_promise_record]_vars
