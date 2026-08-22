@@ -85,7 +85,7 @@ Step(d, it, t0) ==
    produces, and the refinement check would say so. *)
 Walk(r) ==
     LET d0    == docs[OriginOf(steps[r].ev)]
-        t0    == steps[r].at
+        t0    == now
         its   == Items(d0, t0)
         store[n \in 0 .. Len(its)] ==
             IF n = 0 THEN

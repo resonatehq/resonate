@@ -547,7 +547,7 @@ OriginOf(ev) ==
 
 Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> EmptyFn, at |-> 0 ]
+      expect |-> EmptyFn ]
 
 Set(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
@@ -728,8 +728,7 @@ Process(r) ==
                                         \o DelTimeouts(o, W)
                                         \o [ n \in 1 .. Len(sends) |->
                                                [tag |-> "Send", entry |-> sends[n]] ],
-                                  ![r].expect  = docs[o],
-                                  ![r].at      = now]
+                                  ![r].expect  = docs[o]]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 Ready(r) ==
