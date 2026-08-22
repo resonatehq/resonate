@@ -575,6 +575,12 @@ Settled(doc) ==
 
 -----------------------------------------------------------------------------
 
+Merge(a, b) ==
+    [ doc   |-> b.doc,
+      puts  |-> a.puts  \o b.puts,
+      dels  |-> a.dels  \o b.dels,
+      sends |-> a.sends \o b.sends ]
+
 SweepTimeoutAt(doc, t) ==
     LET S  == { i \in DOMAIN doc :
                   doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t }
@@ -677,14 +683,6 @@ SweepRetryAt(doc, t) ==
                                     id      |-> q[n],
                                     version |-> doc[q[n]].task.version ] ] ] ]
 
------------------------------------------------------------------------------
-
-Merge(a, b) ==
-    [ doc   |-> b.doc,
-      puts  |-> a.puts  \o b.puts,
-      dels  |-> a.dels  \o b.dels,
-      sends |-> a.sends \o b.sends ]
-
 Sweep(doc, t) ==
     LET s1 == SweepTimeoutAt(doc, t)
         s2 == Merge(s1, SweepListeners(s1.doc, t))
@@ -693,37 +691,12 @@ Sweep(doc, t) ==
     IN
         Merge(s4, SweepRetryAt(s4.doc, t))
 
-Was(base, i, k) ==
-    IF i \in DOMAIN base THEN
-        Deadline(base[i], k)
-    ELSE
-        NoTime
+-----------------------------------------------------------------------------
 
-PutTimeoutFor(base, i, new, k) ==
-    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(base, i, k) THEN
-        << [at |-> Deadline(new, k), id |-> i, kind |-> k] >>
-    ELSE
-        << >>
-
-DelTimeoutFor(base, i, new, k) ==
-    IF Was(base, i, k) /= NoTime /\ Was(base, i, k) /= Deadline(new, k) THEN
-        << [at |-> Was(base, i, k), id |-> i, kind |-> k] >>
-    ELSE
-        << >>
-
-PutTimeouts(base, W) ==
-    FoldSet(LAMBDA acc, w :
-                acc \o PutTimeoutFor(base, w.id, w.obj, "promise")
-                    \o PutTimeoutFor(base, w.id, w.obj, "lease")
-                    \o PutTimeoutFor(base, w.id, w.obj, "retry"),
-            << >>, W)
-
-DelTimeouts(base, W) ==
-    FoldSet(LAMBDA acc, w :
-                acc \o DelTimeoutFor(base, w.id, w.obj, "promise")
-                    \o DelTimeoutFor(base, w.id, w.obj, "lease")
-                    \o DelTimeoutFor(base, w.id, w.obj, "retry"),
-            << >>, W)
+Armed(doc) ==
+    { e \in { [at |-> Deadline(doc[i], k), id |-> i, kind |-> k] :
+                i \in DOMAIN doc, k \in DeadlineKind } :
+        e.at /= NoTime }
 
 Process(r) ==
     /\ r \in DOMAIN steps
@@ -732,12 +705,8 @@ Process(r) ==
            swept == Sweep(docs[o], now)
            out   == Handle(steps[r].ev, swept.doc, now)
            final == out.doc
-           W     == { [id |-> i, obj |-> final[i]] :
-                        i \in { j \in DOMAIN final :
-                                   \/ j \notin DOMAIN swept.doc
-                                   \/ final[j] /= swept.doc[j] } }
-           puts  == swept.puts  \o PutTimeouts(swept.doc, W)
-           dels  == swept.dels  \o DelTimeouts(swept.doc, W)
+           puts  == swept.puts  \o SetToSeq(Armed(final) \ Armed(swept.doc))
+           dels  == swept.dels  \o SetToSeq(Armed(swept.doc) \ Armed(final))
            sends == swept.sends \o out.sends
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending =
@@ -870,14 +839,10 @@ C_UnitCoherent ==
     A!UnitCoherent
 
 C_WheelSound ==
-    \A e \in timeouts :
-        /\ e.id \in DOMAIN Objects
-        /\ Deadline(Objects[e.id], e.kind) = e.at
+    timeouts \subseteq Armed(Objects)
 
 C_WheelComplete ==
-    \A o \in DOMAIN Objects, k \in DeadlineKind :
-        Deadline(Objects[o], k) /= NoTime =>
-            [at |-> Deadline(Objects[o], k), id |-> o, kind |-> k] \in timeouts
+    Armed(Objects) \subseteq timeouts
 
 SplitWrite ==
     \E r \in DOMAIN steps :
