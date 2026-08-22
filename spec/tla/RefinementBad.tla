@@ -72,7 +72,7 @@ Walked(r) ==
            /\ UNCHANGED <<docs, timeouts, outbox, steps, now>>
        ELSE
            /\ s' = top
-           /\ Commit(r)
+           /\ PutDocument(r)
 
 (* `Concrete`'s next-state relation, with the write replaced by the walk and
    everything else held still while one is in progress. Nothing may interleave
@@ -86,7 +86,7 @@ NextS ==
           \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
                 Process(r) \/ Crash(r) \/ Retire(r) \/ Refuse(r)
-                           \/ Arm(r) \/ Disarm(r) \/ Emit(r)
+                           \/ PutTimeout(r) \/ DelTimeout(r) \/ Send(r)
           \/ Clock
     \/ \E r \in DOMAIN steps : Walked(r)
 

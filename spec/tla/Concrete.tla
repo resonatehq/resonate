@@ -682,32 +682,32 @@ Was(o, i, k) ==
     ELSE
         NoTime
 
-ArmFor(o, i, new, k) ==
+PutTimeoutFor(o, i, new, k) ==
     IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(o, i, k) THEN
-        << Variant("ArmTimeout",
+        << Variant("PutTimeout",
                    [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
     ELSE
         << >>
 
-DisarmFor(o, i, new, k) ==
+DelTimeoutFor(o, i, new, k) ==
     IF Was(o, i, k) /= NoTime /\ Was(o, i, k) /= Deadline(new, k) THEN
-        << Variant("DisarmTimeout",
+        << Variant("DelTimeout",
                    [entry |-> [at |-> Was(o, i, k), id |-> i, kind |-> k]]) >>
     ELSE
         << >>
 
-Arms(o, W) ==
+PutTimeouts(o, W) ==
     FoldSet(LAMBDA acc, w :
-                acc \o ArmFor(o, w.id, w.obj, "promise")
-                    \o ArmFor(o, w.id, w.obj, "lease")
-                    \o ArmFor(o, w.id, w.obj, "retry"),
+                acc \o PutTimeoutFor(o, w.id, w.obj, "promise")
+                    \o PutTimeoutFor(o, w.id, w.obj, "lease")
+                    \o PutTimeoutFor(o, w.id, w.obj, "retry"),
             << >>, W)
 
-Disarms(o, W) ==
+DelTimeouts(o, W) ==
     FoldSet(LAMBDA acc, w :
-                acc \o DisarmFor(o, w.id, w.obj, "promise")
-                    \o DisarmFor(o, w.id, w.obj, "lease")
-                    \o DisarmFor(o, w.id, w.obj, "retry"),
+                acc \o DelTimeoutFor(o, w.id, w.obj, "promise")
+                    \o DelTimeoutFor(o, w.id, w.obj, "lease")
+                    \o DelTimeoutFor(o, w.id, w.obj, "retry"),
             << >>, W)
 
 Process(r) ==
@@ -729,10 +729,10 @@ Process(r) ==
                                  \/ final[j] /= docs[o][j] } }
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending =
-                                      Arms(o, W)
+                                      PutTimeouts(o, W)
                                         \o << Variant("PutDocument",
                                                       [body |-> final]) >>
-                                        \o Disarms(o, W)
+                                        \o DelTimeouts(o, W)
                                         \o [ n \in 1 .. Len(sends) |->
                                                Variant("Send",
                                                        [entry |-> sends[n]]) ],
@@ -760,7 +760,7 @@ FenceOk(r) ==
     \/ /\ docs[steps[r].org] = steps[r].expect
        /\ now = steps[r].at
 
-Commit(r) ==
+PutDocument(r) ==
     /\ Heads(r, "PutDocument")
     /\ FenceOk(r)
     /\ LET o == steps[r].org
@@ -777,22 +777,21 @@ Refuse(r) ==
     /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-Arm(r) ==
-    /\ Heads(r, "ArmTimeout")
+PutTimeout(r) ==
+    /\ Heads(r, "PutTimeout")
     /\ timeouts' = timeouts \cup
-                     {VariantGetUnsafe("ArmTimeout", Head(steps[r].pending)).entry}
+                     {VariantGetUnsafe("PutTimeout", Head(steps[r].pending)).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
-Disarm(r) ==
-    /\ Heads(r, "DisarmTimeout")
+DelTimeout(r) ==
+    /\ Heads(r, "DelTimeout")
     /\ timeouts' = timeouts \
-                     {VariantGetUnsafe("DisarmTimeout", Head(steps[r].pending)).entry}
+                     {VariantGetUnsafe("DelTimeout", Head(steps[r].pending)).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
-
-Emit(r) ==
+Send(r) ==
     /\ Heads(r, "Send")
     /\ outbox' = LET en == VariantGetUnsafe("Send", Head(steps[r].pending)).entry
                  IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
@@ -800,7 +799,12 @@ Emit(r) ==
     /\ UNCHANGED <<docs, timeouts, now>>
 
 Perform(r) ==
-    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r) \/ Emit(r)
+    \/ PutTimeout(r)
+    \/ PutDocument(r)
+    \/ DelTimeout(r)
+    \/ Send(r)
+    \/ Refuse(r)
+    \/ Retire(r)
 
 Crash(r) ==
     /\ r \in DOMAIN steps
