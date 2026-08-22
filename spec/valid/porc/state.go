@@ -8,13 +8,6 @@
 // *ServerState receiver and mutates it — the caller clones first, so the
 // model function porcupine sees is still pure.
 //
-// ONE DIFFERENCE FROM THE LEAN, ON PURPOSE. `spec/02-abstract/state.lean`
-// carries ONE row — an `Object` holding a promise and, if it has one, the
-// task executing it. This file still carries two slices keyed by the same
-// id. The two agree: `cmd/fuzz -lean` runs generated traces and mutants
-// past both and requires the same verdict, which is what stops the port
-// from drifting. Fusing the row here is a follow-up, not a correction.
-//
 // Two things the Lean says that this file leans on:
 //
 //   - The two read disciplines are the SAME CODE modulo `viewObject` vs
@@ -113,7 +106,6 @@ func (t Tags) key() string {
 // `Listeners`: in this machine they SURVIVE settlement and are drained by
 // internal steps R4/R3 later. That is the whole source of nondeterminism.
 type Promise struct {
-	ID        string
 	State     PromiseState
 	Tags      Tags
 	TimeoutAt uint64
@@ -186,8 +178,10 @@ func (p *Promise) Project(now uint64) *Promise {
 // Task is `AbstractModel.TaskObject`. `ExpiresAt` and `RetryAt` are the
 // deadlines the concrete machine keeps in `taskTimeouts`; here they live
 // on the object, so R5 and R6 guard on the task alone.
+//
+// Neither Promise nor Task carries an id any more. The id belongs to the
+// Object the two are faces of.
 type Task struct {
-	ID        string
 	State     TaskState
 	Version   uint64
 	TTL       *uint64
@@ -220,6 +214,40 @@ func (t *Task) View(p *Promise) *Task {
 	return t
 }
 
+// PromiseRecord and TaskRecord are what a RESPONSE carries: the row plus
+// the id of the object it belongs to. `Record` is `toRecord` in
+// spec/02-abstract/state.lean, which takes the id for the same reason —
+// neither face carries one any more.
+// The row is embedded BY VALUE, not by pointer. A record is a snapshot of
+// what a response carried, and a caller that copies one — the fuzzer's
+// `mutate` does, `t := *r.Task; t.Version++` — must get a copy. Embed the
+// pointer instead and that write lands on the stored object, corrupting
+// the state the mutant was supposed to be compared against. Found by the
+// differential fuzzer, which is what it is for.
+type PromiseRecord struct {
+	ID string
+	Promise
+}
+
+type TaskRecord struct {
+	ID string
+	Task
+}
+
+func (p *Promise) Record(id string) *PromiseRecord {
+	if p == nil {
+		return nil
+	}
+	return &PromiseRecord{ID: id, Promise: *p}
+}
+
+func (t *Task) Record(id string) *TaskRecord {
+	if t == nil {
+		return nil
+	}
+	return &TaskRecord{ID: id, Task: *t}
+}
+
 // Message is the outbox payload.
 type Message struct {
 	Address string
@@ -240,36 +268,49 @@ func (m Message) Key() string {
 
 // ---------------------------------------------------------------- the state
 
-// ServerState is `AbstractModel.ServerState`: four components. No timeout
-// sets, no deferred queue, no config.
+// ServerState is `AbstractModel.ServerState`: one list of objects, plus
+// the outbox. No timeout sets, no deferred queue, no config.
 //
 // Schedules are omitted deliberately, not forgotten. `nextCron` and
 // `occurrences` are `opaque` in the Lean with no value, so there is
 // nothing to port — see valid/lean/schedules.lean. A trace mentioning
 // schedules is rejected by the loader rather than silently checked
 // against an invented calendar.
+// Object is `AbstractModel.Object`: an id, a promise, and the task
+// executing it if it has one. A nil Task is `none` — the promise carries
+// no `resonate:target`, so nothing executes it.
+type Object struct {
+	ID      string
+	Promise *Promise
+	Task    *Task
+}
+
 type ServerState struct {
-	Promises []*Promise
-	Tasks    []*Task
-	Outbox   []Message
+	Objects []*Object
+	Outbox  []Message
 }
 
 func (s *ServerState) clone() *ServerState {
 	t := &ServerState{
-		Promises: make([]*Promise, len(s.Promises)),
-		Tasks:    make([]*Task, len(s.Tasks)),
-		Outbox:   append([]Message(nil), s.Outbox...),
+		Objects: make([]*Object, len(s.Objects)),
+		Outbox:  append([]Message(nil), s.Outbox...),
 	}
-	copy(t.Promises, s.Promises)
-	copy(t.Tasks, s.Tasks)
+	copy(t.Objects, s.Objects)
 	return t
 }
 
-func (s *ServerState) GetPromise(id string) *Promise {
-	for _, p := range s.Promises {
-		if p.ID == id {
-			return p
+func (s *ServerState) GetObject(id string) *Object {
+	for _, o := range s.Objects {
+		if o.ID == id {
+			return o
 		}
+	}
+	return nil
+}
+
+func (s *ServerState) GetPromise(id string) *Promise {
+	if o := s.GetObject(id); o != nil {
+		return o.Promise
 	}
 	return nil
 }
@@ -284,43 +325,47 @@ func (s *ServerState) GetPromise(id string) *Promise {
 // a settled promise and cannot come through here — there is no stored
 // task to couple to — so the create paths write the fulfilled task
 // themselves.
-func (s *ServerState) SetSettled(p *Promise) {
-	s.SetPromise(p)
+func (s *ServerState) SetSettled(o *Object, p *Promise) {
+	s.SetPromise(o.ID, p)
 	if p.State == Pending {
 		return
 	}
-	if t := s.GetTask(p.ID); t != nil && t.State != TaskFulfilled {
-		s.SetTask(t.Fulfill())
+	if o.Task != nil && o.Task.State != TaskFulfilled {
+		s.SetTask(o.ID, o.Task.Fulfill())
 	}
 }
 
-func (s *ServerState) SetPromise(p *Promise) {
-	for i, q := range s.Promises {
-		if q.ID == p.ID {
-			s.Promises[i] = p
+// SetPromise is the UPSERT: it creates the object if there is none at
+// this id, carrying across whatever task was already there.
+func (s *ServerState) SetPromise(id string, p *Promise) {
+	for i, o := range s.Objects {
+		if o.ID == id {
+			s.Objects[i] = &Object{ID: id, Promise: p, Task: o.Task}
 			return
 		}
 	}
-	s.Promises = append(s.Promises, p)
+	s.Objects = append(s.Objects, &Object{ID: id, Promise: p})
+}
+
+// SetTask is the UPDATE: it rewrites one field of a row that is already
+// there, and is a no-op at an id no object holds. The asymmetry is the
+// Lean's — see `Effect.apply` in spec/02-abstract/state.lean. The three
+// creation sites write the promise first, which is what makes the no-op
+// unreachable.
+func (s *ServerState) SetTask(id string, t *Task) {
+	for i, o := range s.Objects {
+		if o.ID == id {
+			s.Objects[i] = &Object{ID: id, Promise: o.Promise, Task: t}
+			return
+		}
+	}
 }
 
 func (s *ServerState) GetTask(id string) *Task {
-	for _, t := range s.Tasks {
-		if t.ID == id {
-			return t
-		}
+	if o := s.GetObject(id); o != nil {
+		return o.Task
 	}
 	return nil
-}
-
-func (s *ServerState) SetTask(t *Task) {
-	for i, u := range s.Tasks {
-		if u.ID == t.ID {
-			s.Tasks[i] = t
-			return
-		}
-	}
-	s.Tasks = append(s.Tasks, t)
 }
 
 // SetMessage is the keyed upsert.
@@ -358,35 +403,54 @@ func (d Discipline) String() string {
 	return "-m (materialized)"
 }
 
-// readPromise is `viewPromise` or `touchPromise`.
-func (s *ServerState) readPromise(d Discipline, id string, now uint64) *Promise {
-	p := s.GetPromise(id)
-	if p == nil {
-		return nil
+// Project is `Object.project`: the promise at this instant, and the
+// task's view of it. Promise projection and the task's view were always
+// the same fact read twice.
+func (o *Object) Project(now uint64) *Object {
+	p := o.Promise.Project(now)
+	var t *Task
+	if o.Task != nil {
+		t = o.Task.View(p)
 	}
-	q := p.Project(now)
-	if d == Materialized && q.State != p.State {
-		s.SetSettled(q)
-	}
-	return q
+	return &Object{ID: o.ID, Promise: p, Task: t}
 }
 
-// readTask is `viewTask` or `touchTask`. Returns (task, promise); a nil
-// promise is the `some (t, none)` case, which handlers treat as 404/409.
-func (s *ServerState) readTask(d Discipline, id string, now uint64) (*Task, *Promise) {
-	t := s.GetTask(id)
-	if t == nil {
-		return nil, nil
+// readObject is `viewObject` or `touchObject` — the ONE read. There is no
+// longer a "task without its promise" result to return, because the state
+// cannot hold one.
+//
+// ONE BEHAVIOURAL DIFFERENCE from the two-read version, and it is
+// deliberate. `readTask` used to look the TASK up first and return early
+// when there was none, so a `task.*` request against an id holding an
+// untargeted promise never materialised that promise — it 404'd having
+// written nothing. This reads the row, so under `Materialized` the
+// promise settles at that moment instead of at whichever internal step
+// touched it next.
+//
+// The Lean sweeps never reach it: their alphabet only issues task
+// requests against a targeted id. The generator here does reach it, and
+// the fuzzer showed exactly one R4 firing per 250 traces losing its
+// "changed state" mark because the change had already happened one step
+// earlier. Nothing observable moves — the emitted trace for 500 seeds
+// under both disciplines is byte-identical to the two-read version — and
+// materialising what a read projects is what `Materialized` MEANS. The
+// note is here because "no observable difference" is a claim worth
+// being able to find again.
+func (s *ServerState) readObject(d Discipline, id string, now uint64) *Object {
+	o := s.GetObject(id)
+	if o == nil {
+		return nil
 	}
-	p := s.readPromise(d, t.ID, now)
-	if p == nil {
-		return t, nil
+	u := o.Project(now)
+	if d == Materialized {
+		if u.Promise.State != o.Promise.State {
+			s.SetPromise(id, u.Promise)
+		}
+		if o.Task != nil && u.Task != nil && u.Task.State != o.Task.State {
+			s.SetTask(id, u.Task)
+		}
 	}
-	u := t.View(p)
-	if d == Materialized && u != t {
-		s.SetTask(u)
-	}
-	return u, p
+	return u
 }
 
 // ---------------------------------------------------------------- canonical
@@ -397,9 +461,10 @@ func (s *ServerState) readTask(d Discipline, id string, now uint64) (*Task, *Pro
 // valid/lean/validator.lean.
 func (s *ServerState) Key() string {
 	var b strings.Builder
-	ps := append([]*Promise(nil), s.Promises...)
-	sort.Slice(ps, func(i, j int) bool { return ps[i].ID < ps[j].ID })
-	for _, p := range ps {
+	os_ := append([]*Object(nil), s.Objects...)
+	sort.Slice(os_, func(i, j int) bool { return os_[i].ID < os_[j].ID })
+	for _, o := range os_ {
+		p := o.Promise
 		cb := append([]string(nil), p.Callbacks...)
 		ls := append([]string(nil), p.Listeners...)
 		sort.Strings(cb)
@@ -420,17 +485,19 @@ func (s *ServerState) Key() string {
 		// string and removes the obligation to keep proving which fields
 		// happen to be unobservable today.
 		fmt.Fprintf(&b, "P|%s|%d|%d|%d|%s|%s|%s|%s|%s|%s\n",
-			p.ID, p.State, p.TimeoutAt, p.CreatedAt, u64s(p.SettledAt),
+			o.ID, p.State, p.TimeoutAt, p.CreatedAt, u64s(p.SettledAt),
 			strings.Join(cb, ","), strings.Join(ls, ","), p.Tags.key(),
 			canonValue(p.Param), canonValue(p.Value))
 	}
-	ts := append([]*Task(nil), s.Tasks...)
-	sort.Slice(ts, func(i, j int) bool { return ts[i].ID < ts[j].ID })
-	for _, t := range ts {
+	for _, o := range os_ {
+		t := o.Task
+		if t == nil {
+			continue
+		}
 		rs := append([]string(nil), t.Resumes...)
 		sort.Strings(rs)
 		fmt.Fprintf(&b, "T|%s|%d|%d|%s|%s|%s|%s|%s\n",
-			t.ID, t.State, t.Version, u64s(t.TTL), strs(t.PID),
+			o.ID, t.State, t.Version, u64s(t.TTL), strs(t.PID),
 			u64s(t.ExpiresAt), u64s(t.RetryAt), strings.Join(rs, ","))
 	}
 	ob := make([]string, 0, len(s.Outbox))

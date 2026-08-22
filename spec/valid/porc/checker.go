@@ -160,7 +160,7 @@ func matches(got, want Response) bool {
 // `tags` — so a server that returned the wrong VALUE on a settle was
 // caught by the Lean checker and waved through here. Two checkers that
 // disagree about how much to check are not two checks.
-func samePromiseRecord(got, want *Promise) bool {
+func samePromiseRecord(got, want *PromiseRecord) bool {
 	if got == nil {
 		return false
 	}

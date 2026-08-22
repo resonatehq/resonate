@@ -15,29 +15,29 @@ func TestAffectsCoversObservableWrites(t *testing.T) {
 		s    *ServerState
 	}{
 		{"R1 a promise past its deadline, with an awaiter on its ledger", 300, &ServerState{
-			Promises: []*Promise{
-				{ID: "a", State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
-					Callbacks: []string{"x"}, Listeners: []string{"https://l"}},
-				{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100},
+			Objects: []*Object{
+				{ID: "a", Promise: &Promise{State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
+					Callbacks: []string{"x"}, Listeners: []string{"https://l"}}},
+				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskSuspended, Version: 1}},
 			},
-			Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
 		}},
 		{"R3/R4 a settled promise with both ledgers loaded", 300, &ServerState{
-			Promises: []*Promise{
-				{ID: "a", State: Resolved, Tags: ext, TimeoutAt: 2000, CreatedAt: 100,
-					SettledAt: u64p(200), Callbacks: []string{"x"}, Listeners: []string{"https://l"}},
-				{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100},
+			Objects: []*Object{
+				{ID: "a", Promise: &Promise{State: Resolved, Tags: ext, TimeoutAt: 2000, CreatedAt: 100,
+					SettledAt: u64p(200), Callbacks: []string{"x"}, Listeners: []string{"https://l"}}},
+				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskSuspended, Version: 1}},
 			},
-			Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
 		}},
 		{"R5 an acquired task past its lease", 300, &ServerState{
-			Promises: []*Promise{{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}},
-			Tasks: []*Task{{ID: "x", State: TaskAcquired, Version: 1, TTL: u64p(100),
-				PID: strp("p0"), ExpiresAt: u64p(200)}},
+			Objects: []*Object{
+				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskAcquired, Version: 1, TTL: u64p(100),
+					PID: strp("p0"), ExpiresAt: u64p(200)}},
+			},
 		}},
 		{"R6 a pending task past its retry deadline", 300, &ServerState{
-			Promises: []*Promise{{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}},
-			Tasks:    []*Task{{ID: "x", State: TaskPending, Version: 1, RetryAt: u64p(200)}},
+			Objects: []*Object{
+				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskPending, Version: 1, RetryAt: u64p(200)}},
+			},
 		}},
 	}
 
@@ -55,8 +55,10 @@ func TestAffectsCoversObservableWrites(t *testing.T) {
 // firing's affects has to be caught.
 func TestAffectsCatchesAnUnderstatedSet(t *testing.T) {
 	s := &ServerState{
-		Promises: []*Promise{{ID: "a", State: Pending, Tags: Tags{"resonate:external": "true"},
-			TimeoutAt: 250, CreatedAt: 100}},
+		Objects: []*Object{
+			{ID: "a", Promise: &Promise{State: Pending, Tags: Tags{"resonate:external": "true"},
+				TimeoutAt: 250, CreatedAt: 100}},
+		},
 	}
 	fs := enabledFirings(s, 300)
 	if len(fs) != 1 {
@@ -84,12 +86,11 @@ func armR1() (*ServerState, uint64) {
 	ext := Tags{"resonate:external": "true"}
 	tgt := Tags{"resonate:target": "poll://any@w1"}
 	return &ServerState{
-		Promises: []*Promise{
-			{ID: "a", State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
-				Callbacks: []string{"x"}},
-			{ID: "x", State: Pending, Tags: tgt, TimeoutAt: 5000, CreatedAt: 100},
+		Objects: []*Object{
+			{ID: "a", Promise: &Promise{State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
+				Callbacks: []string{"x"}}},
+			{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 5000, CreatedAt: 100}, Task: &Task{State: TaskSuspended, Version: 1}},
 		},
-		Tasks: []*Task{{ID: "x", State: TaskSuspended, Version: 1}},
 	}, 300
 }
 
