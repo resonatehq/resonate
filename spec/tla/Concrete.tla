@@ -579,12 +579,12 @@ Settled(doc) ==
     { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
 
 Listening(doc) ==
-    UNION { { [id |-> i, address |-> a] : a \in doc[i].promise.listeners }
-              : i \in Settled(doc) }
+    { x \in [id : Settled(doc), address : Address] :
+        x.address \in doc[x.id].promise.listeners }
 
 Awaiting(doc) ==
-    UNION { { [id |-> i, awaiter |-> w] : w \in doc[i].promise.callbacks }
-              : i \in Settled(doc) }
+    { x \in [id : Settled(doc), awaiter : Id] :
+        x.awaiter \in doc[x.id].promise.callbacks }
 
 Leased(doc, t) ==
     { i \in DOMAIN doc :
