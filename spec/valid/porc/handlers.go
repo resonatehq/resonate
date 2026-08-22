@@ -145,7 +145,7 @@ func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter str
 // ---------------------------------------------------------------------- tasks
 
 func (s *ServerState) TaskGet(d Discipline, id string, now uint64) Response {
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -153,7 +153,7 @@ func (s *ServerState) TaskGet(d Discipline, id string, now uint64) Response {
 }
 
 func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid string, ttl uint64, now uint64) Response {
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -188,7 +188,7 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 		}
 		seen[a] = true
 	}
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -231,7 +231,7 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 	if !st.Settable() {
 		return Response{Status: 400}
 	}
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -250,7 +250,7 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 }
 
 func (s *ServerState) TaskRelease(d Discipline, id string, version uint64, now uint64) Response {
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -287,7 +287,7 @@ type TaskRef struct {
 // runs the specification forbids.
 func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
 	for _, ref := range refs {
-		o := s.readObject(d, ref.ID, now)
+		o := s.readTaskObject(d, ref.ID, now)
 		if o == nil || o.Task == nil {
 			continue
 		}
@@ -351,7 +351,7 @@ func addressValid(a string) bool {
 }
 
 func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -370,7 +370,7 @@ func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
 }
 
 func (s *ServerState) TaskContinue(d Discipline, id string, now uint64) Response {
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
@@ -427,7 +427,7 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 	if act.TargetID() == id {
 		return Response{Status: 400}, nil
 	}
-	o := s.readObject(d, id, now)
+	o := s.readTaskObject(d, id, now)
 	if o == nil || o.Task == nil {
 		return Response{Status: 404}, nil
 	}

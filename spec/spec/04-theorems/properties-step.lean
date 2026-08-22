@@ -237,6 +237,36 @@ theorem reaches_settled_promise_step :
 theorem reaches_fulfilled_task_step :
     stepWitnesses battery (fun a _ => a.tasks.any (·.state == .fulfilled)) = true := by decide
 
+/-! ### The task read's guard, pinned
+
+A catalogue entry cannot hold this: the difference it protects is not
+visible in any state a response can report, which is exactly why it went
+unnoticed until the Go fuzzer reached it. So it is pinned directly —
+`decide` on one step out of one state. -/
+
+def sTaskless : AbstractModel.ServerState :=
+  { objects := [{ id := "a",
+                  promise := { state := .pending, param := {},
+                               tags := [("resonate:external","true")],
+                               timeoutAt := 250, createdAt := 100 } }] }
+
+/-- A task request against an id with no task writes NOTHING — under the
+    MATERIALISING discipline, at an instant long past that promise's
+    deadline. Delete the `o.task.isSome` test in `readTaskObject` and this
+    goes red. -/
+theorem taskless_id_task_request_writes_nothing :
+    ((stepOf true (.api (.taskGet { id := "a" })) 500 sTaskless).2 == sTaskless
+      && (stepOf true (.api (.taskHalt { id := "a" })) 500 sTaskless).2 == sTaskless)
+      = true := by decide
+
+/-- And not because nothing ever materialises here: the same state, the
+    same instant, a request that IS about that promise, and it settles.
+    Without this the theorem above would hold of a machine that had
+    stopped materialising altogether. -/
+theorem the_same_promise_does_materialise :
+    ((stepOf true (.api (.promiseGet { id := "a" })) 500 sTaskless).2 == sTaskless)
+      = false := by decide
+
 /-- The correction, machine-checked: a settled promise's RECORD is
     frozen but the promise is not. The listener drain changes the object
     on a step where `preserved_settled_promise_record` holds. -/

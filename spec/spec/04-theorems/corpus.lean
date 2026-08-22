@@ -13,8 +13,9 @@ chosen so that every pair interferes. Length ≤ 3 over it is 1 + 11 +
 `100 · (i+1)` so the clock advances monotonically and never twice at
 the same instant.
 
-`b1`–`b5` and `wLag` are hand-built for shapes the alphabet misses:
-`wLag` a task whose promise died under it, `b3` a timer, `b5` fencing.
+`b1`–`b6` and `wLag` are hand-built for shapes the alphabet misses:
+`wLag` a task whose promise died under it, `b3` a timer, `b5` fencing,
+`b6` a task request against an id that has no task.
 They are the battery; the sweep is the alphabet. -/
 
 namespace Abstraction
@@ -65,6 +66,22 @@ def b5 : List (Step × Nat) :=
     (.api (.taskFence { id := "x", version := 1, action := .settle { id := "c", state := .resolved, value := {} } }), 300),
     (.api (.taskFence { id := "x", version := 1, action := .settle { id := "x", state := .resolved, value := {} } }), 400),
     (.api (.taskFence { id := "x", version := 1, action := .settle { id := "c", state := .resolved, value := {} } }), 2500) ]
+
+/-- A task request against an id that holds a promise with NO task. `"a"`
+    is external and untargeted, and by 500 it is past its deadline. Both
+    doors answer 404, and neither may settle `"a"` on the way out — the
+    request was never about it, and `readTaskObject` is the guard that
+    says so.
+
+    The alphabet cannot reach this: every task request in `kernelsResp`
+    names `"x"`, which is created targeted and therefore always has a
+    task. The Go fuzzer is what noticed, and this is here so the Lean
+    harnesses stop needing it to. -/
+def b6 : List (Step × Nat) :=
+  [ (.api (.promiseCreate { id := "a", timeoutAt := 250, param := {}, tags := extTags }), 100),
+    (.api (.taskGet { id := "a" }), 500),
+    (.api (.taskHalt { id := "a" }), 500),
+    (.api (.promiseGet { id := "a" }), 500) ]
 
 /-! ## The alphabet
 

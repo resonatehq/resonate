@@ -112,7 +112,7 @@ open ServerModel (TaskGetReq TaskGetRes
                   TaskSearchReq TaskSearchRes)
 
 def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -174,7 +174,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
             return { status := 409 }
 
 def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -199,7 +199,7 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
 def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -222,7 +222,7 @@ def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
           return { status := 200, action := some (.settle res) }
 
 def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : H Unit := do
-  match ← readObject ref.id now with
+  match ← readTaskObject ref.id now with
   | none =>
       pure ()
   | some o =>
@@ -274,7 +274,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   let awaitedIds := req.actions.map (·.awaited)
   if awaitedIds.eraseDups.length != awaitedIds.length then
     return { status := 400 }
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -303,7 +303,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
   if !req.action.state.settable then
     return { status := 400 }
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -323,7 +323,7 @@ def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
       return { status := 200, promise := some (p.toRecord o.id) }
 
 def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -342,7 +342,7 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
       return { status := 200 }
 
 def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>
@@ -359,7 +359,7 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
       return { status := 200 }
 
 def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
-  match ← readObject req.id now with
+  match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
   | some o =>

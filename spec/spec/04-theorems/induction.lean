@@ -736,6 +736,69 @@ theorem writesGood_afterReadObjectP {α} {e : Env} (hq : Hereditary g e.state)
   writesGood_afterReadObject hq hs id now f hnone
     (fun o ho => hsome o (QObj_promise ho))
 
+/-- What the task read hands back is what `readObject` would have, when
+    it hands back anything at all. -/
+theorem readTaskObject_fst_some {id : String} {now : Nat} {e : Env} {u : Object}
+    (h : (readTaskObject id now e).1 = some u) : (readObject id now e).1 = some u := by
+  revert h
+  unfold readTaskObject
+  rw [bind_fst, getObject_fst]
+  cases hf : e.state.objects.find? (·.id == id) with
+  | none => intro hh; simp [pure] at hh
+  | some o =>
+      show ((if o.task.isSome then readObject id now else pure none) e).1 = _ → _
+      by_cases hto : o.task.isSome = true
+      · rw [if_pos hto]; exact fun hh => hh
+      · rw [if_neg hto]; intro hh; simp [pure] at hh
+
+theorem writesGood_readTaskObject {e : Env} (hq : Hereditary g e.state)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    WritesGood g e (readTaskObject id now) := by
+  unfold readTaskObject
+  refine writesGood_bind' _ _ _ _ (writesGood_getObject _ _ _) ?_
+  rw [getObject_fst]
+  split
+  · exact writesGood_pure _ _ _
+  · exact writesGood_ite _ _ _ _ _ (writesGood_readObject hq hs id now)
+      (writesGood_pure _ _ _)
+
+/-- The task read's combinator. The guard writes nothing, so this is
+    `writesGood_afterReadObject` behind a test — and its `none` branch now
+    covers two ways of getting there, no row and no task, which is why
+    that hypothesis is unconditional. -/
+theorem writesGood_afterReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (f : Option Object → H α)
+    (hnone : WritesGood g e (f none))
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (readTaskObject id now >>= f) := by
+  refine writesGood_bind' _ _ _ _ (writesGood_readTaskObject hq hs id now) ?_
+  cases h : (readTaskObject id now e).1 with
+  | none => exact hnone
+  | some u =>
+      have h' := readTaskObject_fst_some h
+      exact hsome u (returnsGood_readObject hq hs id now u h')
+        (readObject_notDue id now e u h') (readObject_stored id now e u h')
+
+theorem writesGood_afterMatReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
+    (b : Bool) (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (f : Option Object → H α)
+    (hnone : WritesGood g e (f none))
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (withMat b (readTaskObject id now) >>= f) := by
+  refine writesGood_bind' _ _ _ _
+    (writesGood_readTaskObject (e := { e with mat := b }) hq hs id now) ?_
+  show WritesGood g e (f ((readTaskObject id now { e with mat := b }).1))
+  cases h : (readTaskObject id now { e with mat := b }).1 with
+  | none => exact hnone
+  | some u =>
+      have h' := readTaskObject_fst_some h
+      exact hsome u (returnsGood_readObject (e := { e with mat := b }) hq hs id now u h')
+        (readObject_notDue id now { e with mat := b } u h')
+        (readObject_stored id now { e with mat := b } u h')
+
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchObject` is `withMat true`, `viewObject` is `withMat false`. -/
 theorem writesGood_afterMatReadObject {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)

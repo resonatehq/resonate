@@ -343,6 +343,26 @@ def readObject (id : String) (now : Nat) : H (Option Object) := do
       if (← ask).mat then materialise id o o'
       return some o'
 
+/-- The read a TASK handler makes. Identical to `readObject` except that
+    it looks at the task FIRST and declines the row when there is none.
+
+    That guard is not decoration. A `task.*` request against an id holding
+    an untargeted promise answers 404 because there is no task, and it has
+    no business settling that promise on the way out — the request was
+    never about it. The two-store machine got this from the order of its
+    lookups (`getTask` before `readPromise`); fusing the row would have
+    lost it silently, so it is stated here instead.
+
+    Nothing observable turns on it: the response is 404 either way, and a
+    settlement is stamped at the promise's deadline rather than at `now`,
+    so persisting it later writes the same row. `b6` in the battery is the
+    script that reaches the shape, and it is there so that this stays
+    checked rather than argued. -/
+def readTaskObject (id : String) (now : Nat) : H (Option Object) := do
+  match ← getObject id with
+  | none   => return none
+  | some o => if o.task.isSome then readObject id now else return none
+
 def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do
   match ← readObject req.id now with
   | some _ => pure ()
@@ -355,5 +375,11 @@ def touchObject (id : String) (now : Nat) : H (Option Object) :=
 
 def viewObject (id : String) (now : Nat) : H (Option Object) :=
   withMat false (readObject id now)
+
+def touchTaskObject (id : String) (now : Nat) : H (Option Object) :=
+  withMat true (readTaskObject id now)
+
+def viewTaskObject (id : String) (now : Nat) : H (Option Object) :=
+  withMat false (readTaskObject id now)
 
 end AbstractModel

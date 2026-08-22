@@ -41,7 +41,7 @@ func (s *ServerState) ProcessListener(id, address string, now uint64) {
 // deadline first, so TIMEOUT ALWAYS WINS falls out with no explicit guard:
 // an awaiter past its own deadline reads `.fulfilled` and is dropped.
 func (s *ServerState) resumeOne(awaited, awaiter string, now uint64) {
-	o := s.readObject(Materialized, awaiter, now)
+	o := s.readTaskObject(Materialized, awaiter, now)
 	if o == nil || o.Task == nil {
 		return
 	}
@@ -88,7 +88,7 @@ func (s *ServerState) ProcessCallback(id, awaiter string, now uint64) {
 // task alone changes nothing: the view only fulfils a task whose promise
 // is settled, and a settled promise fails the guard below anyway.
 func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
-	o := s.readObject(Projected, id, now)
+	o := s.readTaskObject(Projected, id, now)
 	if o == nil || o.Task == nil {
 		return
 	}
@@ -110,7 +110,7 @@ func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
 // re-arming `retryAt` at a chosen instant. Repeatable: the outbox's keyed
 // upsert makes re-emission idempotent, so any `next` is sound.
 func (s *ServerState) ProcessRetryTimeout(id string, next, now uint64) {
-	o := s.readObject(Projected, id, now)
+	o := s.readTaskObject(Projected, id, now)
 	if o == nil || o.Task == nil {
 		return
 	}

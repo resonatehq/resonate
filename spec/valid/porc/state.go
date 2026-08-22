@@ -418,24 +418,6 @@ func (o *Object) Project(now uint64) *Object {
 // readObject is `viewObject` or `touchObject` — the ONE read. There is no
 // longer a "task without its promise" result to return, because the state
 // cannot hold one.
-//
-// ONE BEHAVIOURAL DIFFERENCE from the two-read version, and it is
-// deliberate. `readTask` used to look the TASK up first and return early
-// when there was none, so a `task.*` request against an id holding an
-// untargeted promise never materialised that promise — it 404'd having
-// written nothing. This reads the row, so under `Materialized` the
-// promise settles at that moment instead of at whichever internal step
-// touched it next.
-//
-// The Lean sweeps never reach it: their alphabet only issues task
-// requests against a targeted id. The generator here does reach it, and
-// the fuzzer showed exactly one R4 firing per 250 traces losing its
-// "changed state" mark because the change had already happened one step
-// earlier. Nothing observable moves — the emitted trace for 500 seeds
-// under both disciplines is byte-identical to the two-read version — and
-// materialising what a read projects is what `Materialized` MEANS. The
-// note is here because "no observable difference" is a claim worth
-// being able to find again.
 func (s *ServerState) readObject(d Discipline, id string, now uint64) *Object {
 	o := s.GetObject(id)
 	if o == nil {
@@ -451,6 +433,30 @@ func (s *ServerState) readObject(d Discipline, id string, now uint64) *Object {
 		}
 	}
 	return u
+}
+
+// readTaskObject is the read a TASK handler makes: `readObject` behind a
+// test on the task — `readTaskObject` in spec/02-abstract/state.lean.
+//
+// The guard is not decoration. A `task.*` request against an id holding an
+// untargeted promise answers 404 because there is no task, and it has no
+// business settling that promise on the way out: the request was never
+// about it. The two-store machine got this from the order of its lookups
+// (`GetTask` before `readPromise`); fusing the row would have lost it
+// silently, and the differential fuzzer is what noticed — one R4 firing
+// per 250 traces losing its "changed state" mark because the settlement
+// had already happened a step earlier.
+//
+// Nothing observable turned on it either way, which is why it needed a
+// harness that watches state rather than responses. `b6` in the Lean
+// battery reaches the shape and
+// `taskless_id_task_request_writes_nothing` pins it.
+func (s *ServerState) readTaskObject(d Discipline, id string, now uint64) *Object {
+	o := s.GetObject(id)
+	if o == nil || o.Task == nil {
+		return nil
+	}
+	return s.readObject(d, id, now)
 }
 
 // ---------------------------------------------------------------- canonical

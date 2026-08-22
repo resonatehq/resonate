@@ -32,7 +32,7 @@ def processListener (id : String) (address : String) (now : Nat) : H Unit := do
         setMessage address (.unblock (o.promise.toRecord o.id))
 
 def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
-  match ← touchObject awaiter now with
+  match ← touchTaskObject awaiter now with
   | none => pure ()
   | some o =>
   match o.task with
@@ -60,7 +60,7 @@ def processCallback (id : String) (awaiter : String) (now : Nat) : H Unit := do
         resumeOne o.id awaiter now
 
 def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
-  match ← viewObject id now with
+  match ← viewTaskObject id now with
   | none => pure ()
   | some o =>
   match o.task with
@@ -98,7 +98,7 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
     refuses it: `valid/lean/real.lean` shows `ttl := none` on a task
     acquired with 60000, suspended and resumed. -/
 def processRetryTimeout (id : String) (now : Nat) : H Unit := do
-  match ← viewObject id now with
+  match ← viewTaskObject id now with
   | none => pure ()
   | some o =>
   match o.task with

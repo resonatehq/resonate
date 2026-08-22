@@ -189,7 +189,7 @@ theorem writesGood_promiseSearch (req : ServerModel.PromiseSearchReq) (now : Nat
 theorem writesGood_taskGet (req : ServerModel.TaskGetReq) (now : Nat) :
     WritesGood g e (taskGet req now) := by
   unfold taskGet
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro o ho _ _
   dsimp only
   split <;> exact writesGood_pure _ _ _
@@ -236,7 +236,7 @@ theorem writesGood_taskCreate (req : ServerModel.TaskCreateReq) (now : Nat) :
 theorem writesGood_taskAcquire (req : ServerModel.TaskAcquireReq) (now : Nat) :
     WritesGood g e (taskAcquire req now) := by
   unfold taskAcquire
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -254,7 +254,7 @@ theorem writesGood_taskFence (req : ServerModel.TaskFenceReq) (now : Nat) :
     WritesGood g e (taskFence req now) := by
   unfold taskFence
   wg_guard
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -274,7 +274,7 @@ theorem writesGood_taskFence (req : ServerModel.TaskFenceReq) (now : Nat) :
 theorem writesGood_heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) :
     WritesGood g e (heartbeatOne pid ref now) := by
   unfold heartbeatOne
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -333,7 +333,7 @@ theorem writesGood_taskSuspend (req : ServerModel.TaskSuspendReq) (now : Nat) :
   wg_guard
   wg_guard
   wg_guard
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -358,7 +358,7 @@ theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
   unfold taskFulfill
   refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hset => ?_)
   refine writesGood_pureBind _ _ _ _ ?_
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp hdue hsto
   dsimp only
   split
@@ -379,7 +379,7 @@ theorem writesGood_taskFulfill (req : ServerModel.TaskFulfillReq) (now : Nat) :
 theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
     WritesGood g e (taskRelease req now) := by
   unfold taskRelease
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -396,7 +396,7 @@ theorem writesGood_taskRelease (req : ServerModel.TaskReleaseReq) (now : Nat) :
 theorem writesGood_taskHalt (req : ServerModel.TaskHaltReq) (now : Nat) :
     WritesGood g e (taskHalt req now) := by
   unfold taskHalt
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
   split
@@ -412,7 +412,7 @@ theorem writesGood_taskHalt (req : ServerModel.TaskHaltReq) (now : Nat) :
 theorem writesGood_taskContinue (req : ServerModel.TaskContinueReq) (now : Nat) :
     WritesGood g e (taskContinue req now) := by
   unfold taskContinue
-  refine writesGood_afterReadObject hq hs _ _ _ (fun _ => writesGood_pure _ _ _) ?_
+  refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p ho _ _
   dsimp only
   split
@@ -484,9 +484,9 @@ theorem writesGood_processListener (id : String) (address : String) (now : Nat) 
 
 theorem writesGood_resumeOne (awaited awaiter : String) (now : Nat) :
     WritesGood g e (Internal.resumeOne awaited awaiter now) := by
-  unfold Internal.resumeOne touchObject
-  refine writesGood_afterMatReadObject hq true hs _ _ _
-    (fun _ => writesGood_pure _ _ _) ?_
+  unfold Internal.resumeOne touchTaskObject
+  refine writesGood_afterMatReadTaskObject hq true hs _ _ _
+    (writesGood_pure _ _ _) ?_
   intro o ho _ _
   dsimp only
   split
@@ -519,9 +519,9 @@ theorem writesGood_processCallback (id : String) (awaiter : String) (now : Nat) 
 
 theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
     WritesGood g e (Internal.processLeaseTimeout id now) := by
-  unfold Internal.processLeaseTimeout viewObject
-  refine writesGood_afterMatReadObject hq false hs _ _ _
-    (fun _ => writesGood_pure _ _ _) ?_
+  unfold Internal.processLeaseTimeout viewTaskObject
+  refine writesGood_afterMatReadTaskObject hq false hs _ _ _
+    (writesGood_pure _ _ _) ?_
   intro o ho _ _
   dsimp only
   split
@@ -536,9 +536,9 @@ theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
 
 theorem writesGood_processRetryTimeout (id : String) (now : Nat) :
     WritesGood g e (Internal.processRetryTimeout id now) := by
-  unfold Internal.processRetryTimeout viewObject
-  refine writesGood_afterMatReadObject hq false hs _ _ _
-    (fun _ => writesGood_pure _ _ _) ?_
+  unfold Internal.processRetryTimeout viewTaskObject
+  refine writesGood_afterMatReadTaskObject hq false hs _ _ _
+    (writesGood_pure _ _ _) ?_
   intro o ho _ _
   dsimp only
   split

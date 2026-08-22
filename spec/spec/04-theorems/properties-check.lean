@@ -120,7 +120,7 @@ def covHalt : List (Step × Nat) :=
     (.api (.taskContinue { id := "h" }), 120) ]
 
 def battery : List (List (Step × Nat)) :=
-  [wLag, b1, b2, b3, b4, b5, covInternal, covListeners, covTwoTasks, covHalt]
+  [wLag, b1, b2, b3, b4, b5, b6, covInternal, covListeners, covTwoTasks, covHalt]
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
