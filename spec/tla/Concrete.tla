@@ -572,6 +572,9 @@ SubmitInternal(e) ==
                         Fresh(Variant("Timeout", [id |-> e.id, kind |-> e.kind])))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
+SubmitDue(i, k) ==
+    \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
+
 DrainableTimeouts(doc, t) ==
     { d \in [id : DOMAIN doc, kind : DeadlineKind] :
         /\ Deadline(doc[d.id], d.kind) /= NoTime
@@ -794,7 +797,6 @@ Crash(r) ==
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 Clock ==
-    /\ now < MaxTime
     /\ now' = now + 1
     /\ UNCHANGED <<docs, timeouts, outbox, steps>>
 
@@ -816,7 +818,7 @@ EventuallyStable ==
 
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
-    /\ \A e \in Entry : SF_vars(SubmitInternal(e))
+    /\ \A i \in Id, k \in DeadlineKind : SF_vars(SubmitDue(i, k))
     /\ WF_vars(Clock)
     /\ EventuallyStable
 
@@ -831,6 +833,9 @@ SpecSF ==
     Init /\ [][Next]_vars /\ FairnessSF
 
 -----------------------------------------------------------------------------
+
+C_NowBound ==
+    now <= MaxTime
 
 C_VersionBound ==
     \A i \in UNION { DOMAIN docs[o] : o \in Origin } : docs[i.origin][i].task.version <= MaxVersion

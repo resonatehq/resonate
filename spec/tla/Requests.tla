@@ -93,7 +93,16 @@ FoldSet(Op(_,_), base, S) ==
     IN
         f[S]
 
+(* AN INSTANT. Not bounded: a deadline is allowed to point past the horizon --
+   that is what "scheduled for later" means -- and `retryAt = now + RetryTimeout`
+   does exactly that. Only membership is ever tested, never enumerated. *)
 Time ==
+    Nat
+
+(* WHAT A REQUEST MAY NAME, and how far the clock is wound. Finite, because TLC
+   enumerates CreateReq to generate every request a client might send. This is
+   a statement about coverage, not about time. *)
+Horizon ==
     0 .. MaxTime
 Version ==
     0 .. MaxVersion
@@ -191,7 +200,7 @@ SettleState ==
     {"resolved", "rejected", "rejectedCanceled"}
 
 CreateReq ==
-    [id : Id, timeoutAt : Time, param : Value, tags : Tags]
+    [id : Id, timeoutAt : Horizon, param : Value, tags : Tags]
 SettleReq ==
     [id : Id, state : SettleState, value : Value]
 CallbackReq ==

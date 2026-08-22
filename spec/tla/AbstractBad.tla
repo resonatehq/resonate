@@ -387,7 +387,6 @@ ProcessCallback ==
 -----------------------------------------------------------------------------
 
 Clock ==
-    /\ now < MaxTime
     /\ now' = now + 1
     /\ UNCHANGED <<objects, outbox>>
 
@@ -449,11 +448,9 @@ Safety ==
    terminated. This is the bound, as a state constraint rather than a guard,
    because a protocol that stopped bumping at MaxVersion would be a different
    protocol. *)
-DeadlinesInTime ==
-    \A i \in DOMAIN objects :
-        /\ objects[i].task.retryAt   \in Time \cup {NoTime}
-        /\ objects[i].task.expiresAt \in Time \cup {NoTime}
-        /\ objects[i].promise.timeoutAt \in Time
+
+NowBound ==
+    now <= MaxTime
 
 VersionBound ==
     \A i \in DOMAIN objects : objects[i].task.version <= MaxVersion
