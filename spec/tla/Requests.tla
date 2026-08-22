@@ -103,9 +103,6 @@ SetToSeq(S) ==
     IN
         f[Cardinality(S)]
 
-Range(q) ==
-    { q[n] : n \in DOMAIN q }
-
 (* AN INSTANT. Not bounded: a deadline is allowed to point past the horizon --
    that is what "scheduled for later" means -- and `retryAt = now + RetryTimeout`
    does exactly that. Only membership is ever tested, never enumerated. *)

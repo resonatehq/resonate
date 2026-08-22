@@ -602,61 +602,59 @@ Retrying(doc, t) ==
 
 -----------------------------------------------------------------------------
 
-TimeOut(doc, q, t) ==
-    [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in Range(q) THEN Project(doc[i], t) ELSE doc[i] ],
-      sends |-> << >> ]
+TimeOut(doc, t) ==
+    [ i \in DOMAIN doc |->
+        IF i \in Due(doc, t) THEN Project(doc[i], t) ELSE doc[i] ]
 
 Notify(doc, q, t) ==
     [ doc   |-> [ i \in DOMAIN doc |->
-                    [ doc[i] EXCEPT
-                        !.promise.listeners =
-                            @ \ { x.address : x \in { y \in Range(q) : y.id = i } } ] ],
+                    IF i \in Settled(doc) THEN
+                        [doc[i] EXCEPT !.promise.listeners = {}]
+                    ELSE
+                        doc[i] ],
       sends |-> [ n \in 1 .. Len(q) |->
                     [ address |-> q[n].address,
                       message |-> [ tag   |-> "Unblock",
                                     id    |-> q[n].id,
                                     state |-> doc[q[n].id].promise.state ] ] ] ]
 
-Resume(doc, q, t) ==
-    LET S == Range(q)
+Resume(doc, t) ==
+    LET S == Awaiting(doc)
         Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
         Woken      == { x.awaiter : x \in S } \cap DOMAIN doc
     IN
-        [ doc   |-> [ i \in DOMAIN doc |->
-                        LET struck ==
-                              [ doc[i] EXCEPT
-                                  !.promise.callbacks =
-                                      @ \ { x.awaiter : x \in { y \in S : y.id = i } } ]
-                        IN
-                            IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
-                                struck
-                            ELSE IF struck.task.state = "suspended" THEN
-                                [struck EXCEPT !.task.state     = "pending",
-                                               !.task.pid       = NoPid,
-                                               !.task.ttl       = NoTime,
-                                               !.task.expiresAt = NoTime,
-                                               !.task.retryAt   = t,
-                                               !.task.resumes   = Resumes(i)]
-                            ELSE
-                                [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ],
-          sends |-> << >> ]
+        [ i \in DOMAIN doc |->
+            LET struck == IF i \in Settled(doc) THEN
+                              [doc[i] EXCEPT !.promise.callbacks = {}]
+                          ELSE
+                              doc[i]
+            IN
+                IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
+                    struck
+                ELSE IF struck.task.state = "suspended" THEN
+                    [struck EXCEPT !.task.state     = "pending",
+                                   !.task.pid       = NoPid,
+                                   !.task.ttl       = NoTime,
+                                   !.task.expiresAt = NoTime,
+                                   !.task.retryAt   = t,
+                                   !.task.resumes   = Resumes(i)]
+                ELSE
+                    [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ]
 
-Expire(doc, q, t) ==
-    [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in Range(q) THEN
-                        [ doc[i] EXCEPT !.task.state     = "pending",
-                                        !.task.pid       = NoPid,
-                                        !.task.ttl       = NoTime,
-                                        !.task.expiresAt = NoTime,
-                                        !.task.retryAt   = t ]
-                    ELSE
-                        doc[i] ],
-      sends |-> << >> ]
+Expire(doc, t) ==
+    [ i \in DOMAIN doc |->
+        IF i \in Leased(doc, t) THEN
+            [ doc[i] EXCEPT !.task.state     = "pending",
+                            !.task.pid       = NoPid,
+                            !.task.ttl       = NoTime,
+                            !.task.expiresAt = NoTime,
+                            !.task.retryAt   = t ]
+        ELSE
+            doc[i] ]
 
 Retry(doc, q, t) ==
     [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in Range(q) THEN
+                    IF i \in Retrying(doc, t) THEN
                         [ doc[i] EXCEPT !.task.retryAt = t + RetryTimeout ]
                     ELSE
                         doc[i] ],
@@ -668,23 +666,15 @@ Retry(doc, q, t) ==
 
 -----------------------------------------------------------------------------
 
-Pass(st, q, Apply(_, _, _), t) ==
-    LET out(n) == Apply(st.doc, SubSeq(q, 1, n), t)
-    IN
-        [ doc   |-> out(Len(q)).doc,
-          sends |-> st.sends \o out(Len(q)).sends,
-          tr    |-> st.tr \o [ n \in 1 .. Len(q) |->
-                                 [ doc   |-> out(n).doc,
-                                   sends |-> st.sends \o out(n).sends ] ] ]
-
 Sweep(doc, t) ==
-    LET s0 == [doc |-> doc, sends |-> << >>, tr |-> << >>]
-        s1 == Pass(s0, SetToSeq(Due(s0.doc, t)),       TimeOut, t)
-        s2 == Pass(s1, SetToSeq(Listening(s1.doc)),    Notify,  t)
-        s3 == Pass(s2, SetToSeq(Awaiting(s2.doc)),     Resume,  t)
-        s4 == Pass(s3, SetToSeq(Leased(s3.doc, t)),    Expire,  t)
+    LET d1 == TimeOut(doc, t)
+        o2 == Notify(d1, SetToSeq(Listening(d1)), t)
+        d3 == Resume(o2.doc, t)
+        d4 == Expire(d3, t)
+        o5 == Retry(d4, SetToSeq(Retrying(d4, t)), t)
     IN
-        Pass(s4, SetToSeq(Retrying(s4.doc, t)), Retry, t)
+        [ doc   |-> o5.doc,
+          sends |-> o2.sends \o o5.sends ]
 
 EnvAt(d, t) ==
     [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]

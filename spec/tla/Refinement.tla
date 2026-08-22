@@ -42,18 +42,66 @@ varsS ==
 
 -----------------------------------------------------------------------------
 
+(* THE SWEEP, ONE ITEM AT A TIME. `Sweep` does each pass in bulk; the protocol
+   does one item per step. So the walk lists the items each pass will do -- in
+   the order `SetToSeq` picked, the same order the sweep's sends carry -- and
+   `Concrete`'s pass boundaries say where one list ends and the next begins. *)
+Items(d0) ==
+    LET q1 == SetToSeq(Due(d0, now))
+        d1 == TimeOut(d0, now)
+        q2 == SetToSeq(Listening(d1))
+        d2 == Notify(d1, q2, now).doc
+        q3 == SetToSeq(Awaiting(d2))
+        d3 == Resume(d2, now)
+        q4 == SetToSeq(Leased(d3, now))
+        d4 == Expire(d3, now)
+        q5 == SetToSeq(Retrying(d4, now))
+    IN
+           [ n \in 1 .. Len(q1) |-> [kind |-> "promise",  id |-> q1[n]] ]
+        \o [ n \in 1 .. Len(q2) |-> [kind |-> "listener",
+                                      id   |-> q2[n].id, address |-> q2[n].address] ]
+        \o [ n \in 1 .. Len(q3) |-> [kind |-> "callback",
+                                      id   |-> q3[n].id, awaiter |-> q3[n].awaiter] ]
+        \o [ n \in 1 .. Len(q4) |-> [kind |-> "lease",    id |-> q4[n]] ]
+        \o [ n \in 1 .. Len(q5) |-> [kind |-> "retry",    id |-> q5[n]] ]
+
+(* One item is one protocol step, said with `Concrete`'s own handlers. *)
+Step(d, it) ==
+    CASE it.kind = "promise"  ->
+             ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], EnvAt(d, now))
+      [] it.kind = "listener" ->
+             ProcessListener([id |-> it.id, address |-> it.address], EnvAt(d, now))
+      [] it.kind = "callback" ->
+             ProcessCallback([id |-> it.id, awaiter |-> it.awaiter], EnvAt(d, now))
+      [] it.kind = "lease"    ->
+             ProcessLeaseTimeout(it.id, EnvAt(d, now))
+      [] OTHER                ->
+             ProcessRetryTimeout(it.id, EnvAt(d, now))
+
 (* THE STORES ONE WRITE PASSES THROUGH, one per abstract step, excluding the
    last -- the last is what the write itself produces, so the write is its own
-   final tick. *)
+   final tick. The replay must land where the bulk sweep landed: if it ever
+   did not, the walk's last store would fail to meet the one the write
+   produces, and the refinement check would say so. *)
 Walk(r) ==
-    LET doc   == docs[steps[r].org]
-        swept == Sweep(doc, now)
+    LET d0    == docs[steps[r].org]
+        its   == Items(d0)
+        store[n \in 0 .. Len(its)] ==
+            IF n = 0 THEN
+                [doc |-> d0, sends |-> << >>]
+            ELSE
+                LET prev == store[n - 1]
+                    out  == Step(prev.doc, its[n])
+                IN
+                    [doc |-> out.doc, sends |-> prev.sends \o out.sends]
+        swept == store[Len(its)]
         out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
+        ticks == [ n \in 1 .. Len(its) |-> store[n] ]
         full  == IF out.doc = swept.doc /\ out.sends = << >> THEN
-                     swept.tr
+                     ticks
                  ELSE
-                     swept.tr \o << [ doc   |-> out.doc,
-                                      sends |-> swept.sends \o out.sends ] >>
+                     ticks \o << [ doc   |-> out.doc,
+                                   sends |-> swept.sends \o out.sends ] >>
     IN
         IF full = << >> THEN << >> ELSE SubSeq(full, 1, Len(full) - 1)
 
