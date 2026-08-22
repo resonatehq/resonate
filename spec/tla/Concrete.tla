@@ -456,15 +456,6 @@ OriginOf(ev) ==
 
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
-Fresh(ev) ==
-    [ ev |-> ev, phase |-> "process", pending |-> << >>,
-      expect |-> EmptyFn ]
-
-Set(f, k, v) ==
-    [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
-Del(f, k) ==
-    [x \in (DOMAIN f) \ {k} |-> f[x]]
-
 -----------------------------------------------------------------------------
 
 Merge(a, b) ==
@@ -586,6 +577,15 @@ Sweep(doc, t) ==
         Merge(s4, SweepRetryAt(s4.doc, t))
 
 -----------------------------------------------------------------------------
+
+Fresh(ev) ==
+    [ ev |-> ev, phase |-> "process", pending |-> << >>,
+      expect |-> EmptyFn ]
+
+Set(f, k, v) ==
+    [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+Del(f, k) ==
+    [x \in (DOMAIN f) \ {k} |-> f[x]]
 
 SubmitExternal(ev) ==
     /\ ev \in ExternalEvent
