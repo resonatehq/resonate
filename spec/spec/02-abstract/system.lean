@@ -209,6 +209,7 @@ does exactly that, and caches the canonical form because recomputing it
 inside a pairwise comparison made dedup quadratic twice over. -/
 
 deriving instance BEq for AbstractModel.PromiseObject
+deriving instance BEq for AbstractModel.Object
 deriving instance BEq for AbstractModel.ServerState
 
 /-! ## The driver

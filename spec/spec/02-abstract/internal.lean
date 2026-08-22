@@ -6,9 +6,10 @@ Six steps a background job may fire: the promise timeout, the listener
 drain, the callback drain, the lease timeout, the retry dispatch, and
 the schedule. No client asks for these.
 
-They take the FORCED reads — `touchPromise`, `touchTask`,
-`viewPromise` — not the parametric ones. Internal steps materialise
-under both readings of the machine; `Env.mat` does not reach here. -/
+They take the FORCED reads — `touchObject` where the step persists what
+it projects, `viewObject` where it only needs to look. Neither is
+parametric: internal steps materialise under both readings of the
+machine, and `Env.mat` does not reach here. -/
 
 namespace AbstractModel
 namespace Internal
@@ -17,61 +18,65 @@ namespace Internal
 open ServerModel (nextCron occurrences expand Schedule)
 
 def processPromiseTimeout (id : String) (now : Nat) : H Unit := do
-  let _ ← touchPromise id now
+  let _ ← touchObject id now
 
 def processListener (id : String) (address : String) (now : Nat) : H Unit := do
-  match ← touchPromise id now with
+  match ← touchObject id now with
   | none => pure ()
-  | some p =>
-      if p.state == .pending then
+  | some o =>
+      if o.promise.state == .pending then
         pure ()
-      else if p.listeners.contains address then
-        setPromise { p with listeners := p.listeners.filter (· != address) }
-        setMessage address (.unblock p.toRecord)
+      else if o.promise.listeners.contains address then
+        setPromise o.id { o.promise with
+                          listeners := o.promise.listeners.filter (· != address) }
+        setMessage address (.unblock (o.promise.toRecord o.id))
 
 def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
-  match ← touchTask awaiter now with
+  match ← touchObject awaiter now with
   | none => pure ()
-  | some (_, none) => pure ()
-  | some (t, some _) =>
+  | some o =>
+  match o.task with
+  | none => pure ()
+  | some t =>
       match t.state with
       | .suspended =>
-          setTask { t with state := .pending, resumes := [awaited],
-                           retryAt := some now }
+          setTask o.id { t with state := .pending, resumes := [awaited],
+                                retryAt := some now }
       | .pending | .acquired | .halted =>
           if !(t.resumes.contains awaited) then
-            setTask { t with resumes := t.resumes ++ [awaited] }
+            setTask o.id { t with resumes := t.resumes ++ [awaited] }
       | .fulfilled =>
           pure ()
 
 def processCallback (id : String) (awaiter : String) (now : Nat) : H Unit := do
-  match ← touchPromise id now with
+  match ← touchObject id now with
   | none => pure ()
-  | some p =>
-      if p.state == .pending then
+  | some o =>
+      if o.promise.state == .pending then
         pure ()
-      else if p.callbacks.contains awaiter then
-        setPromise { p with callbacks := p.callbacks.filter (· != awaiter) }
-        resumeOne p.id awaiter now
+      else if o.promise.callbacks.contains awaiter then
+        setPromise o.id { o.promise with
+                          callbacks := o.promise.callbacks.filter (· != awaiter) }
+        resumeOne o.id awaiter now
 
 def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
-  match ← getTask id with
+  match ← viewObject id now with
+  | none => pure ()
+  | some o =>
+  match o.task with
   | none => pure ()
   | some t =>
       match t.expiresAt with
       | none => pure ()
       | some deadline =>
           if t.state == .acquired ∧ deadline ≤ now then
-            match ← viewPromise t.id now with
-            | none => pure ()
-            | some p =>
-                if p.state == .pending then
-                  setTask { t with state := .pending, pid := none, ttl := none,
-                                   expiresAt := none, retryAt := some now }
+            if o.promise.state == .pending then
+              setTask o.id { t with state := .pending, pid := none, ttl := none,
+                                    expiresAt := none, retryAt := some now }
 
 /-- Redispatch a pending task whose dispatch clock is due.
 
-    The next instant is COMPUTED, from the task's own `ttl` and the
+    The next instant is COMPUTED, from the server's dial and the
     clock — it is not supplied by whoever fires the step. Every other
     arming site (`createPromise`, `taskRelease`, `taskContinue`,
     `resumeOne`, `processLeaseTimeout`) already computed it; this was
@@ -93,20 +98,21 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
     refuses it: `valid/lean/real.lean` shows `ttl := none` on a task
     acquired with 60000, suspended and resumed. -/
 def processRetryTimeout (id : String) (now : Nat) : H Unit := do
-  match ← getTask id with
+  match ← viewObject id now with
+  | none => pure ()
+  | some o =>
+  match o.task with
   | none => pure ()
   | some t =>
       match t.retryAt with
       | none => pure ()
       | some due =>
           if t.state == .pending ∧ due ≤ now then
-            match ← viewPromise t.id now with
-            | none => pure ()
-            | some p =>
-                if p.state == .pending then
-                  setTask { t with retryAt := some (now + (← ask).config.retryTimeout) }
-                  setMessage ((p.tags.get? "resonate:target").getD "")
-                    (.execute t.id t.version)
+            if o.promise.state == .pending then
+              setTask o.id { t with
+                             retryAt := some (now + (← ask).config.retryTimeout) }
+              setMessage ((o.promise.tags.get? "resonate:target").getD "")
+                (.execute o.id t.version)
 
 def fireOccurrence (s : Schedule) (t : Nat) : H Unit :=
   createIfAbsent

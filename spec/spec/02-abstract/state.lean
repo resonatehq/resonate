@@ -19,12 +19,51 @@ nothing. The two used to be two machines, 387 and 386 lines differing
 in one word per read; here they are one body and a bit.
 
 The parameter scopes over EXTERNAL steps only. Internal steps
-materialise under both readings, and take the forced reads
-(`touchPromise`, `touchTask`, `viewPromise`) rather than the parametric
-ones. Getting that wrong is not theoretical: the first derivation of
-this machine substituted the parametric read into the internal steps
-too, and the sweep refuted it — 60 of 1 331 scripts. `withMat` is the
-fix. -/
+materialise under both readings, and take the forced read
+(`touchObject`) rather than the parametric one. Getting that wrong is
+not theoretical: the first derivation of this machine substituted the
+parametric read into the internal steps too, and the sweep refuted it —
+60 of 1 331 scripts. `withMat` is the fix.
+
+ONE OBJECT. A promise and its task are not two rows that happen to
+share an id; they are one thing with two faces. Every task the machine
+writes is written at a promise's id, and nothing deletes promises, so a
+task without its promise was never reachable — but the state used to
+say it was, and the cost showed up everywhere. `readTask` returned
+`Option (TaskObject × Option PromiseObject)`, eleven handlers dismissed
+the impossible `some (_, none)` with a status code no run can emit, and
+the induction tier carried an `hbare` obligation for each one. Fusing
+the row deletes all of that, and — the reason that matters — it turns
+the promise/task joins in the catalogue into predicates on ONE row,
+which is the only shape `PerStore` can reach.
+
+What it does NOT delete is the catalogue's right to name the shape.
+`consistent_task_iff_targeted_promise` survives, because the OTHER half
+of it — a targeted promise must HAVE a task — is still a claim an
+implementation with two tables can get wrong. The type stops the
+machine from writing the illegal row; the entry stops a server from
+being believed when it does.
+
+EFFECTS STAY SPLIT, and asymmetric. `.setPromise` is an upsert;
+`.setTask` is a map over the objects already there. Two reasons, both
+load-bearing:
+
+  * They COMMUTE. A read never sees a write of its own step, so every
+    value a handler holds is a pre-state value. An effect that carried
+    a whole `Object` would let a late task write clobber a promise a
+    materialising read had already settled — the writes would have to
+    be ordered, and the ordering argument would have to be re-made
+    after every change. Naming only the field it touches makes each
+    write immune to what the others did.
+  * `.setTask` is a `map`, so it preserves length, order and ids
+    definitionally. Every frame, uniqueness and monotonicity lemma has
+    NOTHING to prove for a task write; only the promise side needs the
+    upsert argument.
+
+The price is one dead branch — `.setTask` at an id no object holds is a
+no-op — against the eleven it removes. The three creation sites
+(`createPromise`, and both arms of `taskCreate`) emit the promise
+first, which is what makes the no-op unreachable. -/
 
 namespace AbstractModel
 
@@ -32,7 +71,6 @@ open ServerModel (Tags Value PromiseState TaskState PromiseRecord
                   TaskRecord Schedule Message OutboxEntry PromiseCreateReq)
 
 structure PromiseObject where
-  id        : String
   state     : PromiseState
   param     : Value
   value     : Value       := {}
@@ -44,8 +82,8 @@ structure PromiseObject where
   listeners : List String := []
   deriving Repr
 
-def PromiseObject.toRecord (p : PromiseObject) : PromiseRecord :=
-  { id := p.id, state := p.state, param := p.param, value := p.value,
+def PromiseObject.toRecord (p : PromiseObject) (id : String) : PromiseRecord :=
+  { id := id, state := p.state, param := p.param, value := p.value,
     tags := p.tags, timeoutAt := p.timeoutAt, createdAt := p.createdAt,
     settledAt := p.settledAt }
 
@@ -54,6 +92,9 @@ def PromiseObject.isTimer (p : PromiseObject) : Bool := p.tags.isTimer
 def PromiseObject.external (p : PromiseObject) : Bool :=
   p.tags.get? "resonate:external" == some "true"
     || p.tags.has "resonate:target" || p.isTimer
+
+def PromiseObject.targeted (p : PromiseObject) : Bool :=
+  p.tags.has "resonate:target"
 
 def PromiseObject.addCallback (p : PromiseObject) (awaiterId : String) : PromiseObject :=
   if p.callbacks.contains awaiterId then
@@ -77,7 +118,6 @@ def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
     p
 
 structure TaskObject where
-  id        : String
   state     : TaskState
   version   : Nat
   ttl       : Option Nat    := none
@@ -87,8 +127,8 @@ structure TaskObject where
   resumes   : List String   := []
   deriving Repr
 
-def TaskObject.toRecord (t : TaskObject) : TaskRecord :=
-  { id := t.id, state := t.state, version := t.version,
+def TaskObject.toRecord (t : TaskObject) (id : String) : TaskRecord :=
+  { id := id, state := t.state, version := t.version,
     resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
 
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
@@ -98,26 +138,80 @@ def TaskObject.fulfill (t : TaskObject) : TaskObject :=
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
   if p.state != .pending ∧ t.state != .fulfilled then t.fulfill else t
 
+/-- A promise, its id, and the task that executes it — if it has one.
+
+    The `Option` is not free information: it is `promise.targeted`, and
+    `consistent_task_iff_targeted_promise` is the entry that says so.
+    Keeping it an `Option` rather than an index on the tag is
+    deliberate — the tag arrives from a client, and the catalogue has
+    to be able to write down the state where the two disagree. -/
+structure Object where
+  id      : String
+  promise : PromiseObject
+  task    : Option TaskObject := none
+  deriving Repr
+
+/-- The whole object at an instant. Promise projection and the task's
+    view of it were always the same fact read twice — the promise
+    settles at its deadline, and a task whose promise is settled is
+    fulfilled. One row, one function. -/
+def Object.project (o : Object) (now : Nat) : Object :=
+  let p := o.promise.project now
+  { o with promise := p, task := o.task.map (·.view p) }
+
 structure ServerState where
-  promises  : List PromiseObject := []
-  tasks     : List TaskObject    := []
-  schedules : List Schedule      := []
-  outbox    : List OutboxEntry   := []
+  objects   : List Object      := []
+  schedules : List Schedule    := []
+  outbox    : List OutboxEntry := []
   deriving Repr
 
 def ServerState.init : ServerState := {}
 
+/-- The two faces, as views of the one store.
+
+    These are projections, not stores: `s.promises` is the promise of
+    every object and `s.tasks` the task of every object that has one.
+    The catalogue's per-row entries read through them and are written
+    exactly as they were when there were two lists, which is the point —
+    fusing the row was a change to the state, not to what is claimed
+    about it. An entry that needs the id reads `s.objects` directly. -/
+def ServerState.promises (s : ServerState) : List PromiseObject :=
+  s.objects.map (·.promise)
+
+def ServerState.tasks (s : ServerState) : List TaskObject :=
+  s.objects.filterMap (·.task)
+
+/-- Lookup by id, one face at a time. The catalogue reads through these;
+    handlers take the whole object. `task?` is `none` for both an id no
+    object holds and an object with no task — which is exactly the
+    distinction the handlers stopped having to make. -/
+def ServerState.promise? (s : ServerState) (id : String) : Option PromiseObject :=
+  (s.objects.find? (·.id == id)).map (·.promise)
+
+def ServerState.task? (s : ServerState) (id : String) : Option TaskObject :=
+  (s.objects.find? (·.id == id)).bind (·.task)
+
+def ServerState.hasTask (s : ServerState) (id : String) : Bool :=
+  (s.task? id).isSome
+
 inductive Effect
-  | setPromise  (p : PromiseObject)
-  | setTask     (t : TaskObject)
+  | setPromise  (id : String) (p : PromiseObject)
+  | setTask     (id : String) (t : TaskObject)
   | setSchedule (s : Schedule)
   | delSchedule (id : String)
   | setMessage  (address : String) (msg : Message)
   deriving Repr
 
 def Effect.apply (s : ServerState) : Effect → ServerState
-  | .setPromise p  => { s with promises  := p :: s.promises.filter (·.id != p.id) }
-  | .setTask t     => { s with tasks     := t :: s.tasks.filter (·.id != t.id) }
+  | .setPromise id p =>
+      let o : Object :=
+        match s.objects.find? (·.id == id) with
+        | some o => { o with promise := p }
+        | none   => { id := id, promise := p }
+      { s with objects := o :: s.objects.filter (·.id != id) }
+  | .setTask id t =>
+      { s with objects := s.objects.map fun o =>
+                 if o.id == id then { o with task := some t } else o }
   | .setSchedule c => { s with schedules := c :: s.schedules.filter (·.id != c.id) }
   | .delSchedule i => { s with schedules := s.schedules.filter (·.id != i) }
   | .setMessage a m =>
@@ -170,90 +264,85 @@ def runWith (mat : Bool) (config : ServerConfig) (act : H α) (s : ServerState) 
 def run (mat : Bool) (act : H α) (s : ServerState) : α × ServerState :=
   runWith mat {} act s
 
-def getPromise (id : String) : H (Option PromiseObject) :=
-  return (← ask).state.promises.find? (·.id == id)
-
-def getTask (id : String) : H (Option TaskObject) :=
-  return (← ask).state.tasks.find? (·.id == id)
+def getObject (id : String) : H (Option Object) :=
+  return (← ask).state.objects.find? (·.id == id)
 
 def getSchedule (id : String) : H (Option Schedule) :=
   return (← ask).state.schedules.find? (·.id == id)
 
-def setPromise (p : PromiseObject) : H Unit := emit (.setPromise p)
-def setTask (t : TaskObject) : H Unit := emit (.setTask t)
+def setPromise (id : String) (p : PromiseObject) : H Unit := emit (.setPromise id p)
+def setTask (id : String) (t : TaskObject) : H Unit := emit (.setTask id t)
 def setSchedule (c : Schedule) : H Unit := emit (.setSchedule c)
 def delSchedule (id : String) : H Unit := emit (.delSchedule id)
 def setMessage (a : String) (m : Message) : H Unit := emit (.setMessage a m)
 
-def setSettled (p : PromiseObject) : H Unit := do
-  setPromise p
+/-- Settle a promise, and fulfil the task executing it. The task no
+    longer has to be looked up — it is in the object the caller already
+    read. -/
+def setSettled (o : Object) (p : PromiseObject) : H Unit := do
+  setPromise o.id p
   if p.state != .pending then
-    match ← getTask p.id with
-    | some t => if t.state != .fulfilled then setTask t.fulfill
-    | none => pure ()
+    match o.task with
+    | some t => if t.state != .fulfilled then setTask o.id t.fulfill
+    | none   => pure ()
 
-def createPromise (req : PromiseCreateReq) (now : Nat) : H PromiseObject := do
+def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
   if req.timeoutAt > now then
     let p : PromiseObject :=
-      { id := req.id, state := .pending, param := req.param, tags := req.tags,
+      { state := .pending, param := req.param, tags := req.tags,
         timeoutAt := req.timeoutAt, createdAt := now }
-    setPromise p
-    if p.tags.has "resonate:target" then
+    setPromise req.id p
+    if p.targeted then
       let due :=
         match p.tags.get? "resonate:delay" with
         | some d => max (ServerModel.parseNat d) now
         | none => now
-      setTask { id := p.id, state := .pending, version := 0, retryAt := some due }
-    return p
+      let t : TaskObject := { state := .pending, version := 0, retryAt := some due }
+      setTask req.id t
+      return { id := req.id, promise := p, task := some t }
+    else
+      return { id := req.id, promise := p }
   else
     let state :=
       if req.tags.isTimer then PromiseState.resolved else PromiseState.rejectedTimedout
     let p : PromiseObject :=
-      { id := req.id, state := state, param := req.param, tags := req.tags,
+      { state := state, param := req.param, tags := req.tags,
         timeoutAt := req.timeoutAt, createdAt := req.timeoutAt,
         settledAt := some req.timeoutAt }
-    setPromise p
-    if p.tags.has "resonate:target" then
-      setTask { id := p.id, state := .fulfilled, version := 0 }
-    return p
+    setPromise req.id p
+    if p.targeted then
+      let t : TaskObject := { state := .fulfilled, version := 0 }
+      setTask req.id t
+      return { id := req.id, promise := p, task := some t }
+    else
+      return { id := req.id, promise := p }
 
-def readPromise (id : String) (now : Nat) : H (Option PromiseObject) := do
-  match ← getPromise id with
+/-- The one read. Projects the object at `now`, and — when `mat` — writes
+    back whichever face the projection moved. -/
+def readObject (id : String) (now : Nat) : H (Option Object) := do
+  match ← getObject id with
   | none => return none
-  | some p =>
-      let p' := p.project now
-      if (← ask).mat && p'.state != p.state then
-        setSettled p'
-      return some p'
+  | some o =>
+      let o' := o.project now
+      if (← ask).mat then
+        if o'.promise.state != o.promise.state then
+          setPromise id o'.promise
+        match o.task, o'.task with
+        | some t, some u => if u.state != t.state then setTask id u
+        | _, _ => pure ()
+      return some o'
 
 def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do
-  match ← readPromise req.id now with
+  match ← readObject req.id now with
   | some _ => pure ()
   | none   => let _ ← createPromise req now
 
-def readTask (id : String) (now : Nat) :
-    H (Option (TaskObject × Option PromiseObject)) := do
-  match ← getTask id with
-  | none => return none
-  | some t =>
-  match ← readPromise t.id now with
-  | none => return some (t, none)
-  | some p =>
-      let u := t.view p
-      if (← ask).mat && u.state != t.state then
-        setTask u
-      return some (u, some p)
-
 def withMat (mat : Bool) (act : H α) : H α := fun e => act { e with mat := mat }
 
-def touchPromise (id : String) (now : Nat) : H (Option PromiseObject) :=
-  withMat true (readPromise id now)
+def touchObject (id : String) (now : Nat) : H (Option Object) :=
+  withMat true (readObject id now)
 
-def touchTask (id : String) (now : Nat) :
-    H (Option (TaskObject × Option PromiseObject)) :=
-  withMat true (readTask id now)
-
-def viewPromise (id : String) (now : Nat) : H (Option PromiseObject) :=
-  withMat false (readPromise id now)
+def viewObject (id : String) (now : Nat) : H (Option Object) :=
+  withMat false (readObject id now)
 
 end AbstractModel
