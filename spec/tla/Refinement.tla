@@ -29,16 +29,32 @@
    from `docs` rather than a plain variable rename, so there is nothing to
    evaluate it against. It fails with "the identifier docs is either undefined
    or not an operator".) *)
+
+(* TWO MORE AUXILIARIES, both confined to this module.
+
+   `stamp` is a history variable: the instant each request's Process read the
+   clock. The executor does not keep it -- its fence is the CAS and nothing
+   else -- but the walk must replay the computation, and the computation was a
+   function of the document AND the instant. History is the legitimate way to
+   remember what the implementation legitimately forgot.
+
+   The outbox mapping reads pending. An abstract message step strikes the
+   document and enqueues the message in one action; the executor splits it --
+   the write commits the strike, the Send goes later. So the mapping counts a
+   message from the moment its write lands: `Outstanding` folds every landed
+   request's still-pending sends over the real outbox, and a real Send step
+   then moves a message from pending to outbox without changing the mapped
+   value at all -- a stutter, as it must be. *)
 EXTENDS Concrete
 
-VARIABLE s
+VARIABLES s, stamp
 
 (* `top` marks "not mid-walk". A record, so it cannot collide with a position. *)
 top ==
     [top |-> "top"]
 
 varsS ==
-    <<s, docs, timeouts, outbox, steps, now>>
+    <<s, stamp, docs, timeouts, outbox, steps, now>>
 
 -----------------------------------------------------------------------------
 
@@ -239,7 +255,7 @@ Step(d, it, t0) ==
    produces, and the refinement check would say so. *)
 Walk(r) ==
     LET d0    == docs[OriginOf(steps[r].ev)]
-        t0    == now
+        t0    == stamp[r]
         its   == Items(d0, t0)
         store[n \in 0 .. Len(its)] ==
             IF n = 0 THEN
@@ -272,13 +288,13 @@ Walked(r) ==
     /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
     /\ IF IF s = top THEN Walk(r) /= << >> ELSE s.k < Len(Walk(r)) THEN
            /\ s' = IF s = top THEN [req |-> r, k |-> 1] ELSE [s EXCEPT !.k = @ + 1]
-           /\ UNCHANGED <<docs, timeouts, outbox, steps, now>>
+           /\ UNCHANGED <<stamp, docs, timeouts, outbox, steps, now>>
        ELSE
            /\ s' = top
            /\ docs'  = [docs EXCEPT
                             ![OriginOf(steps[r].ev)] = Head(steps[r].pending).body]
            /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
-           /\ UNCHANGED <<timeouts, outbox, now>>
+           /\ UNCHANGED <<stamp, timeouts, outbox, now>>
 
 (* `Concrete`'s next-state relation, with the write replaced by the walk and
    everything else held still while one is in progress. Nothing may interleave
@@ -288,20 +304,26 @@ Walked(r) ==
 NextS ==
     \/ /\ s = top
        /\ UNCHANGED s
-       /\ \/ \E ev \in ExternalEvent : SubmitExternal(ev)
-          \/ \E e \in timeouts : SubmitInternal(e)
+       /\ \/ /\ \/ \E ev \in ExternalEvent : SubmitExternal(ev)
+                \/ \E e \in timeouts : SubmitInternal(e)
+                \/ Clock
+             /\ UNCHANGED stamp
           \/ \E r \in DOMAIN steps :
-                \/ Process(r)
-                \/ Crash(r)
+                \/ /\ Process(r)
+                   /\ stamp' = Set(stamp, r, now)
+                \/ /\ Crash(r)
+                   /\ stamp' = Del(stamp, r)
                 \/ /\ Perform(r)
-                   /\ \/ steps[r].pending = << >>
-                      \/ Head(steps[r].pending).tag /= "PutDocument"
-                      \/ docs[OriginOf(steps[r].ev)] /= steps[r].expect
-          \/ Clock
+                   /\ ~( /\ steps[r].pending /= << >>
+                         /\ Head(steps[r].pending).tag = "PutDocument"
+                         /\ docs[OriginOf(steps[r].ev)] = steps[r].expect )
+                   /\ stamp' = IF steps[r].pending = << >>
+                                THEN Del(stamp, r)
+                                ELSE stamp
     \/ \E r \in DOMAIN steps : Walked(r)
 
 InitS ==
-    Init /\ s = top
+    Init /\ s = top /\ stamp = EmptyFn
 
 SpecS ==
     InitS /\ [][NextS]_varsS
@@ -326,11 +348,32 @@ ObjectsAt(d, o) ==
 At ==
     Walk(s.req)[s.k]
 
+(* A message counts from the moment its write lands. *)
+Landed(r) ==
+    /\ steps[r].phase = "perform"
+    /\ \A n \in DOMAIN steps[r].pending :
+           steps[r].pending[n].tag /= "PutDocument"
+
+SendsOf(r) ==
+    LET q == SelectSeq(steps[r].pending, LAMBDA x : x.tag = "Send")
+    IN  [ n \in 1 .. Len(q) |-> q[n].entry ]
+
+Outstanding ==
+    LET L == { r \in DOMAIN steps : Landed(r) }
+        f[T \in SUBSET L] ==
+            IF T = {} THEN
+                outbox
+            ELSE
+                LET r == CHOOSE x \in T : TRUE
+                IN  SendsInto(f[T \ {r}], SendsOf(r))
+    IN
+        f[L]
+
 P == INSTANCE Abstract WITH
          objects <- IF s = top THEN Objects
                     ELSE ObjectsAt(At.doc, OriginOf(steps[s.req].ev)),
-         outbox  <- IF s = top THEN outbox
-                    ELSE SendsInto(outbox, At.sends)
+         outbox  <- IF s = top THEN Outstanding
+                    ELSE SendsInto(Outstanding, At.sends)
 
 Refines ==
     P!Safety
