@@ -46,15 +46,44 @@ varsS ==
    does one item per step. So the walk lists the items each pass will do -- in
    the order `SetToSeq` picked, the same order the sweep's sends carry -- and
    `Concrete`'s pass boundaries say where one list ends and the next begins. *)
+Due(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].promise.timeoutAt <= t }
+
+Listening(doc) ==
+    { x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+              address : Address] :
+        x.address \in doc[x.id].promise.listeners }
+
+Awaiting(doc) ==
+    { x \in [id : { i \in DOMAIN doc : doc[i].promise.state /= "pending" },
+              awaiter : Id] :
+        x.awaiter \in doc[x.id].promise.callbacks }
+
+Leased(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "acquired"
+        /\ doc[i].task.expiresAt /= NoTime
+        /\ doc[i].task.expiresAt <= t }
+
+Retrying(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "pending"
+        /\ doc[i].task.retryAt /= NoTime
+        /\ doc[i].task.retryAt <= t }
+
 Items(d0, t0) ==
     LET q1 == SetToSeq(Due(d0, t0))
-        d1 == TimeOut(d0, t0)
+        d1 == SweepTimeoutAt(d0, t0).doc
         q2 == SetToSeq(Listening(d1))
-        d2 == Notify(d1, q2, t0).doc
+        d2 == SweepListeners(d1, t0).doc
         q3 == SetToSeq(Awaiting(d2))
-        d3 == Resume(d2, t0)
+        d3 == SweepCallbacks(d2, t0).doc
         q4 == SetToSeq(Leased(d3, t0))
-        d4 == Expire(d3, t0)
+        d4 == SweepExpiresAt(d3, t0).doc
         q5 == SetToSeq(Retrying(d4, t0))
     IN
            [ n \in 1 .. Len(q1) |-> [kind |-> "promise",  id |-> q1[n]] ]
@@ -65,7 +94,132 @@ Items(d0, t0) ==
         \o [ n \in 1 .. Len(q4) |-> [kind |-> "lease",    id |-> q4[n]] ]
         \o [ n \in 1 .. Len(q5) |-> [kind |-> "retry",    id |-> q5[n]] ]
 
-(* One item is one protocol step, said with `Concrete`'s own handlers. *)
+(* One item is one protocol step. These are the protocol's single-item
+   handlers -- the executor no longer has them (its sweep does everything in
+   bulk, and a timer request's handler has nothing left to do), but the walk
+   replays one item per tick, so they live here now. *)
+ProcessLeaseTimeout(i, doc, t) ==
+    IF i \notin DOMAIN doc THEN
+        Skip(doc)
+    ELSE
+        LET old == doc[i]
+            new == [old EXCEPT !.task.state     = "pending",
+                               !.task.pid       = NoPid,
+                               !.task.ttl       = NoTime,
+                               !.task.expiresAt = NoTime,
+                               !.task.retryAt   = t]
+        IN
+            IF \/ old.task.state /= "acquired"
+               \/ old.task.expiresAt = NoTime
+               \/ old.task.expiresAt > t
+               \/ Project(old, t).promise.state /= "pending" THEN
+                Skip(doc)
+            ELSE
+                [ doc   |-> Write(doc, i, new),
+                  puts  |-> << [at |-> t, id |-> i, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.expiresAt, id |-> i, kind |-> "lease"] >>,
+                  sends |-> << >> ]
+
+ProcessRetryTimeout(i, doc, t) ==
+    IF i \notin DOMAIN doc THEN
+        Skip(doc)
+    ELSE
+        LET old == doc[i]
+            new == [old EXCEPT !.task.retryAt = t + RetryTimeout]
+        IN
+            IF \/ old.task.state /= "pending"
+               \/ old.task.retryAt = NoTime
+               \/ old.task.retryAt > t
+               \/ Project(old, t).promise.state /= "pending" THEN
+                Skip(doc)
+            ELSE
+                [ doc   |-> Write(doc, i, new),
+                  puts  |-> << [at |-> t + RetryTimeout, id |-> i, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.retryAt, id |-> i, kind |-> "retry"] >>,
+                  sends |-> << [ address |-> old.promise.tags.target,
+                                 message |-> [tag |-> "Execute", id      |-> i,
+                                                       version |-> old.task.version] ] >> ]
+
+ProcessListener(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        Skip(doc)
+    ELSE
+        LET awaited    == Project(doc[req.id], t)
+            newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
+        IN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.address \notin awaited.promise.listeners THEN
+                Skip(doc)
+            ELSE
+                [ doc   |-> Write(doc, req.id, newAwaited),
+                  puts  |-> << >>,
+                  dels  |-> << >>,
+                  sends |-> << [ address |-> req.address,
+                                 message |-> [tag |-> "Unblock", id    |-> req.id,
+                                                       state |-> awaited.promise.state] ] >> ]
+
+ProcessCallback(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        Skip(doc)
+    ELSE
+        LET awaited    == Project(doc[req.id], t)
+            newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
+        IN
+            IF \/ awaited.promise.state = "pending"
+               \/ req.awaiter \notin awaited.promise.callbacks THEN
+                Skip(doc)
+            ELSE IF req.awaiter \notin DOMAIN doc THEN
+                [ doc   |-> Write(doc, req.id, newAwaited),
+                  puts  |-> << >>,
+                  dels  |-> << >>,
+                  sends |-> << >> ]
+            ELSE
+                LET struck     == Write(doc, req.id, newAwaited)
+                    awaiter    == Project(struck[req.awaiter], t)
+                    newAwaiter == IF awaiter.task.state = "suspended" THEN
+                                      [awaiter EXCEPT !.task.state     = "pending",
+                                                      !.task.pid       = NoPid,
+                                                      !.task.ttl       = NoTime,
+                                                      !.task.expiresAt = NoTime,
+                                                      !.task.retryAt   = t,
+                                                      !.task.resumes   = {req.id}]
+                                  ELSE
+                                      [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
+                IN
+                    IF awaiter.task.state \in {"none", "fulfilled"} THEN
+                        [ doc   |-> struck,
+                          puts  |-> << >>,
+                          dels  |-> << >>,
+                          sends |-> << >> ]
+                    ELSE
+                        [ doc   |-> Write(struck, req.awaiter, newAwaiter),
+                          puts  |-> IF awaiter.task.state = "suspended" THEN
+                                        << [at |-> t, id |-> req.awaiter, kind |-> "retry"] >>
+                                    ELSE << >>,
+                          dels  |-> << >>,
+                          sends |-> << >> ]
+
+ProcessPromiseTimeout(req, doc, t) ==
+    IF req.kind /= "promise" \/ req.id \notin DOMAIN doc THEN
+        Skip(doc)
+    ELSE
+        LET old == doc[req.id]
+            new == Project(old, t)
+        IN
+            IF new = old THEN
+                Skip(doc)
+            ELSE
+                [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << >>,
+                  dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"] >>
+                         \o (IF old.task.state = "acquired" THEN
+                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
+                             ELSE << >>)
+                         \o (IF old.task.state = "pending" THEN
+                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
+                             ELSE << >>),
+                  sends |-> << >> ]
+
 Step(d, it, t0) ==
     CASE it.kind = "promise"  ->
              ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], d, t0)
@@ -85,7 +239,7 @@ Step(d, it, t0) ==
    produces, and the refinement check would say so. *)
 Walk(r) ==
     LET d0    == docs[OriginOf(steps[r].ev)]
-        t0    == steps[r].at
+        t0    == now
         its   == Items(d0, t0)
         store[n \in 0 .. Len(its)] ==
             IF n = 0 THEN
@@ -111,14 +265,20 @@ Walk(r) ==
    it with its own write. *)
 Walked(r) ==
     /\ (s /= top) => (s.req = r)
-    /\ Heads(r, "PutDocument")
-    /\ FenceOk(r)
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ steps[r].pending /= << >>
+    /\ Head(steps[r].pending).tag = "PutDocument"
+    /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
     /\ IF IF s = top THEN Walk(r) /= << >> ELSE s.k < Len(Walk(r)) THEN
            /\ s' = IF s = top THEN [req |-> r, k |-> 1] ELSE [s EXCEPT !.k = @ + 1]
            /\ UNCHANGED <<docs, timeouts, outbox, steps, now>>
        ELSE
            /\ s' = top
-           /\ PutDocument(r)
+           /\ docs'  = [docs EXCEPT
+                            ![OriginOf(steps[r].ev)] = Head(steps[r].pending).body]
+           /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
+           /\ UNCHANGED <<timeouts, outbox, now>>
 
 (* `Concrete`'s next-state relation, with the write replaced by the walk and
    everything else held still while one is in progress. Nothing may interleave
@@ -131,8 +291,12 @@ NextS ==
        /\ \/ \E ev \in ExternalEvent : SubmitExternal(ev)
           \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
-                Process(r) \/ Crash(r) \/ Finish(r) \/ Restart(r)
-                           \/ PutTimeout(r) \/ DelTimeout(r) \/ Send(r)
+                \/ Process(r)
+                \/ Crash(r)
+                \/ /\ Perform(r)
+                   /\ \/ steps[r].pending = << >>
+                      \/ Head(steps[r].pending).tag /= "PutDocument"
+                      \/ docs[OriginOf(steps[r].ev)] /= steps[r].expect
           \/ Clock
     \/ \E r \in DOMAIN steps : Walked(r)
 

@@ -398,128 +398,6 @@ HandleTaskContinue(req, doc, t) ==
                   dels  |-> << >>,
                   sends |-> << >> ]
 
-ProcessLeaseTimeout(i, doc, t) ==
-    IF i \notin DOMAIN doc THEN
-        Skip(doc)
-    ELSE
-        LET old == doc[i]
-            new == [old EXCEPT !.task.state     = "pending",
-                               !.task.pid       = NoPid,
-                               !.task.ttl       = NoTime,
-                               !.task.expiresAt = NoTime,
-                               !.task.retryAt   = t]
-        IN
-            IF \/ old.task.state /= "acquired"
-               \/ old.task.expiresAt = NoTime
-               \/ old.task.expiresAt > t
-               \/ Project(old, t).promise.state /= "pending" THEN
-                Skip(doc)
-            ELSE
-                [ doc   |-> Write(doc, i, new),
-                  puts  |-> << [at |-> t, id |-> i, kind |-> "retry"] >>,
-                  dels  |-> << [at |-> old.task.expiresAt, id |-> i, kind |-> "lease"] >>,
-                  sends |-> << >> ]
-
-ProcessRetryTimeout(i, doc, t) ==
-    IF i \notin DOMAIN doc THEN
-        Skip(doc)
-    ELSE
-        LET old == doc[i]
-            new == [old EXCEPT !.task.retryAt = t + RetryTimeout]
-        IN
-            IF \/ old.task.state /= "pending"
-               \/ old.task.retryAt = NoTime
-               \/ old.task.retryAt > t
-               \/ Project(old, t).promise.state /= "pending" THEN
-                Skip(doc)
-            ELSE
-                [ doc   |-> Write(doc, i, new),
-                  puts  |-> << [at |-> t + RetryTimeout, id |-> i, kind |-> "retry"] >>,
-                  dels  |-> << [at |-> old.task.retryAt, id |-> i, kind |-> "retry"] >>,
-                  sends |-> << [ address |-> old.promise.tags.target,
-                                 message |-> [tag |-> "Execute", id      |-> i,
-                                                       version |-> old.task.version] ] >> ]
-
-ProcessListener(req, doc, t) ==
-    IF req.id \notin DOMAIN doc THEN
-        Skip(doc)
-    ELSE
-        LET awaited    == Project(doc[req.id], t)
-            newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
-        IN
-            IF \/ awaited.promise.state = "pending"
-               \/ req.address \notin awaited.promise.listeners THEN
-                Skip(doc)
-            ELSE
-                [ doc   |-> Write(doc, req.id, newAwaited),
-                  puts  |-> << >>,
-                  dels  |-> << >>,
-                  sends |-> << [ address |-> req.address,
-                                 message |-> [tag |-> "Unblock", id    |-> req.id,
-                                                       state |-> awaited.promise.state] ] >> ]
-
-ProcessCallback(req, doc, t) ==
-    IF req.id \notin DOMAIN doc THEN
-        Skip(doc)
-    ELSE
-        LET awaited    == Project(doc[req.id], t)
-            newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
-        IN
-            IF \/ awaited.promise.state = "pending"
-               \/ req.awaiter \notin awaited.promise.callbacks THEN
-                Skip(doc)
-            ELSE IF req.awaiter \notin DOMAIN doc THEN
-                [ doc   |-> Write(doc, req.id, newAwaited),
-                  puts  |-> << >>,
-                  dels  |-> << >>,
-                  sends |-> << >> ]
-            ELSE
-                LET struck     == Write(doc, req.id, newAwaited)
-                    awaiter    == Project(struck[req.awaiter], t)
-                    newAwaiter == IF awaiter.task.state = "suspended" THEN
-                                      [awaiter EXCEPT !.task.state     = "pending",
-                                                      !.task.pid       = NoPid,
-                                                      !.task.ttl       = NoTime,
-                                                      !.task.expiresAt = NoTime,
-                                                      !.task.retryAt   = t,
-                                                      !.task.resumes   = {req.id}]
-                                  ELSE
-                                      [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
-                IN
-                    IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                        [ doc   |-> struck,
-                          puts  |-> << >>,
-                          dels  |-> << >>,
-                          sends |-> << >> ]
-                    ELSE
-                        [ doc   |-> Write(struck, req.awaiter, newAwaiter),
-                          puts  |-> IF awaiter.task.state = "suspended" THEN
-                                        << [at |-> t, id |-> req.awaiter, kind |-> "retry"] >>
-                                    ELSE << >>,
-                          dels  |-> << >>,
-                          sends |-> << >> ]
-
-ProcessPromiseTimeout(req, doc, t) ==
-    IF req.kind /= "promise" \/ req.id \notin DOMAIN doc THEN
-        Skip(doc)
-    ELSE
-        LET old == doc[req.id]
-            new == Project(old, t)
-        IN
-            IF new = old THEN
-                Skip(doc)
-            ELSE
-                [ doc   |-> Write(doc, req.id, new),
-                  puts  |-> << >>,
-                  dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"] >>
-                         \o (IF old.task.state = "acquired" THEN
-                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
-                             ELSE << >>)
-                         \o (IF old.task.state = "pending" THEN
-                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
-                             ELSE << >>),
-                  sends |-> << >> ]
-
 Handle(ev, doc, t) ==
     CASE ev.tag = "PromiseGet" ->
              HandlePromiseGet(ev, doc, t)
@@ -552,14 +430,7 @@ Handle(ev, doc, t) ==
       [] ev.tag = "TaskContinue" ->
              HandleTaskContinue(ev, doc, t)
       [] ev.tag = "Timeout" ->
-             LET d == ev
-             IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d, doc, t)
-                   [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, doc, t)
-                   [] OTHER              -> ProcessRetryTimeout(d.id, doc, t)
-      [] ev.tag = "ListenerDrain" ->
-             ProcessListener(ev, doc, t)
-      [] ev.tag = "CallbackDrain" ->
-             ProcessCallback(ev, doc, t)
+             Skip(doc)
       [] OTHER -> Skip(doc)
 
 -----------------------------------------------------------------------------
@@ -582,8 +453,6 @@ OriginOf(ev) ==
       [] ev.tag = "TaskHalt"      -> ev.id.origin
       [] ev.tag = "TaskContinue"  -> ev.id.origin
       [] ev.tag = "Timeout"       -> ev.id.origin
-      [] ev.tag = "ListenerDrain" -> ev.id.origin
-      [] ev.tag = "CallbackDrain" -> ev.id.origin
 
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
@@ -753,72 +622,39 @@ Process(r) ==
                                   ![r].expect  = docs[o]]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-Finish(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending = << >>
-    /\ steps' = Del(steps, r)
-    /\ UNCHANGED <<docs, timeouts, outbox, now>>
-
-PutDocument(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = "PutDocument"
-    /\ docs[OriginOf(steps[r].ev)] = steps[r].expect
-    /\ LET o == OriginOf(steps[r].ev)
-       IN
-           /\ docs'  = [docs EXCEPT ![o] =
-                            Head(steps[r].pending).body]
-    /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<timeouts, outbox, now>>
-
-Restart(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = "PutDocument"
-    /\ docs[OriginOf(steps[r].ev)] /= steps[r].expect
-    /\ steps' = [steps EXCEPT ![r].phase = "process", ![r].pending = << >>]
-    /\ UNCHANGED <<docs, timeouts, outbox, now>>
-
-PutTimeout(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = "PutTimeout"
-    /\ timeouts' = timeouts \cup
-                     {Head(steps[r].pending).entry}
-    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<docs, outbox, now>>
-
-DelTimeout(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = "DelTimeout"
-    /\ timeouts' = timeouts \
-                     {Head(steps[r].pending).entry}
-    /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<docs, outbox, now>>
-
-Send(r) ==
-    /\ r \in DOMAIN steps
-    /\ steps[r].phase = "perform"
-    /\ steps[r].pending /= << >>
-    /\ Head(steps[r].pending).tag = "Send"
-    /\ outbox' = LET en == Head(steps[r].pending).entry
-                 IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
-    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<docs, timeouts, now>>
-
 Perform(r) ==
-    \/ PutTimeout(r)
-    \/ PutDocument(r)
-    \/ DelTimeout(r)
-    \/ Send(r)
-    \/ Restart(r)
-    \/ Finish(r)
+    /\ r \in DOMAIN steps
+    /\ steps[r].phase = "perform"
+    /\ IF steps[r].pending = << >> THEN
+           /\ steps' = Del(steps, r)
+           /\ UNCHANGED <<docs, timeouts, outbox, now>>
+       ELSE
+           LET e    == Head(steps[r].pending)
+               rest == [steps EXCEPT ![r].pending = Tail(@)]
+           IN
+               CASE e.tag = "PutTimeout" ->
+                        /\ timeouts' = timeouts \cup {e.entry}
+                        /\ steps'    = rest
+                        /\ UNCHANGED <<docs, outbox, now>>
+                 [] e.tag = "PutDocument" ->
+                        IF docs[OriginOf(steps[r].ev)] = steps[r].expect THEN
+                            /\ docs'  = [docs EXCEPT
+                                             ![OriginOf(steps[r].ev)] = e.body]
+                            /\ steps' = rest
+                            /\ UNCHANGED <<timeouts, outbox, now>>
+                        ELSE
+                            /\ steps' = [steps EXCEPT ![r].phase   = "process",
+                                                      ![r].pending = << >>]
+                            /\ UNCHANGED <<docs, timeouts, outbox, now>>
+                 [] e.tag = "DelTimeout" ->
+                        /\ timeouts' = timeouts \ {e.entry}
+                        /\ steps'    = rest
+                        /\ UNCHANGED <<docs, outbox, now>>
+                 [] OTHER ->
+                        /\ outbox' = { x \in outbox : MsgKey(x) /= MsgKey(e.entry) }
+                                       \cup {e.entry}
+                        /\ steps'  = rest
+                        /\ UNCHANGED <<docs, timeouts, now>>
 
 Crash(r) ==
     /\ r \in DOMAIN steps
@@ -896,11 +732,6 @@ SplitWrite ==
 
 NoSplitWrite ==
     ~SplitWrite
-
-DrainRan ==
-    \E r \in DOMAIN steps : steps[r].ev.tag = "CallbackDrain"
-NoDrainRan ==
-    ~DrainRan
 
 CT_preserved_settled_promise_record ==
     [][A!preserved_settled_promise_record]_vars

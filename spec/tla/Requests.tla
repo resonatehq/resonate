@@ -245,8 +245,6 @@ InternalEvent ==
        {}
     \cup On("Timeout", { [tag |-> "Timeout", id |-> i, kind |-> k]
                          : i \in Id, k \in DeadlineKind})
-    \cup On("ListenerDrain", { [tag |-> "ListenerDrain", id |-> i, address |-> a] : i \in Id, a \in Address})
-    \cup On("CallbackDrain", { [tag |-> "CallbackDrain", id |-> r.awaited, awaiter |-> r.awaiter] : r \in CallbackReq})
 
 Event ==
     ExternalEvent \cup InternalEvent
