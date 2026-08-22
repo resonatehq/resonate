@@ -86,7 +86,7 @@ NextS ==
           \/ \E e \in timeouts : SubmitInternal(e)
           \/ \E r \in DOMAIN steps :
                 Process(r) \/ Crash(r) \/ Retire(r) \/ Refuse(r)
-                           \/ Arm(r) \/ Disarm(r)
+                           \/ Arm(r) \/ Disarm(r) \/ Emit(r)
           \/ Clock
     \/ \E r \in DOMAIN steps : Walked(r)
 
@@ -97,6 +97,16 @@ SpecS ==
     InitS /\ [][NextS]_varsS
 
 -----------------------------------------------------------------------------
+
+SendsInto(ob, ms) ==
+    LET upto[n \in 0 .. Len(ms)] ==
+          IF n = 0 THEN
+              ob
+          ELSE
+              LET acc == upto[n - 1]
+              IN  { x \in acc : MsgKey(x) /= MsgKey(ms[n]) } \cup {ms[n]}
+    IN
+        upto[Len(ms)]
 
 ObjectsAt(d, o) ==
     LET D == [ p \in Origin |-> IF p = o THEN d ELSE docs[p] ]

@@ -25,15 +25,6 @@ A ==
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
 
-SendsInto(ob, ms) ==
-    LET upto[n \in 0 .. Len(ms)] ==
-          IF n = 0 THEN
-              ob
-          ELSE
-              LET acc == upto[n - 1]
-              IN  { x \in acc : MsgKey(x) /= MsgKey(ms[n]) } \cup {ms[n]}
-    IN
-        upto[Len(ms)]
 
 Write(doc, i, obj) ==
     [ x \in (DOMAIN doc) \cup {i} |-> IF x = i THEN obj ELSE doc[x] ]
@@ -740,9 +731,11 @@ Process(r) ==
                                   ![r].pending =
                                       Arms(o, W)
                                         \o << Variant("PutDocument",
-                                                      [body |-> final,
-                                                       sends |-> sends]) >>
-                                        \o Disarms(o, W),
+                                                      [body |-> final]) >>
+                                        \o Disarms(o, W)
+                                        \o [ n \in 1 .. Len(sends) |->
+                                               Variant("Send",
+                                                       [entry |-> sends[n]]) ],
                                   ![r].expect  = docs[o],
                                   ![r].at      = now]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
@@ -775,11 +768,8 @@ Commit(r) ==
            /\ docs'  = [docs EXCEPT ![o] =
                             VariantGetUnsafe("PutDocument",
                                              Head(steps[r].pending)).body]
-           /\ outbox' = SendsInto(outbox,
-                                   VariantGetUnsafe("PutDocument",
-                                                    Head(steps[r].pending)).sends)
     /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
-    /\ UNCHANGED <<timeouts, now>>
+    /\ UNCHANGED <<timeouts, outbox, now>>
 
 Refuse(r) ==
     /\ Heads(r, "PutDocument")
@@ -802,8 +792,15 @@ Disarm(r) ==
     /\ UNCHANGED <<docs, outbox, now>>
 
 
+Emit(r) ==
+    /\ Heads(r, "Send")
+    /\ outbox' = LET en == VariantGetUnsafe("Send", Head(steps[r].pending)).entry
+                 IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
+    /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
+    /\ UNCHANGED <<docs, timeouts, now>>
+
 Perform(r) ==
-    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r)
+    \/ Retire(r) \/ Commit(r) \/ Refuse(r) \/ Arm(r) \/ Disarm(r) \/ Emit(r)
 
 Crash(r) ==
     /\ r \in DOMAIN steps
