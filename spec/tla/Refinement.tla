@@ -50,7 +50,7 @@ Items(d0, t0) ==
     LET q1 == SetToSeq(Due(d0, t0))
         d1 == TimeOut(d0, t0)
         q2 == SetToSeq(Listening(d1))
-        d2 == Notify(d1, q2, t0).doc
+        d2 == Notify(d1, t0).doc
         q3 == SetToSeq(Awaiting(d2))
         d3 == Resume(d2, t0)
         q4 == SetToSeq(Leased(d3, t0))

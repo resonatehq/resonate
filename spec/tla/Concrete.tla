@@ -606,7 +606,9 @@ TimeOut(doc, t) ==
     [ i \in DOMAIN doc |->
         IF i \in Due(doc, t) THEN Project(doc[i], t) ELSE doc[i] ]
 
-Notify(doc, q, t) ==
+Notify(doc, t) ==
+    LET q == SetToSeq(Listening(doc))
+    IN
     [ doc   |-> [ i \in DOMAIN doc |->
                     IF i \in Settled(doc) THEN
                         [doc[i] EXCEPT !.promise.listeners = {}]
@@ -652,7 +654,9 @@ Expire(doc, t) ==
         ELSE
             doc[i] ]
 
-Retry(doc, q, t) ==
+Retry(doc, t) ==
+    LET q == SetToSeq(Retrying(doc, t))
+    IN
     [ doc   |-> [ i \in DOMAIN doc |->
                     IF i \in Retrying(doc, t) THEN
                         [ doc[i] EXCEPT !.task.retryAt = t + RetryTimeout ]
@@ -668,10 +672,10 @@ Retry(doc, q, t) ==
 
 Sweep(doc, t) ==
     LET d1 == TimeOut(doc, t)
-        o2 == Notify(d1, SetToSeq(Listening(d1)), t)
+        o2 == Notify(d1, t)
         d3 == Resume(o2.doc, t)
         d4 == Expire(d3, t)
-        o5 == Retry(d4, SetToSeq(Retrying(d4, t)), t)
+        o5 == Retry(d4, t)
     IN
         [ doc   |-> o5.doc,
           sends |-> o2.sends \o o5.sends ]
