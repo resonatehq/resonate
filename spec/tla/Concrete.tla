@@ -431,30 +431,42 @@ Handle(ev, doc, t) ==
              HandleTaskContinue(ev, doc, t)
       [] ev.tag = "Timeout" ->
              Skip(doc)
-      [] OTHER -> Skip(doc)
 
 -----------------------------------------------------------------------------
 
 OriginOf(ev) ==
-    CASE ev.tag = "PromiseGet"              -> ev.id.origin
-      [] ev.tag = "PromiseCreate"           -> ev.req.id.origin
-      [] ev.tag = "PromiseSettle"           -> ev.req.id.origin
+    CASE ev.tag = "PromiseGet" ->
+             ev.id.origin
+      [] ev.tag = "PromiseCreate" ->
+             ev.req.id.origin
+      [] ev.tag = "PromiseSettle" ->
+             ev.req.id.origin
       [] ev.tag = "PromiseRegisterCallback" ->
              ev.req.awaited.origin
       [] ev.tag = "PromiseRegisterListener" ->
              ev.awaited.origin
-      [] ev.tag = "TaskGet"       -> ev.id.origin
-      [] ev.tag = "TaskCreate"    -> ev.action.id.origin
-      [] ev.tag = "TaskAcquire"   -> ev.id.origin
-      [] ev.tag = "TaskFence"     -> ev.id.origin
-      [] ev.tag = "TaskSuspend"   -> ev.id.origin
-      [] ev.tag = "TaskFulfill"   -> ev.id.origin
-      [] ev.tag = "TaskRelease"   -> ev.id.origin
-      [] ev.tag = "TaskHalt"      -> ev.id.origin
-      [] ev.tag = "TaskContinue"  -> ev.id.origin
-      [] ev.tag = "Timeout"       -> ev.id.origin
-
-      [] OTHER -> CHOOSE o \in Origin : TRUE
+      [] ev.tag = "TaskGet" ->
+             ev.id.origin
+      [] ev.tag = "TaskCreate" ->
+             ev.action.id.origin
+      [] ev.tag = "TaskAcquire" ->
+             ev.id.origin
+      [] ev.tag = "TaskFence" ->
+             ev.id.origin
+      [] ev.tag = "TaskHeartbeat" ->
+             CHOOSE o \in Origin : TRUE
+      [] ev.tag = "TaskSuspend" ->
+             ev.id.origin
+      [] ev.tag = "TaskFulfill" ->
+             ev.id.origin
+      [] ev.tag = "TaskRelease" ->
+             ev.id.origin
+      [] ev.tag = "TaskHalt" ->
+             ev.id.origin
+      [] ev.tag = "TaskContinue" ->
+             ev.id.origin
+      [] ev.tag = "Timeout" ->
+             ev.id.origin
 
 -----------------------------------------------------------------------------
 
