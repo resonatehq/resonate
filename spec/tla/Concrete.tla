@@ -598,22 +598,6 @@ Set(f, k, v) ==
 Del(f, k) ==
     [x \in (DOMAIN f) \ {k} |-> f[x]]
 
-SubmitExternal(ev) ==
-    /\ ev \in ExternalEvent
-    /\ \E r \in Rid \ DOMAIN steps : steps' = Set(steps, r, Fresh(ev))
-    /\ UNCHANGED <<docs, timeouts, outbox, now>>
-
-SubmitInternal(e) ==
-    /\ e \in timeouts
-    /\ e.at <= now
-    /\ \E r \in Rid \ DOMAIN steps :
-           steps' = Set(steps, r,
-                        Fresh([tag |-> "Timeout", id |-> e.id, kind |-> e.kind]))
-    /\ UNCHANGED <<docs, timeouts, outbox, now>>
-
-SubmitDue(i, k) ==
-    \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
-
 Settled(doc) ==
     { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
 
@@ -736,6 +720,22 @@ Sweep(doc, t) ==
         Merge(s4, SweepRetryAt(s4.doc, t))
 
 -----------------------------------------------------------------------------
+
+SubmitExternal(ev) ==
+    /\ ev \in ExternalEvent
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Set(steps, r, Fresh(ev))
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
+
+SubmitInternal(e) ==
+    /\ e \in timeouts
+    /\ e.at <= now
+    /\ \E r \in Rid \ DOMAIN steps :
+           steps' = Set(steps, r,
+                        Fresh([tag |-> "Timeout", id |-> e.id, kind |-> e.kind]))
+    /\ UNCHANGED <<docs, timeouts, outbox, now>>
+
+SubmitDue(i, k) ==
+    \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
 
 Process(r) ==
     /\ r \in DOMAIN steps
