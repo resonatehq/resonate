@@ -576,11 +576,22 @@ Settled(doc) ==
 -----------------------------------------------------------------------------
 
 SweepTimeoutAt(doc, t) ==
-    [ i \in DOMAIN doc |->
-        IF doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t THEN
-            Project(doc[i], t)
-        ELSE
-            doc[i] ]
+    LET S  == { i \in DOMAIN doc :
+                  doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t }
+        qp == SetToSeq(S)
+        ql == SetToSeq({ i \in S : doc[i].task.state = "acquired" })
+        qr == SetToSeq({ i \in S : doc[i].task.state = "pending" })
+    IN
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in S THEN Project(doc[i], t) ELSE doc[i] ],
+      puts  |-> << >>,
+      dels  |->    [ n \in 1 .. Len(qp) |->
+                       [at |-> doc[qp[n]].promise.timeoutAt, id |-> qp[n], kind |-> "promise"] ]
+                \o [ n \in 1 .. Len(ql) |->
+                       [at |-> doc[ql[n]].task.expiresAt,    id |-> ql[n], kind |-> "lease"] ]
+                \o [ n \in 1 .. Len(qr) |->
+                       [at |-> doc[qr[n]].task.retryAt,      id |-> qr[n], kind |-> "retry"] ],
+      sends |-> << >> ]
 
 SweepListeners(doc, t) ==
     LET q == SetToSeq({ x \in [id : Settled(doc), address : Address] :
@@ -591,6 +602,8 @@ SweepListeners(doc, t) ==
                         [doc[i] EXCEPT !.promise.listeners = {}]
                     ELSE
                         doc[i] ],
+      puts  |-> << >>,
+      dels  |-> << >>,
       sends |-> [ n \in 1 .. Len(q) |->
                     [ address |-> q[n].address,
                       message |-> [ tag   |-> "Unblock",
@@ -602,47 +615,62 @@ SweepCallbacks(doc, t) ==
                    x.awaiter \in doc[x.id].promise.callbacks }
         Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
         Woken      == { x.awaiter : x \in S } \cap DOMAIN doc
-    IN
-        [ i \in DOMAIN doc |->
-            LET struck == IF i \in Settled(doc) THEN
-                              [doc[i] EXCEPT !.promise.callbacks = {}]
-                          ELSE
-                              doc[i]
-            IN
-                IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
-                    struck
-                ELSE IF struck.task.state = "suspended" THEN
-                    [struck EXCEPT !.task.state     = "pending",
-                                   !.task.pid       = NoPid,
-                                   !.task.ttl       = NoTime,
-                                   !.task.expiresAt = NoTime,
-                                   !.task.retryAt   = t,
-                                   !.task.resumes   = Resumes(i)]
-                ELSE
-                    [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ]
-
-SweepExpiresAt(doc, t) ==
-    [ i \in DOMAIN doc |->
-        IF doc[i].task.state = "acquired" /\ doc[i].task.expiresAt <= t THEN
-            [ doc[i] EXCEPT !.task.state     = "pending",
-                            !.task.pid       = NoPid,
-                            !.task.ttl       = NoTime,
-                            !.task.expiresAt = NoTime,
-                            !.task.retryAt   = t ]
-        ELSE
-            doc[i] ]
-
-SweepRetryAt(doc, t) ==
-    LET R == { i \in DOMAIN doc :
-                 /\ doc[i].task.state = "pending"
-                 /\ doc[i].task.retryAt <= t }
-        q == SetToSeq(R)
+        q  == SetToSeq({ w \in Woken : doc[w].task.state = "suspended" })
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in R THEN
+                    LET struck == IF i \in Settled(doc) THEN
+                                      [doc[i] EXCEPT !.promise.callbacks = {}]
+                                  ELSE
+                                      doc[i]
+                    IN
+                        IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
+                            struck
+                        ELSE IF struck.task.state = "suspended" THEN
+                            [struck EXCEPT !.task.state     = "pending",
+                                           !.task.pid       = NoPid,
+                                           !.task.ttl       = NoTime,
+                                           !.task.expiresAt = NoTime,
+                                           !.task.retryAt   = t,
+                                           !.task.resumes   = Resumes(i)]
+                        ELSE
+                            [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ],
+      puts  |-> [ n \in 1 .. Len(q) |-> [at |-> t, id |-> q[n], kind |-> "retry"] ],
+      dels  |-> << >>,
+      sends |-> << >> ]
+
+SweepExpiresAt(doc, t) ==
+    LET S == { i \in DOMAIN doc :
+                 doc[i].task.state = "acquired" /\ doc[i].task.expiresAt <= t }
+        q == SetToSeq(S)
+    IN
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in S THEN
+                        [ doc[i] EXCEPT !.task.state     = "pending",
+                                        !.task.pid       = NoPid,
+                                        !.task.ttl       = NoTime,
+                                        !.task.expiresAt = NoTime,
+                                        !.task.retryAt   = t ]
+                    ELSE
+                        doc[i] ],
+      puts  |-> [ n \in 1 .. Len(q) |-> [at |-> t, id |-> q[n], kind |-> "retry"] ],
+      dels  |-> [ n \in 1 .. Len(q) |->
+                    [at |-> doc[q[n]].task.expiresAt, id |-> q[n], kind |-> "lease"] ],
+      sends |-> << >> ]
+
+SweepRetryAt(doc, t) ==
+    LET S == { i \in DOMAIN doc :
+                 doc[i].task.state = "pending" /\ doc[i].task.retryAt <= t }
+        q == SetToSeq(S)
+    IN
+    [ doc   |-> [ i \in DOMAIN doc |->
+                    IF i \in S THEN
                         [ doc[i] EXCEPT !.task.retryAt = t + RetryTimeout ]
                     ELSE
                         doc[i] ],
+      puts  |-> [ n \in 1 .. Len(q) |->
+                    [at |-> t + RetryTimeout, id |-> q[n], kind |-> "retry"] ],
+      dels  |-> [ n \in 1 .. Len(q) |->
+                    [at |-> doc[q[n]].task.retryAt, id |-> q[n], kind |-> "retry"] ],
       sends |-> [ n \in 1 .. Len(q) |->
                     [ address |-> doc[q[n]].promise.tags.target,
                       message |-> [ tag     |-> "Execute",
@@ -651,66 +679,73 @@ SweepRetryAt(doc, t) ==
 
 -----------------------------------------------------------------------------
 
+Merge(a, b) ==
+    [ doc   |-> b.doc,
+      puts  |-> a.puts  \o b.puts,
+      dels  |-> a.dels  \o b.dels,
+      sends |-> a.sends \o b.sends ]
+
 Sweep(doc, t) ==
-    LET d1 == SweepTimeoutAt(doc, t)
-        o2 == SweepListeners(d1, t)
-        d3 == SweepCallbacks(o2.doc, t)
-        d4 == SweepExpiresAt(d3, t)
-        o5 == SweepRetryAt(d4, t)
+    LET s1 == SweepTimeoutAt(doc, t)
+        s2 == Merge(s1, SweepListeners(s1.doc, t))
+        s3 == Merge(s2, SweepCallbacks(s2.doc, t))
+        s4 == Merge(s3, SweepExpiresAt(s3.doc, t))
     IN
-        [ doc   |-> o5.doc,
-          sends |-> o2.sends \o o5.sends ]
+        Merge(s4, SweepRetryAt(s4.doc, t))
 
-
-Was(o, i, k) ==
-    IF i \in DOMAIN docs[o] THEN
-        Deadline(docs[o][i], k)
+Was(base, i, k) ==
+    IF i \in DOMAIN base THEN
+        Deadline(base[i], k)
     ELSE
         NoTime
 
-PutTimeoutFor(o, i, new, k) ==
-    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(o, i, k) THEN
-        << [tag |-> "PutTimeout", entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]] >>
+PutTimeoutFor(base, i, new, k) ==
+    IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(base, i, k) THEN
+        << [at |-> Deadline(new, k), id |-> i, kind |-> k] >>
     ELSE
         << >>
 
-DelTimeoutFor(o, i, new, k) ==
-    IF Was(o, i, k) /= NoTime /\ Was(o, i, k) /= Deadline(new, k) THEN
-        << [tag |-> "DelTimeout", entry |-> [at |-> Was(o, i, k), id |-> i, kind |-> k]] >>
+DelTimeoutFor(base, i, new, k) ==
+    IF Was(base, i, k) /= NoTime /\ Was(base, i, k) /= Deadline(new, k) THEN
+        << [at |-> Was(base, i, k), id |-> i, kind |-> k] >>
     ELSE
         << >>
 
-PutTimeouts(o, W) ==
+PutTimeouts(base, W) ==
     FoldSet(LAMBDA acc, w :
-                acc \o PutTimeoutFor(o, w.id, w.obj, "promise")
-                    \o PutTimeoutFor(o, w.id, w.obj, "lease")
-                    \o PutTimeoutFor(o, w.id, w.obj, "retry"),
+                acc \o PutTimeoutFor(base, w.id, w.obj, "promise")
+                    \o PutTimeoutFor(base, w.id, w.obj, "lease")
+                    \o PutTimeoutFor(base, w.id, w.obj, "retry"),
             << >>, W)
 
-DelTimeouts(o, W) ==
+DelTimeouts(base, W) ==
     FoldSet(LAMBDA acc, w :
-                acc \o DelTimeoutFor(o, w.id, w.obj, "promise")
-                    \o DelTimeoutFor(o, w.id, w.obj, "lease")
-                    \o DelTimeoutFor(o, w.id, w.obj, "retry"),
+                acc \o DelTimeoutFor(base, w.id, w.obj, "promise")
+                    \o DelTimeoutFor(base, w.id, w.obj, "lease")
+                    \o DelTimeoutFor(base, w.id, w.obj, "retry"),
             << >>, W)
 
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
-    /\ LET o   == OriginOf(steps[r].ev)
+    /\ LET o     == OriginOf(steps[r].ev)
            swept == Sweep(docs[o], now)
            out   == Handle(steps[r].ev, swept.doc, now)
            final == out.doc
+           W     == { [id |-> i, obj |-> final[i]] :
+                        i \in { j \in DOMAIN final :
+                                   \/ j \notin DOMAIN swept.doc
+                                   \/ final[j] /= swept.doc[j] } }
+           puts  == swept.puts  \o PutTimeouts(swept.doc, W)
+           dels  == swept.dels  \o DelTimeouts(swept.doc, W)
            sends == swept.sends \o out.sends
-           W   == { [id |-> i, obj |-> final[i]] :
-                      i \in { j \in DOMAIN final :
-                                 \/ j \notin DOMAIN docs[o]
-                                 \/ final[j] /= docs[o][j] } }
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending =
-                                      PutTimeouts(o, W)
+                                      [ n \in 1 .. Len(puts) |->
+                                          [tag |-> "PutTimeout", entry |-> puts[n]] ]
                                         \o << [tag |-> "PutDocument", body |-> final] >>
-                                        \o DelTimeouts(o, W)
+                                        \o [ n \in 1 .. Len(dels) |->
+                                               [tag |-> "DelTimeout", entry |-> dels[n]] ]
                                         \o [ n \in 1 .. Len(sends) |->
                                                [tag |-> "Send", entry |-> sends[n]] ],
                                   ![r].expect  = docs[o]]
