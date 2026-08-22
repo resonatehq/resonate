@@ -12,24 +12,6 @@ vars ==
 -----------------------------------------------------------------------------
 
 (* @type: ($object, Int) => $object; *)
-Project(obj, t) ==
-    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
-        [ promise |-> [obj.promise EXCEPT
-                          !.state     = IF obj.promise.tags.timer THEN "resolved"
-                                        ELSE "rejectedTimedout",
-                          !.value     = NoValue,
-                          !.settledAt = obj.promise.timeoutAt],
-          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
-                                                     ELSE "fulfilled",
-                                       !.pid       = NoPid,
-                                       !.ttl       = NoTime,
-                                       !.expiresAt = NoTime,
-                                       !.retryAt   = NoTime,
-                                       !.resumes   = {}] ]
-    ELSE
-        obj
-
-(* @type: ($createReq, Int) => $object; *)
 New(req, t) ==
     IF req.timeoutAt > t THEN
         [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
@@ -52,6 +34,26 @@ New(req, t) ==
                           [NoTask EXCEPT !.state = "fulfilled"]
                       ELSE
                           NoTask ]
+
+Project(obj, t) ==
+    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
+        [ promise |-> [obj.promise EXCEPT
+                          !.state     = IF obj.promise.tags.timer THEN "resolved"
+                                        ELSE "rejectedTimedout",
+                          !.value     = NoValue,
+                          !.settledAt = obj.promise.timeoutAt],
+          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
+                                                     ELSE "fulfilled",
+                                       !.pid       = NoPid,
+                                       !.ttl       = NoTime,
+                                       !.expiresAt = NoTime,
+                                       !.retryAt   = NoTime,
+                                       !.resumes   = {}] ]
+    ELSE
+        obj
+
+(* @type: ($createReq, Int) => $object; *)
+
 
 -----------------------------------------------------------------------------
 
@@ -447,6 +449,12 @@ Safety ==
    terminated. This is the bound, as a state constraint rather than a guard,
    because a protocol that stopped bumping at MaxVersion would be a different
    protocol. *)
+DeadlinesInTime ==
+    \A i \in DOMAIN objects :
+        /\ objects[i].task.retryAt   \in Time \cup {NoTime}
+        /\ objects[i].task.expiresAt \in Time \cup {NoTime}
+        /\ objects[i].promise.timeoutAt \in Time
+
 VersionBound ==
     \A i \in DOMAIN objects : objects[i].task.version <= MaxVersion
 

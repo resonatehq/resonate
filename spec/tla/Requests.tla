@@ -80,6 +80,19 @@ ASSUME RetryTimeout > 0
 EmptyFn ==
     << >>
 
+Write(doc, i, obj) ==
+    [ x \in (DOMAIN doc) \cup {i} |-> IF x = i THEN obj ELSE doc[x] ]
+
+FoldSet(Op(_,_), base, S) ==
+    LET f[T \in SUBSET S] ==
+          IF T = {} THEN
+              base
+          ELSE
+              LET x == CHOOSE y \in T : TRUE
+              IN  Op(f[T \ {x}], x)
+    IN
+        f[S]
+
 Time ==
     0 .. MaxTime
 Version ==

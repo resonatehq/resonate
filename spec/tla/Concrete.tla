@@ -24,42 +24,6 @@ A ==
 
 -----------------------------------------------------------------------------
 -----------------------------------------------------------------------------
-
-
-Write(doc, i, obj) ==
-    [ x \in (DOMAIN doc) \cup {i} |-> IF x = i THEN obj ELSE doc[x] ]
-
-FoldSet(Op(_,_), base, S) ==
-    LET f[T \in SUBSET S] ==
-          IF T = {} THEN
-              base
-          ELSE
-              LET x == CHOOSE y \in T : TRUE
-              IN  Op(f[T \ {x}], x)
-    IN
-        f[S]
-
-
-
-
-
-Project(obj, t) ==
-    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
-        [ promise |-> [obj.promise EXCEPT
-                          !.state     = IF obj.promise.tags.timer THEN "resolved"
-                                        ELSE "rejectedTimedout",
-                          !.value     = NoValue,
-                          !.settledAt = obj.promise.timeoutAt],
-          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
-                                                     ELSE "fulfilled",
-                                       !.pid       = NoPid,
-                                       !.ttl       = NoTime,
-                                       !.expiresAt = NoTime,
-                                       !.retryAt   = NoTime,
-                                       !.resumes   = {}] ]
-    ELSE
-        obj
-
 New(req, t) ==
     IF req.timeoutAt > t THEN
         [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
@@ -81,6 +45,24 @@ New(req, t) ==
                           [NoTask EXCEPT !.state = "fulfilled"]
                       ELSE
                           NoTask ]
+
+Project(obj, t) ==
+    IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
+        [ promise |-> [obj.promise EXCEPT
+                          !.state     = IF obj.promise.tags.timer THEN "resolved"
+                                        ELSE "rejectedTimedout",
+                          !.value     = NoValue,
+                          !.settledAt = obj.promise.timeoutAt],
+          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
+                                                     ELSE "fulfilled",
+                                       !.pid       = NoPid,
+                                       !.ttl       = NoTime,
+                                       !.expiresAt = NoTime,
+                                       !.retryAt   = NoTime,
+                                       !.resumes   = {}] ]
+    ELSE
+        obj
+
 
 HandlePromiseGet(req, env) ==
     [ doc   |-> env.objects,
