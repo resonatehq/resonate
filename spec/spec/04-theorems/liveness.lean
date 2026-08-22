@@ -37,10 +37,10 @@ so enabledness is not needed for safety; it is needed to say that
 something is *owed*. -/
 
 def promiseAt (s : ServerState) (id : String) : Option PromiseObject :=
-  s.promises.find? (·.id == id)
+  s.promise? id
 
 def taskAt (s : ServerState) (id : String) : Option TaskObject :=
-  s.tasks.find? (·.id == id)
+  s.task? id
 
 def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with

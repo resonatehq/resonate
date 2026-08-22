@@ -142,11 +142,19 @@ even when the defect is one bad row. These three build the smallest
 state that holds one object, which is what most of the violators below
 want. -/
 
+/-- A task no longer stands alone, so `oneTask` supplies the promise it
+    is part of — a targeted one, since that is what the catalogue says
+    carries a task. Which promise does not matter to the task entries
+    below; that it must be SOME promise is the fusion showing up here. -/
+def carrier : AbstractModel.PromiseObject :=
+  { state := .pending, param := {}, tags := [("resonate:target","w")],
+    timeoutAt := 100, createdAt := 10 }
+
 def onePromise (p : AbstractModel.PromiseObject) : AbstractModel.ServerState :=
-  { promises := [p] }
+  { objects := [{ id := "a", promise := p }] }
 
 def oneTask (t : AbstractModel.TaskObject) : AbstractModel.ServerState :=
-  { tasks := [t] }
+  { objects := [{ id := "a", promise := carrier, task := some t }] }
 
 def oneSchedule (c : ServerModel.Schedule) : AbstractModel.ServerState :=
   { schedules := [c] }
@@ -154,9 +162,12 @@ def oneSchedule (c : ServerModel.Schedule) : AbstractModel.ServerState :=
 open ServerModel AbstractModel.Properties in
 def mutants : List (String × Bool) :=
   let P : AbstractModel.PromiseObject :=
-    { id := "a", state := .pending, param := {}, tags := [("resonate:external","true")],
+    { state := .pending, param := {}, tags := [("resonate:external","true")],
       timeoutAt := 100, createdAt := 10 }
-  let T : AbstractModel.TaskObject := { id := "a", state := .pending, version := 1, retryAt := some 0 }
+  let T : AbstractModel.TaskObject := { state := .pending, version := 1, retryAt := some 0 }
+  let obj : AbstractModel.PromiseObject → Option AbstractModel.TaskObject →
+              AbstractModel.ServerState :=
+    fun p t => { objects := [{ id := "a", promise := p, task := t }] }
   let C : Schedule := { id := "c", cron := "*", promiseId := "p", promiseTimeout := 1,
                         promiseParam := {}, promiseTags := [], nextRunAt := 50, createdAt := 10 }
   [ ("well_formed_promise_created_at_lte_timeout_at",
@@ -223,34 +234,53 @@ def mutants : List (String × Bool) :=
        well_formed_promise_deadline_settlement_has_no_value 0 (onePromise { P with state := .rejectedTimedout, settledAt := some 100, value := { data := some "boom" } })),
     ("well_formed_task_acquired_version_positive",
        well_formed_task_acquired_version_positive 0 (oneTask { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none })),
+    -- Both halves of the entry still have a violator to name. Fusing
+    -- the row stopped the MACHINE from writing them; it did not stop the
+    -- catalogue from saying they are wrong, which is the whole reason
+    -- the entry survived the fusion.
     ("consistent_task_iff_targeted_promise/task_without_target",
-       consistent_task_iff_targeted_promise 0 { promises := [P], tasks := [T] }),
+       consistent_task_iff_targeted_promise 0 (obj P (some T))),
     ("consistent_task_iff_targeted_promise/target_without_task",
-       consistent_task_iff_targeted_promise 0 { promises := [{ P with tags := [("resonate:target","w")] }] }),
+       consistent_task_iff_targeted_promise 0
+         (obj { P with tags := [("resonate:target","w")] } none)),
     ("consistent_settled_promise_has_fulfilled_task",
-       consistent_settled_promise_has_fulfilled_task 0 { promises := [{ P with state := .resolved, settledAt := some 20 }], tasks := [T] }),
+       consistent_settled_promise_has_fulfilled_task 0
+         (obj { P with state := .resolved, settledAt := some 20 } (some T))),
     ("consistent_callback_awaiter_is_targeted",
-       consistent_callback_awaiter_is_targeted 0 { promises := [{ P with callbacks := ["z"] }] }),
+       consistent_callback_awaiter_is_targeted 0 (obj { P with callbacks := ["z"] } none)),
     ("consistent_listener_addresses_deliverable",
-       consistent_listener_addresses_deliverable 0 { promises := [{ P with listeners := ["not-an-address"] }] }),
+       consistent_listener_addresses_deliverable 0
+         (obj { P with listeners := ["not-an-address"] } none)),
     ("consistent_outbox_execute_names_existing_task",
        consistent_outbox_execute_names_existing_task 0 { outbox := [{ address := "w", message := .execute "ghost" 0 }] }),
     ("consistent_outbox_never_ahead",
-       consistent_outbox_never_ahead 0 { tasks := [T], outbox := [{ address := "w", message := .execute "a" 9 }] }),
+       consistent_outbox_never_ahead 0
+         { objects := [{ id := "a", promise := carrier, task := some T }],
+           outbox := [{ address := "w", message := .execute "a" 9 }] }),
     ("consistent_outbox_execute_address_is_target_tag",
-       consistent_outbox_execute_address_is_target_tag 0 { promises := [{ P with tags := [("resonate:target","w")] }], outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
+       consistent_outbox_execute_address_is_target_tag 0
+         { objects := [{ id := "a", promise := { P with tags := [("resonate:target","w")] } }],
+           outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
     ("consistent_outbox_unblock_names_settled_promise",
-       consistent_outbox_unblock_names_settled_promise 0 { promises := [P], outbox := [{ address := "https://l", message := .unblock P.toRecord }] }),
+       consistent_outbox_unblock_names_settled_promise 0
+         { objects := [{ id := "a", promise := P }],
+           outbox := [{ address := "https://l", message := .unblock (P.toRecord "a") }] }),
     ("consistent_outbox_unblock_address_deliverable",
-       consistent_outbox_unblock_address_deliverable 0 { promises := [{ P with state := .resolved, settledAt := some 20 }], outbox := [{ address := "nope", message := .unblock ({ P with state := .resolved, settledAt := some 20 } : AbstractModel.PromiseObject).toRecord }] }),
+       consistent_outbox_unblock_address_deliverable 0
+         { objects := [{ id := "a", promise := { P with state := .resolved, settledAt := some 20 } }],
+           outbox := [{ address := "nope",
+                        message := .unblock
+                          (({ P with state := .resolved, settledAt := some 20 }
+                              : AbstractModel.PromiseObject).toRecord "a") }] }),
     ("consistent_settled_task_promise_settled",
-       consistent_settled_task_promise_settled 0 { promises := [P], tasks := [{ T with state := .fulfilled, retryAt := none }] }),
+       consistent_settled_task_promise_settled 0
+         (obj P (some { T with state := .fulfilled, retryAt := none }))),
     ("consistent_suspended_task_holds_rung",
-       consistent_suspended_task_holds_rung 50 { promises := [P], tasks := [{ T with state := .suspended, retryAt := none }] }),
-    ("well_formed_store_promise_ids_unique",
-       well_formed_store_promise_ids_unique 0 { promises := [P, P] }),
-    ("well_formed_store_task_ids_unique",
-       well_formed_store_task_ids_unique 0 { tasks := [T, T] }),
+       consistent_suspended_task_holds_rung 50
+         (obj P (some { T with state := .suspended, retryAt := none }))),
+    ("well_formed_store_object_ids_unique",
+       well_formed_store_object_ids_unique 0
+         { objects := [{ id := "a", promise := P }, { id := "a", promise := P }] }),
     ("well_formed_store_schedule_ids_unique",
        well_formed_store_schedule_ids_unique 0 { schedules := [C, C] }),
     ("well_formed_store_outbox_keys_unique",

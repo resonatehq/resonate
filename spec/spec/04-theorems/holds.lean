@@ -33,7 +33,7 @@ finding which entries need it was the informative part of the work.
 
 ## What this is not
 
-It is not `valid_implies_legal`. That theorem needs ALL 95 entries; the
+It is not `valid_implies_legal`. That theorem needs ALL 94 entries; the
 count below is what is currently proved. The remainder are still backed
 only by the 1 464-script sweep, which `bounded.lean` shows is the same
 statement with both quantifiers made finite. -/
@@ -352,9 +352,10 @@ section NotInductiveAlone
 open AbstractModel
 
 def sneaky : ServerState :=
-  { promises := [{ id := "p", state := .pending, param := {},
-                   value := { data := some "x", headers := [] },
-                   tags := [], timeoutAt := 10, createdAt := 0 }] }
+  { objects := [{ id := "p",
+                  promise := { state := .pending, param := {},
+                               value := { data := some "x", headers := [] },
+                               tags := [], timeoutAt := 10, createdAt := 0 } }] }
 
 theorem sneaky_satisfies_the_entry :
     Properties.well_formed_promise_deadline_settlement_has_no_value 0 sneaky = true := by
