@@ -737,11 +737,6 @@ Sweep(doc, t) ==
 
 -----------------------------------------------------------------------------
 
-Armed(doc) ==
-    { e \in { [at |-> Deadline(doc[i], k), id |-> i, kind |-> k] :
-                i \in DOMAIN doc, k \in DeadlineKind } :
-        e.at /= NoTime }
-
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
@@ -881,6 +876,11 @@ C_TypeOK ==
     A!TypeOK
 C_UnitCoherent ==
     A!UnitCoherent
+
+Armed(doc) ==
+    { e \in { [at |-> Deadline(doc[i], k), id |-> i, kind |-> k] :
+                i \in DOMAIN doc, k \in DeadlineKind } :
+        e.at /= NoTime }
 
 C_WheelSound ==
     timeouts \subseteq Armed(Objects)
