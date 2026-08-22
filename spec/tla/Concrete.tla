@@ -733,9 +733,6 @@ SubmitInternal(e) ==
                         Fresh([tag |-> "Timeout", id |-> e.id, kind |-> e.kind]))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
-SubmitDue(i, k) ==
-    \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
-
 Process(r) ==
     /\ r \in DOMAIN steps
     /\ steps[r].phase = "process"
@@ -849,7 +846,9 @@ EventuallyStable ==
 
 Fairness ==
     /\ \A r  \in Rid             : WF_vars(Process(r) \/ Perform(r))
-    /\ \A i \in Id, k \in DeadlineKind : SF_vars(SubmitDue(i, k))
+    /\ \A i \in Id, k \in DeadlineKind :
+           SF_vars(\E e \in timeouts :
+                       e.id = i /\ e.kind = k /\ SubmitInternal(e))
     /\ WF_vars(Clock)
     /\ EventuallyStable
 
