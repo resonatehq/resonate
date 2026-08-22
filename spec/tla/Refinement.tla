@@ -187,7 +187,7 @@ ProcessCallback(req, doc, t) ==
                                       [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
                 IN
                     IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                        [ doc   |-> struck,
+                        [ doc   |-> Write(struck, req.awaiter, awaiter),
                           puts  |-> << >>,
                           dels  |-> << >>,
                           sends |-> << >> ]

@@ -360,7 +360,7 @@ ProcessCallback ==
                              awaiter == Project(struck[w], now)
                          IN
                              IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                                 objects' = struck
+                                 objects' = Write(struck, w, awaiter)
                              ELSE
                                  objects' =
                                      Write(struck, w,
