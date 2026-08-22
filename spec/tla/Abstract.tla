@@ -357,13 +357,14 @@ ProcessCallback ==
                 /\ \/ /\ w \notin DOMAIN objects
                       /\ objects' = Write(objects, i, newAwaited)
                    \/ /\ w \in DOMAIN objects
-                      /\ LET awaiter == Project(objects[w], now)
+                      /\ LET struck  == Write(objects, i, newAwaited)
+                             awaiter == Project(struck[w], now)
                          IN
                              IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                                 objects' = Write(objects, i, newAwaited)
+                                 objects' = struck
                              ELSE
                                  objects' =
-                                     Write(Write(objects, w,
+                                     Write(struck, w,
                                            IF awaiter.task.state = "suspended" THEN
                                              [awaiter EXCEPT
                                                  !.task.state     = "pending",
@@ -374,7 +375,7 @@ ProcessCallback ==
                                                  !.task.resumes   = {i}]
                                          ELSE
                                              [awaiter EXCEPT
-                                                 !.task.resumes = @ \cup {i}]), i, newAwaited)
+                                                 !.task.resumes = @ \cup {i}])
                 /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------

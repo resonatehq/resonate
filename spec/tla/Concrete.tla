@@ -443,7 +443,8 @@ ProcessCallback(req, env) ==
                 [ doc   |-> Write(env.objects, req.id, newAwaited),
                   sends |-> << >> ]
             ELSE
-                LET awaiter    == Project(env.objects[req.awaiter], env.now)
+                LET struck     == Write(env.objects, req.id, newAwaited)
+                    awaiter    == Project(struck[req.awaiter], env.now)
                     newAwaiter == IF awaiter.task.state = "suspended" THEN
                                       [awaiter EXCEPT !.task.state     = "pending",
                                                       !.task.pid       = NoPid,
@@ -455,10 +456,10 @@ ProcessCallback(req, env) ==
                                       [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
                 IN
                     IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                        [ doc   |-> Write(env.objects, req.id, newAwaited),
+                        [ doc   |-> struck,
                           sends |-> << >> ]
                     ELSE
-                        [ doc   |-> Write(Write(env.objects, req.id, newAwaited), req.awaiter, newAwaiter),
+                        [ doc   |-> Write(struck, req.awaiter, newAwaiter),
                           sends |-> << >> ]
 
 ProcessPromiseTimeout(req, env) ==
