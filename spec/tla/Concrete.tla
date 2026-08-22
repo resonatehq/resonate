@@ -209,18 +209,18 @@ HandleTaskFence(req, env) ==
     ELSE
         LET old == Project(env.objects[req.id], env.now)
         IN
-            IF \/ (IF VariantTag(req.action) = "Create"
-                   THEN VariantGetUnsafe("Create", req.action).req.id
-                   ELSE VariantGetUnsafe("Settle", req.action).req.id) = req.id
+            IF \/ (IF req.action.tag = "Create"
+                   THEN req.action.req.id
+                   ELSE req.action.req.id) = req.id
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
                 [ doc   |-> env.objects,
                   sends |-> << >> ]
-            ELSE IF VariantTag(req.action) = "Create" THEN
-                HandlePromiseCreate(VariantGetUnsafe("Create", req.action).req, env)
+            ELSE IF req.action.tag = "Create" THEN
+                HandlePromiseCreate(req.action.req, env)
             ELSE
-                HandlePromiseSettle(VariantGetUnsafe("Settle", req.action).req, env)
+                HandlePromiseSettle(req.action.req, env)
 
 HandleTaskHeartbeat(req, env) ==
     LET beat == { i \in DOMAIN env.objects :
@@ -407,9 +407,8 @@ ProcessRetryTimeout(i, env) ==
             ELSE
                 [ doc   |-> Write(env.objects, i, new),
                   sends |-> << [ address |-> old.promise.tags.target,
-                                 message |-> Variant("Execute",
-                                                     [ id      |-> i,
-                                                       version |-> old.task.version ]) ] >> ]
+                                 message |-> [tag |-> "Execute", id      |-> i,
+                                                       version |-> old.task.version] ] >> ]
 
 ProcessListener(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
@@ -426,9 +425,8 @@ ProcessListener(req, env) ==
             ELSE
                 [ doc   |-> Write(env.objects, req.id, newAwaited),
                    sends |-> << [ address |-> req.address,
-                                 message |-> Variant("Unblock",
-                                                     [ id    |-> req.id,
-                                                       state |-> awaited.promise.state ]) ] >> ]
+                                 message |-> [tag |-> "Unblock", id    |-> req.id,
+                                                       state |-> awaited.promise.state] ] >> ]
 
 ProcessCallback(req, env) ==
     IF req.id \notin DOMAIN env.objects THEN
@@ -480,73 +478,70 @@ ProcessPromiseTimeout(req, env) ==
                   sends |-> << >> ]
 
 Handle(ev, env) ==
-    LET p(tag) == VariantGetUnsafe(tag, ev)
-    IN
-    CASE VariantTag(ev) = "PromiseGet" ->
-             HandlePromiseGet(p("PromiseGet"), env)
-      [] VariantTag(ev) = "PromiseCreate" ->
-             HandlePromiseCreate(p("PromiseCreate").req, env)
-      [] VariantTag(ev) = "PromiseSettle" ->
-             HandlePromiseSettle(p("PromiseSettle").req, env)
-      [] VariantTag(ev) = "PromiseRegisterCallback" ->
-             HandlePromiseRegisterCallback(p("PromiseRegisterCallback").req, env)
-      [] VariantTag(ev) = "PromiseRegisterListener" ->
-             HandlePromiseRegisterListener(p("PromiseRegisterListener"), env)
-      [] VariantTag(ev) = "TaskGet" ->
-             HandleTaskGet(p("TaskGet"), env)
-      [] VariantTag(ev) = "TaskCreate" ->
-             HandleTaskCreate(p("TaskCreate"), env)
-      [] VariantTag(ev) = "TaskAcquire" ->
-             HandleTaskAcquire(p("TaskAcquire"), env)
-      [] VariantTag(ev) = "TaskFence" ->
-             HandleTaskFence(p("TaskFence"), env)
-      [] VariantTag(ev) = "TaskHeartbeat" ->
-             HandleTaskHeartbeat(p("TaskHeartbeat"), env)
-      [] VariantTag(ev) = "TaskSuspend" ->
-             HandleTaskSuspend(p("TaskSuspend"), env)
-      [] VariantTag(ev) = "TaskFulfill" ->
-             HandleTaskFulfill(p("TaskFulfill"), env)
-      [] VariantTag(ev) = "TaskRelease" ->
-             HandleTaskRelease(p("TaskRelease"), env)
-      [] VariantTag(ev) = "TaskHalt" ->
-             HandleTaskHalt(p("TaskHalt"), env)
-      [] VariantTag(ev) = "TaskContinue" ->
-             HandleTaskContinue(p("TaskContinue"), env)
-      [] VariantTag(ev) = "Timeout" ->
-             LET d == p("Timeout")
+    CASE ev.tag = "PromiseGet" ->
+             HandlePromiseGet(ev, env)
+      [] ev.tag = "PromiseCreate" ->
+             HandlePromiseCreate(ev.req, env)
+      [] ev.tag = "PromiseSettle" ->
+             HandlePromiseSettle(ev.req, env)
+      [] ev.tag = "PromiseRegisterCallback" ->
+             HandlePromiseRegisterCallback(ev.req, env)
+      [] ev.tag = "PromiseRegisterListener" ->
+             HandlePromiseRegisterListener(ev, env)
+      [] ev.tag = "TaskGet" ->
+             HandleTaskGet(ev, env)
+      [] ev.tag = "TaskCreate" ->
+             HandleTaskCreate(ev, env)
+      [] ev.tag = "TaskAcquire" ->
+             HandleTaskAcquire(ev, env)
+      [] ev.tag = "TaskFence" ->
+             HandleTaskFence(ev, env)
+      [] ev.tag = "TaskHeartbeat" ->
+             HandleTaskHeartbeat(ev, env)
+      [] ev.tag = "TaskSuspend" ->
+             HandleTaskSuspend(ev, env)
+      [] ev.tag = "TaskFulfill" ->
+             HandleTaskFulfill(ev, env)
+      [] ev.tag = "TaskRelease" ->
+             HandleTaskRelease(ev, env)
+      [] ev.tag = "TaskHalt" ->
+             HandleTaskHalt(ev, env)
+      [] ev.tag = "TaskContinue" ->
+             HandleTaskContinue(ev, env)
+      [] ev.tag = "Timeout" ->
+             LET d == ev
              IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d, env)
                    [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, env)
                    [] OTHER              -> ProcessRetryTimeout(d.id, env)
-      [] VariantTag(ev) = "ListenerDrain" ->
-             ProcessListener(p("ListenerDrain"), env)
-      [] VariantTag(ev) = "CallbackDrain" ->
-             ProcessCallback(p("CallbackDrain"), env)
+      [] ev.tag = "ListenerDrain" ->
+             ProcessListener(ev, env)
+      [] ev.tag = "CallbackDrain" ->
+             ProcessCallback(ev, env)
       [] OTHER -> [ doc   |-> env.objects,
                     sends |-> << >> ]
 
 -----------------------------------------------------------------------------
 
 OriginOf(ev) ==
-    LET p(tag) == VariantGetUnsafe(tag, ev) IN
-    CASE VariantTag(ev) = "PromiseGet"              -> p("PromiseGet").id.origin
-      [] VariantTag(ev) = "PromiseCreate"           -> p("PromiseCreate").req.id.origin
-      [] VariantTag(ev) = "PromiseSettle"           -> p("PromiseSettle").req.id.origin
-      [] VariantTag(ev) = "PromiseRegisterCallback" ->
-             p("PromiseRegisterCallback").req.awaited.origin
-      [] VariantTag(ev) = "PromiseRegisterListener" ->
-             p("PromiseRegisterListener").awaited.origin
-      [] VariantTag(ev) = "TaskGet"       -> p("TaskGet").id.origin
-      [] VariantTag(ev) = "TaskCreate"    -> p("TaskCreate").action.id.origin
-      [] VariantTag(ev) = "TaskAcquire"   -> p("TaskAcquire").id.origin
-      [] VariantTag(ev) = "TaskFence"     -> p("TaskFence").id.origin
-      [] VariantTag(ev) = "TaskSuspend"   -> p("TaskSuspend").id.origin
-      [] VariantTag(ev) = "TaskFulfill"   -> p("TaskFulfill").id.origin
-      [] VariantTag(ev) = "TaskRelease"   -> p("TaskRelease").id.origin
-      [] VariantTag(ev) = "TaskHalt"      -> p("TaskHalt").id.origin
-      [] VariantTag(ev) = "TaskContinue"  -> p("TaskContinue").id.origin
-      [] VariantTag(ev) = "Timeout"       -> p("Timeout").id.origin
-      [] VariantTag(ev) = "ListenerDrain" -> p("ListenerDrain").id.origin
-      [] VariantTag(ev) = "CallbackDrain" -> p("CallbackDrain").id.origin
+    CASE ev.tag = "PromiseGet"              -> ev.id.origin
+      [] ev.tag = "PromiseCreate"           -> ev.req.id.origin
+      [] ev.tag = "PromiseSettle"           -> ev.req.id.origin
+      [] ev.tag = "PromiseRegisterCallback" ->
+             ev.req.awaited.origin
+      [] ev.tag = "PromiseRegisterListener" ->
+             ev.awaited.origin
+      [] ev.tag = "TaskGet"       -> ev.id.origin
+      [] ev.tag = "TaskCreate"    -> ev.action.id.origin
+      [] ev.tag = "TaskAcquire"   -> ev.id.origin
+      [] ev.tag = "TaskFence"     -> ev.id.origin
+      [] ev.tag = "TaskSuspend"   -> ev.id.origin
+      [] ev.tag = "TaskFulfill"   -> ev.id.origin
+      [] ev.tag = "TaskRelease"   -> ev.id.origin
+      [] ev.tag = "TaskHalt"      -> ev.id.origin
+      [] ev.tag = "TaskContinue"  -> ev.id.origin
+      [] ev.tag = "Timeout"       -> ev.id.origin
+      [] ev.tag = "ListenerDrain" -> ev.id.origin
+      [] ev.tag = "CallbackDrain" -> ev.id.origin
 
       [] OTHER -> CHOOSE o \in Origin : TRUE
 
@@ -569,7 +564,7 @@ SubmitInternal(e) ==
     /\ e.at <= now
     /\ \E r \in Rid \ DOMAIN steps :
            steps' = Put(steps, r,
-                        Fresh(Variant("Timeout", [id |-> e.id, kind |-> e.kind])))
+                        Fresh([tag |-> "Timeout", id |-> e.id, kind |-> e.kind]))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 SubmitDue(i, k) ==
@@ -669,15 +664,13 @@ Was(o, i, k) ==
 
 PutTimeoutFor(o, i, new, k) ==
     IF Deadline(new, k) /= NoTime /\ Deadline(new, k) /= Was(o, i, k) THEN
-        << Variant("PutTimeout",
-                   [entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]]) >>
+        << [tag |-> "PutTimeout", entry |-> [at |-> Deadline(new, k), id |-> i, kind |-> k]] >>
     ELSE
         << >>
 
 DelTimeoutFor(o, i, new, k) ==
     IF Was(o, i, k) /= NoTime /\ Was(o, i, k) /= Deadline(new, k) THEN
-        << Variant("DelTimeout",
-                   [entry |-> [at |-> Was(o, i, k), id |-> i, kind |-> k]]) >>
+        << [tag |-> "DelTimeout", entry |-> [at |-> Was(o, i, k), id |-> i, kind |-> k]] >>
     ELSE
         << >>
 
@@ -700,12 +693,7 @@ Process(r) ==
     /\ steps[r].phase = "process"
     /\ LET o   == steps[r].org
            swept == Sweep(docs[o], now)
-           env == [ objects  |-> swept.doc,
-                    timeouts |-> timeouts,
-                    outbox   |-> outbox,
-                    now      |-> now,
-                    config   |-> [retryTimeout |-> RetryTimeout] ]
-           out == Handle(steps[r].ev, env)
+           out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
            final == out.doc
            sends == swept.sends \o out.sends
            W   == { [id |-> i, obj |-> final[i]] :
@@ -715,12 +703,10 @@ Process(r) ==
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending =
                                       PutTimeouts(o, W)
-                                        \o << Variant("PutDocument",
-                                                      [body |-> final]) >>
+                                        \o << [tag |-> "PutDocument", body |-> final] >>
                                         \o DelTimeouts(o, W)
                                         \o [ n \in 1 .. Len(sends) |->
-                                               Variant("Send",
-                                                       [entry |-> sends[n]]) ],
+                                               [tag |-> "Send", entry |-> sends[n]] ],
                                   ![r].expect  = docs[o],
                                   ![r].at      = now]
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
@@ -738,7 +724,7 @@ Finish(r) ==
 Heads(r, tag) ==
     /\ Ready(r)
     /\ steps[r].pending /= << >>
-    /\ VariantTag(Head(steps[r].pending)) = tag
+    /\ Head(steps[r].pending).tag = tag
 
 FenceOk(r) ==
     \/ ~Fenced
@@ -751,8 +737,7 @@ PutDocument(r) ==
     /\ LET o == steps[r].org
        IN
            /\ docs'  = [docs EXCEPT ![o] =
-                            VariantGetUnsafe("PutDocument",
-                                             Head(steps[r].pending)).body]
+                            Head(steps[r].pending).body]
     /\ steps' = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<timeouts, outbox, now>>
 
@@ -765,20 +750,20 @@ Restart(r) ==
 PutTimeout(r) ==
     /\ Heads(r, "PutTimeout")
     /\ timeouts' = timeouts \cup
-                     {VariantGetUnsafe("PutTimeout", Head(steps[r].pending)).entry}
+                     {Head(steps[r].pending).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
 DelTimeout(r) ==
     /\ Heads(r, "DelTimeout")
     /\ timeouts' = timeouts \
-                     {VariantGetUnsafe("DelTimeout", Head(steps[r].pending)).entry}
+                     {Head(steps[r].pending).entry}
     /\ steps'    = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, outbox, now>>
 
 Send(r) ==
     /\ Heads(r, "Send")
-    /\ outbox' = LET en == VariantGetUnsafe("Send", Head(steps[r].pending)).entry
+    /\ outbox' = LET en == Head(steps[r].pending).entry
                  IN  {x \in outbox : MsgKey(x) /= MsgKey(en)} \cup {en}
     /\ steps'  = [steps EXCEPT ![r].pending = Tail(@)]
     /\ UNCHANGED <<docs, timeouts, now>>
@@ -860,13 +845,13 @@ SplitWrite ==
         /\ steps[r].phase = "perform"
         /\ docs[steps[r].org] /= steps[r].expect
         /\ \E j \in DOMAIN steps[r].pending :
-               VariantTag(steps[r].pending[j]) = "PutDocument"
+               steps[r].pending[j].tag = "PutDocument"
 
 NoSplitWrite ==
     ~SplitWrite
 
 DrainRan ==
-    \E r \in DOMAIN steps : VariantTag(steps[r].ev) = "CallbackDrain"
+    \E r \in DOMAIN steps : steps[r].ev.tag = "CallbackDrain"
 NoDrainRan ==
     ~DrainRan
 

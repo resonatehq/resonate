@@ -1,5 +1,5 @@
 ----------------------------- MODULE AbstractBad -----------------------------
-EXTENDS Requests, TLC
+EXTENDS Requests
 
 VARIABLES
     objects,    \* partial: DOMAIN is what exists
@@ -59,7 +59,7 @@ Project(obj, t) ==
 
 HandlePromiseCreate(req) ==
     /\ req.id \notin DOMAIN objects
-    /\ objects' = (req.id :> New(req, now)) @@ objects
+    /\ objects' = Write(objects, req.id, New(req, now))
     /\ UNCHANGED <<outbox, now>>
 
 HandlePromiseSettle(req) ==
@@ -68,8 +68,8 @@ HandlePromiseSettle(req) ==
        IN
            /\ old.promise.state = "pending"
            /\ objects' =
-                  (req.id :>
-                      [ promise |-> [old.promise EXCEPT !.state     = req.state,
+                  Write(objects, req.id,
+                        [ promise |-> [old.promise EXCEPT !.state     = req.state,
                                                         !.value     = req.value,
                                                         !.settledAt = now],
                         task    |-> [old.task EXCEPT
@@ -79,7 +79,7 @@ HandlePromiseSettle(req) ==
                                         !.ttl       = NoTime,
                                         !.expiresAt = NoTime,
                                         !.retryAt   = NoTime,
-                                        !.resumes   = {}] ]) @@ objects
+                                        !.resumes   = {}] ])
     /\ UNCHANGED <<outbox, now>>
 
 HandlePromiseRegisterCallback(req) ==
@@ -93,9 +93,7 @@ HandlePromiseRegisterCallback(req) ==
            /\ awaited.promise.state = "pending"
            /\ awaiter.promise.state = "pending"
            /\ objects' =
-                  (req.awaited :>
-                      [awaited EXCEPT !.promise.callbacks = @ \cup {req.awaiter}])
-                          @@ objects
+                  Write(objects, req.awaited, [awaited EXCEPT !.promise.callbacks = @ \cup {req.awaiter}])
     /\ UNCHANGED <<outbox, now>>
 
 HandlePromiseRegisterListener(req) ==
@@ -105,9 +103,7 @@ HandlePromiseRegisterListener(req) ==
            /\ IsExternal(old.promise)
            /\ old.promise.state = "pending"
            /\ objects' =
-                  (req.awaited :>
-                      [old EXCEPT !.promise.listeners = @ \cup {req.address}])
-                          @@ objects
+                  Write(objects, req.awaited, [old EXCEPT !.promise.listeners = @ \cup {req.address}])
     /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------
@@ -118,8 +114,8 @@ HandleTaskCreate(req) ==
           /\ LET born == New(req.action, now)
              IN
                  objects' =
-                     (req.action.id :>
-                         IF born.promise.state = "pending" THEN
+                     Write(objects, req.action.id,
+                           IF born.promise.state = "pending" THEN
                              [born EXCEPT !.task.state     = "acquired",
                                           !.task.version   = @ + 1,
                                           !.task.ttl       = req.ttl,
@@ -128,21 +124,21 @@ HandleTaskCreate(req) ==
                                           !.task.retryAt   = NoTime,
                                           !.task.resumes   = {}]
                          ELSE
-                             born) @@ objects
+                             born)
        \/ /\ req.action.id \in DOMAIN objects
           /\ LET old == Project(objects[req.action.id], now)
              IN
                  /\ old.promise.tags.targeted
                  /\ old.task.state = "pending"
                  /\ objects' =
-                        (req.action.id :>
-                            [old EXCEPT !.task.state     = "acquired",
+                        Write(objects, req.action.id,
+                              [old EXCEPT !.task.state     = "acquired",
                                         !.task.version   = @ + 1,
                                         !.task.ttl       = req.ttl,
                                         !.task.pid       = req.pid,
                                         !.task.expiresAt = now + req.ttl,
                                         !.task.retryAt   = NoTime,
-                                        !.task.resumes   = {}]) @@ objects
+                                        !.task.resumes   = {}])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskAcquire(req) ==
@@ -153,14 +149,14 @@ HandleTaskAcquire(req) ==
            /\ old.promise.state = "pending"
            /\ old.task.version = req.version
            /\ objects' =
-                  (req.id :>
-                      [old EXCEPT !.task.state     = "acquired",
+                  Write(objects, req.id,
+                        [old EXCEPT !.task.state     = "acquired",
                                   !.task.version   = @ + 1,
                                   !.task.ttl       = req.ttl,
                                   !.task.pid       = req.pid,
                                   !.task.expiresAt = now + req.ttl,
                                   !.task.retryAt   = NoTime,
-                                  !.task.resumes   = {}]) @@ objects
+                                  !.task.resumes   = {}])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskFence(i, v) ==
@@ -209,7 +205,7 @@ HandleTaskSuspend(req) ==
                /\ IF \E a \in aw :
                         Project(objects[a], now).promise.state /= "pending" THEN
                       objects' =
-                          (req.id :> [old EXCEPT !.task.resumes = {}]) @@ objects
+                          Write(objects, req.id, [old EXCEPT !.task.resumes = {}])
                   ELSE
                       objects' =
                           [ i \in DOMAIN objects |->
@@ -235,8 +231,8 @@ HandleTaskFulfill(req) ==
            /\ old.promise.state = "pending"
            /\ old.task.version = req.version
            /\ objects' =
-                  (req.id :>
-                      [ promise |-> [old.promise EXCEPT
+                  Write(objects, req.id,
+                        [ promise |-> [old.promise EXCEPT
                                         !.state     = req.action.state,
                                         !.value     = req.action.value,
                                         !.settledAt = now],
@@ -245,7 +241,7 @@ HandleTaskFulfill(req) ==
                                                      !.ttl       = NoTime,
                                                      !.expiresAt = NoTime,
                                                      !.retryAt   = NoTime,
-                                                     !.resumes   = {}] ]) @@ objects
+                                                     !.resumes   = {}] ])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskRelease(req) ==
@@ -256,12 +252,12 @@ HandleTaskRelease(req) ==
            /\ old.promise.state = "pending"
            /\ old.task.version = req.version
            /\ objects' =
-                  (req.id :>
-                      [old EXCEPT !.task.state     = "pending",
+                  Write(objects, req.id,
+                        [old EXCEPT !.task.state     = "pending",
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now]) @@ objects
+                                  !.task.retryAt   = now])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskHalt(req) ==
@@ -270,12 +266,12 @@ HandleTaskHalt(req) ==
        IN
            /\ old.task.state \notin {"none", "fulfilled", "halted"}
            /\ objects' =
-                  (req.id :>
-                      [old EXCEPT !.task.state     = "halted",
+                  Write(objects, req.id,
+                        [old EXCEPT !.task.state     = "halted",
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = NoTime]) @@ objects
+                                  !.task.retryAt   = NoTime])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskContinue(req) ==
@@ -285,12 +281,12 @@ HandleTaskContinue(req) ==
            /\ old.task.state = "halted"
            /\ old.promise.state = "pending"
            /\ objects' =
-                  (req.id :>
-                      [old EXCEPT !.task.state     = "pending",
+                  Write(objects, req.id,
+                        [old EXCEPT !.task.state     = "pending",
                                   !.task.pid       = NoPid,
                                   !.task.ttl       = NoTime,
                                   !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now]) @@ objects
+                                  !.task.retryAt   = now])
     /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------
@@ -299,7 +295,7 @@ ProcessPromiseTimeout ==
     \E i \in DOMAIN objects :
         /\ objects[i].promise.state = "pending"
         /\ objects[i].promise.timeoutAt <= now
-        /\ objects' = (i :> Project(objects[i], now)) @@ objects
+        /\ objects' = Write(objects, i, Project(objects[i], now))
         /\ UNCHANGED <<outbox, now>>
 
 ProcessLeaseTimeout ==
@@ -311,27 +307,27 @@ ProcessLeaseTimeout ==
             /\ old.task.expiresAt <= now
             /\ Project(old, now).promise.state = "pending"
             /\ objects' =
-                   (i :> [old EXCEPT !.task.state     = "pending",
+                   Write(objects, i,
+                         [old EXCEPT !.task.state     = "pending",
                                      !.task.pid       = NoPid,
                                      !.task.ttl       = NoTime,
                                      !.task.expiresAt = NoTime,
-                                     !.task.retryAt   = now]) @@ objects
+                                     !.task.retryAt   = now])
             /\ UNCHANGED <<outbox, now>>
 
 ProcessRetryTimeout ==
     \E i \in DOMAIN objects :
         LET old == objects[i]
             msg == [ address |-> objects[i].promise.tags.target,
-                     message |-> Variant("Execute",
-                                         [id      |-> i,
-                                          version |-> objects[i].task.version]) ]
+                     message |-> [tag |-> "Execute", id      |-> i,
+                                          version |-> objects[i].task.version] ]
         IN
             /\ old.task.state = "pending"
             /\ old.task.retryAt /= NoTime
             /\ old.task.retryAt <= now
             /\ Project(old, now).promise.state = "pending"
             /\ objects' =
-                   (i :> [old EXCEPT !.task.retryAt = now + RetryTimeout]) @@ objects
+                   Write(objects, i, [old EXCEPT !.task.retryAt = now + RetryTimeout])
             /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
             /\ UNCHANGED now
 
@@ -340,14 +336,13 @@ ProcessListener ==
         \E a \in objects[i].promise.listeners :
             LET awaited == Project(objects[i], now)
                 msg     == [ address |-> a,
-                             message |-> Variant("Unblock",
-                                                 [id    |-> i,
+                             message |-> [tag |-> "Unblock", id    |-> i,
                                                   state |-> Project(objects[i],
-                                                                    now).promise.state]) ]
+                                                                    now).promise.state] ]
             IN
                 /\ awaited.promise.state /= "pending"
                 /\ objects' =
-                       (i :> [awaited EXCEPT !.promise.listeners = @ \ {a}]) @@ objects
+                       Write(objects, i, [awaited EXCEPT !.promise.listeners = @ \ {a}])
                 /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
                 /\ UNCHANGED now
 
@@ -360,17 +355,16 @@ ProcessCallback ==
             IN
                 /\ awaited.promise.state /= "pending"
                 /\ \/ /\ w \notin DOMAIN objects
-                      /\ objects' = (i :> newAwaited) @@ objects
+                      /\ objects' = Write(objects, i, newAwaited)
                    \/ /\ w \in DOMAIN objects
                       /\ LET awaiter == Project(objects[w], now)
                          IN
                              IF awaiter.task.state \in {"none", "fulfilled"} THEN
-                                 objects' = (i :> newAwaited) @@ objects
+                                 objects' = Write(objects, i, newAwaited)
                              ELSE
                                  objects' =
-                                     (i :> newAwaited)
-                                  @@ (w :>
-                                         IF awaiter.task.state = "suspended" THEN
+                                     Write(Write(objects, w,
+                                           IF awaiter.task.state = "suspended" THEN
                                              [awaiter EXCEPT
                                                  !.task.state     = "pending",
                                                  !.task.pid       = NoPid,
@@ -380,8 +374,7 @@ ProcessCallback ==
                                                  !.task.resumes   = {i}]
                                          ELSE
                                              [awaiter EXCEPT
-                                                 !.task.resumes = @ \cup {i}])
-                                  @@ objects
+                                                 !.task.resumes = @ \cup {i}]), i, newAwaited)
                 /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------

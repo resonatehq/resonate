@@ -6,7 +6,7 @@
 (* machines, and the refinement asks whether their behaviour lines up.     *)
 (* Nothing here decides anything: no handler, no transition, no state.     *)
 (***************************************************************************)
-EXTENDS Integers, Sequences, FiniteSets, Variants
+EXTENDS Integers, Sequences, FiniteSets
 
 -----------------------------------------------------------------------------
 
@@ -163,20 +163,20 @@ Object ==
     [promise : Promise, task : Task]
 
 Message ==
-       { Variant("Execute", [id |-> i, version |-> v]) : i \in Id, v \in Version }
-  \cup { Variant("Unblock", [id |-> i, state |-> s]) : i \in Id, s \in PromiseState }
+       { [tag |-> "Execute", id |-> i, version |-> v] : i \in Id, v \in Version }
+  \cup { [tag |-> "Unblock", id |-> i, state |-> s] : i \in Id, s \in PromiseState }
 
 OutEntry ==
     [address : Address, message : Message]
 
 (* @type: $outEntry => $msgKey; *)
 MsgKey(e) ==
-    IF VariantTag(e.message) = "Execute"
+    IF e.message.tag = "Execute"
     THEN [kind |-> "execute",
-          id      |-> VariantGetUnsafe("Execute", e.message).id,
+          id      |-> e.message.id,
           address |-> NoAddr]
     ELSE [kind |-> "unblock",
-          id      |-> VariantGetUnsafe("Unblock", e.message).id,
+          id      |-> e.message.id,
           address |-> e.address]
 
 -----------------------------------------------------------------------------
@@ -211,8 +211,8 @@ TaskRefT ==
     [id : Id, version : Version]
 
 FenceAction ==
-       { Variant("Create", [req |-> r]) : r \in CreateReq }
-  \cup { Variant("Settle", [req |-> r]) : r \in SettleReq }
+       { [tag |-> "Create", req |-> r] : r \in CreateReq }
+  \cup { [tag |-> "Settle", req |-> r] : r \in SettleReq }
 
 (* @type: (Str, Set($event)) => Set($event); *)
 On(tag, S) ==
@@ -223,30 +223,30 @@ On(tag, S) ==
 
 ExternalEvent ==
        {}
-    \cup On("PromiseGet", { Variant("PromiseGet", [id |-> i]) : i \in Id})
-    \cup On("PromiseCreate", { Variant("PromiseCreate", [req |-> r]) : r \in CreateReq})
-    \cup On("PromiseSettle", { Variant("PromiseSettle", [req |-> r]) : r \in SettleReq})
-    \cup On("PromiseRegisterCallback", { Variant("PromiseRegisterCallback", [req |-> r]) : r \in CallbackReq})
-    \cup On("PromiseRegisterListener", { Variant("PromiseRegisterListener", [awaited |-> i, address |-> a]) : i \in Id, a \in Address})
-    \cup On("PromiseSearch", { Variant("PromiseSearch", UNIT)})
-    \cup On("TaskGet", { Variant("TaskGet", [id |-> i]) : i \in Id})
-    \cup On("TaskCreate", { Variant("TaskCreate", [pid |-> p, ttl |-> t, action |-> r]) : p \in Pid, t \in Ttl, r \in CreateReq})
-    \cup On("TaskAcquire", { Variant("TaskAcquire", [id |-> i, version |-> v, pid |-> p, ttl |-> t]) : i \in Id, v \in Version, p \in Pid, t \in Ttl})
-    \cup On("TaskFence", { Variant("TaskFence", [id |-> i, version |-> v, action |-> a]) : i \in Id, v \in Version, a \in FenceAction})
-    \cup On("TaskHeartbeat", { Variant("TaskHeartbeat", [pid |-> p, tasks |-> ts]) : p \in Pid, ts \in SUBSET TaskRefT})
-    \cup On("TaskSuspend", { Variant("TaskSuspend", [id |-> i, version |-> v, actions |-> as]) : i \in Id, v \in Version, as \in SUBSET CallbackReq})
-    \cup On("TaskFulfill", { Variant("TaskFulfill", [id |-> i, version |-> v, action |-> r]) : i \in Id, v \in Version, r \in SettleReq})
-    \cup On("TaskRelease", { Variant("TaskRelease", [id |-> i, version |-> v]) : i \in Id, v \in Version})
-    \cup On("TaskHalt", { Variant("TaskHalt", [id |-> i]) : i \in Id})
-    \cup On("TaskContinue", { Variant("TaskContinue", [id |-> i]) : i \in Id})
-    \cup On("TaskSearch", { Variant("TaskSearch", UNIT)})
+    \cup On("PromiseGet", { [tag |-> "PromiseGet", id |-> i] : i \in Id})
+    \cup On("PromiseCreate", { [tag |-> "PromiseCreate", req |-> r] : r \in CreateReq})
+    \cup On("PromiseSettle", { [tag |-> "PromiseSettle", req |-> r] : r \in SettleReq})
+    \cup On("PromiseRegisterCallback", { [tag |-> "PromiseRegisterCallback", req |-> r] : r \in CallbackReq})
+    \cup On("PromiseRegisterListener", { [tag |-> "PromiseRegisterListener", awaited |-> i, address |-> a] : i \in Id, a \in Address})
+    \cup On("PromiseSearch", { [tag |-> "PromiseSearch"]})
+    \cup On("TaskGet", { [tag |-> "TaskGet", id |-> i] : i \in Id})
+    \cup On("TaskCreate", { [tag |-> "TaskCreate", pid |-> p, ttl |-> t, action |-> r] : p \in Pid, t \in Ttl, r \in CreateReq})
+    \cup On("TaskAcquire", { [tag |-> "TaskAcquire", id |-> i, version |-> v, pid |-> p, ttl |-> t] : i \in Id, v \in Version, p \in Pid, t \in Ttl})
+    \cup On("TaskFence", { [tag |-> "TaskFence", id |-> i, version |-> v, action |-> a] : i \in Id, v \in Version, a \in FenceAction})
+    \cup On("TaskHeartbeat", { [tag |-> "TaskHeartbeat", pid |-> p, tasks |-> ts] : p \in Pid, ts \in SUBSET TaskRefT})
+    \cup On("TaskSuspend", { [tag |-> "TaskSuspend", id |-> i, version |-> v, actions |-> as] : i \in Id, v \in Version, as \in SUBSET CallbackReq})
+    \cup On("TaskFulfill", { [tag |-> "TaskFulfill", id |-> i, version |-> v, action |-> r] : i \in Id, v \in Version, r \in SettleReq})
+    \cup On("TaskRelease", { [tag |-> "TaskRelease", id |-> i, version |-> v] : i \in Id, v \in Version})
+    \cup On("TaskHalt", { [tag |-> "TaskHalt", id |-> i] : i \in Id})
+    \cup On("TaskContinue", { [tag |-> "TaskContinue", id |-> i] : i \in Id})
+    \cup On("TaskSearch", { [tag |-> "TaskSearch"]})
 
 InternalEvent ==
        {}
-    \cup On("Timeout", { Variant("Timeout", [id |-> i, kind |-> k])
+    \cup On("Timeout", { [tag |-> "Timeout", id |-> i, kind |-> k]
                          : i \in Id, k \in DeadlineKind})
-    \cup On("ListenerDrain", { Variant("ListenerDrain", [id |-> i, address |-> a]) : i \in Id, a \in Address})
-    \cup On("CallbackDrain", { Variant("CallbackDrain", [id |-> r.awaited, awaiter |-> r.awaiter]) : r \in CallbackReq})
+    \cup On("ListenerDrain", { [tag |-> "ListenerDrain", id |-> i, address |-> a] : i \in Id, a \in Address})
+    \cup On("CallbackDrain", { [tag |-> "CallbackDrain", id |-> r.awaited, awaiter |-> r.awaiter] : r \in CallbackReq})
 
 Event ==
     ExternalEvent \cup InternalEvent
