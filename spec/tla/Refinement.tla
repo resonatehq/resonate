@@ -75,13 +75,13 @@ Retrying(doc, t) ==
 
 Items(d0, t0) ==
     LET q1 == SetToSeq(Due(d0, t0))
-        d1 == TimeOut(d0, t0)
+        d1 == SweepTimeoutAt(d0, t0)
         q2 == SetToSeq(Listening(d1))
-        d2 == Notify(d1, t0).doc
+        d2 == SweepListeners(d1, t0).doc
         q3 == SetToSeq(Awaiting(d2))
-        d3 == Resume(d2, t0)
+        d3 == SweepCallbacks(d2, t0)
         q4 == SetToSeq(Leased(d3, t0))
-        d4 == Expire(d3, t0)
+        d4 == SweepExpiresAt(d3, t0)
         q5 == SetToSeq(Retrying(d4, t0))
     IN
            [ n \in 1 .. Len(q1) |-> [kind |-> "promise",  id |-> q1[n]] ]

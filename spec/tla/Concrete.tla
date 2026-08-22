@@ -575,14 +575,14 @@ Settled(doc) ==
 
 -----------------------------------------------------------------------------
 
-TimeOut(doc, t) ==
+SweepTimeoutAt(doc, t) ==
     [ i \in DOMAIN doc |->
         IF doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t THEN
             Project(doc[i], t)
         ELSE
             doc[i] ]
 
-Notify(doc, t) ==
+SweepListeners(doc, t) ==
     LET q == SetToSeq({ x \in [id : Settled(doc), address : Address] :
                           x.address \in doc[x.id].promise.listeners })
     IN
@@ -597,7 +597,7 @@ Notify(doc, t) ==
                                     id    |-> q[n].id,
                                     state |-> doc[q[n].id].promise.state ] ] ] ]
 
-Resume(doc, t) ==
+SweepCallbacks(doc, t) ==
     LET S == { x \in [id : Settled(doc), awaiter : Id] :
                    x.awaiter \in doc[x.id].promise.callbacks }
         Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
@@ -621,13 +621,9 @@ Resume(doc, t) ==
                 ELSE
                     [struck EXCEPT !.task.resumes = @ \cup Resumes(i)] ]
 
-Expire(doc, t) ==
+SweepExpiresAt(doc, t) ==
     [ i \in DOMAIN doc |->
-        IF /\ doc[i].promise.state = "pending"
-           /\ doc[i].task.state = "acquired"
-           /\ doc[i].task.expiresAt /= NoTime
-           /\ doc[i].task.expiresAt <= t
-        THEN
+        IF doc[i].task.state = "acquired" /\ doc[i].task.expiresAt <= t THEN
             [ doc[i] EXCEPT !.task.state     = "pending",
                             !.task.pid       = NoPid,
                             !.task.ttl       = NoTime,
@@ -636,11 +632,9 @@ Expire(doc, t) ==
         ELSE
             doc[i] ]
 
-Retry(doc, t) ==
+SweepRetryAt(doc, t) ==
     LET R == { i \in DOMAIN doc :
-                 /\ doc[i].promise.state = "pending"
                  /\ doc[i].task.state = "pending"
-                 /\ doc[i].task.retryAt /= NoTime
                  /\ doc[i].task.retryAt <= t }
         q == SetToSeq(R)
     IN
@@ -658,11 +652,11 @@ Retry(doc, t) ==
 -----------------------------------------------------------------------------
 
 Sweep(doc, t) ==
-    LET d1 == TimeOut(doc, t)
-        o2 == Notify(d1, t)
-        d3 == Resume(o2.doc, t)
-        d4 == Expire(d3, t)
-        o5 == Retry(d4, t)
+    LET d1 == SweepTimeoutAt(doc, t)
+        o2 == SweepListeners(d1, t)
+        d3 == SweepCallbacks(o2.doc, t)
+        d4 == SweepExpiresAt(d3, t)
+        o5 == SweepRetryAt(d4, t)
     IN
         [ doc   |-> o5.doc,
           sends |-> o2.sends \o o5.sends ]
