@@ -598,9 +598,6 @@ Set(f, k, v) ==
 Del(f, k) ==
     [x \in (DOMAIN f) \ {k} |-> f[x]]
 
-Settled(doc) ==
-    { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
-
 -----------------------------------------------------------------------------
 
 Merge(a, b) ==
@@ -608,6 +605,9 @@ Merge(a, b) ==
       puts  |-> a.puts  \o b.puts,
       dels  |-> a.dels  \o b.dels,
       sends |-> a.sends \o b.sends ]
+
+Settled(doc) ==
+    { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
 
 SweepTimeoutAt(doc, t) ==
     LET S  == { i \in DOMAIN doc :
