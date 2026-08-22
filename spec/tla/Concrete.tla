@@ -570,44 +570,21 @@ SubmitInternal(e) ==
 SubmitDue(i, k) ==
     \E e \in timeouts : e.id = i /\ e.kind = k /\ SubmitInternal(e)
 
-Due(doc, t) ==
-    { i \in DOMAIN doc :
-        /\ doc[i].promise.state = "pending"
-        /\ doc[i].promise.timeoutAt <= t }
-
 Settled(doc) ==
     { i \in DOMAIN doc : doc[i].promise.state /= "pending" }
-
-Listening(doc) ==
-    { x \in [id : Settled(doc), address : Address] :
-        x.address \in doc[x.id].promise.listeners }
-
-Awaiting(doc) ==
-    { x \in [id : Settled(doc), awaiter : Id] :
-        x.awaiter \in doc[x.id].promise.callbacks }
-
-Leased(doc, t) ==
-    { i \in DOMAIN doc :
-        /\ doc[i].promise.state = "pending"
-        /\ doc[i].task.state = "acquired"
-        /\ doc[i].task.expiresAt /= NoTime
-        /\ doc[i].task.expiresAt <= t }
-
-Retrying(doc, t) ==
-    { i \in DOMAIN doc :
-        /\ doc[i].promise.state = "pending"
-        /\ doc[i].task.state = "pending"
-        /\ doc[i].task.retryAt /= NoTime
-        /\ doc[i].task.retryAt <= t }
 
 -----------------------------------------------------------------------------
 
 TimeOut(doc, t) ==
     [ i \in DOMAIN doc |->
-        IF i \in Due(doc, t) THEN Project(doc[i], t) ELSE doc[i] ]
+        IF doc[i].promise.state = "pending" /\ doc[i].promise.timeoutAt <= t THEN
+            Project(doc[i], t)
+        ELSE
+            doc[i] ]
 
 Notify(doc, t) ==
-    LET q == SetToSeq(Listening(doc))
+    LET q == SetToSeq({ x \in [id : Settled(doc), address : Address] :
+                          x.address \in doc[x.id].promise.listeners })
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
                     IF i \in Settled(doc) THEN
@@ -621,7 +598,8 @@ Notify(doc, t) ==
                                     state |-> doc[q[n].id].promise.state ] ] ] ]
 
 Resume(doc, t) ==
-    LET S == Awaiting(doc)
+    LET S == { x \in [id : Settled(doc), awaiter : Id] :
+                   x.awaiter \in doc[x.id].promise.callbacks }
         Resumes(w) == { x.id : x \in { y \in S : y.awaiter = w } }
         Woken      == { x.awaiter : x \in S } \cap DOMAIN doc
     IN
@@ -645,7 +623,11 @@ Resume(doc, t) ==
 
 Expire(doc, t) ==
     [ i \in DOMAIN doc |->
-        IF i \in Leased(doc, t) THEN
+        IF /\ doc[i].promise.state = "pending"
+           /\ doc[i].task.state = "acquired"
+           /\ doc[i].task.expiresAt /= NoTime
+           /\ doc[i].task.expiresAt <= t
+        THEN
             [ doc[i] EXCEPT !.task.state     = "pending",
                             !.task.pid       = NoPid,
                             !.task.ttl       = NoTime,
@@ -655,10 +637,15 @@ Expire(doc, t) ==
             doc[i] ]
 
 Retry(doc, t) ==
-    LET q == SetToSeq(Retrying(doc, t))
+    LET R == { i \in DOMAIN doc :
+                 /\ doc[i].promise.state = "pending"
+                 /\ doc[i].task.state = "pending"
+                 /\ doc[i].task.retryAt /= NoTime
+                 /\ doc[i].task.retryAt <= t }
+        q == SetToSeq(R)
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
-                    IF i \in Retrying(doc, t) THEN
+                    IF i \in R THEN
                         [ doc[i] EXCEPT !.task.retryAt = t + RetryTimeout ]
                     ELSE
                         doc[i] ],

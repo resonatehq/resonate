@@ -46,6 +46,33 @@ varsS ==
    does one item per step. So the walk lists the items each pass will do -- in
    the order `SetToSeq` picked, the same order the sweep's sends carry -- and
    `Concrete`'s pass boundaries say where one list ends and the next begins. *)
+Due(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].promise.timeoutAt <= t }
+
+Listening(doc) ==
+    { x \in [id : Settled(doc), address : Address] :
+        x.address \in doc[x.id].promise.listeners }
+
+Awaiting(doc) ==
+    { x \in [id : Settled(doc), awaiter : Id] :
+        x.awaiter \in doc[x.id].promise.callbacks }
+
+Leased(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "acquired"
+        /\ doc[i].task.expiresAt /= NoTime
+        /\ doc[i].task.expiresAt <= t }
+
+Retrying(doc, t) ==
+    { i \in DOMAIN doc :
+        /\ doc[i].promise.state = "pending"
+        /\ doc[i].task.state = "pending"
+        /\ doc[i].task.retryAt /= NoTime
+        /\ doc[i].task.retryAt <= t }
+
 Items(d0, t0) ==
     LET q1 == SetToSeq(Due(d0, t0))
         d1 == TimeOut(d0, t0)
