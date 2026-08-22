@@ -68,15 +68,15 @@ Items(d0) ==
 (* One item is one protocol step, said with `Concrete`'s own handlers. *)
 Step(d, it) ==
     CASE it.kind = "promise"  ->
-             ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], EnvAt(d, now))
+             ProcessPromiseTimeout([id |-> it.id, kind |-> "promise"], d, now)
       [] it.kind = "listener" ->
-             ProcessListener([id |-> it.id, address |-> it.address], EnvAt(d, now))
+             ProcessListener([id |-> it.id, address |-> it.address], d, now)
       [] it.kind = "callback" ->
-             ProcessCallback([id |-> it.id, awaiter |-> it.awaiter], EnvAt(d, now))
+             ProcessCallback([id |-> it.id, awaiter |-> it.awaiter], d, now)
       [] it.kind = "lease"    ->
-             ProcessLeaseTimeout(it.id, EnvAt(d, now))
+             ProcessLeaseTimeout(it.id, d, now)
       [] OTHER                ->
-             ProcessRetryTimeout(it.id, EnvAt(d, now))
+             ProcessRetryTimeout(it.id, d, now)
 
 (* THE STORES ONE WRITE PASSES THROUGH, one per abstract step, excluding the
    last -- the last is what the write itself produces, so the write is its own
@@ -95,7 +95,7 @@ Walk(r) ==
                 IN
                     [doc |-> out.doc, sends |-> prev.sends \o out.sends]
         swept == store[Len(its)]
-        out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
+        out   == Handle(steps[r].ev, swept.doc, now)
         ticks == [ n \in 1 .. Len(its) |-> store[n] ]
         full  == IF out.doc = swept.doc /\ out.sends = << >> THEN
                      ticks

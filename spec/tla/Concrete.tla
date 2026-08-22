@@ -63,29 +63,29 @@ Project(obj, t) ==
     ELSE
         obj
 
-HandlePromiseGet(req, env) ==
-    [ doc   |-> env.objects,
+HandlePromiseGet(req, doc, t) ==
+    [ doc   |-> doc,
       sends |-> << >> ]
 
-HandlePromiseCreate(req, env) ==
-    IF req.id \in DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandlePromiseCreate(req, doc, t) ==
+    IF req.id \in DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET new == New(req, env.now)
+        LET new == New(req, t)
         IN
-            [ doc   |-> Write(env.objects, req.id, new),
+            [ doc   |-> Write(doc, req.id, new),
               sends |-> << >> ]
 
-HandlePromiseSettle(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandlePromiseSettle(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.state,
                                                      !.value     = req.value,
-                                                     !.settledAt = env.now],
+                                                     !.settledAt = t],
                      task    |-> [old.task EXCEPT !.state     = IF @ = "none" THEN "none"
                                                                ELSE "fulfilled",
                                                   !.pid       = NoPid,
@@ -95,118 +95,118 @@ HandlePromiseSettle(req, env) ==
                                                   !.resumes   = {}] ]
         IN
             IF old.promise.state = "pending" THEN
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
 
-HandlePromiseRegisterCallback(req, env) ==
-    IF \/ req.awaited \notin DOMAIN env.objects
-       \/ req.awaiter \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandlePromiseRegisterCallback(req, doc, t) ==
+    IF \/ req.awaited \notin DOMAIN doc
+       \/ req.awaiter \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET awaited    == Project(env.objects[req.awaited], env.now)
-            awaiter    == Project(env.objects[req.awaiter], env.now)
+        LET awaited    == Project(doc[req.awaited], t)
+            awaiter    == Project(doc[req.awaiter], t)
             newAwaited == [awaited EXCEPT !.promise.callbacks = @ \cup {req.awaiter}]
         IN
             IF \/ ~awaiter.promise.tags.targeted
                \/ ~IsExternal(awaited.promise)
                \/ awaited.promise.state /= "pending"
                \/ awaiter.promise.state /= "pending" THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.awaited, newAwaited),
+                [ doc   |-> Write(doc, req.awaited, newAwaited),
                   sends |-> << >> ]
 
-HandlePromiseRegisterListener(req, env) ==
-    IF req.awaited \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandlePromiseRegisterListener(req, doc, t) ==
+    IF req.awaited \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.awaited], env.now)
+        LET old == Project(doc[req.awaited], t)
             new == [old EXCEPT !.promise.listeners = @ \cup {req.address}]
         IN
             IF \/ ~IsExternal(old.promise)
                \/ old.promise.state /= "pending" THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.awaited, new),
+                [ doc   |-> Write(doc, req.awaited, new),
                   sends |-> << >> ]
 
-HandleTaskGet(req, env) ==
-    [ doc   |-> env.objects,
+HandleTaskGet(req, doc, t) ==
+    [ doc   |-> doc,
       sends |-> << >> ]
 
-HandleTaskCreate(req, env) ==
+HandleTaskCreate(req, doc, t) ==
     IF ~req.action.tags.targeted THEN
-        [ doc   |-> env.objects,
+        [ doc   |-> doc,
           sends |-> << >> ]
-    ELSE IF req.action.id \notin DOMAIN env.objects THEN
-        LET born == New(req.action, env.now)
+    ELSE IF req.action.id \notin DOMAIN doc THEN
+        LET born == New(req.action, t)
             new  == IF born.promise.state = "pending" THEN
                         [born EXCEPT !.task.state     = "acquired",
                                      !.task.version   = @ + 1,
                                      !.task.ttl       = req.ttl,
                                      !.task.pid       = req.pid,
-                                     !.task.expiresAt = env.now + req.ttl,
+                                     !.task.expiresAt = t + req.ttl,
                                      !.task.retryAt   = NoTime,
                                      !.task.resumes   = {}]
                     ELSE
                         born
         IN
-            [ doc   |-> Write(env.objects, req.action.id, new),
+            [ doc   |-> Write(doc, req.action.id, new),
               sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.action.id], env.now)
+        LET old == Project(doc[req.action.id], t)
             new == [old EXCEPT !.task.state     = "acquired",
                                !.task.version   = @ + 1,
                                !.task.ttl       = req.ttl,
                                !.task.pid       = req.pid,
-                               !.task.expiresAt = env.now + req.ttl,
+                               !.task.expiresAt = t + req.ttl,
                                !.task.retryAt   = NoTime,
                                !.task.resumes   = {}]
         IN
             IF \/ ~old.promise.tags.targeted
                \/ old.task.state /= "pending" THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.action.id, new),
+                [ doc   |-> Write(doc, req.action.id, new),
                   sends |-> << >> ]
 
-HandleTaskAcquire(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskAcquire(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "acquired",
                                !.task.version   = @ + 1,
                                !.task.ttl       = req.ttl,
                                !.task.pid       = req.pid,
-                               !.task.expiresAt = env.now + req.ttl,
+                               !.task.expiresAt = t + req.ttl,
                                !.task.retryAt   = NoTime,
                                !.task.resumes   = {}]
         IN
             IF \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
 
-HandleTaskFence(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskFence(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
         IN
             IF \/ (IF req.action.tag = "Create"
                    THEN req.action.req.id
@@ -214,44 +214,44 @@ HandleTaskFence(req, env) ==
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE IF req.action.tag = "Create" THEN
-                HandlePromiseCreate(req.action.req, env)
+                HandlePromiseCreate(req.action.req, doc, t)
             ELSE
-                HandlePromiseSettle(req.action.req, env)
+                HandlePromiseSettle(req.action.req, doc, t)
 
-HandleTaskHeartbeat(req, env) ==
-    LET beat == { i \in DOMAIN env.objects :
-                    LET old == Project(env.objects[i], env.now)
+HandleTaskHeartbeat(req, doc, t) ==
+    LET beat == { i \in DOMAIN doc :
+                    LET old == Project(doc[i], t)
                     IN  /\ \E rf \in req.tasks :
                               rf.id = i /\ rf.version = old.task.version
                         /\ old.task.state = "acquired"
                         /\ old.task.pid = req.pid
                         /\ old.promise.state = "pending" }
     IN
-        [ doc   |-> [ i \in DOMAIN env.objects |->
+        [ doc   |-> [ i \in DOMAIN doc |->
                          IF i \in beat THEN
-                             LET old == Project(env.objects[i], env.now)
+                             LET old == Project(doc[i], t)
                              IN  [old EXCEPT !.task.expiresAt =
-                                                 env.now + old.task.ttl]
+                                                 t + old.task.ttl]
                          ELSE
-                             env.objects[i] ],
+                             doc[i] ],
            sends |-> << >> ]
 
-HandleTaskSuspend(req, env) ==
+HandleTaskSuspend(req, doc, t) ==
     LET aw   == { a.awaited : a \in req.actions }
-        seen == { a \in aw : a \in DOMAIN env.objects }
+        seen == { a \in aw : a \in DOMAIN doc }
     IN
         IF \/ req.actions = {}
            \/ req.id \in aw
            \/ \E a \in aw : a.origin /= req.id.origin
-           \/ req.id \notin DOMAIN env.objects
+           \/ req.id \notin DOMAIN doc
            \/ seen /= aw THEN
-            [ doc   |-> env.objects,
+            [ doc   |-> doc,
               sends |-> << >> ]
         ELSE
-            LET old == Project(env.objects[req.id], env.now)
+            LET old == Project(doc[req.id], t)
                 new == [old EXCEPT !.task.state     = "suspended",
                                    !.task.pid       = NoPid,
                                    !.task.ttl       = NoTime,
@@ -263,33 +263,33 @@ HandleTaskSuspend(req, env) ==
                    \/ old.promise.state /= "pending"
                    \/ old.task.version /= req.version
                    \/ \E a \in aw :
-                        ~IsExternal(Project(env.objects[a], env.now).promise) THEN
-                    [ doc   |-> env.objects,
+                        ~IsExternal(Project(doc[a], t).promise) THEN
+                    [ doc   |-> doc,
                       sends |-> << >> ]
                 ELSE IF \E a \in aw :
-                          Project(env.objects[a], env.now).promise.state /= "pending" THEN
-                    [ doc   |-> Write(env.objects, req.id, [old EXCEPT !.task.resumes = {}]),
+                          Project(doc[a], t).promise.state /= "pending" THEN
+                    [ doc   |-> Write(doc, req.id, [old EXCEPT !.task.resumes = {}]),
                       sends |-> << >> ]
                 ELSE
-                    [ doc   |-> [ i \in DOMAIN env.objects |->
+                    [ doc   |-> [ i \in DOMAIN doc |->
                                      IF i = req.id THEN
                                          new
                                      ELSE IF i \in aw THEN
-                                         [Project(env.objects[i], env.now) EXCEPT
+                                         [Project(doc[i], t) EXCEPT
                                               !.promise.callbacks = @ \cup {req.id}]
                                      ELSE
-                                         env.objects[i] ],
+                                         doc[i] ],
                        sends |-> << >> ]
 
-HandleTaskFulfill(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskFulfill(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.action.state,
                                                      !.value     = req.action.value,
-                                                     !.settledAt = env.now],
+                                                     !.settledAt = t],
                      task    |-> [old.task EXCEPT !.state     = "fulfilled",
                                                   !.pid       = NoPid,
                                                   !.ttl       = NoTime,
@@ -300,39 +300,39 @@ HandleTaskFulfill(req, env) ==
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
 
-HandleTaskRelease(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskRelease(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "pending",
                                !.task.pid       = NoPid,
                                !.task.ttl       = NoTime,
                                !.task.expiresAt = NoTime,
-                               !.task.retryAt   = env.now]
+                               !.task.retryAt   = t]
         IN
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
 
-HandleTaskHalt(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskHalt(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "halted",
                                !.task.pid       = NoPid,
                                !.task.ttl       = NoTime,
@@ -341,116 +341,116 @@ HandleTaskHalt(req, env) ==
         IN
             IF \/ old.task.state = "none"
                \/ old.task.state \in {"fulfilled", "halted"} THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
 
-HandleTaskContinue(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+HandleTaskContinue(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == Project(env.objects[req.id], env.now)
+        LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "pending",
                                !.task.pid       = NoPid,
                                !.task.ttl       = NoTime,
                                !.task.expiresAt = NoTime,
-                               !.task.retryAt   = env.now]
+                               !.task.retryAt   = t]
         IN
             IF \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
 
-ProcessLeaseTimeout(i, env) ==
-    IF i \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+ProcessLeaseTimeout(i, doc, t) ==
+    IF i \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == env.objects[i]
+        LET old == doc[i]
             new == [old EXCEPT !.task.state     = "pending",
                                !.task.pid       = NoPid,
                                !.task.ttl       = NoTime,
                                !.task.expiresAt = NoTime,
-                               !.task.retryAt   = env.now]
+                               !.task.retryAt   = t]
         IN
             IF \/ old.task.state /= "acquired"
                \/ old.task.expiresAt = NoTime
-               \/ old.task.expiresAt > env.now
-               \/ Project(old, env.now).promise.state /= "pending" THEN
-                [ doc   |-> env.objects,
+               \/ old.task.expiresAt > t
+               \/ Project(old, t).promise.state /= "pending" THEN
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, i, new),
+                [ doc   |-> Write(doc, i, new),
                   sends |-> << >> ]
 
-ProcessRetryTimeout(i, env) ==
-    IF i \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+ProcessRetryTimeout(i, doc, t) ==
+    IF i \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == env.objects[i]
-            new == [old EXCEPT !.task.retryAt = env.now + env.config.retryTimeout]
+        LET old == doc[i]
+            new == [old EXCEPT !.task.retryAt = t + RetryTimeout]
         IN
             IF \/ old.task.state /= "pending"
                \/ old.task.retryAt = NoTime
-               \/ old.task.retryAt > env.now
-               \/ Project(old, env.now).promise.state /= "pending" THEN
-                [ doc   |-> env.objects,
+               \/ old.task.retryAt > t
+               \/ Project(old, t).promise.state /= "pending" THEN
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, i, new),
+                [ doc   |-> Write(doc, i, new),
                   sends |-> << [ address |-> old.promise.tags.target,
                                  message |-> [tag |-> "Execute", id      |-> i,
                                                        version |-> old.task.version] ] >> ]
 
-ProcessListener(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+ProcessListener(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET awaited    == Project(env.objects[req.id], env.now)
+        LET awaited    == Project(doc[req.id], t)
             newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.address \notin awaited.promise.listeners THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> Write(env.objects, req.id, newAwaited),
+                [ doc   |-> Write(doc, req.id, newAwaited),
                    sends |-> << [ address |-> req.address,
                                  message |-> [tag |-> "Unblock", id    |-> req.id,
                                                        state |-> awaited.promise.state] ] >> ]
 
-ProcessCallback(req, env) ==
-    IF req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+ProcessCallback(req, doc, t) ==
+    IF req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET awaited    == Project(env.objects[req.id], env.now)
+        LET awaited    == Project(doc[req.id], t)
             newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.awaiter \notin awaited.promise.callbacks THEN
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
-            ELSE IF req.awaiter \notin DOMAIN env.objects THEN
-                [ doc   |-> Write(env.objects, req.id, newAwaited),
+            ELSE IF req.awaiter \notin DOMAIN doc THEN
+                [ doc   |-> Write(doc, req.id, newAwaited),
                   sends |-> << >> ]
             ELSE
-                LET struck     == Write(env.objects, req.id, newAwaited)
-                    awaiter    == Project(struck[req.awaiter], env.now)
+                LET struck     == Write(doc, req.id, newAwaited)
+                    awaiter    == Project(struck[req.awaiter], t)
                     newAwaiter == IF awaiter.task.state = "suspended" THEN
                                       [awaiter EXCEPT !.task.state     = "pending",
                                                       !.task.pid       = NoPid,
                                                       !.task.ttl       = NoTime,
                                                       !.task.expiresAt = NoTime,
-                                                      !.task.retryAt   = env.now,
+                                                      !.task.retryAt   = t,
                                                       !.task.resumes   = {req.id}]
                                   ELSE
                                       [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
@@ -462,62 +462,62 @@ ProcessCallback(req, env) ==
                         [ doc   |-> Write(struck, req.awaiter, newAwaiter),
                           sends |-> << >> ]
 
-ProcessPromiseTimeout(req, env) ==
-    IF req.kind /= "promise" \/ req.id \notin DOMAIN env.objects THEN
-        [ doc   |-> env.objects,
+ProcessPromiseTimeout(req, doc, t) ==
+    IF req.kind /= "promise" \/ req.id \notin DOMAIN doc THEN
+        [ doc   |-> doc,
           sends |-> << >> ]
     ELSE
-        LET old == env.objects[req.id]
-            new == Project(old, env.now)
+        LET old == doc[req.id]
+            new == Project(old, t)
         IN
             IF new /= old THEN
-                [ doc   |-> Write(env.objects, req.id, new),
+                [ doc   |-> Write(doc, req.id, new),
                   sends |-> << >> ]
             ELSE
-                [ doc   |-> env.objects,
+                [ doc   |-> doc,
                   sends |-> << >> ]
 
-Handle(ev, env) ==
+Handle(ev, doc, t) ==
     CASE ev.tag = "PromiseGet" ->
-             HandlePromiseGet(ev, env)
+             HandlePromiseGet(ev, doc, t)
       [] ev.tag = "PromiseCreate" ->
-             HandlePromiseCreate(ev.req, env)
+             HandlePromiseCreate(ev.req, doc, t)
       [] ev.tag = "PromiseSettle" ->
-             HandlePromiseSettle(ev.req, env)
+             HandlePromiseSettle(ev.req, doc, t)
       [] ev.tag = "PromiseRegisterCallback" ->
-             HandlePromiseRegisterCallback(ev.req, env)
+             HandlePromiseRegisterCallback(ev.req, doc, t)
       [] ev.tag = "PromiseRegisterListener" ->
-             HandlePromiseRegisterListener(ev, env)
+             HandlePromiseRegisterListener(ev, doc, t)
       [] ev.tag = "TaskGet" ->
-             HandleTaskGet(ev, env)
+             HandleTaskGet(ev, doc, t)
       [] ev.tag = "TaskCreate" ->
-             HandleTaskCreate(ev, env)
+             HandleTaskCreate(ev, doc, t)
       [] ev.tag = "TaskAcquire" ->
-             HandleTaskAcquire(ev, env)
+             HandleTaskAcquire(ev, doc, t)
       [] ev.tag = "TaskFence" ->
-             HandleTaskFence(ev, env)
+             HandleTaskFence(ev, doc, t)
       [] ev.tag = "TaskHeartbeat" ->
-             HandleTaskHeartbeat(ev, env)
+             HandleTaskHeartbeat(ev, doc, t)
       [] ev.tag = "TaskSuspend" ->
-             HandleTaskSuspend(ev, env)
+             HandleTaskSuspend(ev, doc, t)
       [] ev.tag = "TaskFulfill" ->
-             HandleTaskFulfill(ev, env)
+             HandleTaskFulfill(ev, doc, t)
       [] ev.tag = "TaskRelease" ->
-             HandleTaskRelease(ev, env)
+             HandleTaskRelease(ev, doc, t)
       [] ev.tag = "TaskHalt" ->
-             HandleTaskHalt(ev, env)
+             HandleTaskHalt(ev, doc, t)
       [] ev.tag = "TaskContinue" ->
-             HandleTaskContinue(ev, env)
+             HandleTaskContinue(ev, doc, t)
       [] ev.tag = "Timeout" ->
              LET d == ev
-             IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d, env)
-                   [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, env)
-                   [] OTHER              -> ProcessRetryTimeout(d.id, env)
+             IN  CASE d.kind = "promise" -> ProcessPromiseTimeout(d, doc, t)
+                   [] d.kind = "lease"   -> ProcessLeaseTimeout(d.id, doc, t)
+                   [] OTHER              -> ProcessRetryTimeout(d.id, doc, t)
       [] ev.tag = "ListenerDrain" ->
-             ProcessListener(ev, env)
+             ProcessListener(ev, doc, t)
       [] ev.tag = "CallbackDrain" ->
-             ProcessCallback(ev, env)
-      [] OTHER -> [ doc   |-> env.objects,
+             ProcessCallback(ev, doc, t)
+      [] OTHER -> [ doc   |-> doc,
                     sends |-> << >> ]
 
 -----------------------------------------------------------------------------
@@ -549,21 +549,21 @@ Fresh(ev) ==
     [ ev |-> ev, phase |-> "process", pending |-> << >>,
       expect |-> EmptyFn, at |-> 0, org |-> OriginOf(ev) ]
 
-Put(f, k, v) ==
+Set(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
-Drop(f, k) ==
+Del(f, k) ==
     [x \in (DOMAIN f) \ {k} |-> f[x]]
 
 SubmitExternal(ev) ==
     /\ ev \in ExternalEvent
-    /\ \E r \in Rid \ DOMAIN steps : steps' = Put(steps, r, Fresh(ev))
+    /\ \E r \in Rid \ DOMAIN steps : steps' = Set(steps, r, Fresh(ev))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 SubmitInternal(e) ==
     /\ e \in timeouts
     /\ e.at <= now
     /\ \E r \in Rid \ DOMAIN steps :
-           steps' = Put(steps, r,
+           steps' = Set(steps, r,
                         Fresh([tag |-> "Timeout", id |-> e.id, kind |-> e.kind]))
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
@@ -676,8 +676,6 @@ Sweep(doc, t) ==
         [ doc   |-> o5.doc,
           sends |-> o2.sends \o o5.sends ]
 
-EnvAt(d, t) ==
-    [ objects |-> d, now |-> t, config |-> [retryTimeout |-> RetryTimeout] ]
 
 Was(o, i, k) ==
     IF i \in DOMAIN docs[o] THEN
@@ -716,7 +714,7 @@ Process(r) ==
     /\ steps[r].phase = "process"
     /\ LET o   == steps[r].org
            swept == Sweep(docs[o], now)
-           out   == Handle(steps[r].ev, EnvAt(swept.doc, now))
+           out   == Handle(steps[r].ev, swept.doc, now)
            final == out.doc
            sends == swept.sends \o out.sends
            W   == { [id |-> i, obj |-> final[i]] :
@@ -741,7 +739,7 @@ Ready(r) ==
 Finish(r) ==
     /\ Ready(r)
     /\ steps[r].pending = << >>
-    /\ steps' = Drop(steps, r)
+    /\ steps' = Del(steps, r)
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 Heads(r, tag) ==
@@ -801,7 +799,7 @@ Perform(r) ==
 
 Crash(r) ==
     /\ r \in DOMAIN steps
-    /\ steps' = Drop(steps, r)
+    /\ steps' = Del(steps, r)
     /\ UNCHANGED <<docs, timeouts, outbox, now>>
 
 Clock ==
