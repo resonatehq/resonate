@@ -104,6 +104,7 @@ Time ==
    a statement about coverage, not about time. *)
 Horizon ==
     0 .. MaxTime
+
 Version ==
     0 .. MaxVersion
 
@@ -201,12 +202,15 @@ SettleState ==
 
 CreateReq ==
     [id : Id, timeoutAt : Horizon, param : Value, tags : Tags]
+
 SettleReq ==
     [id : Id, state : SettleState, value : Value]
+
 CallbackReq ==
     { r \in [awaited : Id, awaiter : Id] :
         /\ r.awaited /= r.awaiter
         /\ r.awaited.origin = r.awaiter.origin }
+
 TaskRefT ==
     [id : Id, version : Version]
 

@@ -54,7 +54,6 @@ Project(obj, t) ==
 
 (* @type: ($createReq, Int) => $object; *)
 
-
 -----------------------------------------------------------------------------
 
 HandlePromiseCreate(req) ==
@@ -553,10 +552,13 @@ SameOrigin ==
 
 T_preserved_settled_promise_record ==
     [][preserved_settled_promise_record]_vars
+
 T_consistent_new_promise_born_clean ==
     [][consistent_new_promise_born_clean]_vars
+
 T_consistent_promise_settlement_stamp ==
     [][consistent_promise_settlement_stamp]_vars
+
 T_consistent_settlement_fulfils_task ==
     [][consistent_settlement_fulfils_task]_vars
 

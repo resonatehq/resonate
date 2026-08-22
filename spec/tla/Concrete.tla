@@ -596,6 +596,7 @@ Fresh(ev) ==
 
 Set(f, k, v) ==
     [x \in (DOMAIN f) \cup {k} |-> IF x = k THEN v ELSE f[x]]
+
 Del(f, k) ==
     [x \in (DOMAIN f) \ {k} |-> f[x]]
 
@@ -708,6 +709,7 @@ FairnessSF ==
 
 Spec ==
     Init /\ [][Next]_vars /\ Fairness
+
 SpecSF ==
     Init /\ [][Next]_vars /\ FairnessSF
 
@@ -721,6 +723,7 @@ C_VersionBound ==
 
 C_TypeOK ==
     A!TypeOK
+
 C_UnitCoherent ==
     A!UnitCoherent
 
@@ -747,6 +750,7 @@ NoSplitWrite ==
 
 CT_preserved_settled_promise_record ==
     [][A!preserved_settled_promise_record]_vars
+
 CT_consistent_promise_settlement_stamp ==
     [][A!consistent_promise_settlement_stamp]_vars
 
