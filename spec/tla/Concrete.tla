@@ -63,24 +63,34 @@ Project(obj, t) ==
     ELSE
         obj
 
-HandlePromiseGet(req, doc, t) ==
+Skip(doc) ==
     [ doc   |-> doc,
+      puts  |-> << >>,
+      dels  |-> << >>,
       sends |-> << >> ]
+
+HandlePromiseGet(req, doc, t) ==
+    Skip(doc)
 
 HandlePromiseCreate(req, doc, t) ==
     IF req.id \in DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET new == New(req, t)
         IN
             [ doc   |-> Write(doc, req.id, new),
+              puts  |-> (IF new.promise.state = "pending" THEN
+                             << [at |-> req.timeoutAt, id |-> req.id, kind |-> "promise"] >>
+                         ELSE << >>)
+                     \o (IF new.task.state = "pending" THEN
+                             << [at |-> t, id |-> req.id, kind |-> "retry"] >>
+                         ELSE << >>),
+              dels  |-> << >>,
               sends |-> << >> ]
 
 HandlePromiseSettle(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.state,
@@ -94,18 +104,24 @@ HandlePromiseSettle(req, doc, t) ==
                                                   !.retryAt   = NoTime,
                                                   !.resumes   = {}] ]
         IN
-            IF old.promise.state = "pending" THEN
-                [ doc   |-> Write(doc, req.id, new),
-                  sends |-> << >> ]
+            IF old.promise.state /= "pending" THEN
+                Skip(doc)
             ELSE
-                [ doc   |-> doc,
+                [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << >>,
+                  dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"] >>
+                         \o (IF old.task.state = "acquired" THEN
+                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
+                             ELSE << >>)
+                         \o (IF old.task.state = "pending" THEN
+                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
+                             ELSE << >>),
                   sends |-> << >> ]
 
 HandlePromiseRegisterCallback(req, doc, t) ==
     IF \/ req.awaited \notin DOMAIN doc
        \/ req.awaiter \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET awaited    == Project(doc[req.awaited], t)
             awaiter    == Project(doc[req.awaiter], t)
@@ -115,36 +131,35 @@ HandlePromiseRegisterCallback(req, doc, t) ==
                \/ ~IsExternal(awaited.promise)
                \/ awaited.promise.state /= "pending"
                \/ awaiter.promise.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.awaited, newAwaited),
+                  puts  |-> << >>,
+                  dels  |-> << >>,
                   sends |-> << >> ]
 
 HandlePromiseRegisterListener(req, doc, t) ==
     IF req.awaited \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.awaited], t)
             new == [old EXCEPT !.promise.listeners = @ \cup {req.address}]
         IN
             IF \/ ~IsExternal(old.promise)
                \/ old.promise.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.awaited, new),
+                  puts  |-> << >>,
+                  dels  |-> << >>,
                   sends |-> << >> ]
 
 HandleTaskGet(req, doc, t) ==
-    [ doc   |-> doc,
-      sends |-> << >> ]
+    Skip(doc)
 
 HandleTaskCreate(req, doc, t) ==
     IF ~req.action.tags.targeted THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE IF req.action.id \notin DOMAIN doc THEN
         LET born == New(req.action, t)
             new  == IF born.promise.state = "pending" THEN
@@ -159,6 +174,11 @@ HandleTaskCreate(req, doc, t) ==
                         born
         IN
             [ doc   |-> Write(doc, req.action.id, new),
+              puts  |-> IF born.promise.state = "pending" THEN
+                            << [at |-> req.action.timeoutAt, id |-> req.action.id, kind |-> "promise"],
+                               [at |-> t + req.ttl,          id |-> req.action.id, kind |-> "lease"] >>
+                        ELSE << >>,
+              dels  |-> << >>,
               sends |-> << >> ]
     ELSE
         LET old == Project(doc[req.action.id], t)
@@ -172,16 +192,16 @@ HandleTaskCreate(req, doc, t) ==
         IN
             IF \/ ~old.promise.tags.targeted
                \/ old.task.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.action.id, new),
+                  puts  |-> << [at |-> t + req.ttl, id |-> req.action.id, kind |-> "lease"] >>,
+                  dels  |-> << [at |-> old.task.retryAt, id |-> req.action.id, kind |-> "retry"] >>,
                   sends |-> << >> ]
 
 HandleTaskAcquire(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "acquired",
@@ -195,16 +215,16 @@ HandleTaskAcquire(req, doc, t) ==
             IF \/ old.task.state /= "pending"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << [at |-> t + req.ttl, id |-> req.id, kind |-> "lease"] >>,
+                  dels  |-> << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>,
                   sends |-> << >> ]
 
 HandleTaskFence(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
         IN
@@ -214,8 +234,7 @@ HandleTaskFence(req, doc, t) ==
                \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE IF req.action.tag = "Create" THEN
                 HandlePromiseCreate(req.action.req, doc, t)
             ELSE
@@ -229,6 +248,8 @@ HandleTaskHeartbeat(req, doc, t) ==
                         /\ old.task.state = "acquired"
                         /\ old.task.pid = req.pid
                         /\ old.promise.state = "pending" }
+        q    == SetToSeq({ i \in beat :
+                             t + doc[i].task.ttl /= doc[i].task.expiresAt })
     IN
         [ doc   |-> [ i \in DOMAIN doc |->
                          IF i \in beat THEN
@@ -237,7 +258,11 @@ HandleTaskHeartbeat(req, doc, t) ==
                                                  t + old.task.ttl]
                          ELSE
                              doc[i] ],
-           sends |-> << >> ]
+          puts  |-> [ n \in 1 .. Len(q) |->
+                        [at |-> t + doc[q[n]].task.ttl, id |-> q[n], kind |-> "lease"] ],
+          dels  |-> [ n \in 1 .. Len(q) |->
+                        [at |-> doc[q[n]].task.expiresAt, id |-> q[n], kind |-> "lease"] ],
+          sends |-> << >> ]
 
 HandleTaskSuspend(req, doc, t) ==
     LET aw   == { a.awaited : a \in req.actions }
@@ -248,8 +273,7 @@ HandleTaskSuspend(req, doc, t) ==
            \/ \E a \in aw : a.origin /= req.id.origin
            \/ req.id \notin DOMAIN doc
            \/ seen /= aw THEN
-            [ doc   |-> doc,
-              sends |-> << >> ]
+            Skip(doc)
         ELSE
             LET old == Project(doc[req.id], t)
                 new == [old EXCEPT !.task.state     = "suspended",
@@ -264,11 +288,12 @@ HandleTaskSuspend(req, doc, t) ==
                    \/ old.task.version /= req.version
                    \/ \E a \in aw :
                         ~IsExternal(Project(doc[a], t).promise) THEN
-                    [ doc   |-> doc,
-                      sends |-> << >> ]
+                    Skip(doc)
                 ELSE IF \E a \in aw :
                           Project(doc[a], t).promise.state /= "pending" THEN
                     [ doc   |-> Write(doc, req.id, [old EXCEPT !.task.resumes = {}]),
+                      puts  |-> << >>,
+                      dels  |-> << >>,
                       sends |-> << >> ]
                 ELSE
                     [ doc   |-> [ i \in DOMAIN doc |->
@@ -279,12 +304,13 @@ HandleTaskSuspend(req, doc, t) ==
                                               !.promise.callbacks = @ \cup {req.id}]
                                      ELSE
                                          doc[i] ],
-                       sends |-> << >> ]
+                      puts  |-> << >>,
+                      dels  |-> << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>,
+                      sends |-> << >> ]
 
 HandleTaskFulfill(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [ promise |-> [old.promise EXCEPT !.state     = req.action.state,
@@ -300,16 +326,17 @@ HandleTaskFulfill(req, doc, t) ==
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << >>,
+                  dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"],
+                               [at |-> old.task.expiresAt,    id |-> req.id, kind |-> "lease"] >>,
                   sends |-> << >> ]
 
 HandleTaskRelease(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "pending",
@@ -321,16 +348,16 @@ HandleTaskRelease(req, doc, t) ==
             IF \/ old.task.state /= "acquired"
                \/ old.promise.state /= "pending"
                \/ old.task.version /= req.version THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << [at |-> t, id |-> req.id, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>,
                   sends |-> << >> ]
 
 HandleTaskHalt(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "halted",
@@ -341,16 +368,21 @@ HandleTaskHalt(req, doc, t) ==
         IN
             IF \/ old.task.state = "none"
                \/ old.task.state \in {"fulfilled", "halted"} THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << >>,
+                  dels  |-> (IF old.task.state = "acquired" THEN
+                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
+                             ELSE << >>)
+                         \o (IF old.task.state = "pending" THEN
+                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
+                             ELSE << >>),
                   sends |-> << >> ]
 
 HandleTaskContinue(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
             new == [old EXCEPT !.task.state     = "pending",
@@ -361,16 +393,16 @@ HandleTaskContinue(req, doc, t) ==
         IN
             IF \/ old.task.state /= "halted"
                \/ old.promise.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << [at |-> t, id |-> req.id, kind |-> "retry"] >>,
+                  dels  |-> << >>,
                   sends |-> << >> ]
 
 ProcessLeaseTimeout(i, doc, t) ==
     IF i \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == doc[i]
             new == [old EXCEPT !.task.state     = "pending",
@@ -383,16 +415,16 @@ ProcessLeaseTimeout(i, doc, t) ==
                \/ old.task.expiresAt = NoTime
                \/ old.task.expiresAt > t
                \/ Project(old, t).promise.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, i, new),
+                  puts  |-> << [at |-> t, id |-> i, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.expiresAt, id |-> i, kind |-> "lease"] >>,
                   sends |-> << >> ]
 
 ProcessRetryTimeout(i, doc, t) ==
     IF i \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == doc[i]
             new == [old EXCEPT !.task.retryAt = t + RetryTimeout]
@@ -401,46 +433,47 @@ ProcessRetryTimeout(i, doc, t) ==
                \/ old.task.retryAt = NoTime
                \/ old.task.retryAt > t
                \/ Project(old, t).promise.state /= "pending" THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, i, new),
+                  puts  |-> << [at |-> t + RetryTimeout, id |-> i, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.retryAt, id |-> i, kind |-> "retry"] >>,
                   sends |-> << [ address |-> old.promise.tags.target,
                                  message |-> [tag |-> "Execute", id      |-> i,
                                                        version |-> old.task.version] ] >> ]
 
 ProcessListener(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET awaited    == Project(doc[req.id], t)
             newAwaited == [awaited EXCEPT !.promise.listeners = @ \ {req.address}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.address \notin awaited.promise.listeners THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, req.id, newAwaited),
-                   sends |-> << [ address |-> req.address,
+                  puts  |-> << >>,
+                  dels  |-> << >>,
+                  sends |-> << [ address |-> req.address,
                                  message |-> [tag |-> "Unblock", id    |-> req.id,
                                                        state |-> awaited.promise.state] ] >> ]
 
 ProcessCallback(req, doc, t) ==
     IF req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET awaited    == Project(doc[req.id], t)
             newAwaited == [awaited EXCEPT !.promise.callbacks = @ \ {req.awaiter}]
         IN
             IF \/ awaited.promise.state = "pending"
                \/ req.awaiter \notin awaited.promise.callbacks THEN
-                [ doc   |-> doc,
-                  sends |-> << >> ]
+                Skip(doc)
             ELSE IF req.awaiter \notin DOMAIN doc THEN
                 [ doc   |-> Write(doc, req.id, newAwaited),
+                  puts  |-> << >>,
+                  dels  |-> << >>,
                   sends |-> << >> ]
             ELSE
                 LET struck     == Write(doc, req.id, newAwaited)
@@ -457,24 +490,36 @@ ProcessCallback(req, doc, t) ==
                 IN
                     IF awaiter.task.state \in {"none", "fulfilled"} THEN
                         [ doc   |-> struck,
+                          puts  |-> << >>,
+                          dels  |-> << >>,
                           sends |-> << >> ]
                     ELSE
                         [ doc   |-> Write(struck, req.awaiter, newAwaiter),
+                          puts  |-> IF awaiter.task.state = "suspended" THEN
+                                        << [at |-> t, id |-> req.awaiter, kind |-> "retry"] >>
+                                    ELSE << >>,
+                          dels  |-> << >>,
                           sends |-> << >> ]
 
 ProcessPromiseTimeout(req, doc, t) ==
     IF req.kind /= "promise" \/ req.id \notin DOMAIN doc THEN
-        [ doc   |-> doc,
-          sends |-> << >> ]
+        Skip(doc)
     ELSE
         LET old == doc[req.id]
             new == Project(old, t)
         IN
-            IF new /= old THEN
-                [ doc   |-> Write(doc, req.id, new),
-                  sends |-> << >> ]
+            IF new = old THEN
+                Skip(doc)
             ELSE
-                [ doc   |-> doc,
+                [ doc   |-> Write(doc, req.id, new),
+                  puts  |-> << >>,
+                  dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"] >>
+                         \o (IF old.task.state = "acquired" THEN
+                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
+                             ELSE << >>)
+                         \o (IF old.task.state = "pending" THEN
+                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
+                             ELSE << >>),
                   sends |-> << >> ]
 
 Handle(ev, doc, t) ==
@@ -517,8 +562,7 @@ Handle(ev, doc, t) ==
              ProcessListener(ev, doc, t)
       [] ev.tag = "CallbackDrain" ->
              ProcessCallback(ev, doc, t)
-      [] OTHER -> [ doc   |-> doc,
-                    sends |-> << >> ]
+      [] OTHER -> Skip(doc)
 
 -----------------------------------------------------------------------------
 
@@ -705,8 +749,8 @@ Process(r) ==
            swept == Sweep(docs[o], now)
            out   == Handle(steps[r].ev, swept.doc, now)
            final == out.doc
-           puts  == swept.puts  \o SetToSeq(Armed(final) \ Armed(swept.doc))
-           dels  == swept.dels  \o SetToSeq(Armed(swept.doc) \ Armed(final))
+           puts  == swept.puts  \o out.puts
+           dels  == swept.dels  \o out.dels
            sends == swept.sends \o out.sends
        IN  steps' = [steps EXCEPT ![r].phase   = "perform",
                                   ![r].pending =
