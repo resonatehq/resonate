@@ -23,7 +23,7 @@ A ==
     INSTANCE Abstract WITH objects <- Objects
 
 -----------------------------------------------------------------------------
------------------------------------------------------------------------------
+
 New(req, t) ==
     IF req.timeoutAt > t THEN
         [ promise |-> [ state |-> "pending", param |-> req.param, value |-> NoValue,
