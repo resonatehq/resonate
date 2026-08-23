@@ -158,19 +158,19 @@ func enabledInternalSteps(s *ServerState, now uint64) []internalStep {
 		o := o
 		p := o.Promise
 		if p.State == Pending && p.TimeoutAt <= now {
-			rs = append(rs, internalStep{"R1 processPromiseTimeout " + o.ID,
+			rs = append(rs, internalStep{"promiseTimeout " + o.ID,
 				func(t *ServerState) { t.ProcessPromiseTimeout(o.ID, now) }})
 			continue // its callbacks cannot drain until it is settled
 		}
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				rs = append(rs, internalStep{"R4 processCallback " + o.ID + " -> " + a,
+				rs = append(rs, internalStep{"callback " + o.ID + " → " + a,
 					func(t *ServerState) { t.ProcessCallback(o.ID, a, now) }})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				rs = append(rs, internalStep{"R3 processListener " + o.ID + " -> " + l,
+				rs = append(rs, internalStep{"listener " + o.ID + " → " + l,
 					func(t *ServerState) { t.ProcessListener(o.ID, l, now) }})
 			}
 		}
@@ -186,11 +186,11 @@ func enabledInternalSteps(s *ServerState, now uint64) []internalStep {
 			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			rs = append(rs, internalStep{"R5 processLeaseTimeout " + o.ID,
+			rs = append(rs, internalStep{"taskLeaseTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			rs = append(rs, internalStep{"R6 processRetryTimeout " + o.ID,
+			rs = append(rs, internalStep{"taskRetryTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }})
 		}
 	}
@@ -278,7 +278,7 @@ func enabledFirings(s *ServerState, now uint64) []firing {
 		o := o
 		p := o.Promise
 		if p.State == Pending && p.TimeoutAt <= now {
-			fs = append(fs, firing{internalStep{"R1 processPromiseTimeout " + o.ID,
+			fs = append(fs, firing{internalStep{"promiseTimeout " + o.ID,
 				func(t *ServerState) { t.ProcessPromiseTimeout(o.ID, now) }},
 				append(append([]string{}, p.Callbacks...), o.ID)})
 			continue
@@ -286,13 +286,13 @@ func enabledFirings(s *ServerState, now uint64) []firing {
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				fs = append(fs, firing{internalStep{"R4 processCallback " + o.ID + " -> " + a,
+				fs = append(fs, firing{internalStep{"callback " + o.ID + " → " + a,
 					func(t *ServerState) { t.ProcessCallback(o.ID, a, now) }},
 					[]string{o.ID, a}})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				fs = append(fs, firing{internalStep{"R3 processListener " + o.ID + " -> " + l,
+				fs = append(fs, firing{internalStep{"listener " + o.ID + " → " + l,
 					func(t *ServerState) { t.ProcessListener(o.ID, l, now) }},
 					nil})
 			}
@@ -305,12 +305,12 @@ func enabledFirings(s *ServerState, now uint64) []firing {
 			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			fs = append(fs, firing{internalStep{"R5 processLeaseTimeout " + o.ID,
+			fs = append(fs, firing{internalStep{"taskLeaseTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }},
 				[]string{o.ID}})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			fs = append(fs, firing{internalStep{"R6 processRetryTimeout " + o.ID,
+			fs = append(fs, firing{internalStep{"taskRetryTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }},
 				nil})
 		}

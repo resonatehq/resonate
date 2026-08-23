@@ -65,7 +65,7 @@ func TestCleanTracesLinearize(t *testing.T) {
 	// SDK against a real server, so they exercise the kinds the
 	// hand-written load generators never sent: `task.create`,
 	// `task.fence` and `promise.register_listener`. Two of the four are
-	// suspend/resume runs, which is the only way R4 gets reached at all.
+	// suspend/resume runs, which is the only way callback gets reached at all.
 	for _, name := range []string{
 		"resonate-sqlite-50wf.ndjson", "resonate-sqlite-200wf-debugstart.ndjson",
 		"resonate-sdk-simple-run.ndjson", "resonate-sdk-simple-rpc.ndjson",
@@ -195,7 +195,7 @@ func TestTamperedTracesAreRejected(t *testing.T) {
 	}
 }
 
-// The witness is a certificate: the recorded run needs hidden R4 firings
+// The witness is a certificate: the recorded run needs hidden callback firings
 // to be explainable at all, so an empty witness would mean the trace was
 // never asking the interesting question.
 func TestWitnessRecoversHiddenResumes(t *testing.T) {
@@ -207,12 +207,12 @@ func TestWitnessRecoversHiddenResumes(t *testing.T) {
 		}
 		resumes := 0
 		for _, r := range w {
-			if len(r) > 2 && r[:2] == "R4" {
+			if strings.HasPrefix(r, "callback") {
 				resumes++
 			}
 		}
 		if resumes != 50 {
-			t.Errorf("%v: recovered %d R4 firings, want 50 (one per workflow)", d, resumes)
+			t.Errorf("%v: recovered %d callback firings, want 50 (one per workflow)", d, resumes)
 		}
 	}
 }

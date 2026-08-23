@@ -27,24 +27,24 @@ Three defects, of which only the first was previously named.
    observations. `Explains` cannot place it there.
 
 2. **The instant is not even the RIGHT observation's.** `Admissible`
-   fires each event's schedule BEFORE that event, so a τ that a real
+   fires each event's schedule BEFORE that event, so an internal step that a real
    execution fired at `o_i.now` — but after `o_i`'s request — is
    attributed by the checker to `o_{i+1}.now`. So `ValidPinned` is not
-   the "τs at observation instants" fragment of `Valid`; it is strictly
+   the "internal steps at observation instants" fragment of `Valid`; it is strictly
    narrower than that, and the discrepancy is visible on a trace whose
    instants are ALL on the grid. This was not recorded anywhere.
 
-3. **Nothing after the last observation.** τs that fire after the final
+3. **Nothing after the last observation.** internal steps that fire after the final
    event are not modelled. This one is harmless — such steps precede no
    observation, so deleting them from an execution changes no external
    step — but it has to be argued rather than assumed, and `Admissible`
    never made room to argue it.
 
 `AdmissibleAt` below fixes all three by carrying the interval: each
-event's schedule is a list of (τ, instant) pairs whose instants are
+event's schedule is a list of (internal step, instant) pairs whose instants are
 NON-DECREASING and lie in `[a, o.now]`, where `a` is the previous event's
 instant (`0` before the first). Defect 3 is fixed by the theorem, not the
-definition: the reconstruction pads with `.idle`, so trailing τs simply
+definition: the reconstruction pads with `.idle`, so trailing internal steps simply
 never need to appear.
 
 ## Why this is a restatement and not a redefinition
@@ -69,14 +69,14 @@ namespace TraceCheck.Executions
 
 open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Correctness
 
-/-! ## Internal requests, read back as τs
+/-! ## Internal requests, read back as internal steps
 
-`Tau` was introduced so that "a schedule contains only internal steps" is
+`InternalStep` was introduced so that "a schedule contains only internal steps" is
 a typing fact. Recovering a schedule from a trace needs the other
-direction: every non-external `Request` is either a τ or `.idle`, and
+direction: every non-external `Request` is either an internal step or `.idle`, and
 `.idle` is a no-op that can be dropped. -/
 
-def ofStep? : Step → Option Tau
+def ofStep? : Step → Option InternalStep
   | .promiseTimeout id      => some (.promiseTimeout id)
   | .listener id addr => some (.listener id addr)
   | .callback id x    => some (.callback id x)
@@ -85,11 +85,11 @@ def ofStep? : Step → Option Tau
   | .scheduleTimeout id      => some (.scheduleTimeout id)
   | _           => none
 
-theorem toStep_ofStep? {st : Step} {t : Tau} (h : ofStep? st = some t) :
+theorem toStep_ofStep? {st : Step} {t : InternalStep} (h : ofStep? st = some t) :
     t.toStep = st := by
   cases st <;> simp [ofStep?] at h <;> subst h <;> rfl
 
-/-- The only non-external step that is not a τ. -/
+/-- The only non-external step that is not an internal step. -/
 theorem idle_of_internal {st : Step}
     (hx : st.isExternal = false) (h : ofStep? st = none) : st = .idle := by
   cases st <;> simp [ofStep?, Step.isExternal] at h hx <;> rfl
@@ -100,30 +100,30 @@ theorem step_idle (now : Nat) (s : ServerState) :
 
 /-! ## Timed schedules
 
-A schedule is now a list of (τ, instant) pairs. `Timed a b σ` is the
+A schedule is now a list of (internal step, instant) pairs. `Timed a b σ` is the
 clock discipline `ValidM` imposes on it: start no earlier than `a`, never
 run backwards, finish no later than `b`. Written as a fold rather than as
 `List.Chain` so that the recursion matches `fireAllAt`'s. -/
 
-def Timed : Nat → Nat → List (Tau × Nat) → Prop
+def Timed : Nat → Nat → List (InternalStep × Nat) → Prop
   | a, b, []             => a ≤ b
   | a, b, (_, n) :: rest => a ≤ n ∧ Timed n b rest
 
-theorem Timed.weaken {a a' b : Nat} {σ : List (Tau × Nat)}
+theorem Timed.weaken {a a' b : Nat} {σ : List (InternalStep × Nat)}
     (h : Timed a' b σ) (hle : a ≤ a') : Timed a b σ := by
   cases σ with
   | nil => exact Nat.le_trans hle h
   | cons hd tl => exact ⟨Nat.le_trans hle h.1, h.2⟩
 
-/-- Fire a timed schedule: each τ at ITS OWN instant. This is the one
+/-- Fire a timed schedule: each internal step at ITS OWN instant. This is the one
     place `fireAll` from `correctness.lean` was too weak — there, one
     instant served the whole schedule. -/
-def fireAllAt (σ : List (Tau × Nat)) (s : ServerState) : ServerState :=
+def fireAllAt (σ : List (InternalStep × Nat)) (s : ServerState) : ServerState :=
   σ.foldl (fun st tn => tn.1.step tn.2 st) s
 
 @[simp] theorem fireAllAt_nil (s : ServerState) : fireAllAt [] s = s := rfl
 
-@[simp] theorem fireAllAt_cons (t : Tau) (n : Nat) (σ : List (Tau × Nat)) (s : ServerState) :
+@[simp] theorem fireAllAt_cons (t : InternalStep) (n : Nat) (σ : List (InternalStep × Nat)) (s : ServerState) :
     fireAllAt ((t, n) :: σ) s = fireAllAt σ (t.step n s) := rfl
 
 /-! ## Admissibility, with the interval -/
@@ -136,7 +136,7 @@ def fireAllAt (σ : List (Tau × Nat)) (s : ServerState) : ServerState :=
     rather than pinned. -/
 inductive AdmissibleAt : Nat → ServerState → List Observation → Prop
   | nil  {a s} : AdmissibleAt a s []
-  | cons {a s s' o rest} (σ : List (Tau × Nat))
+  | cons {a s s' o rest} (σ : List (InternalStep × Nat))
       (htime : Timed a o.now σ)
       (hstep : Abstraction.stepOf true (.api o.req) o.now (fireAllAt σ s) = (o.res, s'))
       (hrest : AdmissibleAt o.now s' rest) :
@@ -173,17 +173,17 @@ theorem Monotone.tail {o : Observation} {rest : List Observation}
 theorem Monotone.head {o hd : Observation} {tl : List Observation}
     (h : Monotone (o :: hd :: tl)) : o.now ≤ hd.now := h.1
 
-theorem timed_of_pinned (o : Observation) (σ : List Tau) :
+theorem timed_of_pinned (o : Observation) (σ : List InternalStep) :
     ∀ a : Nat, a ≤ o.now → Timed a o.now (σ.map (fun t => (t, o.now))) := by
   induction σ with
   | nil => intro a h; exact h
   | cons hd tl ih => intro a h; exact ⟨h, ih o.now (Nat.le_refl _)⟩
 
-theorem fireAllAt_pinned (σ : List Tau) (now : Nat) (s : ServerState) :
+theorem fireAllAt_pinned (σ : List InternalStep) (now : Nat) (s : ServerState) :
     fireAllAt (σ.map (fun t => (t, now))) s = fireAll σ now s := by
   induction σ generalizing s with
   | nil => rfl
-  | cons hd tl ih => simpa [fireAll, Tau.step] using ih (hd.step now s)
+  | cons hd tl ih => simpa [fireAll, InternalStep.step] using ih (hd.step now s)
 
 /-- Pinned admissibility is timed admissibility, on a monotone recording. -/
 theorem admissibleAt_of_admissible {s : ServerState} {obs : List Observation}
@@ -266,7 +266,7 @@ theorem segment {tr : Trace} (hv : ValidM tr) :
           refine ⟨(t, (tr k).now) :: σ, ⟨ha, htime.weaken hclock⟩, ?_⟩
           rw [fireAllAt_cons, ← hfire, hstate]
           congr 1
-          simp [Tau.step, toStep_ofStep? hof]
+          simp [InternalStep.step, toStep_ofStep? hof]
 
 /-- **SOUNDNESS's half.** Every timed explanation is an execution the
     specification calls valid. -/

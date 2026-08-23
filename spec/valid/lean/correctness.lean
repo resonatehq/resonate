@@ -49,14 +49,14 @@ So the bridge `pinned_implies_valid` is deliberately ONE-DIRECTIONAL, and
 the converse is `InstantsSuffice` — a named, unproved, possibly FALSE
 proposition rather than a remark in a comment. Soundness survives
 untouched. Completeness now carries `InstantsSuffice` as a hypothesis,
-which is the honest statement: reject means "no schedule with τs at
+which is the honest statement: reject means "no schedule with internal steps at
 observation instants", and upgrading that to "no schedule at all" is
 precisely the missing lemma.
 
 ## The semantics of a schedule
 
-`Tau` is a type, so "a schedule contains only internal steps" is not a
-hypothesis to carry around — it is what `List Tau` MEANS. The predicate
+`InternalStep` is a type, so "a schedule contains only internal steps" is not a
+hypothesis to carry around — it is what `List InternalStep` MEANS. The predicate
 used to read `∃ σ : List Request, (∀ t ∈ σ, t.isExternal = false) ∧ …`,
 which put the invariant in a place every lemma had to re-establish.
 
@@ -73,7 +73,7 @@ convenience: the trace framework calls it being "OBLIGATION-GUARDED".
 search actually ran to saturation, so the checker must be able to say "I
 stopped early" as a distinct answer.
 
-Writing that hypothesis down is what exposed a real gap: `tauClosureBy`
+Writing that hypothesis down is what exposed a real gap: `internalClosureBy`
 used to return its partial `seen` set when fuel ran out, indistinguishably
 from having reached a fixpoint, so a REFUTED verdict could rest on a
 closure that was simply cut short. It now reports saturation and
@@ -133,12 +133,12 @@ something. Deleting these would delete the record of why the design
 changed. -/
 
 /-- Run a schedule of internal steps at ONE instant. -/
-def fireAll (σ : List Tau) (now : Nat) (s : ServerState) : ServerState :=
+def fireAll (σ : List InternalStep) (now : Nat) (s : ServerState) : ServerState :=
   σ.foldl (fun st t => t.step now st) s
 
 /-- One observed event explained by a schedule pinned to `o.now`. -/
 def Explains (o : Observation) (s s' : ServerState) : Prop :=
-  ∃ σ : List Tau,
+  ∃ σ : List InternalStep,
     Abstraction.stepOf true (.api o.req) o.now (fireAll σ o.now s) = (o.res, s')
 
 inductive Admissible : ServerState → List Observation → Prop
@@ -207,21 +207,21 @@ theorem canon_step {s s' : ServerState} (h : canon s = canon s')
 
 /-- **3 · INDEPENDENCE — the cone's whole justification.**
 
-    A τ whose affected set misses everything the request reads cannot
+    A internal step whose affected set misses everything the request reads cannot
     change the response, so declining to fire it now loses nothing: it
     stays armed and is available at the next event that does reach it.
 
     Note the two SIDES of the hypothesis are now different types —
-    `affects` takes a `Tau`, `touches` a `Request` — which is the point:
-    only a τ can be deferred, and the type says so.
+    `affects` takes a `InternalStep`, `touches` a `Request` — which is the point:
+    only an internal step can be deferred, and the type says so.
 
-    This is the statement `touches` violated. `touches (τPromiseTimeout a)`
+    This is the statement `touches` violated. `touches (promiseTimeout a)`
     was `[a]`, but settling `a` defers resumes for its awaiters — so the
     hypothesis held while the conclusion did not, and the cone refuted a
     conforming trace. `affects` exists to make the hypothesis strong
     enough to be true. If this cannot be proved, `affects` is still
     wrong. -/
-theorem cone_independence {s : ServerState} {now : Nat} {req : Request} {t : Tau}
+theorem cone_independence {s : ServerState} {now : Nat} {req : Request} {t : InternalStep}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
     (Abstraction.stepOf true (.api req) now (t.step now s)).1
       = (Abstraction.stepOf true (.api req) now s).1 := by
@@ -229,7 +229,7 @@ theorem cone_independence {s : ServerState} {now : Nat} {req : Request} {t : Tau
 
 /-- **3b · and the states commute**, modulo `canon`, so deferring is a
     reordering rather than a loss. -/
-theorem cone_commute {s : ServerState} {now : Nat} {req : Request} {t : Tau}
+theorem cone_commute {s : ServerState} {now : Nat} {req : Request} {t : InternalStep}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
     canon (t.step now (Abstraction.stepOf true (.api req) now s).2)
       = canon (Abstraction.stepOf true (.api req) now (t.step now s)).2 := by

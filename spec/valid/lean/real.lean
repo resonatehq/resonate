@@ -20,9 +20,9 @@ The interesting event is #6:
 The task was `suspended` at 1200 and nobody woke it explicitly. resonate
 discharges the resume INSIDE `promise.settle`'s transaction, so an
 observer sees a task that changed state with no request to explain it.
-The specification does not fix that schedule — `deferred` plus a drain τ
+The specification does not fix that schedule — `deferred` plus a drain internal step
 is one admissible schedule, doing it eagerly is another. So the validator
-has to supply the missing `τResume` itself. That is the whole point of
+has to supply the missing `callback` itself. That is the whole point of
 asking for admissibility rather than for reproduction.
 
 ## Two divergences from the specification, found while capturing

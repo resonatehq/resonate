@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The write half of the cone's soundness obligation, on states built to
 // enable each internal step in turn. The fuzzer checks it across generated runs;
@@ -14,27 +17,27 @@ func TestAffectsCoversObservableWrites(t *testing.T) {
 		now  uint64
 		s    *ServerState
 	}{
-		{"R1 a promise past its deadline, with an awaiter on its ledger", 300, &ServerState{
+		{"promiseTimeout: a promise past its deadline, with an awaiter on its ledger", 300, &ServerState{
 			Objects: []*Object{
 				{ID: "a", Promise: &Promise{State: Pending, Tags: ext, TimeoutAt: 250, CreatedAt: 100,
 					Callbacks: []string{"x"}, Listeners: []string{"https://l"}}},
 				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskSuspended, Version: 1}},
 			},
 		}},
-		{"R3/R4 a settled promise with both ledgers loaded", 300, &ServerState{
+		{"listener/callback: a settled promise with both ledgers loaded", 300, &ServerState{
 			Objects: []*Object{
 				{ID: "a", Promise: &Promise{State: Resolved, Tags: ext, TimeoutAt: 2000, CreatedAt: 100,
 					SettledAt: u64p(200), Callbacks: []string{"x"}, Listeners: []string{"https://l"}}},
 				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskSuspended, Version: 1}},
 			},
 		}},
-		{"R5 an acquired task past its lease", 300, &ServerState{
+		{"taskLeaseTimeout: an acquired task past its lease", 300, &ServerState{
 			Objects: []*Object{
 				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskAcquired, Version: 1, TTL: u64p(100),
 					PID: strp("p0"), ExpiresAt: u64p(200)}},
 			},
 		}},
-		{"R6 a pending task past its retry deadline", 300, &ServerState{
+		{"taskRetryTimeout: a pending task past its retry deadline", 300, &ServerState{
 			Objects: []*Object{
 				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskPending, Version: 1, RetryAt: u64p(200)}},
 			},
@@ -62,12 +65,12 @@ func TestAffectsCatchesAnUnderstatedSet(t *testing.T) {
 	}
 	fs := enabledFirings(s, 300)
 	if len(fs) != 1 {
-		t.Fatalf("expected exactly R1 enabled, got %d", len(fs))
+		t.Fatalf("expected exactly promiseTimeout enabled, got %d", len(fs))
 	}
 	if got := observableWrites(s, fs[0].fire); len(got) != 1 || got[0] != "a" {
-		t.Fatalf("R1 should observably write exactly [a], got %v", got)
+		t.Fatalf("promiseTimeout should observably write exactly [a], got %v", got)
 	}
-	// declare nothing, as R3 and R6 legitimately do, and the write must show
+	// declare nothing, as listener and taskRetryTimeout legitimately do, and the write must show
 	declared := map[string]bool{}
 	for _, id := range observableWrites(s, fs[0].fire) {
 		if !declared[id] {
@@ -77,12 +80,12 @@ func TestAffectsCatchesAnUnderstatedSet(t *testing.T) {
 	t.Fatal("an understated affects went undetected")
 }
 
-// armR1 is the state the arming obligation exists for: a promise past its
+// armPromiseTimeout is the state the arming obligation exists for: a promise past its
 // deadline carrying an awaiter on its callback ledger, and that awaiter
-// suspended on it. Firing R1 settles the promise, which is what ENABLES
-// R4, which wakes the task — so R1 can reach a write to `x` without ever
+// suspended on it. Firing promiseTimeout settles the promise, which is what ENABLES
+// callback, which wakes the task — so promiseTimeout can reach a write to `x` without ever
 // writing `x` itself.
-func armR1() (*ServerState, uint64) {
+func armPromiseTimeout() (*ServerState, uint64) {
 	ext := Tags{"resonate:external": "true"}
 	tgt := Tags{"resonate:target": "poll://any@w1"}
 	return &ServerState{
@@ -94,30 +97,30 @@ func armR1() (*ServerState, uint64) {
 	}, 300
 }
 
-func TestArmingReachesThroughR1(t *testing.T) {
-	s, now := armR1()
+func TestArmingReachesThroughPromiseTimeout(t *testing.T) {
+	s, now := armPromiseTimeout()
 	fs := enabledFirings(s, now)
-	var r1 firing
+	var pt firing
 	for _, f := range fs {
-		if len(f.name) > 2 && f.name[:2] == "R1" {
-			r1 = f
+		if strings.HasPrefix(f.name, "promiseTimeout") {
+			pt = f
 		}
 	}
-	if r1.fire == nil {
-		t.Fatal("R1 not enabled — the fixture does not test what it claims")
+	if pt.fire == nil {
+		t.Fatal("promiseTimeout not enabled — the fixture does not test what it claims")
 	}
 
-	reach, complete := reachableWrites(s, now, r1.fire, 4000)
+	reach, complete := reachableWrites(s, now, pt.fire, 4000)
 	if !complete {
 		t.Fatal("search truncated on a two-promise state")
 	}
-	// R1 writes only `a`; it REACHES `x` by arming R4.
-	direct := observableWrites(s, r1.fire)
+	// promiseTimeout writes only `a`; it REACHES `x` by arming callback.
+	direct := observableWrites(s, pt.fire)
 	if len(direct) != 1 || direct[0] != "a" {
-		t.Fatalf("R1 should write only [a], got %v", direct)
+		t.Fatalf("promiseTimeout should write only [a], got %v", direct)
 	}
 	if len(reach) != 2 || reach[0] != "a" || reach[1] != "x" {
-		t.Fatalf("R1 should reach [a x], got %v", reach)
+		t.Fatalf("promiseTimeout should reach [a x], got %v", reach)
 	}
 
 	// as declared, it is sound
@@ -126,20 +129,20 @@ func TestArmingReachesThroughR1(t *testing.T) {
 	}
 }
 
-// The historical bug, reproduced: drop the callbacks from R1's affects —
+// The historical bug, reproduced: drop the callbacks from promiseTimeout's affects —
 // leaving exactly the set it WRITES — and the check must catch it. Without
 // this, the check above only shows that today's table passes.
 func TestArmingCatchesTheHistoricalBug(t *testing.T) {
-	s, now := armR1()
-	var r1 firing
+	s, now := armPromiseTimeout()
+	var pt firing
 	for _, f := range enabledFirings(s, now) {
-		if len(f.name) > 2 && f.name[:2] == "R1" {
-			r1 = f
+		if strings.HasPrefix(f.name, "promiseTimeout") {
+			pt = f
 		}
 	}
-	understated := firing{internalStep: r1.internalStep, affects: []string{"a"}} // the write set alone
+	understated := firing{internalStep: pt.internalStep, affects: []string{"a"}} // the write set alone
 	if bad := armingViolation(s, now, understated, 4000); bad == "" {
-		t.Fatal("R1 with only its write set declared went undetected — " +
+		t.Fatal("promiseTimeout with only its write set declared went undetected — " +
 			"this is the shape that made the Lean cone unsound")
 	}
 }

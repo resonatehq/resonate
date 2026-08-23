@@ -5,7 +5,7 @@ import "testing"
 // A heartbeat carries no top-level id — its subject is the ref list — so
 // keying the partition on `Op.ID` filed every one of them under `""`,
 // away from the tasks whose leases they extend. The extension is then
-// lost in the owning partition, R5 becomes enabled earlier than the
+// lost in the owning partition, taskLeaseTimeout becomes enabled earlier than the
 // specification allows, and since firing an internal step is a CHOICE that only
 // adds candidates, the partitioned replay accepts a superset. A false
 // accept is the one direction a checker must never fail in.

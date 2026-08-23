@@ -172,9 +172,9 @@ open Equivalence
     would go on meaning the lease timeout wherever it was named. Names
     hold that position without needing a hole to do it, and they say at
     the use site which step is meant. The checker had already reached
-    the same conclusion: `Tau` in `valid/lean/validator.lean` has
-    carried exactly these names all along, and `Tau.toStep` existed to
-    translate between the two vocabularies. -/
+    the same conclusion: `InternalStep` in `valid/lean/validator.lean`
+    has carried exactly these names all along, and `InternalStep.toStep`
+    existed to translate between the two vocabularies. -/
 inductive Step
   | api              (rq : Request)
   | promiseTimeout   (id : String)

@@ -2,7 +2,7 @@ import «valid».«lean».executions
 
 /-!  # The checker, searching intervals instead of instants
 
-`valid/lean/executions.lean` proves that `ValidExec` — schedules whose τs
+`valid/lean/executions.lean` proves that `ValidExec` — schedules whose internal steps
 carry their own instants, non-decreasing, inside `[prev, o.now]` — is
 implied by `Valid`, with no hypothesis. That fixes the SEMANTICS. This
 file fixes the ALGORITHM so that it decides the wider notion, and states
@@ -70,7 +70,7 @@ It does not need to. Read the handlers rather than the prose:
   finds `state.lean`'s writer and `guarantee.lean`, which is
   meta-analysis, not a transition.
 * `processRetryTimeout` writes NOTHING ELSE: `delTaskTimeout`,
-  `setTaskTimeout … 0 …`, `setMessage`. So a retry τ is invisible to the
+  `setTaskTimeout … 0 …`, `setMessage`. So a retry internal step is invisible to the
   response channel entirely — provided a `.pending` task never carries a
   LEASE timer, since `delTaskTimeout` deletes both kinds. That proviso is
   `PendingHasNoLease` below, and it is checked empirically at every
@@ -94,7 +94,7 @@ open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Cor
     dispatch clock. `TaskRecord` carries `id`, `state`, `version`,
     `resumes` as a count, `ttl` and `pid` — not `retryAt`, and not
     `expiresAt` — so neither deadline is on the wire. `retryAt` is
-    erased here because a retry τ writes nothing else observable;
+    erased here because a retry internal step writes nothing else observable;
     `expiresAt` is KEPT, because `processLeaseTimeout` moves the task's
     state and `task.get` projects that. -/
 def Visible (s : ServerState) : ServerState :=
@@ -158,14 +158,14 @@ def rep (a b : Nat) (ss : List ServerState) (n : Nat) : Nat :=
 /-! ## The closure, over an interval
 
 Processing the critical instants in ASCENDING order and running the
-ordinary τ-closure at each generates exactly the non-decreasing timed
+ordinary internal-step closure at each generates exactly the non-decreasing timed
 schedules over that instant set — which is the shape `Timed` asks for. -/
 
-def tauClosureIn (pick : ServerState → Nat → List Tau) (instants : List Nat)
+def internalClosureIn (pick : ServerState → Nat → List InternalStep) (instants : List Nat)
     (fuel : Nat) (cs : List Cand) : List Cand × Bool :=
   instants.foldl
     (fun (acc : List Cand × Bool) n =>
-      let (cs', sat) := tauClosureBy (fun st => pick st n) n fuel acc.1
+      let (cs', sat) := internalClosureBy (fun st => pick st n) n fuel acc.1
       (cs', acc.2 && sat))
     (cs, true)
 
@@ -202,10 +202,10 @@ def stepObservedBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
     (o : Observation) (cs : List Cand) : List Cand × Bool × Bool :=
   let instants :=
     if exhaustive then allInstants a o.now else criticalInstants a o.now (cs.map (·.state))
-  let pick : ServerState → Nat → List Tau :=
-    if coned then (fun st n => relevantTaus o.req st n)
-    else (fun st n => enabledTaus st n)
-  let (closed, deep) := tauClosureIn pick instants fuel cs
+  let pick : ServerState → Nat → List InternalStep :=
+    if coned then (fun st n => relevantInternalSteps o.req st n)
+    else (fun st n => enabledInternalSteps st n)
+  let (closed, deep) := internalClosureIn pick instants fuel cs
   let gapOK := exhaustive || noNewInGapDeadline a o.now instants closed
   (dedup <| closed.filterMap fun c =>
     let (r, s') := Abstraction.stepOf true (.api o.req) o.now c.state
@@ -250,10 +250,10 @@ def validateBy (exhaustive : Bool) (coned : Bool) (trace : List Observation)
             let before := cs.length
             let (cs', deep, gapOK) := stepObservedBy exhaustive coned fuel a o cs
             if !deep then
-              .inconclusive i s!"τ-closure hit the fuel bound ({fuel})"
+              .inconclusive i s!"internal-step closure hit the fuel bound ({fuel})"
             else if !gapOK then
               .inconclusive i
-                "a τ armed a deadline inside the gap that the critical instants miss \
+                "an internal step armed a deadline inside the gap that the critical instants miss \
                  — the reduction is not justified here (raising fuel will not help)"
             else if cs'.isEmpty then
               .refuted i before
@@ -298,12 +298,12 @@ observation list and every execution explaining it, and had no
 per-handler decomposition at all — which is why nobody could prove it and
 why it took an empirical hunt to even guess at its truth. -/
 
-/-- **R1 · Retry τs are invisible.** `processRetryTimeout` writes only
+/-- **R1 · Retry internal steps are invisible.** `processRetryTimeout` writes only
     `taskTimeouts` and `outbox`, so it changes nothing `Visible` keeps —
     given that its `delTaskTimeout` cannot take a lease timer with it. -/
 theorem retry_invisible {s : ServerState} {id : String} {n : Nat}
     (hinv : PendingHasNoLease s) :
-    Visible ((Tau.taskRetryTimeout id).step n s) = Visible s := by
+    Visible ((InternalStep.taskRetryTimeout id).step n s) = Visible s := by
   sorry
 
 /-- **R2 · `Visible` is a congruence for responses.** Nothing a handler
@@ -321,21 +321,21 @@ theorem visible_step {s s' : ServerState} (h : Visible s = Visible s')
       = Visible (Abstraction.stepOf true (.api req) now s').2 := by
   sorry
 
-/-- **R3 · THE REDUCTION.** On a schedule-free state, firing a τ at `n`
+/-- **R3 · THE REDUCTION.** On a schedule-free state, firing an internal step at `n`
     or at `n`'s critical representative is the same step, up to
     `Visible`. This is the piecewise-constancy claim, and it is stated
-    per-τ and per-state — no trace in sight.
+    per-internal step and per-state — no trace in sight.
 
     `s.schedules = []` is not decoration: with a schedule present,
     `processSchedule` reads `occurrences … now`, an opaque function of
     the instant, and the statement is FALSE for any faithful cron. -/
-theorem step_at_rep {s : ServerState} {t : Tau} {a b n : Nat}
+theorem step_at_rep {s : ServerState} {t : InternalStep} {a b n : Nat}
     (hsched : s.schedules = []) (hinv : PendingHasNoLease s)
     (ha : a ≤ n) (hb : n ≤ b) :
     Visible (t.step n s) = Visible (t.step (rep a b [s] n) s) := by
   sorry
 
-/-- **R4 · schedule-freeness is preserved.** No τ and no non-schedule
+/-- **R4 · schedule-freeness is preserved.** No internal step and no non-schedule
     request creates a schedule, so a trace that never mentions one runs
     entirely in the `schedules = []` fragment — which is what lets R3's
     hypothesis be discharged once, at the top, instead of at every step. -/
@@ -366,13 +366,13 @@ theorem accepted_trace_implies_valid_trace {t : List Observation} {fuel cap : Na
     explanation, segment by segment, one segment per observation.
 
     Better here than in the pinned version this replaces. There the
-    witness was a bare `List Tau` and the instants had to be reconstructed
+    witness was a bare `List InternalStep` and the instants had to be reconstructed
     from context; now every step carries the instant it fired at, so the
     witness reads as an execution rather than as a hint. -/
 theorem witness_explains {t : List Observation} {fuel cap : Nat}
-    {w : List (Tau × Nat)} {f n : Nat}
+    {w : List (InternalStep × Nat)} {f n : Nat}
     (h : validate t fuel cap = .admissible w f n) :
-    ∃ segments : List (List (Tau × Nat)),
+    ∃ segments : List (List (InternalStep × Nat)),
       segments.length = t.length ∧ segments.flatten = w ∧ ValidExec t := by
   sorry
 
