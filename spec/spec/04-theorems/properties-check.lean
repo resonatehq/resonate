@@ -100,16 +100,16 @@ def covListeners : List (Step × Nat) :=
     (.api (.promiseRegisterListener { awaited := "a", address := "https://l1" }), 110),
     (.api (.promiseRegisterListener { awaited := "a", address := "https://l2" }), 120),
     (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200),
-    (.r3 "a" "https://l1", 210),
-    (.r3 "a" "https://l2", 220) ]
+    (.listener "a" "https://l1", 210),
+    (.listener "a" "https://l2", 220) ]
 
 def covTwoTasks : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
     (.api (.taskRelease { id := "x", version := 1 }), 120),
     (.api (.taskRelease { id := "y", version := 1 }), 130),
-    (.r6 "x", 140),
-    (.r6 "y", 150) ]
+    (.taskRetryTimeout "x", 140),
+    (.taskRetryTimeout "y", 150) ]
 
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
@@ -387,7 +387,7 @@ def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
 def wGapEmptyTarget : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
-    (.r6 "y", 110) ]
+    (.taskRetryTimeout "y", 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
     (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide

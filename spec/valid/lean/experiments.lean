@@ -39,7 +39,7 @@ def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   , (.api (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
   , (.api (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
   , (.api (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
-  , (.r4 a x, t1)          -- hidden
+  , (.callback a x, t1)          -- hidden
   , (.api (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
   , (.api (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
 
@@ -61,7 +61,7 @@ def fanoutScript (n : Nat) : List (Step × Nat) :=
 def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
       (.api (.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
-  ++ (List.range n).map (fun i => (.r1 s!"a{i}", 500))
+  ++ (List.range n).map (fun i => (.promiseTimeout s!"a{i}", 500))
   ++ [ (.api (.promiseGet { id := "a0" }), 500) ]
 
 /-- **Regression.** `a` expires on its own; that expiry defers a resume
@@ -76,8 +76,8 @@ def crossObjectScript : List (Step × Nat) :=
   , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
   , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 50 }), 10)
   , (.api (.taskSuspend   { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 12)
-  , (.r1 "a", 40)                            -- hidden
-  , (.r4 "a" "x", 40)      -- hidden
+  , (.promiseTimeout "a", 40)                            -- hidden
+  , (.callback "a" "x", 40)      -- hidden
   , (.api (.taskGet { id := "x" }), 50) ]
 
 /-! ## Running -/

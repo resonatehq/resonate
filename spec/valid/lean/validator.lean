@@ -111,14 +111,21 @@ inductive Tau
     a listener at all. The abstract machine drains both explicitly, one
     obligation at a time, so both are steps an observer's explanation
     may have to include — and each names the obligation it discharges
-    rather than a queue entry. -/
+    rather than a queue entry.
+
+    This is a coercion now, not a translation. `Step` used to call these
+    `r1`–`r7` and this function existed to bridge the two vocabularies;
+    `Step` took these names, so what is left is the injection of the
+    internal steps into all of them. `Tau` still earns its place by
+    being exactly the internal half — a schedule may contain nothing
+    else, and `DecidableEq` on it is what the cone's dedup needs. -/
 def Tau.toStep : Tau → Step
-  | .promiseTimeout id   => .r1 id
-  | .listener id addr    => .r3 id addr
-  | .callback id awaiter => .r4 id awaiter
-  | .taskLeaseTimeout id => .r5 id
-  | .taskRetryTimeout id => .r6 id
-  | .scheduleTimeout id  => .r7 id
+  | .promiseTimeout id   => .promiseTimeout id
+  | .listener id addr    => .listener id addr
+  | .callback id awaiter => .callback id awaiter
+  | .taskLeaseTimeout id => .taskLeaseTimeout id
+  | .taskRetryTimeout id => .taskRetryTimeout id
+  | .scheduleTimeout id  => .scheduleTimeout id
 
 /-- A witness is meant to be read, so it prints as the step rather than
     as its constructor. -/

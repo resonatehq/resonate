@@ -315,8 +315,8 @@ theorem internal_laws_are_strictly_stronger :
 /-! ### The gap that closed
 
 `monotone_task_retry_rearm_advances` used to live in `gaps`, witnessed
-by a script that fired `.r6 "x" 0` — the environment writing a past
-instant into the store. There is no such script now: `Step.r6` names
+by a script that fired `.taskRetryTimeout "x" 0` — the environment writing a past
+instant into the store. There is no such script now: `Step.taskRetryTimeout` names
 only its task, and the next instant comes from
 `Env.config.retryTimeout`, which no step can write. The witness cannot
 be expressed, so it is gone, and the property has moved into

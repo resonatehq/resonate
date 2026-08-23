@@ -77,12 +77,12 @@ direction: every non-external `Request` is either a τ or `.idle`, and
 `.idle` is a no-op that can be dropped. -/
 
 def ofStep? : Step → Option Tau
-  | .r1 id      => some (.promiseTimeout id)
-  | .r3 id addr => some (.listener id addr)
-  | .r4 id x    => some (.callback id x)
-  | .r5 id      => some (.taskLeaseTimeout id)
-  | .r6 id      => some (.taskRetryTimeout id)
-  | .r7 id      => some (.scheduleTimeout id)
+  | .promiseTimeout id      => some (.promiseTimeout id)
+  | .listener id addr => some (.listener id addr)
+  | .callback id x    => some (.callback id x)
+  | .taskLeaseTimeout id      => some (.taskLeaseTimeout id)
+  | .taskRetryTimeout id      => some (.taskRetryTimeout id)
+  | .scheduleTimeout id      => some (.scheduleTimeout id)
   | _           => none
 
 theorem toStep_ofStep? {st : Step} {t : Tau} (h : ofStep? st = some t) :

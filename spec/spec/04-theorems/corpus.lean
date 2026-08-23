@@ -27,17 +27,17 @@ open Equivalence
 def wLag : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
     (.api (.taskGet { id := "x" }), 300),
-    (.r5 "x", 300),
-    (.r6 "x", 300) ]
+    (.taskLeaseTimeout "x", 300),
+    (.taskRetryTimeout "x", 300) ]
 
 def b1 : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
     (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
     (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200),
-    (.r4 "a" "x", 200),
+    (.callback "a" "x", 200),
     (.api (.taskGet { id := "x" }), 210),
-    (.r6 "x", 210),
+    (.taskRetryTimeout "x", 210),
     (.api (.taskAcquire { id := "x", version := 1, pid := "p2", ttl := 50 }), 220),
     (.api (.taskFulfill { id := "x", version := 2, action := { id := "x", state := .resolved, value := {} } }), 230) ]
 
@@ -85,9 +85,9 @@ def b6 : List (Step × Nat) :=
 
 /-! ## The alphabet
 
-`.r6` names only its task now — the next fire instant comes from
+`.taskRetryTimeout` names only its task now — the next fire instant comes from
 `Env.config.retryTimeout`, so there is no instant for a script to
-choose. It used to read `.r6 "x" 9000`. -/
+choose. It used to read `.taskRetryTimeout "x" 9000`. -/
 
 def kernelsResp : List Step :=
   [ .api (.promiseCreate { id := "a", timeoutAt := 250, param := {}, tags := extTags }),
@@ -97,10 +97,10 @@ def kernelsResp : List Step :=
     .api (.promiseGet { id := "a" }),
     .api (.taskGet { id := "x" }),
     .api (.taskHalt { id := "x" }),
-    .r1 "a",
-    .r4 "a" "x",
-    .r5 "x",
-    .r6 "x" ]
+    .promiseTimeout "a",
+    .callback "a" "x",
+    .taskLeaseTimeout "x",
+    .taskRetryTimeout "x" ]
 
 def seqsLenA (ks : List Step) : Nat → List (List Step)
   | 0 => [[]]

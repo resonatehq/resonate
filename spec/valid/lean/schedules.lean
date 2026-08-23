@@ -132,7 +132,7 @@ def sid : String := "s"
 def script (H : CronDiscriminates) : List (Step × Nat) :=
   [ (.api (.scheduleCreate { id := sid, cron := H.cron, promiseId := "p",
                              promiseTimeout := 1000, promiseParam := {}, promiseTags := [] }), H.t0)
-  , (.r7 sid, H.tg)
+  , (.scheduleTimeout sid, H.tg)
   , (.api (.scheduleGet { id := sid }), H.t1) ]
 
 def obs (H : CronDiscriminates) : List Observation := recordFrom (script H)

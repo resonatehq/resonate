@@ -44,31 +44,31 @@ def taskAt (s : ServerState) (id : String) : Option TaskObject :=
 
 def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
-  | .r1 id =>
+  | .promiseTimeout id =>
       match promiseAt s id with
       | some p => p.state == .pending && p.timeoutAt ≤ now
       | none   => false
-  | .r3 id addr =>
+  | .listener id addr =>
       match promiseAt s id with
       | some p => (p.project now).state != .pending && p.listeners.contains addr
       | none   => false
-  | .r4 id x =>
+  | .callback id x =>
       match promiseAt s id with
       | some p => (p.project now).state != .pending && p.callbacks.contains x
       | none   => false
-  | .r5 id =>
+  | .taskLeaseTimeout id =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .acquired && (t.expiresAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .r6 id =>
+  | .taskRetryTimeout id =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .pending && (t.retryAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .r7 id => (s.schedules.find? (·.id == id)).isSome
+  | .scheduleTimeout id => (s.schedules.find? (·.id == id)).isSome
   | _ => false
 
 /-! ### The environment's obligations -/
@@ -87,15 +87,15 @@ def WeaklyFairOn (tr : Trace) (family : Step → Bool) : Prop :=
       ∃ u : Nat, t ≤ u ∧ (tr u).req = st
 
 def isSettlementStep : Step → Bool
-  | .r1 _ => true
+  | .promiseTimeout _ => true
   | _     => false
 
 def isCallbackStep : Step → Bool
-  | .r4 _ _ => true
+  | .callback _ _ => true
   | _       => false
 
 def isListenerStep : Step → Bool
-  | .r3 _ _ => true
+  | .listener _ _ => true
   | _       => false
 
 /-! ### 1. Every promise eventually settles
@@ -103,8 +103,8 @@ def isListenerStep : Step → Bool
 Not trivial, and not a consequence of time passing alone. A promise
 past its deadline reads as settled through any view, but the STORED
 promise stays pending until something touches it — and in the projected
-discipline nothing touches it except R1. So this needs the clock AND
-fairness on R1. -/
+discipline nothing touches it except the promise timeout. So this needs
+the clock AND fairness on that step. -/
 
 def EventuallyEveryPromiseSettles : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
@@ -154,9 +154,9 @@ the awaiter's own promise died while it waited, the timeout path owns
 its cleanup and the wake is void — which is exactly what
 `resumeOne` does when it lands on a fulfilled task.
 
-Fairness on R4 alone is not enough. The ledger is only reachable once
-the awaited promise is settled in STORE, so R1 must fire too; hence
-both families in the hypothesis. -/
+Fairness on the callback drain alone is not enough. The ledger is only
+reachable once the awaited promise is settled in STORE, so the promise
+timeout must fire too; hence both families in the hypothesis. -/
 
 def EventuallyAwaiterResumed : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr →
@@ -200,11 +200,11 @@ this is a real refutation channel rather than decoration. -/
 def enabledSteps (now : Nat) (s : ServerState) : List Step :=
   s.objects.flatMap fun o =>
     let p := o.promise
-    (if enabledInternal (.r1 o.id) now s then [Step.r1 o.id] else [])
-      ++ p.listeners.map (fun addr => Step.r3 o.id addr)
-      ++ p.callbacks.map (fun x => Step.r4 o.id x)
-      ++ (if o.task.isSome ∧ enabledInternal (.r5 o.id) now s then [Step.r5 o.id] else [])
-      ++ (if o.task.isSome ∧ enabledInternal (.r6 o.id) now s then [Step.r6 o.id] else [])
+    (if enabledInternal (.promiseTimeout o.id) now s then [Step.promiseTimeout o.id] else [])
+      ++ p.listeners.map (fun addr => Step.listener o.id addr)
+      ++ p.callbacks.map (fun x => Step.callback o.id x)
+      ++ (if o.task.isSome ∧ enabledInternal (.taskLeaseTimeout o.id) now s then [Step.taskLeaseTimeout o.id] else [])
+      ++ (if o.task.isSome ∧ enabledInternal (.taskRetryTimeout o.id) now s then [Step.taskRetryTimeout o.id] else [])
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl

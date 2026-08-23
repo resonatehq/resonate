@@ -614,22 +614,22 @@ theorem writesGood_handle (st : Step) (now : Nat) : WritesGood g e (handle st no
       | taskHalt r => exact writesGood_map _ _ _ _ (writesGood_taskHalt hq hs r now)
       | taskContinue r => exact writesGood_map _ _ _ _ (writesGood_taskContinue hq hs r now)
       | taskSearch r => exact writesGood_map _ _ _ _ (writesGood_taskSearch hq hs r now)
-  | r1 id =>
+  | promiseTimeout id =>
       exact writesGood_bind' _ _ _ _ (writesGood_processPromiseTimeout hq hs id now)
         (writesGood_pure _ _ _)
-  | r3 id a =>
+  | listener id a =>
       exact writesGood_bind' _ _ _ _ (writesGood_processListener hq hs id a now)
         (writesGood_pure _ _ _)
-  | r4 id x =>
+  | callback id x =>
       exact writesGood_bind' _ _ _ _ (writesGood_processCallback hq hs id x now)
         (writesGood_pure _ _ _)
-  | r5 id =>
+  | taskLeaseTimeout id =>
       exact writesGood_bind' _ _ _ _ (writesGood_processLeaseTimeout hq hs id now)
         (writesGood_pure _ _ _)
-  | r6 id =>
+  | taskRetryTimeout id =>
       exact writesGood_bind' _ _ _ _ (writesGood_processRetryTimeout hq hs id now)
         (writesGood_pure _ _ _)
-  | r7 id =>
+  | scheduleTimeout id =>
       exact writesGood_bind' _ _ _ _ (writesGood_processSchedule hq hs id now)
         (writesGood_pure _ _ _)
   | idle => exact writesGood_pure _ _ _
