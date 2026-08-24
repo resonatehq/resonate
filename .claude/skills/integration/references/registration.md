@@ -141,17 +141,21 @@ impl ResonateWorker for AirflowWorker {
 }
 ```
 
-The work is in the spawned task, split where the error channel changes. `run` is the
-protocol frame: claim, work, settle. `execute` is the work, and everything that can go
-wrong in it comes back as one `MyError`, so `run` has exactly one place where the promise
-is settled and one rule for when it is not.
+The work is in the spawned task, in three layers that each speak one vocabulary. `run` is
+the protocol frame — claim, ask, settle — and knows nothing about the downstream system.
+`execute` decides what the promise becomes. `work` does the work, with one error channel so
+`?` carries the failures.
+
+Keeping `run` at the protocol's altitude is the point of the split: it hands off to
+something unspecified and gets back a `Settlement`, so a downstream run, an error kind and
+a value schema never appear in it.
 
 ```rust
 /// The protocol frame: claim the task, do the work, settle the promise.
 ///
-/// Everything that can go wrong inside `execute` comes back as one
-/// `MyError`, so this body has exactly one place where the promise is
-/// settled and one rule for when it is not.
+/// Nothing here is integration-specific. It never sees a downstream run, an
+/// error kind or a value schema — `execute` decides all of that and hands
+/// back a `Settlement`, and this body's whole job is to apply it.
 async fn run(self) {
     // ── 1. Claim the task ────────────────────────────────────────────────
     //
@@ -182,23 +186,8 @@ async fn run(self) {
     let promise = acquired.promise; // param, timeoutAt, createdAt, tags
 
     // ── 2. Do the work, and settle with whatever it decided ──────────────
-    //
-    // Three arms because there are three outcomes. `Monitored` has no `Failed`
-    // and `MyError` has no separate "gave up": a run that finished in a failure
-    // state is a permanent error like any other, which is what keeps one arm
-    // per outcome instead of one per variant.
-    let (state, value) = match self.execute(&promise, version).await {
-        Ok(Monitored::Succeeded { run, output }) => (SettleState::Resolved, value_of(run, output)),
-        Err(MyError::Permanent { kind, message, run }) => {
-            tracing::warn!(task_id = %self.task.id, kind, %message, "my: rejecting");
-            (SettleState::Rejected, error_of(run, kind, message))
-        }
-        // Nothing to settle: the server settles a timed-out promise itself, and
-        // a transient failure must be left for redelivery to retry.
-        other => {
-            tracing::warn!(task_id = %self.task.id, ?other, "my: promise left unsettled");
-            return;
-        }
+    let Some((state, value)) = self.execute(&promise, version).await else {
+        return;
     };
 
     let settled = self
@@ -230,13 +219,45 @@ async fn run(self) {
 ```
 
 ```rust
+/// What the work decided the promise should become.
+///
+/// `None` leaves it alone — the server settles a timed-out promise itself, and
+/// a transient failure must be left for redelivery to retry. This is the only
+/// vocabulary `run` needs: it settles, it does not interpret.
+type Settlement = Option<(SettleState, PromiseValue)>;
+
+/// Do the work, and decide what the promise becomes.
+///
+/// This is where the integration's error policy lives: three outcomes —
+/// resolve, reject, leave alone — and the mapping from what happened to which
+/// one. `run` above only applies the answer.
+async fn execute(&self, promise: &PromiseRecord, version: i64) -> Settlement {
+    match self.work(promise, version).await {
+        Ok(Monitored::Succeeded { run, output }) => {
+            Some((SettleState::Resolved, value_of(run, output)))
+        }
+        Err(MyError::Permanent { kind, message, run }) => {
+            tracing::warn!(task_id = %self.task.id, kind, %message, "my: rejecting");
+            Some((SettleState::Rejected, error_of(run, kind, message)))
+        }
+        // Nothing to settle: the server settles a timed-out promise itself, and
+        // a transient failure must be left for redelivery to retry.
+        other => {
+            tracing::warn!(task_id = %self.task.id, ?other, "my: promise left unsettled");
+            None
+        }
+    }
+}
+```
+
+```rust
 /// Resolve, create, monitor. One error channel, so `?` does the work.
 ///
 /// The two ways resolution fails are not the same failure: a malformed
 /// address is the caller's error and can never become valid, because promise
 /// tags are immutable, so it rejects the promise; an unconfigured deployment
 /// is the operator's error that a rollout fixes, so it retries.
-async fn execute(
+async fn work(
     &self,
     promise: &PromiseRecord,
     version: i64,
@@ -307,9 +328,9 @@ Three things to notice in the shape:
 - **The claim has one interesting case.** A 409 race, a transient error and an unreachable
   server are all "this attempt does not run"; there is nothing to decide between them, so
   they share one `let … else`. `Response::TaskAcquire` is the other.
-- **Three outcomes: resolve, reject, leave alone.** That `match` is where an integration's
-  whole error policy lives, and it stays three arms only because the two enums do not
-  cross-cut — see below.
+- **Three outcomes: resolve, reject, leave alone.** That `match` lives in `execute`, not in
+  `run` — the frame applies a decision, it does not make one. It stays three arms only
+  because the two enums do not cross-cut; see below.
 
 ### Keep the outcome enums from cross-cutting
 

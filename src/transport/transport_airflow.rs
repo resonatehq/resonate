@@ -237,6 +237,13 @@ enum Monitored {
     DeadlineReached,
 }
 
+/// What the work decided the promise should become.
+///
+/// `None` leaves it alone — the server settles a timed-out promise itself, and
+/// a transient failure must be left for redelivery to retry. This is the only
+/// vocabulary `run` needs: it settles, it does not interpret.
+type Settlement = Option<(&'static str, Value)>;
+
 /// A downstream failure, classified. The classification decides whether the
 /// promise is settled or the task is dropped for redelivery.
 #[derive(Debug)]
@@ -284,9 +291,9 @@ impl AirflowError {
 impl RunContext {
     /// The protocol frame: claim the task, do the work, settle the promise.
     ///
-    /// Everything that can go wrong inside `execute` comes back as one
-    /// `AirflowError`, so this body has exactly one place where the promise is
-    /// settled and one rule for when it is not.
+    /// Nothing here is Airflow-specific. It never sees a DAG run, an error kind
+    /// or a value schema — `execute` decides all of that and hands back a
+    /// [`Settlement`], and this body's whole job is to apply it.
     async fn run(self) {
         // ── 1. Claim the task ────────────────────────────────────────────────
         //
@@ -338,31 +345,9 @@ impl RunContext {
         let version = acquired.task.version; // the RESPONSE version (n+1), from here on
         let promise = acquired.promise; // param, timeoutAt, createdAt, tags
 
-        // ── 2. Do the work ───────────────────────────────────────────────────
-        let outcome = self.execute(&promise, version).await;
-
-        // ── 3. Settle ────────────────────────────────────────────────────────
-        //
-        // One exit, and one rule for the two cases that do not take it: the
-        // server settles a timed-out promise itself, and a transient failure
-        // must be left for redelivery to retry.
-        let (state, value) = match outcome {
-            Ok(Monitored::Succeeded { run, output }) => {
-                ("resolved", json!({ "run": run, "output": output }))
-            }
-            Err(AirflowError::Permanent { kind, message, run }) => {
-                tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: rejecting");
-                (
-                    "rejected",
-                    json!({ "run": run, "error": { "kind": kind, "message": message } }),
-                )
-            }
-            // Nothing to settle: the server settles a timed-out promise itself,
-            // and a transient failure must be left for redelivery to retry.
-            other => {
-                tracing::warn!(task_id = %self.task.id, ?other, "airflow: promise left unsettled");
-                return;
-            }
+        // ── 2. Do the work, and settle with whatever it decided ──────────────
+        let Some((state, value)) = self.execute(&promise, version).await else {
+            return;
         };
 
         let settled = self
@@ -407,18 +392,39 @@ impl RunContext {
         }
     }
 
-    /// Resolve, create, monitor. One error channel, so `?` does the work the
-    /// combinator chain used to.
+    /// Do the work, and decide what the promise becomes.
+    ///
+    /// This is where the integration's error policy lives: three outcomes —
+    /// resolve, reject, leave alone — and the mapping from what happened to
+    /// which one. `run` above only applies the answer.
+    async fn execute(&self, promise: &PromiseRecord, version: i64) -> Settlement {
+        match self.work(promise, version).await {
+            Ok(Monitored::Succeeded { run, output }) => {
+                Some(("resolved", json!({ "run": run, "output": output })))
+            }
+            Err(AirflowError::Permanent { kind, message, run }) => {
+                tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: rejecting");
+                Some((
+                    "rejected",
+                    json!({ "run": run, "error": { "kind": kind, "message": message } }),
+                ))
+            }
+            // Nothing to settle: the server settles a timed-out promise itself,
+            // and a transient failure must be left for redelivery to retry.
+            other => {
+                tracing::warn!(task_id = %self.task.id, ?other, "airflow: promise left unsettled");
+                None
+            }
+        }
+    }
+
+    /// Resolve, create, monitor. One error channel, so `?` does the work.
     ///
     /// The two ways resolution fails are not the same failure: a malformed
     /// address is the caller's error and can never become valid, because
     /// promise tags are immutable, so it rejects the promise; an unconfigured
     /// deployment is the operator's error that a rollout fixes, so it retries.
-    async fn execute(
-        &self,
-        promise: &PromiseRecord,
-        version: i64,
-    ) -> Result<Monitored, AirflowError> {
+    async fn work(&self, promise: &PromiseRecord, version: i64) -> Result<Monitored, AirflowError> {
         // The address comes off the promise, not off the message: the promise
         // is the durable record, and it is where every other input already
         // comes from. A promise that has a task always carries this tag — that
