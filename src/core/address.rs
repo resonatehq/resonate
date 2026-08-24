@@ -48,9 +48,22 @@ pub struct GcpsAddress {
 #[allow(dead_code)]
 pub struct BashAddress;
 
-/// Returns true if the address is a valid, routable URL.
+/// Returns true if `address` is a valid Resonate address.
+///
+/// Validity is deliberately shallow: an address is valid if it parses as a URI
+/// with a scheme. Everything past the scheme belongs to whichever worker is
+/// registered for it, and this function must not know about it.
+///
+/// That shallowness is a requirement, not a simplification. Validation has to
+/// be a pure function of the string — identical on every deployment — because
+/// the reference model has no workers at all, and because a server's enabled
+/// transports must never change which requests it accepts. A scheme-aware
+/// check would make both untrue.
+///
+/// The consequence is that syntax errors past the scheme surface at delivery
+/// rather than at admission.
 pub fn is_valid_address(address: &str) -> bool {
-    parse_address(address).is_some()
+    url::Url::parse(address).is_ok()
 }
 
 /// Parse an address string into a typed Address.
@@ -102,6 +115,37 @@ pub fn parse_address(address: &str) -> Option<Address> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valid_address_is_any_uri_with_a_scheme() {
+        for addr in [
+            "http://worker:9999",
+            "https://worker/path",
+            "poll://uni@group",
+            "poll://any@group/id",
+            "gcps://project/topic",
+            "bash://",
+            "bash://docker/alpine",
+            // Schemes core knows nothing about are valid — that is the point.
+            "unknown://x/y",
+            "mailto:a@b.c",
+            "foo:bar",
+            // Well-formed URI, malformed for its scheme. Admitted here; the
+            // worker registered for the scheme rejects it at delivery.
+            "poll://group",
+            "poll://bogus@group",
+            "gcps://project",
+        ] {
+            assert!(is_valid_address(addr), "expected valid: {addr}");
+        }
+    }
+
+    #[test]
+    fn invalid_address_is_not_a_uri() {
+        for addr in ["", "not a url", "/relative", "http://"] {
+            assert!(!is_valid_address(addr), "expected invalid: {addr}");
+        }
+    }
 
     #[test]
     fn bash_address_parses() {
