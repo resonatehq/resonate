@@ -116,8 +116,7 @@ sequenceDiagram
   L->>R: route(address, Execute id, ver=n)
   R->>R: scheme_of(address)
   R->>W: send(address, msg)<br/>address verbatim, scheme guaranteed
-  W->>W: Address::parse(address)<br/>worker owns the syntax past the scheme
-  W-)W: tokio::spawn(run)
+  W-)W: tokio::spawn(run)<br/>nothing else happens on this path
   W-->>R: Ok(()) accepted for delivery
   R-->>L: Ok(())
 
@@ -127,8 +126,9 @@ sequenceDiagram
   alt claimed
     S-->>W: 200 task ver=n+1, promise
   else lost the race
-    S-->>W: 409 drop, never touch D
+    S-->>W: 409 do nothing at all
   end
+  W->>W: parse address, resolve config<br/>past the claim, so failures settle the promise
 
   par lease clock — every ttl/3
     loop until aborted
@@ -158,11 +158,15 @@ sequenceDiagram
 
 Four things the diagram is about:
 
-- **Steps 6–8 are the point of the port.** `send` spawns and returns `Ok(())` before any
+- **Steps 5–7 are the point of the port.** `send` spawns and returns `Ok(())` before any
   work happens, so the dispatch loop is not blocked for the hours a downstream run may take.
-- **Step 9 reverses direction.** The worker becomes a client of the same `ResonateServer`
+  Note what is *not* there: no parse, no config lookup, no `task.acquire`.
+- **Step 8 reverses direction.** The worker becomes a client of the same `ResonateServer`
   the message came from. The worker holds `Arc<dyn ResonateServer>` and `Server` never
   holds the router, so it stays a DAG rather than a cycle.
+- **Step 11 is after step 8 on purpose.** Validation sits past the claim because that is
+  what makes its failures reportable: before the claim the only outcome is
+  `Err(Unavailable)`, which the dispatch loop logs and drops.
 - **The `par` block is two independent clocks** — steps 12–13 against the lease, steps
   14–18 against the downstream system. Neither branch knows the other's cadence.
 - **Nothing in the diagram tells the worker which delivery this is.** The `Execute` at step

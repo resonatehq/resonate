@@ -115,16 +115,22 @@ impl AirflowAddress {
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
-pub struct AirflowWorker {
-    /// This worker runs in the server's own process, so it holds the port
-    /// directly. Every state change goes through `process` — the same path a
-    /// remote worker's HTTP calls take.
-    server: Arc<dyn ResonateServer>,
+/// Everything a run needs that is the same for every message. Behind an `Arc`
+/// so a delivery costs two pointer clones rather than a copy of the config.
+struct Shared {
     client: reqwest::Client,
     deployments: HashMap<String, AirflowDeployment>,
     lease_timeout: i64,
     poll_interval: i64,
     max_poll_interval: i64,
+}
+
+pub struct AirflowWorker {
+    /// This worker runs in the server's own process, so it holds the port
+    /// directly. Every state change goes through `process` — the same path a
+    /// remote worker's HTTP calls take.
+    server: Arc<dyn ResonateServer>,
+    shared: Arc<Shared>,
 }
 
 impl AirflowWorker {
@@ -135,11 +141,13 @@ impl AirflowWorker {
     ) -> Self {
         Self {
             server,
-            client: reqwest::Client::new(),
-            deployments: config.deployments.clone(),
-            lease_timeout,
-            poll_interval: config.poll_interval,
-            max_poll_interval: config.max_poll_interval,
+            shared: Arc::new(Shared {
+                client: reqwest::Client::new(),
+                deployments: config.deployments.clone(),
+                lease_timeout,
+                poll_interval: config.poll_interval,
+                max_poll_interval: config.max_poll_interval,
+            }),
         }
     }
 }
@@ -154,49 +162,20 @@ impl ResonateWorker for AirflowWorker {
             Message::Unblock(_) => return Ok(()),
         };
 
-        // Two failure classes, and they are not the same failure.
+        // Hand off, and do nothing else here.
         //
-        // A malformed address is the *caller's* error and can never become
-        // valid — promise tags are immutable. Reject the promise so the caller
-        // sees why, rather than letting it hang until it times out.
-        let addr = match AirflowAddress::parse(address) {
-            Ok(a) => a,
-            Err(e) => {
-                let server = Arc::clone(&self.server);
-                let (id, version, ttl) = (task.id.clone(), task.version, self.lease_timeout);
-                let message = format!("invalid airflow address '{address}': {e}");
-                tokio::spawn(async move {
-                    reject_permanently(server, id, version, ttl, "invalid_request", message).await
-                });
-                return Ok(());
-            }
-        };
-
-        // An unconfigured deployment is the *operator's* error, and deploying
-        // the config fixes it without touching the promise. That one really is
-        // undeliverable: report it and let redelivery retry.
-        let deployment = self
-            .deployments
-            .get(&addr.deployment)
-            .cloned()
-            .ok_or_else(|| {
-                Unavailable::new(format!(
-                    "airflow: no deployment '{}' configured (known: {:?})",
-                    addr.deployment,
-                    self.deployments.keys().collect::<Vec<_>>()
-                ))
-            })?;
-
-        // `send` means accepted for delivery, not executed: a DAG run can take
-        // hours, and the dispatcher must not block on it.
+        // The first real step is claiming the task, and that is a server round
+        // trip. `process_batch` awaits `send` sequentially over the whole
+        // batch, so a round trip here would stall delivery of every other
+        // message in it — including messages for other schemes. Validation
+        // waits too: until the task is claimed the only way to report anything
+        // is `Err(Unavailable)`, which the dispatch loop logs and drops.
+        //
+        // `send` means accepted for delivery, not executed.
         let ctx = RunContext {
             server: Arc::clone(&self.server),
-            client: self.client.clone(),
-            deployment,
-            addr,
-            lease_timeout: self.lease_timeout,
-            poll_interval: self.poll_interval,
-            max_poll_interval: self.max_poll_interval,
+            shared: Arc::clone(&self.shared),
+            address: address.to_string(),
             task_id: task.id.clone(),
             task_version: task.version,
         };
@@ -209,14 +188,19 @@ impl ResonateWorker for AirflowWorker {
 
 struct RunContext {
     server: Arc<dyn ResonateServer>,
-    client: reqwest::Client,
-    deployment: AirflowDeployment,
-    addr: AirflowAddress,
-    lease_timeout: i64,
-    poll_interval: i64,
-    max_poll_interval: i64,
+    shared: Arc<Shared>,
+    /// Unparsed: parsing is a validation step, and validation happens after the
+    /// claim so that a bad address can reject the promise instead of vanishing
+    /// into a log line.
+    address: String,
     task_id: String,
     task_version: i64,
+}
+
+/// The address and deployment, resolved once the task is owned.
+struct Target {
+    addr: AirflowAddress,
+    deployment: AirflowDeployment,
 }
 
 /// What one status check found. `Pending` means keep waiting.
@@ -260,11 +244,22 @@ impl RunContext {
         let version = acquired.task.version;
         let promise = acquired.promise;
 
-        // Monitoring runs two independent clocks. The lease clock lives in its
-        // own task so that however long the downstream clock sleeps between
-        // status checks, the lease is still refreshed underneath it.
+        // 2. Resolve the address. This is validation, and it happens *after*
+        //    the claim on purpose: now that the task is owned, both ways it
+        //    can fail are reportable — a malformed address rejects the
+        //    promise, an unconfigured deployment drops the task. Before the
+        //    claim the only outcome available was `Err(Unavailable)`, which
+        //    the dispatch loop logs and drops.
+        let target = match self.resolve_target() {
+            Ok(t) => t,
+            Err(e) => return self.report(version, e).await,
+        };
+
+        // 3. Monitoring runs two independent clocks. The lease clock lives in
+        //    its own task so that however long the downstream clock sleeps
+        //    between status checks, the lease is still refreshed underneath it.
         let heartbeat = self.spawn_heartbeat(pid.clone(), version);
-        let outcome = self.create_and_monitor(&promise).await;
+        let outcome = self.create_and_monitor(&target, &promise).await;
         heartbeat.abort();
 
         match outcome {
@@ -278,7 +273,7 @@ impl RunContext {
                 self.settle(
                     version,
                     "resolved",
-                    json!({ "run": self.run_summary(&run), "output": output }),
+                    json!({ "run": self.run_summary(&target, &run), "output": output }),
                 )
                 .await;
             }
@@ -287,7 +282,7 @@ impl RunContext {
                     version,
                     "rejected",
                     json!({
-                        "run": self.run_summary(&run),
+                        "run": self.run_summary(&target, &run),
                         "error": {
                             "kind": "downstream_failed",
                             "message": format!(
@@ -305,11 +300,47 @@ impl RunContext {
             Ok(Monitored::DeadlineReached) => {
                 tracing::warn!(
                     task_id = %self.task_id,
-                    dag_id = %self.addr.dag_id,
+                    dag_id = %target.addr.dag_id,
                     "airflow: promise deadline reached, stopped monitoring"
                 );
             }
-            Err(AirflowError::Permanent { kind, message }) => {
+            Err(e) => self.report(version, e).await,
+        }
+    }
+
+    /// Resolve the address, now that the task is owned.
+    ///
+    /// The two ways this fails are not the same failure. A malformed address is
+    /// the *caller's* error and can never become valid — promise tags are
+    /// immutable — so it rejects the promise with the reason. An unconfigured
+    /// deployment is the *operator's* error and deploying the config fixes it
+    /// without touching the promise, so it is transient.
+    fn resolve_target(&self) -> Result<Target, AirflowError> {
+        let addr = AirflowAddress::parse(&self.address).map_err(|e| AirflowError::Permanent {
+            kind: "invalid_request",
+            message: format!("invalid airflow address '{}': {e}", self.address),
+        })?;
+        let deployment = self
+            .shared
+            .deployments
+            .get(&addr.deployment)
+            .cloned()
+            .ok_or_else(|| {
+                AirflowError::Transient(format!(
+                    "no deployment '{}' configured (known: {:?})",
+                    addr.deployment,
+                    self.shared.deployments.keys().collect::<Vec<_>>()
+                ))
+            })?;
+        Ok(Target { addr, deployment })
+    }
+
+    /// Apply the classification. Permanent failures settle the promise so the
+    /// caller learns why; transient ones drop the task without settling, so the
+    /// lease expires and redelivery re-runs the idempotent create.
+    async fn report(&self, version: i64, err: AirflowError) {
+        match err {
+            AirflowError::Permanent { kind, message } => {
                 tracing::warn!(task_id = %self.task_id, kind, %message, "airflow: permanent failure");
                 self.settle(
                     version,
@@ -318,9 +349,7 @@ impl RunContext {
                 )
                 .await;
             }
-            // Do not settle: the lease will expire and the idempotent create
-            // will run again against the same run id.
-            Err(AirflowError::Transient(message)) => {
+            AirflowError::Transient(message) => {
                 tracing::warn!(
                     task_id = %self.task_id,
                     %message,
@@ -332,24 +361,28 @@ impl RunContext {
 
     /// Phases 1 and 2. Returns the terminal run, or `Pending` if the promise
     /// deadline arrived first.
-    async fn create_and_monitor(&self, promise: &PromiseRecord) -> Result<Monitored, AirflowError> {
+    async fn create_and_monitor(
+        &self,
+        target: &Target,
+        promise: &PromiseRecord,
+    ) -> Result<Monitored, AirflowError> {
         let input = decode_param(promise.param.data.as_deref())?;
         let run_id = derive_run_id(&promise.id);
 
         // Phase 1 — create. Idempotent by construction.
-        self.create_dag_run(&run_id, &input).await?;
+        self.create_dag_run(target, &run_id, &input).await?;
 
         // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
         // and latency, and deliberately unrelated to the lease TTL: the
         // heartbeat task holds the lease open independently, so this interval
         // may back off well past it.
-        let mut interval = self.poll_interval;
+        let mut interval = self.shared.poll_interval;
         loop {
             let now = crate::util::system_time_ms();
             if now >= promise.timeout_at {
                 return Ok(Monitored::DeadlineReached);
             }
-            match self.get_dag_run(&run_id).await? {
+            match self.get_dag_run(target, &run_id).await? {
                 RunState::Pending => {}
                 RunState::Succeeded(run) => return Ok(Monitored::Succeeded(run)),
                 RunState::Failed(run) => return Ok(Monitored::Failed(run)),
@@ -359,12 +392,19 @@ impl RunContext {
             // already settled the promise.
             let sleep_ms = interval.min(promise.timeout_at - now).max(0) as u64;
             tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-            interval = interval.saturating_mul(2).min(self.max_poll_interval);
+            interval = interval
+                .saturating_mul(2)
+                .min(self.shared.max_poll_interval);
         }
     }
 
     /// Trigger the DAG run, treating "already exists" as success.
-    async fn create_dag_run(&self, run_id: &str, input: &Value) -> Result<(), AirflowError> {
+    async fn create_dag_run(
+        &self,
+        target: &Target,
+        run_id: &str,
+        input: &Value,
+    ) -> Result<(), AirflowError> {
         let mut body = json!({
             "dag_run_id": run_id,
             "conf": input.get("conf").cloned().unwrap_or_else(|| json!({})),
@@ -374,24 +414,24 @@ impl RunContext {
         }
         // Airflow 3 requires the key to be present (null means "run now");
         // Airflow 2 defaults it when omitted.
-        if self.deployment.api_version != "v1" || input.get("logicalDate").is_some() {
+        if target.deployment.api_version != "v1" || input.get("logicalDate").is_some() {
             body["logical_date"] = input.get("logicalDate").cloned().unwrap_or(Value::Null);
         }
 
         let url = format!(
             "{}/dags/{}/dagRuns",
-            self.deployment.api_base(),
-            urlencode(&self.addr.dag_id)
+            target.deployment.api_base(),
+            urlencode(&target.addr.dag_id)
         );
         let (status, payload) = self
-            .request(reqwest::Method::POST, &url, Some(body))
+            .request(target, reqwest::Method::POST, &url, Some(body))
             .await?;
 
         match status {
             200 | 201 => {
                 tracing::info!(
                     task_id = %self.task_id,
-                    dag_id = %self.addr.dag_id,
+                    dag_id = %target.addr.dag_id,
                     run_id,
                     "airflow: DAG run triggered"
                 );
@@ -402,7 +442,7 @@ impl RunContext {
             409 => {
                 tracing::info!(
                     task_id = %self.task_id,
-                    dag_id = %self.addr.dag_id,
+                    dag_id = %target.addr.dag_id,
                     run_id,
                     "airflow: DAG run already exists, re-attaching"
                 );
@@ -412,7 +452,7 @@ impl RunContext {
                 kind: "not_found",
                 message: format!(
                     "DAG '{}' not found in deployment '{}'",
-                    self.addr.dag_id, self.addr.deployment
+                    target.addr.dag_id, target.addr.deployment
                 ),
             }),
             400 | 422 => Err(AirflowError::Permanent {
@@ -423,24 +463,26 @@ impl RunContext {
                 kind: "unauthorized",
                 message: format!(
                     "Airflow rejected the worker credentials for '{}'",
-                    self.addr.deployment
+                    target.addr.deployment
                 ),
             }),
             other => Err(AirflowError::Transient(format!(
                 "trigger dag '{}': HTTP {other}: {payload}",
-                self.addr.dag_id
+                target.addr.dag_id
             ))),
         }
     }
 
-    async fn get_dag_run(&self, run_id: &str) -> Result<RunState, AirflowError> {
+    async fn get_dag_run(&self, target: &Target, run_id: &str) -> Result<RunState, AirflowError> {
         let url = format!(
             "{}/dags/{}/dagRuns/{}",
-            self.deployment.api_base(),
-            urlencode(&self.addr.dag_id),
+            target.deployment.api_base(),
+            urlencode(&target.addr.dag_id),
             urlencode(run_id)
         );
-        let (status, payload) = self.request(reqwest::Method::GET, &url, None).await?;
+        let (status, payload) = self
+            .request(target, reqwest::Method::GET, &url, None)
+            .await?;
 
         match status {
             200 => {}
@@ -458,7 +500,7 @@ impl RunContext {
                     kind: "unauthorized",
                     message: format!(
                         "Airflow rejected the worker credentials for '{}'",
-                        self.addr.deployment
+                        target.addr.deployment
                     ),
                 })
             }
@@ -475,12 +517,13 @@ impl RunContext {
     /// One authenticated request, with a token refresh on a mid-flight 401.
     async fn request(
         &self,
+        target: &Target,
         method: reqwest::Method,
         url: &str,
         body: Option<Value>,
     ) -> Result<(u16, Value), AirflowError> {
-        let mut req = self.client.request(method.clone(), url);
-        req = self.deployment.authenticate(req);
+        let mut req = self.shared.client.request(method.clone(), url);
+        req = target.deployment.authenticate(req);
         if let Some(ref b) = body {
             req = req.json(b);
         }
@@ -496,7 +539,7 @@ impl RunContext {
         Ok((status, payload))
     }
 
-    fn run_summary(&self, run: &Value) -> Value {
+    fn run_summary(&self, target: &Target, run: &Value) -> Value {
         let run_id = run
             .get("dag_run_id")
             .and_then(Value::as_str)
@@ -506,7 +549,7 @@ impl RunContext {
             "state": run.get("state").cloned().unwrap_or(Value::Null),
             "startedAt": run.get("start_date").cloned().unwrap_or(Value::Null),
             "endedAt": run.get("end_date").cloned().unwrap_or(Value::Null),
-            "url": self.deployment.run_url(&self.addr.dag_id, run_id),
+            "url": target.deployment.run_url(&target.addr.dag_id, run_id),
         })
     }
 
@@ -517,7 +560,18 @@ impl RunContext {
         kind: &str,
         data: Value,
     ) -> Result<ResponseEnvelope, Unavailable> {
-        call(self.server.as_ref(), kind, data).await
+        self.server
+            .process(&RequestEnvelope {
+                kind: kind.to_string(),
+                head: RequestHead {
+                    corr_id: format!("airflow-{}", fastrand::u64(..)),
+                    version: PROTOCOL_VERSION.to_string(),
+                    auth: None,
+                    debug_time: None,
+                },
+                data,
+            })
+            .await
     }
 
     async fn acquire(&self, pid: &str) -> Option<TaskAcquireResponseData> {
@@ -528,7 +582,7 @@ impl RunContext {
                     "id": self.task_id,
                     "version": self.task_version,
                     "pid": pid,
-                    "ttl": self.lease_timeout
+                    "ttl": self.shared.lease_timeout
                 }),
             )
             .await
@@ -569,7 +623,7 @@ impl RunContext {
     fn spawn_heartbeat(&self, pid: String, version: i64) -> tokio::task::JoinHandle<()> {
         let server = Arc::clone(&self.server);
         let task_id = self.task_id.clone();
-        let beat_ms = heartbeat_interval_ms(self.lease_timeout);
+        let beat_ms = heartbeat_interval_ms(self.shared.lease_timeout);
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
             ticker.tick().await;
@@ -639,88 +693,6 @@ impl RunContext {
             }
         }
     }
-}
-
-// ─── Protocol calls without a run ─────────────────────────────────────────────
-
-/// Issue one protocol request at the server this worker is attached to.
-async fn call(
-    server: &dyn ResonateServer,
-    kind: &str,
-    data: Value,
-) -> Result<ResponseEnvelope, Unavailable> {
-    server
-        .process(&RequestEnvelope {
-            kind: kind.to_string(),
-            head: RequestHead {
-                corr_id: format!("airflow-{}", fastrand::u64(..)),
-                version: PROTOCOL_VERSION.to_string(),
-                auth: None,
-                debug_time: None,
-            },
-            data,
-        })
-        .await
-}
-
-/// Claim the task and reject its promise, for a failure that can never be
-/// fixed by retrying.
-///
-/// The alternative — returning `Unavailable` from `send` — is wrong for this
-/// class of failure. The dispatch loop only logs that error, so the task stays
-/// pending and the server re-delivers every `tasks.retry_timeout` until the
-/// promise times out; the caller then sees `rejected_timedout` rather than the
-/// reason, and the log fills with the same parse failure forever. A promise's
-/// tags are immutable, so a malformed address is never going to become valid.
-///
-/// Costs one acquire and one fulfill to produce a useful error. Worth it.
-async fn reject_permanently(
-    server: Arc<dyn ResonateServer>,
-    task_id: String,
-    task_version: i64,
-    lease_timeout: i64,
-    kind: &'static str,
-    message: String,
-) {
-    let pid = format!("airflow-{}", fastrand::u64(..));
-    let resp = match call(
-        server.as_ref(),
-        "task.acquire",
-        json!({ "id": task_id, "version": task_version, "pid": pid, "ttl": lease_timeout }),
-    )
-    .await
-    {
-        Ok(r) if r.head.status == 200 => r,
-        // 409 means another attempt owns it and will reach the same verdict.
-        // Anything else is transient; redelivery will bring us back here.
-        _ => return,
-    };
-    let acquired: TaskAcquireResponseData = match serde_json::from_value(resp.data) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let value = json!({ "run": {}, "error": { "kind": kind, "message": message } });
-    let _ = call(
-        server.as_ref(),
-        "task.fulfill",
-        json!({
-            "id": task_id,
-            "version": acquired.task.version,
-            "action": {
-                "kind": "promise.settle",
-                "head": {},
-                "data": {
-                    "id": task_id,
-                    "state": "rejected",
-                    "value": {
-                        "headers": { "content-type": "application/json" },
-                        "data": b64_encode(&value.to_string())
-                    }
-                }
-            }
-        }),
-    )
-    .await;
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────

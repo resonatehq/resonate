@@ -82,12 +82,11 @@ One trait, one method. Everything else is a free choice.
 
 ```rust
 pub struct MyWorker {
-    /// In process, so it holds the inbound port directly rather than dialling
-    /// it. `Server` never holds the router, which keeps this a DAG.
+    /// The inbound port. In process, so it holds the port directly rather than
+    /// dialling it — and it is how the worker claims the task, heartbeats it,
+    /// and settles its promise. `Server` never holds the router, so this is a DAG.
     server: Arc<dyn ResonateServer>,
-    client: reqwest::Client,
-    deployments: HashMap<String, MyDeployment>,
-    lease_timeout: i64,
+    shared: Arc<Shared>,          // client, config; immutable after construction
 }
 
 #[async_trait]
@@ -98,19 +97,29 @@ impl ResonateWorker for MyWorker {
             Message::Unblock(_) => return Ok(()),  // for workers that *wait*; not this one
         };
 
-        // Cheap, and worth failing fast on: this worker owns the syntax past
-        // the scheme. A malformed address is rejected on the promise; an
-        // unconfigured deployment is `Err(Unavailable)`. The two are different
-        // failures — see references/registration.md.
-        let addr = MyAddress::parse(address)?;
-
-        // `send` is accepted-for-delivery, and the dispatch loop awaits it
-        // sequentially over the batch. Spawn; the run may take hours.
+        // Hand off and do nothing else. The first real step is claiming the
+        // task through `server`, and that is a round trip — the dispatch loop
+        // awaits `send` sequentially over the batch. Validation waits too:
+        // until the task is claimed its failures are unreportable.
+        let ctx = RunContext {
+            server: Arc::clone(&self.server),
+            shared: Arc::clone(&self.shared),
+            address: address.to_string(),          // unparsed
+            task_id: task.id.clone(),
+            task_version: task.version,
+        };
         tokio::spawn(async move { ctx.run().await });
-        Ok(())
+        Ok(())                                     // accepted for delivery, not executed
     }
 }
 ```
+
+The work lives in `run`, and it starts by claiming the task **through the server handle** —
+`task.acquire` via `process`, the same entry point a remote worker's HTTP call takes. That
+claim is the gate: before it the only way to report a failure is `Err(Unavailable)`, which
+the dispatch loop logs and drops; after it, every failure can settle the promise. So
+validation, config lookup and the downstream call all belong on the far side of it. Full
+stub in `references/registration.md`.
 
 Registering it is one line, and nothing in `core` changes:
 

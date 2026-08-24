@@ -8,19 +8,29 @@ Use `src/transport/transport_airflow.rs` and its config/registration as the temp
 ## 1. The worker — `src/transport/transport_<name>.rs`
 
 ```rust
-pub struct MyWorker {
-    /// The inbound port. This worker runs in the server's process, so it holds
-    /// the port rather than dialling it.
-    server: Arc<dyn ResonateServer>,
-
-    /// Everything else is immutable after construction. `send` takes `&self`,
-    /// and one instance serves every address of its scheme concurrently, so
-    /// any mutable state would need its own synchronisation.
+/// Everything a run needs that is the same for every message. Behind an `Arc`
+/// so a delivery costs two pointer clones rather than a copy of the config.
+struct Shared {
     client: reqwest::Client,
     deployments: HashMap<String, MyDeployment>,
     lease_timeout: i64,
 }
 
+pub struct MyWorker {
+    /// The inbound port. This worker runs in the server's process, so it holds
+    /// the port rather than dialling it — and it is how the worker claims the
+    /// task, heartbeats it, and settles its promise.
+    server: Arc<dyn ResonateServer>,
+    /// Immutable after construction: `send` takes `&self`, and one instance
+    /// serves every address of its scheme concurrently.
+    shared: Arc<Shared>,
+}
+```
+
+`send` itself does almost nothing. Its whole job is to decide whether this message is
+yours and then get off the dispatch thread.
+
+```rust
 #[async_trait]
 impl ResonateWorker for MyWorker {
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
@@ -33,60 +43,130 @@ impl ResonateWorker for MyWorker {
             Message::Unblock(_) => return Ok(()),
         };
 
-        // ── 2. Caller errors → reject the promise ────────────────────────────
-        // A malformed address can never become valid: promise tags are
-        // immutable. Returning `Unavailable` would re-deliver every
-        // `tasks.retry_timeout` until the promise times out, and the caller
-        // would see `rejected_timedout` instead of the reason. Claim the task
-        // and reject it instead — one acquire and one fulfill for a real error.
-        let addr = match MyAddress::parse(address) {
-            Ok(a) => a,
-            Err(e) => {
-                let server = Arc::clone(&self.server);
-                let (id, version, ttl) = (task.id.clone(), task.version, self.lease_timeout);
-                let message = format!("invalid address '{address}': {e}");
-                tokio::spawn(async move {
-                    reject_permanently(server, id, version, ttl, "invalid_request", message).await
-                });
-                return Ok(());
-            }
-        };
-
-        // ── 3. Operator errors → report as undeliverable ─────────────────────
-        // An unconfigured deployment is fixable by deploying config, after
-        // which redelivery succeeds without touching the promise. That is what
-        // `Unavailable` is for.
-        let deployment = self.deployments.get(&addr.deployment).cloned().ok_or_else(|| {
-            Unavailable::new(format!("my: no deployment '{}' configured", addr.deployment))
-        })?;
-
-        // ── 4. Hand off ──────────────────────────────────────────────────────
-        // Everything past this point needs a task claim first, so it belongs in
-        // the spawned task where it can settle the promise. Clone into an owned
-        // context: the task must be `'static`.
+        // ── 2. Hand off, and do nothing else here ────────────────────────────
+        // The first real step is claiming the task, and that is a round trip to
+        // the server. `process_batch` awaits `send` sequentially over the whole
+        // batch, so a round trip on this path would stall delivery of every
+        // other message in it — including messages for other schemes.
+        //
+        // Validation waits too. It could run here, but its failures could then
+        // only be reported as `Err(Unavailable)`, which the dispatch loop logs
+        // and drops. Do it after the claim, where it can settle the promise.
         let ctx = RunContext {
             server: Arc::clone(&self.server),
-            client: self.client.clone(),
-            deployment,
-            addr,
-            lease_timeout: self.lease_timeout,
+            shared: Arc::clone(&self.shared),
+            address: address.to_string(),   // unparsed; owned, the task is `'static`
             task_id: task.id.clone(),
             task_version: task.version,
         };
         tokio::spawn(async move { ctx.run().await });
 
-        // ── 5. Accepted for delivery — not executed ──────────────────────────
+        // ── 3. Accepted for delivery — not executed ──────────────────────────
         Ok(())
     }
 }
 ```
 
-That body is almost entirely invariant. Only `MyAddress::parse`, the config lookup, and
-`RunContext::run` differ between integrations.
+The work is in the spawned task, and it starts by claiming the task **through the server
+handle the worker holds** — `task.acquire`, over the same `process` entry point a remote
+worker's HTTP call would take.
 
-### What must not go in `send`
+```rust
+impl RunContext {
+    async fn run(self) {
+        // ── 1. Claim the task ────────────────────────────────────────────────
+        // Nothing may happen on behalf of a task this worker does not own — and
+        // nothing can be *reported* until it does. The claim is the gate that
+        // turns "log it and hope" into "settle the promise".
+        let pid = format!("my-{}", fastrand::u64(..));
+        let acquired = match self.acquire(&pid).await {
+            Some(a) => a,
+            None => return,     // 409: another attempt owns it. Do nothing at all.
+        };
+        let version = acquired.task.version;   // the RESPONSE version (n+1), from here on
+        let promise = acquired.promise;        // param, timeoutAt, createdAt, tags
 
-`process_batch` awaits `route` **sequentially** over the whole batch:
+        // ── 2. Validate, now that failures are reportable ────────────────────
+        let target = match self.resolve_target() {
+            Ok(t) => t,
+            Err(e) => return self.report(version, e).await,
+        };
+
+        // ── 3. Monitor, on two independent clocks ────────────────────────────
+        let heartbeat = self.spawn_heartbeat(pid.clone(), version);   // lease clock
+        let outcome = self.create_and_monitor(&target, &promise).await;  // downstream clock
+        heartbeat.abort();
+
+        // ── 4. Settle ────────────────────────────────────────────────────────
+        match outcome {
+            Ok(Monitored::Succeeded(run)) => self.settle(version, "resolved", ...).await,
+            Ok(Monitored::Failed(run))    => self.settle(version, "rejected", ...).await,
+            // The server settles `rejected_timedout` at `timeoutAt` itself.
+            Ok(Monitored::DeadlineReached) => tracing::warn!(...),
+            Err(e) => self.report(version, e).await,
+        }
+    }
+
+    /// The claim, and every other state change, goes through the inbound port.
+    async fn acquire(&self, pid: &str) -> Option<TaskAcquireResponseData> {
+        let resp = self.server.process(&RequestEnvelope {
+            kind: "task.acquire".to_string(),
+            head: RequestHead {
+                corr_id: format!("my-{}", fastrand::u64(..)),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: None,
+            },
+            data: json!({
+                "id": self.task_id,
+                "version": self.task_version,      // the fencing token from `execute`
+                "pid": pid,
+                "ttl": self.shared.lease_timeout,
+            }),
+        }).await.ok()?;
+
+        match resp.head.status {
+            200 => serde_json::from_value(resp.data).ok(),
+            409 => None,   // another attempt owns it, or the task is no longer pending
+            _   => None,   // transient — redelivery will bring us back here
+        }
+    }
+}
+```
+
+Only `resolve_target` and `create_and_monitor` differ between integrations. Everything
+above is the same shape every time.
+
+### Why the claim comes first
+
+It is the line that divides "can be reported" from "cannot".
+
+| | Before the claim | After the claim |
+|---|---|---|
+| Ways to report a failure | `Err(Unavailable)` only | Settle the promise, or drop the task |
+| What the dispatch loop does with it | Logs it and drops it | — |
+| What the caller sees | Nothing, until `rejected_timedout` | The reason, immediately |
+| What redelivery does | Repeats the same failure every `retry_timeout` | Nothing — the promise is settled |
+
+So push everything you can past the claim. A malformed address validated in `send` becomes
+a log line every 30 seconds until the promise times out; validated after the claim, it
+becomes `rejected` with `kind = "invalid_request"` and the address quoted.
+
+### The two failure classes, once you own the task
+
+Owning the task does not make every failure a rejection. `resolve_target` produces both:
+
+| | Malformed address | Unconfigured deployment |
+|---|---|---|
+| Whose mistake | The caller's | The operator's |
+| Fixable without a new promise | No — promise tags are immutable | Yes — deploy the config |
+| Classification | `Permanent` | `Transient` |
+| What the worker does | `task.fulfill` → `rejected` | Return without settling |
+| What happens next | Caller sees the reason | Lease expires, redelivery retries |
+
+### What must never go in `send`
+
+`process_batch` awaits `route` sequentially over the batch:
 
 ```rust
 for msg in execute_msgs {
@@ -94,32 +174,17 @@ for msg in execute_msgs {
 }
 ```
 
-So anything slow in `send` stalls delivery of every other message in that batch —
-including messages for other schemes, which have nothing to do with your integration. That
-rules out:
+Anything slow there stalls every other message in the batch, including other schemes'.
 
-| Never in `send` | Why | Where it goes |
-|---|---|---|
-| The downstream call | Can take hours | The spawned task |
-| `task.acquire` | A server round trip per message, serialised | The spawned task |
-| Retries or backoff | Blocks the batch for the duration | The spawned task |
-| Blocking I/O, `std::fs`, `block_on` | Stalls the runtime thread | Nowhere |
+| Never in `send` | Why |
+|---|---|
+| `task.acquire` | A server round trip per message, serialised |
+| The downstream call | Can take hours |
+| Retries or backoff | Blocks the batch for the duration |
+| Validation that could reject the promise | Its failures are unreportable until the claim |
+| Blocking I/O, `std::fs`, `block_on` | Stalls the runtime thread |
 
-What belongs in `send` is what is cheap *and* worth failing fast on: which message kind it
-is, whether the address parses, and whether this worker is configured to serve it.
-
-### The two error classes, side by side
-
-| | Malformed address | Unconfigured deployment |
-|---|---|---|
-| Whose mistake | The caller's | The operator's |
-| Fixable without a new promise | No — tags are immutable | Yes — deploy the config |
-| Right response | Claim the task, reject the promise | `Err(Unavailable)` |
-| What the caller sees | `rejected`, `kind = "invalid_request"`, with the address quoted | Promise stays pending, then `rejected_timedout` if nobody fixes it |
-| Cost of getting it wrong | A parse failure logged every 30 s until timeout, and a useless error for the caller | A promise permanently rejected for a config gap that a rollout would have fixed |
-
-`reject_permanently` is a free function, not a `RunContext` method — it runs before there
-is a run to have a context for. See `src/transport/transport_airflow.rs`.
+What is left is the message-kind match and the spawn. That is the whole of `send`.
 
 Keep the pure parts (address parsing, the idempotency key, param decoding, downstream state
 classification) as free functions with unit tests. Those are the parts that carry the
