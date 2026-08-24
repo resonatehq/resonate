@@ -66,7 +66,7 @@ async function buildComputation(registry: Registry): Promise<{
     registry,
     new TestHeartbeat(),
     new Map(),
-    new OptionsBuilder({ match: (target: string) => target, idPrefix: "test-" }),
+    new OptionsBuilder({ match: (target: string) => target }),
     logger,
   );
 

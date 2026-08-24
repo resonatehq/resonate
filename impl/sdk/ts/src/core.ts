@@ -9,6 +9,7 @@ import type { OptionsBuilder } from "./options.js";
 import { randomUUID } from "./platform.js";
 import type { Registry } from "./registry.js";
 import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries.js";
+import { TraceCollector } from "./trace.js";
 import type { Effects, Send } from "./types.js";
 import * as util from "./util.js";
 
@@ -79,6 +80,42 @@ export class Core {
     preload?: PromiseRecord[],
   ): Promise<Status> {
     util.assert(task.state === "acquired", `expected task state to be 'acquired', got '${task.state}'`);
+
+    // A resonate:timer promise is a durable sleep. It names no function to
+    // run; it only carries a task at all because the target that gets the
+    // server to *schedule* its deadline also spawns one.
+    if (rootPromise.tags["resonate:timer"] === "true") {
+      const collector = new TraceCollector();
+      if (rootPromise.state === "pending") {
+        // Not yet due: drop the task and let the deadline settle the promise,
+        // which is what wakes the sleepers. Dropping means exactly that: no
+        // fulfill (that would end the sleep early), no suspend (a task cannot
+        // await its own promise), and no release (the server re-dispatches a
+        // released task immediately, which would spin). The lease simply
+        // lapses; a re-delivery before the wake is dropped again, and one
+        // after it takes the settled branch below.
+        this.logger.debug(
+          { component: "core", taskId: task.id, timeoutAt: rootPromise.timeoutAt },
+          "dropping not-yet-due timer task",
+        );
+        return { kind: "suspended", awaited: [], trace: collector.getTrace() };
+      }
+      // Settled: a durable sleep whose wake has passed. It carries no
+      // function/args, so it cannot go through the computation; fulfill the
+      // task with the promise's settlement. (The server normally fulfills a
+      // timer's task itself when the deadline settles the promise, so this
+      // only catches a delivery already in flight at that moment.)
+      const status: Done = {
+        kind: "done",
+        id: rootPromise.id,
+        state: rootPromise.state === "resolved" ? "resolved" : "rejected",
+        value: rootPromise.value?.data,
+        trace: collector.getTrace(),
+      };
+      await this.fulfillTask(task, rootPromise, status);
+      return status;
+    }
+
     const computation = this.createComputation(
       rootPromise.id,
       util.buildEffects(this.send, this.codec, { id: task.id, version: task.version }, preload),

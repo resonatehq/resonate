@@ -67,7 +67,7 @@ async function cancelOrder(_info: Info, orderId: string, note: string): Promise<
 // -- Orchestrator ---------------------------------------------------------
 
 async function fulfillOrder(ctx: Context, orderId: string, amount: number): Promise<string> {
-  // Open the human-decision promise first. Its `.id` (`{workflowId}.0`) is
+  // Open the human-decision promise first. Its `.id` (`{workflowId}:0`) is
   // available synchronously -- the address to resolve.
   const approval = ctx.promise<Decision>();
   await ctx.run(notifyReviewer, orderId, amount, approval.id);

@@ -1,5 +1,6 @@
 import type { Clock } from "../clock.js";
 import exceptions, { type ResonateError } from "../exceptions.js";
+import { joinId } from "../ids.js";
 import type { PromiseCreateReq, PromiseRecord } from "../network/types.js";
 import type { Options, OptionsBuilder } from "../options.js";
 import { delay, randomUUID } from "../platform.js";
@@ -30,11 +31,12 @@ export type Return<F> = F extends (...args: any[]) => infer R ? Awaited<R> : nev
 export interface Info {
   readonly id: string;
   readonly parentId: string;
+  /** The lineage origin: everything before the first `:` of every id in this
+   * workflow, set at the top (resonate.run/rpc) and carried through the
+   * resonate:origin tag unchanged forever — including into detached children,
+   * which mint `${originId}:d${hash}` off it. Also the anchor every descendant
+   * id extends, so it doubles as the id-generation root. */
   readonly originId: string;
-  /** The id-generation prefix (resonate:prefix). Set once at the top and
-   * propagated down unchanged — through every child AND across detached
-   * re-roots — so recursive detached ids stay bounded. */
-  readonly prefixId: string;
   readonly branchId: string;
   readonly timeoutAt: number;
   readonly attempt: number;
@@ -166,7 +168,6 @@ export class DurablePromise<T> implements Promise<T> {
 interface AsyncContextConfig {
   id: string;
   oId?: string;
-  prId?: string;
   bId?: string;
   pId?: string;
   func: string;
@@ -182,7 +183,6 @@ interface AsyncContextConfig {
 export class AsyncContext implements Context {
   readonly id: string;
   readonly originId: string;
-  readonly prefixId: string;
   readonly branchId: string;
   readonly parentId: string;
   readonly func: string;
@@ -219,7 +219,6 @@ export class AsyncContext implements Context {
   constructor(cfg: AsyncContextConfig, effects: Effects, trace: TraceCollector) {
     this.id = cfg.id;
     this.originId = cfg.oId ?? cfg.id;
-    this.prefixId = cfg.prId ?? cfg.id;
     this.branchId = cfg.bId ?? cfg.id;
     this.parentId = cfg.pId ?? cfg.id;
     this.func = cfg.func;
@@ -278,7 +277,6 @@ export class AsyncContext implements Context {
       {
         id: cfg.id,
         oId: this.originId,
-        prId: this.prefixId,
         bId: this.branchId,
         pId: this.id,
         func: cfg.func,
@@ -468,16 +466,17 @@ export class AsyncContext implements Context {
     }
 
     const idChanged = opts.id !== undefined;
-    // Detached ids are minted off the fixed id-generation prefix (NOT the grown
-    // id or the diverging origin), so recursive detached stays bounded at one
-    // segment past the prefix. Mirrors the generator engine (src/context.ts).
-    const id = idChanged ? (opts.id as string) : util.detachedId(this.prefixId, this.seqid());
+    // Detached ids are minted off the lineage origin (`${origin}:d${hash}`,
+    // one segment past it), so recursive detached stays bounded instead of
+    // growing a segment per level. Mirrors the generator engine
+    // (src/context.ts).
+    const id = idChanged ? (opts.id as string) : util.detachedId(this.originId, this.seqid());
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
     const version = registered ? registered.version : opts.version || 1;
     const data = { func, args: argu, retry: opts.retryPolicy?.encode(), version };
-    const createReq = this.detachedCreateReq({ id, data, opts });
+    const createReq = this.detachedCreateReq({ id, data, opts, breaksLineage: idChanged });
     const slot = this.claimCreateSlot();
 
     // Fire-and-forget: the parent waits only for the durable CREATE to land
@@ -655,12 +654,12 @@ export class AsyncContext implements Context {
       data,
       tags: {
         "resonate:scope": "local",
-        "resonate:branch": this.branchId,
-        "resonate:parent": this.id,
+        // An explicit-id child (breaksLineage) starts a fresh self-anchored
+        // lineage: the server requires an id to extend its declared branch /
+        // parent / origin, which only the id itself satisfies.
+        "resonate:branch": breaksLineage ? id : this.branchId,
+        "resonate:parent": breaksLineage ? id : this.id,
         "resonate:origin": breaksLineage ? id : this.originId,
-        // Prefix is set at the top and propagates down unchanged forever,
-        // independent of origin (which detached/explicit-id may break).
-        "resonate:prefix": this.prefixId,
         ...opts.tags,
       },
     });
@@ -685,19 +684,34 @@ export class AsyncContext implements Context {
         "resonate:scope": "global",
         "resonate:target": opts.target,
         "resonate:branch": id,
-        "resonate:parent": this.id,
+        "resonate:parent": breaksLineage ? id : this.id,
         "resonate:origin": breaksLineage ? id : this.originId,
-        // Prefix is set at the top and propagates down unchanged forever,
-        // independent of origin (which detached/explicit-id may break).
-        "resonate:prefix": this.prefixId,
         ...opts.tags,
       },
     });
   }
 
-  // Detached: a globally-scoped promise with its own origin (lineage break) and
-  // an independent lifetime — its timeout is NOT clamped to the parent's.
-  private detachedCreateReq({ id, data, opts }: { id: string; data: any; opts: Options }): PromiseCreateReq {
+  // Detached: a globally-scoped promise with an independent lifetime — its
+  // timeout is NOT clamped to the parent's. The child keeps the *parent's*
+  // origin rather than re-rooting onto its own id: the server derives the
+  // origin as everything before the first `:` and requires every id in a
+  // lineage to start with `{origin}:`. Its id hangs off the origin
+  // (`${origin}:d${hash}`, bounding recursion), so the origin is also the
+  // resonate:parent it declares — a parent of the spawning context would be
+  // rejected. resonate:branch stays the child's own id: a detached child
+  // roots its own branch. An explicit opts.id still starts a fresh
+  // self-anchored lineage (breaksLineage).
+  private detachedCreateReq({
+    id,
+    data,
+    opts,
+    breaksLineage,
+  }: {
+    id: string;
+    data: any;
+    opts: Options;
+    breaksLineage: boolean;
+  }): PromiseCreateReq {
     return this.createReq({
       id,
       timeoutAt: this.clock.now() + opts.timeout,
@@ -706,11 +720,8 @@ export class AsyncContext implements Context {
         "resonate:scope": "global",
         "resonate:target": opts.target,
         "resonate:branch": id,
-        "resonate:parent": this.id,
-        "resonate:origin": id,
-        // Prefix carries forward unchanged across the detached re-root (origin
-        // breaks, prefix does not) — this is what keeps recursive ids bounded.
-        "resonate:prefix": this.prefixId,
+        "resonate:parent": breaksLineage ? id : this.originId,
+        "resonate:origin": breaksLineage ? id : this.originId,
         ...opts.tags,
       },
     });
@@ -737,32 +748,40 @@ export class AsyncContext implements Context {
         "resonate:branch": id,
         "resonate:parent": this.id,
         "resonate:origin": this.originId,
-        // Prefix is set at the top and propagates down unchanged forever.
-        "resonate:prefix": this.prefixId,
         ...tags,
       },
     });
   }
 
   private sleepCreateReq({ id, time }: { id: string; time: number }): PromiseCreateReq {
+    // The timer is the promise's own deadline: resonate:timer makes the server
+    // settle it RESOLVED (rather than timed out) when the deadline arrives,
+    // which fires the callbacks every sleeper is suspended on. The
+    // resonate:target is what makes that deadline *happen*: the server only
+    // schedules timeouts for promises carrying an address, so a target-less
+    // timer would simply never fire. The flip side is that a target also
+    // spawns a task, dispatched immediately rather than at the wake; a timer
+    // names no function to run, so the worker that receives it drops it and
+    // lets the deadline do the waking (see AsyncCore.executeUntilBlocked).
     return this.createReq({
       id,
       timeoutAt: Math.min(time, this.timeoutAt),
       data: "",
       tags: {
         "resonate:scope": "global",
+        "resonate:target": this.options().target,
         "resonate:branch": id,
         "resonate:parent": this.id,
         "resonate:origin": this.originId,
-        // Prefix is set at the top and propagates down unchanged forever.
-        "resonate:prefix": this.prefixId,
         "resonate:timer": "true",
       },
     });
   }
 
   private seqid(): string {
-    return `${this.id}.${this.seq}`;
+    // A bare root joins its first lineage segment with ':', deeper segments
+    // join with '.' -- see ids.joinId.
+    return joinId(this.id, `${this.seq}`);
   }
 }
 

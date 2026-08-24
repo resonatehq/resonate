@@ -2,6 +2,7 @@ import type { Clock } from "../clock.js";
 import type { Codec } from "../codec.js";
 import exceptions, { ResonateError } from "../exceptions.js";
 import type { Heartbeat } from "../heartbeat.js";
+import { originOf } from "../ids.js";
 import type { Logger } from "../logger.js";
 import { isRedirect, isSuccess, type Message, type PromiseRecord, type TaskRecord } from "../network/types.js";
 import type { OptionsBuilder } from "../options.js";
@@ -101,6 +102,42 @@ export class Core {
     preload?: PromiseRecord[],
   ): Promise<Status> {
     util.assert(task.state === "acquired", `expected task state to be 'acquired', got '${task.state}'`);
+
+    // A resonate:timer promise is a durable sleep. It names no function to
+    // run; it only carries a task at all because the target that gets the
+    // server to *schedule* its deadline also spawns one.
+    if (rootPromise.tags["resonate:timer"] === "true") {
+      const collector = new TraceCollector();
+      if (rootPromise.state === "pending") {
+        // Not yet due: drop the task and let the deadline settle the promise,
+        // which is what wakes the sleepers. Dropping means exactly that: no
+        // fulfill (that would end the sleep early), no suspend (a task cannot
+        // await its own promise), and no release (the server re-dispatches a
+        // released task immediately, which would spin). The lease simply
+        // lapses; a re-delivery before the wake is dropped again, and one
+        // after it takes the settled branch below.
+        this.logger.debug(
+          { component: "async-core", taskId: task.id, timeoutAt: rootPromise.timeoutAt },
+          "dropping not-yet-due timer task",
+        );
+        return { kind: "suspended", awaited: [], trace: collector.getTrace() };
+      }
+      // Settled: a durable sleep whose wake has passed. It carries no
+      // function/args, so it cannot go through the run driver; fulfill the
+      // task with the promise's settlement. (The server normally fulfills a
+      // timer's task itself when the deadline settles the promise, so this
+      // only catches a delivery already in flight at that moment.)
+      const status: Done = {
+        kind: "done",
+        id: rootPromise.id,
+        state: rootPromise.state === "resolved" ? "resolved" : "rejected",
+        value: rootPromise.value?.data,
+        trace: collector.getTrace(),
+      };
+      await this.fulfillTask(task, rootPromise, status);
+      return status;
+    }
+
     const effects = util.buildEffects(this.send, this.codec, { id: task.id, version: task.version }, preload);
 
     try {
@@ -182,12 +219,13 @@ export class Core {
         new AsyncContext(
           {
             id: rootPromise.id,
-            oId: rootPromise.tags["resonate:origin"] ?? rootPromise.id,
-            // The id-generation prefix, propagated unchanged across re-roots (a
-            // detached child resets origin to its own id but carries prefix
-            // forward), so recursive detached ids stay bounded. Falls back to
-            // the id like oId.
-            prId: rootPromise.tags["resonate:prefix"] ?? rootPromise.id,
+            // Take the lineage origin from the promise's resonate:origin tag,
+            // which the dispatcher set: every id in the lineage is
+            // `{origin}:{lineage}`, so this is both the ancestry root and the
+            // anchor this workflow's own child ids extend. A tag-less promise
+            // falls back to deriving it from the id the same way the server
+            // does -- which for a genuine top-level root is the id itself.
+            oId: rootPromise.tags["resonate:origin"] ?? originOf(rootPromise.id),
             func: registered.func.name,
             clock: this.clock,
             registry: this.registry,

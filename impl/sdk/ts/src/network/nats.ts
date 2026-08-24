@@ -1,5 +1,6 @@
 import type { Msg, MsgHdrs, NatsConnection, Subscription } from "@nats-io/transport-node";
 import { ResonateTimeoutException } from "../exceptions.js";
+import { originOf } from "../ids.js";
 import type { Logger } from "../logger.js";
 import { randomUUID } from "../platform.js";
 import type { Network } from "./network.js";
@@ -32,11 +33,10 @@ const REPLY_HEADER = "Resonate-Reply-To";
 // ROUTING HELPERS
 // =============================================================================
 
-// Return the lineage origin: the substring before the first `.`.
-function idToOrigin(id: string): string {
-  const dot = id.indexOf(".");
-  return dot === -1 ? id : id.slice(0, dot);
-}
+// The lineage origin of an id — see `src/ids.ts`. Aliased here because it is
+// what selects the server's origin-state partition (below), so it must agree
+// with the server's own `origin()` for every id shape.
+const idToOrigin = originOf;
 
 // Derive the routing origin from a request, mirroring the server's client.
 //

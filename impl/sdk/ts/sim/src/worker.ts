@@ -211,7 +211,7 @@ export class WorkerProcess extends Process {
       registry,
       heartbeat: new NoopHeartbeat(),
       dependencies: new Map(),
-      optsBuilder: new OptionsBuilder({ match: (target: string) => `sim://any@${target}`, idPrefix: "" }),
+      optsBuilder: new OptionsBuilder({ match: (target: string) => `sim://any@${target}` }),
       logger,
     });
     this.network.recv((msg) => {

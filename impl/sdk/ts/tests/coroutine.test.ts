@@ -98,7 +98,7 @@ describe("Coroutine", () => {
         timeout: 0,
         version: 1,
         retryPolicy: new Never(),
-        optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+        optsBuilder: new OptionsBuilder({ match: (t) => t }),
       }),
       func,
       args,
@@ -140,7 +140,7 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 
@@ -165,7 +165,7 @@ describe("Coroutine", () => {
     const effects = buildEffects(network);
 
     // Completes in one execution — no suspension for locals
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 31458 } });
   });
 
@@ -186,13 +186,13 @@ describe("Coroutine", () => {
     const network = new DummyNetwork();
     const effects = buildEffects(network);
 
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, "foo:1.1", { kind: "value", value: 42 });
+    r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 
@@ -205,21 +205,21 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, "foo:1.1", { kind: "value", value: 42 });
+    r = await exec("foo:1", foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(effects, "foo.1.0", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, "foo:1.0", { kind: "value", value: 42 });
+    r = await exec("foo:1", foo, [], effects);
 
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 99 } });
   });
@@ -245,7 +245,7 @@ describe("Coroutine", () => {
     const effects = buildEffects(network);
 
     // Locals are flushed at return → completes in single execution
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 99 } });
   });
 
@@ -268,16 +268,16 @@ describe("Coroutine", () => {
 
     // First execution: local is flushed and settled inline at return,
     // but remote is still pending → suspended with 1 remote todo
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1);
 
     // Settle the remote promise
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
+    await completePromise(effects, "foo:1.1", { kind: "value", value: 42 });
 
     // Second execution: everything resolved → done
-    r = await exec("foo.1", foo, [], effects);
+    r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 77 } });
   });
 
@@ -300,7 +300,7 @@ describe("Coroutine", () => {
 
     // The child generator completes inline, so no pending todos exist when
     // foo returns → should complete in a single execution without suspending.
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 88 } });
   });
 
@@ -313,14 +313,14 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(1);
 
-    await completePromise(effects, "foo.1.0", { kind: "value", value: 42 });
-    r = await exec("foo.1", foo, [], effects);
+    await completePromise(effects, "foo:1.0", { kind: "value", value: 42 });
+    r = await exec("foo:1", foo, [], effects);
 
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 99 } });
   });
@@ -335,13 +335,14 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const id = util.detachedId("foo", "foo.1");
+    const id = util.detachedId("foo", "foo:1");
     let r = await exec(id, foo, [], effects);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todo.remote).toHaveLength(2);
 
+    // The exec root id already carries a ':', so its children join with '.'.
     await completePromise(effects, `${id}.0`, { kind: "value", value: 42 });
     r = await exec(id, foo, [], effects);
 
@@ -355,18 +356,16 @@ describe("Coroutine", () => {
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 
-  test("detached id stays bounded across recursive re-root", () => {
-    // A detached workflow runs as its own root: resonate:origin is reset to its
-    // own id (a fresh lineage). Recursive detached ids stay bounded NOT via
-    // origin but via resonate:prefix, propagated unchanged across re-roots. Were
-    // the id minted off the (grown) origin, each level would add a `.d${hash}`
-    // segment without bound; rooting it on the pinned prefix keeps it at
-    // `${prefix}.d${hash}` -- one segment past the prefix, at every depth.
-    const grownId = "top.deadbeefdeadbe"; // a workflow already several detached levels deep
+  test("detached id stays bounded across recursive detachment", () => {
+    // A detached child keeps the parent's ORIGIN and mints its id off it
+    // (`${origin}:d${hash}`), so recursion stays bounded at one segment past
+    // the origin instead of growing a segment per level. The origin is also
+    // the resonate:parent it declares -- the id hangs off the origin, not off
+    // the spawning context -- while resonate:branch stays the child's own id.
+    const grownId = "top:deadbeefdeadbe"; // a workflow already one detached level deep
     const ctx = new InnerContext({
       id: grownId,
-      oId: grownId, // detached re-roots origin to its own (grown) id
-      prId: "top", // the id-generation prefix is still pinned to the top
+      oId: "top", // the lineage origin, fixed at the top and carried unchanged
       func: "fires",
       clock: new WallClock(),
       registry: new Registry(),
@@ -374,37 +373,37 @@ describe("Coroutine", () => {
       timeout: 0,
       version: 1,
       retryPolicy: new Never(),
-      optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+      optsBuilder: new OptionsBuilder({ match: (t) => t }),
     });
 
     const rfi = ctx.detached("fires");
 
-    // The detached id is rooted at the pinned PREFIX "top", exactly one segment
-    // past it -- NOT the grown id (which would add a segment per level).
+    // The detached id is rooted at the ORIGIN "top", exactly one segment past
+    // it -- NOT the grown id (which would add a segment per level).
     expect(rfi.id).toBe(util.detachedId("top", `${grownId}.0`));
-    expect(rfi.id.startsWith("top.d")).toBe(true);
-    expect(rfi.id.split(".")).toHaveLength(2);
+    expect(rfi.id.startsWith("top:d")).toBe(true);
+    expect(rfi.id.split(":")).toHaveLength(2);
 
-    // The prefix carries forward unchanged, bounding the next level; the child's
-    // lineage origin is its OWN id (a fresh lineage root).
-    expect(rfi.createReq.data.tags?.["resonate:prefix"]).toBe("top");
-    expect(rfi.createReq.data.tags?.["resonate:origin"]).toBe(rfi.id);
+    // The origin carries forward unchanged, bounding the next level, and is
+    // the declared ancestor; the branch is the child's own id.
+    expect(rfi.createReq.data.tags?.["resonate:origin"]).toBe("top");
+    expect(rfi.createReq.data.tags?.["resonate:parent"]).toBe("top");
+    expect(rfi.createReq.data.tags?.["resonate:branch"]).toBe(rfi.id);
   });
 
   test("recursive multi-detached keeps every id at the same bounded length", () => {
     // End-to-end proof: fan out FANOUT detached per workflow, DEPTH levels deep,
-    // re-rooting each child exactly as production does -- a detached promise
-    // executes as its own root with oId = its resonate:origin tag (its own id)
-    // and prId = its resonate:prefix tag (computation.ts). The id is
-    // `${prefix}.d${cyrb53(seqid).padStart(14)}`: the hash flattens the
-    // (ever-growing) seqid to a constant 14 chars, and the prefix tag keeps the
-    // prefix pinned to the top, so it never grows. Net: every detached id at
-    // every depth is exactly `${top}.d${14hex}` -- bounded regardless of depth.
-    const makeCtx = (id: string, oId: string, prId: string) =>
+    // re-seeding each child exactly as production does -- a detached promise
+    // executes with oId = its resonate:origin tag (the parent's origin,
+    // carried unchanged). The id is `${origin}:d${cyrb53(seqid).padStart(14)}`:
+    // the hash flattens the (ever-growing) seqid to a constant 14 chars, and
+    // the origin stays pinned to the top, so it never grows. Net: every
+    // detached id at every depth is exactly `${top}:d${14hex}` -- bounded
+    // regardless of depth.
+    const makeCtx = (id: string, oId: string) =>
       new InnerContext({
         id,
         oId,
-        prId,
         func: "fires",
         clock: new WallClock(),
         registry: new Registry(),
@@ -412,7 +411,7 @@ describe("Coroutine", () => {
         timeout: 0,
         version: 1,
         retryPolicy: new Never(),
-        optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+        optsBuilder: new OptionsBuilder({ match: (t) => t }),
       });
 
     const TOP = "top";
@@ -420,48 +419,46 @@ describe("Coroutine", () => {
     const DEPTH = 4;
 
     // Frontier of workflows to run; seed with the genuine top-level root
-    // (origin == prefix == its id).
-    let frontier: Array<{ id: string; oId: string; prId: string }> = [{ id: TOP, oId: TOP, prId: TOP }];
+    // (origin == its id).
+    let frontier: Array<{ id: string; oId: string }> = [{ id: TOP, oId: TOP }];
     const lengths = new Set<number>();
     const ids = new Set<string>();
 
     for (let level = 0; level < DEPTH; level++) {
-      const next: Array<{ id: string; oId: string; prId: string }> = [];
-      for (const { id, oId, prId } of frontier) {
-        const ctx = makeCtx(id, oId, prId);
+      const next: Array<{ id: string; oId: string }> = [];
+      for (const { id, oId } of frontier) {
+        const ctx = makeCtx(id, oId);
         for (let i = 0; i < FANOUT; i++) {
           const rfi = ctx.detached("fires");
           lengths.add(rfi.id.length);
           ids.add(rfi.id);
-          // Re-root as production does: oId = origin tag (its own id), prId =
-          // prefix tag (the top, propagated unchanged -- what bounds the id).
+          // Re-seed as production does: oId = origin tag (the parent's origin,
+          // propagated unchanged -- what bounds the id).
           next.push({
             id: rfi.id,
             oId: rfi.createReq.data.tags?.["resonate:origin"] as string,
-            prId: rfi.createReq.data.tags?.["resonate:prefix"] as string,
           });
         }
       }
       frontier = next;
     }
 
-    // Bounded: a single length across all depths, exactly `${top}.d${14hex}`.
+    // Bounded: a single length across all depths, exactly `${top}:d${14hex}`.
     expect(lengths.size).toBe(1);
-    expect([...lengths][0]).toBe(TOP.length + ".d".length + 14);
+    expect([...lengths][0]).toBe(TOP.length + ":d".length + 14);
     // ...and no collisions: every node in the tree got a distinct id.
-    expect(ids.size).toBe((FANOUT ** (DEPTH + 1) - FANOUT) / (FANOUT - 1));
+    expect(ids.size).toBe(FANOUT + FANOUT ** 2 + FANOUT ** 3 + FANOUT ** 4);
   });
 
-  test("detached breaks the origin lineage and starts a new one, even with an explicit id", () => {
-    // "detached" is fire-and-forget and runs as its own root, so resonate:origin
-    // is reset to its own id (origin == id == branch) -- a fresh lineage -- even
-    // with a caller-pinned id. The id-generation prefix (resonate:prefix) is
-    // carried forward unchanged, independent of the diverging origin.
-    const optsBuilder = new OptionsBuilder({ match: (t) => t, idPrefix: "" });
+  test("detached with an explicit id starts a fresh self-anchored lineage", () => {
+    // A caller-pinned id cannot extend the current lineage, so it starts a
+    // fresh one: the server requires an id to extend its declared origin /
+    // branch / parent, which only the id itself satisfies
+    // (origin == branch == parent == id, exactly like a top-level run).
+    const optsBuilder = new OptionsBuilder({ match: (t) => t });
     const ctx = new InnerContext({
       id: "wf",
       oId: "top",
-      prId: "top",
       func: "fires",
       clock: new WallClock(),
       registry: new Registry(),
@@ -475,9 +472,11 @@ describe("Coroutine", () => {
     const rfi = ctx.detached("fires", optsBuilder.build({ id: "custom-detached" }));
 
     expect(rfi.id).toBe("custom-detached");
-    // Origin is the detached's own id (new lineage); prefix is propagated.
     expect(rfi.createReq.data.tags?.["resonate:origin"]).toBe("custom-detached");
-    expect(rfi.createReq.data.tags?.["resonate:prefix"]).toBe("top");
+    expect(rfi.createReq.data.tags?.["resonate:parent"]).toBe("custom-detached");
+    expect(rfi.createReq.data.tags?.["resonate:branch"]).toBe("custom-detached");
+    // The resonate:prefix tag is gone.
+    expect(rfi.createReq.data.tags?.["resonate:prefix"]).toBeUndefined();
   });
 
   test("lfc/rfc", async () => {
@@ -494,14 +493,14 @@ describe("Coroutine", () => {
     const network = new DummyNetwork();
     const effects = buildEffects(network);
 
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1);
 
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
+    await completePromise(effects, "foo:1.1", { kind: "value", value: 42 });
 
-    r = await exec("foo.1", foo, [], effects);
+    r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 84 } });
   });
 
@@ -521,7 +520,7 @@ describe("Coroutine", () => {
       Coroutine.exec(
         testLogger,
         new InnerContext({
-          id: "foo.1",
+          id: "foo:1",
           func: foo.name,
           clock: new WallClock(),
           registry: new Registry(),
@@ -529,7 +528,7 @@ describe("Coroutine", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (t) => t, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (t) => t }),
         }),
         foo,
         [],
@@ -549,7 +548,7 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 
@@ -572,7 +571,7 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: "caught: boom" } });
   });
 
@@ -602,7 +601,7 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 3 } });
 
     // Both started before either completes (true concurrency)
@@ -626,16 +625,16 @@ describe("Coroutine", () => {
     const effects = buildEffects(network);
 
     // First execution: child suspends on remote → parent suspends too
-    let r = await exec("foo.1", parent, [], effects);
+    let r = await exec("foo:1", parent, [], effects);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1);
 
     // Settle the remote promise that the child was waiting on
-    await completePromise(effects, "foo.1.0.0", { kind: "value", value: 21 });
+    await completePromise(effects, "foo:1.0.0", { kind: "value", value: 21 });
 
     // Second execution: child completes → parent completes
-    r = await exec("foo.1", parent, [], effects);
+    r = await exec("foo:1", parent, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 43 } });
   });
 
@@ -654,14 +653,14 @@ describe("Coroutine", () => {
     const effects = buildEffects(network);
 
     // First execution: local flushed + settled inline, remote still pending
-    let r = await exec("foo.1", foo, [], effects);
+    let r = await exec("foo:1", foo, [], effects);
     expect(r.type).toBe("suspended");
 
     // Settle remote
-    await completePromise(effects, "foo.1.1", { kind: "value", value: 42 });
+    await completePromise(effects, "foo:1.1", { kind: "value", value: 42 });
 
     // Re-execution: local promise already settled (fast-forward), completes
-    r = await exec("foo.1", foo, [], effects);
+    r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 77 } });
   });
 
@@ -691,18 +690,18 @@ describe("Coroutine", () => {
 
     // First execution: parent suspends on remoteParent.
     // The child's local work must be flushed, surfacing its remote dep.
-    let r = await exec("p.1", parent, [], effects);
+    let r = await exec("p:1", parent, [], effects);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     // Must include BOTH remoteParent AND the child's remoteChild
     expect(suspended.todo.remote.length).toBeGreaterThanOrEqual(2);
 
     // Settle both remote promises
-    await completePromise(effects, "p.1.0", { kind: "value", value: 5 });
-    await completePromise(effects, "p.1.1.0", { kind: "value", value: 3 });
+    await completePromise(effects, "p:1.0", { kind: "value", value: 5 });
+    await completePromise(effects, "p:1.1.0", { kind: "value", value: 3 });
 
     // Second execution: everything settled → done
-    r = await exec("p.1", parent, [], effects);
+    r = await exec("p:1", parent, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 35 } });
   });
 
@@ -724,16 +723,16 @@ describe("Coroutine", () => {
     const effects = buildEffects(network);
 
     // First execution: suspends on remote, but local bar() must be flushed and settled
-    let r = await exec("p.1", parent, [], effects);
+    let r = await exec("p:1", parent, [], effects);
     expect(r.type).toBe("suspended");
     const suspended = r as Suspended;
     expect(suspended.todo.remote).toHaveLength(1); // only remoteParent
 
     // Settle the remote
-    await completePromise(effects, "p.1.0", { kind: "value", value: 8 });
+    await completePromise(effects, "p:1.0", { kind: "value", value: 8 });
 
     // Second execution: bar's durable promise was settled on first run → replay fast-path
-    r = await exec("p.1", parent, [], effects);
+    r = await exec("p:1", parent, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 50 } });
   });
 
@@ -752,7 +751,7 @@ describe("Coroutine", () => {
 
     const network = new DummyNetwork();
     const effects = buildEffects(network);
-    const r = await exec("foo.1", foo, [], effects);
+    const r = await exec("foo:1", foo, [], effects);
     expect(r).toMatchObject({ type: "done", result: { kind: "value", value: 42 } });
   });
 });

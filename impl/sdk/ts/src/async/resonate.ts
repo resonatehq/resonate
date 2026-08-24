@@ -3,6 +3,7 @@ import { Codec } from "../codec.js";
 import { type Encryptor, NoopEncryptor } from "../encryptor.js";
 import exceptions, { ResonateTimeoutException } from "../exceptions.js";
 import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "../heartbeat.js";
+import { validateRootId } from "../ids.js";
 import { ConsoleLogger, type Logger, type LogLevel } from "../logger.js";
 import { HttpNetwork, PollMessageSource } from "../network/http.js";
 import { LocalNetwork } from "../network/local.js";
@@ -60,7 +61,6 @@ export class Resonate {
   private clock: WallClock;
   private pid: string;
   private ttl: number;
-  private idPrefix: string;
 
   private core: Core;
   private codec: Codec;
@@ -91,7 +91,6 @@ export class Resonate {
     logger = undefined,
     encryptor = undefined,
     network = undefined,
-    prefix = undefined,
   }: {
     url?: string;
     group?: string;
@@ -104,14 +103,10 @@ export class Resonate {
     logger?: Logger;
     encryptor?: Encryptor;
     network?: Network;
-    prefix?: string;
   } = {}) {
     this.clock = new WallClock();
     this.ttl = ttl;
     this.codec = new Codec(encryptor ?? new NoopEncryptor());
-
-    const resolvedPrefix = prefix ?? getEnv("RESONATE_PREFIX");
-    this.idPrefix = resolvedPrefix ? `${resolvedPrefix}:` : "";
 
     const resolvedLogLevel: LogLevel = logLevel ?? (verbose ? "debug" : "warn");
     this.logger = logger ?? new ConsoleLogger(resolvedLogLevel);
@@ -155,7 +150,7 @@ export class Resonate {
 
     this.registry = new Registry();
     this.dependencies = new Map();
-    this.optsBuilder = new OptionsBuilder({ match: this.network.match.bind(this.network), idPrefix: this.idPrefix });
+    this.optsBuilder = new OptionsBuilder({ match: this.network.match.bind(this.network) });
 
     this.core = new Core({
       pid: this.pid,
@@ -254,7 +249,11 @@ export class Resonate {
       );
     }
 
-    id = `${this.idPrefix}${id}`;
+    // Validated at the call site that named the workflow, rather than
+    // surfacing later as an opaque 400 from the server: the id becomes the
+    // origin of its whole lineage, so ':' is rejected outright ('.' is only
+    // read below the origin).
+    validateRootId(id);
     util.assert(registered.version > 0, "function version must be greater than zero");
 
     const { promise, task } = await this.taskCreate({
@@ -275,10 +274,10 @@ export class Resonate {
             },
             tags: {
               ...opts.tags,
+              // A genuine top-level root is its own lineage origin, so
+              // origin == branch == parent == id here. Every descendant id
+              // extends it as `{id}:{lineage}`.
               "resonate:origin": id,
-              // A genuine top-level root is its own lineage origin AND its own
-              // id-generation prefix; the prefix then propagates down unchanged.
-              "resonate:prefix": id,
               "resonate:branch": id,
               "resonate:parent": id,
               "resonate:scope": "global",
@@ -318,7 +317,7 @@ export class Resonate {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
-    id = `${this.idPrefix}${id}`;
+    validateRootId(id);
     const func = registered ? registered.name : (funcOrName as string);
     const version = registered ? registered.version : opts.version || 1;
 
@@ -331,10 +330,10 @@ export class Resonate {
         param: { data: { func, args, retry: opts.retryPolicy?.encode(), version }, headers: {} },
         tags: {
           ...opts.tags,
+          // A genuine top-level root is its own lineage origin, so
+          // origin == branch == parent == id here. Every descendant id
+          // extends it as `{id}:{lineage}`.
           "resonate:origin": id,
-          // A genuine top-level root is its own lineage origin AND its own
-          // id-generation prefix; the prefix then propagates down unchanged.
-          "resonate:prefix": id,
           "resonate:branch": id,
           "resonate:parent": id,
           "resonate:scope": "global",
@@ -377,7 +376,15 @@ export class Resonate {
       version: registered ? registered.version : opts.version || 1,
     });
 
-    await this.schedules.create(name, cron, `${this.idPrefix}{{.id}}.{{.timestamp}}`, opts.timeout, {
+    // Each firing creates a root promise named from this id, so the schedule
+    // name is bound by the same rules as a run/rpc id. The server stamps the
+    // *whole* templated id onto the fired promise's resonate:origin tag, so
+    // the template must join with a plain '-': a ':' would hide the timestamp
+    // below the origin, collapsing every firing onto one lineage. A '.' is
+    // fine now — it is only read below the origin — but '-' keeps the
+    // timestamp clearly distinct from any dots in the schedule name.
+    validateRootId(name);
+    await this.schedules.create(name, cron, "{{.id}}-{{.timestamp}}", opts.timeout, {
       promiseHeaders: headers,
       promiseData: data,
       promiseTags: { ...opts.tags, "resonate:target": opts.target },
@@ -390,7 +397,8 @@ export class Resonate {
 
   /** Returns a handle to an existing durable promise by id. */
   public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
-    id = `${this.idPrefix}${id}`;
+    // get is a lookup, not a create: it takes any id, including a child's
+    // (e.g. "wf:1.2"), so it deliberately does NOT validate.
     const promise = await this.promiseGet({
       kind: "promise.get",
       head: { corrId: randomUUID(), version: util.VERSION },

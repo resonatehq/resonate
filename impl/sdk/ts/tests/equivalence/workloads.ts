@@ -205,6 +205,6 @@ export const humanInTheLoop: MatchedWorkload = {
   gen: { dpc: dpcGen },
   async: { dpc: dpcAsync },
   drive: async (api) => {
-    await api.resolvePromise("dpc.0", "signal");
+    await api.resolvePromise("dpc:0", "signal");
   },
 };

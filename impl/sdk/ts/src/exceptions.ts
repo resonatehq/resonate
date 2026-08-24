@@ -108,6 +108,11 @@ export default {
       cause: c,
     });
   },
+  INVALID_ID: (id: string, reason: string) => {
+    // A caller-supplied root id the server's id format cannot carry — see
+    // `ids.validateRootId`.
+    return new ResonateError("10", "InvalidId", `Invalid id '${id}': ${reason}`);
+  },
   PANIC: (src: string, msg: string | undefined) => {
     src = src.charAt(0).toUpperCase() + src.slice(1);
     msg = msg ? `: ${msg}` : "";

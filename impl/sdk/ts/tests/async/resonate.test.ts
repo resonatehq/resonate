@@ -115,28 +115,25 @@ describe("Resonate usage tests", () => {
     resonate.register("bar", bar);
     resonate.register("baz", baz);
 
-    expect(await res(resonate.run("foo.1", foo))).toBe("hello");
-    expect((await resonate.promises.get("foo.1")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1",
-      "resonate:parent": "foo.1",
+    expect(await res(resonate.run("foo1", foo))).toBe("hello");
+    expect((await resonate.promises.get("foo1")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1",
+      "resonate:parent": "foo1",
       "resonate:scope": "global",
       "resonate:target": "local://any@default/default",
     });
-    expect((await resonate.promises.get("foo.1.0")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1.0",
-      "resonate:parent": "foo.1",
+    expect((await resonate.promises.get("foo1:0")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1:0",
+      "resonate:parent": "foo1",
       "resonate:scope": "global",
       "resonate:target": "local://any@default",
     });
-    expect((await resonate.promises.get("foo.1.0.0")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1.0.0",
-      "resonate:parent": "foo.1.0",
+    expect((await resonate.promises.get("foo1:0.0")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1:0.0",
+      "resonate:parent": "foo1:0",
       "resonate:scope": "global",
       "resonate:target": "local://any@default",
     });
@@ -149,27 +146,24 @@ describe("Resonate usage tests", () => {
     const foo = async (ctx: Context): Promise<string> => ctx.run(bar);
     const f = resonate.register("lfcfoo", foo);
 
-    expect(await res(f.run("foo.1"))).toBe("hello");
-    expect((await resonate.promises.get("foo.1")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1",
-      "resonate:parent": "foo.1",
+    expect(await res(f.run("foo1"))).toBe("hello");
+    expect((await resonate.promises.get("foo1")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1",
+      "resonate:parent": "foo1",
       "resonate:scope": "global",
       "resonate:target": "local://any@default/default",
     });
-    expect((await resonate.promises.get("foo.1.0")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1",
-      "resonate:parent": "foo.1",
+    expect((await resonate.promises.get("foo1:0")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1",
+      "resonate:parent": "foo1",
       "resonate:scope": "local",
     });
-    expect((await resonate.promises.get("foo.1.0.0")).tags).toEqual({
-      "resonate:origin": "foo.1",
-      "resonate:prefix": "foo.1",
-      "resonate:branch": "foo.1",
-      "resonate:parent": "foo.1.0",
+    expect((await resonate.promises.get("foo1:0.0")).tags).toEqual({
+      "resonate:origin": "foo1",
+      "resonate:branch": "foo1",
+      "resonate:parent": "foo1:0",
       "resonate:scope": "local",
     });
   });
@@ -186,7 +180,7 @@ describe("Resonate usage tests", () => {
     expect(await h.done()).toBe(false);
 
     await sleep(100); // ensure the latent promise done-1.0 exists
-    await resonate.promises.resolve("done-1.0", { data: codec.encode("v").data });
+    await resonate.promises.resolve("done-1:0", { data: codec.encode("v").data });
     expect(await h.result()).toBe("v");
     expect(await h.done()).toBe(true);
 
@@ -349,15 +343,15 @@ describe("Resonate usage tests", () => {
 
     const wf = async (ctx: Context): Promise<{ msg: string }> => {
       const fu = ctx.run(g, "this is a function", ctx.options({ tags: { myTag: "value" } }));
-      expect(fu.id).toBe("opts-1.0");
+      expect(fu.id).toBe("opts-1:0");
       return fu;
     };
     resonate.register("optswf", wf);
 
     const v = await res(resonate.run("opts-1", wf));
     expect(v.msg).toBe("this is a function");
-    const durable = await resonate.promises.get("opts-1.0");
-    expect(durable.id).toBe("opts-1.0");
+    const durable = await resonate.promises.get("opts-1:0");
+    expect(durable.id).toBe("opts-1:0");
     expect(durable.tags).toMatchObject({ myTag: "value", "resonate:scope": "local" });
   });
 
@@ -370,21 +364,20 @@ describe("Resonate usage tests", () => {
 
     const wf = async (ctx: Context): Promise<{ msg: string }> => {
       const fu = ctx.run(g, "this is a function");
-      expect(fu.id).toBe("noopts-1.0");
+      expect(fu.id).toBe("noopts-1:0");
       return fu;
     };
     resonate.register("nooptswf", wf);
 
     const v = await res(resonate.run("noopts-1", wf));
     expect(v.msg).toBe("this is a function");
-    const durable = await resonate.promises.get("noopts-1.0");
-    expect(durable.id).toBe("noopts-1.0");
+    const durable = await resonate.promises.get("noopts-1:0");
+    expect(durable.id).toBe("noopts-1:0");
     expect(durable.tags).toStrictEqual({
       "resonate:scope": "local",
       "resonate:branch": "noopts-1",
       "resonate:parent": "noopts-1",
       "resonate:origin": "noopts-1",
-      "resonate:prefix": "noopts-1",
     });
   });
 
@@ -400,7 +393,7 @@ describe("Resonate usage tests", () => {
     for (const [i, target] of ["default", "foo", "bar", "baz"].entries()) {
       await res(resonate.rpc(`t${i}`, "tfoo", target, resonate.options({ target })));
       const p1 = await resonate.promises.get(`t${i}`);
-      const p2 = await resonate.promises.get(`t${i}.0`);
+      const p2 = await resonate.promises.get(`t${i}:0`);
 
       expect(p1.tags["resonate:target"]).toBe(`local://any@${target}`);
       expect(p2.tags["resonate:target"]).toBe(`local://any@${target}`);
@@ -418,7 +411,7 @@ describe("Resonate usage tests", () => {
     ].entries()) {
       await res(resonate.rpc(`u${i}`, "tfoo", target, resonate.options({ target })));
       const p1 = await resonate.promises.get(`u${i}`);
-      const p2 = await resonate.promises.get(`u${i}.0`);
+      const p2 = await resonate.promises.get(`u${i}:0`);
 
       expect(p1.tags["resonate:target"]).toBe(target);
       expect(p2.tags["resonate:target"]).toBe(target);
@@ -430,7 +423,7 @@ describe("Resonate usage tests", () => {
 
     const wf = async (ctx: Context): Promise<string> => {
       const fu = ctx.promise<string>();
-      expect(fu.id).toBe("hitl-1.0");
+      expect(fu.id).toBe("hitl-1:0");
       return fu;
     };
     resonate.register("hitlwf", wf);
@@ -438,12 +431,11 @@ describe("Resonate usage tests", () => {
     const h = await resonate.run("hitl-1", wf);
     await sleep(100); // ensure hitl-1.0 promise is created
 
-    await resonate.promises.resolve("hitl-1.0", { data: codec.encode("myValue").data });
+    await resonate.promises.resolve("hitl-1:0", { data: codec.encode("myValue").data });
     expect(await h.result()).toBe("myValue");
-    expect((await resonate.promises.get("hitl-1.0")).tags).toEqual({
-      "resonate:branch": "hitl-1.0",
+    expect((await resonate.promises.get("hitl-1:0")).tags).toEqual({
+      "resonate:branch": "hitl-1:0",
       "resonate:origin": "hitl-1",
-      "resonate:prefix": "hitl-1",
       "resonate:parent": "hitl-1",
       "resonate:scope": "global",
     });
@@ -456,7 +448,7 @@ describe("Resonate usage tests", () => {
 
     const wf = async (ctx: Context): Promise<string> => {
       const fu = ctx.promise<string>({ timeout: 5 * util.HOUR });
-      expect(fu.id).toBe("timeout-1.0");
+      expect(fu.id).toBe("timeout-1:0");
       return fu;
     };
     resonate.register("timeoutwf", wf);
@@ -464,17 +456,16 @@ describe("Resonate usage tests", () => {
     const h = await resonate.run("timeout-1", wf);
     await sleep(100); // ensure timeout-1.0 promise is created
 
-    const durable = await resonate.promises.get("timeout-1.0");
+    const durable = await resonate.promises.get("timeout-1:0");
     expect(durable.timeoutAt).toBeGreaterThanOrEqual(time + 5 * util.HOUR);
     expect(durable.timeoutAt).toBeLessThan(time + 5 * util.HOUR + 1000);
     expect(durable.tags).toEqual({
-      "resonate:branch": "timeout-1.0",
+      "resonate:branch": "timeout-1:0",
       "resonate:origin": "timeout-1",
-      "resonate:prefix": "timeout-1",
       "resonate:parent": "timeout-1",
       "resonate:scope": "global",
     });
-    await resonate.promises.resolve("timeout-1.0", { data: codec.encode("myValue").data });
+    await resonate.promises.resolve("timeout-1:0", { data: codec.encode("myValue").data });
     expect(await h.result()).toBe("myValue");
   });
 
@@ -491,14 +482,16 @@ describe("Resonate usage tests", () => {
     const h = await resonate.run("sleep-1", wf);
     await sleep(100); // ensure sleep-1.0 promise is created
 
-    const durable = await resonate.promises.get("sleep-1.0");
+    const durable = await resonate.promises.get("sleep-1:0");
     expect(durable.tags).toEqual({
       "resonate:timer": "true",
-      "resonate:branch": "sleep-1.0",
+      "resonate:branch": "sleep-1:0",
       "resonate:origin": "sleep-1",
-      "resonate:prefix": "sleep-1",
       "resonate:parent": "sleep-1",
       "resonate:scope": "global",
+      // The server only schedules a timeout for a promise carrying a target,
+      // so a target-less timer would never fire — the timer must carry one.
+      "resonate:target": "local://any@default",
     });
     expect(durable.timeoutAt).toBeLessThan(time + 1 * util.SEC + 100);
 
@@ -581,14 +574,13 @@ describe("Resonate usage tests", () => {
     resonate.register("twf1", wf);
 
     await res(resonate.run("tdef-1", wf));
-    const durable = await resonate.promises.get("tdef-1.0");
-    expect(durable.id).toBe("tdef-1.0");
+    const durable = await resonate.promises.get("tdef-1:0");
+    expect(durable.id).toBe("tdef-1:0");
     expect(durable.tags).toStrictEqual({
       "resonate:scope": "global",
-      "resonate:branch": "tdef-1.0",
+      "resonate:branch": "tdef-1:0",
       "resonate:parent": "tdef-1",
       "resonate:origin": "tdef-1",
-      "resonate:prefix": "tdef-1",
       "resonate:target": "local://any@default",
     });
   });
@@ -604,13 +596,12 @@ describe("Resonate usage tests", () => {
     resonate.register("twf2", wf);
 
     await res(resonate.run("topt-1", wf));
-    const durable = await resonate.promises.get("topt-1.0");
+    const durable = await resonate.promises.get("topt-1:0");
     expect(durable.tags).toStrictEqual({
       "resonate:scope": "global",
-      "resonate:branch": "topt-1.0",
+      "resonate:branch": "topt-1:0",
       "resonate:parent": "topt-1",
       "resonate:origin": "topt-1",
-      "resonate:prefix": "topt-1",
       "resonate:target": "local://any@remoteTarget",
     });
   });
@@ -626,13 +617,12 @@ describe("Resonate usage tests", () => {
     resonate.register("twf3", wf);
 
     await res(resonate.run("turl-1", wf));
-    const durable = await resonate.promises.get("turl-1.0");
+    const durable = await resonate.promises.get("turl-1:0");
     expect(durable.tags).toStrictEqual({
       "resonate:scope": "global",
-      "resonate:branch": "turl-1.0",
+      "resonate:branch": "turl-1:0",
       "resonate:parent": "turl-1",
       "resonate:origin": "turl-1",
-      "resonate:prefix": "turl-1",
       "resonate:target": "http://faasurl.com",
     });
   });
@@ -654,7 +644,6 @@ describe("Resonate usage tests", () => {
       "resonate:branch": "troot-1",
       "resonate:parent": "troot-1",
       "resonate:origin": "troot-1",
-      "resonate:prefix": "troot-1",
       "resonate:target": "http://faasurl.com",
     });
   });
@@ -675,7 +664,6 @@ describe("Resonate usage tests", () => {
       "resonate:branch": "troot-2",
       "resonate:parent": "troot-2",
       "resonate:origin": "troot-2",
-      "resonate:prefix": "troot-2",
       "resonate:target": "local://any@default",
     });
   });
@@ -830,46 +818,29 @@ describe("Resonate usage tests", () => {
     // awaited out of band by id.
     expect(new Set(ids).size).toBe(2);
     for (const id of ids) {
-      expect(id).toMatch(/^equiv-1\.d[0-9a-f]+$/);
+      expect(id).toMatch(/^equiv-1:d[0-9a-f]+$/);
       expect(await (await resonate.get<string>(id)).result()).toBe("bar");
     }
   });
 
-  test("Using prefix at Resonate class prefixes all the promises", async () => {
-    const prefix = "myPrefix";
-    resonate = new Resonate({ prefix });
+  test("run/rpc/schedule reject an invalid root id; get does not validate", async () => {
+    // Raised at the call site, before anything reaches the server: a root id
+    // becomes the origin of its whole lineage, so ':' is rejected outright
+    // ('.' is only read below the origin).
+    resonate = newResonate();
+    const noop = async (_ctx: Context): Promise<string> => "ok";
+    resonate.register("vnoop", noop);
 
-    const qux = async (info: Info): Promise<string> => {
-      expect(info.id.startsWith(prefix)).toBe(true);
-      expect(info.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
-      return "qux";
-    };
+    for (const bad of ["bad:id", "", "bad\u0000id"]) {
+      await expect(resonate.run(bad, noop)).rejects.toThrow(/Invalid id/);
+      await expect(resonate.rpc(bad, "vnoop")).rejects.toThrow(/Invalid id/);
+      await expect(resonate.schedule(bad, "* * * * *", "vnoop")).rejects.toThrow(/Invalid id/);
+    }
 
-    const baz = async (ctx: Context): Promise<string> => {
-      expect(ctx.id.startsWith(prefix)).toBe(true);
-      expect(ctx.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
-      await ctx.run(qux);
-      return "baz";
-    };
-
-    const bar = async (ctx: Context): Promise<string> => {
-      expect(ctx.id.startsWith(prefix)).toBe(true);
-      expect(ctx.id.startsWith(`${prefix}:${prefix}`)).toBe(false);
-      return "bar";
-    };
-
-    const foo = async (ctx: Context): Promise<string> => {
-      const p = ctx.run(bar);
-      await ctx.run(baz);
-      await ctx.run(qux);
-      await p;
-      return "ok";
-    };
-    const f = resonate.register("pfxfoo", foo);
-
-    const h = await f.run("fooId");
-    expect(h.id).toBe(`${prefix}:fooId`);
-    expect(await h.result()).toBe("ok");
+    // get is a lookup, not a create: it takes any id, including a child's
+    // (e.g. "wf:1.2"), so it must NOT validate. A missing one 404s rather
+    // than raising InvalidId.
+    await expect(resonate.get("wf:1.2")).rejects.toThrow(/not found|404|exist/i);
   });
 });
 

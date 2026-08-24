@@ -76,7 +76,7 @@ function buildCore(opts: {
     registry: new Registry(),
     heartbeat: new TestHeartbeat(),
     dependencies: new Map(),
-    optsBuilder: new OptionsBuilder({ match: (t: string) => t, idPrefix: "test-" }),
+    optsBuilder: new OptionsBuilder({ match: (t: string) => t }),
     logger,
   });
 

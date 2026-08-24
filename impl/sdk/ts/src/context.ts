@@ -1,5 +1,6 @@
 import type { Clock } from "./clock.js";
 import exceptions, { type ResonateError } from "./exceptions.js";
+import { joinId } from "./ids.js";
 import type { PromiseCreateReq } from "./network/types.js";
 import type { Options, OptionsBuilder } from "./options.js";
 import { randomUUID } from "./platform.js";
@@ -192,7 +193,6 @@ export class Future<T> implements Iterable<Future<T>> {
 export interface Context {
   readonly id: string;
   readonly originId: string;
-  readonly prefixId: string;
   readonly parentId: string;
   readonly branchId: string;
   readonly info: { readonly attempt: number; readonly timeout: number; readonly version: number };
@@ -273,7 +273,6 @@ export class InnerContext implements Context {
   readonly nonRetryableErrors: Array<new (...args: any[]) => Error>;
 
   readonly originId: string;
-  readonly prefixId: string;
   readonly branchId: string;
   readonly parentId: string;
   readonly clock: Clock;
@@ -290,7 +289,6 @@ export class InnerContext implements Context {
   constructor({
     id,
     oId = id,
-    prId = id,
     bId = id,
     pId = id,
     func,
@@ -305,7 +303,6 @@ export class InnerContext implements Context {
   }: {
     id: string;
     oId?: string;
-    prId?: string;
     bId?: string;
     pId?: string;
     func: string;
@@ -319,14 +316,12 @@ export class InnerContext implements Context {
     nonRetryableErrors?: Array<new (...args: any[]) => Error>;
   }) {
     this.id = id;
+    // The lineage origin: everything before the first `:` of every id in this
+    // workflow, set at the top (resonate.run/rpc) and carried through the
+    // resonate:origin tag unchanged forever -- including into detached
+    // children, which mint `${originId}:d${hash}` off it. Also the anchor
+    // every descendant id extends, so it doubles as the id-generation root.
     this.originId = oId;
-    // The id-generation prefix (resonate:prefix). Set once at the top
-    // (resonate.run/rpc) and propagated down unchanged forever -- through every
-    // child AND across detached re-roots -- never tracking the (diverging)
-    // lineage origin. Bounds recursive detached ids: each level mints
-    // `${prefixId}.d${hash}` off this fixed prefix. Mirrors the Python SDK's
-    // `Context.prefix_id`.
-    this.prefixId = prId;
     this.branchId = bId;
     this.parentId = pId;
     this.func = func;
@@ -362,7 +357,6 @@ export class InnerContext implements Context {
     return new InnerContext({
       id,
       oId: this.originId,
-      prId: this.prefixId,
       bId: this.branchId,
       pId: this.id,
       func,
@@ -573,7 +567,7 @@ export class InnerContext implements Context {
 
     const idChanged = opts.id !== undefined;
 
-    const id = idChanged ? opts.id : util.detachedId(this.prefixId, this.seqid());
+    const id = idChanged ? opts.id : util.detachedId(this.originId, this.seqid());
     this.seq++;
 
     const func = registered ? registered.name : (funcOrName as string);
@@ -590,16 +584,23 @@ export class InnerContext implements Context {
       id,
       func,
       version,
-      // detached ALWAYS breaks the origin lineage (breaksLineage: true): it is
-      // fire-and-forget and runs as its own root, so resonate:origin must equal
-      // its own id (origin == id == branch), starting a fresh lineage. Recursive
-      // detached ids stay bounded NOT via origin but via resonate:prefix, which
-      // is propagated down unchanged (set in remoteCreateReq = this.prefixId) and
-      // is what `util.detachedId(this.prefixId, ...)` roots the id on. So each
-      // level mints `${prefix}.d${hash}` off the same fixed prefix instead of
-      // off its own grown id. Mirrors the Python SDK (detached origin = its id,
-      // prefix carried forward).
-      this.remoteCreateReq({ id, data, opts, maxTimeout: Number.MAX_SAFE_INTEGER, breaksLineage: true }),
+      // A detached child keeps the *parent's* origin rather than re-rooting
+      // onto its own id: the server derives the origin as everything before
+      // the first `:` and requires every id in a lineage to start with
+      // `{origin}:`. Its id hangs off the origin (`${origin}:d${hash}`, one
+      // segment past it, bounding recursion), so the origin is also the
+      // resonate:parent it declares -- a parent of the spawning context would
+      // be rejected. resonate:branch stays the child's own id: a detached
+      // child roots its own branch. An explicit opts.id still starts a fresh
+      // self-anchored lineage (breaksLineage).
+      this.remoteCreateReq({
+        id,
+        data,
+        opts,
+        maxTimeout: Number.MAX_SAFE_INTEGER,
+        breaksLineage: idChanged,
+        parent: idChanged ? id : this.originId,
+      }),
       "detached",
     );
   }
@@ -680,12 +681,12 @@ export class InnerContext implements Context {
         param: { headers: {}, data },
         tags: {
           "resonate:scope": "local",
-          "resonate:branch": this.branchId,
-          "resonate:parent": this.id,
+          // An explicit-id child (breaksLineage) starts a fresh self-anchored
+          // lineage: the server requires an id to extend its declared branch /
+          // parent / origin, which only the id itself satisfies.
+          "resonate:branch": breaksLineage ? id : this.branchId,
+          "resonate:parent": breaksLineage ? id : this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
-          // Prefix is set at the top and propagates down unchanged forever,
-          // independent of origin (which detached/explicit-id may break).
-          "resonate:prefix": this.prefixId,
           ...opts.tags,
         },
       },
@@ -697,12 +698,17 @@ export class InnerContext implements Context {
     data,
     opts,
     breaksLineage,
+    parent,
     maxTimeout = this.info.timeout,
   }: {
     id: string;
     data: any;
     opts: Options;
     breaksLineage: boolean;
+    // Only detached overrides the parent: its id is minted off the origin
+    // rather than off the spawning context, and the server requires every id
+    // to extend its declared resonate:parent.
+    parent?: string;
     maxTimeout?: number;
   }): PromiseCreateReq {
     // timeout cannot be greater than parent timeout (unless detached)
@@ -718,11 +724,8 @@ export class InnerContext implements Context {
           "resonate:scope": "global",
           "resonate:target": opts.target,
           "resonate:branch": id,
-          "resonate:parent": this.id,
+          "resonate:parent": parent ?? (breaksLineage ? id : this.id),
           "resonate:origin": breaksLineage ? id : this.originId,
-          // Prefix is set at the top and propagates down unchanged forever,
-          // independent of origin (which detached/explicit-id may break).
-          "resonate:prefix": this.prefixId,
           ...opts.tags,
         },
         param: { headers: {}, data },
@@ -756,11 +759,8 @@ export class InnerContext implements Context {
         tags: {
           "resonate:scope": "global",
           "resonate:branch": id,
-          "resonate:parent": this.id,
+          "resonate:parent": breaksLineage ? id : this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
-          // Prefix is set at the top and propagates down unchanged forever,
-          // independent of origin (which detached/explicit-id may break).
-          "resonate:prefix": this.prefixId,
           ...tags,
         },
       },
@@ -768,13 +768,21 @@ export class InnerContext implements Context {
   }
 
   sleepCreateOpts({ id, time }: { id: string; time: number }): PromiseCreateReq {
+    // The timer is the promise's own deadline: resonate:timer makes the server
+    // settle it RESOLVED (rather than timed out) when the deadline arrives,
+    // which fires the callbacks every sleeper is suspended on. The
+    // resonate:target is what makes that deadline *happen*: the server only
+    // schedules timeouts for promises carrying an address, so a target-less
+    // timer would simply never fire. The flip side is that a target also
+    // spawns a task, dispatched immediately rather than at the wake; a timer
+    // names no function to run, so the worker that receives it drops it and
+    // lets the deadline do the waking (see Core.executeUntilBlocked).
     const tags = {
       "resonate:scope": "global",
+      "resonate:target": this.options().target,
       "resonate:branch": id,
       "resonate:parent": this.id,
       "resonate:origin": this.originId,
-      // Prefix is set at the top and propagates down unchanged forever.
-      "resonate:prefix": this.prefixId,
       "resonate:timer": "true",
     };
 
@@ -794,6 +802,8 @@ export class InnerContext implements Context {
   }
 
   seqid(): string {
-    return `${this.id}.${this.seq}`;
+    // A bare root joins its first lineage segment with ':', deeper segments
+    // join with '.' -- see ids.joinId.
+    return joinId(this.id, `${this.seq}`);
   }
 }

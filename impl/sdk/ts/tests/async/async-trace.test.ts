@@ -52,7 +52,7 @@ function newCore(registry: Registry, network: LocalNetwork): Core {
     registry,
     heartbeat: new NoopHeartbeat(),
     dependencies: new Map(),
-    optsBuilder: new OptionsBuilder({ match: (target: string) => target, idPrefix: "" }),
+    optsBuilder: new OptionsBuilder({ match: (target: string) => target }),
     logger: new ConsoleLogger("error"),
   });
 }
@@ -167,12 +167,12 @@ describe("async engine lifecycle trace", () => {
 
     // run main -> main.0
     const run = t.find((e) => e.kind === "run");
-    expect(run).toEqual({ kind: "run", id: "main", callee: "main.0" });
+    expect(run).toEqual({ kind: "run", id: "main", callee: "main:0" });
 
     // Child spawns once and returns 7.
     expect(counts(t).spawn.filter((e) => e.id !== "main").length).toBe(1);
-    const childReturn = t.find((e) => e.kind === "return" && e.id === "main.0");
-    expect(childReturn).toEqual({ kind: "return", id: "main.0", state: "resolved", value: 7 });
+    const childReturn = t.find((e) => e.kind === "return" && e.id === "main:0");
+    expect(childReturn).toEqual({ kind: "return", id: "main:0", state: "resolved", value: 7 });
 
     // Root return is last.
     expect(t[t.length - 1]).toEqual({ kind: "return", id: "main", state: "resolved", value: 7 });
@@ -237,7 +237,7 @@ describe("async engine lifecycle trace", () => {
     expect(res.kind).toBe("done");
     if (res.kind === "done") expect(res.state).toBe("rejected");
 
-    const childReturn = res.trace.find((e) => e.kind === "return" && e.id === "main.0");
+    const childReturn = res.trace.find((e) => e.kind === "return" && e.id === "main:0");
     expect(childReturn?.kind === "return" && childReturn.state).toBe("rejected");
     const rootReturn = res.trace[res.trace.length - 1];
     expect(rootReturn.kind === "return" && rootReturn.state).toBe("rejected");
@@ -264,7 +264,7 @@ describe("async engine lifecycle trace", () => {
     expect(res.kind).toBe("done");
     if (res.kind === "done") expect(res.value).toBe("caught:kaboom");
 
-    const childReturn = res.trace.find((e) => e.kind === "return" && e.id === "main.0");
+    const childReturn = res.trace.find((e) => e.kind === "return" && e.id === "main:0");
     expect(childReturn?.kind === "return" && childReturn.state).toBe("rejected");
     const rootReturn = res.trace[res.trace.length - 1];
     expect(rootReturn).toMatchObject({ kind: "return", id: "main", state: "resolved" });
@@ -279,12 +279,12 @@ describe("async engine lifecycle trace", () => {
     const res = await runRoot(fns, "main");
 
     expect(res.kind).toBe("suspended");
-    if (res.kind === "suspended") expect(res.awaited).toEqual(["main.0"]);
+    if (res.kind === "suspended") expect(res.awaited).toEqual(["main:0"]);
     const t = res.trace;
 
     expect(t[0]).toEqual({ kind: "spawn", id: "main" });
-    expect(t.find((e) => e.kind === "rpc")).toEqual({ kind: "rpc", id: "main", callee: "main.0" });
-    expect(t.find((e) => e.kind === "block")).toEqual({ kind: "block", id: "main.0" });
+    expect(t.find((e) => e.kind === "rpc")).toEqual({ kind: "rpc", id: "main", callee: "main:0" });
+    expect(t.find((e) => e.kind === "block")).toEqual({ kind: "block", id: "main:0" });
     expect(t[t.length - 1]).toEqual({ kind: "suspend", id: "main" });
 
     expectLifecycleWellFormed(t);
@@ -355,7 +355,7 @@ describe("async engine lifecycle trace", () => {
 
       // Pre-settle the child (main.0) so the engine's create dedups against it.
       const effects = util.buildEffects(network.send, codec, { id: task.id, version: task.version });
-      await presettle(effects, "main.0", 99);
+      await presettle(effects, "main:0", 99);
 
       const res = await core.executeUntilBlocked(task, promise, preload);
 
@@ -363,10 +363,10 @@ describe("async engine lifecycle trace", () => {
       if (res.kind === "done") expect(res.value).toBe(99); // deduped to the stored value
 
       const c = counts(res.trace);
-      expect(c.run).toEqual([{ kind: "run", id: "main", callee: "main.0" }]);
+      expect(c.run).toEqual([{ kind: "run", id: "main", callee: "main:0" }]);
       expect(c.dedup.length).toBe(1);
-      expect(c.dedup[0]).toMatchObject({ kind: "dedup", id: "main.0", state: "resolved" });
-      expect(c.spawn.filter((e) => e.id === "main.0").length).toBe(0); // deduped, never spawned
+      expect(c.dedup[0]).toMatchObject({ kind: "dedup", id: "main:0", state: "resolved" });
+      expect(c.spawn.filter((e) => e.id === "main:0").length).toBe(0); // deduped, never spawned
 
       expectLifecycleWellFormed(res.trace);
     } finally {

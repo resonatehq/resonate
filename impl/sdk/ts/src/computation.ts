@@ -3,6 +3,7 @@ import { InnerContext } from "./context.js";
 import { Coroutine } from "./coroutine.js";
 import exceptions from "./exceptions.js";
 import type { Heartbeat } from "./heartbeat.js";
+import { originOf } from "./ids.js";
 import type { Logger } from "./logger.js";
 import type { PromiseRecord } from "./network/types.js";
 import type { OptionsBuilder } from "./options.js";
@@ -116,11 +117,13 @@ export class Computation {
 
     const ctxConfig = {
       id: this.id,
-      oId: rootPromise.tags["resonate:origin"] ?? this.id,
-      // The id-generation prefix, propagated unchanged across re-roots (a
-      // detached child resets origin to its own id but carries prefix forward),
-      // so recursive detached ids stay bounded. Falls back to the id like oId.
-      prId: rootPromise.tags["resonate:prefix"] ?? this.id,
+      // Take the lineage origin from the promise's resonate:origin tag, which
+      // the dispatcher set: every id in the lineage is `{origin}:{lineage}`,
+      // so this is both the ancestry root and the anchor this computation's
+      // own child ids extend. A tag-less promise falls back to deriving it
+      // from the id the same way the server does -- which for a genuine
+      // top-level root is the id itself.
+      oId: rootPromise.tags["resonate:origin"] ?? originOf(this.id),
       func: registered.func.name,
       clock: this.clock,
       registry: this.registry,

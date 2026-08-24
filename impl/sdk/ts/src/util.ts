@@ -1,6 +1,7 @@
 import type { Codec } from "./codec.js";
 import type { InnerContext } from "./context.js";
 import exceptions from "./exceptions.js";
+import { joinId } from "./ids.js";
 import type { Logger } from "./logger.js";
 import {
   isSuccess,
@@ -112,12 +113,15 @@ function cyrb53(input: string | Uint8Array, seed = 0): number {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
-export function detachedId(prefix: string, seqid: string): string {
-  // `${prefix}.d${hash}` -- the `d` marks the segment as a detached child (vs an
-  // rfi child's numeric `.${seq}`). `prefix` is the id-generation prefix
-  // (resonate:prefix), set once at the top and propagated down unchanged, so
-  // recursive detached ids stay bounded at one segment past the prefix.
-  return `${prefix}.d${cyrb53(seqid).toString(16).padStart(14, "0")}`;
+export function detachedId(origin: string, seqid: string): string {
+  // `${origin}:d${hash}` -- the `d` marks the segment as a detached child (vs a
+  // child's numeric `.${seq}`). `origin` is the lineage origin, set once at the
+  // top and propagated down unchanged forever, so recursive detached ids stay
+  // bounded at one segment past the origin instead of growing a segment per
+  // level. The child keeps the parent's origin rather than re-rooting onto its
+  // own id: the server derives the origin as everything before the first `:`
+  // and requires every id in a lineage to start with `{origin}:`.
+  return joinId(origin, `d${cyrb53(seqid).toString(16).padStart(14, "0")}`);
 }
 
 export function getCallerInfo(): string {

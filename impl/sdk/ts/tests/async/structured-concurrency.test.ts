@@ -50,7 +50,7 @@ function newCore(registry: Registry, network: LocalNetwork): Core {
     registry,
     heartbeat: new NoopHeartbeat(),
     dependencies: new Map(),
-    optsBuilder: new OptionsBuilder({ match: (target: string) => target, idPrefix: "" }),
+    optsBuilder: new OptionsBuilder({ match: (target: string) => target }),
     logger: new ConsoleLogger("error"),
   });
 }
@@ -127,8 +127,8 @@ describe("async engine structured concurrency", () => {
       expect(status.kind).toBe("done");
       if (status.kind !== "done") return;
       expect(status.value).toBe("done");
-      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-fire.0");
-      const rec = await getPromise(network, "sc-fire.0");
+      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-fire:0");
+      const rec = await getPromise(network, "sc-fire:0");
       expect(rec?.state).toBe("resolved");
       expect(rec?.value?.data).toBe("side-effect");
     } finally {
@@ -156,13 +156,13 @@ describe("async engine structured concurrency", () => {
       // The pass suspends on the timer only; the chained locals both completed.
       expect(status.kind).toBe("suspended");
       if (status.kind !== "suspended") return;
-      expect(status.awaited).toEqual(["sc-local.0"]);
+      expect(status.awaited).toEqual(["sc-local:0"]);
 
       // The chained run finished INSIDE the pass: its return event is in the
       // trace (not emitted after getTrace) and its durable promise is settled
       // before executeUntilBlocked returned (no settle racing task.suspend).
-      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-local.2");
-      const rec = await getPromise(network, "sc-local.2");
+      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-local:2");
+      const rec = await getPromise(network, "sc-local:2");
       expect(rec?.state).toBe("resolved");
       expect(rec?.value?.data).toBe("b:a");
     } finally {
@@ -189,7 +189,7 @@ describe("async engine structured concurrency", () => {
       // todo was lost (self-healing on resume, but a missed callback).
       expect(status.kind).toBe("suspended");
       if (status.kind !== "suspended") return;
-      expect([...status.awaited].sort()).toEqual(["sc-remote.0", "sc-remote.2"]);
+      expect([...status.awaited].sort()).toEqual(["sc-remote:0", "sc-remote:2"]);
     } finally {
       await network.stop();
     }
@@ -216,9 +216,9 @@ describe("async engine structured concurrency", () => {
 
       expect(status.kind).toBe("suspended");
       if (status.kind !== "suspended") return;
-      expect(status.awaited).toEqual(["sc-hops.0"]);
-      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-hops.2");
-      expect((await getPromise(network, "sc-hops.2"))?.state).toBe("resolved");
+      expect(status.awaited).toEqual(["sc-hops:0"]);
+      expect(returnsOf(status.trace).map((e) => e.id)).toContain("sc-hops:2");
+      expect((await getPromise(network, "sc-hops:2"))?.state).toBe("resolved");
     } finally {
       await network.stop();
     }
@@ -247,7 +247,7 @@ describe("async engine structured concurrency", () => {
       await delay(120);
       expect(String(leaked)).toContain("after the pass ended");
       // The panicked op never reached the server: no child promise was created.
-      expect(await getPromise(network, "sc-zombie.1")).toBeUndefined();
+      expect(await getPromise(network, "sc-zombie:1")).toBeUndefined();
     } finally {
       await network.stop();
     }
@@ -276,7 +276,7 @@ describe("async engine structured concurrency", () => {
 
       await delay(120);
       expect(String(leaked)).toContain("after the pass ended");
-      expect(await getPromise(network, "sc-done.0")).toBeUndefined();
+      expect(await getPromise(network, "sc-done:0")).toBeUndefined();
     } finally {
       await network.stop();
     }

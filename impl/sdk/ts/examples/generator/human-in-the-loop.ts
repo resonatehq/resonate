@@ -71,7 +71,7 @@ async function cancelOrder(_ctx: Context, orderId: string, note: string): Promis
 
 function* fulfillOrder(ctx: Context, orderId: string, amount: number): Generator<any, string, any> {
   // Open the human-decision promise first so its id is deterministic
-  // (`{workflowId}.0`). The Future's `.id` is the address to resolve.
+  // (`{workflowId}:0`). The Future's `.id` is the address to resolve.
   const approval = yield* ctx.promise<Decision>();
   const approvalId = approval.id;
 

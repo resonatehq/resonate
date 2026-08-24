@@ -42,7 +42,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -50,7 +50,7 @@ describe("Decorator", () => {
 
     expect(r).toMatchObject({
       type: "internal.async.l",
-      id: "foo.0",
+      id: "foo:0",
     });
   });
 
@@ -90,7 +90,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -165,7 +165,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -177,14 +177,14 @@ describe("Decorator", () => {
       type: "internal.promise",
       state: "pending",
       mode: "attached",
-      id: "foo.0",
+      id: "foo:0",
     }); // pending promise → generator gets Future(pending), advances to second LFI
     expect(r).toMatchObject({ type: "internal.async.l" });
 
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.1",
+      id: "foo:1",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 10 },
@@ -220,7 +220,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -231,7 +231,7 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.0",
+      id: "foo:0",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 10 },
@@ -243,14 +243,14 @@ describe("Decorator", () => {
       type: "internal.promise",
       state: "pending",
       mode: "attached",
-      id: "foo.1",
+      id: "foo:1",
     }); // B -> pending promise → generator gets Future(pending), advances to C -> LFI
     expect(r).toMatchObject({ type: "internal.async.l" });
 
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.2",
+      id: "foo:2",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 30 },
@@ -287,7 +287,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -298,7 +298,7 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.0",
+      id: "foo:0",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 10 },
@@ -309,7 +309,7 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.1",
+      id: "foo:1",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 20 },
@@ -320,7 +320,7 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.promise",
       state: "completed",
-      id: "foo.2",
+      id: "foo:2",
       value: {
         type: "internal.literal",
         value: { kind: "value", value: 30 },
@@ -356,7 +356,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -390,7 +390,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -427,7 +427,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -493,7 +493,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -507,10 +507,10 @@ describe("Decorator", () => {
       type: "internal.promise",
       state: "pending",
       mode: "attached",
-      id: "foo.0",
+      id: "foo:0",
     });
     // Generator advances to yield* f (Future iterator: yield this)
-    expect(r).toMatchObject({ type: "internal.await", promise: { state: "pending", id: "foo.0" } });
+    expect(r).toMatchObject({ type: "internal.await", promise: { state: "pending", id: "foo:0" } });
 
     // Coroutine resolves inline and feeds a literal back
     r = d.next({
@@ -551,7 +551,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
-          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}`, idPrefix: "" }),
+          optsBuilder: new OptionsBuilder({ match: (target: string) => `local://any@${target}` }),
         }),
       ),
     );
@@ -565,7 +565,7 @@ describe("Decorator", () => {
       type: "internal.promise",
       state: "pending",
       mode: "attached",
-      id: "foo.0",
+      id: "foo:0",
     });
     expect(r).toMatchObject({ type: "internal.await", promise: { state: "pending" } });
 

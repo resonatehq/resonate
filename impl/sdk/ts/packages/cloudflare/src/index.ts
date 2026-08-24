@@ -28,7 +28,6 @@ function isUrl(str: string): boolean {
 export class Resonate {
   private registry: Registry;
   private codec: Codec;
-  private idPrefix: string;
   private logger: Logger;
   private pid: string | undefined;
   private dependencies: Map<string, any>;
@@ -55,7 +54,6 @@ export class Resonate {
    * @param options.logLevel - Log level for the default ConsoleLogger. Defaults to `"warn"`. Takes precedence over `verbose`.
    * @param options.logger - Custom logger implementation. Defaults to {@link ConsoleLogger}.
    * @param options.encryptor - Payload encryptor. Defaults to {@link NoopEncryptor}.
-   * @param options.prefix - ID prefix applied to generated IDs.
    */
   constructor({
     pid = undefined,
@@ -66,7 +64,6 @@ export class Resonate {
     logLevel = undefined,
     logger = undefined,
     encryptor = undefined,
-    prefix = undefined,
   }: {
     pid?: string;
     ttl?: number;
@@ -76,10 +73,8 @@ export class Resonate {
     logLevel?: LogLevel;
     logger?: Logger;
     encryptor?: Encryptor;
-    prefix?: string;
   } = {}) {
     this.codec = new Codec(encryptor ?? new NoopEncryptor());
-    this.idPrefix = prefix ? `${prefix}:` : "";
     const resolvedLogLevel: LogLevel = logLevel ?? (verbose ? "debug" : "warn");
     this.logger = logger ?? new ConsoleLogger(resolvedLogLevel);
     this.pid = pid;
@@ -188,7 +183,6 @@ export class Resonate {
                 if (isUrl(target)) return target;
                 return functionUrl;
               },
-              idPrefix: this.idPrefix,
             }),
             logger: this.logger,
           });

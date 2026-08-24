@@ -12,7 +12,7 @@
 // flight. Before foo's promise resolves, the runtime joins both children.
 //
 // We prove it durably. `ctx.beginRun` children get deterministic ids
-// `{foo_id}.0` and `{foo_id}.1`. After foo returns 5 we attach to those two
+// `{foo_id}:0` and `{foo_id}:1`. After foo returns 5 we attach to those two
 // promises by id and assert each resolved -- evidence the never-awaited work
 // was awaited *by the runtime* on our behalf.
 //
@@ -48,12 +48,14 @@ try {
   console.log(`[foo] OK: returned ${out} (never awaited its two children)`);
 
   // The runtime awaited the two never-awaited children before resolving foo.
-  // Child ids are assigned in call order as `{parent}.{seq}` (seq from 0).
+  // Child ids are assigned in call order below the workflow's origin -- a bare
+  // root joins its first lineage segment with ':' (deeper ones with '.'), so
+  // foo's children are `{foo_id}:{seq}` (seq from 0).
   for (const [seq, n] of [
     [0, 1],
     [1, 2],
   ]) {
-    const childId = `${fooId}.${seq}`;
+    const childId = `${fooId}:${seq}`;
     const child = await resonate.get(childId);
     const childOut = await child.result();
     if (childOut !== n * 10) throw new Error(`child ${childId} resolved ${childOut}, expected ${n * 10}`);

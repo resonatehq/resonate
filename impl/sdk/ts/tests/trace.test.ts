@@ -37,7 +37,7 @@ class TestHeartbeat implements Heartbeat {
 
 async function buildComputation(
   registry: Registry,
-  id = "foo.1",
+  id = "foo:1",
 ): Promise<{
   computation: Computation;
   network: Network;
@@ -84,7 +84,7 @@ async function buildComputation(
     registry,
     new TestHeartbeat(),
     new Map(),
-    new OptionsBuilder({ match: (target: string) => target, idPrefix: "test-" }),
+    new OptionsBuilder({ match: (target: string) => target }),
     logger,
   );
 
@@ -167,7 +167,7 @@ describe("Trace", () => {
       registry.add(add, "add");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "main", []);
+      const rootPromise = createRootPromise("foo:1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("done");
@@ -176,22 +176,22 @@ describe("Trace", () => {
       const trace = res.trace;
 
       // Root spawn is first
-      expect(trace[0]).toEqual({ kind: "spawn", id: "foo.1" });
+      expect(trace[0]).toEqual({ kind: "spawn", id: "foo:1" });
 
       // Should have run event from parent to child
       const runEvt = trace.find((e) => e.kind === "run");
       expect(runEvt).toBeDefined();
       expect(runEvt!.kind).toBe("run");
       if (runEvt!.kind === "run") {
-        expect(runEvt!.id).toBe("foo.1");
+        expect(runEvt!.id).toBe("foo:1");
       }
 
       // Should have spawn for child
-      const childSpawns = trace.filter((e) => e.kind === "spawn" && e.id !== "foo.1");
+      const childSpawns = trace.filter((e) => e.kind === "spawn" && e.id !== "foo:1");
       expect(childSpawns.length).toBe(1);
 
       // Should have return for child
-      const childReturns = trace.filter((e) => e.kind === "return" && e.id !== "foo.1");
+      const childReturns = trace.filter((e) => e.kind === "return" && e.id !== "foo:1");
       expect(childReturns.length).toBe(1);
       if (childReturns[0].kind === "return") {
         expect(childReturns[0].state).toBe("resolved");
@@ -207,7 +207,7 @@ describe("Trace", () => {
       // Root return is last
       const lastEvt = trace[trace.length - 1];
       expect(lastEvt.kind).toBe("return");
-      expect(lastEvt.id).toBe("foo.1");
+      expect(lastEvt.id).toBe("foo:1");
       if (lastEvt.kind === "return") {
         expect(lastEvt.state).toBe("resolved");
         expect(lastEvt.value).toBe(7);
@@ -227,18 +227,18 @@ describe("Trace", () => {
       registry.add(main, "main");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "main", []);
+      const rootPromise = createRootPromise("foo:1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("suspended");
       const trace = res.trace;
 
-      expect(trace[0]).toEqual({ kind: "spawn", id: "foo.1" });
+      expect(trace[0]).toEqual({ kind: "spawn", id: "foo:1" });
 
       // rpc event
       const rpcEvt = trace.find((e) => e.kind === "rpc");
       expect(rpcEvt).toBeDefined();
-      expect(rpcEvt!.id).toBe("foo.1");
+      expect(rpcEvt!.id).toBe("foo:1");
 
       // block event for the callee
       const blockEvt = trace.find((e) => e.kind === "block");
@@ -251,7 +251,7 @@ describe("Trace", () => {
       // suspend event (terminal)
       const suspendEvt = trace.find((e) => e.kind === "suspend");
       expect(suspendEvt).toBeDefined();
-      expect(suspendEvt!.id).toBe("foo.1");
+      expect(suspendEvt!.id).toBe("foo:1");
 
       expect(isWellFormed(trace)).toBe(true);
     });
@@ -269,7 +269,7 @@ describe("Trace", () => {
       registry.add(main, "main");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "main", []);
+      const rootPromise = createRootPromise("foo:1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("suspended");
@@ -309,7 +309,7 @@ describe("Trace", () => {
       registry.add(compute, "compute");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "main", []);
+      const rootPromise = createRootPromise("foo:1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("suspended");
@@ -324,10 +324,10 @@ describe("Trace", () => {
       expect(rpcEvt).toBeDefined();
 
       // local child should spawn + return
-      const childSpawns = trace.filter((e) => e.kind === "spawn" && e.id !== "foo.1");
+      const childSpawns = trace.filter((e) => e.kind === "spawn" && e.id !== "foo:1");
       expect(childSpawns.length).toBe(1);
 
-      const childReturns = trace.filter((e) => e.kind === "return" && e.id !== "foo.1");
+      const childReturns = trace.filter((e) => e.kind === "return" && e.id !== "foo:1");
       expect(childReturns.length).toBe(1);
 
       // block for remote child
@@ -337,7 +337,7 @@ describe("Trace", () => {
       // parent suspends
       const suspendEvt = trace.find((e) => e.kind === "suspend");
       expect(suspendEvt).toBeDefined();
-      expect(suspendEvt!.id).toBe("foo.1");
+      expect(suspendEvt!.id).toBe("foo:1");
 
       expect(isWellFormed(trace)).toBe(true);
     });
@@ -353,7 +353,7 @@ describe("Trace", () => {
       registry.add(factorial, "factorial");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "factorial", [3]);
+      const rootPromise = createRootPromise("foo:1", "factorial", [3]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("done");
@@ -387,15 +387,15 @@ describe("Trace", () => {
       registry.add(add, "add");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "add", [3, 4]);
+      const rootPromise = createRootPromise("foo:1", "add", [3, 4]);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("done");
       const trace = res.trace;
 
       expect(trace.length).toBe(2);
-      expect(trace[0]).toEqual({ kind: "spawn", id: "foo.1" });
-      expect(trace[1]).toEqual({ kind: "return", id: "foo.1", state: "resolved", value: 7 });
+      expect(trace[0]).toEqual({ kind: "spawn", id: "foo:1" });
+      expect(trace[1]).toEqual({ kind: "return", id: "foo:1", state: "resolved", value: 7 });
       expect(isWellFormed(trace)).toBe(true);
     });
 
@@ -409,7 +409,7 @@ describe("Trace", () => {
 
       const { computation } = await buildComputation(registry);
       const rootPromise: PromiseRecord = {
-        id: "foo.1",
+        id: "foo:1",
         state: "resolved",
         param: { headers: {}, data: { func: "main", args: [], version: 1 } as any },
         tags: { "resonate:target": "default" },
@@ -426,7 +426,7 @@ describe("Trace", () => {
       expect(trace.length).toBe(1);
       expect(trace[0].kind).toBe("dedup");
       if (trace[0].kind === "dedup") {
-        expect(trace[0].id).toBe("foo.1");
+        expect(trace[0].id).toBe("foo:1");
         expect(trace[0].state).toBe("resolved");
       }
       // A dedup-only root trace doesn't start with spawn — that's correct per spec.
@@ -452,9 +452,9 @@ describe("Trace", () => {
       const { computation, effects } = await buildComputation(registry);
 
       // Pre-settle the child promise
-      await presettle(effects, "foo.1.0", 42);
+      await presettle(effects, "foo:1.0", 42);
 
-      const rootPromise = createRootPromise("foo.1", "main", []);
+      const rootPromise = createRootPromise("foo:1", "main", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("done");
@@ -490,7 +490,7 @@ describe("Trace", () => {
       registry.add(taskB, "taskB");
 
       const { computation } = await buildComputation(registry);
-      const rootPromise = createRootPromise("foo.1", "scatter", []);
+      const rootPromise = createRootPromise("foo:1", "scatter", []);
       const res = await computation.executeUntilBlocked(rootPromise);
 
       expect(res.kind).toBe("done");

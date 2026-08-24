@@ -13,7 +13,7 @@ function makeCtx({
   timeout = Number.MAX_SAFE_INTEGER,
 } = {}) {
   const registry = new Registry();
-  const optsBuilder = new OptionsBuilder({ match: (t) => t, idPrefix: "" });
+  const optsBuilder = new OptionsBuilder({ match: (t) => t });
   return new InnerContext({
     id: "test",
     func: "testFunc",
@@ -180,40 +180,40 @@ describe("base64 encoder", () => {
 });
 
 describe("detachedId", () => {
-  test("returns prefix dot-d plus cyrb53 hex of seqid", () => {
-    const result = detachedId("root", "root.0");
-    expect(result).toBe(detachedId("root", "root.0"));
-    expect(result.startsWith("root.d")).toBe(true);
+  test("returns origin colon-d plus cyrb53 hex of seqid", () => {
+    const result = detachedId("root", "root:0");
+    expect(result).toBe(detachedId("root", "root:0"));
+    expect(result.startsWith("root:d")).toBe(true);
   });
 
-  test("segment after the prefix is a `d` marker followed by hex", () => {
-    const result = detachedId("origin", "origin.3");
-    const segment = result.split(".").slice(1).join(".");
+  test("segment after the origin is a `d` marker followed by hex", () => {
+    const result = detachedId("origin", "origin:3");
+    const segment = result.split(":").slice(1).join(":");
     expect(segment[0]).toBe("d");
     expect(segment.slice(1)).toMatch(/^[0-9a-f]+$/);
   });
 
   test("is deterministic — same inputs produce same output", () => {
-    expect(detachedId("a", "a.0")).toBe(detachedId("a", "a.0"));
+    expect(detachedId("a", "a:0")).toBe(detachedId("a", "a:0"));
   });
 
   test("different seqids produce different ids", () => {
-    expect(detachedId("root", "root.0")).not.toBe(detachedId("root", "root.1"));
+    expect(detachedId("root", "root:0")).not.toBe(detachedId("root", "root:1"));
   });
 
-  test("different prefixes produce different ids", () => {
-    expect(detachedId("root.0", "root.0.0")).not.toBe(detachedId("root.1", "root.0.0"));
+  test("different origins produce different ids", () => {
+    expect(detachedId("root0", "root:0.0")).not.toBe(detachedId("root1", "root:0.0"));
   });
 
-  test("prefix is preserved before the `.d` segment", () => {
-    const prefix = "my-workflow-abc123";
-    const result = detachedId(prefix, "my-workflow-abc123.5");
-    expect(result.startsWith(`${prefix}.d`)).toBe(true);
+  test("origin is preserved before the `:d` segment", () => {
+    const origin = "my-workflow-abc123";
+    const result = detachedId(origin, "my-workflow-abc123:5");
+    expect(result.startsWith(`${origin}:d`)).toBe(true);
   });
 
   test("works with empty strings", () => {
     const result = detachedId("", "");
-    expect(result.startsWith(".d")).toBe(true);
+    expect(result.startsWith(":d")).toBe(true);
   });
 });
 
