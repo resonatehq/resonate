@@ -192,7 +192,9 @@ pub struct ExecuteMsgData {
     pub task: ExecuteMsgTask,
 }
 
-#[derive(Debug, Serialize)]
+/// `Clone` so a worker can carry the task into the run it spawns, rather than
+/// splitting it into loose id and version fields.
+#[derive(Debug, Clone, Serialize)]
 pub struct ExecuteMsgTask {
     pub id: String,
     pub version: i64,

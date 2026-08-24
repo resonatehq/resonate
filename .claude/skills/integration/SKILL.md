@@ -81,13 +81,15 @@ pub struct Unavailable { pub message: String }
 One trait, one method. Everything else is a free choice.
 
 ```rust
-pub struct MyWorker {
-    /// The inbound port. In process, so it holds the port directly rather than
-    /// dialling it — and it is how the worker claims the task, heartbeats it,
-    /// and settles its promise. `Server` never holds the router, so this is a DAG.
-    server: Arc<dyn ResonateServer>,
-    shared: Arc<Shared>,          // client, config; immutable after construction
-}
+/// Everything the worker holds, behind one `Arc`. `server` is the inbound port:
+/// how a run claims its task, heartbeats it, and settles its promise. `Server`
+/// never holds the router, so this stays a DAG.
+struct My { server: Arc<dyn ResonateServer>, client: reqwest::Client, /* config */ }
+
+pub struct MyWorker { inner: Arc<My> }
+
+/// One delivery in flight: the worker, the address, the task. Nothing else.
+struct RunContext { worker: Arc<My>, address: String, task: ExecuteMsgTask }
 
 #[async_trait]
 impl ResonateWorker for MyWorker {
@@ -102,11 +104,9 @@ impl ResonateWorker for MyWorker {
         // awaits `send` sequentially over the batch. Validation waits too:
         // until the task is claimed its failures are unreportable.
         let ctx = RunContext {
-            server: Arc::clone(&self.server),
-            shared: Arc::clone(&self.shared),
+            worker: Arc::clone(&self.inner),
             address: address.to_string(),          // unparsed
-            task_id: task.id.clone(),
-            task_version: task.version,
+            task: task.clone(),
         };
         tokio::spawn(async move { ctx.run().await });
         Ok(())                                     // accepted for delivery, not executed

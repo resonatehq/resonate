@@ -8,24 +8,33 @@ Use `src/transport/transport_airflow.rs` and its config/registration as the temp
 ## 1. The worker — `src/transport/transport_<name>.rs`
 
 ```rust
-/// Everything a run needs that is the same for every message. Behind an `Arc`
-/// so a delivery costs two pointer clones rather than a copy of the config.
-struct Shared {
+/// Everything the worker holds. Shared by every run behind one `Arc`, so a
+/// delivery costs a pointer clone rather than a copy of the config.
+struct My {
+    /// The inbound port: how a run claims its task, heartbeats it, and settles
+    /// its promise.
+    server: Arc<dyn ResonateServer>,
     client: reqwest::Client,
     deployments: HashMap<String, MyDeployment>,
     lease_timeout: i64,
 }
 
 pub struct MyWorker {
-    /// The inbound port. This worker runs in the server's process, so it holds
-    /// the port rather than dialling it — and it is how the worker claims the
-    /// task, heartbeats it, and settles its promise.
-    server: Arc<dyn ResonateServer>,
-    /// Immutable after construction: `send` takes `&self`, and one instance
-    /// serves every address of its scheme concurrently.
-    shared: Arc<Shared>,
+    inner: Arc<My>,
+}
+
+/// One delivery in flight. Three things and nothing else: the worker it belongs
+/// to, the address it was routed to, and the task it was told about.
+struct RunContext {
+    worker: Arc<My>,
+    /// Unparsed — validation happens after the claim.
+    address: String,
+    task: ExecuteMsgTask,       // { id, version }
 }
 ```
+
+Resist splitting `task` into loose `task_id` and `task_version` fields. It is one thing —
+the payload of the `Execute` message — and `ExecuteMsgTask` is the type that says so.
 
 `send` itself does almost nothing. Its whole job is to decide whether this message is
 yours and then get off the dispatch thread.
@@ -53,11 +62,9 @@ impl ResonateWorker for MyWorker {
         // only be reported as `Err(Unavailable)`, which the dispatch loop logs
         // and drops. Do it after the claim, where it can settle the promise.
         let ctx = RunContext {
-            server: Arc::clone(&self.server),
-            shared: Arc::clone(&self.shared),
+            worker: Arc::clone(&self.inner),
             address: address.to_string(),   // unparsed; owned, the task is `'static`
-            task_id: task.id.clone(),
-            task_version: task.version,
+            task: task.clone(),
         };
         tokio::spawn(async move { ctx.run().await });
 
@@ -78,8 +85,7 @@ impl RunContext {
         // Nothing may happen on behalf of a task this worker does not own — and
         // nothing can be *reported* until it does. The claim is the gate that
         // turns "log it and hope" into "settle the promise".
-        let pid = format!("my-{}", fastrand::u64(..));
-        let acquired = match self.acquire(&pid).await {
+        let acquired = match self.acquire().await {
             Some(a) => a,
             None => return,     // 409: another attempt owns it. Do nothing at all.
         };
@@ -93,7 +99,7 @@ impl RunContext {
         };
 
         // ── 3. Monitor, on two independent clocks ────────────────────────────
-        let heartbeat = self.spawn_heartbeat(pid.clone(), version);   // lease clock
+        let heartbeat = self.spawn_heartbeat(version);                // lease clock
         let outcome = self.create_and_monitor(&target, &promise).await;  // downstream clock
         heartbeat.abort();
 
@@ -107,23 +113,25 @@ impl RunContext {
         }
     }
 
-    /// The claim, and every other state change, goes through the inbound port.
-    async fn acquire(&self, pid: &str) -> Option<TaskAcquireResponseData> {
-        let resp = self.server.process(&RequestEnvelope {
+    /// The claim. Constructed by hand so it is obvious what crosses the port:
+    /// an ordinary protocol request, the same one a remote worker would put on
+    /// the wire, handed straight to `process` instead of to a socket.
+    async fn acquire(&self) -> Option<TaskAcquireResponseData> {
+        let resp = self.worker.server.process(&RequestEnvelope {
             kind: "task.acquire".to_string(),
             head: RequestHead {
                 corr_id: format!("my-{}", fastrand::u64(..)),
                 version: PROTOCOL_VERSION.to_string(),
-                auth: None,
+                auth: None,          // in process: there is no caller to authenticate
                 debug_time: None,
             },
             data: json!({
-                "id": self.task_id,
-                "version": self.task_version,      // the fencing token from `execute`
-                "pid": pid,
-                "ttl": self.shared.lease_timeout,
+                "id": self.task.id,
+                "version": self.task.version,   // the fencing token from `execute`
+                "pid": PID,
+                "ttl": self.worker.lease_timeout,
             }),
-        }).await.ok()?;
+        }).await.ok()?;                          // Err = Unavailable; redelivery retries
 
         match resp.head.status {
             200 => serde_json::from_value(resp.data).ok(),
@@ -132,6 +140,20 @@ impl RunContext {
         }
     }
 }
+```
+
+`PID` is a constant:
+
+```rust
+/// The `pid` this worker claims tasks under.
+///
+/// A constant, and it can be: `pid` only has to match between the `task.acquire`
+/// that claims a task and the `task.heartbeat` that refreshes it. The storage
+/// guard is `id = ? AND process_id = ?` plus an exists-check on the task's
+/// *version* — and the version is the real fence, so two runs sharing a pid
+/// cannot touch each other's leases, and a stale attempt heartbeating an old
+/// version is a no-op.
+const PID: &str = "self";
 ```
 
 Only `resolve_target` and `create_and_monitor` differ between integrations. Everything
