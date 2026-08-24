@@ -168,26 +168,6 @@ func TestPromisesGetMissingReturns404(t *testing.T) {
 	}
 }
 
-func TestPromisesPrefixApplied(t *testing.T) {
-	r := newLocal(t, localConfig{Prefix: "pre"})
-	ctx, cancel := testCtx(t)
-	defer cancel()
-
-	rec, err := r.Promises().Create(ctx, "x", time.Hour)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if rec.ID != "pre:x" {
-		t.Errorf("ID = %q, want pre:x", rec.ID)
-	}
-	if _, err := r.Sender().PromiseGet(ctx, "pre:x"); err != nil {
-		t.Errorf("raw PromiseGet(pre:x): %v", err)
-	}
-	if _, err := r.Promises().Get(ctx, "x"); err != nil {
-		t.Errorf("Promises().Get(x): %v", err)
-	}
-}
-
 func TestPromisesIdempotentRecreate(t *testing.T) {
 	r := newLocal(t, localConfig{})
 	ctx, cancel := testCtx(t)

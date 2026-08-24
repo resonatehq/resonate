@@ -30,14 +30,14 @@ type PromiseCreateOptions struct {
 	Tags map[string]string
 }
 
-// Get fetches a promise by ID (with the configured prefix applied). Returns
-// *ServerError with Code 404 when the promise does not exist.
+// Get fetches a promise by ID. Returns *ServerError with Code 404 when the
+// promise does not exist.
 //
 // For rejected promises, the decoded rec.Value.Data holds the standard error
 // payload; DeserializeError(rec.Value.Data) converts it to an
 // *ApplicationError.
 func (p *Promises) Get(ctx stdctx.Context, id string) (PromiseRecord, error) {
-	rec, err := p.r.sender.PromiseGet(ctx, p.r.prefixID(id))
+	rec, err := p.r.sender.PromiseGet(ctx, id)
 	if err != nil {
 		return PromiseRecord{}, err
 	}
@@ -61,9 +61,8 @@ func (p *Promises) Create(ctx stdctx.Context, id string, timeout time.Duration, 
 	if tags == nil {
 		tags = map[string]string{}
 	}
-	prefixedID := p.r.prefixID(id)
-	rec, err := p.r.sender.PromiseCreate(ctx, prefixedID, PromiseCreateReq{
-		ID:        prefixedID,
+	rec, err := p.r.sender.PromiseCreate(ctx, id, PromiseCreateReq{
+		ID:        id,
 		TimeoutAt: nowMs() + timeout.Milliseconds(),
 		Param:     param,
 		Tags:      tags,
@@ -107,7 +106,7 @@ func (p *Promises) settle(ctx stdctx.Context, id string, state SettleState, valu
 		return PromiseRecord{}, err
 	}
 	rec, err := p.r.sender.PromiseSettle(ctx, PromiseSettleReq{
-		ID:    p.r.prefixID(id),
+		ID:    id,
 		State: state,
 		Value: v,
 	})

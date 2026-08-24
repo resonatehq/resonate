@@ -423,9 +423,15 @@ func (s *serverState) promiseCreate(now int64, corrID any, req map[string]any) (
 	}
 	rec := p.toRecord()
 	s.promises[id] = p
-	s.setPTimeout(id, timeoutAt)
 
 	if addr, ok := tags["resonate:target"]; ok {
+		// Only a promise carrying an address is expired by the tick loop. A
+		// target-less promise (a bare ctx.Promise) is never timed out by the
+		// scheduler, so a durable timer has to carry a target to fire at all —
+		// see Context.Sleep. Scheduling one here regardless would make this
+		// simulation *more* permissive than the server, which is invisible to
+		// every test that only asserts success.
+		s.setPTimeout(id, timeoutAt)
 		var delay int64
 		hasDelay := false
 		if d, ok := tags["resonate:delay"]; ok {
@@ -639,7 +645,12 @@ func (s *serverState) taskCreate(now int64, corrID any, req map[string]any) (map
 	}
 	pr := p.toRecord()
 	s.promises[promiseID] = p
-	s.setPTimeout(promiseID, timeoutAt)
+	// Same scheduler invariant as promiseCreate: only a promise carrying a
+	// target is expired by the tick loop. A task.create root always carries
+	// one in practice, but the guard keeps the invariant explicit.
+	if _, ok := tags["resonate:target"]; ok {
+		s.setPTimeout(promiseID, timeoutAt)
+	}
 
 	pidCopy := pid
 	ttlCopy := ttl

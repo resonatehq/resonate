@@ -120,6 +120,24 @@ func (c *Core) OnMessage(ctx stdctx.Context, taskID string, version int64, origi
 func (c *Core) ExecuteUntilBlocked(ctx stdctx.Context, taskID string, taskVersion int64,
 	promise PromiseRecord, preload []PromiseRecord, retryPolicy RetryPolicy) (status Status, retErr error) {
 
+	// A still-pending resonate:timer promise is a durable sleep that has not
+	// come due (see Context.Sleep). It names no function to run; it only
+	// carries a task at all because the target that gets the server to
+	// *schedule* its deadline also spawns one. Drop it and let the deadline
+	// settle the promise, which is what wakes the sleepers.
+	//
+	// Dropping means exactly that: no fulfill (that would end the sleep
+	// early), no suspend (a task cannot await its own promise), and no
+	// release (the server re-dispatches a released task immediately, which
+	// would spin). The lease simply lapses; a re-delivery before the wake is
+	// dropped again, and one after it finds the promise settled and fulfills
+	// the task below.
+	if promise.Tags["resonate:timer"] == "true" && promise.State == PromiseStatePending {
+		c.log.Debug("core: dropping not-yet-due timer task",
+			"task_id", taskID, "timeout_at", promise.TimeoutAt)
+		return StatusSuspended, nil
+	}
+
 	c.heartbeat.Start(taskID, taskVersion)
 	defer c.heartbeat.Stop(taskID)
 
@@ -199,6 +217,25 @@ const (
 // release) — the caller owns that. It does encode return values through
 // the codec so the caller has a single, uniform "fulfill" path.
 func (c *Core) executeUntilBlockedInner(ctx stdctx.Context, promise PromiseRecord, origin string, effects *Effects, retryPolicy RetryPolicy) (execOutcome, error) {
+	// 0. A settled resonate:timer promise — a durable sleep whose wake has
+	//    passed. It names no function and carries no TaskData, so it cannot go
+	//    through the decode below; report its settlement so the caller fulfills
+	//    the task. (The not-yet-due case never reaches here: the caller drops
+	//    it. The server normally fulfills a timer's task itself when the
+	//    deadline settles the promise, so this only catches a delivery already
+	//    in flight at that moment.)
+	if promise.Tags["resonate:timer"] == "true" && promise.State != PromiseStatePending {
+		settleState, ok := settleStateFromPromiseState(promise.State)
+		if !ok {
+			return execOutcome{}, &DecodingError{Msg: fmt.Sprintf("unexpected promise state %q", promise.State)}
+		}
+		encoded, err := c.codec.Encode(promise.Value.DataOrNull())
+		if err != nil {
+			return execOutcome{}, err
+		}
+		return execOutcome{kind: execFulfill, settleState: settleState, value: encoded}, nil
+	}
+
 	// 1. Decode TaskData from the (already-decoded) promise param.
 	var taskData TaskData
 	if err := json.Unmarshal(promise.Param.DataOrNull(), &taskData); err != nil {
@@ -320,13 +357,15 @@ func (c *Core) releaseTask(ctx stdctx.Context, taskID string, taskVersion int64)
 
 // originFromPromise returns the lineage origin for a run: the acquired
 // promise's resonate:origin tag when set (a promise spawned by another workflow
-// carries its lineage's origin there), or the promise's own ID for a genuine
-// root that has no origin tag.
+// carries its lineage's origin there). A tag-less promise (one created directly
+// through the promises client, say) falls back to deriving it from the id the
+// same way the server does — which for a genuine top-level root is the id
+// itself.
 func originFromPromise(p PromiseRecord) string {
 	if o, ok := p.Tags["resonate:origin"]; ok && o != "" {
 		return o
 	}
-	return p.ID
+	return OriginOf(p.ID)
 }
 
 // settleStateFromPromiseState maps a settled promise state to its settle action.

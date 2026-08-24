@@ -306,7 +306,7 @@ func TestCore_SuspendsOnPendingRemote(t *testing.T) {
 		t.Fatalf("status = %v, want StatusSuspended", status)
 	}
 
-	child := f.promiseGetRaw(t, "p1-wait.1")
+	child := f.promiseGetRaw(t, "p1-wait:1")
 	if child.State != resonate.PromiseStatePending {
 		t.Errorf("childA state = %v, want pending", child.State)
 	}
@@ -391,23 +391,23 @@ func TestCore_ExecuteUntilBlocked_WithPreload(t *testing.T) {
 	}
 
 	// Pre-resolve the child the workflow will read. ctx.RPC generates the
-	// child id "p1-pre.1". Children are codec-encoded on the wire just like
+	// child id "p1-pre:1". Children are codec-encoded on the wire just like
 	// root promises, so pre-settle with codec.Encode to match.
 	encVal, _ := f.codec.Encode(99)
 	if _, err := f.sender.PromiseCreate(f.ctx, "", resonate.PromiseCreateReq{
-		ID: "p1-pre.1", TimeoutAt: int64(1) << 50,
+		ID: "p1-pre:1", TimeoutAt: int64(1) << 50,
 	}); err != nil {
 		t.Fatalf("promise.create child: %v", err)
 	}
 	if _, err := f.sender.PromiseSettle(f.ctx, resonate.PromiseSettleReq{
-		ID: "p1-pre.1", State: resonate.SettleStateResolved, Value: encVal,
+		ID: "p1-pre:1", State: resonate.SettleStateResolved, Value: encVal,
 	}); err != nil {
 		t.Fatalf("promise.settle child: %v", err)
 	}
 
 	// Feed the preloaded child to Effects via the preload arg too, exercising
 	// the seed-at-construction path.
-	pre, _ := f.sender.PromiseGet(f.ctx, "p1-pre.1")
+	pre, _ := f.sender.PromiseGet(f.ctx, "p1-pre:1")
 	preload := []resonate.PromiseRecord{pre}
 
 	status, err := f.core.ExecuteUntilBlocked(f.ctx, "p1-pre", v, promise, preload, nil)
@@ -722,9 +722,9 @@ func TestCore_InnerPromiseInheritsOriginFromTag(t *testing.T) {
 		t.Fatalf("status = %v, want StatusSuspended", status)
 	}
 
-	// The inner RPC promise (child-of-other.1) must carry the lineage origin,
+	// The inner RPC promise (child-of-other:1) must carry the lineage origin,
 	// not "child-of-other".
-	inner := f.promiseGetRaw(t, "child-of-other.1")
+	inner := f.promiseGetRaw(t, "child-of-other:1")
 	if got := inner.Tags["resonate:origin"]; got != realRoot {
 		t.Errorf("inner resonate:origin = %q, want %q (lineage origin from the acquired promise's tag)", got, realRoot)
 	}
@@ -748,7 +748,7 @@ func TestCore_InnerPromiseFallsBackToPromiseIDWhenNoOriginTag(t *testing.T) {
 		t.Fatalf("status = %v, want StatusSuspended", status)
 	}
 
-	inner := f.promiseGetRaw(t, "genuine-root.1")
+	inner := f.promiseGetRaw(t, "genuine-root:1")
 	if got := inner.Tags["resonate:origin"]; got != "genuine-root" {
 		t.Errorf("inner resonate:origin = %q, want %q (fallback to promise ID)", got, "genuine-root")
 	}
