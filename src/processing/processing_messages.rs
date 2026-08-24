@@ -237,6 +237,62 @@ mod tests {
         .await;
     }
 
+    /// Is an undeliverable execute message *permanently* lost, or re-queued?
+    ///
+    /// `take_outgoing` deletes before delivery (at-most-once), so a failed
+    /// route loses that attempt. But a task left `pending` keeps its type-0
+    /// retry timeout, and `process_timeouts` re-inserts `outgoing_execute` when
+    /// it fires — so the message comes back.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn undeliverable_execute_message_is_requeued_not_lost() {
+        let server = make_server();
+        create_task_with_target(&server, "task-requeue", "http://stub-server/webhook").await;
+
+        // First pass with nothing registered: the message is dequeued and dropped.
+        process_batch(
+            &server.storage,
+            &empty_router(),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+
+        let stub = Arc::new(RecordingWorker::new());
+        process_batch(
+            &server.storage,
+            &router_with("http", stub.clone()),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+        assert_eq!(stub.calls().len(), 0, "that attempt really was consumed");
+
+        // Advance past the task retry timeout and let timeout processing run.
+        let retry_deadline = 1_000_000 + 60_000;
+        server
+            .storage
+            .transact(move |db| db.process_timeouts(retry_deadline))
+            .await
+            .unwrap();
+
+        // The message should be back.
+        process_batch(
+            &server.storage,
+            &router_with("http", stub.clone()),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+        let calls = stub.calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "a pending task re-queues its execute message on retry timeout — \
+             the message is lost for one attempt, not permanently"
+        );
+        assert_eq!(calls[0].0, "http://stub-server/webhook");
+    }
+
     // ---- execute-message tests ----
 
     #[tokio::test(flavor = "multi_thread")]

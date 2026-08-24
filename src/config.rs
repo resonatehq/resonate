@@ -645,13 +645,22 @@ impl Config {
         // `task.acquire` validates `ttl >= 1`, so a non-positive lease would
         // make every acquire fail with a 400 and the worker would silently
         // never run anything. Reject it here instead.
-
+        //
+        // Both the override and the value it falls back to: guarding only the
+        // override would leave `tasks.lease_timeout = 0` reaching `task.acquire`
+        // through `resolve_lease_timeout`, which is the same failure.
         if let Some(ttl) = self.transports.bash_exec.lease_timeout {
             if ttl < 1 {
                 return Err(format!(
                     "transports.bash_exec.lease_timeout must be at least 1 (got {ttl})"
                 ));
             }
+        }
+        if self.tasks.lease_timeout < 1 {
+            return Err(format!(
+                "tasks.lease_timeout must be at least 1 (got {})",
+                self.tasks.lease_timeout
+            ));
         }
 
         Ok(())
@@ -689,6 +698,18 @@ mod tests {
                 .resolve_lease_timeout(&config.tasks),
             600_000
         );
+    }
+
+    #[test]
+    fn non_positive_task_lease_timeout_is_rejected() {
+        // It is what bash_exec.lease_timeout falls back to, so it reaches
+        // `task.acquire` as the ttl and must clear the same bar.
+        for ttl in [0, -1] {
+            let mut config = Config::default();
+            config.tasks.lease_timeout = ttl;
+            let err = config.validate().expect_err("would 400 every acquire");
+            assert!(err.contains("tasks.lease_timeout"), "{err}");
+        }
     }
 
     #[test]

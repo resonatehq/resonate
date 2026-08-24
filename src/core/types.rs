@@ -888,6 +888,33 @@ mod tests {
     // `to_value(ExecuteMsg)` for execute. The enum is `untagged` precisely so
     // the bytes on the wire do not change; these pin that down.
 
+    /// The poll/SSE worker sends a serialized *string*, so key order is part of
+    /// its wire format — and `Value` comparison cannot see key order, which is
+    /// why the two tests below are not enough on their own.
+    #[test]
+    fn message_serializes_with_sorted_keys_like_the_value_hop() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        let via_value = serde_json::to_string(&serde_json::to_value(&msg).unwrap()).unwrap();
+        assert_eq!(
+            via_value,
+            r#"{"data":{"task":{"id":"t1","version":3}},"head":{"serverUrl":"http://localhost:8001"},"kind":"execute"}"#,
+            "SSE consumers have always received alphabetically ordered keys"
+        );
+        // Serializing the struct directly would emit declaration order instead.
+        assert_ne!(serde_json::to_string(&msg).unwrap(), via_value);
+    }
+
     #[test]
     fn execute_message_wire_format() {
         let msg = Message::Execute(ExecuteMsg {

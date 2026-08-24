@@ -212,7 +212,12 @@ impl PollRegistry {
 impl ResonateWorker for PollRegistry {
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = PollAddress::parse(address)?;
-        let body = serde_json::to_string(msg)
+        // Serialize via `Value` rather than straight from the struct. serde_json
+        // has no `preserve_order`, so a `Value` map is a BTreeMap and emits keys
+        // alphabetically — which is what SSE consumers have always received.
+        // Going direct would emit declaration order instead and change the bytes.
+        let body = serde_json::to_value(msg)
+            .and_then(|v| serde_json::to_string(&v))
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
         if PollRegistry::send_poll(self, &addr, &body).await {
             Ok(())
