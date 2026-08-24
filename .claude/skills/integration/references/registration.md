@@ -532,14 +532,22 @@ the README for whoever calls it. If they disagree, the code wins and the README 
 
 ## 6. Tests
 
-- **Unit** — address parsing (including every malformed shape), the idempotency key
-  (determinism, charset, collision after truncation), param decoding, downstream state
-  classification. All pure, all fast.
-- **End-to-end** — run the server against an API double for the downstream system, create a
-  promise targeted at the new scheme, and assert the promise value.
-- **The one that matters** — `SIGKILL` the server between downstream-create and settle,
-  restart against the same storage, and assert **exactly one** downstream run exists for
-  that promise and the promise still resolves.
+Four layers, in `references/testing.md`. The short version:
+
+- **Unit** — address parsing (including the shapes you deliberately reject), the idempotency
+  key (determinism, charset, collision after truncation), param decoding and validation,
+  downstream state mapping (an unknown state is *pending*), and the two clocks. All pure,
+  all fast.
+- **An API double**, in its own process, that reproduces the downstream system's
+  duplicate-create rejection and counts calls. A double that happily creates two runs under
+  one key makes every other test meaningless.
+- **End to end** — happy path, downstream failure, unknown resource, unknown deployment,
+  malformed param, malformed address. Assert the promise outcome *and* the downstream call
+  count.
+- **Crash and restart** — `SIGKILL` the server between the downstream create and the settle,
+  restart against the same storage, and assert exactly one downstream run for that promise.
+  Everything above passes on an integration whose idempotency is broken; this is the one
+  that does not.
 
 ## Checklist
 
@@ -548,7 +556,11 @@ the README for whoever calls it. If they disagree, the code wins and the README 
 - [ ] Config struct, field on `TransportsConfig`, `validate` rules
 - [ ] `workers.insert("<scheme>", …)` in `src/main.rs`, gated on `enabled`
 - [ ] Param validation at the top of `work`, rejecting on violation with the offending field
-- [ ] Unit tests for the pure helpers, including every malformed param and address
-- [ ] A crash-and-restart test proving one downstream run
+- [ ] Unit tests for the pure helpers, including every malformed param and address, and
+      the shapes you deliberately reject
+- [ ] An API double, in its own process, that rejects duplicate creates and counts calls
+- [ ] End-to-end tests asserting the promise outcome *and* the downstream call count
+- [ ] A crash-and-restart test proving one downstream run, with `conflicts > 0` asserted so
+      it cannot pass without exercising the recovery path
 - [ ] Address, param and value schemas in the module's doc comment
 - [ ] A README from `references/readme-template.md`

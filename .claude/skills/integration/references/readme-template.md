@@ -159,4 +159,7 @@ window belongs here as well as above.>
 The test that matters: `SIGKILL` the server between the downstream create and the settle,
 restart it against the same storage, and assert the downstream holds **exactly one** run
 for that promise and the promise still settles from it.
+
+<State whether that test exists and where. If it does not, say so — a reader is entitled to
+know that the integration's central claim is unverified.>
 ```

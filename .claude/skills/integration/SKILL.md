@@ -230,8 +230,11 @@ transient. `references/lifecycle.md` has the full table.
    idempotency key and what the downstream does with duplicates, the configuration, and an
    honest limitations section. Nobody should have to read the worker to learn how to call
    it.
-6. **Test the redelivery path.** `SIGKILL` the server between create and settle, restart it
-   against the same storage, and assert exactly one downstream run exists.
+6. **Test it** — `references/testing.md`. Unit tests for the pure decisions, an API double
+   in its own process that rejects duplicate creates, end-to-end tests that assert the
+   promise outcome *and* the downstream call count, and the one that matters: `SIGKILL` the
+   server between create and settle, restart against the same storage, and assert exactly
+   one downstream run exists for that promise.
 
 ## Reference material
 
@@ -243,4 +246,5 @@ transient. `references/lifecycle.md` has the full table.
 | `references/schemas.md` | Address, param and value schema rules |
 | `references/registration.md` | The five edits that plug a worker into the server |
 | `references/readme-template.md` | The README every integration ships, section by section |
+| `references/testing.md` | The four layers, and the ways these tests quietly lie |
 | `references/push-vs-poll.md` | Why push is out of scope and what to settle first |
