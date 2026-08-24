@@ -114,6 +114,32 @@ impl Core {
         promise: PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
+        // A still-pending `resonate:timer` promise is a durable sleep that has
+        // not come due (see `Context::sleep`). It names no function to run; it
+        // only carries a task at all because the target that gets the server
+        // to *schedule* its deadline also spawns one. Drop it and let the
+        // deadline settle the promise, which is what wakes the sleepers.
+        //
+        // Dropping means exactly that: no fulfill (that would end the sleep
+        // early), no suspend (a task cannot await its own promise), and no
+        // release (the server re-dispatches a released task immediately, which
+        // would spin). The lease simply lapses; a re-delivery before the wake
+        // is dropped again, and one after it finds the promise settled and
+        // fulfills the task below.
+        if promise
+            .tags
+            .get("resonate:timer")
+            .is_some_and(|v| v == "true")
+            && promise.state == PromiseState::Pending
+        {
+            tracing::debug!(
+                task_id = task_id,
+                timeout_at = promise.timeout_at,
+                "dropping not-yet-due timer task"
+            );
+            return Ok(Status::Suspended);
+        }
+
         // Start heartbeat before execution to keep the task lease alive
         self.heartbeat.start(task_id, task_version);
 
@@ -155,6 +181,37 @@ impl Core {
         promise: &PromiseRecord,
         preload: Option<Vec<PromiseRecord>>,
     ) -> Result<Status> {
+        // 0. A settled `resonate:timer` promise — a durable sleep whose wake
+        //    has passed. It names no function and carries no `TaskData`, so it
+        //    cannot go through the decode below; fulfill the task with the
+        //    promise's settlement instead. (The not-yet-due case never reaches
+        //    here: the caller drops it. The server normally fulfills a timer's
+        //    task itself when the deadline settles the promise, so this only
+        //    catches a delivery already in flight at that moment.)
+        if promise
+            .tags
+            .get("resonate:timer")
+            .is_some_and(|v| v == "true")
+            && promise.state != PromiseState::Pending
+        {
+            let state = match promise.state {
+                PromiseState::Pending => unreachable!(),
+                PromiseState::Resolved => SettleState::Resolved,
+                PromiseState::Rejected
+                | PromiseState::RejectedCanceled
+                | PromiseState::RejectedTimedout => SettleState::Rejected,
+            };
+            self.fulfill_task(
+                task_id,
+                task_version,
+                &promise.id,
+                state,
+                serde_json::Value::Null,
+            )
+            .await?;
+            return Ok(Status::Done);
+        }
+
         // 1. Extract function name and args from promise
         let task_data: TaskData = TaskData::deserialize(promise.param.data_as_ref())
             .map_err(|e| Error::DecodingError(format!("invalid task data: {}", e)))?;
@@ -202,6 +259,19 @@ impl Core {
 
         // 4. EXECUTE, on redirect, re-execute with new preloaded promises
         //    without re-acquiring the task.
+        //
+        // Take the lineage origin from the promise's `resonate:origin` tag,
+        // which the dispatcher set: every id in the lineage is
+        // `{origin}:{lineage}`, so this is both the ancestry root and the
+        // anchor this workflow's own child ids extend. A tag-less promise (one
+        // created directly through the promises client, say) falls back to
+        // deriving it from the id the same way the server does — which for a
+        // genuine top-level root is the id itself.
+        let origin_id = promise
+            .tags
+            .get("resonate:origin")
+            .cloned()
+            .unwrap_or_else(|| crate::ids::origin_of(&promise.id).to_string());
         let mut current_preload = preload;
         loop {
             let info;
@@ -211,7 +281,7 @@ impl Core {
                     info = crate::info::Info::new(
                         promise.id.clone(),
                         String::new(),
-                        promise.id.clone(),
+                        origin_id.clone(),
                         promise.id.clone(),
                         promise.timeout_at,
                         task_data.func.clone(),
@@ -230,6 +300,7 @@ impl Core {
                     );
                     ctx = Context::root(
                         promise.id.clone(),
+                        origin_id.clone(),
                         promise.timeout_at,
                         task_data.func.clone(),
                         effects,
@@ -912,8 +983,8 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(use_preload).unwrap();
 
-        // Child promise "p1.0" is preloaded as resolved — rpc won't suspend
-        let preloaded = vec![resolved_promise("p1.0", serde_json::json!(99))];
+        // Child promise "p1:0" is preloaded as resolved — rpc won't suspend
+        let preloaded = vec![resolved_promise("p1:0", serde_json::json!(99))];
 
         let core = test_core(
             harness.build_sender(),
@@ -1484,5 +1555,94 @@ mod tests {
             requests.iter().any(|r| r["kind"] == "task.fulfill"),
             "should complete normally with NoopHeartbeat"
         );
+    }
+
+    // ── Timer tasks (durable sleep) ─────────────────────────────────
+    //
+    // A `resonate:timer` promise is a durable sleep: the wake IS its deadline,
+    // and `resonate:timer` makes timing out settle it *resolved*. It carries a
+    // `resonate:target` only because the server refuses to schedule a deadline
+    // for a promise without one — which also spawns a task, dispatched right
+    // away rather than at the wake. That task names no function, so Core must
+    // neither run it nor hand it back (a release is re-dispatched immediately,
+    // which would spin): it drops it and lets the deadline do the waking.
+
+    fn make_timer_promise(id: &str, state: PromiseState) -> PromiseRecord {
+        PromiseRecord {
+            id: id.to_string(),
+            state,
+            timeout_at: i64::MAX,
+            param: Value::default(),
+            value: Value::default(),
+            tags: HashMap::from([
+                ("resonate:branch".to_string(), id.to_string()),
+                ("resonate:target".to_string(), "any".to_string()),
+                ("resonate:timer".to_string(), "true".to_string()),
+            ]),
+            created_at: 0,
+            settled_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn not_yet_due_timer_task_is_dropped() {
+        let harness = TestHarness::new();
+        let hb = Arc::new(TrackingHeartbeat::new());
+        let core = test_core_with_heartbeat(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(Registry::new())),
+            hb.clone(),
+        );
+
+        let status = core
+            .execute_until_blocked(
+                "t-pending",
+                0,
+                make_timer_promise("t-pending", PromiseState::Pending),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(status, Status::Suspended);
+        // Dropped means dropped: no fulfill (that would end the sleep early),
+        // no suspend, no release — nothing reached the server at all.
+        let requests = harness.sent_requests_json().await;
+        assert!(requests.is_empty(), "unexpected requests: {:?}", requests);
+        // And the lease was never taken, so nothing is heartbeating a task
+        // this worker is not working on.
+        assert_eq!(hb.started.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn due_timer_fulfills_task_without_decoding() {
+        // A delivery already in flight when the deadline settled the promise.
+        // A timer's empty param holds no TaskData, so this has to
+        // short-circuit before the decode rather than fail on it.
+        let harness = TestHarness::new();
+        let core = test_core(
+            harness.build_sender(),
+            noop_codec(),
+            Arc::new(RwLock::new(Registry::new())),
+        );
+
+        let status = core
+            .execute_until_blocked(
+                "t-due",
+                0,
+                make_timer_promise("t-due", PromiseState::Resolved),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(status, Status::Done);
+        let requests = harness.sent_requests_json().await;
+        let fulfill = requests
+            .iter()
+            .find(|r| r["kind"] == "task.fulfill")
+            .expect("should have sent task.fulfill");
+        assert_eq!(fulfill["action"]["state"], "resolved");
     }
 }

@@ -9,6 +9,11 @@ pub enum Error {
     #[error("function '{0}' is already registered")]
     AlreadyRegistered(String),
 
+    /// A caller-supplied root id the server's id format cannot carry.
+    /// See [`crate::ids::validate_root_id`].
+    #[error("invalid id {id:?}: {reason}")]
+    InvalidId { id: String, reason: String },
+
     #[error("server error (code={code}): {message}")]
     ServerError { code: u16, message: String },
 

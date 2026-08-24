@@ -642,6 +642,7 @@ pub fn empty_deps() -> std::sync::Arc<crate::DependencyMap> {
 pub fn test_context(id: &str, effects: Effects) -> Context {
     Context::root(
         id.to_string(),
+        id.to_string(),
         i64::MAX,
         "test".to_string(),
         effects,
@@ -658,6 +659,7 @@ pub fn test_context_with_match(
 ) -> Context {
     Context::root(
         id.to_string(),
+        id.to_string(),
         i64::MAX,
         "test".to_string(),
         effects,
@@ -669,6 +671,7 @@ pub fn test_context_with_match(
 /// Build a root Context for testing with a specific timeout_at.
 pub fn test_context_with_timeout(id: &str, timeout_at: i64, effects: Effects) -> Context {
     Context::root(
+        id.to_string(),
         id.to_string(),
         timeout_at,
         "test".to_string(),
@@ -703,4 +706,59 @@ pub async fn try_finalize_context<T>(
     } else {
         crate::types::Outcome::Suspended { remote_todos }
     })
+}
+
+// ── The server's id-format rules, ported ────────────────────────────────
+//
+// The server (resonatehq/resonate, "new promise id" / PR #1127) treats a
+// promise id as `<origin>:<lineage>`. `server_validate` is a direct port of
+// its `validate_promise_create_data`, and `server_origin` of its `origin()`
+// helper. Every promise the SDK creates is replayed through them in the
+// id-format compliance tests, so a drift in id minting fails locally instead
+// of as a 400 from a real server.
+
+/// The origin per the server's `origin()`: text before the first `:`.
+pub fn server_origin(id: &str) -> &str {
+    id.split(':').next().unwrap_or(id)
+}
+
+/// Port of the server's `validate_promise_create_data`. Panics (fails the
+/// test) on any violation.
+pub fn server_validate(id: &str, tags: &serde_json::Value) {
+    assert!(!id.contains('\0'), "null_bytes: id={:?}", id);
+
+    if let Some(origin) = tags.get("resonate:origin").and_then(|v| v.as_str()) {
+        // '.' is *not* rejected here: it only separates lineage segments below
+        // the origin, which is read after the origin has been split off at the
+        // first ':'.
+        assert!(
+            !origin.contains(':'),
+            "colon_in_origin: origin={:?}",
+            origin
+        );
+        assert!(
+            id == origin || id.starts_with(&format!("{}:", origin)),
+            "origin_prefix: id={:?} is not prefixed by origin={:?}",
+            id,
+            origin
+        );
+    }
+    for key in ["resonate:branch", "resonate:parent"] {
+        if let Some(ancestor) = tags.get(key).and_then(|v| v.as_str()) {
+            // A bare root joins its first lineage segment with ':'; an
+            // ancestor that already carries lineage joins deeper ones with '.'.
+            let sep = if ancestor.contains(':') { '.' } else { ':' };
+            assert!(
+                id == ancestor || id.starts_with(&format!("{}{}", ancestor, sep)),
+                "{}_prefix: id={:?} is not prefixed by {}={:?}",
+                key,
+                id,
+                key,
+                ancestor
+            );
+        }
+    }
+    if let Some(prefix) = tags.get("resonate:prefix").and_then(|v| v.as_str()) {
+        assert!(!prefix.contains('.'), "dot_in_prefix: prefix={:?}", prefix);
+    }
 }

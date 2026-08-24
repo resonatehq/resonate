@@ -440,10 +440,17 @@ impl ServerState {
         };
         let record = promise.to_record();
         self.promises.insert(id.to_string(), promise);
-        self.set_p_timeout(id, timeout_at);
 
         // Auto-create task and dispatch execute when target tag is present
         if let Some(address) = tags.get("resonate:target").cloned() {
+            // Only a promise carrying an address is expired by the tick loop.
+            // A target-less promise (a bare `ctx.promise`) is never timed out
+            // by the scheduler, so a durable timer has to carry a target to
+            // fire at all — see `Context::sleep`. Scheduling one here
+            // regardless would make this simulation *more* permissive than
+            // the server, which is invisible to every test that only asserts
+            // success.
+            self.set_p_timeout(id, timeout_at);
             let delay = tags
                 .get("resonate:delay")
                 .and_then(|d| d.parse::<i64>().ok());
@@ -656,6 +663,7 @@ impl ServerState {
         }
 
         // Create promise + task (acquired)
+        let has_target = tags.contains_key("resonate:target");
         let promise = DurablePromise {
             id: promise_id.to_string(),
             state: PromiseState::Pending,
@@ -670,7 +678,12 @@ impl ServerState {
         };
         let pr = promise.to_record();
         self.promises.insert(promise_id.to_string(), promise);
-        self.set_p_timeout(promise_id, timeout_at);
+        // Same scheduler invariant as promise.create: only a promise carrying
+        // a target is expired by the tick loop. A task.create root always
+        // carries one in practice, but the guard keeps the invariant explicit.
+        if has_target {
+            self.set_p_timeout(promise_id, timeout_at);
+        }
 
         let task = Task {
             id: promise_id.to_string(),
@@ -1920,5 +1933,92 @@ mod tests {
         let resp: serde_json::Value =
             serde_json::from_str(&net.send(suspend_req.to_string()).await.unwrap()).unwrap();
         assert_eq!(status(&resp), 300);
+    }
+
+    // ── Scheduler invariant: only targeted promises are timed out ──
+    //
+    // Mirrors the server's `promise.pendingHasTimeout` invariant: a pending
+    // promise carrying `resonate:target` always has a timeout scheduled, and
+    // one without a target must NOT. Divergence here is invisible in ordinary
+    // tests — a simulation that schedules timeouts for *every* promise simply
+    // lets more things succeed than the real server does — so it is asserted
+    // directly against the state machine.
+
+    fn create_promise_direct(
+        state: &mut ServerState,
+        now: i64,
+        id: &str,
+        timeout_at: i64,
+        tags: serde_json::Value,
+    ) {
+        state
+            .promise_create(
+                now,
+                &serde_json::json!(id),
+                &serde_json::json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": tags }),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn only_promises_with_a_target_are_scheduled_for_timeout() {
+        let mut state = ServerState::new();
+        let now = 1_000_000;
+        let deadline = now + 60_000;
+
+        create_promise_direct(
+            &mut state,
+            now,
+            "no-target",
+            deadline,
+            serde_json::json!({"resonate:scope": "global"}),
+        );
+        create_promise_direct(
+            &mut state,
+            now,
+            "with-target",
+            deadline,
+            serde_json::json!({
+                "resonate:scope": "global",
+                "resonate:target": "poll://any@default",
+            }),
+        );
+
+        let scheduled: Vec<&str> = state.p_timeouts.iter().map(|pt| pt.id.as_str()).collect();
+        assert!(scheduled.contains(&"with-target"), "{:?}", scheduled);
+        assert!(!scheduled.contains(&"no-target"), "{:?}", scheduled);
+    }
+
+    #[test]
+    fn tick_expires_only_the_targeted_promise() {
+        let mut state = ServerState::new();
+        let now = 1_000_000;
+        let deadline = now + 60_000;
+
+        create_promise_direct(
+            &mut state,
+            now,
+            "bare",
+            deadline,
+            serde_json::json!({"resonate:scope": "global"}),
+        );
+        create_promise_direct(
+            &mut state,
+            now,
+            "timer",
+            deadline,
+            serde_json::json!({
+                "resonate:scope": "global",
+                "resonate:target": "poll://any@default",
+                "resonate:timer": "true",
+            }),
+        );
+
+        state.tick(deadline + 1);
+
+        // The timer fires — and `resonate:timer` settles it RESOLVED, which
+        // is what wakes a sleeping workflow. The bare promise is left alone.
+        assert_eq!(state.promises["timer"].state, PromiseState::Resolved);
+        assert_eq!(state.promises["bare"].state, PromiseState::Pending);
     }
 }

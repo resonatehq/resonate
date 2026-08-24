@@ -241,7 +241,7 @@ mod tests {
             .create(
                 "unit-s1",
                 "*/5 * * * *",
-                "unit-s1.{{.timestamp}}",
+                "unit-s1-{{.timestamp}}",
                 60_000,
                 Value::default(),
                 HashMap::from([(
@@ -276,7 +276,7 @@ mod tests {
             .create(
                 "unit-s-untagged",
                 "*/5 * * * *",
-                "unit-s-untagged.{{.timestamp}}",
+                "unit-s-untagged-{{.timestamp}}",
                 60_000,
                 Value::default(),
                 HashMap::new(),
@@ -310,7 +310,7 @@ mod tests {
             .create(
                 "unit-s-search",
                 "* * * * *",
-                "unit-s-search.{{.timestamp}}",
+                "unit-s-search-{{.timestamp}}",
                 60_000,
                 Value::default(),
                 HashMap::from([(

@@ -8,6 +8,7 @@ pub mod futures;
 pub mod handle;
 pub mod heartbeat;
 pub mod http_network;
+pub mod ids;
 pub mod info;
 pub mod network;
 pub mod options;

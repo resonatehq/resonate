@@ -81,8 +81,18 @@ pub struct Context {
 
 impl Context {
     /// Create a root context for a top-level task execution.
+    ///
+    /// `origin_id` is the lineage origin: everything before the first `:` of
+    /// every id in this workflow, set at the top (`resonate.run`/`rpc`) and
+    /// carried through the `resonate:origin` tag unchanged forever — including
+    /// into `detached` children, which mint `{origin}:d{16hex}` off it. It is
+    /// also the anchor every descendant id extends, so it doubles as the
+    /// id-generation root. The caller resolves it from the dispatching
+    /// promise's tags, falling back to [`crate::ids::origin_of`] for tag-less
+    /// promises — the same derivation the server uses.
     pub(crate) fn root(
         id: String,
+        origin_id: String,
         timeout_at: i64,
         func_name: String,
         effects: Effects,
@@ -90,7 +100,7 @@ impl Context {
         deps: Arc<crate::DependencyMap>,
     ) -> Self {
         Self {
-            origin_id: id.clone(),
+            origin_id,
             branch_id: id.clone(),
             parent_id: String::new(),
             id,
@@ -121,10 +131,12 @@ impl Context {
         self.deps.get::<T>()
     }
 
-    /// Generate the next deterministic child ID.
+    /// Generate the next deterministic child ID. A bare root joins its first
+    /// lineage segment with `:`, deeper segments join with `.` — see
+    /// [`crate::ids::join_id`].
     fn next_id(&self) -> String {
         let seq = self.seq.fetch_add(1, Ordering::Relaxed);
-        format!("{}.{}", self.id, seq)
+        crate::ids::join_id(&self.id, &seq.to_string())
     }
 
     /// Default timeout for child promises (24 hours).
@@ -176,10 +188,23 @@ impl Context {
 
     /// Build the lineage tags shared by every child promise create request.
     fn child_tags(&self, scope: &str, branch: &str) -> HashMap<String, String> {
+        self.child_tags_with_parent(scope, branch, &self.id)
+    }
+
+    /// [`Context::child_tags`] with an explicit `resonate:parent`. Only
+    /// `detached` overrides the parent: its id is minted off the origin rather
+    /// than off the spawning context, and the server requires every id to
+    /// extend its declared `resonate:parent`.
+    fn child_tags_with_parent(
+        &self,
+        scope: &str,
+        branch: &str,
+        parent: &str,
+    ) -> HashMap<String, String> {
         HashMap::from([
             ("resonate:scope".to_string(), scope.to_string()),
             ("resonate:branch".to_string(), branch.to_string()),
-            ("resonate:parent".to_string(), self.id.clone()),
+            ("resonate:parent".to_string(), parent.to_string()),
             ("resonate:origin".to_string(), self.origin_id.clone()),
         ])
     }
@@ -209,12 +234,13 @@ impl Context {
         &self,
         id: &str,
         func_name: &str,
+        parent: &str,
         args: &impl Serialize,
         timeout: Option<Duration>,
         target_override: Option<&str>,
     ) -> Result<PromiseCreateReq> {
         let target = (self.target_resolver)(target_override);
-        let mut tags = self.child_tags("global", id);
+        let mut tags = self.child_tags_with_parent("global", id, parent);
         tags.insert("resonate:target".to_string(), target);
 
         Ok(PromiseCreateReq {
@@ -275,10 +301,21 @@ impl Context {
 
     /// Build a sleep (timer) create request.
     ///
-    /// Similar to `remote_create_req` but with `resonate:timer` tag and no target.
+    /// The timer is the promise's own deadline: `resonate:timer` makes the
+    /// server settle it **resolved** (rather than timed out) when the deadline
+    /// arrives, which fires the callbacks every sleeper is suspended on.
+    ///
+    /// The `resonate:target` is what makes that deadline *happen*: the server
+    /// only schedules timeouts for promises carrying an address, so a
+    /// target-less timer would simply never fire. The flip side is that a
+    /// target also spawns a task, dispatched immediately rather than at the
+    /// wake; a timer names no function to run, so the worker that receives it
+    /// drops it and lets the deadline do the waking (see
+    /// `Core::execute_until_blocked`).
     fn sleep_create_req(&self, id: &str, duration: Duration) -> PromiseCreateReq {
         let mut tags = self.child_tags("global", id);
         tags.insert("resonate:timer".to_string(), "true".to_string());
+        tags.insert("resonate:target".to_string(), (self.target_resolver)(None));
 
         PromiseCreateReq {
             id: id.to_string(),
@@ -362,7 +399,7 @@ impl Context {
     pub fn rpc<T>(&self, func: &str, args: impl Serialize) -> RpcTask<'_, T> {
         let child_id = self.next_id();
         let (req, serialization_error) =
-            match self.remote_create_req(&child_id, func, &args, None, None) {
+            match self.remote_create_req(&child_id, func, &self.id, &args, None, None) {
                 Ok(req) => (req, None),
                 Err(e) => (
                     PromiseCreateReq::default_with_id(&child_id),
@@ -388,11 +425,20 @@ impl Context {
     ///   promise ID once the promise exists on the server. A detached call's
     ///   result is never delivered back to the parent.
     ///
-    /// The promise ID is computed deterministically as
-    /// `{origin_id}.{16-hex-char hash of (parent_id, seq)}`. Hashing keeps the
-    /// id length bounded regardless of nesting depth, while the use of a
-    /// stable hash (`seahash`) over deterministic inputs preserves replay
-    /// safety.
+    /// The promise ID is computed deterministically as `{origin_id}:d{16-hex
+    /// hash of the next child id}` — minted off the lineage origin (fixed at
+    /// the top and propagated unchanged forever) so recursion stays bounded at
+    /// one segment past the origin instead of growing a segment per level. The
+    /// `d` marks the segment as a detached child (vs a normal child's numeric
+    /// `{seq}`). Hashing (stable `seahash` over deterministic inputs) keeps
+    /// the id length bounded while preserving replay safety.
+    ///
+    /// The child keeps the *parent's* origin rather than re-rooting onto its
+    /// own id: the server derives the origin as everything before the first
+    /// `:` and requires every id in a lineage to start with `{origin}:`. Its
+    /// declared `resonate:parent` is the origin too — the id hangs off the
+    /// origin, not off this context — while `resonate:branch` stays the
+    /// child's own id: a detached child roots its own branch.
     ///
     /// # Usage
     /// ```ignore
@@ -404,9 +450,9 @@ impl Context {
     /// ```
     pub fn detached(&self, func: &str, args: impl Serialize) -> DetachedTask<'_> {
         let raw = self.next_id();
-        let child_id = format!("{}.{}", self.origin_id, hash_id(&raw));
+        let child_id = crate::ids::join_id(&self.origin_id, &format!("d{}", hash_id(&raw)));
         let (req, serialization_error) =
-            match self.remote_create_req(&child_id, func, &args, None, None) {
+            match self.remote_create_req(&child_id, func, &self.origin_id, &args, None, None) {
                 Ok(req) => (req, None),
                 Err(e) => (
                     PromiseCreateReq::default_with_id(&child_id),
@@ -1951,10 +1997,10 @@ mod tests {
         }
         // Verify we got the nested ones too (root.0, root.0.0, root.0.1, root.1)
         let ids: Vec<&str> = creates.iter().map(|c| c["id"].as_str().unwrap()).collect();
-        assert!(ids.contains(&"root.0"), "should have root.0");
-        assert!(ids.contains(&"root.0.0"), "should have root.0.0");
-        assert!(ids.contains(&"root.0.1"), "should have root.0.1");
-        assert!(ids.contains(&"root.1"), "should have root.1");
+        assert!(ids.contains(&"root:0"), "should have root:0");
+        assert!(ids.contains(&"root:0.0"), "should have root:0.0");
+        assert!(ids.contains(&"root:0.1"), "should have root:0.1");
+        assert!(ids.contains(&"root:1"), "should have root:1");
     }
 
     // ── Match Function (target resolution) ─────────────────────────
@@ -2336,9 +2382,9 @@ mod tests {
             .map(|r| r["id"].as_str().unwrap().to_string())
             .collect();
 
-        assert_eq!(create_ids[0], "root.0");
-        assert_eq!(create_ids[1], "root.1");
-        assert_eq!(create_ids[2], "root.2");
+        assert_eq!(create_ids[0], "root:0");
+        assert_eq!(create_ids[1], "root:1");
+        assert_eq!(create_ids[2], "root:2");
     }
 
     #[tokio::test]
@@ -2356,9 +2402,9 @@ mod tests {
             .map(|r| r["id"].as_str().unwrap().to_string())
             .collect();
 
-        assert!(create_ids.contains(&"root.0".to_string()));
-        assert!(create_ids.contains(&"root.0.0".to_string()));
-        assert!(create_ids.contains(&"root.0.1".to_string()));
+        assert!(create_ids.contains(&"root:0".to_string()));
+        assert!(create_ids.contains(&"root:0.0".to_string()));
+        assert!(create_ids.contains(&"root:0.1".to_string()));
     }
 
     // ── Concurrent vs Sequential execution ─────────────────────────
@@ -2733,8 +2779,10 @@ mod tests {
         assert_eq!(tags["resonate:origin"].as_str().unwrap(), "root");
         // branch should be the child id
         assert!(tags.contains_key("resonate:branch"));
-        // should NOT have a target tag
-        assert!(!tags.contains_key("resonate:target"));
+        // The server only schedules a timeout for a promise carrying a
+        // target, so a target-less timer would never fire — the timer must
+        // carry one.
+        assert!(tags.contains_key("resonate:target"));
     }
 
     #[tokio::test]
@@ -2791,7 +2839,7 @@ mod tests {
     #[tokio::test]
     async fn sleep_returns_ok_when_already_resolved() {
         let harness = TestHarness::new();
-        let sleep_id = "root.0";
+        let sleep_id = "root:0";
         harness.settle_promise_in_stub(sleep_id, ()).await;
 
         let effects = harness.build_effects(vec![resolved_promise(sleep_id, ())]);
@@ -2821,7 +2869,7 @@ mod tests {
     #[tokio::test]
     async fn sleep_spawn_resolved_returns_ok() {
         let harness = TestHarness::new();
-        let sleep_id = "root.0";
+        let sleep_id = "root:0";
         harness.settle_promise_in_stub(sleep_id, ()).await;
 
         let effects = harness.build_effects(vec![resolved_promise(sleep_id, ())]);
@@ -3007,7 +3055,7 @@ mod tests {
     #[tokio::test]
     async fn promise_resolved_returns_value() {
         let harness = TestHarness::new();
-        let promise_id = "root.0";
+        let promise_id = "root:0";
         harness
             .settle_promise_in_stub(promise_id, "hello".to_string())
             .await;
@@ -3049,7 +3097,7 @@ mod tests {
         let _ = finalize_context(&ctx, Ok(0)).await;
 
         let ids = create_ids_in_order(&harness).await;
-        let expected: Vec<String> = (0..8).map(|i| format!("root.{}", i)).collect();
+        let expected: Vec<String> = (0..8).map(|i| format!("root:{}", i)).collect();
         assert_eq!(
             ids, expected,
             "creations must reach the server in call order"
@@ -3072,9 +3120,9 @@ mod tests {
         // Only the direct children of root, in terminal-op call order.
         let root_children: Vec<&String> = ids
             .iter()
-            .filter(|id| id.matches('.').count() == 1)
+            .filter(|id| id.matches(':').count() == 1 && !id.contains('.'))
             .collect();
-        assert_eq!(root_children, ["root.0", "root.1", "root.2", "root.3"]);
+        assert_eq!(root_children, ["root:0", "root:1", "root:2", "root:3"]);
     }
 
     #[tokio::test]
@@ -3106,7 +3154,7 @@ mod tests {
 
         // Success-gating: only the first creation ever reached the server.
         let ids = create_ids_in_order(&harness).await;
-        assert_eq!(ids, ["root.0"], "successors must not issue promise.create");
+        assert_eq!(ids, ["root:0"], "successors must not issue promise.create");
     }
 
     #[tokio::test]
@@ -3151,7 +3199,7 @@ mod tests {
         let outcome = finalize_context(&ctx, Err::<i32, _>(Error::Suspended)).await;
         match &outcome {
             Outcome::Suspended { remote_todos } => {
-                assert_eq!(remote_todos, &["root.0".to_string()]);
+                assert_eq!(remote_todos, &["root:0".to_string()]);
             }
             other => panic!("expected Suspended, got {:?}", other),
         }
@@ -3160,7 +3208,7 @@ mod tests {
     #[tokio::test]
     async fn rpc_spawn_preloaded_resolved_returns_value_via_handle() {
         let harness = TestHarness::new();
-        let effects = harness.build_effects(vec![resolved_promise("root.0", 99_i32)]);
+        let effects = harness.build_effects(vec![resolved_promise("root:0", 99_i32)]);
         let ctx = test_context("root", effects);
 
         // Replay short-circuit flows through the handle's oneshot.
@@ -3177,7 +3225,7 @@ mod tests {
 
         let handle = ctx.detached("audit", ()).spawn().unwrap();
         let id = handle.id().await.unwrap();
-        assert!(id.starts_with("root."), "id = {id}");
+        assert!(id.starts_with("root:"), "id = {id}");
 
         // The promise existed on the server before the handle resolved.
         let ids = create_ids_in_order(&harness).await;
@@ -3196,11 +3244,11 @@ mod tests {
 
         let handle = ctx.rpc::<i32>("remote", &()).spawn().unwrap();
         let id = handle.id().await.unwrap();
-        assert_eq!(id, "root.0");
+        assert_eq!(id, "root:0");
 
         // At the moment id() resolved, the create request had reached the stub.
         let ids = create_ids_in_order(&harness).await;
-        assert_eq!(ids, ["root.0"]);
+        assert_eq!(ids, ["root:0"]);
 
         let _ = finalize_context(&ctx, Ok(0)).await;
     }
@@ -3263,5 +3311,133 @@ mod tests {
             cancelled.load(SeqCst),
             "parked task should have been aborted when its SpawnedHandle dropped"
         );
+    }
+
+    // ── Promise id format compliance (the server's rules, ported) ──
+
+    /// Deep workflow used by the id-format tests: nested children, a durable
+    /// sleep, and a detached child spawned from a *nested* context.
+    struct IdFormatMid;
+    impl Durable<(), i32> for IdFormatMid {
+        const NAME: &'static str = "id_format_mid";
+        const KIND: DurableKind = DurableKind::Workflow;
+        async fn execute(&self, env: ExecutionEnv<'_>, _args: ()) -> crate::error::Result<i32> {
+            let ctx = env.into_context();
+            let a: i32 = ctx.run(ChildWithLeaves, ()).await?;
+            // A global-scope timer promise: minted from the same seq as
+            // everything else. Not awaited (it would suspend).
+            let _ = ctx.sleep(Duration::from_secs(3600)).spawn()?;
+            // Detached from a nested context: its id is minted off the
+            // origin, not off this context, so its declared ancestors must be
+            // the origin too.
+            let _ = ctx.detached("tail", ()).spawn()?;
+            Ok(a)
+        }
+    }
+
+    async fn run_id_format_workflow(harness: &TestHarness, root: &str) -> Vec<serde_json::Value> {
+        let effects = harness.build_effects(vec![]);
+        let ctx = test_context(root, effects);
+        let _: i32 = ctx.run(IdFormatMid, ()).await.unwrap();
+        let _: i32 = ctx.run(IdFormatMid, ()).await.unwrap();
+        let _ = finalize_context(&ctx, Ok(0)).await;
+
+        harness
+            .sent_requests_json()
+            .await
+            .into_iter()
+            .filter(|r| r["kind"] == "promise.create")
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn every_created_promise_passes_server_validation() {
+        // A dotted root is a caller's prerogative: '.' is only read below the
+        // origin, so every id minted under it still validates and still shares
+        // that origin.
+        for root in ["wf", "my.app.workflow"] {
+            let harness = TestHarness::new();
+            let creates = run_id_format_workflow(&harness, root).await;
+            assert!(creates.len() >= 8, "expected a real tree: {:?}", creates);
+            for create in &creates {
+                let id = create["id"].as_str().unwrap();
+                server_validate(id, &create["tags"]);
+                assert_eq!(server_origin(id), root, "id {} origin", id);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn whole_workflow_shares_one_origin() {
+        // The origin is the server's partition key and the unit both
+        // promise.register_callback and task.suspend match on, so every
+        // promise a workflow creates — detached children included — must
+        // share it.
+        let harness = TestHarness::new();
+        let creates = run_id_format_workflow(&harness, "wf").await;
+        for create in &creates {
+            let id = create["id"].as_str().unwrap();
+            assert_eq!(server_origin(id), "wf", "id {} origin", id);
+            assert_eq!(
+                create["tags"]["resonate:origin"].as_str().unwrap(),
+                "wf",
+                "id {} resonate:origin",
+                id
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn child_ids_are_colon_then_dot_separated() {
+        let harness = TestHarness::new();
+        let creates = run_id_format_workflow(&harness, "wf").await;
+        let ids: Vec<&str> = creates.iter().map(|c| c["id"].as_str().unwrap()).collect();
+        // First level below the root joins with ':', deeper levels with '.'.
+        for want in ["wf:0", "wf:0.0", "wf:0.0.0"] {
+            assert!(ids.contains(&want), "expected {} in {:?}", want, ids);
+        }
+        // No id keeps the old all-'.' shape.
+        assert!(
+            !ids.iter().any(|id| id.starts_with("wf.")),
+            "old-shape ids: {:?}",
+            ids
+        );
+    }
+
+    #[tokio::test]
+    async fn detached_ids_stay_bounded_below_the_origin() {
+        // Detached ids are `{origin}:d{16 hex}` — one segment past the origin
+        // no matter how deep the spawning context is.
+        let harness = TestHarness::new();
+        let creates = run_id_format_workflow(&harness, "wf").await;
+        let detached: Vec<&serde_json::Value> = creates
+            .iter()
+            .filter(|c| c["id"].as_str().unwrap().starts_with("wf:d"))
+            .collect();
+        assert_eq!(detached.len(), 2, "one per IdFormatMid invocation");
+        for create in detached {
+            let id = create["id"].as_str().unwrap();
+            let suffix = &id["wf:d".len()..];
+            assert_eq!(suffix.len(), 16, "id {}", id);
+            assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "id {}", id);
+            // The id hangs off the origin, not off the spawning context, so
+            // the origin is also the ancestor it declares; branch stays the
+            // child's own id.
+            assert_eq!(create["tags"]["resonate:parent"].as_str().unwrap(), "wf");
+            assert_eq!(create["tags"]["resonate:branch"].as_str().unwrap(), id);
+        }
+    }
+
+    #[tokio::test]
+    async fn prefix_tag_is_not_emitted() {
+        let harness = TestHarness::new();
+        let creates = run_id_format_workflow(&harness, "wf").await;
+        for create in &creates {
+            assert!(
+                create["tags"].get("resonate:prefix").is_none(),
+                "promise {} emits resonate:prefix",
+                create["id"]
+            );
+        }
     }
 }
