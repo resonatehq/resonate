@@ -98,11 +98,14 @@ impl ResonateWorker for MyWorker {
             Message::Unblock(_) => return Ok(()),  // for workers that *wait*; not this one
         };
 
-        // Cheap, worth failing fast on: this worker owns the syntax past the scheme.
-        let addr = MyAddress::parse(address)
-            .map_err(|e| Unavailable::new(format!("my: bad address {address}: {e}")))?;
+        // Cheap, and worth failing fast on: this worker owns the syntax past
+        // the scheme. A malformed address is rejected on the promise; an
+        // unconfigured deployment is `Err(Unavailable)`. The two are different
+        // failures — see references/registration.md.
+        let addr = MyAddress::parse(address)?;
 
-        // `send` is accepted-for-delivery. Spawn; the run may take hours.
+        // `send` is accepted-for-delivery, and the dispatch loop awaits it
+        // sequentially over the batch. Spawn; the run may take hours.
         tokio::spawn(async move { ctx.run().await });
         Ok(())
     }

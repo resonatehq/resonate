@@ -9,9 +9,13 @@ Use `src/transport/transport_airflow.rs` and its config/registration as the temp
 
 ```rust
 pub struct MyWorker {
-    /// In-process, so it holds the port directly. Every state change goes
-    /// through `process` — the same path a remote worker's HTTP calls take.
+    /// The inbound port. This worker runs in the server's process, so it holds
+    /// the port rather than dialling it.
     server: Arc<dyn ResonateServer>,
+
+    /// Everything else is immutable after construction. `send` takes `&self`,
+    /// and one instance serves every address of its scheme concurrently, so
+    /// any mutable state would need its own synchronisation.
     client: reqwest::Client,
     deployments: HashMap<String, MyDeployment>,
     lease_timeout: i64,
@@ -20,26 +24,102 @@ pub struct MyWorker {
 #[async_trait]
 impl ResonateWorker for MyWorker {
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        // ── 1. Which message is this? ────────────────────────────────────────
+        // `Unblock` is delivered to workers that *wait* on a promise. An
+        // integration never waits, so acknowledge and drop it. Returning `Err`
+        // here would log a delivery failure for a message that was never ours.
         let task = match msg {
-            Message::Execute(e) => &e.data.task,
+            Message::Execute(e) => &e.data.task,      // { id, version }
             Message::Unblock(_) => return Ok(()),
         };
-        let addr = MyAddress::parse(address)
-            .map_err(|e| Unavailable::new(format!("my: bad address {address}: {e}")))?;
-        let deployment = self.deployments.get(&addr.deployment).cloned()
-            .ok_or_else(|| Unavailable::new(format!("my: no deployment '{}'", addr.deployment)))?;
 
-        // `send` means accepted for delivery: spawn the long work and return.
-        let ctx = RunContext { /* … */ };
+        // ── 2. Caller errors → reject the promise ────────────────────────────
+        // A malformed address can never become valid: promise tags are
+        // immutable. Returning `Unavailable` would re-deliver every
+        // `tasks.retry_timeout` until the promise times out, and the caller
+        // would see `rejected_timedout` instead of the reason. Claim the task
+        // and reject it instead — one acquire and one fulfill for a real error.
+        let addr = match MyAddress::parse(address) {
+            Ok(a) => a,
+            Err(e) => {
+                let server = Arc::clone(&self.server);
+                let (id, version, ttl) = (task.id.clone(), task.version, self.lease_timeout);
+                let message = format!("invalid address '{address}': {e}");
+                tokio::spawn(async move {
+                    reject_permanently(server, id, version, ttl, "invalid_request", message).await
+                });
+                return Ok(());
+            }
+        };
+
+        // ── 3. Operator errors → report as undeliverable ─────────────────────
+        // An unconfigured deployment is fixable by deploying config, after
+        // which redelivery succeeds without touching the promise. That is what
+        // `Unavailable` is for.
+        let deployment = self.deployments.get(&addr.deployment).cloned().ok_or_else(|| {
+            Unavailable::new(format!("my: no deployment '{}' configured", addr.deployment))
+        })?;
+
+        // ── 4. Hand off ──────────────────────────────────────────────────────
+        // Everything past this point needs a task claim first, so it belongs in
+        // the spawned task where it can settle the promise. Clone into an owned
+        // context: the task must be `'static`.
+        let ctx = RunContext {
+            server: Arc::clone(&self.server),
+            client: self.client.clone(),
+            deployment,
+            addr,
+            lease_timeout: self.lease_timeout,
+            task_id: task.id.clone(),
+            task_version: task.version,
+        };
         tokio::spawn(async move { ctx.run().await });
+
+        // ── 5. Accepted for delivery — not executed ──────────────────────────
         Ok(())
     }
 }
 ```
 
-Do in `send` only what is cheap and worth failing fast on — parse the address, resolve the
-deployment. Everything else belongs in the spawned task, where it can settle the promise
-rather than return an error nobody reads.
+That body is almost entirely invariant. Only `MyAddress::parse`, the config lookup, and
+`RunContext::run` differ between integrations.
+
+### What must not go in `send`
+
+`process_batch` awaits `route` **sequentially** over the whole batch:
+
+```rust
+for msg in execute_msgs {
+    if let Err(e) = router.route(&msg.address, &payload).await { tracing::warn!(...) }
+}
+```
+
+So anything slow in `send` stalls delivery of every other message in that batch —
+including messages for other schemes, which have nothing to do with your integration. That
+rules out:
+
+| Never in `send` | Why | Where it goes |
+|---|---|---|
+| The downstream call | Can take hours | The spawned task |
+| `task.acquire` | A server round trip per message, serialised | The spawned task |
+| Retries or backoff | Blocks the batch for the duration | The spawned task |
+| Blocking I/O, `std::fs`, `block_on` | Stalls the runtime thread | Nowhere |
+
+What belongs in `send` is what is cheap *and* worth failing fast on: which message kind it
+is, whether the address parses, and whether this worker is configured to serve it.
+
+### The two error classes, side by side
+
+| | Malformed address | Unconfigured deployment |
+|---|---|---|
+| Whose mistake | The caller's | The operator's |
+| Fixable without a new promise | No — tags are immutable | Yes — deploy the config |
+| Right response | Claim the task, reject the promise | `Err(Unavailable)` |
+| What the caller sees | `rejected`, `kind = "invalid_request"`, with the address quoted | Promise stays pending, then `rejected_timedout` if nobody fixes it |
+| Cost of getting it wrong | A parse failure logged every 30 s until timeout, and a useless error for the caller | A promise permanently rejected for a config gap that a rollout would have fixed |
+
+`reject_permanently` is a free function, not a `RunContext` method — it runs before there
+is a run to have a context for. See `src/transport/transport_airflow.rs`.
 
 Keep the pure parts (address parsing, the idempotency key, param decoding, downstream state
 classification) as free functions with unit tests. Those are the parts that carry the

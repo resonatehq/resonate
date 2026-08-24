@@ -154,8 +154,27 @@ impl ResonateWorker for AirflowWorker {
             Message::Unblock(_) => return Ok(()),
         };
 
-        let addr = AirflowAddress::parse(address)
-            .map_err(|e| Unavailable::new(format!("airflow: bad address {address}: {e}")))?;
+        // Two failure classes, and they are not the same failure.
+        //
+        // A malformed address is the *caller's* error and can never become
+        // valid — promise tags are immutable. Reject the promise so the caller
+        // sees why, rather than letting it hang until it times out.
+        let addr = match AirflowAddress::parse(address) {
+            Ok(a) => a,
+            Err(e) => {
+                let server = Arc::clone(&self.server);
+                let (id, version, ttl) = (task.id.clone(), task.version, self.lease_timeout);
+                let message = format!("invalid airflow address '{address}': {e}");
+                tokio::spawn(async move {
+                    reject_permanently(server, id, version, ttl, "invalid_request", message).await
+                });
+                return Ok(());
+            }
+        };
+
+        // An unconfigured deployment is the *operator's* error, and deploying
+        // the config fixes it without touching the promise. That one really is
+        // undeliverable: report it and let redelivery retry.
         let deployment = self
             .deployments
             .get(&addr.deployment)
@@ -498,18 +517,7 @@ impl RunContext {
         kind: &str,
         data: Value,
     ) -> Result<ResponseEnvelope, Unavailable> {
-        self.server
-            .process(&RequestEnvelope {
-                kind: kind.to_string(),
-                head: RequestHead {
-                    corr_id: format!("airflow-{}", fastrand::u64(..)),
-                    version: PROTOCOL_VERSION.to_string(),
-                    auth: None,
-                    debug_time: None,
-                },
-                data,
-            })
-            .await
+        call(self.server.as_ref(), kind, data).await
     }
 
     async fn acquire(&self, pid: &str) -> Option<TaskAcquireResponseData> {
@@ -631,6 +639,88 @@ impl RunContext {
             }
         }
     }
+}
+
+// ─── Protocol calls without a run ─────────────────────────────────────────────
+
+/// Issue one protocol request at the server this worker is attached to.
+async fn call(
+    server: &dyn ResonateServer,
+    kind: &str,
+    data: Value,
+) -> Result<ResponseEnvelope, Unavailable> {
+    server
+        .process(&RequestEnvelope {
+            kind: kind.to_string(),
+            head: RequestHead {
+                corr_id: format!("airflow-{}", fastrand::u64(..)),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: None,
+            },
+            data,
+        })
+        .await
+}
+
+/// Claim the task and reject its promise, for a failure that can never be
+/// fixed by retrying.
+///
+/// The alternative — returning `Unavailable` from `send` — is wrong for this
+/// class of failure. The dispatch loop only logs that error, so the task stays
+/// pending and the server re-delivers every `tasks.retry_timeout` until the
+/// promise times out; the caller then sees `rejected_timedout` rather than the
+/// reason, and the log fills with the same parse failure forever. A promise's
+/// tags are immutable, so a malformed address is never going to become valid.
+///
+/// Costs one acquire and one fulfill to produce a useful error. Worth it.
+async fn reject_permanently(
+    server: Arc<dyn ResonateServer>,
+    task_id: String,
+    task_version: i64,
+    lease_timeout: i64,
+    kind: &'static str,
+    message: String,
+) {
+    let pid = format!("airflow-{}", fastrand::u64(..));
+    let resp = match call(
+        server.as_ref(),
+        "task.acquire",
+        json!({ "id": task_id, "version": task_version, "pid": pid, "ttl": lease_timeout }),
+    )
+    .await
+    {
+        Ok(r) if r.head.status == 200 => r,
+        // 409 means another attempt owns it and will reach the same verdict.
+        // Anything else is transient; redelivery will bring us back here.
+        _ => return,
+    };
+    let acquired: TaskAcquireResponseData = match serde_json::from_value(resp.data) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let value = json!({ "run": {}, "error": { "kind": kind, "message": message } });
+    let _ = call(
+        server.as_ref(),
+        "task.fulfill",
+        json!({
+            "id": task_id,
+            "version": acquired.task.version,
+            "action": {
+                "kind": "promise.settle",
+                "head": {},
+                "data": {
+                    "id": task_id,
+                    "state": "rejected",
+                    "value": {
+                        "headers": { "content-type": "application/json" },
+                        "data": b64_encode(&value.to_string())
+                    }
+                }
+            }
+        }),
+    )
+    .await;
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
