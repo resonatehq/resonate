@@ -150,6 +150,10 @@ Keeping `run` at the protocol's altitude is the point of the split: it hands off
 something unspecified and gets back a `Settlement`, so a downstream run, an error kind and
 a value schema never appear in it.
 
+`run` and `execute` below are complete — they are the same in every integration. `work` is
+a **sketch**: its shape is fixed (resolve, start, watch, report) but every line of it is
+yours. `src/transport/transport_airflow.rs` is one filled-in version.
+
 ```rust
 /// The protocol frame: claim the task, do the work, settle the promise.
 ///
@@ -251,71 +255,82 @@ async fn execute(&self, promise: &PromiseRecord, version: i64) -> Settlement {
 ```
 
 ```rust
-/// Resolve, create, monitor. One error channel, so `?` does the work.
+/// Do the work. One error channel, so `?` carries the failures out to
+/// `execute`, which turns them into a settlement.
 ///
-/// The two ways resolution fails are not the same failure: a malformed
-/// address is the caller's error and can never become valid, because promise
-/// tags are immutable, so it rejects the promise; an unconfigured deployment
-/// is the operator's error that a rollout fixes, so it retries.
+/// Everything below is integration-specific except its shape, and the shape is
+/// the same every time: resolve, start, watch, report.
 async fn work(
     &self,
     promise: &PromiseRecord,
     version: i64,
 ) -> Result<Monitored, MyError> {
-    // The address comes off the promise, not off the message: the promise is
-    // the durable record, and it is where every other input already comes
-    // from. A promise that has a task always carries this tag — that tag is
+    // ── Resolve what to act on ───────────────────────────────────────────
+    //
+    // Off the promise, not off the message: the promise is the durable record,
+    // and a promise that has a task always carries its target tag — that tag is
     // what caused the task to exist.
-    let address = promise
-        .tags
-        .get(TARGET_TAG)
-        .ok_or_else(|| MyError::permanent("invalid_request", format!("no {TARGET_TAG} tag")))?;
-    let addr = MyAddress::parse(address)
-        .map_err(|e| MyError::permanent("invalid_request", format!("bad address '{address}': {e}")))?;
-    let deployment = self
-        .worker
-        .deployments
-        .get(&addr.deployment)
-        .cloned()
-        .ok_or_else(|| MyError::transient(format!("no deployment '{}' configured", addr.deployment)))?;
-    let target = Target { addr, deployment };
-
+    //
+    // The two ways this fails are not the same failure. A malformed address is
+    // the caller's and can never become valid, because promise tags are
+    // immutable: reject the promise. An unconfigured deployment is the
+    // operator's and a rollout fixes it: leave the task for redelivery.
+    let target = self.target(promise)?;
     let input = decode_param(promise.param.data.as_deref())?;
-    let run_id = derive_run_id(&promise.id);
 
-    // No `?` past this point: the heartbeat below has to be aborted, and an
-    // early return would leave it beating for a lease nobody holds.
-    let heartbeat = {
-        // The lease clock. Its own task, on a cadence derived from the lease
-        // TTL and nothing else — which is what lets the downstream clock back
-        // off past the lease without the lease lapsing.
-        let server = Arc::clone(&self.worker.server);
-        let task_id = self.task.id.clone();
-        let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
-            ticker.tick().await;
-            loop {
-                ticker.tick().await;
-                // Deliberately ignored. `task.heartbeat` answers 200 whether or
-                // not it refreshed anything — a heartbeat for a lease this
-                // worker no longer holds is a silent no-op — so the response
-                // carries no signal. Losing the lease surfaces at
-                // `task.fulfill`.
-                let _ = server
-                    .process(Request::TaskHeartbeat(TaskHeartbeatData {
-                        pid: PID.to_string(),
-                        tasks: vec![TaskHeartbeatTask { id: task_id.clone(), version }],
-                    }))
-                    .await;
-            }
-        })
-    };
+    // ── Start the downstream run ─────────────────────────────────────────
+    //
+    // This runs on EVERY delivery, not just the first. `execute` messages are
+    // at-least-once and are re-sent until the promise settles, and nothing in
+    // the message says which delivery this is — so do not try to remember
+    // whether you already started it. You cannot: a restart takes your memory
+    // with it.
+    //
+    // Start it again, every time, under a key that is a pure function of the
+    // promise id, and let the downstream system reject the duplicate. Its
+    // "already exists" is the recovery path, not an error: catch it, look the
+    // existing run up, and carry on to monitoring.
+    //
+    // A downstream system that cannot deduplicate a create cannot be integrated
+    // this way. That is the precondition, not a detail — references/idempotency.md.
+    let run_id = derive_run_id(&promise.id);        // deterministic: no uuid, no clock
+    self.start(&target, &run_id, &input).await?;    // duplicate ⇒ Ok, re-attach
 
-    // The downstream clock: create once, then poll on an interval sized for
-    // the downstream system rather than for the lease.
-    let outcome = self.create_and_monitor(&target, promise, &run_id, &input).await;
+    // ── Watch it, on two independent clocks ──────────────────────────────
+    //
+    // The LEASE clock: `task.heartbeat` at about a third of the lease TTL, so
+    // the server does not conclude this worker died and hand the task to
+    // someone else. Its cadence comes from the lease and from nothing else.
+    //
+    // The DOWNSTREAM clock: ask the external system whether the run has
+    // finished, on an interval sized for *that* system — seconds for a cheap
+    // status endpoint, minutes for an expensive one, backing off as the run
+    // wears on.
+    //
+    // They answer to different authorities and run at different frequencies.
+    // Keep the heartbeat in its own task and the poll interval can back off
+    // past the lease TTL without the lease lapsing. Fold them into one loop and
+    // you are choosing between hammering the downstream API and silently losing
+    // the task.
+    let heartbeat = self.spawn_heartbeat(version);  // no `?` past here — see below
+
+    // Poll until the downstream system says the run is done — whatever "done"
+    // means there: succeeded, failed, cancelled, expired. Two rules:
+    //
+    //   * Stop at `promise.timeout_at`. The server settles the promise itself
+    //     at that instant whether or not anyone is still watching.
+    //   * A state you do not recognise is NOT done. A downstream release that
+    //     adds one must not turn healthy promises into rejected ones — keep
+    //     waiting and log it.
+    let outcome = self.poll_until_done(&target, promise, &run_id).await;
+
+    // The heartbeat has to be stopped on every path out of here, which is why
+    // there is no `?` between the spawn and this line: an early return would
+    // leave it beating for a lease nobody holds.
     heartbeat.abort();
+
+    // Hand back what happened. `execute` maps it to resolve / reject / leave
+    // alone, and `run` settles the task with the answer.
     outcome
 }
 ```
@@ -331,6 +346,10 @@ Three things to notice in the shape:
 - **Three outcomes: resolve, reject, leave alone.** That `match` lives in `execute`, not in
   `run` — the frame applies a decision, it does not make one. It stays three arms only
   because the two enums do not cross-cut; see below.
+- **The two hard parts are both in `work`.** Starting the downstream run on every delivery
+  under a deterministic key, and running the lease clock and the downstream clock as two
+  separate things. Get either wrong and nothing above notices — you get duplicate runs, or
+  tasks that quietly get handed to someone else mid-flight.
 
 ### Keep the outcome enums from cross-cutting
 
