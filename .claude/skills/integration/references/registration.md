@@ -141,17 +141,18 @@ impl ResonateWorker for AirflowWorker {
 }
 ```
 
-The work is in the spawned task. Below is `RunContext::run` from
-`src/transport/transport_airflow.rs`, **verbatim and complete** — claim, resolve, two
-clocks, settle, with every protocol request built inline so nothing is hidden behind a
-helper. Only the downstream half (`create_and_monitor` and the two HTTP calls under it) is
-factored out; that is the part that differs per integration.
+The work is in the spawned task. Below is the lifecycle from
+`src/transport/transport_airflow.rs`, **verbatim** — two functions, split where the error
+channel changes. `run` is the protocol frame: claim, work, settle. `execute` is the work,
+and everything that can go wrong in it comes back as one `AirflowError`, so `run` has
+exactly one place where the promise is settled and one rule for when it is not.
 
 ```rust
-/// The whole lifecycle in one body: claim, resolve, monitor on two clocks,
-/// settle. Only the downstream half is factored out — `create_and_monitor`
-/// and the two HTTP calls under it are the part that differs per
-/// integration; everything here is the same for all of them.
+/// The protocol frame: claim the task, do the work, settle the promise.
+///
+/// Everything that can go wrong inside `execute` comes back as one
+/// `AirflowError`, so this body has exactly one place where the promise is
+/// settled and one rule for when it is not.
 async fn run(self) {
     // ── 1. Claim the task ────────────────────────────────────────────────
     //
@@ -160,7 +161,11 @@ async fn run(self) {
     // outcome available is `Err(Unavailable)`, which the dispatch loop logs
     // and drops; after it, every failure can settle the promise. So the
     // claim comes first and validation comes after.
-    let claimed = self
+    //
+    // Anything that is not "here is the task" — a 409 race, a transient
+    // error, an unreachable server — means this attempt does not run.
+    // Redelivery brings us back; there is nothing to decide between them.
+    let Ok(claimed) = self
         .worker
         .server
         .process(&RequestEnvelope {
@@ -179,127 +184,34 @@ async fn run(self) {
                 "ttl": self.worker.lease_timeout,
             }),
         })
-        .await;
-
-    let acquired: TaskAcquireResponseData = match claimed {
-        Ok(r) if r.head.status == 200 => match serde_json::from_value(r.data) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::error!(task_id = %self.task.id, error = %e, "airflow: malformed acquire response");
-                return;
-            }
-        },
-        // 409: another attempt owns it, or the task is no longer pending.
-        // Do nothing at all — in particular, do not touch Airflow.
-        Ok(r) if r.head.status == 409 => {
-            tracing::debug!(task_id = %self.task.id, "airflow: task not acquired");
-            return;
-        }
-        // Anything else is transient. Drop the task without settling; the
-        // lease expires and redelivery brings us back here.
-        Ok(r) => {
-            tracing::warn!(task_id = %self.task.id, status = r.head.status, "airflow: task acquire rejected");
-            return;
-        }
+        .await
+    else {
+        return;
+    };
+    if claimed.head.status != 200 {
+        tracing::debug!(task_id = %self.task.id, status = claimed.head.status, "airflow: task not acquired");
+        return;
+    }
+    // The one case that should never happen: the server answered 200 and
+    // the payload is not a task.
+    let acquired: TaskAcquireResponseData = match serde_json::from_value(claimed.data) {
+        Ok(d) => d,
         Err(e) => {
-            tracing::error!(task_id = %self.task.id, error = %e, "airflow: task acquire failed");
+            tracing::error!(task_id = %self.task.id, error = %e, "airflow: malformed acquire response");
             return;
         }
     };
     let version = acquired.task.version; // the RESPONSE version (n+1), from here on
     let promise = acquired.promise; // param, timeoutAt, createdAt, tags
 
-    // ── 2. Resolve the address, off the promise ──────────────────────────
-    //
-    // Not off the message: the promise is the durable record, and it is
-    // where every other input already comes from. A promise that has a task
-    // always carries the target tag — that tag is what caused the task to
-    // exist — so the lookup cannot fail in practice.
-    //
-    // The two ways this *can* fail are not the same failure. A malformed
-    // address is the caller's error and can never become valid, because
-    // promise tags are immutable; an unconfigured deployment is the
-    // operator's error and a rollout fixes it. One rejects, one retries.
-    let target = promise
-        .tags
-        .get(TARGET_TAG)
-        .ok_or_else(|| AirflowError::Permanent {
-            kind: "invalid_request",
-            message: format!("promise has no {TARGET_TAG} tag"),
-        })
-        .and_then(|address| {
-            AirflowAddress::parse(address).map_err(|e| AirflowError::Permanent {
-                kind: "invalid_request",
-                message: format!("invalid airflow address '{address}': {e}"),
-            })
-        })
-        .and_then(|addr| match self.worker.deployments.get(&addr.deployment) {
-            Some(deployment) => Ok(Target {
-                deployment: deployment.clone(),
-                addr,
-            }),
-            None => Err(AirflowError::Transient(format!(
-                "no deployment '{}' configured (known: {:?})",
-                addr.deployment,
-                self.worker.deployments.keys().collect::<Vec<_>>()
-            ))),
-        });
+    // ── 2. Do the work ───────────────────────────────────────────────────
+    let outcome = self.execute(&promise, version).await;
 
-    // ── 3. Monitor, on two independent clocks ────────────────────────────
-    let outcome = match target {
-        Err(e) => Err(e),
-        Ok(target) => {
-            // The lease clock. Its own task, on a cadence derived from the
-            // lease TTL and nothing else — which is what lets the
-            // downstream clock below back off past the lease without the
-            // lease lapsing.
-            let heartbeat = {
-                let server = Arc::clone(&self.worker.server);
-                let task_id = self.task.id.clone();
-                let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
-                tokio::spawn(async move {
-                    let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
-                    ticker.tick().await;
-                    loop {
-                        ticker.tick().await;
-                        // Deliberately ignored. `task.heartbeat` answers 200
-                        // whether or not it refreshed anything — a heartbeat
-                        // for a lease this worker no longer holds is a
-                        // silent no-op — so the response carries no signal.
-                        // Losing the lease surfaces at `task.fulfill`, as a
-                        // 409.
-                        let _ = server
-                            .process(&RequestEnvelope {
-                                kind: "task.heartbeat".to_string(),
-                                head: RequestHead {
-                                    corr_id: format!("airflow-hb-{}", fastrand::u64(..)),
-                                    version: PROTOCOL_VERSION.to_string(),
-                                    auth: None,
-                                    debug_time: None,
-                                },
-                                data: json!({
-                                    "pid": PID,
-                                    "tasks": [{ "id": task_id, "version": version }]
-                                }),
-                            })
-                            .await;
-                    }
-                })
-            };
-
-            // The downstream clock: create once, then poll on an interval
-            // sized for Airflow rather than for the lease.
-            let outcome = self.create_and_monitor(&target, &promise).await;
-            heartbeat.abort();
-            outcome
-        }
-    };
-
-    // ── 4. Settle ────────────────────────────────────────────────────────
+    // ── 3. Settle ────────────────────────────────────────────────────────
     //
-    // One exit. Two of the five cases deliberately do not settle: the
-    // server itself settles a timed-out promise, and a transient failure
-    // must leave the task for redelivery to retry.
+    // One exit, and one rule for the two cases that do not take it: the
+    // server settles a timed-out promise itself, and a transient failure
+    // must be left for redelivery to retry.
     let (state, value) = match outcome {
         Ok(Monitored::Succeeded { run, output }) => {
             ("resolved", json!({ "run": run, "output": output }))
@@ -315,8 +227,6 @@ async fn run(self) {
                 json!({ "run": {}, "error": { "kind": kind, "message": message } }),
             )
         }
-        // The server settles `rejected_timedout` at `timeoutAt` itself.
-        // Stop watching and leave the DAG run alone rather than racing it.
         Ok(Monitored::DeadlineReached) => {
             tracing::warn!(task_id = %self.task.id, "airflow: promise deadline reached, stopped monitoring");
             return;
@@ -361,26 +271,167 @@ async fn run(self) {
         Ok(r) if (200..300).contains(&r.head.status) => {
             tracing::info!(task_id = %self.task.id, state, "airflow: promise settled");
         }
-        // 409: the lease was lost, or the promise already settled — almost
-        // always a timeout. Retrying cannot help.
-        Ok(r) => {
-            tracing::warn!(task_id = %self.task.id, status = r.head.status, state, "airflow: task fulfill rejected")
-        }
-        Err(e) => {
-            tracing::error!(task_id = %self.task.id, error = %e, "airflow: task fulfill failed")
+        // A 409 means the lease was lost or the promise already settled —
+        // almost always a timeout. Nothing here is retryable either way.
+        other => {
+            tracing::warn!(task_id = %self.task.id, state, ?other, "airflow: promise not settled")
         }
     }
 }
 ```
 
-Two things to notice in the shape:
+```rust
+/// Resolve, create, monitor. One error channel, so `?` does the work the
+/// combinator chain used to.
+///
+/// The two ways resolution fails are not the same failure: a malformed
+/// address is the caller's error and can never become valid, because
+/// promise tags are immutable, so it rejects the promise; an unconfigured
+/// deployment is the operator's error that a rollout fixes, so it retries.
+async fn execute(
+    &self,
+    promise: &PromiseRecord,
+    version: i64,
+) -> Result<Monitored, AirflowError> {
+    // The address comes off the promise, not off the message: the promise
+    // is the durable record, and it is where every other input already
+    // comes from. A promise that has a task always carries this tag — that
+    // tag is what caused the task to exist.
+    let address = promise.tags.get(TARGET_TAG).ok_or_else(|| {
+        AirflowError::permanent("invalid_request", format!("no {TARGET_TAG} tag"))
+    })?;
+    let addr = AirflowAddress::parse(address).map_err(|e| {
+        AirflowError::permanent("invalid_request", format!("bad address '{address}': {e}"))
+    })?;
+    let deployment = self
+        .worker
+        .deployments
+        .get(&addr.deployment)
+        .cloned()
+        .ok_or_else(|| {
+            AirflowError::transient(format!("no deployment '{}' configured", addr.deployment))
+        })?;
+    let target = Target { addr, deployment };
+
+    let input = decode_param(promise.param.data.as_deref())?;
+    let run_id = derive_run_id(&promise.id);
+
+    // No `?` past this point: the heartbeat below has to be aborted, and an
+    // early return would leave it beating for a lease nobody holds.
+    let heartbeat = {
+        // The lease clock. Its own task, on a cadence derived from the lease
+        // TTL and nothing else — which is what lets the downstream clock
+        // back off past the lease without the lease lapsing.
+        let server = Arc::clone(&self.worker.server);
+        let task_id = self.task.id.clone();
+        let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                // Deliberately ignored. `task.heartbeat` answers 200 whether
+                // or not it refreshed anything — a heartbeat for a lease this
+                // worker no longer holds is a silent no-op — so the response
+                // carries no signal. Losing the lease surfaces at
+                // `task.fulfill`, as a 409.
+                let _ = server
+                    .process(&RequestEnvelope {
+                        kind: "task.heartbeat".to_string(),
+                        head: RequestHead {
+                            corr_id: format!("airflow-hb-{}", fastrand::u64(..)),
+                            version: PROTOCOL_VERSION.to_string(),
+                            auth: None,
+                            debug_time: None,
+                        },
+                        data: json!({
+                            "pid": PID,
+                            "tasks": [{ "id": task_id, "version": version }]
+                        }),
+                    })
+                    .await;
+            }
+        })
+    };
+
+    let outcome = self
+        .create_and_monitor(&target, promise, &run_id, &input)
+        .await;
+    heartbeat.abort();
+    outcome
+}
+
+/// Phases 1 and 2. Returns the terminal run, or `Pending` if the promise
+/// deadline arrived first.
+async fn create_and_monitor(
+    &self,
+    target: &Target,
+    promise: &PromiseRecord,
+    run_id: &str,
+    input: &Value,
+) -> Result<Monitored, AirflowError> {
+    // Phase 1 — create. Idempotent by construction.
+    self.create_dag_run(target, run_id, input).await?;
+
+    // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
+    // and latency, and deliberately unrelated to the lease TTL: the
+    // heartbeat task holds the lease open independently, so this interval
+    // may back off well past it.
+    let mut interval = self.worker.poll_interval;
+    loop {
+        let now = crate::util::system_time_ms();
+        if now >= promise.timeout_at {
+            return Ok(Monitored::DeadlineReached);
+        }
+        match self.get_dag_run(target, run_id).await? {
+            RunState::Pending => {}
+            RunState::Succeeded(run) => {
+                return Ok(Monitored::Succeeded {
+                    output: json!({
+                        "runType": run.get("run_type").cloned().unwrap_or(Value::Null),
+                        "conf": run.get("conf").cloned().unwrap_or_else(|| json!({})),
+                        "note": run.get("note").cloned().unwrap_or(Value::Null),
+                        "logicalDate": run.get("logical_date").cloned().unwrap_or(Value::Null),
+                    }),
+                    run: self.run_summary(target, &run),
+                })
+            }
+            RunState::Failed(run) => {
+                return Ok(Monitored::Failed {
+                    message: format!(
+                        "DAG run finished in state {}",
+                        run.get("state")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                    ),
+                    run: self.run_summary(target, &run),
+                })
+            }
+        }
+        // Never sleep past the promise deadline: the next iteration has to
+        // observe it and stop rather than wake up after the server has
+        // already settled the promise.
+        let sleep_ms = interval.min(promise.timeout_at - now).max(0) as u64;
+        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+        interval = interval
+            .saturating_mul(2)
+            .min(self.worker.max_poll_interval);
+    }
+}
+```
+
+Three things to notice in the shape:
 
 - **Every state change goes through `self.worker.server.process`** — an ordinary protocol
   request, the same one a remote worker would put on the wire, handed to the port instead
   of to a socket. There is no privileged in-process API.
+- **The claim has one interesting case.** A 409 race, a transient error and an unreachable
+  server are all "this attempt does not run"; there is nothing to decide between them, so
+  they share one early return. The single case worth its own arm is the one that should
+  never happen: a 200 whose payload is not a task.
 - **Five outcomes, three of which settle.** A timed-out promise is settled by the server
   itself, and a transient failure must be left for redelivery; settling either would be
-  wrong. The `match` at step 4 is where an integration's whole error policy lives.
+  wrong. That `match` is where an integration's whole error policy lives.
 
 ### Why the claim comes first
 
