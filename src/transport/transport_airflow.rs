@@ -68,8 +68,8 @@ use serde_json::{json, Value};
 
 use crate::config::{AirflowConfig, AirflowDeployment};
 use crate::core::types::{
-    ExecuteMsgTask, Message, PromiseRecord, RequestEnvelope, RequestHead, ResponseEnvelope,
-    TaskAcquireResponseData, PROTOCOL_VERSION,
+    ExecuteMsgTask, Message, PromiseRecord, RequestEnvelope, RequestHead, TaskAcquireResponseData,
+    PROTOCOL_VERSION, TARGET_TAG,
 };
 use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 
@@ -166,7 +166,7 @@ impl AirflowWorker {
 
 #[async_trait]
 impl ResonateWorker for AirflowWorker {
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn send(&self, _address: &str, msg: &Message) -> Result<(), Unavailable> {
         // Only `execute` asks for work. An `unblock` is a notification for a
         // worker that is waiting on a promise; this worker never waits.
         let task = match msg {
@@ -184,9 +184,14 @@ impl ResonateWorker for AirflowWorker {
         // is `Err(Unavailable)`, which the dispatch loop logs and drops.
         //
         // `send` means accepted for delivery, not executed.
+        //
+        // The `address` parameter goes unused here. It is what a *proxy* worker
+        // needs — HTTP push has a URL to POST to, poll a group to fan out to —
+        // and they have no promise in hand. This worker claims the task, so it
+        // reads its address off the promise instead: one durable source of
+        // truth, and the same one every other input comes from.
         let ctx = RunContext {
             worker: Arc::clone(&self.inner),
-            address: address.to_string(),
             task: task.clone(),
         };
         tokio::spawn(async move { ctx.run().await });
@@ -196,14 +201,11 @@ impl ResonateWorker for AirflowWorker {
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
-/// One delivery in flight. Three things and nothing else: the worker it belongs
-/// to, the address it was routed to, and the task it was told about.
+/// One delivery in flight. Two things and nothing else: the worker it belongs
+/// to, and the task it was told about. Everything else comes from the promise,
+/// once the task is claimed.
 struct RunContext {
     worker: Arc<Airflow>,
-    /// Unparsed: parsing is a validation step, and validation happens after the
-    /// claim so that a bad address can reject the promise instead of vanishing
-    /// into a log line.
-    address: String,
     task: ExecuteMsgTask,
 }
 
@@ -222,9 +224,12 @@ enum RunState {
 
 /// How monitoring ended. Distinct from [`RunState`] because reaching the
 /// promise deadline is an outcome of the loop, not a state Airflow reports.
+///
+/// Carries the finished run summary rather than the raw Airflow record, so
+/// settling needs nothing but this.
 enum Monitored {
-    Succeeded(Value),
-    Failed(Value),
+    Succeeded { run: Value, output: Value },
+    Failed { run: Value, message: String },
     DeadlineReached,
 }
 
@@ -241,128 +246,226 @@ enum AirflowError {
 }
 
 impl RunContext {
+    /// The whole lifecycle in one body: claim, resolve, monitor on two clocks,
+    /// settle. Only the downstream half is factored out — `create_and_monitor`
+    /// and the two HTTP calls under it are the part that differs per
+    /// integration; everything here is the same for all of them.
     async fn run(self) {
-        // 1. Acquire. A 409 means another attempt owns this task — drop
-        //    silently and never touch Airflow. Anything else non-200 is
-        //    transient: drop and let the retry loop redeliver.
-        let acquired = match self.acquire().await {
-            Some(a) => a,
-            None => return,
-        };
-        let version = acquired.task.version;
-        let promise = acquired.promise;
-
-        // 2. Resolve the address. This is validation, and it happens *after*
-        //    the claim on purpose: now that the task is owned, both ways it
-        //    can fail are reportable — a malformed address rejects the
-        //    promise, an unconfigured deployment drops the task. Before the
-        //    claim the only outcome available was `Err(Unavailable)`, which
-        //    the dispatch loop logs and drops.
-        let target = match self.resolve_target() {
-            Ok(t) => t,
-            Err(e) => return self.report(version, e).await,
-        };
-
-        // 3. Monitoring runs two independent clocks. The lease clock lives in
-        //    its own task so that however long the downstream clock sleeps
-        //    between status checks, the lease is still refreshed underneath it.
-        let heartbeat = self.spawn_heartbeat(version);
-        let outcome = self.create_and_monitor(&target, &promise).await;
-        heartbeat.abort();
-
-        match outcome {
-            Ok(Monitored::Succeeded(run)) => {
-                let output = json!({
-                    "runType": run.get("run_type").cloned().unwrap_or(Value::Null),
-                    "conf": run.get("conf").cloned().unwrap_or_else(|| json!({})),
-                    "note": run.get("note").cloned().unwrap_or(Value::Null),
-                    "logicalDate": run.get("logical_date").cloned().unwrap_or(Value::Null),
-                });
-                self.settle(
-                    version,
-                    "resolved",
-                    json!({ "run": self.run_summary(&target, &run), "output": output }),
-                )
-                .await;
-            }
-            Ok(Monitored::Failed(run)) => {
-                self.settle(
-                    version,
-                    "rejected",
-                    json!({
-                        "run": self.run_summary(&target, &run),
-                        "error": {
-                            "kind": "downstream_failed",
-                            "message": format!(
-                                "DAG run finished in state {}",
-                                run.get("state").and_then(Value::as_str).unwrap_or("unknown")
-                            ),
-                        }
-                    }),
-                )
-                .await;
-            }
-            // The server settles the promise `rejected_timedout` at `timeoutAt`
-            // on its own; stop watching and leave the DAG run alone rather than
-            // racing it.
-            Ok(Monitored::DeadlineReached) => {
-                tracing::warn!(
-                    task_id = %self.task.id,
-                    dag_id = %target.addr.dag_id,
-                    "airflow: promise deadline reached, stopped monitoring"
-                );
-            }
-            Err(e) => self.report(version, e).await,
-        }
-    }
-
-    /// Resolve the address, now that the task is owned.
-    ///
-    /// The two ways this fails are not the same failure. A malformed address is
-    /// the *caller's* error and can never become valid — promise tags are
-    /// immutable — so it rejects the promise with the reason. An unconfigured
-    /// deployment is the *operator's* error and deploying the config fixes it
-    /// without touching the promise, so it is transient.
-    fn resolve_target(&self) -> Result<Target, AirflowError> {
-        let addr = AirflowAddress::parse(&self.address).map_err(|e| AirflowError::Permanent {
-            kind: "invalid_request",
-            message: format!("invalid airflow address '{}': {e}", self.address),
-        })?;
-        let deployment = self
+        // ── 1. Claim the task ────────────────────────────────────────────────
+        //
+        // Nothing may happen on behalf of a task this worker does not own — and
+        // nothing can be *reported* until it does. Before the claim the only
+        // outcome available is `Err(Unavailable)`, which the dispatch loop logs
+        // and drops; after it, every failure can settle the promise. So the
+        // claim comes first and validation comes after.
+        let claimed = self
             .worker
-            .deployments
-            .get(&addr.deployment)
-            .cloned()
-            .ok_or_else(|| {
-                AirflowError::Transient(format!(
+            .server
+            .process(&RequestEnvelope {
+                kind: "task.acquire".to_string(),
+                head: RequestHead {
+                    corr_id: format!("airflow-{}", fastrand::u64(..)),
+                    version: PROTOCOL_VERSION.to_string(),
+                    // In process: there is no caller to authenticate.
+                    auth: None,
+                    debug_time: None,
+                },
+                data: json!({
+                    "id": self.task.id,
+                    "version": self.task.version,   // the fencing token from `execute`
+                    "pid": PID,
+                    "ttl": self.worker.lease_timeout,
+                }),
+            })
+            .await;
+
+        let acquired: TaskAcquireResponseData = match claimed {
+            Ok(r) if r.head.status == 200 => match serde_json::from_value(r.data) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!(task_id = %self.task.id, error = %e, "airflow: malformed acquire response");
+                    return;
+                }
+            },
+            // 409: another attempt owns it, or the task is no longer pending.
+            // Do nothing at all — in particular, do not touch Airflow.
+            Ok(r) if r.head.status == 409 => {
+                tracing::debug!(task_id = %self.task.id, "airflow: task not acquired");
+                return;
+            }
+            // Anything else is transient. Drop the task without settling; the
+            // lease expires and redelivery brings us back here.
+            Ok(r) => {
+                tracing::warn!(task_id = %self.task.id, status = r.head.status, "airflow: task acquire rejected");
+                return;
+            }
+            Err(e) => {
+                tracing::error!(task_id = %self.task.id, error = %e, "airflow: task acquire failed");
+                return;
+            }
+        };
+        let version = acquired.task.version; // the RESPONSE version (n+1), from here on
+        let promise = acquired.promise; // param, timeoutAt, createdAt, tags
+
+        // ── 2. Resolve the address, off the promise ──────────────────────────
+        //
+        // Not off the message: the promise is the durable record, and it is
+        // where every other input already comes from. A promise that has a task
+        // always carries the target tag — that tag is what caused the task to
+        // exist — so the lookup cannot fail in practice.
+        //
+        // The two ways this *can* fail are not the same failure. A malformed
+        // address is the caller's error and can never become valid, because
+        // promise tags are immutable; an unconfigured deployment is the
+        // operator's error and a rollout fixes it. One rejects, one retries.
+        let target = promise
+            .tags
+            .get(TARGET_TAG)
+            .ok_or_else(|| AirflowError::Permanent {
+                kind: "invalid_request",
+                message: format!("promise has no {TARGET_TAG} tag"),
+            })
+            .and_then(|address| {
+                AirflowAddress::parse(address).map_err(|e| AirflowError::Permanent {
+                    kind: "invalid_request",
+                    message: format!("invalid airflow address '{address}': {e}"),
+                })
+            })
+            .and_then(|addr| match self.worker.deployments.get(&addr.deployment) {
+                Some(deployment) => Ok(Target {
+                    deployment: deployment.clone(),
+                    addr,
+                }),
+                None => Err(AirflowError::Transient(format!(
                     "no deployment '{}' configured (known: {:?})",
                     addr.deployment,
                     self.worker.deployments.keys().collect::<Vec<_>>()
-                ))
-            })?;
-        Ok(Target { addr, deployment })
-    }
+                ))),
+            });
 
-    /// Apply the classification. Permanent failures settle the promise so the
-    /// caller learns why; transient ones drop the task without settling, so the
-    /// lease expires and redelivery re-runs the idempotent create.
-    async fn report(&self, version: i64, err: AirflowError) {
-        match err {
-            AirflowError::Permanent { kind, message } => {
+        // ── 3. Monitor, on two independent clocks ────────────────────────────
+        let outcome = match target {
+            Err(e) => Err(e),
+            Ok(target) => {
+                // The lease clock. Its own task, on a cadence derived from the
+                // lease TTL and nothing else — which is what lets the
+                // downstream clock below back off past the lease without the
+                // lease lapsing.
+                let heartbeat = {
+                    let server = Arc::clone(&self.worker.server);
+                    let task_id = self.task.id.clone();
+                    let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
+                    tokio::spawn(async move {
+                        let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
+                        ticker.tick().await;
+                        loop {
+                            ticker.tick().await;
+                            // Deliberately ignored. `task.heartbeat` answers 200
+                            // whether or not it refreshed anything — a heartbeat
+                            // for a lease this worker no longer holds is a
+                            // silent no-op — so the response carries no signal.
+                            // Losing the lease surfaces at `task.fulfill`, as a
+                            // 409.
+                            let _ = server
+                                .process(&RequestEnvelope {
+                                    kind: "task.heartbeat".to_string(),
+                                    head: RequestHead {
+                                        corr_id: format!("airflow-hb-{}", fastrand::u64(..)),
+                                        version: PROTOCOL_VERSION.to_string(),
+                                        auth: None,
+                                        debug_time: None,
+                                    },
+                                    data: json!({
+                                        "pid": PID,
+                                        "tasks": [{ "id": task_id, "version": version }]
+                                    }),
+                                })
+                                .await;
+                        }
+                    })
+                };
+
+                // The downstream clock: create once, then poll on an interval
+                // sized for Airflow rather than for the lease.
+                let outcome = self.create_and_monitor(&target, &promise).await;
+                heartbeat.abort();
+                outcome
+            }
+        };
+
+        // ── 4. Settle ────────────────────────────────────────────────────────
+        //
+        // One exit. Two of the five cases deliberately do not settle: the
+        // server itself settles a timed-out promise, and a transient failure
+        // must leave the task for redelivery to retry.
+        let (state, value) = match outcome {
+            Ok(Monitored::Succeeded { run, output }) => {
+                ("resolved", json!({ "run": run, "output": output }))
+            }
+            Ok(Monitored::Failed { run, message }) => (
+                "rejected",
+                json!({ "run": run, "error": { "kind": "downstream_failed", "message": message } }),
+            ),
+            Err(AirflowError::Permanent { kind, message }) => {
                 tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: permanent failure");
-                self.settle(
-                    version,
+                (
                     "rejected",
                     json!({ "run": {}, "error": { "kind": kind, "message": message } }),
                 )
-                .await;
             }
-            AirflowError::Transient(message) => {
-                tracing::warn!(
-                    task_id = %self.task.id,
-                    %message,
-                    "airflow: transient failure, dropping task for redelivery"
-                );
+            // The server settles `rejected_timedout` at `timeoutAt` itself.
+            // Stop watching and leave the DAG run alone rather than racing it.
+            Ok(Monitored::DeadlineReached) => {
+                tracing::warn!(task_id = %self.task.id, "airflow: promise deadline reached, stopped monitoring");
+                return;
+            }
+            Err(AirflowError::Transient(message)) => {
+                tracing::warn!(task_id = %self.task.id, %message, "airflow: transient failure, dropping task for redelivery");
+                return;
+            }
+        };
+
+        let settled = self
+            .worker
+            .server
+            .process(&RequestEnvelope {
+                kind: "task.fulfill".to_string(),
+                head: RequestHead {
+                    corr_id: format!("airflow-{}", fastrand::u64(..)),
+                    version: PROTOCOL_VERSION.to_string(),
+                    auth: None,
+                    debug_time: None,
+                },
+                data: json!({
+                    "id": self.task.id,
+                    "version": version,
+                    "action": {
+                        "kind": "promise.settle",
+                        "head": {},
+                        "data": {
+                            "id": self.task.id,   // must equal the task id
+                            "state": state,
+                            "value": {
+                                "headers": { "content-type": "application/json" },
+                                "data": b64_encode(&value.to_string())
+                            }
+                        }
+                    }
+                }),
+            })
+            .await;
+
+        match settled {
+            Ok(r) if (200..300).contains(&r.head.status) => {
+                tracing::info!(task_id = %self.task.id, state, "airflow: promise settled");
+            }
+            // 409: the lease was lost, or the promise already settled — almost
+            // always a timeout. Retrying cannot help.
+            Ok(r) => {
+                tracing::warn!(task_id = %self.task.id, status = r.head.status, state, "airflow: task fulfill rejected")
+            }
+            Err(e) => {
+                tracing::error!(task_id = %self.task.id, error = %e, "airflow: task fulfill failed")
             }
         }
     }
@@ -392,8 +495,28 @@ impl RunContext {
             }
             match self.get_dag_run(target, &run_id).await? {
                 RunState::Pending => {}
-                RunState::Succeeded(run) => return Ok(Monitored::Succeeded(run)),
-                RunState::Failed(run) => return Ok(Monitored::Failed(run)),
+                RunState::Succeeded(run) => {
+                    return Ok(Monitored::Succeeded {
+                        output: json!({
+                            "runType": run.get("run_type").cloned().unwrap_or(Value::Null),
+                            "conf": run.get("conf").cloned().unwrap_or_else(|| json!({})),
+                            "note": run.get("note").cloned().unwrap_or(Value::Null),
+                            "logicalDate": run.get("logical_date").cloned().unwrap_or(Value::Null),
+                        }),
+                        run: self.run_summary(target, &run),
+                    })
+                }
+                RunState::Failed(run) => {
+                    return Ok(Monitored::Failed {
+                        message: format!(
+                            "DAG run finished in state {}",
+                            run.get("state")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown")
+                        ),
+                        run: self.run_summary(target, &run),
+                    })
+                }
             }
             // Never sleep past the promise deadline: the next iteration has to
             // observe it and stop rather than wake up after the server has
@@ -559,148 +682,6 @@ impl RunContext {
             "endedAt": run.get("end_date").cloned().unwrap_or(Value::Null),
             "url": target.deployment.run_url(&target.addr.dag_id, run_id),
         })
-    }
-
-    // -- protocol calls -----------------------------------------------------
-
-    async fn request_server(
-        &self,
-        kind: &str,
-        data: Value,
-    ) -> Result<ResponseEnvelope, Unavailable> {
-        self.worker
-            .server
-            .process(&RequestEnvelope {
-                kind: kind.to_string(),
-                head: RequestHead {
-                    corr_id: format!("airflow-{}", fastrand::u64(..)),
-                    version: PROTOCOL_VERSION.to_string(),
-                    auth: None,
-                    debug_time: None,
-                },
-                data,
-            })
-            .await
-    }
-
-    async fn acquire(&self) -> Option<TaskAcquireResponseData> {
-        let resp = match self
-            .request_server(
-                "task.acquire",
-                json!({
-                    "id": self.task.id,
-                    "version": self.task.version,
-                    "pid": PID,
-                    "ttl": self.worker.lease_timeout
-                }),
-            )
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!(task_id = %self.task.id, error = %e, "airflow: task acquire failed");
-                return None;
-            }
-        };
-        if resp.head.status == 409 {
-            tracing::debug!(task_id = %self.task.id, "airflow: task not acquired");
-            return None;
-        }
-        if resp.head.status != 200 {
-            tracing::warn!(
-                task_id = %self.task.id,
-                status = resp.head.status,
-                "airflow: task acquire rejected"
-            );
-            return None;
-        }
-        match serde_json::from_value(resp.data) {
-            Ok(d) => Some(d),
-            Err(e) => {
-                tracing::error!(task_id = %self.task.id, error = %e, "airflow: malformed acquire response");
-                None
-            }
-        }
-    }
-
-    /// The lease clock. Runs until aborted, on a cadence derived from the
-    /// lease TTL and from nothing else.
-    ///
-    /// Its own task on purpose: folding the heartbeat into the poll loop would
-    /// tie the lease to the downstream system's cadence, and a poll interval
-    /// that backed off past the lease TTL would silently drop the task.
-    fn spawn_heartbeat(&self, version: i64) -> tokio::task::JoinHandle<()> {
-        let server = Arc::clone(&self.worker.server);
-        let task_id = self.task.id.clone();
-        let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
-            ticker.tick().await;
-            loop {
-                ticker.tick().await;
-                // Deliberately ignored. `task.heartbeat` answers 200 whether or
-                // not it refreshed anything — a heartbeat for a lease this
-                // worker no longer holds is a silent no-op — so the response
-                // carries no signal to act on. Losing the lease surfaces at
-                // `task.fulfill`, as a 409.
-                let _ = server
-                    .process(&RequestEnvelope {
-                        kind: "task.heartbeat".to_string(),
-                        head: RequestHead {
-                            corr_id: format!("airflow-hb-{}", fastrand::u64(..)),
-                            version: PROTOCOL_VERSION.to_string(),
-                            auth: None,
-                            debug_time: None,
-                        },
-                        data: json!({
-                            "pid": PID,
-                            "tasks": [{ "id": task_id, "version": version }]
-                        }),
-                    })
-                    .await;
-            }
-        })
-    }
-
-    async fn settle(&self, version: i64, state: &str, value: Value) {
-        let encoded = b64_encode(&value.to_string());
-        let resp = self
-            .request_server(
-                "task.fulfill",
-                json!({
-                    "id": self.task.id,
-                    "version": version,
-                    "action": {
-                        "kind": "promise.settle",
-                        "head": {},
-                        "data": {
-                            "id": self.task.id,
-                            "state": state,
-                            "value": {
-                                "headers": { "content-type": "application/json" },
-                                "data": encoded
-                            }
-                        }
-                    }
-                }),
-            )
-            .await;
-        match resp {
-            Ok(r) if (200..300).contains(&r.head.status) => {
-                tracing::info!(task_id = %self.task.id, state, "airflow: promise settled");
-            }
-            // 409: the lease was lost, or the promise already settled — almost
-            // always a timeout. Retrying cannot help.
-            Ok(r) => tracing::warn!(
-                task_id = %self.task.id,
-                status = r.head.status,
-                state,
-                "airflow: task fulfill rejected"
-            ),
-            Err(e) => {
-                tracing::error!(task_id = %self.task.id, error = %e, "airflow: task fulfill failed")
-            }
-        }
     }
 }
 

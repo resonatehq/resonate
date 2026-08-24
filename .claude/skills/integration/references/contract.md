@@ -128,7 +128,7 @@ sequenceDiagram
   else lost the race
     S-->>W: 409 do nothing at all
   end
-  W->>W: parse address, resolve config<br/>past the claim, so failures settle the promise
+  W->>W: read the target tag off the promise<br/>parse and resolve config — failures now settle it
 
   par lease clock — every ttl/3
     loop until aborted

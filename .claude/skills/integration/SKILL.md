@@ -88,12 +88,16 @@ struct My { server: Arc<dyn ResonateServer>, client: reqwest::Client, /* config 
 
 pub struct MyWorker { inner: Arc<My> }
 
-/// One delivery in flight: the worker, the address, the task. Nothing else.
-struct RunContext { worker: Arc<My>, address: String, task: ExecuteMsgTask }
+/// One delivery in flight: the worker and the task. Nothing else — the
+/// address, the param and the deadline all come off the promise once claimed.
+struct RunContext { worker: Arc<My>, task: ExecuteMsgTask }
 
 #[async_trait]
 impl ResonateWorker for MyWorker {
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    // `address` is unused: a *proxy* worker needs it (a URL to POST to, a group
+    // to fan out to) because it has no promise in hand. This one claims the
+    // task, so it reads its address off the promise's `resonate:target` tag.
+    async fn send(&self, _address: &str, msg: &Message) -> Result<(), Unavailable> {
         let task = match msg {
             Message::Execute(e) => &e.data.task,   // { id, version }
             Message::Unblock(_) => return Ok(()),  // for workers that *wait*; not this one
@@ -103,11 +107,7 @@ impl ResonateWorker for MyWorker {
         // task through `server`, and that is a round trip — the dispatch loop
         // awaits `send` sequentially over the batch. Validation waits too:
         // until the task is claimed its failures are unreportable.
-        let ctx = RunContext {
-            worker: Arc::clone(&self.inner),
-            address: address.to_string(),          // unparsed
-            task: task.clone(),
-        };
+        let ctx = RunContext { worker: Arc::clone(&self.inner), task: task.clone() };
         tokio::spawn(async move { ctx.run().await });
         Ok(())                                     // accepted for delivery, not executed
     }

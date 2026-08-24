@@ -129,6 +129,13 @@ impl fmt::Display for SettleState {
     }
 }
 
+/// The tag carrying a promise's address — the value the router dispatches on.
+///
+/// A promise that has a task always has this tag: it is what causes the task to
+/// exist. So a worker that has claimed a task can read its own address back off
+/// the promise rather than being told it, which is why it lives in `core`.
+pub const TARGET_TAG: &str = "resonate:target";
+
 // Protocol version used in responses
 pub const PROTOCOL_VERSION: &str = "2026-04-01";
 // Versions accepted in requests.
