@@ -67,7 +67,7 @@ async def create_order(ctx: Context, order_id: str, items: list[dict]) -> Order:
 
 
 async def main() -> None:
-    r = Resonate()  # in-process LocalNetwork; no server required
+    r = Resonate()  # in-process LocalConnection; no server required
     r.register(price_items)
     r.register(create_order)
     try:

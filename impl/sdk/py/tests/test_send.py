@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 import msgspec
 import pytest
 
+from resonate.connections import LocalConnection
 from resonate.error import ServerError
-from resonate.network import LocalNetwork
 from resonate.send import (
     Envelope,
     Head,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 I64_MAX = 2**63 - 1
 
 
-def _sender(net: LocalNetwork) -> Sender:
+def _sender(net: LocalConnection) -> Sender:
     return Sender(Transport(net), None)
 
 
@@ -68,10 +68,10 @@ def test_sub_envelope_serializes_nested_action() -> None:
     assert json["data"]["state"] == "resolved"
 
 
-# -- Round-trip: Sender methods through LocalNetwork --------------------------
+# -- Round-trip: Sender methods through LocalConnection --------------------------
 
 
-async def _raw_send(net: LocalNetwork, req: Any) -> Any:
+async def _raw_send(net: LocalConnection, req: Any) -> Any:
     """Send a raw envelope and return its decoded ``data`` portion."""
     resp_str = await net.send(msgspec.json.encode(req).decode("utf-8"))
     resp = msgspec.json.decode(resp_str)
@@ -101,7 +101,7 @@ def _create_task_req(corr_id: str, promise_id: str) -> dict[str, Any]:
 
 def test_promise_create_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="test")
+        net = LocalConnection(pid="test")
         sender = _sender(net)
 
         req = PromiseCreateReq(id="rt-p1", timeout_at=I64_MAX, param=Value(), tags={})
@@ -114,7 +114,7 @@ def test_promise_create_roundtrip() -> None:
 
 def test_task_acquire_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         # First create a task via raw network (proper envelope format).
         rdata = await _raw_send(net, _create_task_req("c1", "rt-p2"))
@@ -138,7 +138,7 @@ def test_task_acquire_roundtrip() -> None:
 
 def test_task_fulfill_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         rdata = await _raw_send(net, _create_task_req("c1", "rt-p3"))
         task_id = rdata["task"]["id"]
@@ -156,7 +156,7 @@ def test_task_fulfill_roundtrip() -> None:
 
 def test_task_fence_create_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         rdata = await _raw_send(net, _create_task_req("c1", "rt-fence"))
         task_id = rdata["task"]["id"]
@@ -177,7 +177,7 @@ def test_task_fence_wrong_version_raises_and_does_not_apply() -> None:
     """A fence with a stale lease version raises ServerError(409) and is a no-op."""
 
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         rdata = await _raw_send(net, _create_task_req("c1", "rt-fence2"))
         task_id = rdata["task"]["id"]
@@ -197,7 +197,7 @@ def test_task_fence_wrong_version_raises_and_does_not_apply() -> None:
 
 def test_task_suspend_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         rdata = await _raw_send(net, _create_task_req("c1", "rt-p4"))
         task_id = rdata["task"]["id"]
@@ -215,7 +215,7 @@ def test_task_suspend_roundtrip() -> None:
 
 def test_task_release_roundtrip() -> None:
     async def run() -> None:
-        net = LocalNetwork(pid="pid1")
+        net = LocalConnection(pid="pid1")
 
         rdata = await _raw_send(net, _create_task_req("c1", "rt-p5"))
         task_id = rdata["task"]["id"]

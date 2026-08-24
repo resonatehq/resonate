@@ -32,7 +32,7 @@ below pin that contract at three layers:
    :class:`ApplicationError` with the message preserved. This is the proof
    shared by both dispatch paths.
 2. **Local dispatch (``ctx.run`` / ``handle.result``)** -- end-to-end against
-   the in-process :class:`~resonate.network.LocalNetwork`.
+   the in-process :class:`~resonate.connections.LocalConnection`.
 3. **Discrimination patterns** -- catching the original class (now possible),
    "by position" (one ``await`` per ``try``), and "by message tag"
    (``raise ApplicationError('E_CODE: ...')``, the cross-SDK-safe idiom).

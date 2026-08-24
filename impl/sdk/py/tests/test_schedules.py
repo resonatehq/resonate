@@ -1,7 +1,7 @@
 """Behaviour tests for :mod:`resonate.schedules`.
 
 The :class:`Promises` / :class:`Schedules` clients are built directly over a
-real :class:`Sender` + :class:`Transport` + :class:`LocalNetwork` -- the same
+real :class:`Sender` + :class:`Transport` + :class:`LocalConnection` -- the same
 wiring ``Resonate.local()`` performs -- with a ``Codec(NoopEncryptor())``.
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 
 from resonate.codec import Codec, NoopEncryptor
+from resonate.connections import LocalConnection
 from resonate.error import ServerError
-from resonate.network import LocalNetwork
 from resonate.schedules import Schedules
 from resonate.send import Sender
 from resonate.transport import Transport
@@ -22,7 +22,7 @@ I64_MAX = 2**63 - 1
 
 def _local() -> Schedules:
     """Build promise/schedule clients sharing one local network, like ``Resonate::local()``."""
-    net = LocalNetwork()
+    net = LocalConnection()
     sender = Sender(Transport(net), None)
     codec = Codec(NoopEncryptor())
     return Schedules(sender, codec)

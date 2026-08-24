@@ -30,6 +30,7 @@ from resonate.error import (
     Suspended,
 )
 from resonate.heartbeat import Heartbeat, NoopHeartbeat
+from resonate.ids import origin_of
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy
 from resonate.send import Redirect, Sender
@@ -171,6 +172,26 @@ class Core(msgspec.Struct, kw_only=True):
         drives the redirect loop, fulfills or suspends on the inner's outcome,
         and releases on error.
         """
+        # A still-pending ``resonate:timer`` promise is a durable sleep that has
+        # not come due (see :meth:`resonate.context.Context.sleep`). It names no
+        # function to run; it only carries a task at all because the target that
+        # gets the server to *schedule* its deadline also spawns one. Drop it and
+        # let the deadline settle the promise, which is what wakes the sleepers.
+        #
+        # Dropping means exactly that: no fulfill (that would end the sleep
+        # early), no suspend (a task cannot await its own promise), and no
+        # release (the server re-dispatches a released task immediately, which
+        # would spin). The lease simply lapses; a re-delivery before the wake is
+        # dropped again, and one after it finds the promise settled and fulfills
+        # the task below.
+        if promise.tags.get("resonate:timer") == "true" and promise.state == "pending":
+            logger.debug(
+                "core: dropping not-yet-due timer task task_id=%s timeout_at=%d",
+                task_id,
+                promise.timeout_at,
+            )
+            return "suspended"
+
         self.heartbeat.start(task_id, task_version)
         assert self.sender, "sender must be set"
         try:
@@ -285,6 +306,24 @@ class Core(msgspec.Struct, kw_only=True):
         caller owns those. Encodes return values through the codec so the caller
         has a single, uniform fulfill path.
         """
+        # 0. A settled ``resonate:timer`` promise -- a durable sleep whose wake
+        #    has passed. It names no function and carries no ``TaskData``, so it
+        #    cannot go through the decode below; report its settlement so the
+        #    caller fulfills the task. (The not-yet-due case never reaches here:
+        #    the caller drops it. The server normally fulfills a timer's task
+        #    itself when the deadline settles the promise, so this only catches a
+        #    delivery already in flight at that moment.)
+        if promise.tags.get("resonate:timer") == "true" and promise.state != "pending":
+            tree = Tree(root_id=promise.id)
+            tree.settle(promise.id)
+            return _ExecFulfilled(
+                state="rejected"
+                if promise.state == "rejected_timedout"
+                else promise.state,
+                value=self.codec.encode(promise.value.data),
+                tree=tree,
+            )
+
         # 1. Decode TaskData from the (already-decoded) promise param.
         try:
             task_data = self.codec.convert(promise.param.data, TaskData)
@@ -330,19 +369,13 @@ class Core(msgspec.Struct, kw_only=True):
         root_ctx = Context.root(
             id=promise.id,
             # Take the lineage origin from the promise's ``resonate:origin`` tag,
-            # which the dispatcher set: a top-level run / rpc propagates its own
-            # origin, while ``detached`` resets it to the child's own id (a new
-            # lineage). Falling back to ``promise.id`` when absent keeps a genuine
-            # top-level root (whose tag equals its id anyway) and any tag-less
-            # promise correct.
-            origin_id=promise.tags.get("resonate:origin", promise.id),
-            # The id-generation prefix from ``resonate:prefix``. Unlike origin it
-            # is propagated *unchanged* across ``detached`` re-roots, so every
-            # recursion level mints ``{prefix}.{16hex}`` off the same fixed prefix
-            # instead of off its own grown id -- this is what bounds recursive
-            # detached ids. Falls back to ``promise.id`` when absent (genuine
-            # top-level root / tag-less promise), matching the origin fallback.
-            prefix_id=promise.tags.get("resonate:prefix", promise.id),
+            # which the dispatcher set: every id in the lineage is
+            # ``{origin}:{lineage}``, so this is both the ancestry root and the
+            # anchor this workflow's own child ids extend. A tag-less promise
+            # (one created directly through the promises client, say) falls back
+            # to deriving it from the id the same way the server does -- which
+            # for a genuine top-level root is the id itself.
+            origin_id=promise.tags.get("resonate:origin") or origin_of(promise.id),
             timeout_at=promise.timeout_at,
             func_name=task_data.func,
             effects=effects,

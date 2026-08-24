@@ -423,7 +423,9 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 ``conversation_id``: a conversation spans many runs, so reusing
                 it would make a follow-up turn resolve to the first turn's
                 promise and replay its result. Compose one when you want the
-                link, e.g. ``id=f'{conversation_id}:{turn}'``.
+                link, e.g. ``id=f'{conversation_id}-{turn}'``. The id is the
+                lineage origin of every promise the run creates, so it must not
+                contain ``.`` or ``:`` (see :mod:`resonate.ids`).
             output_type: Custom output type for this run. Only supported when
                 running inline inside an active workflow; a durable run's
                 output type must be set on the agent at construction time.
@@ -550,7 +552,11 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # deliberately *not*
         # used as the fallback: it spans many runs, so a follow-up turn would
         # collide with the first turn's promise and replay its result.
-        run_id = id or f"{self._name}.run.{uuid4()}"
+        # ``-`` joins the parts, never ``:``: the run id becomes the
+        # ``resonate:origin`` of every promise this run creates, and the origin
+        # is everything before an id's first ``:`` (see
+        # :func:`resonate.ids.validate_root_id`).
+        run_id = id or f"{self._name}-run-{uuid4()}"
 
         if self._run_timeout is not None:
             resonate = resonate.options(timeout=self._run_timeout)

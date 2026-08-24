@@ -9,9 +9,9 @@ from resonate.error import DecodingError, ServerError
 from resonate.types import PromiseRecord
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
-    from resonate.network import Network
+    from resonate.connections import Network, Source
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,14 @@ def _nested_str(value: Any, *keys: str) -> str:
 class Transport:
     """Adds JSON serialization, deserialization, and correlation validation.
 
-    Resonate and its sub-components use the transport -- never the raw network.
+    Resonate and its sub-components use the transport -- never the raw
+    connections. Requests go out over the single ``network``; push messages
+    come in over every ``source``.
     """
 
-    def __init__(self, network: Network) -> None:
+    def __init__(self, network: Network, sources: Sequence[Source] = ()) -> None:
         self._network = network
+        self._sources = tuple(sources)
 
     async def send(self, kind: str, corr_id: str, body: str) -> Any:
         """Send an already-serialized request, returning the parsed response."""
@@ -121,7 +124,7 @@ class Transport:
         return response
 
     def recv(self, callback: Callable[[Message], None]) -> None:
-        """Register a callback for incoming messages."""
+        """Register a callback for incoming messages on every source."""
 
         def on_raw(raw: str) -> None:
             try:
@@ -134,7 +137,8 @@ class Transport:
             logger.debug("transport recv: %s", raw)
             callback(msg)
 
-        self._network.recv(on_raw)
+        for source in self._sources:
+            source.recv(on_raw)
 
     def network(self) -> Network:
         """Access the underlying network."""

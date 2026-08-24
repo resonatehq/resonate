@@ -24,13 +24,13 @@ import pydantic
 import pytest
 
 from resonate.codec import Codec, NoopEncryptor
+from resonate.connections import LocalConnection
+from resonate.connections.local import Task
 from resonate.context import Context
 from resonate.dependencies import DependencyMap
 from resonate.durable import DurableFunction
 from resonate.effects import ResonateEffects
 from resonate.error import ApplicationError, SerializationError
-from resonate.network import LocalNetwork
-from resonate.network.local import Task
 from resonate.send import Sender
 from resonate.transport import Transport
 from resonate.types import Args
@@ -44,7 +44,7 @@ I64_MAX = 2**63 - 1
 
 
 def _context() -> Context:
-    net = LocalNetwork()
+    net = LocalConnection()
     net.state.tasks["root"] = Task(
         id="root",
         state="acquired",
@@ -58,7 +58,6 @@ def _context() -> Context:
     return Context.root(
         id="root",
         origin_id="root",
-        prefix_id="root",
         timeout_at=I64_MAX,
         func_name="root",
         effects=effects,

@@ -112,7 +112,7 @@ async def cancel_order(ctx: Context, order_id: str, note: str) -> str:
 
 async def fulfill_order(ctx: Context, order_id: str, amount: int) -> str:
     # Open the human-decision promise first so its id is deterministic
-    # (``{workflow_id}.1``). ctx.promise returns a future whose ``id()`` is
+    # (``{workflow_id}:1``). ctx.promise returns a future whose ``id()`` is
     # awaitable; we publish that id through a leaf so a real reviewer would
     # know where to resolve.
     approval = ctx.promise()  # inherit workflow timeout

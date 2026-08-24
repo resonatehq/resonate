@@ -57,7 +57,7 @@ def _promise_to_json(p: PromiseRecord) -> dict[str, Any]:
 class StubNetwork:
     """In-memory promise store mimicking the server, tracking send count.
 
-    Implements the :class:`~resonate.network.Network` protocol; only
+    Implements the :class:`~resonate.connections.Network` protocol; only
     ``promise.create`` and ``promise.settle`` are handled (the operations the
     effects tests use), everything else returns a 400.
     """

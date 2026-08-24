@@ -18,8 +18,8 @@ serverless worker cannot do:
   a worker only *executes* work handed to it. A Lambda drives one task through
   :class:`~resonate.core.Core` and reports the outcome.
 
-The per-invocation wiring (the :class:`~resonate.network.HttpNetwork` back to
-the server, the :class:`~resonate.core.Core`) is built fresh inside the
+The per-invocation wiring (the :class:`~resonate.connections.HttpConnection` back
+to the server, the :class:`~resonate.core.Core`) is built fresh inside the
 returned handler because both the server URL and this function's own public
 URL are only known once the request arrives. Everything reusable across
 invocations -- codec, registry, dependencies -- is built once at construction
@@ -52,11 +52,11 @@ from typing import TYPE_CHECKING, Any, Concatenate, overload
 import msgspec
 
 from resonate.codec import Codec, NoopEncryptor
+from resonate.connections import HttpConnection
 from resonate.core import Core
 from resonate.dependencies import DependencyMap
 from resonate.error import ApplicationError
 from resonate.heartbeat import NoopHeartbeat
-from resonate.network import HttpNetwork
 from resonate.registry import Registry
 from resonate.retry import Exponential
 from resonate.send import Sender
@@ -158,7 +158,6 @@ class Resonate:
         *,
         url: str | None = None,
         function_url: str | None = None,
-        group: str | None = None,
         pid: str | None = None,
         ttl: timedelta | None = None,
         token: str | None = None,
@@ -189,7 +188,6 @@ class Resonate:
             if function_url is not None
             else os.environ.get("RESONATE_FUNCTION_URL")
         )
-        self._group = group
         self._pid = pid if pid is not None else uuid.uuid4().hex
         self._ttl = ttl if ttl is not None else DEFAULT_TTL
         self._auth = token if token is not None else os.environ.get("RESONATE_TOKEN")
@@ -269,8 +267,8 @@ class Resonate:
 
         The returned coroutine-free handler processes a single ``execute``
         message per invocation: it validates the HTTP request, decodes the
-        message, builds a send-only :class:`~resonate.network.HttpNetwork` back
-        to the server and a :class:`~resonate.core.Core`, drives the task to
+        message, builds an :class:`~resonate.connections.HttpConnection` back to
+        the server and a :class:`~resonate.core.Core`, drives the task to
         ``done`` or ``suspended`` under a fresh event loop, and returns a JSON
         status. Child tasks dispatched by the workflow are routed back to this
         same function (see the resolver below), so a recursive workflow
@@ -307,7 +305,8 @@ class Resonate:
                 # its *own* view of its URL in the head (e.g. ``localhost:8001``),
                 # which is unreachable from inside a Lambda container -- the
                 # deployment knows the routable address, the server does not.
-                # HttpNetwork needs this to send acquire/fulfill/suspend back.
+                # HttpConnection needs this to send acquire/fulfill/suspend
+                # back.
                 server_url = self._url or msg.head.server_url
                 if not server_url:
                     return _response(
@@ -374,19 +373,13 @@ class Resonate:
     ) -> str:
         """Build the per-invocation wiring and run the task to a terminal state.
 
-        A send-only :class:`~resonate.network.HttpNetwork` is used because the
-        server pushes work over HTTP -- there is no poll connection to open.
-        The resolver routes any non-URL child target back to ``function_url`` so
-        recursive sub-tasks re-invoke this Lambda; explicit URL targets pass
-        through unchanged.
+        An :class:`~resonate.connections.HttpConnection` (request/response only)
+        is all that is needed because the server pushes work over HTTP --
+        there is no message source to open. The resolver routes any non-URL
+        child target back to ``function_url`` so recursive sub-tasks re-invoke
+        this Lambda; explicit URL targets pass through unchanged.
         """
-        network = HttpNetwork(
-            url=server_url,
-            pid=self._pid,
-            group=self._group,
-            auth=self._auth,
-            send_only=True,
-        )
+        network = HttpConnection(url=server_url, auth=self._auth)
 
         core = Core(
             sender=Sender(Transport(network), self._auth),

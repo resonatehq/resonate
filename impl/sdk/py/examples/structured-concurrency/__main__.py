@@ -15,7 +15,7 @@ child, so both ``bar`` invocations run to completion regardless of whether
 ``foo`` awaited them.
 
 We prove it durably. ``ctx.run`` children get deterministic ids
-``{foo_id}.1`` and ``{foo_id}.2``. After ``foo`` returns ``5`` we attach to
+``{foo_id}:1`` and ``{foo_id}:2``. After ``foo`` returns ``5`` we attach to
 those two promises by id and assert each one resolved -- evidence the
 never-awaited work was awaited *by the runtime* on our behalf.
 
@@ -74,11 +74,12 @@ async def main() -> None:
 
         # Structured concurrency: the runtime awaited the two never-awaited
         # ctx.run children before resolving foo. ctx.run assigns child ids in
-        # call order as ``{parent_id}.{seq}`` (seq starts at 1), so foo's two
-        # children are ``{foo_id}.1`` and ``{foo_id}.2``. Attach to each
+        # call order below the workflow's origin -- a bare root joins its first
+        # lineage segment with ``:`` (deeper ones with ``.``), so foo's two
+        # children are ``{foo_id}:1`` and ``{foo_id}:2``. Attach to each
         # durable promise and confirm it resolved with bar's result.
         for seq, n in ((1, 1), (2, 2)):
-            child_id = f"{foo_id}.{seq}"
+            child_id = f"{foo_id}:{seq}"
             child_handle = await r.get(child_id)
             child_out = await child_handle.result()
             assert child_out == n * 10, (

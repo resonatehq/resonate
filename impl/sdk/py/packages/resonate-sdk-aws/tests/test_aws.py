@@ -21,8 +21,8 @@ import msgspec
 import pytest
 from resonate_aws import Resonate, _self_routing_resolver
 
+from resonate.connections import HttpConnection, Source
 from resonate.error import AlreadyRegisteredError, ApplicationError
-from resonate.network import HttpNetwork
 
 if TYPE_CHECKING:
     from aws_lambda_typing.context import Context as LambdaContext
@@ -314,17 +314,18 @@ def test_with_dependency_is_readable_by_type() -> None:
 # -- send-only network --------------------------------------------------------
 
 
-def test_send_only_network_skips_sse_listener() -> None:
-    async def run() -> None:
-        send_only = HttpNetwork(url=_SERVER_URL, send_only=True)
-        await send_only.start()
-        # No poll connection is opened for a serverless worker.
-        assert send_only._sse_handle is None
-        await send_only.stop()
+def test_http_connection_is_not_a_message_source() -> None:
+    """The per-invocation network is request/response only by construction.
 
-        polling = HttpNetwork(url=_SERVER_URL)
-        await polling.start()
-        assert polling._sse_handle is not None
-        await polling.stop()
+    A serverless worker is pushed work over HTTP; it must never open a poll
+    connection. With the network/source split that guarantee is structural:
+    :class:`HttpConnection` has no receive half at all.
+    """
+
+    async def run() -> None:
+        network = HttpConnection(url=_SERVER_URL)
+        await network.start()
+        assert not isinstance(network, Source)
+        await network.stop()
 
     asyncio.run(run())

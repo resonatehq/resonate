@@ -1,7 +1,7 @@
 """Behaviour tests for :mod:`resonate.ext.pydantic_ai`.
 
 End-to-end tests drive a real ``ResonateAgent`` over the in-process
-:class:`~resonate.network.LocalNetwork` -- "real server, real wire", no mocks
+:class:`~resonate.connections.LocalConnection` -- "real server, real wire", no mocks
 -- with Pydantic AI's offline ``TestModel`` / ``FunctionModel`` standing in for
 a provider. Replay tests reuse the ``_root`` preload harness from
 ``test_context``: a pre-settled child promise is what a crash-recovery replay
@@ -33,6 +33,8 @@ from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import RunUsage
 
 from resonate.codec import Codec, NoopEncryptor
+from resonate.connections import LocalConnection
+from resonate.connections.local import Task
 from resonate.context import Context
 from resonate.dependencies import DependencyMap
 from resonate.effects import ResonateEffects
@@ -43,8 +45,6 @@ from resonate.ext.pydantic_ai.context import (
     set_workflow_context,
 )
 from resonate.ext.pydantic_ai.types import ModelResponseEnvelope
-from resonate.network import LocalNetwork
-from resonate.network.local import Task
 from resonate.resonate import Resonate
 from resonate.retry import Never
 from resonate.send import Sender
@@ -83,8 +83,8 @@ def _codec() -> Codec:
 
 
 def _root(preload: list[PromiseRecord] | None = None) -> Context:
-    """Build a root ``Context`` over a fresh ``LocalNetwork``, as a workflow would see it."""
-    net = LocalNetwork()
+    """Build a root ``Context`` over a fresh ``LocalConnection``, as a workflow would see it."""
+    net = LocalConnection()
     net.state.tasks["root"] = Task(
         id="root",
         state="acquired",
@@ -98,7 +98,6 @@ def _root(preload: list[PromiseRecord] | None = None) -> Context:
     return Context.root(
         id="root",
         origin_id="root",
-        prefix_id="root",
         timeout_at=I64_MAX,
         func_name="root",
         effects=effects,
@@ -566,7 +565,7 @@ def _forbidden_model() -> FunctionModel:
 @pytest.mark.asyncio
 async def test_model_request_replay_is_served_from_journal() -> None:
     stored = ModelResponseEnvelope(response=_text_response("from the journal"))
-    ctx = _root([_resolved("root.1", stored)])
+    ctx = _root([_resolved("root:1", stored)])
 
     model = ResonateModel(
         _forbidden_model(), retry_policy=None, get_event_stream_handler=lambda: None
@@ -585,7 +584,7 @@ async def test_model_request_replay_is_served_from_journal() -> None:
 @pytest.mark.asyncio
 async def test_model_request_stream_replay_is_served_from_journal() -> None:
     stored = ModelResponseEnvelope(response=_text_response("streamed from the journal"))
-    ctx = _root([_resolved("root.1", stored)])
+    ctx = _root([_resolved("root:1", stored)])
 
     handler_calls = 0
 
@@ -653,9 +652,9 @@ async def test_replay_continues_from_last_completed_step() -> None:
             parts=[ToolCallPart(tool_name="get_weather", args={"city": "SF"})]
         )
     )
-    # The first model request is `root.1`; leaving `root.2` unsettled forces the
+    # The first model request is `root:1`; leaving `root:2` unsettled forces the
     # second request to run live.
-    ctx = _root([_resolved("root.1", step_one)])
+    ctx = _root([_resolved("root:1", step_one)])
 
     model_calls = 0
     tool_calls: list[str] = []
@@ -774,7 +773,7 @@ async def test_mcp_toolset_is_wrapped_and_checkpointed() -> None:
 @pytest.mark.asyncio
 async def test_mcp_call_tool_replay_is_served_from_journal() -> None:
     stored = ToolResultEnvelope(result="42")
-    ctx = _root([_resolved("root.1", stored)])
+    ctx = _root([_resolved("root:1", stored)])
 
     toolset = StubMCPToolset(id="calculator")
     durable_toolset = ResonateMCPToolset(toolset)

@@ -8,6 +8,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from resonate.error import NatsError
+from resonate.ids import origin_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,10 +42,9 @@ DEFAULT_RECV_PREFIX = "resonate.recv"
 REPLY_HEADER = "Resonate-Reply-To"
 
 
-def _id_to_origin(id: str) -> str:
-    """Return the lineage origin: the substring before the first ``.``."""
-    dot = id.find(".")
-    return id if dot == -1 else id[:dot]
+#: The lineage origin of an id -- see :mod:`resonate.ids`. Aliased here because
+#: it is what selects the server's origin-state partition (below).
+_id_to_origin = origin_of
 
 
 def _routing_origin(req: dict[str, Any]) -> str:
@@ -80,12 +80,20 @@ def _publish_subject(prefix: str, origin: str) -> str:
     return f"{prefix}.{token.decode('ascii')}"
 
 
-class NatsNetwork:
-    """:class:`Network` implementation that talks to resonate-on-nats over NATS.
+class NatsConnection:
+    """NATS connection to resonate-on-nats.
+
+    Implements **both** protocols: :class:`~resonate.connections.Network` (the
+    request/response ``send`` path) and :class:`~resonate.connections.Source` (the
+    push-message ``recv`` path). It can therefore serve as the network, as a
+    source, or as both at once. When used only as a source, :meth:`send` is
+    simply never called; when used only as the network, no receiver is
+    registered via :meth:`recv` and :meth:`start` opens no subscriptions.
 
     The NATS connection lifecycle lives **outside** the SDK: pass an already
-    connected ``nats-py`` client; :meth:`stop` only tears down this network's
-    subscriptions and leaves the connection for the caller to drain/close.
+    connected ``nats-py`` client; :meth:`stop` only tears down this
+    connection's subscriptions and leaves the client for the caller to
+    drain/close.
 
     - Requests are published to ``{api_prefix}.{base64url(origin)}`` with a
       ``Resonate-Reply-To`` header naming a private inbox; the reply arrives on
@@ -141,8 +149,20 @@ class NatsNetwork:
         return self._anycast
 
     async def start(self) -> None:
-        """Subscribe to the unicast and anycast subjects on the shared connection."""
+        """Subscribe to the unicast and anycast subjects on the shared connection.
+
+        Subscriptions are only opened when a receiver has been registered via
+        :meth:`recv` -- i.e. when this connection is used as a
+        :class:`~resonate.connections.Source`. A network-only connection must not
+        subscribe: it would consume messages off the group's queue
+        subscription and drop them, delaying the task until the server
+        re-delivers it elsewhere. Register receivers **before** calling
+        ``start`` (:class:`~resonate.resonate.Resonate` wires dispatch before
+        starting any connection).
+        """
         self._running = True
+        if not self._subscribers:
+            return
         self._subs = [
             await self._nc.subscribe(self._uni_subject, cb=self._on_msg),
             await self._nc.subscribe(
@@ -164,9 +184,9 @@ class NatsNetwork:
 
     async def send(self, req: str) -> str:
         """Publish a request and await its reply on a private inbox."""
-        logger.debug("nats_network req: %s", req)
+        logger.debug("nats_connection req: %s", req)
         if not self._running:
-            raise NatsError(RuntimeError("network has been stopped"))
+            raise NatsError(RuntimeError("connection has been stopped"))
         envelope = json.loads(req)
         origin = _routing_origin(envelope)
         # The server reads the origin from the head, not the subject; set both.
@@ -182,7 +202,7 @@ class NatsNetwork:
             raise NatsError(exc) from exc
 
         resp_str = msg.data.decode("utf-8")
-        logger.debug("nats_network res: %s", resp_str)
+        logger.debug("nats_connection res: %s", resp_str)
         return resp_str
 
     def recv(self, callback: Callable[[str], None]) -> None:
@@ -201,6 +221,6 @@ class NatsNetwork:
         except UnicodeDecodeError:
             logger.warning("dropping non-utf8 NATS message on %s", msg.subject)
             return
-        logger.debug("nats_network recv: %s", data)
+        logger.debug("nats_connection recv: %s", data)
         for cb in list(self._subscribers):
             cb(data)

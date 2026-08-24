@@ -22,6 +22,7 @@ from resonate.error import (
     SerializationError,
     Suspended,
 )
+from resonate.ids import join_id
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy
 from resonate.tree import Tree
@@ -76,7 +77,6 @@ class _State:
         self,
         id: str,
         origin_id: str,
-        prefix_id: str,
         branch_id: str,
         parent_id: str,
         func_name: str,
@@ -92,17 +92,14 @@ class _State:
         registry: Registry,
     ) -> None:
         self.id = id
-        self.origin_id = origin_id
 
-        # The id-generation prefix, carried through the ``resonate:prefix`` tag.
-        # Distinct from ``origin_id``: ``origin_id`` is the lineage origin
-        # (which ``detached`` resets to the child's own id, starting a new
-        # lineage), while ``prefix_id`` propagates *unchanged* across
-        # ``detached`` re-roots. That keeps recursive ``detached`` ids bounded:
-        # every level mints ``{prefix}.{16hex}`` off the same fixed prefix
-        # rather than off its own grown id (see :meth:`Context.detached`). For
-        # any non-detached context the two are equal.
-        self.prefix_id = prefix_id
+        # The lineage origin: everything before the first ``:`` of every id in
+        # this workflow, set at the top (``resonate.run``/``rpc``) and carried
+        # through the ``resonate:origin`` tag unchanged forever -- including
+        # into ``detached`` children, which mint ``{origin}:d{16hex}`` off it
+        # (see :meth:`Context.detached`). Also the anchor every descendant id
+        # extends, so it doubles as the id-generation root.
+        self.origin_id = origin_id
 
         self.branch_id = branch_id
         self.parent_id = parent_id
@@ -195,7 +192,6 @@ class Context:
         cls,
         id: str,
         origin_id: str,
-        prefix_id: str,
         timeout_at: int,
         func_name: str,
         effects: Effects,
@@ -207,24 +203,17 @@ class Context:
         # ``origin_id`` is the top of the execution lineage, carried through
         # the ``resonate:origin`` tag from whoever dispatched this workflow
         # (top-level run, ``rpc``, or ``detached``). For a genuine top-level
-        # root it equals ``id``; a ``detached`` child resets it to its *own*
-        # id, starting a fresh lineage.
+        # root it equals ``id``; below one it is the fixed prefix every id in
+        # the lineage extends (``{origin}:{lineage}``), which is also what the
+        # server derives by splitting an id on its first ``:``.
         #
-        # ``prefix_id`` is the id-generation prefix, carried through the
-        # ``resonate:prefix`` tag. Unlike the lineage origin it is propagated
-        # *unchanged* across ``detached`` re-roots -- which is what keeps
-        # recursive ``detached`` ids bounded (``{prefix}.{16hex}``, one segment
-        # past the fixed prefix) rather than growing a segment per level. For a
-        # genuine top-level root it equals ``id`` (and ``origin_id``).
-        #
-        # The caller resolves both from the dispatching promise's tags; a
-        # re-root must never silently fall back to ``id``, so both are
-        # required rather than defaulted.
+        # The caller resolves it from the dispatching promise's tags; it must
+        # never silently fall back to ``id``, so it is required rather than
+        # defaulted.
         return cls(
             state=_State(
                 id=id,
                 origin_id=origin_id,
-                prefix_id=prefix_id,
                 branch_id=id,
                 parent_id=id,
                 func_name=func_name,
@@ -259,7 +248,6 @@ class Context:
             state=_State(
                 id=id,
                 origin_id=self._state.origin_id,
-                prefix_id=self._state.prefix_id,
                 branch_id=id,
                 parent_id=self._state.id,
                 func_name=func_name,
@@ -359,7 +347,7 @@ class Context:
 
     def _next_id(self) -> str:
         self._state.seq += 1
-        return f"{self._state.id}.{self._state.seq}"
+        return join_id(self._state.id, str(self._state.seq))
 
     async def flush_local_work(self) -> None:
         """Wait for every eagerly spawned task on this context to finish.
@@ -473,7 +461,7 @@ class Context:
         data: TaskData | None = None,
         target: str | None = None,
         timer: bool = False,
-        origin: str | None = None,
+        parent: str | None = None,
     ) -> PromiseCreateReq:
         """Build a global-scope promise request.
 
@@ -485,21 +473,22 @@ class Context:
         sleep from a bare promise. Tags are inserted in a fixed order so the
         serialized form is deterministic.
 
-        ``resonate:prefix`` is *always* this context's :attr:`prefix_id` -- the
-        prefix is set once at the top (``resonate.run``/``rpc``) and propagates
-        down unchanged forever, including across ``detached`` re-roots, so it
-        never tracks the (possibly diverging) lineage origin. ``origin`` defaults
-        to ``origin_id``; only :meth:`detached` overrides it, setting origin to
-        the child's own id to start a fresh lineage.
+        ``resonate:origin`` is *always* this context's :attr:`origin_id` -- the
+        origin is set once at the top (``resonate.run``/``rpc``) and propagates
+        down unchanged forever, including into :meth:`detached` children, whose
+        ids are minted off it.
+
+        ``parent`` defaults to this context's id; only :meth:`detached`
+        overrides it, because its id is minted off the origin rather than off
+        the spawning context and the server requires every id to extend its
+        declared ``resonate:parent``.
         """
-        resolved_origin = origin if origin is not None else self._state.origin_id
         tags = {"resonate:scope": "global"}
         if target is not None:
             tags["resonate:target"] = target
         tags["resonate:branch"] = id
-        tags["resonate:parent"] = self._state.id
-        tags["resonate:origin"] = resolved_origin
-        tags["resonate:prefix"] = self._state.prefix_id
+        tags["resonate:parent"] = parent if parent is not None else self._state.id
+        tags["resonate:origin"] = self._state.origin_id
         if timer:
             tags["resonate:timer"] = "true"
         return PromiseCreateReq(
@@ -572,8 +561,6 @@ class Context:
                 "resonate:branch": self._state.branch_id,
                 "resonate:parent": self._state.id,
                 "resonate:origin": self._state.origin_id,
-                # Prefix is set at the top and propagates down unchanged forever.
-                "resonate:prefix": self._state.prefix_id,
             },
         )
 
@@ -753,11 +740,36 @@ class Context:
         return self._remote_future(req, link, df)
 
     def sleep(self, duration: timedelta) -> ResonateFuture[None]:
+        """Suspend this workflow durably for ``duration``.
+
+        The timer is the promise's own deadline: ``resonate:timer`` makes the
+        server settle it **resolved** (rather than timed out) when the deadline
+        arrives, which fires the callbacks every sleeper is suspended on. Its
+        wake is therefore ``now + duration``, bounded by the workflow's own
+        deadline so a sleep cannot outlive it.
+
+        The ``resonate:target`` is what makes that deadline *happen*: the server
+        only schedules timeouts for promises carrying an address, so a
+        target-less timer would simply never fire. The flip side is that a
+        target also spawns a task, dispatched immediately rather than at the
+        wake; a timer names no function to run, so the worker that receives it
+        drops it and lets the deadline do the waking (see
+        :meth:`resonate.core.Core.execute_until_blocked_outer`).
+
+        Nothing is held in memory while sleeping, and the wake survives this
+        worker -- or every worker -- dying, because it is the server's own
+        deadline that settles the promise.
+        """
         self._state.workflow = True
 
         link = self._state.chain.link()
 
-        req = self._global_req(self._next_id(), duration, timer=True)
+        req = self._global_req(
+            self._next_id(),
+            duration,
+            timer=True,
+            target=self._state.target_resolver(self.opts.target),
+        )
 
         return self._remote_future(req, link)
 
@@ -774,20 +786,34 @@ class Context:
         self._state.workflow = True
         link = self._state.chain.link()
 
-        # Mint the id off ``prefix_id`` -- set at the top and propagated unchanged
-        # forever -- as ``{prefix}.d{16hex}``, so recursion stays bounded at one
-        # segment past the prefix instead of growing a segment per level. The
-        # ``d`` marks the segment as a detached child (vs an rpc child's numeric
-        # ``.{seq}``). ``resonate:origin`` is the child's own id (a fresh lineage
-        # root: ``origin == id == branch``); ``resonate:prefix`` (set in
-        # ``_global_req``) carries the same prefix forward to the next level.
-        child_id = f"{self._state.prefix_id}.d{_hash_id(self._next_id())}"
+        # Mint the id off ``origin_id`` -- the lineage origin, fixed at the top
+        # and propagated unchanged forever -- as ``{origin}:d{16hex}``, so
+        # recursion stays bounded at one segment past the origin instead of
+        # growing a segment per level. The ``d`` marks the segment as a detached
+        # child (vs a normal child's numeric ``{seq}``).
+        #
+        # The child keeps the *parent's* origin rather than re-rooting onto its
+        # own id: the server derives the origin as everything before the first
+        # ``:``, and requires every id in a lineage to start with
+        # ``{origin}:``. An id of ``{origin}:d{hex}`` naming *itself* as origin
+        # would therefore reject its own children (they mint ``...d{hex}.1``,
+        # which is not prefixed by ``{origin}:d{hex}:``). Detachment is a
+        # structured-concurrency property, which the SDK models with a Det node
+        # in the tree (below) -- the server's origin is only a validation and
+        # partitioning key, and a detached child never registers a callback on
+        # its parent, so sharing the origin changes no behavior.
+        child_id = join_id(self._state.origin_id, f"d{_hash_id(self._next_id())}")
         req = self._global_req(
             child_id,
             self.opts.timeout,
             data=TaskData(func=fn, args=args, kwargs=kwargs, version=self.opts.version),
             target=self._state.target_resolver(self.opts.target),
-            origin=child_id,
+            # The id hangs off the origin, not off this context, so the origin
+            # is also the ancestor it declares -- a ``resonate:parent`` of the
+            # spawning context would be rejected (``{origin}:d{hex}`` does not
+            # extend, say, ``{origin}:1``). ``resonate:branch`` stays the
+            # child's own id: a detached child roots its own branch.
+            parent=self._state.origin_id,
         )
 
         # Record the detached child as a Det node. Det subtrees are outside this

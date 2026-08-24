@@ -3,15 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import uuid
-from typing import TYPE_CHECKING
 
 import aiohttp
 
 from resonate.error import HttpError
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -27,51 +22,31 @@ _MAX_BACKOFF_SECS = 60
 #: periodic ``task.heartbeat`` request until task leases lapse and the server
 #: re-delivers them. Keeping the cap well above the execution-concurrency
 #: ceiling (see ``resonate.resonate.DEFAULT_MAX_CONCURRENT_TASKS``) guarantees
-#: the heartbeat always finds a free connection. The long-lived SSE ``GET``
-#: occupies one slot.
+#: the heartbeat always finds a free connection.
 DEFAULT_CONN_LIMIT = 256
 
 
-class HttpNetwork:
-    """:class:`Network` implementation that talks to a Resonate server over HTTP.
+class HttpConnection:
+    """:class:`~resonate.connections.Network` implementation over HTTP.
 
-    - Requests are sent via ``POST /`` (JSON envelope format).
-    - Incoming messages (execute/unblock) are received via SSE on
-      ``GET /poll/{group}/{pid}``.
-    - Addresses use the ``poll://`` scheme: ``poll://uni@group/id`` and
-      ``poll://any@group/id``.
-
-    The SSE listener runs as a background asyncio task; callbacks registered
-    via :meth:`recv` fire on the event loop as SSE events arrive.
+    Requests are sent via ``POST /`` (JSON envelope format). This is the
+    request/response half only; push messages from the server arrive through a
+    separate :class:`~resonate.connections.Source` (typically
+    :class:`~resonate.connections.SSEConnection`).
     """
 
     def __init__(
         self,
         url: str,
-        pid: str | None = None,
-        group: str | None = None,
         auth: str | None = None,
         conn_limit: int | None = None,
-        *,
-        send_only: bool = False,
     ) -> None:
-        self._pid = pid if pid is not None else uuid.uuid4().hex
-        self._group = group if group is not None else "default"
-        self._unicast = f"poll://uni@{self._group}/{self._pid}"
-        self._anycast = f"poll://any@{self._group}/{self._pid}"
         # Strip trailing slash(es) from url.
         self._url = url.rstrip("/")
         self._auth = auth
         self._conn_limit = conn_limit if conn_limit is not None else DEFAULT_CONN_LIMIT
-        # Request/response only: :meth:`start` skips the SSE listener. A
-        # serverless worker (see ``resonate_aws``) is *pushed* one execute
-        # message per invocation over HTTP and never holds a poll connection,
-        # so opening an SSE stream it would immediately tear down is pure waste.
-        self._send_only = send_only
 
-        self._subscribers: list[Callable[[str], None]] = []
         self._session: aiohttp.ClientSession | None = None
-        self._sse_handle: asyncio.Task[None] | None = None
         self._running: bool = False
         # True only after :meth:`stop` is called. Distinct from ``_running``
         # (which starts ``False`` before :meth:`start` fires) so that
@@ -83,29 +58,10 @@ class HttpNetwork:
         # immediately instead of blocking shutdown.
         self._stop_event = asyncio.Event()
 
-    def pid(self) -> str:
-        return self._pid
-
-    def group(self) -> str:
-        return self._group
-
-    def unicast(self) -> str:
-        return self._unicast
-
-    def anycast(self) -> str:
-        return self._anycast
-
     async def start(self) -> None:
-        """Start the SSE listener for incoming messages from the server.
-
-        In ``send_only`` mode no listener is started -- the network only marks
-        itself running so :meth:`send` is permitted -- because a serverless
-        worker receives work by HTTP push, not by polling.
-        """
+        """Mark the connection running so :meth:`send` retries through outages."""
         self._running = True
         self._stop_event.clear()
-        if not self._send_only:
-            self._sse_handle = asyncio.create_task(self._sse_loop())
 
     async def stop(self) -> None:
         self._running = False
@@ -113,16 +69,9 @@ class HttpNetwork:
         # Wake any ``send`` parked in the retry backoff so the bounded join in
         # :meth:`~resonate.resonate.Resonate.stop` does not stall.
         self._stop_event.set()
-        handle = self._sse_handle
-        self._sse_handle = None
-        if handle is not None:
-            handle.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await handle
         if self._session is not None:
             await self._session.close()
             self._session = None
-        self._subscribers.clear()
 
     async def send(self, req: str) -> str:
         """Send a request to the Resonate server via ``POST /``.
@@ -137,7 +86,7 @@ class HttpNetwork:
         :class:`HttpError` instead of retrying, so shutdown is never blocked
         by the backoff loop.
         """
-        logger.debug("http_network http_req: %s", req)
+        logger.debug("http_connection http_req: %s", req)
         headers = self._auth_headers({"Content-Type": "application/json"})
         backoff: float = _INITIAL_BACKOFF_SECS
         while True:
@@ -168,16 +117,8 @@ class HttpNetwork:
                     raise HttpError(exc) from exc
                 backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
                 continue
-            logger.debug("http_network http_res: %s", resp_str)
+            logger.debug("http_connection http_res: %s", resp_str)
             return resp_str
-
-    def recv(self, callback: Callable[[str], None]) -> None:
-        """Register a callback for incoming SSE messages."""
-        self._subscribers.append(callback)
-
-    def target_resolver(self, target: str) -> str:
-        """Resolve a target name to a ``poll://`` anycast address."""
-        return f"poll://any@{target}"
 
     # -- internals ------------------------------------------------------------
 
@@ -218,79 +159,3 @@ class HttpNetwork:
         """
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=secs)
-
-    async def _sse_loop(self) -> None:
-        """Connect to the SSE endpoint, reconnecting with exponential backoff."""
-        url = f"{self._url}/poll/{self._group}/{self._pid}"
-        headers = self._auth_headers({"Accept": "text/event-stream"})
-        backoff = _INITIAL_BACKOFF_SECS
-        with contextlib.suppress(asyncio.CancelledError):
-            while self._running:
-                try:
-                    session = self._ensure_session()
-                    async with session.get(url, headers=headers) as resp:
-                        if not (200 <= resp.status < 300):
-                            logger.warning(
-                                "SSE endpoint returned %s, retrying (backoff=%ss)",
-                                resp.status,
-                                backoff,
-                            )
-                            await asyncio.sleep(backoff)
-                            backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
-                            continue
-
-                        # Connection succeeded, reset backoff.
-                        backoff = _INITIAL_BACKOFF_SECS
-                        logger.info("SSE connection established: %s", url)
-                        await self._read_stream(resp)
-                except asyncio.CancelledError:
-                    raise
-                except aiohttp.ClientError as exc:
-                    logger.warning(
-                        "SSE connection failed, retrying (backoff=%ss): %s",
-                        backoff,
-                        exc,
-                    )
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
-                    continue
-
-                if not self._running:
-                    break
-                logger.info(
-                    "SSE connection closed, reconnecting (backoff=%ss)", backoff
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
-
-    async def _read_stream(self, resp: aiohttp.ClientResponse) -> None:
-        """Parse the SSE byte stream and dispatch each ``data:`` line.
-
-        SSE events are separated by a blank line; every ``data:`` line in an
-        event is dispatched to each subscriber.
-        """
-        buffer = ""
-        async for chunk in resp.content.iter_any():
-            try:
-                text = chunk.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-            buffer += text
-
-            while "\n\n" in buffer:
-                block, buffer = buffer.split("\n\n", 1)
-                for line in block.splitlines():
-                    data = _strip_data_prefix(line)
-                    if data is None:
-                        continue
-                    logger.debug("http_network sse_recv: %s", data)
-                    for cb in list(self._subscribers):
-                        cb(data)
-
-
-def _strip_data_prefix(line: str) -> str | None:
-    """Return the trimmed payload of an SSE ``data:`` line, else ``None``."""
-    if line.startswith("data:"):
-        data = line[len("data:") :].strip()
-        return data or None
-    return None

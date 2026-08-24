@@ -20,10 +20,11 @@ if TYPE_CHECKING:
 
 
 class StubNetwork:
-    """A minimal in-process ``Network`` standing in for ``LocalNetwork``.
+    """A minimal dual-role connection standing in for ``LocalConnection``.
 
-    The stub plays the server: ``send`` returns a canned response and ``recv``
-    captures the registered callback so tests can feed it raw messages.
+    Implements both ``Network`` and ``Source``. The stub plays the server:
+    ``send`` returns a canned response and ``recv`` captures the registered
+    callback so tests can feed it raw messages.
     """
 
     def __init__(self, response: str = "") -> None:
@@ -125,6 +126,7 @@ def test_send_missing_fields_treated_as_empty() -> None:
 
 
 def feed(transport: Transport, net: StubNetwork, raw: str) -> list[Message]:
+    """Register a recv callback (fanned out to ``net`` as a source) and inject ``raw``."""
     received: list[Message] = []
     transport.recv(received.append)
     net.callbacks[0](raw)
@@ -134,7 +136,7 @@ def feed(transport: Transport, net: StubNetwork, raw: str) -> list[Message]:
 def test_recv_parses_execute_message() -> None:
     net = StubNetwork()
     raw = '{"kind":"execute","data":{"task":{"id":"t1","version":3}}}'
-    received = feed(Transport(net), net, raw)
+    received = feed(Transport(net, [net]), net, raw)
     assert len(received) == 1
     msg = received[0]
     assert isinstance(msg, ExecuteMsg)
@@ -145,7 +147,7 @@ def test_recv_parses_execute_message() -> None:
 def test_recv_execute_message_default_version() -> None:
     net = StubNetwork()
     raw = '{"kind":"execute","data":{"task":{"id":"t1"}}}'
-    received = feed(Transport(net), net, raw)
+    received = feed(Transport(net, [net]), net, raw)
     assert isinstance(received[0], ExecuteMsg)
     assert received[0].version == 0
 
@@ -156,7 +158,7 @@ def test_recv_parses_unblock_message() -> None:
         '{"kind":"unblock","data":{"promise":'
         '{"id":"p1","state":"resolved","value":{"data":"dmFs"},"timeoutAt":123}}}'
     )
-    received = feed(Transport(net), net, raw)
+    received = feed(Transport(net, [net]), net, raw)
     assert len(received) == 1
     msg = received[0]
     assert isinstance(msg, UnblockMsg)
@@ -170,14 +172,36 @@ def test_recv_parses_unblock_message() -> None:
 
 def test_recv_discards_invalid_json() -> None:
     net = StubNetwork()
-    received = feed(Transport(net), net, "not json")
+    received = feed(Transport(net, [net]), net, "not json")
     assert received == []
 
 
 def test_recv_discards_unknown_kind() -> None:
     net = StubNetwork()
-    received = feed(Transport(net), net, '{"kind":"mystery","data":{}}')
+    received = feed(Transport(net, [net]), net, '{"kind":"mystery","data":{}}')
     assert received == []
+
+
+def test_recv_registers_on_every_source() -> None:
+    """A message arriving on *any* source reaches the callback."""
+    net = StubNetwork()
+    extra = StubNetwork()
+    transport = Transport(net, [net, extra])
+
+    received: list[Message] = []
+    transport.recv(received.append)
+    assert len(net.callbacks) == 1
+    assert len(extra.callbacks) == 1
+
+    net.callbacks[0]('{"kind":"execute","data":{"task":{"id":"t1"}}}')
+    extra.callbacks[0]('{"kind":"execute","data":{"task":{"id":"t2"}}}')
+    assert [m.task_id for m in received if isinstance(m, ExecuteMsg)] == ["t1", "t2"]
+
+
+def test_recv_without_sources_is_a_no_op() -> None:
+    net = StubNetwork()
+    Transport(net).recv(lambda _msg: None)  # nothing to register on
+    assert net.callbacks == []
 
 
 # -- network accessor ---------------------------------------------------------

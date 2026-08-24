@@ -223,7 +223,7 @@ def _parse_promise_state(value: Any) -> PromiseState:
 
 
 class ServerState:
-    """The in-process server state machine driving :class:`LocalNetwork`.
+    """The in-process server state machine driving :class:`LocalConnection`.
 
     It owns promises, tasks, schedules, pending timeouts, and the queue of
     outgoing messages produced while applying a request or ticking.
@@ -449,11 +449,17 @@ class ServerState:
         )
         record = promise.to_record()
         self.promises[promise_id] = promise
-        self.set_p_timeout(promise_id, timeout_at)
 
         # Auto-create task and dispatch execute when target tag is present.
         address = tags.get("resonate:target")
         if address is not None:
+            # Only a promise carrying an address is expired by the tick loop.
+            # A target-less promise (a bare ``ctx.promise``) is never timed out
+            # by the scheduler, so a durable timer has to carry a target to fire
+            # at all -- see ``Context.sleep``. Scheduling one here regardless
+            # would make this simulation *more* permissive than the server,
+            # which is invisible to every test that only asserts success.
+            self.set_p_timeout(promise_id, timeout_at)
             delay = _parse_int(tags.get("resonate:delay"))
             deferred = delay is not None and now < delay
             self.tasks[promise_id] = Task(
@@ -1107,16 +1113,19 @@ class ServerState:
 
 
 # =============================================================================
-# LOCAL NETWORK
+# LOCAL CONNECTION
 # =============================================================================
 
 
-class LocalNetwork:
-    """In-process :class:`Network` backed by a :class:`ServerState` simulation.
+class LocalConnection:
+    """In-process connection backed by a :class:`ServerState` simulation.
 
-    Useful for running workflows without a Resonate server. A background tick
-    loop advances time once per second; outgoing messages are dispatched to
-    callbacks registered via :meth:`recv` as asyncio tasks.
+    Implements both :class:`~resonate.connections.Network` and
+    :class:`~resonate.connections.Source`, so a single instance serves as network
+    and source at once. Useful for running workflows without a Resonate
+    server. A background tick loop advances time once per second; outgoing
+    messages are dispatched to callbacks registered via :meth:`recv` as
+    asyncio tasks.
     """
 
     def __init__(self, pid: str | None = None, group: str | None = None) -> None:

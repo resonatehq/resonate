@@ -15,6 +15,21 @@ class FunctionNotFoundError(ResonateError):
         return f"function not found: {self.name} (version {self.version})"
 
 
+class InvalidIdError(ResonateError):
+    """A caller-supplied root id the server's id format cannot carry.
+
+    See :func:`resonate.ids.validate_root_id`.
+    """
+
+    def __init__(self, id: str, reason: str) -> None:
+        self.id = id
+        self.reason = reason
+        super().__init__(id, reason)
+
+    def __str__(self) -> str:
+        return f"invalid id {self.id!r}: {self.reason}"
+
+
 class AlreadyRegisteredError(ResonateError):
     def __init__(self, name: str, version: int = 1) -> None:
         self.name = name

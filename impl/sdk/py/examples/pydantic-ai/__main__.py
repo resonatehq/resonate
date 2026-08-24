@@ -293,13 +293,13 @@ async def main() -> None:
         conversation_id = f"ticket-A-1-{time.time_ns()}"
         first = await durable_agent.run(
             "Open the ticket for order A-1",
-            id=f"{conversation_id}:1",
+            id=f"{conversation_id}-1",
             conversation_id=conversation_id,
             deps=deps,
         )
         follow_up = await durable_agent.run(
             "What should we tell the customer?",
-            id=f"{conversation_id}:2",
+            id=f"{conversation_id}-2",
             conversation_id=conversation_id,
             message_history=first.all_messages(),
             deps=deps,

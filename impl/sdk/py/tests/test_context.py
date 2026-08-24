@@ -5,7 +5,7 @@ directly, raises on rejection, and raises
 :class:`~resonate.error.Suspended` when a dependency is still pending.
 
 The harness builds a root :class:`~resonate.context.Context` over a real
-:class:`~resonate.network.LocalNetwork` (as :mod:`tests.test_durable` does), so
+:class:`~resonate.connections.LocalConnection` (as :mod:`tests.test_durable` does), so
 ``create_promise``/``settle_promise`` exercise the actual durability boundary.
 """
 
@@ -23,6 +23,8 @@ import pytest
 
 from resonate import now_ms
 from resonate.codec import Codec, NoopEncryptor, _encode_error
+from resonate.connections import LocalConnection
+from resonate.connections.local import Task
 from resonate.context import Context, Opts, _hash_id
 from resonate.dependencies import DependencyMap
 from resonate.durable import DurableFunction
@@ -34,8 +36,6 @@ from resonate.error import (
     SerializationError,
     Suspended,
 )
-from resonate.network import LocalNetwork
-from resonate.network.local import Task
 from resonate.registry import Registry
 from resonate.retry import Constant, Never
 from resonate.send import Sender
@@ -67,7 +67,7 @@ def _root(
     retry_policy: RetryPolicy | None = None,
     registry: Registry | None = None,
 ) -> Context:
-    """Build a root ``Context`` over a fresh ``LocalNetwork``.
+    """Build a root ``Context`` over a fresh ``LocalConnection``.
 
     ``retry_policy`` defaults to ``None`` -> ``Never`` (the engine-layer default),
     so a failing pure leaf settles on the first attempt; pass a policy to exercise
@@ -77,7 +77,7 @@ def _root(
     durable ops resolve to not-found; pass one (with functions registered) to
     exercise by-name ``run`` / by-object ``rpc`` resolution.
     """
-    net = LocalNetwork()
+    net = LocalConnection()
     net.state.tasks["root"] = Task(
         id="root",
         state="acquired",
@@ -91,7 +91,6 @@ def _root(
     return Context.root(
         id="root",
         origin_id="root",
-        prefix_id="root",
         timeout_at=timeout_at,
         func_name="root",
         effects=effects,
@@ -216,19 +215,19 @@ async def fire_and_forget(ctx: Context) -> int:
 
 def test_next_id_sequential() -> None:
     ctx = _root()
-    assert ctx._next_id() == "root.1"
-    assert ctx._next_id() == "root.2"
-    assert ctx._next_id() == "root.3"
+    assert ctx._next_id() == "root:1"
+    assert ctx._next_id() == "root:2"
+    assert ctx._next_id() == "root:3"
 
 
 def test_child_parent_is_current_id() -> None:
     # Regression: child.parent_id must be the *current* id, not the parent's
     # own parent_id.
     ctx = _root()
-    child = ctx._child("root.1", "fn", I64_MAX)
+    child = ctx._child("root:1", "fn", I64_MAX)
     assert child.info.parent_id == "root"
     assert child.info.origin_id == "root"
-    assert child.info.branch_id == "root.1"
+    assert child.info.branch_id == "root:1"
 
 
 def test_child_timeout_caps_to_parent() -> None:
@@ -277,7 +276,7 @@ def test_get_dependency_shared_with_child_context() -> None:
     cfg = _Config("shared")
     deps.insert(cfg)
     ctx = _root(deps=deps)
-    child = ctx._child("root.1", "fn", I64_MAX)
+    child = ctx._child("root:1", "fn", I64_MAX)
     assert child.get_dependency(_Config) is cfg
 
 
@@ -290,7 +289,7 @@ def test_get_dependency_shared_with_child_context() -> None:
 async def test_run_leaf_returns_and_settles_resolved() -> None:
     ctx = _root()
     assert await ctx.run(double, 21) == 42
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert record.state == "resolved"
     assert record.value.data == 42
 
@@ -299,7 +298,7 @@ async def test_run_leaf_returns_and_settles_resolved() -> None:
 async def test_run_ctx_only_function() -> None:
     ctx = _root()
     assert await ctx.run(beat) == "ok"
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -313,10 +312,10 @@ async def test_run_passes_live_struct_arg() -> None:
 @pytest.mark.asyncio
 async def test_run_sequential_child_ids() -> None:
     ctx = _root()
-    assert await ctx.run(double, 2) == 4  # root.1
-    assert await ctx.run(double, 3) == 6  # root.2
-    assert ctx._state.effects.cache["root.1"].value.data == 4
-    assert ctx._state.effects.cache["root.2"].value.data == 6
+    assert await ctx.run(double, 2) == 4  # root:1
+    assert await ctx.run(double, 3) == 6  # root:2
+    assert ctx._state.effects.cache["root:1"].value.data == 4
+    assert ctx._state.effects.cache["root:2"].value.data == 6
 
 
 @pytest.mark.asyncio
@@ -372,7 +371,7 @@ async def test_run_local_child_param_is_empty() -> None:
     # value, never the param.
     ctx = _root()
     await ctx.run(double, 21)
-    assert ctx._state.effects.cache["root.1"].param == Value()
+    assert ctx._state.effects.cache["root:1"].param == Value()
 
 
 @pytest.mark.asyncio
@@ -398,7 +397,7 @@ async def test_run_function_error_propagates_and_settles_rejected() -> None:
     ctx = _root()
     with pytest.raises(ApplicationError, match="denied"):
         await ctx.run(failing)
-    assert ctx._state.effects.cache["root.1"].state == "rejected"
+    assert ctx._state.effects.cache["root:1"].state == "rejected"
 
 
 @pytest.mark.asyncio
@@ -415,7 +414,7 @@ async def test_run_plain_exception_preserves_type_and_settles_rejected() -> None
     ctx = _root()
     with pytest.raises(BookingError, match="card declined"):
         await ctx.run(failing_plain)
-    assert ctx._state.effects.cache["root.1"].state == "rejected"
+    assert ctx._state.effects.cache["root:1"].state == "rejected"
 
 
 # =============================================================================
@@ -432,7 +431,7 @@ async def test_run_presettled_resolved_skips_execution() -> None:
         calls += 1
         return x
 
-    ctx = _root([_resolved("root.1", 99)])
+    ctx = _root([_resolved("root:1", 99)])
     assert await ctx.run(counted, 1) == 99  # value from the pre-settled record
     assert calls == 0  # the function body never ran
 
@@ -446,7 +445,7 @@ async def test_run_presettled_rejected_raises_without_execution() -> None:
         calls += 1
         return x
 
-    ctx = _root([_rejected("root.1", "stored failure")])
+    ctx = _root([_rejected("root:1", "stored failure")])
     with pytest.raises(ApplicationError, match="stored failure"):
         await ctx.run(counted, 1)
     assert calls == 0
@@ -484,7 +483,7 @@ async def test_run_recovery_coerces_return_to_declared_struct() -> None:
     # The settled child value was stored as plain builtins (a dict). On recovery
     # ctx.run coerces it back to the declared return type, so the parent observes
     # the same in-memory object the live path would have produced -- not a dict.
-    ctx = _root([_resolved("root.1", _RecoveredPoint(x=3, y=4))])
+    ctx = _root([_resolved("root:1", _RecoveredPoint(x=3, y=4))])
     result = await ctx.run(_make_point, 3, 4)
     assert result == _RecoveredPoint(x=3, y=4)
     assert isinstance(result, _RecoveredPoint)
@@ -495,7 +494,7 @@ async def test_run_recovery_coerces_return_to_tuple() -> None:
     # JSON has no tuple, so the settled value round-trips as a list; the return
     # annotation (tuple[int, str]) drives coercion back to a real tuple, matching
     # the live path (which would have returned a tuple).
-    ctx = _root([_resolved("root.1", (5, "6"))])
+    ctx = _root([_resolved("root:1", (5, "6"))])
     result = await ctx.run(_make_pair, 5, 6)
     assert result == (5, "6")
     assert isinstance(result, tuple)
@@ -528,7 +527,7 @@ async def test_run_live_path_coerces_return_to_declared_type() -> None:
     # The promise stores the raw return (an int); coercion is applied only at the
     # return boundary, matching the top-level run (which stores raw and coerces
     # at the handle).
-    assert ctx._state.effects.cache["root.1"].value.data == 3
+    assert ctx._state.effects.cache["root:1"].value.data == 3
 
 
 @pytest.mark.asyncio
@@ -537,7 +536,7 @@ async def test_run_live_and_recovery_returns_are_identical() -> None:
     # holding the raw value the live path stored (int 3) hands back an equal,
     # same-typed object on both paths.
     live = await _root().run(_make_float, 3)
-    recovered = await _root([_resolved("root.1", 3)]).run(_make_float, 3)
+    recovered = await _root([_resolved("root:1", 3)]).run(_make_float, 3)
     assert live == recovered == 3.0
     assert isinstance(live, float)
     assert isinstance(recovered, float)
@@ -564,10 +563,10 @@ async def test_workflow_runs_nested_leaves() -> None:
     ctx = _root()
     assert await ctx.run(parent_workflow, 5) == 30  # a=10, b=20
     assert ctx._state.spawned_remote == []  # nothing pending -> no suspension
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
     # Nested children live under the workflow's own id.
-    assert ctx._state.effects.cache["root.1.1"].value.data == 10
-    assert ctx._state.effects.cache["root.1.2"].value.data == 20
+    assert ctx._state.effects.cache["root:1.1"].value.data == 10
+    assert ctx._state.effects.cache["root:1.2"].value.data == 20
 
 
 # =============================================================================
@@ -583,7 +582,7 @@ async def test_run_suspends_when_child_blocks_on_remote() -> None:
     # The child's todo is merged up so the task can suspend on it...
     assert ctx._state.spawned_remote == ["remote-dep"]
     # ...and the child promise is left pending (not settled).
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -594,7 +593,7 @@ async def test_run_suspends_when_child_completes_with_pending_remote() -> None:
     with pytest.raises(Suspended):
         await ctx.run(fire_and_forget)
     assert ctx._state.spawned_remote == ["ff-dep"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -656,8 +655,8 @@ async def test_run_suspension_propagates_through_intermediate_workflow() -> None
         await ctx.run(deep_middle)
     assert ctx._state.spawned_remote == ["deep-dep"]
     # Both promises along the suspension path are left pending.
-    assert ctx._state.effects.cache["root.1"].state == "pending"  # middle
-    assert ctx._state.effects.cache["root.1.1"].state == "pending"  # inner
+    assert ctx._state.effects.cache["root:1"].state == "pending"  # middle
+    assert ctx._state.effects.cache["root:1.1"].state == "pending"  # inner
 
 
 @pytest.mark.asyncio
@@ -667,9 +666,9 @@ async def test_run_suspension_propagates_through_three_levels() -> None:
     with pytest.raises(Suspended):
         await ctx.run(deep_top)
     assert ctx._state.spawned_remote == ["deep-dep"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"  # top
-    assert ctx._state.effects.cache["root.1.1"].state == "pending"  # middle
-    assert ctx._state.effects.cache["root.1.1.1"].state == "pending"  # inner
+    assert ctx._state.effects.cache["root:1"].state == "pending"  # top
+    assert ctx._state.effects.cache["root:1.1"].state == "pending"  # middle
+    assert ctx._state.effects.cache["root:1.1.1"].state == "pending"  # inner
 
 
 @pytest.mark.asyncio
@@ -682,13 +681,13 @@ async def test_run_completed_sibling_settles_but_parent_still_suspends() -> None
         await ctx.run(completes_then_suspends)
     assert ctx._state.spawned_remote == ["remote-dep"]
     # First child got fully settled with its computed value.
-    assert ctx._state.effects.cache["root.1.1"].state == "resolved"
-    assert ctx._state.effects.cache["root.1.1"].value.data == 42
+    assert ctx._state.effects.cache["root:1.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1.1"].value.data == 42
     # Second child remains pending -- its body raised Suspended.
-    assert ctx._state.effects.cache["root.1.2"].state == "pending"
+    assert ctx._state.effects.cache["root:1.2"].state == "pending"
     # Parent workflow itself stays pending: ``outcome == "suspended"`` skips
     # the settle_promise call at the bottom of ``run``.
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -717,8 +716,8 @@ async def test_run_fire_and_forget_child_suspension_propagates() -> None:
     assert ctx._state.spawned_remote == ["remote-dep"]
     # Parent's value (99) was dropped in favour of suspension; both promises
     # along the suspension path are left pending.
-    assert ctx._state.effects.cache["root.1"].state == "pending"
-    assert ctx._state.effects.cache["root.1.1"].state == "pending"
+    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert ctx._state.effects.cache["root:1.1"].state == "pending"
 
 
 # =============================================================================
@@ -767,11 +766,11 @@ async def test_run_unawaited_child_settles_before_parent() -> None:
     # Child settled first; parent second. If ``flush_local_work`` were a no-op
     # the parent's bg would settle ahead of the still-pending child task and
     # this order would flip.
-    assert settle_order == ["root.1.1", "root.1"]
-    assert ctx._state.effects.cache["root.1.1"].state == "resolved"
-    assert ctx._state.effects.cache["root.1.1"].value.data == 42
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
-    assert ctx._state.effects.cache["root.1"].value.data == 1
+    assert settle_order == ["root:1.1", "root:1"]
+    assert ctx._state.effects.cache["root:1.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1.1"].value.data == 42
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].value.data == 1
 
 
 # =============================================================================
@@ -816,13 +815,13 @@ async def test_run_task_pending_while_create_promise_blocked() -> None:
         await entered.wait()
 
         # And the durable record is not in the cache yet.
-        assert "root.1" not in ctx._state.effects.cache
+        assert "root:1" not in ctx._state.effects.cache
 
         # Releasing the gate lets create_promise return, the event fire, and
         # the body run through to settlement.
         gate.set()
         assert await task == 42
-        assert ctx._state.effects.cache["root.1"].state == "resolved"
+        assert ctx._state.effects.cache["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -860,10 +859,10 @@ async def test_run_durable_promise_visible_in_cache_before_task_resolves() -> No
     ctx = _root()
     result = await ctx.run(double, 5)
     assert result == 10
-    assert "root.1" in ctx._state.effects.cache
+    assert "root:1" in ctx._state.effects.cache
     # And it was created *before* it was settled -- the cached record reflects
     # the post-settle state by the time we observe the result.
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -883,7 +882,7 @@ async def test_run_releases_event_when_create_promise_raises() -> None:
 
     failing.assert_awaited_once()
     # Nothing was cached, because creation never succeeded.
-    assert "root.1" not in ctx._state.effects.cache
+    assert "root:1" not in ctx._state.effects.cache
 
 
 @pytest.mark.asyncio
@@ -908,7 +907,7 @@ async def test_run_does_not_settle_before_create_returns() -> None:
 
         gate.set()
         assert await task == 6
-        settle_mock.assert_awaited_once_with("root.1", 6)
+        settle_mock.assert_awaited_once_with("root:1", 6)
 
 
 # =============================================================================
@@ -928,7 +927,7 @@ async def test_run_with_options_timeout_sets_child_deadline() -> None:
     before = now_ms()
     assert await ctx.options(timeout=timedelta(seconds=30)).run(double, 5) == 10
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -938,19 +937,19 @@ async def test_run_with_options_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     # A year-long timeout still cannot outlive the parent's deadline.
     await ctx.options(timeout=timedelta(days=365)).run(double, 1)
-    assert ctx._state.effects.cache["root.1"].timeout_at == cap
+    assert ctx._state.effects.cache["root:1"].timeout_at == cap
 
 
 @pytest.mark.asyncio
 async def test_run_options_do_not_leak_to_base_context() -> None:
     ctx = _root()
-    await ctx.options(timeout=timedelta(seconds=30)).run(double, 1)  # root.1
-    short = ctx._state.effects.cache["root.1"].timeout_at
+    await ctx.options(timeout=timedelta(seconds=30)).run(double, 1)  # root:1
+    short = ctx._state.effects.cache["root:1"].timeout_at
     # The next run is issued on the base context, which still carries no
     # options -> the 24h default, well past the 30s one. The override rode the
     # throwaway handle and never touched ``ctx``.
-    await ctx.run(double, 1)  # root.2
-    assert ctx._state.effects.cache["root.2"].timeout_at > short
+    await ctx.run(double, 1)  # root:2
+    assert ctx._state.effects.cache["root:2"].timeout_at > short
     assert ctx.opts == Opts()
 
 
@@ -1040,11 +1039,11 @@ def test_options_sibling_handles_are_mutually_isolated() -> None:
 def test_options_handles_share_id_sequence() -> None:
     # ``_next_id`` mutates the shared ``_state.seq``, so ids advance across every
     # handle minted off the same base: the opts are per-handle, the sequence is
-    # not. A broken impl that copied state per handle would re-mint ``root.1``.
+    # not. A broken impl that copied state per handle would re-mint ``root:1``.
     ctx = _root()
-    assert ctx.options(target="x")._next_id() == "root.1"
-    assert ctx.options(version=2)._next_id() == "root.2"
-    assert ctx._next_id() == "root.3"
+    assert ctx.options(target="x")._next_id() == "root:1"
+    assert ctx.options(version=2)._next_id() == "root:2"
+    assert ctx._next_id() == "root:3"
 
 
 @pytest.mark.asyncio
@@ -1066,15 +1065,15 @@ async def test_options_handles_share_spawned_state() -> None:
     # their pending remote todos accumulate in the same ``spawned_remote`` in
     # call order -- regardless of which handle issued them.
     ctx = _root()
-    f1 = ctx.options(target="a").rpc("fn")  # root.1
-    f2 = ctx.options(target="b").rpc("fn")  # root.2
+    f1 = ctx.options(target="a").rpc("fn")  # root:1
+    f2 = ctx.options(target="b").rpc("fn")  # root:2
     with pytest.raises(Suspended):
         await f1
     with pytest.raises(Suspended):
         await f2
-    assert ctx._state.spawned_remote == ["root.1", "root.2"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"
-    assert ctx._state.effects.cache["root.2"].state == "pending"
+    assert ctx._state.spawned_remote == ["root:1", "root:2"]
+    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert ctx._state.effects.cache["root:2"].state == "pending"
 
 
 # =============================================================================
@@ -1098,7 +1097,7 @@ async def test_run_promise_creation_order_under_concurrency() -> None:
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        # Yield so a non-chained implementation would let root.2 race ahead.
+        # Yield so a non-chained implementation would let root:2 race ahead.
         await asyncio.sleep(0)
         return await original(req)
 
@@ -1111,7 +1110,7 @@ async def test_run_promise_creation_order_under_concurrency() -> None:
         assert await f2 == 4
         assert await f1 == 2
 
-    assert seen == ["root.1", "root.2"]
+    assert seen == ["root:1", "root:2"]
 
 
 @pytest.mark.asyncio
@@ -1128,7 +1127,7 @@ async def test_run_chain_blocks_second_create_until_first_returns() -> None:
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
 
-        if req.id == "root.1":
+        if req.id == "root:1":
             first_entered.set()
             await gate.wait()
         else:
@@ -1147,7 +1146,7 @@ async def test_run_chain_blocks_second_create_until_first_returns() -> None:
 
         # A non-chained implementation would allow bg #2 to enter
         # create_promise before bg #1 completes.
-        assert seen == ["root.1"]
+        assert seen == ["root:1"]
         assert not entered_second.is_set()
 
         gate.set()
@@ -1155,7 +1154,7 @@ async def test_run_chain_blocks_second_create_until_first_returns() -> None:
         assert await f1 == 2
         assert await f2 == 4
 
-    assert seen == ["root.1", "root.2"]
+    assert seen == ["root:1", "root:2"]
 
 
 # =============================================================================
@@ -1180,7 +1179,7 @@ async def test_run_chain_failure_propagates_to_successor() -> None:
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        if req.id == "root.1":
+        if req.id == "root:1":
             raise boom
         return await original(req)
 
@@ -1199,9 +1198,9 @@ async def test_run_chain_failure_propagates_to_successor() -> None:
     assert ei2.value is boom
     # Only the first link ever attempted a create: the successor parked on the
     # failed predecessor and unwound without issuing its own create_promise.
-    assert seen == ["root.1"]
-    assert "root.1" not in ctx._state.effects.cache
-    assert "root.2" not in ctx._state.effects.cache
+    assert seen == ["root:1"]
+    assert "root:1" not in ctx._state.effects.cache
+    assert "root:2" not in ctx._state.effects.cache
 
 
 @pytest.mark.asyncio
@@ -1216,7 +1215,7 @@ async def test_rpc_chain_failure_propagates_to_successor() -> None:
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        if req.id == "root.1":
+        if req.id == "root:1":
             raise boom
         return await original(req)
 
@@ -1232,9 +1231,9 @@ async def test_rpc_chain_failure_propagates_to_successor() -> None:
 
     assert ei1.value is boom
     assert ei2.value is boom
-    assert seen == ["root.1"]
-    assert "root.1" not in ctx._state.effects.cache
-    assert "root.2" not in ctx._state.effects.cache
+    assert seen == ["root:1"]
+    assert "root:1" not in ctx._state.effects.cache
+    assert "root:2" not in ctx._state.effects.cache
     # A failed create never registered a remote todo.
     assert ctx._state.spawned_remote == []
 
@@ -1253,7 +1252,7 @@ async def test_run_chain_failure_poisons_every_later_link() -> None:
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        if req.id == "root.1":
+        if req.id == "root:1":
             raise boom
         return await original(req)
 
@@ -1269,9 +1268,9 @@ async def test_run_chain_failure_poisons_every_later_link() -> None:
             assert ei.value is boom
 
     # Only the first link reached create_promise; the rest unwound on the chain.
-    assert seen == ["root.1"]
+    assert seen == ["root:1"]
     assert not any(
-        id in ctx._state.effects.cache for id in ("root.1", "root.2", "root.3")
+        id in ctx._state.effects.cache for id in ("root:1", "root:2", "root:3")
     )
 
 
@@ -1290,7 +1289,7 @@ async def test_run_chain_failure_poisons_every_later_link() -> None:
 async def test_future_id_returns_id_after_create() -> None:
     ctx = _root()
     fut = ctx.run(double, 21)
-    assert await fut.id() == "root.1"
+    assert await fut.id() == "root:1"
     # And the body still runs through to its value.
     assert await fut == 42
 
@@ -1321,8 +1320,8 @@ async def test_rpc_pending_registers_todo_and_suspends() -> None:
     fut = ctx.rpc("remote_fn", 1, 2)
     with pytest.raises(Suspended):
         await fut
-    assert ctx._state.spawned_remote == ["root.1"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.spawned_remote == ["root:1"]
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1332,14 +1331,14 @@ async def test_rpc_pending_registers_todo_and_suspends() -> None:
 
 @pytest.mark.asyncio
 async def test_rpc_presettled_resolved_returns_value() -> None:
-    ctx = _root([_resolved("root.1", "remote-result")])
+    ctx = _root([_resolved("root:1", "remote-result")])
     assert await ctx.rpc("remote_fn") == "remote-result"
     assert ctx._state.spawned_remote == []
 
 
 @pytest.mark.asyncio
 async def test_rpc_presettled_rejected_raises() -> None:
-    ctx = _root([_rejected("root.1", "remote failure")])
+    ctx = _root([_rejected("root:1", "remote failure")])
     with pytest.raises(ApplicationError, match="remote failure"):
         await ctx.rpc("remote_fn")
     assert ctx._state.spawned_remote == []
@@ -1373,15 +1372,13 @@ async def test_rpc_request_tags_and_param() -> None:
         await ctx.rpc("remote_fn", 1, 2, k="v")
 
     [req] = captured
-    assert req.id == "root.1"
+    assert req.id == "root:1"
     assert req.tags == {
         "resonate:scope": "global",
         "resonate:target": "",
-        "resonate:branch": "root.1",
+        "resonate:branch": "root:1",
         "resonate:parent": "root",
         "resonate:origin": "root",
-        # Non-detached: prefix mirrors origin.
-        "resonate:prefix": "root",
     }
     # ``TaskData`` flattens func + args + kwargs + version; ``args`` is the live
     # tuple here (it serializes to a JSON array on the wire). The codec
@@ -1411,22 +1408,22 @@ async def test_rpc_no_args_param_is_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_rpc_sequential_child_ids() -> None:
-    ctx = _root([_resolved("root.1", "a"), _resolved("root.2", "b")])
-    assert await ctx.rpc("fn") == "a"  # root.1
-    assert await ctx.rpc("fn") == "b"  # root.2
+    ctx = _root([_resolved("root:1", "a"), _resolved("root:2", "b")])
+    assert await ctx.rpc("fn") == "a"  # root:1
+    assert await ctx.rpc("fn") == "b"  # root:2
 
 
 @pytest.mark.asyncio
 async def test_rpc_promise_creation_order_under_concurrency() -> None:
     # The chain in ``_advance_promise_chain`` must serialize ``create_promise``
     # calls into call order even when both rpcs are spawned concurrently.
-    ctx = _root([_resolved("root.1", "a"), _resolved("root.2", "b")])
+    ctx = _root([_resolved("root:1", "a"), _resolved("root:2", "b")])
     seen: list[str] = []
     original = ctx._state.effects.create_promise
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        # Yield so a non-chained implementation would let root.2 race ahead.
+        # Yield so a non-chained implementation would let root:2 race ahead.
         await asyncio.sleep(0)
         return await original(req)
 
@@ -1439,7 +1436,7 @@ async def test_rpc_promise_creation_order_under_concurrency() -> None:
         assert await f2 == "b"
         assert await f1 == "a"
 
-    assert seen == ["root.1", "root.2"]
+    assert seen == ["root:1", "root:2"]
 
 
 # =============================================================================
@@ -1462,7 +1459,7 @@ async def test_rpc_with_options_timeout_sets_child_deadline() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=30)).rpc("fn")
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1472,12 +1469,12 @@ async def test_rpc_with_options_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(days=365)).rpc("fn")
-    assert ctx._state.effects.cache["root.1"].timeout_at == cap
+    assert ctx._state.effects.cache["root:1"].timeout_at == cap
 
 
 @pytest.mark.asyncio
 async def test_rpc_options_do_not_leak_to_base_context() -> None:
-    ctx = _root([_resolved("root.1", "a")])
+    ctx = _root([_resolved("root:1", "a")])
     await ctx.options(timeout=timedelta(seconds=30), target="x").rpc("fn")
     # The override rode the throwaway handle; the base context is untouched.
     assert ctx.opts == Opts()
@@ -1511,12 +1508,12 @@ async def test_rpc_task_pending_while_create_promise_blocked() -> None:
 
         await entered.wait()
 
-        assert "root.1" not in ctx._state.effects.cache
+        assert "root:1" not in ctx._state.effects.cache
 
         gate.set()
         with pytest.raises(Suspended):
             await task
-        assert ctx._state.effects.cache["root.1"].state == "pending"
+        assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -1534,7 +1531,7 @@ async def test_rpc_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root.1" not in ctx._state.effects.cache
+    assert "root:1" not in ctx._state.effects.cache
     assert ctx._state.spawned_remote == []
 
 
@@ -1556,8 +1553,8 @@ async def test_sleep_pending_registers_todo_and_suspends() -> None:
     fut = ctx.sleep(timedelta(seconds=30))
     with pytest.raises(Suspended):
         await fut
-    assert ctx._state.spawned_remote == ["root.1"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.spawned_remote == ["root:1"]
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1569,7 +1566,7 @@ async def test_sleep_pending_registers_todo_and_suspends() -> None:
 async def test_sleep_presettled_resolved_returns_none() -> None:
     # An elapsed timer is recovered as a resolved record carrying no payload;
     # ``_decode_settled`` yields its (empty) value and no todo is registered.
-    ctx = _root([_resolved("root.1", None)])
+    ctx = _root([_resolved("root:1", None)])
     assert await ctx.sleep(timedelta(seconds=1)) is None
     assert ctx._state.spawned_remote == []
 
@@ -1586,13 +1583,15 @@ async def test_sleep_request_tags_and_timer_flag() -> None:
         await ctx.sleep(timedelta(seconds=30))
 
     [req] = captured
-    assert req.id == "root.1"
+    assert req.id == "root:1"
+    # A timer carries a target: the server only schedules timeouts for promises
+    # that have one, so a target-less timer would never fire.
     assert req.tags == {
         "resonate:scope": "global",
-        "resonate:branch": "root.1",
+        "resonate:target": "",
+        "resonate:branch": "root:1",
         "resonate:parent": "root",
         "resonate:origin": "root",
-        "resonate:prefix": "root",
         "resonate:timer": "true",
     }
     # A timer promise carries no param payload (unlike rpc's func envelope).
@@ -1602,24 +1601,26 @@ async def test_sleep_request_tags_and_timer_flag() -> None:
 @pytest.mark.asyncio
 async def test_sleep_timeout_at_is_now_plus_duration() -> None:
     # The wake time is ``now + duration``, taken straight from the argument.
+    # It IS the promise's deadline: ``resonate:timer`` makes timing out settle
+    # the promise resolved, which is what wakes the sleeper.
     ctx = _root()
     before = now_ms()
     with pytest.raises(Suspended):
         await ctx.sleep(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
 @pytest.mark.asyncio
 async def test_sleep_duration_capped_to_parent_timeout() -> None:
     # A wake time beyond the parent's deadline is capped, like every other
-    # child promise (``child_timeout``).
+    # child promise (``child_timeout``): a sleep cannot outlive its workflow.
     cap = now_ms() + 5_000
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.sleep(timedelta(days=365))
-    assert ctx._state.effects.cache["root.1"].timeout_at == cap
+    assert ctx._state.effects.cache["root:1"].timeout_at == cap
 
 
 # =============================================================================
@@ -1640,7 +1641,7 @@ async def test_sleep_ignores_opts_timeout_for_duration() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=5)).sleep(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1663,22 +1664,22 @@ async def test_sleep_options_do_not_leak_to_base_context() -> None:
 
 @pytest.mark.asyncio
 async def test_sleep_sequential_child_ids() -> None:
-    ctx = _root([_resolved("root.1", None), _resolved("root.2", None)])
-    assert await ctx.sleep(timedelta(seconds=1)) is None  # root.1
-    assert await ctx.sleep(timedelta(seconds=1)) is None  # root.2
+    ctx = _root([_resolved("root:1", None), _resolved("root:2", None)])
+    assert await ctx.sleep(timedelta(seconds=1)) is None  # root:1
+    assert await ctx.sleep(timedelta(seconds=1)) is None  # root:2
 
 
 @pytest.mark.asyncio
 async def test_sleep_promise_creation_order_under_concurrency() -> None:
     # ``sleep`` joins the same ``_advance_promise_chain`` as run/rpc, so two
     # timers spawned concurrently still issue ``create_promise`` in call order.
-    ctx = _root([_resolved("root.1", None), _resolved("root.2", None)])
+    ctx = _root([_resolved("root:1", None), _resolved("root:2", None)])
     seen: list[str] = []
     original = ctx._state.effects.create_promise
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        # Yield so a non-chained implementation would let root.2 race ahead.
+        # Yield so a non-chained implementation would let root:2 race ahead.
         await asyncio.sleep(0)
         return await original(req)
 
@@ -1691,7 +1692,7 @@ async def test_sleep_promise_creation_order_under_concurrency() -> None:
         assert await f2 is None
         assert await f1 is None
 
-    assert seen == ["root.1", "root.2"]
+    assert seen == ["root:1", "root:2"]
 
 
 # =============================================================================
@@ -1714,7 +1715,7 @@ async def test_sleep_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root.1" not in ctx._state.effects.cache
+    assert "root:1" not in ctx._state.effects.cache
     assert ctx._state.spawned_remote == []
 
 
@@ -1738,8 +1739,8 @@ async def test_promise_pending_registers_todo_and_suspends() -> None:
     fut = ctx.promise(timedelta(seconds=30))
     with pytest.raises(Suspended):
         await fut
-    assert ctx._state.spawned_remote == ["root.1"]
-    assert ctx._state.effects.cache["root.1"].state == "pending"
+    assert ctx._state.spawned_remote == ["root:1"]
+    assert ctx._state.effects.cache["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1751,14 +1752,14 @@ async def test_promise_pending_registers_todo_and_suspends() -> None:
 async def test_promise_presettled_resolved_returns_value() -> None:
     # A DI promise resolved by an external party is recovered as a resolved
     # record; ``_decode_settled`` yields its payload and no todo is registered.
-    ctx = _root([_resolved("root.1", "external-result")])
+    ctx = _root([_resolved("root:1", "external-result")])
     assert await ctx.promise(timedelta(seconds=1)) == "external-result"
     assert ctx._state.spawned_remote == []
 
 
 @pytest.mark.asyncio
 async def test_promise_presettled_rejected_raises() -> None:
-    ctx = _root([_rejected("root.1", "external failure")])
+    ctx = _root([_rejected("root:1", "external failure")])
     with pytest.raises(ApplicationError, match="external failure"):
         await ctx.promise(timedelta(seconds=1))
     assert ctx._state.spawned_remote == []
@@ -1776,15 +1777,14 @@ async def test_promise_request_tags_and_empty_param() -> None:
         await ctx.promise(timedelta(seconds=30))
 
     [req] = captured
-    assert req.id == "root.1"
+    assert req.id == "root:1"
     # A DI promise carries the standard scope/lineage tags only -- no timer
     # flag (unlike sleep) and no target (unlike rpc).
     assert req.tags == {
         "resonate:scope": "global",
-        "resonate:branch": "root.1",
+        "resonate:branch": "root:1",
         "resonate:parent": "root",
         "resonate:origin": "root",
-        "resonate:prefix": "root",
     }
     assert "resonate:timer" not in req.tags
     assert "resonate:target" not in req.tags
@@ -1799,7 +1799,7 @@ async def test_promise_timeout_at_is_now_plus_timeout() -> None:
     with pytest.raises(Suspended):
         await ctx.promise(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1812,7 +1812,7 @@ async def test_promise_none_timeout_uses_default() -> None:
     with pytest.raises(Suspended):
         await ctx.promise(None)
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     day_ms = 24 * 60 * 60 * 1000
     assert before + day_ms <= record.timeout_at <= after + day_ms
 
@@ -1823,7 +1823,7 @@ async def test_promise_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.promise(timedelta(days=365))
-    assert ctx._state.effects.cache["root.1"].timeout_at == cap
+    assert ctx._state.effects.cache["root:1"].timeout_at == cap
 
 
 # =============================================================================
@@ -1840,7 +1840,7 @@ async def test_promise_ignores_opts_timeout_for_deadline() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=5)).promise(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root.1"]
+    record = ctx._state.effects.cache["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1863,22 +1863,22 @@ async def test_promise_options_do_not_leak_to_base_context() -> None:
 
 @pytest.mark.asyncio
 async def test_promise_sequential_child_ids() -> None:
-    ctx = _root([_resolved("root.1", "a"), _resolved("root.2", "b")])
-    assert await ctx.promise(timedelta(seconds=1)) == "a"  # root.1
-    assert await ctx.promise(timedelta(seconds=1)) == "b"  # root.2
+    ctx = _root([_resolved("root:1", "a"), _resolved("root:2", "b")])
+    assert await ctx.promise(timedelta(seconds=1)) == "a"  # root:1
+    assert await ctx.promise(timedelta(seconds=1)) == "b"  # root:2
 
 
 @pytest.mark.asyncio
 async def test_promise_creation_order_under_concurrency() -> None:
     # ``promise`` joins the same ``_advance_promise_chain`` as run/rpc/sleep, so
     # two DI promises spawned concurrently still create in call order.
-    ctx = _root([_resolved("root.1", "a"), _resolved("root.2", "b")])
+    ctx = _root([_resolved("root:1", "a"), _resolved("root:2", "b")])
     seen: list[str] = []
     original = ctx._state.effects.create_promise
 
     async def recorder(req: Any) -> Any:
         seen.append(req.id)
-        # Yield so a non-chained implementation would let root.2 race ahead.
+        # Yield so a non-chained implementation would let root:2 race ahead.
         await asyncio.sleep(0)
         return await original(req)
 
@@ -1891,7 +1891,7 @@ async def test_promise_creation_order_under_concurrency() -> None:
         assert await f2 == "b"
         assert await f1 == "a"
 
-    assert seen == ["root.1", "root.2"]
+    assert seen == ["root:1", "root:2"]
 
 
 # =============================================================================
@@ -1914,7 +1914,7 @@ async def test_promise_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root.1" not in ctx._state.effects.cache
+    assert "root:1" not in ctx._state.effects.cache
     assert ctx._state.spawned_remote == []
 
 
@@ -1925,15 +1925,15 @@ async def test_promise_releases_event_when_create_promise_raises() -> None:
 # but is fire-and-forget: it is NOT registered in ``spawned_remote``, the
 # workflow never suspends on it, and the returned future resolves to the child
 # *id* rather than a remote result. The id lives outside the structured
-# ``{id}.{seq}`` namespace -- it is ``{prefix}.d{blake2b 16 hex of the raw seq}``
+# ``{id}:{seq}`` namespace -- it is ``{origin}:d{blake2b 16 hex of the raw seq}``
 # (the ``d`` marks it a detached segment) -- so it is deterministic across replay
 # yet distinct from awaited children.
 # =============================================================================
 
 
-def _detached_id(prefix: str, raw: str) -> str:
-    """Return the id ``detached`` derives for raw seq id ``raw`` under ``prefix``."""
-    return f"{prefix}.d{_hash_id(raw)}"
+def _detached_id(origin: str, raw: str) -> str:
+    """Return the id ``detached`` derives for raw seq id ``raw`` under ``origin``."""
+    return f"{origin}:d{_hash_id(raw)}"
 
 
 @pytest.mark.asyncio
@@ -1942,7 +1942,7 @@ async def test_detached_returns_id_without_suspending() -> None:
     # Suspended and does NOT register a remote todo -- the future just
     # yields the child id.
     ctx = _root()
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     assert await ctx.detached("remote_fn", 1, 2) == child_id
     assert ctx._state.spawned_remote == []
     # The durable promise was created (and left pending -- nobody settles it
@@ -1951,15 +1951,15 @@ async def test_detached_returns_id_without_suspending() -> None:
 
 
 @pytest.mark.asyncio
-async def test_detached_id_is_prefix_rooted_hash() -> None:
-    # The id is ``{prefix}.d{16-hex}`` -- prefix-rooted, not parent-rooted, and
-    # outside the ``root.1`` structured namespace.
+async def test_detached_id_is_origin_rooted_hash() -> None:
+    # The id is ``{origin}:d{16-hex}`` -- origin-rooted, not parent-rooted, and
+    # outside the ``root:1`` structured namespace.
     ctx = _root()
     child_id = await ctx.detached("remote_fn")
-    assert child_id == _detached_id("root", "root.1")
-    assert child_id != "root.1"
-    # A ``d`` marker plus 16 lowercase hex chars after the prefix segment.
-    _, _, suffix = child_id.partition(".")
+    assert child_id == _detached_id("root", "root:1")
+    assert child_id != "root:1"
+    # A ``d`` marker plus 16 lowercase hex chars after the origin segment.
+    _, _, suffix = child_id.partition(":")
     assert suffix[0] == "d"
     assert len(suffix) == 17
     assert all(c in "0123456789abcdef" for c in suffix[1:])
@@ -1967,37 +1967,36 @@ async def test_detached_id_is_prefix_rooted_hash() -> None:
 
 @pytest.mark.asyncio
 async def test_detached_consumes_seq_and_yields_distinct_ids() -> None:
-    # Each call consumes a seq slot (root.1, root.2, ...) so ids stay stable
+    # Each call consumes a seq slot (root:1, root:2, ...) so ids stay stable
     # across replay; the resulting hashed ids are distinct.
     ctx = _root()
     id1 = await ctx.detached("fn")
     id2 = await ctx.detached("fn")
-    assert id1 == _detached_id("root", "root.1")
-    assert id2 == _detached_id("root", "root.2")
+    assert id1 == _detached_id("root", "root:1")
+    assert id2 == _detached_id("root", "root:2")
     assert id1 != id2
 
 
 @pytest.mark.asyncio
 async def test_detached_request_tags_and_param() -> None:
     ctx = _root()
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     with _spy_create_promise(ctx) as captured:
         await ctx.detached("remote_fn", 1, 2, k="v")
 
     [req] = captured
     assert req.id == child_id
     # A detached promise carries the remote (rpc-style) tag set: global scope, a
-    # resolved target, and -- like every child -- branch == its own id. Unlike
-    # every other creator, detached starts a fresh lineage: ``resonate:origin``
-    # is its OWN id (== branch), while ``resonate:prefix`` keeps the parent's
-    # propagated prefix ("root") so recursive detached ids stay bounded.
+    # resolved target, and -- like every child -- branch == its own id. It keeps
+    # the parent's ``resonate:origin`` ("root"): the id is minted off that origin
+    # so recursive detached ids stay bounded, and an id of ``root:d{hex}`` naming
+    # itself as origin would reject its own children server-side.
     assert req.tags == {
         "resonate:scope": "global",
         "resonate:target": "",
         "resonate:branch": child_id,
         "resonate:parent": "root",
-        "resonate:origin": child_id,
-        "resonate:prefix": "root",
+        "resonate:origin": "root",
     }
     # Like rpc, detached dispatches a flattened ``TaskData`` (args is the live
     # tuple, serialized to a JSON array on the wire).
@@ -2022,7 +2021,7 @@ async def test_detached_idempotent_on_preloaded_record() -> None:
     # idempotent and detached still returns the id and never suspends,
     # regardless of the record's state.
     ctx = _root()
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     ctx._state.effects.cache[child_id] = _resolved(child_id, "external-result")
     assert await ctx.detached("fn") == child_id
     assert ctx._state.spawned_remote == []
@@ -2031,7 +2030,7 @@ async def test_detached_idempotent_on_preloaded_record() -> None:
 @pytest.mark.asyncio
 async def test_detached_with_options_target_and_timeout() -> None:
     ctx = _root()
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     before = now_ms()
     with _spy_create_promise(ctx) as captured:
         await ctx.options(target="worker-1", timeout=timedelta(seconds=30)).detached(
@@ -2056,7 +2055,7 @@ async def test_detached_options_do_not_leak_to_base_context() -> None:
 async def test_detached_timeout_capped_to_parent() -> None:
     cap = now_ms() + 5_000
     ctx = _root(timeout_at=cap)
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     await ctx.options(timeout=timedelta(days=365)).detached("fn")
     assert ctx._state.effects.cache[child_id].timeout_at == cap
 
@@ -2067,8 +2066,8 @@ async def test_detached_creation_order_under_concurrency() -> None:
     # entrypoints, so two detached dispatches spawned concurrently still issue
     # ``create_promise`` in call order (under their hashed ids).
     ctx = _root()
-    id1 = _detached_id("root", "root.1")
-    id2 = _detached_id("root", "root.2")
+    id1 = _detached_id("root", "root:1")
+    id2 = _detached_id("root", "root:2")
     seen: list[str] = []
     original = ctx._state.effects.create_promise
 
@@ -2127,11 +2126,11 @@ async def test_detached_does_not_force_parent_to_suspend() -> None:
     # suspension the way a pending rpc/promise dependency would force.
     assert await ctx.run(dispatches_detached) == "done"
     assert ctx._state.spawned_remote == []
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
-    assert ctx._state.effects.cache["root.1"].value.data == "done"
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].value.data == "done"
     # The detached promise was created under the child's own origin-rooted id
     # and left pending.
-    detached_id = _detached_id("root", "root.1.1")
+    detached_id = _detached_id("root", "root:1.1")
     assert ctx._state.effects.cache[detached_id].state == "pending"
 
 
@@ -2166,7 +2165,7 @@ async def test_detached_create_promise_completes_by_flush_when_unawaited() -> No
     # future. The bg body is deferred, so right after the call the durable
     # promise does not exist yet...
     ctx = _root()
-    child_id = _detached_id("root", "root.1")
+    child_id = _detached_id("root", "root:1")
     _ = ctx.detached("remote_fn", 1, 2)
     assert child_id not in ctx._state.effects.cache
     # ...``flush_local_work`` joins the body before the workflow can settle, so
@@ -2196,7 +2195,7 @@ async def test_detached_promise_created_before_parent_settles_unawaited() -> Non
     # by ``flush_local_work`` joining it -- without that join the parent settles
     # first (or the create never happens at all).
     ctx = _root()
-    detached_id = _detached_id("root", "root.1.1")
+    detached_id = _detached_id("root", "root:1.1")
     order: list[str] = []
     orig_create = ctx._state.effects.create_promise
     orig_settle = ctx._state.effects.settle_promise
@@ -2221,11 +2220,11 @@ async def test_detached_promise_created_before_parent_settles_unawaited() -> Non
         assert await ctx.run(dispatches_detached_fire_and_forget) == "done"
 
     assert order == [
-        "create:root.1",  # parent workflow promise
+        "create:root:1",  # parent workflow promise
         f"create:{detached_id}",  # detached child -- flushed before settle
-        "settle:root.1",  # parent settles last
+        "settle:root:1",  # parent settles last
     ]
-    assert ctx._state.effects.cache["root.1"].state == "resolved"
+    assert ctx._state.effects.cache["root:1"].state == "resolved"
     assert ctx._state.effects.cache[detached_id].state == "pending"
     # Fire-and-forget: it never became a remote todo for the parent.
     assert ctx._state.spawned_remote == []
@@ -2243,8 +2242,8 @@ async def test_mixed_run_and_rpc_create_in_call_order() -> None:
     # code paths -- otherwise interleaving the two would break id allocation.
     ctx = _root(
         [
-            _resolved("root.2", "remote-1"),
-            _resolved("root.4", "remote-2"),
+            _resolved("root:2", "remote-1"),
+            _resolved("root:4", "remote-2"),
         ]
     )
     seen: list[str] = []
@@ -2259,17 +2258,17 @@ async def test_mixed_run_and_rpc_create_in_call_order() -> None:
     with patch.object(
         ctx._state.effects, "create_promise", new=AsyncMock(side_effect=recorder)
     ):
-        f1 = ctx.run(double, 1)  # root.1 (executes locally)
-        f2 = ctx.rpc("remote_fn")  # root.2 (preloaded resolved)
-        f3 = ctx.run(double, 3)  # root.3 (executes locally)
-        f4 = ctx.rpc("remote_fn")  # root.4 (preloaded resolved)
+        f1 = ctx.run(double, 1)  # root:1 (executes locally)
+        f2 = ctx.rpc("remote_fn")  # root:2 (preloaded resolved)
+        f3 = ctx.run(double, 3)  # root:3 (executes locally)
+        f4 = ctx.rpc("remote_fn")  # root:4 (preloaded resolved)
         # Await in reverse so completion order is decoupled from call order.
         assert await f4 == "remote-2"
         assert await f3 == 6
         assert await f2 == "remote-1"
         assert await f1 == 2
 
-    assert seen == ["root.1", "root.2", "root.3", "root.4"]
+    assert seen == ["root:1", "root:2", "root:3", "root:4"]
 
 
 @pytest.mark.asyncio
@@ -2278,8 +2277,8 @@ async def test_mixed_run_rpc_sleep_create_in_call_order() -> None:
     # sequence across all three must still call ``create_promise`` in call order.
     ctx = _root(
         [
-            _resolved("root.2", "remote-1"),
-            _resolved("root.3", None),
+            _resolved("root:2", "remote-1"),
+            _resolved("root:3", None),
         ]
     )
     seen: list[str] = []
@@ -2293,15 +2292,15 @@ async def test_mixed_run_rpc_sleep_create_in_call_order() -> None:
     with patch.object(
         ctx._state.effects, "create_promise", new=AsyncMock(side_effect=recorder)
     ):
-        f1 = ctx.run(double, 1)  # root.1 (executes locally)
-        f2 = ctx.rpc("remote_fn")  # root.2 (preloaded resolved)
-        f3 = ctx.sleep(timedelta(seconds=1))  # root.3 (preloaded resolved timer)
+        f1 = ctx.run(double, 1)  # root:1 (executes locally)
+        f2 = ctx.rpc("remote_fn")  # root:2 (preloaded resolved)
+        f3 = ctx.sleep(timedelta(seconds=1))  # root:3 (preloaded resolved timer)
         # Await in reverse so completion order is decoupled from call order.
         assert await f3 is None
         assert await f2 == "remote-1"
         assert await f1 == 2
 
-    assert seen == ["root.1", "root.2", "root.3"]
+    assert seen == ["root:1", "root:2", "root:3"]
 
 
 @pytest.mark.asyncio
@@ -2311,9 +2310,9 @@ async def test_mixed_run_rpc_sleep_promise_create_in_call_order() -> None:
     # call ``create_promise`` in call order.
     ctx = _root(
         [
-            _resolved("root.2", "remote-1"),
-            _resolved("root.3", None),
-            _resolved("root.4", "di-1"),
+            _resolved("root:2", "remote-1"),
+            _resolved("root:3", None),
+            _resolved("root:4", "di-1"),
         ]
     )
     seen: list[str] = []
@@ -2327,17 +2326,17 @@ async def test_mixed_run_rpc_sleep_promise_create_in_call_order() -> None:
     with patch.object(
         ctx._state.effects, "create_promise", new=AsyncMock(side_effect=recorder)
     ):
-        f1 = ctx.run(double, 1)  # root.1 (executes locally)
-        f2 = ctx.rpc("remote_fn")  # root.2 (preloaded resolved)
-        f3 = ctx.sleep(timedelta(seconds=1))  # root.3 (preloaded resolved timer)
-        f4 = ctx.promise(timedelta(seconds=1))  # root.4 (preloaded resolved DI)
+        f1 = ctx.run(double, 1)  # root:1 (executes locally)
+        f2 = ctx.rpc("remote_fn")  # root:2 (preloaded resolved)
+        f3 = ctx.sleep(timedelta(seconds=1))  # root:3 (preloaded resolved timer)
+        f4 = ctx.promise(timedelta(seconds=1))  # root:4 (preloaded resolved DI)
         # Await in reverse so completion order is decoupled from call order.
         assert await f4 == "di-1"
         assert await f3 is None
         assert await f2 == "remote-1"
         assert await f1 == 2
 
-    assert seen == ["root.1", "root.2", "root.3", "root.4"]
+    assert seen == ["root:1", "root:2", "root:3", "root:4"]
 
 
 # =============================================================================
@@ -2630,7 +2629,7 @@ async def test_rpc_by_object_recovery_coerces_return_to_declared_struct() -> Non
     # annotation).
     registry = Registry()
     registry.register("make_point", _make_point, 1)
-    ctx = _root([_resolved("root.1", _RecoveredPoint(x=3, y=4))], registry=registry)
+    ctx = _root([_resolved("root:1", _RecoveredPoint(x=3, y=4))], registry=registry)
     result = await ctx.rpc(_make_point, 3, 4)
     assert isinstance(result, _RecoveredPoint)
     assert result == _RecoveredPoint(x=3, y=4)
@@ -2641,7 +2640,7 @@ async def test_rpc_by_name_recovery_stays_raw_builtins() -> None:
     # The contrast case: a by-name dispatch has no local function to coerce
     # against, so the settled value passes through as raw builtins (a dict),
     # untyped by design -- matching the top-level ``rpc``/``get``.
-    ctx = _root([_resolved("root.1", _RecoveredPoint(x=3, y=4))])
+    ctx = _root([_resolved("root:1", _RecoveredPoint(x=3, y=4))])
     result = await ctx.rpc("make_point", 3, 4)
     assert isinstance(result, dict)
     assert result == {"x": 3, "y": 4}
