@@ -259,7 +259,7 @@ async fn execute(&self, promise: &PromiseRecord, version: i64) -> Settlement {
 /// `execute`, which turns them into a settlement.
 ///
 /// Everything below is integration-specific except its shape, and the shape is
-/// the same every time: resolve, start, watch, report.
+/// the same every time: resolve, validate, start, watch, report.
 async fn work(
     &self,
     promise: &PromiseRecord,
@@ -276,7 +276,25 @@ async fn work(
     // immutable: reject the promise. An unconfigured deployment is the
     // operator's and a rollout fixes it: leave the task for redelivery.
     let target = self.target(promise)?;
-    let input = decode_param(promise.param.data.as_deref())?;
+
+    // ── Read and validate the param ──────────────────────────────────────
+    //
+    // The param is the request, and its schema is this integration's contract
+    // with whoever creates the promise. To the protocol `param.data` is opaque
+    // bytes: JSON is the common choice, but it can be protobuf, msgpack, a bare
+    // string, a CSV — whatever the integration says it is. Whatever you pick,
+    // write it down (README.md, and references/schemas.md).
+    //
+    // Validate it here, before the first side effect, and reject on violation.
+    // A promise's param is immutable, so a request that is malformed now is
+    // malformed on every redelivery: retrying cannot help, and leaving it
+    // unvalidated means either a confusing downstream error later or — worse —
+    // a run started from a request you did not actually understand.
+    //
+    // Reject with enough detail to fix the caller: which field, what was wrong.
+    // The promise value is the only channel back, so a bare "invalid request"
+    // strands whoever sent it.
+    let input = self.decode_param(&promise.param)?;   // permanent error on violation
 
     // ── Start the downstream run ─────────────────────────────────────────
     //
@@ -346,6 +364,9 @@ Three things to notice in the shape:
 - **Three outcomes: resolve, reject, leave alone.** That `match` lives in `execute`, not in
   `run` — the frame applies a decision, it does not make one. It stays three arms only
   because the two enums do not cross-cut; see below.
+- **Validation happens once, at the top of `work`.** A param that fails its schema can
+  never pass it — promise params are immutable — so it is a rejection, not a retry, and it
+  must happen before anything downstream is touched.
 - **The two hard parts are both in `work`.** Starting the downstream run on every delivery
   under a deterministic key, and running the lease clock and the downstream clock as two
   separate things. Get either wrong and nothing above notices — you get duplicate runs, or
@@ -499,7 +520,17 @@ One scheme may map to several registrations (`http` and `https` share the push w
 a worker may serve every address of its scheme including malformed ones — rejecting those
 is the worker's job, not the router's.
 
-## 5. Tests
+## 5. README
+
+Write it from `references/readme-template.md` and keep it beside the code —
+`docs/integrations/<name>.md` for an in-tree worker.
+
+The address, param and value schemas are what callers write against; they belong somewhere
+a caller will look, which is not the middle of a Rust file. Put them in **both** the README
+and the worker's module doc comment: the module comment is for whoever changes the worker,
+the README for whoever calls it. If they disagree, the code wins and the README is a bug.
+
+## 6. Tests
 
 - **Unit** — address parsing (including every malformed shape), the idempotency key
   (determinism, charset, collision after truncation), param decoding, downstream state
@@ -516,6 +547,8 @@ is the worker's job, not the router's.
 - [ ] `pub mod` in `src/transport/mod.rs`
 - [ ] Config struct, field on `TransportsConfig`, `validate` rules
 - [ ] `workers.insert("<scheme>", …)` in `src/main.rs`, gated on `enabled`
-- [ ] Unit tests for the pure helpers
+- [ ] Param validation at the top of `work`, rejecting on violation with the offending field
+- [ ] Unit tests for the pure helpers, including every malformed param and address
 - [ ] A crash-and-restart test proving one downstream run
-- [ ] Address, param and value schemas documented in the module's doc comment
+- [ ] Address, param and value schemas in the module's doc comment
+- [ ] A README from `references/readme-template.md`

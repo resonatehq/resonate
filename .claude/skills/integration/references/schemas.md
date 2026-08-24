@@ -1,8 +1,11 @@
 # Schemas: address, param, value
 
-The integration's public contract. Write these first, get them reviewed, then code. Put
-them in the worker module's doc comment, where they cannot drift from the implementation —
-see the header of `src/transport/transport_airflow.rs`.
+The integration's public contract. Write these first, get them reviewed, then code.
+
+They go in two places, on purpose: the worker's module doc comment, where they sit next to
+the code that has to honour them (see the header of `src/transport/transport_airflow.rs`),
+and the integration's README, where a caller will actually look — see
+`references/readme-template.md`. If the two disagree, the code wins and the README is a bug.
 
 ---
 
@@ -45,10 +48,12 @@ impl AirflowAddress {
 }
 ```
 
-A rejected address is `Err(Unavailable)` out of `send`, which the dispatch loop logs and
-drops — the task stays pending and retries. A *permanently* malformed address will
-therefore retry until the promise times out. That is the current behaviour; if you want it
-to reject the promise instead, do it in the spawned task after acquiring, not in `send`.
+Parse it **after the claim**, not in `send`. Before the task is claimed the only way to
+report anything is `Err(Unavailable)`, which the dispatch loop logs and drops — so a
+permanently malformed address would retry every `retry_timeout` until the promise timed out,
+and the caller would see `rejected_timedout` rather than the reason. Past the claim it is an
+ordinary permanent error: the promise settles `rejected` with `invalid_request` and the
+offending address quoted.
 
 ## Deployment configuration
 
@@ -83,8 +88,20 @@ known deployments — that is a deployment error, and retrying will not fix it.
 The request lives in `promise.param`:
 
 ```json
-{ "headers": { "content-type": "application/json" }, "data": "<base64 UTF-8 JSON>" }
+{ "headers": { "content-type": "application/json" }, "data": "<encoded request>" }
 ```
+
+`data` is a string, and to the protocol it is **opaque**. JSON base64-encoded into it is the
+common choice — it is what the CLI and SDKs produce (`src/cli.rs::b64_encode_data_field`) —
+but an integration is free to carry protobuf, msgpack, a bare string, anything. Two
+obligations come with that freedom:
+
+- **Document the encoding**, in the README and in the module doc comment. `headers` is
+  where to declare it on the wire; a caller cannot guess it.
+- **Validate against the schema before the first side effect**, and reject on violation. A
+  promise's param is immutable, so a request that is malformed now is malformed on every
+  redelivery: it is a permanent error, never a retry. Name the offending field — the
+  promise value is the only channel back to whoever sent it.
 
 ### Accept the SDK invocation envelope
 

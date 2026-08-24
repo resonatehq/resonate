@@ -185,10 +185,15 @@ For push, see `references/push-vs-poll.md` — the questions to settle before bu
 
 1. **Address schema** — the scheme it owns and the syntax past it.
    `references/schemas.md`
-2. **Param schema** — the request, in `promise.param.data`.
+2. **Param schema** — the request, in `promise.param.data`. The protocol carries opaque
+   bytes, so the encoding is yours to pick and yours to document; validate against it
+   before the first side effect and reject on violation.
 3. **Value schema** — the outcome, in `promise.value.data`, for both branches.
 4. **Create** — idempotently start or re-attach to the downstream run.
 5. **Check** — map the downstream state to pending / succeeded / failed.
+
+All five go in the integration's README, which is the contract callers write against —
+`references/readme-template.md`.
 
 ## The three phases
 
@@ -221,7 +226,11 @@ transient. `references/lifecycle.md` has the full table.
    worker struct holding `Arc<dyn ResonateServer>`, `send` that spawns, a run context with
    acquire / create / monitor / settle, and pure helpers with unit tests.
 4. **Register it** — five edits, listed in `references/registration.md`.
-5. **Test the redelivery path.** `SIGKILL` the server between create and settle, restart it
+5. **Write the README** from `references/readme-template.md`. The three schemas, the
+   idempotency key and what the downstream does with duplicates, the configuration, and an
+   honest limitations section. Nobody should have to read the worker to learn how to call
+   it.
+6. **Test the redelivery path.** `SIGKILL` the server between create and settle, restart it
    against the same storage, and assert exactly one downstream run exists.
 
 ## Reference material
@@ -233,4 +242,5 @@ transient. `references/lifecycle.md` has the full table.
 | `references/idempotency.md` | Decision tree, and what to do when the downstream offers no dedupe |
 | `references/schemas.md` | Address, param and value schema rules |
 | `references/registration.md` | The five edits that plug a worker into the server |
+| `references/readme-template.md` | The README every integration ships, section by section |
 | `references/push-vs-poll.md` | Why push is out of scope and what to settle first |
