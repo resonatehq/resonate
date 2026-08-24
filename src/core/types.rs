@@ -236,6 +236,105 @@ pub enum Message {
     Unblock(UnblockMsg),
 }
 
+// --- Typed protocol calls ---
+//
+// [`RequestEnvelope`] and [`ResponseEnvelope`] are the *wire* forms: what an
+// HTTP adapter decodes off a socket. A caller in the same process has no socket
+// and no reason to hand-build JSON, so it uses the types below and lets
+// [`ResonateServer::call`](super::ResonateServer::call) do the conversion.
+
+/// A protocol request, typed.
+///
+/// Enumerates the operations a worker performs. Everything else still reaches
+/// the server as an envelope, because everything else arrives as one.
+// The shared `Task` prefix is not redundant: it says which noun the operation
+// is on, and `PromiseCreate`/`ScheduleCreate` join this enum the moment
+// something in process needs them.
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
+pub enum Request {
+    TaskAcquire(TaskAcquireData),
+    TaskHeartbeat(TaskHeartbeatData),
+    TaskFulfill(TaskFulfillData),
+}
+
+impl Request {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Request::TaskAcquire(_) => "task.acquire",
+            Request::TaskHeartbeat(_) => "task.heartbeat",
+            Request::TaskFulfill(_) => "task.fulfill",
+        }
+    }
+
+    /// The wire form. Infallible: these types serialize by construction, which
+    /// is the point of having them.
+    pub fn into_envelope(self) -> RequestEnvelope {
+        let kind = self.kind().to_string();
+        let data = match self {
+            Request::TaskAcquire(d) => serde_json::to_value(d),
+            Request::TaskHeartbeat(d) => serde_json::to_value(d),
+            Request::TaskFulfill(d) => serde_json::to_value(d),
+        }
+        .expect("protocol request types serialize");
+        RequestEnvelope {
+            kind,
+            head: RequestHead {
+                corr_id: format!("{:016x}", fastrand::u64(..)),
+                version: PROTOCOL_VERSION.to_string(),
+                // In process there is no caller to authenticate, and no clock
+                // to override.
+                auth: None,
+                debug_time: None,
+            },
+            data,
+        }
+    }
+}
+
+/// The answer to a [`Request`], typed.
+///
+/// Three variants rather than a status code, because three is how many
+/// outcomes a caller acts on differently.
+#[derive(Debug)]
+pub enum Response {
+    /// `task.acquire` succeeded: the task belongs to this caller now.
+    Acquired(Box<TaskAcquireResponseData>),
+    /// Succeeded, with nothing the caller needs back.
+    Ok,
+    /// The exchange completed and the request did not apply — a 409 race, a
+    /// version mismatch, a validation failure. A caller does the same thing in
+    /// every case (it does not own the task), so the status is carried for the
+    /// log and nothing else.
+    Rejected { status: i32 },
+}
+
+impl Response {
+    /// Read a response envelope back as the answer to `request_kind`.
+    ///
+    /// A 2xx whose body is not what that kind returns is `Err`: the exchange
+    /// technically completed, but there is no answer in it, which is exactly
+    /// what [`Unavailable`](super::Unavailable) means. It also means a caller
+    /// never has to write that case out.
+    pub fn from_envelope(
+        request_kind: &str,
+        envelope: ResponseEnvelope,
+    ) -> Result<Self, super::Unavailable> {
+        let status = envelope.head.status;
+        if !(200..300).contains(&status) {
+            return Ok(Response::Rejected { status });
+        }
+        match request_kind {
+            "task.acquire" => serde_json::from_value(envelope.data)
+                .map(|d| Response::Acquired(Box::new(d)))
+                .map_err(|e| {
+                    super::Unavailable::new(format!("malformed task.acquire response: {e}"))
+                }),
+            _ => Ok(Response::Ok),
+        }
+    }
+}
+
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -471,7 +570,7 @@ pub struct TaskCreateAction {
     pub data: PromiseCreateData,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskAcquireData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
@@ -553,7 +652,7 @@ pub struct TaskFulfillAction {
     pub data: TaskFulfillActionData,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_task_fulfill_data"))]
 pub struct TaskFulfillData {
     #[validate(length(min = 1, message = "Task ID is required"))]
@@ -606,7 +705,7 @@ pub struct TaskHeartbeatTask {
     pub version: i64,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_task_heartbeat_data"))]
 pub struct TaskHeartbeatData {
     #[validate(length(min = 1, message = "Process ID is required"))]

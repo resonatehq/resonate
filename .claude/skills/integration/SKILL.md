@@ -47,6 +47,10 @@ Three traits in `src/core/`, which depends on nothing else in the crate. Verbati
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+
+    /// The typed form, and what a worker uses: no envelope, no JSON, no
+    /// stringly-typed `kind`. Defaulted — it converts and delegates.
+    async fn call(&self, request: Request) -> Result<Response, Unavailable>;
 }
 
 /// The outbound port — src/core/worker.rs
@@ -115,7 +119,8 @@ impl ResonateWorker for MyWorker {
 ```
 
 The work lives in `run`, and it starts by claiming the task **through the server handle** —
-`task.acquire` via `process`, the same entry point a remote worker's HTTP call takes. That
+`server.call(Request::TaskAcquire(..))`, the same operation a remote worker would put on
+the wire, typed rather than hand-built. That
 claim is the gate: before it the only way to report a failure is `Err(Unavailable)`, which
 the dispatch loop logs and drops; after it, every failure can settle the promise. So
 validation, config lookup and the downstream call all belong on the far side of it. Full

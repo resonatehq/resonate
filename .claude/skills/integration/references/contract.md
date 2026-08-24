@@ -21,8 +21,39 @@ pub trait ResonateServer: Send + Sync {
     /// with the status in `ResponseHead::status`. `Err` is reserved for "there
     /// is no answer".
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+
+    /// The typed form of `process`. Defaulted: it converts and delegates.
+    async fn call(&self, request: Request) -> Result<Response, Unavailable> { … }
 }
 ```
+
+**Workers use `call`, not `process`.** The envelopes are the *wire* form — what an HTTP
+adapter decodes off a socket. A caller in the same process has no socket:
+
+```rust
+pub enum Request {
+    TaskAcquire(TaskAcquireData),
+    TaskHeartbeat(TaskHeartbeatData),
+    TaskFulfill(TaskFulfillData),
+}
+
+/// Three variants, because three is how many outcomes a caller acts on
+/// differently.
+pub enum Response {
+    /// `task.acquire` succeeded: the task belongs to this caller now.
+    Acquired(Box<TaskAcquireResponseData>),
+    /// Succeeded, with nothing the caller needs back.
+    Ok,
+    /// The exchange completed and the request did not apply — a 409 race, a
+    /// version mismatch, a validation failure. The status is carried for the
+    /// log; a caller does the same thing in every case.
+    Rejected { status: i32 },
+}
+```
+
+A 2xx whose body is not what that kind returns comes back as `Err(Unavailable)` — the
+exchange completed but there is no answer in it, which is what `Unavailable` means. It
+also means a worker never writes that case out.
 
 One request in, one response out. The in-process server, the in-memory reference model, and
 a client for a remote server all satisfy it, so callers are written once and pointed at any
