@@ -31,24 +31,29 @@
 //! ## Address schema
 //!
 //! ```text
-//! airflow://<deployment>/dags/<dag_id>
+//! airflow://<deployment>
 //! ```
 //!
-//! The authority is a *deployment name*, not a host: it is the key into
+//! That is all of it. The scheme routes the message to this worker; the
+//! authority is a *deployment name*, not a host — the key into
 //! `transports.airflow.deployments`, which is where base URLs and credentials
-//! live. An address never carries a secret — it lands in logs, tags and error
+//! live. An address never carries a secret: it lands in logs, tags and error
 //! messages.
+//!
+//! Which DAG to trigger is *not* here. That is the request, and the request is
+//! the param — one parser, one set of malformed cases, one place to look.
 //!
 //! ## Param schema (`promise.param.data`, base64 UTF-8 JSON)
 //!
 //! ```json
-//! { "conf": { "date": "2026-08-24" }, "note": "…", "logicalDate": null }
+//! { "dag": "etl_daily", "conf": { "date": "2026-08-24" },
+//!   "note": "…", "logicalDate": null }
 //! ```
 //!
-//! The SDK/CLI invocation envelope `{"func","args","version"}` is also
-//! accepted, with `args[0]` taken as the object above — so an application can
-//! reach this worker with an ordinary remote invocation. An empty param is a
-//! trigger with no conf.
+//! `dag` is required; the rest default. Unknown fields are rejected, so a typo
+//! is an error naming the field rather than a silently ignored setting. This is
+//! the only accepted shape — the SDK envelope `{"func","args","version"}` is
+//! the SDK's convention for SDK functions, and an integration is not one.
 //!
 //! ## Value schema (`promise.value.data`, base64 UTF-8 JSON)
 //!
@@ -64,6 +69,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::{AirflowConfig, AirflowDeployment};
@@ -75,42 +81,35 @@ use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 
 // ─── Address ──────────────────────────────────────────────────────────────────
 
-/// A parsed `airflow://<deployment>/dags/<dag_id>` address.
+/// Parse `airflow://<deployment>`, returning the deployment name.
 ///
-/// This worker owns the syntax past the scheme; the router has only checked
-/// that the address is a URI whose scheme is `airflow`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AirflowAddress {
-    pub deployment: String,
-    pub dag_id: String,
-}
-
-impl AirflowAddress {
-    pub fn parse(address: &str) -> Result<Self, String> {
-        let parsed = url::Url::parse(address).map_err(|e| format!("not a URI: {e}"))?;
-        if parsed.scheme() != "airflow" {
-            return Err(format!(
-                "expected airflow:// scheme, got {}://",
-                parsed.scheme()
-            ));
-        }
-        // `host_str` lowercases and strips the port, so take the authority
-        // verbatim — a deployment name is a config key, not a hostname.
-        let deployment = parsed.authority().to_string();
-        if deployment.is_empty() {
-            return Err("missing deployment: expected airflow://<deployment>/dags/<dag_id>".into());
-        }
-        let path = parsed.path().trim_matches('/');
-        let dag_id = match path.split_once('/') {
-            Some(("dags", dag)) if !dag.is_empty() && !dag.contains('/') => dag.to_string(),
-            _ => {
-                return Err(format!(
-                    "expected airflow://<deployment>/dags/<dag_id>, got path '/{path}'"
-                ))
-            }
-        };
-        Ok(AirflowAddress { deployment, dag_id })
+/// That is the whole address: the scheme routes the message to this worker, and
+/// the authority selects which Airflow to talk to. Nothing else belongs here —
+/// *which* DAG to trigger is the request, and the request is the param. Putting
+/// it in the path would mean two parsers, two sets of malformed cases, and two
+/// places a caller has to look.
+///
+/// The authority is taken verbatim: `host_str` lowercases and strips the port,
+/// and a deployment name is a config key, not a hostname.
+fn parse_address(address: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(address).map_err(|e| format!("not a URI: {e}"))?;
+    if parsed.scheme() != "airflow" {
+        return Err(format!(
+            "expected airflow:// scheme, got {}://",
+            parsed.scheme()
+        ));
     }
+    let deployment = parsed.authority().to_string();
+    if deployment.is_empty() {
+        return Err("missing deployment: expected airflow://<deployment>".into());
+    }
+    let path = parsed.path().trim_matches('/');
+    if !path.is_empty() {
+        return Err(format!(
+            "airflow:// takes no path — the DAG is a param, not a route (got '/{path}')"
+        ));
+    }
+    Ok(deployment)
 }
 
 /// The `pid` this worker claims tasks under.
@@ -209,10 +208,35 @@ struct RunContext {
     task: ExecuteMsgTask,
 }
 
-/// The address and deployment, resolved once the task is owned.
+/// The deployment this promise targets, resolved once the task is owned.
 struct Target {
-    addr: AirflowAddress,
+    /// The address authority, kept for error messages.
+    name: String,
     deployment: AirflowDeployment,
+}
+
+/// The request, decoded and validated from `promise.param.data`.
+///
+/// This is the integration's contract with its callers, and the only shape it
+/// accepts. `deny_unknown_fields` makes a typo a rejection naming the field
+/// rather than a silently ignored setting.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TriggerRequest {
+    /// Which DAG to trigger.
+    dag: String,
+    /// Passed to Airflow as the DAG run's `conf`.
+    #[serde(default = "empty_object")]
+    conf: Value,
+    #[serde(default)]
+    note: Option<String>,
+    /// Airflow 3 requires the key to be present; `None` means "run now".
+    #[serde(default, rename = "logicalDate")]
+    logical_date: Option<Value>,
+}
+
+fn empty_object() -> Value {
+    json!({})
 }
 
 /// What one status check found. `Pending` means keep waiting.
@@ -432,20 +456,16 @@ impl RunContext {
         let address = promise.tags.get(TARGET_TAG).ok_or_else(|| {
             AirflowError::permanent("invalid_request", format!("no {TARGET_TAG} tag"))
         })?;
-        let addr = AirflowAddress::parse(address).map_err(|e| {
+        let name = parse_address(address).map_err(|e| {
             AirflowError::permanent("invalid_request", format!("bad address '{address}': {e}"))
         })?;
-        let deployment = self
-            .worker
-            .deployments
-            .get(&addr.deployment)
-            .cloned()
-            .ok_or_else(|| {
-                AirflowError::transient(format!("no deployment '{}' configured", addr.deployment))
+        let deployment =
+            self.worker.deployments.get(&name).cloned().ok_or_else(|| {
+                AirflowError::transient(format!("no deployment '{name}' configured"))
             })?;
-        let target = Target { addr, deployment };
+        let target = Target { name, deployment };
 
-        let input = decode_param(promise.param.data.as_deref())?;
+        let request = decode_param(promise.param.data.as_deref())?;
         let run_id = derive_run_id(&promise.id);
 
         // No `?` past this point: the heartbeat below has to be aborted, and an
@@ -487,7 +507,7 @@ impl RunContext {
         };
 
         let outcome = self
-            .create_and_monitor(&target, promise, &run_id, &input)
+            .create_and_monitor(&target, promise, &request, &run_id)
             .await;
         heartbeat.abort();
         outcome
@@ -499,11 +519,11 @@ impl RunContext {
         &self,
         target: &Target,
         promise: &PromiseRecord,
+        request: &TriggerRequest,
         run_id: &str,
-        input: &Value,
     ) -> Result<Monitored, AirflowError> {
         // Phase 1 — create. Idempotent by construction.
-        self.create_dag_run(target, run_id, input).await?;
+        self.create_dag_run(target, request, run_id).await?;
 
         // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
         // and latency, and deliberately unrelated to the lease TTL: the
@@ -515,7 +535,7 @@ impl RunContext {
             if now >= promise.timeout_at {
                 return Ok(Monitored::DeadlineReached);
             }
-            match self.get_dag_run(target, run_id).await? {
+            match self.get_dag_run(target, &request.dag, run_id).await? {
                 RunState::Pending => {}
                 RunState::Succeeded(run) => {
                     return Ok(Monitored::Succeeded {
@@ -525,7 +545,7 @@ impl RunContext {
                             "note": run.get("note").cloned().unwrap_or(Value::Null),
                             "logicalDate": run.get("logical_date").cloned().unwrap_or(Value::Null),
                         }),
-                        run: self.run_summary(target, &run),
+                        run: self.run_summary(target, &request.dag, &run),
                     })
                 }
                 RunState::Failed(run) => {
@@ -536,7 +556,7 @@ impl RunContext {
                             .unwrap_or("unknown")
                     );
                     return Err(AirflowError::failed(
-                        self.run_summary(target, &run),
+                        self.run_summary(target, &request.dag, &run),
                         message,
                     ));
                 }
@@ -556,32 +576,32 @@ impl RunContext {
     async fn create_dag_run(
         &self,
         target: &Target,
+        request: &TriggerRequest,
         run_id: &str,
-        input: &Value,
     ) -> Result<(), AirflowError> {
         let mut body = json!({
             "dag_run_id": run_id,
-            "conf": input.get("conf").cloned().unwrap_or_else(|| json!({})),
+            "conf": request.conf,
         });
-        if let Some(note) = input.get("note") {
-            body["note"] = note.clone();
+        if let Some(note) = &request.note {
+            body["note"] = json!(note);
         }
         // Airflow 3 requires the key to be present (null means "run now");
         // Airflow 2 defaults it when omitted.
-        if target.deployment.api_version != "v1" || input.get("logicalDate").is_some() {
-            body["logical_date"] = input.get("logicalDate").cloned().unwrap_or(Value::Null);
+        if target.deployment.api_version != "v1" || request.logical_date.is_some() {
+            body["logical_date"] = request.logical_date.clone().unwrap_or(Value::Null);
         }
 
         let url = format!(
             "{}/dags/{}/dagRuns",
             target.deployment.api_base(),
-            urlencode(&target.addr.dag_id)
+            urlencode(&request.dag)
         );
         let (status, payload) = self
             .request(target, reqwest::Method::POST, &url, Some(body))
             .await?;
 
-        let dag = &target.addr.dag_id;
+        let dag = &request.dag;
         match status {
             // 409 is the recovery path, not an error: an earlier delivery
             // already triggered this run, so re-attach and monitor it.
@@ -595,7 +615,7 @@ impl RunContext {
             )),
             401 | 403 => Err(AirflowError::permanent(
                 "unauthorized",
-                format!("credentials rejected by '{}'", target.addr.deployment),
+                format!("credentials rejected by '{}'", target.name),
             )),
             // Every other 4xx is the request's fault and retrying cannot fix it.
             400..=499 => Err(AirflowError::permanent(
@@ -608,11 +628,16 @@ impl RunContext {
         }
     }
 
-    async fn get_dag_run(&self, target: &Target, run_id: &str) -> Result<RunState, AirflowError> {
+    async fn get_dag_run(
+        &self,
+        target: &Target,
+        dag: &str,
+        run_id: &str,
+    ) -> Result<RunState, AirflowError> {
         let url = format!(
             "{}/dags/{}/dagRuns/{}",
             target.deployment.api_base(),
-            urlencode(&target.addr.dag_id),
+            urlencode(dag),
             urlencode(run_id)
         );
         let (status, payload) = self
@@ -630,7 +655,7 @@ impl RunContext {
             )),
             401 | 403 => Err(AirflowError::permanent(
                 "unauthorized",
-                format!("credentials rejected by '{}'", target.addr.deployment),
+                format!("credentials rejected by '{}'", target.name),
             )),
             _ => Err(AirflowError::transient(format!(
                 "get run '{run_id}': HTTP {status}: {payload}"
@@ -663,7 +688,7 @@ impl RunContext {
         Ok((status, payload))
     }
 
-    fn run_summary(&self, target: &Target, run: &Value) -> Value {
+    fn run_summary(&self, target: &Target, dag: &str, run: &Value) -> Value {
         let run_id = run
             .get("dag_run_id")
             .and_then(Value::as_str)
@@ -673,7 +698,7 @@ impl RunContext {
             "state": run.get("state").cloned().unwrap_or(Value::Null),
             "startedAt": run.get("start_date").cloned().unwrap_or(Value::Null),
             "endedAt": run.get("end_date").cloned().unwrap_or(Value::Null),
-            "url": target.deployment.run_url(&target.addr.dag_id, run_id),
+            "url": target.deployment.run_url(dag, run_id),
         })
     }
 }
@@ -765,40 +790,33 @@ fn fnv1a64_hex(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-/// Decode `param.data` into the trigger input.
+/// Decode and validate `param.data` into a [`TriggerRequest`].
 ///
-/// Accepts the SDK/CLI invocation envelope `{"func","args","version"}` as well
-/// as a bare object, so the same worker serves `ctx.rpc` callers and direct
-/// `promise.create` callers. An absent param is a trigger with no conf.
-fn decode_param(data: Option<&str>) -> Result<Value, AirflowError> {
-    let Some(encoded) = data.filter(|s| !s.is_empty()) else {
-        return Ok(json!({}));
-    };
-    let bytes = b64_decode(encoded)
-        .ok_or_else(|| AirflowError::permanent("invalid_request", "param.data is not base64"))?;
-    let text = String::from_utf8(bytes)
-        .map_err(|_| AirflowError::permanent("invalid_request", "param.data is not UTF-8"))?;
-    let value: Value = serde_json::from_str(&text).map_err(|e| {
-        AirflowError::permanent("invalid_request", format!("param.data is not JSON: {e}"))
-    })?;
+/// One shape, and only one. There is no SDK-envelope unwrapping: `{func, args,
+/// version}` is the SDK's convention for SDK functions, and an integration is
+/// not one. Accepting both would mean two shapes to document and test, and an
+/// ambiguity — a legitimate request with a `func` field would be silently
+/// misread as an envelope.
+///
+/// Every failure here is permanent. A promise's param is immutable, so a
+/// request that is malformed now is malformed on every redelivery; the message
+/// names what was wrong, because the promise value is the only channel back to
+/// whoever sent it.
+fn decode_param(data: Option<&str>) -> Result<TriggerRequest, AirflowError> {
+    let bad = |what: &str| AirflowError::permanent("invalid_request", what.to_string());
 
-    let body = if value.get("func").is_some() && value.get("args").is_some() {
-        value
-            .get("args")
-            .and_then(Value::as_array)
-            .and_then(|a| a.first())
-            .cloned()
-            .unwrap_or_else(|| json!({}))
-    } else {
-        value
-    };
-    if !body.is_object() {
-        return Err(AirflowError::permanent(
-            "invalid_request",
-            "input must be a JSON object",
-        ));
+    let encoded = data
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| bad("param is required: at least { \"dag\": \"...\" }"))?;
+    let bytes = b64_decode(encoded).ok_or_else(|| bad("param.data is not base64"))?;
+    let text = String::from_utf8(bytes).map_err(|_| bad("param.data is not UTF-8"))?;
+
+    let request: TriggerRequest = serde_json::from_str(&text)
+        .map_err(|e| AirflowError::permanent("invalid_request", format!("param.data: {e}")))?;
+    if request.dag.trim().is_empty() {
+        return Err(bad("dag must not be empty"));
     }
-    Ok(body)
+    Ok(request)
 }
 
 fn b64_encode(s: &str) -> String {
@@ -833,36 +851,32 @@ mod tests {
     // ---- address ----
 
     #[test]
-    fn address_parses() {
-        let a = AirflowAddress::parse("airflow://prod/dags/etl_daily").unwrap();
-        assert_eq!(a.deployment, "prod");
-        assert_eq!(a.dag_id, "etl_daily");
+    fn address_is_just_a_deployment() {
+        assert_eq!(parse_address("airflow://prod").unwrap(), "prod");
     }
 
     #[test]
     fn address_keeps_the_authority_verbatim() {
         // A deployment name is a config key, not a hostname: no lowercasing,
         // and a port-looking suffix is part of the name.
-        let a = AirflowAddress::parse("airflow://Airflow.Internal:8080/dags/x").unwrap();
-        assert_eq!(a.deployment, "Airflow.Internal:8080");
+        assert_eq!(
+            parse_address("airflow://Airflow.Internal:8080").unwrap(),
+            "Airflow.Internal:8080"
+        );
+    }
+
+    #[test]
+    fn address_rejects_a_path() {
+        // The old form put the DAG here. Rejecting it makes the move loud
+        // instead of silently triggering the wrong thing.
+        let err = parse_address("airflow://prod/dags/etl_daily").unwrap_err();
+        assert!(err.contains("takes no path"), "{err}");
     }
 
     #[test]
     fn address_rejects_wrong_shape() {
-        for addr in [
-            "airflow://prod",          // no path
-            "airflow://prod/dags",     // no dag id
-            "airflow://prod/dags/",    // empty dag id
-            "airflow://prod/jobs/x",   // wrong collection
-            "airflow://prod/dags/a/b", // over-deep
-            "airflow:///dags/x",       // no deployment
-            "bash://prod/dags/x",      // wrong scheme
-            "not a url",
-        ] {
-            assert!(
-                AirflowAddress::parse(addr).is_err(),
-                "expected rejection: {addr}"
-            );
+        for addr in ["airflow://", "airflow:///", "bash://prod", "not a url"] {
+            assert!(parse_address(addr).is_err(), "expected rejection: {addr}");
         }
     }
 
@@ -902,24 +916,69 @@ mod tests {
 
     // ---- param ----
 
-    #[test]
-    fn param_accepts_the_sdk_invocation_envelope() {
-        let inner = json!({"func": "trigger", "args": [{"conf": {"a": 1}}], "version": 1});
-        let got = decode_param(Some(&b64_encode(&inner.to_string()))).unwrap();
-        assert_eq!(got, json!({"conf": {"a": 1}}));
+    fn param(v: Value) -> Option<String> {
+        Some(b64_encode(&v.to_string()))
     }
 
     #[test]
-    fn param_accepts_a_bare_object() {
-        let inner = json!({"conf": {"a": 1}});
-        let got = decode_param(Some(&b64_encode(&inner.to_string()))).unwrap();
-        assert_eq!(got, json!({"conf": {"a": 1}}));
+    fn param_needs_only_a_dag() {
+        let got = decode_param(param(json!({"dag": "etl_daily"})).as_deref()).unwrap();
+        assert_eq!(got.dag, "etl_daily");
+        assert_eq!(got.conf, json!({}));
+        assert!(got.note.is_none() && got.logical_date.is_none());
     }
 
     #[test]
-    fn absent_param_is_a_trigger_with_no_conf() {
-        assert_eq!(decode_param(None).unwrap(), json!({}));
-        assert_eq!(decode_param(Some("")).unwrap(), json!({}));
+    fn param_carries_the_optional_fields() {
+        let got = decode_param(
+            param(json!({"dag": "d", "conf": {"a": 1}, "note": "n", "logicalDate": null}))
+                .as_deref(),
+        )
+        .unwrap();
+        assert_eq!(got.conf, json!({"a": 1}));
+        assert_eq!(got.note.as_deref(), Some("n"));
+    }
+
+    #[test]
+    fn param_is_required() {
+        for data in [None, Some("")] {
+            match decode_param(data) {
+                Err(AirflowError::Permanent { kind, .. }) => assert_eq!(kind, "invalid_request"),
+                other => panic!("expected a permanent error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn param_rejects_a_missing_or_empty_dag() {
+        for v in [json!({}), json!({"dag": ""}), json!({"dag": "   "})] {
+            assert!(
+                decode_param(param(v.clone()).as_deref()).is_err(),
+                "expected rejection: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn param_rejects_unknown_fields() {
+        // A typo is a rejection naming the field, not a silently dropped
+        // setting.
+        let err = decode_param(param(json!({"dag": "d", "conff": {}})).as_deref()).unwrap_err();
+        match err {
+            AirflowError::Permanent { message, .. } => {
+                assert!(message.contains("conff"), "{message}")
+            }
+            other => panic!("expected a permanent error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn param_does_not_unwrap_the_sdk_envelope() {
+        // `{func, args, version}` is not this integration's schema, and a
+        // request that happens to have a `func` field must not be re-read as
+        // one.
+        let envelope = json!({"func": "trigger", "args": [{"dag": "d"}], "version": 1});
+        assert!(decode_param(param(envelope).as_deref()).is_err());
     }
 
     #[test]
@@ -927,11 +986,11 @@ mod tests {
         for data in [
             "!!!not base64!!!",
             &b64_encode("not json"),
-            &b64_encode("[1,2,3]"), // valid JSON, not an object
+            &b64_encode("[1,2,3]"),
         ] {
             match decode_param(Some(data)) {
                 Err(AirflowError::Permanent { kind, .. }) => assert_eq!(kind, "invalid_request"),
-                _ => panic!("expected a permanent error for {data}"),
+                other => panic!("expected a permanent error for {data}, got {other:?}"),
             }
         }
     }

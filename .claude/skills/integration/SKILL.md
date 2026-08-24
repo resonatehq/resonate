@@ -21,7 +21,7 @@ workers.insert("airflow".to_string(), Arc::new(AirflowWorker::new(...)));
 ```
 
 To the rest of the application it is indistinguishable from any other remote function:
-someone creates a promise tagged `resonate:target: airflow://prod/dags/etl_daily`, blocks
+someone creates a promise tagged `resonate:target: airflow://prod`, blocks
 on it, and gets back a value.
 
 An integration is **not** a Resonate SDK application, and not a place for business logic.

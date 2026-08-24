@@ -25,18 +25,22 @@ key. If that property is missing or partial, say so here, at the top, not in a f
 
 ## Address
 
-    <scheme>://<deployment>/<collection>/<id>[?<qualifiers>]
+    <scheme>://<deployment>
 
-    <scheme>://prod.example.com/jobs/nightly-etl
+    <scheme>://prod.example.com
 
 | Part | Meaning |
 |---|---|
 | scheme | Always `<scheme>`; it is what routes the promise to this worker. |
 | authority | A *deployment name*, not a hostname — a key into `deployments` config. Never a credential. |
-| path | The downstream resource, in that system's own vocabulary. |
-| query | Optional qualifiers, each with a default. |
 
-<What a malformed address does: rejected with `invalid_request`, on the first delivery.>
+<The address carries routing and nothing else. What to act on is the param — say so here,
+so a caller does not go looking for it in the path. If this integration *does* put more in
+the address, this is where to justify it: the path must be carrying routing information
+(different credentials, different endpoints), not request data.>
+
+<What a malformed address does: rejected with `invalid_request`, on the first delivery, with
+the address quoted. List the shapes you deliberately reject.>
 
 ## Param
 

@@ -15,13 +15,25 @@ An integration **owns a URL scheme**. The router matches on the scheme and hands
 untouched address; `core` never learns the syntax past it. So a new scheme costs a
 registration and nothing else.
 
-```
-<scheme>://<deployment>/<collection>/<id>[?<qualifiers>]
+**Put as little in the address as routing needs.** The scheme selects the worker; the
+authority selects which deployment of the downstream system to talk to. That is usually
+all:
 
-airflow://prod.astronomer.io/dags/etl_daily
-airflow://airflow.internal:8080/dags/hourly_rollup
-dbt://cloud.getdbt.com/accounts/1234/jobs/5678
 ```
+<scheme>://<deployment>
+
+airflow://prod.astronomer.io
+dbt://cloud.getdbt.com
+```
+
+*What* to do there — which DAG, which job, which pipeline — is the request, and the request
+is the param. Pushing it into the path buys nothing and costs two parsers, two sets of
+malformed cases, and two places a caller has to look to understand one call. It also
+freezes into a routing key something that callers vary per promise.
+
+The exception is a downstream system with several genuinely distinct resource *kinds* that
+route differently — different credentials, different endpoints. Then the path is carrying
+routing information and belongs in the address.
 
 Rules:
 
@@ -32,20 +44,15 @@ Rules:
    worker uses `Url::authority()` rather than `host_str()` precisely because `host_str`
    lowercases and strips the port, and a config key is neither a hostname nor
    case-insensitive.
-3. **Path names the resource** in the downstream system's own vocabulary. Don't invent
-   synonyms for `dags`, `jobs`, `pipelines`.
-4. **Query string carries optional qualifiers** with defaults. Anything required goes in the
-   path.
-5. **No secrets, ever.** Addresses land in logs, promise tags, search results and error
+3. **No secrets, ever.** Addresses land in logs, promise tags, search results and error
    messages.
-6. **Parse strictly, reject early, and unit-test every malformed shape.** `is_valid_address`
-   only checks that the string is a URI, so the worker is the *only* thing standing between
-   a typo and a promise that never settles.
+4. **Parse strictly, reject early, and unit-test every malformed shape** — including the
+   shapes you deliberately do *not* accept. The Airflow worker rejects
+   `airflow://prod/dags/etl_daily` with "takes no path", so a caller using an older form
+   gets an error instead of a surprise.
 
 ```rust
-impl AirflowAddress {
-    pub fn parse(address: &str) -> Result<Self, String> { … }
-}
+fn parse_address(address: &str) -> Result<String, String> { … }
 ```
 
 Parse it **after the claim**, not in `send`. Before the task is claimed the only way to
@@ -103,33 +110,26 @@ obligations come with that freedom:
   redelivery: it is a permanent error, never a retry. Name the offending field — the
   promise value is the only channel back to whoever sent it.
 
-### Accept the SDK invocation envelope
+### One shape, and only one
 
-A promise created by `resonate invoke` or by an SDK's remote invocation carries:
+Do **not** also accept the SDK invocation envelope `{"func", "args", "version"}`. It is the
+SDK's convention for SDK functions, and an integration is not one. Accepting both means two
+shapes to document, validate and test, and an ambiguity you cannot resolve: a legitimate
+request that happens to carry a `func` field gets silently re-read as an envelope.
 
-```json
-{ "func": "<function name>", "args": [ … ], "version": 1 }
-```
-
-An integration that accepts this is callable from any Resonate application as an ordinary
-remote function. Accept a bare object too, for callers using `promise.create` directly:
-
-```rust
-let body = if value.get("func").is_some() && value.get("args").is_some() {
-    value.get("args").and_then(Value::as_array).and_then(|a| a.first())
-         .cloned().unwrap_or_else(|| json!({}))
-} else {
-    value
-};
-```
+A caller reaches an integration by creating a promise with the integration's param schema.
+That is the contract; keep it single.
 
 ### Request object
 
 Keep it a thin pass-through of the downstream request:
 
 ```json
-{ "conf": { "date": "2026-08-24" }, "note": "nightly", "logicalDate": null }
+{ "dag": "etl_daily", "conf": { "date": "2026-08-24" },
+  "note": "nightly", "logicalDate": null }
 ```
+
+`dag` — *what to act on* — lives here rather than in the address, for the reasons above.
 
 Rules:
 
@@ -138,8 +138,8 @@ Rules:
 - **No credentials.** They come from deployment config.
 - **Keep it a pass-through.** Every field you re-map is a field you re-map again when the
   downstream API changes.
-- **An absent param is a valid request** where that makes sense — the Airflow worker treats
-  it as a trigger with no conf.
+- **Reject unknown fields.** `#[serde(deny_unknown_fields)]` turns a typo into an error
+  naming the field instead of a silently ignored setting.
 - **Validate before the first side effect**, and classify violations as *permanent*. A
   malformed param will never become valid on retry.
 - **Version it** if the schema will evolve — promises can be in flight for days. A
