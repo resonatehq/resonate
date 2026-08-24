@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use super::types::{Request, RequestEnvelope, Response, ResponseEnvelope};
+use super::types::{RequestEnvelope, ResponseEnvelope};
 use super::Unavailable;
 
 /// A Resonate server: one request in, one response out.
@@ -36,22 +36,4 @@ pub trait ResonateServer: Send + Sync {
     /// with the status in `ResponseHead::status`. `Err` is reserved for "there
     /// is no answer" — see [`Unavailable`] for the retry contract.
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
-
-    /// The typed form of [`process`](Self::process): a [`Request`] in, a
-    /// [`Response`] out.
-    ///
-    /// This is what an in-process caller uses. It has no socket, so it has no
-    /// reason to hand-build an envelope, spell a `kind` as a string, or pick a
-    /// response apart with `serde_json::from_value` — and every one of those is
-    /// a way to get the protocol subtly wrong at runtime instead of at compile
-    /// time.
-    ///
-    /// Defaulted, so every implementation gets it by converting and delegating.
-    /// `process` stays the port because that is what the HTTP adapter and the
-    /// reference model implement.
-    async fn call(&self, request: Request) -> Result<Response, Unavailable> {
-        let envelope = request.into_envelope();
-        let kind = envelope.kind.clone();
-        Response::from_envelope(&kind, self.process(&envelope).await?)
-    }
 }

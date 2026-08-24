@@ -17,24 +17,19 @@ oracle}`.
 pub trait ResonateServer: Send + Sync {
     /// Apply one request and return its response.
     ///
-    /// A non-2xx outcome is still a completed exchange: it comes back as `Ok`
-    /// with the status in `ResponseHead::status`. `Err` is reserved for "there
-    /// is no answer".
-    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
-
-    /// The typed form of `process`. Defaulted: it converts and delegates.
-    async fn call(&self, request: Request) -> Result<Response, Unavailable> { … }
+    /// A rejected request is still a completed exchange: it comes back as `Ok`
+    /// with an error response. `Err` is reserved for "there is no answer".
+    async fn process(&self, request: Request) -> Result<Response, Unavailable>;
 }
 ```
 
-**Workers use `call`, not `process`.** The envelopes are the *wire* form — what an HTTP
-adapter decodes off a socket. A caller in the same process has no socket, so it uses the
-typed union instead:
+One request in, one response out. `Request` and `Response` are the protocol's unions — one
+variant per operation, mirroring the canonical `types-raw.ts`:
 
 ```rust
 pub enum Request {
-    PromiseGet(PromiseGetData),
     PromiseCreate(PromiseCreateData),
+    PromiseSettle(PromiseSettleData),
     …
     TaskAcquire(TaskAcquireData),
     TaskFulfill(TaskFulfillData),
@@ -43,26 +38,16 @@ pub enum Request {
 }
 
 pub enum Response {
-    TaskAcquire(Box<TaskAcquireResponseData>),
+    TaskAcquire(TaskAcquireResponseData),
+    TaskFulfill(TaskFulfillResponseData),
     …
-    /// A 2xx for an operation that returns nothing the caller needs.
-    Ok,
-    /// The exchange completed and the request did not apply.
     Error { status: i32, message: String },
 }
 ```
 
-`Request` and `Response` mirror the unions of the same name in the canonical
-`types-raw.ts`, member for member and in the same order — `src/core/types.rs` holds them as
-a macro table so the two can be diffed by eye. Every non-2xx member of the canonical
-`Response` carries `data: string`, which is why the error half collapses into one variant
-without losing anything.
-
-A 2xx whose body is not what that kind returns comes back as `Err(Unavailable)` — the
-exchange completed but there is no answer in it, which is what `Unavailable` means. It
-also means a worker never writes that case out.
-
-One request in, one response out. The in-process server, the in-memory reference model, and
+A worker therefore never builds an envelope, never spells a `kind` as a string, and never
+picks a response apart — those are wire concerns, and a worker in the server's own process
+has no wire. The in-process server, the in-memory reference model, and
 a client for a remote server all satisfy it, so callers are written once and pointed at any
 of them.
 
@@ -349,63 +334,81 @@ Consequences an integration must be built around:
 
 ## Protocol calls an integration makes
 
-All through `server.process(&RequestEnvelope { kind, head, data })` with
-`head.version = PROTOCOL_VERSION` and a fresh `corr_id`. The response's real status is
-`head.status`; `Err` is only `Unavailable`.
+All through `server.process(Request::…)`, matching on the `Response` that comes back.
 
-### `task.acquire`
+### `Request::TaskAcquire`
 
-```json
-{ "id": "<task id>", "version": <from execute>, "pid": "<worker instance>", "ttl": 30000 }
+```rust
+Request::TaskAcquire(TaskAcquireData {
+    id: task.id.clone(),
+    version: task.version,        // the fencing token from `execute`
+    pid: PID.to_string(),
+    ttl: lease_timeout,
+})
 ```
 
-`200` returns `TaskAcquireResponseData { task, promise, preload }`. **Use
-`task.version` from the response** for every later call — it is the request version plus
-one. `409` means another attempt owns it: drop silently. `promise.param`,
-`promise.created_at` and `promise.timeout_at` are the integration's entire input, and the
-latter two are stable across retries.
+`Response::TaskAcquire(acquired)` is the task. **Use `acquired.task.version` for every later
+call** — it is the request version plus one. Anything else means this attempt does not run;
+drop it silently. `acquired.promise` carries `param`, `created_at`, `timeout_at` and `tags`
+— the integration's entire input, and the middle two are stable across retries.
 
-### `task.heartbeat`
+### `Request::TaskHeartbeat`
 
-```json
-{ "pid": "<same pid>", "tasks": [ { "id": "…", "version": <acquired version> } ] }
+```rust
+Request::TaskHeartbeat(TaskHeartbeatData {
+    pid: PID.to_string(),
+    tasks: vec![TaskHeartbeatTask { id: task_id.clone(), version }],
+})
 ```
 
 Every `ttl / 3` — a cadence derived from the lease and from nothing else. Batching is
 allowed but every task in a batch must share the same origin (the substring before the
 first `:`), so one task per request is the always-correct choice.
 
-**It always answers `200`.** The storage update is guarded on `state = 'acquired'` at the
-right version and pid; when the guard fails it updates zero rows and the handler still
-returns `200 {}`. So a heartbeat is fire-and-forget by protocol design and a worker cannot
-use it to detect that it lost its lease — that surfaces at `task.fulfill`, as a `409`.
+**It always succeeds.** The storage update is guarded on `state = 'acquired'` at the right
+version and pid; when the guard fails it updates zero rows and the operation still reports
+success. So a heartbeat is fire-and-forget by protocol design and a worker cannot use it to
+detect that it lost its lease — that surfaces at `task.fulfill`.
 
-### `task.fulfill`
+### `Request::TaskFulfill`
 
-```json
-{ "id": "<task id>", "version": <acquired>,
-  "action": { "kind": "promise.settle", "head": {},
-              "data": { "id": "<task id>", "state": "resolved",
-                        "value": { "headers": {"content-type": "application/json"},
-                                   "data": "<base64 utf-8 json>" } } } }
+```rust
+Request::TaskFulfill(TaskFulfillData {
+    id: task.id.clone(),
+    version,                      // the acquired version
+    action: TaskFulfillAction {
+        kind: "promise.settle".to_string(),
+        data: TaskFulfillActionData {
+            id: task.id.clone(),  // must equal the task id, or the request is rejected
+            state: SettleState::Resolved,
+            value,                // the integration's own value schema, opaque here
+        },
+    },
+})
 ```
 
-`action.data.id` **must equal** `id` or the request is rejected `400`. `409` means the lease
-was lost or the promise already settled — usually a timeout. Never retry a `409` fulfill.
+A rejected fulfill means the lease was lost or the promise already settled — usually a
+timeout. Never retry it.
 
-### `task.release`
+### `Request::TaskRelease`
 
-`{ "id": "…", "version": <acquired> }` — back to `pending`, re-dispatched after
-`retry_timeout`.
+```rust
+Request::TaskRelease(TaskReleaseData { id: task.id.clone(), version })
+```
 
-### `promise.create` / `promise.get` / `promise.search`
+Back to `pending`, re-dispatched after `retry_timeout`.
 
-`promise.create` is idempotent by id. A promise tagged `resonate:timer: "true"` **resolves**
+### `Request::PromiseCreate` / `PromiseGet` / `PromiseSearch`
+
+`PromiseCreate` is idempotent by id. A promise tagged `resonate:timer: "true"` **resolves**
 (rather than rejecting) at its `timeoutAt` — the durable sleep primitive, used by the
-scale-out monitoring shape in `lifecycle.md`. `promise.search` filters on tags, so tagging
+scale-out monitoring shape in `lifecycle.md`. `PromiseSearch` filters on tags, so tagging
 integration promises makes them findable for ops tooling.
 
 ## Status codes
+
+`Response::Error` carries the status. A worker mostly does not branch on it — a rejected
+request means it does not own the task — but the values are worth recognising in a log:
 
 | Status | Meaning |
 |---|---|

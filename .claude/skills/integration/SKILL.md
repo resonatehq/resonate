@@ -35,8 +35,12 @@ It maps a request to a run, and a run's state to a promise's state.
 | `src/transport/transport_airflow.rs` | **An integration**: create / monitor / settle against a foreign API |
 
 Read the Airflow worker before writing a new one. It is the complete worked example —
-address schema, idempotency key, error classification, poll loop, settlement — and it is
-compiled and unit-tested in this repo, so it cannot drift from the ports it implements.
+address schema, idempotency key, error classification, poll loop, settlement — compiled and
+unit-tested in this repo.
+
+One difference to expect: this skill writes protocol calls in their typed form,
+`server.process(Request::…)`. Follow the skill for those; the surrounding lifecycle,
+classification and monitoring are what the in-tree worker is there to show.
 
 ## The ports
 
@@ -46,11 +50,7 @@ Three traits in `src/core/`, which depends on nothing else in the crate. Verbati
 /// The inbound port — src/core/server.rs
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
-    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
-
-    /// The typed form, and what a worker uses: no envelope, no JSON, no
-    /// stringly-typed `kind`. Defaulted — it converts and delegates.
-    async fn call(&self, request: Request) -> Result<Response, Unavailable>;
+    async fn process(&self, request: Request) -> Result<Response, Unavailable>;
 }
 
 /// The outbound port — src/core/worker.rs
@@ -65,6 +65,10 @@ pub trait ResonateRouter: Send + Sync {
     async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
 }
 ```
+
+`Request` and `Response` are the protocol's own unions — one variant per operation, the
+same ones the canonical `types-raw.ts` defines. A worker names the operation it wants and
+matches the answer: no envelope, no `kind` string, no JSON on this path.
 
 `Message` is what a server emits toward a worker, and `Unavailable` is the only error any
 port returns:
@@ -119,8 +123,8 @@ impl ResonateWorker for MyWorker {
 ```
 
 The work lives in `run`, and it starts by claiming the task **through the server handle** —
-`server.call(Request::TaskAcquire(..))`, the same operation a remote worker would put on
-the wire, typed rather than hand-built. That
+`server.process(Request::TaskAcquire(..))`, the same operation a remote worker would put
+on the wire. That
 claim is the gate: before it the only way to report a failure is `Err(Unavailable)`, which
 the dispatch loop logs and drops; after it, every failure can settle the promise. So
 validation, config lookup and the downstream call all belong on the far side of it. Full
@@ -143,7 +147,7 @@ Four consequences that shape every integration:
 3. **A new scheme is a registration, never a change to `core`.** That is the whole cost of
    adding an integration.
 4. **`Unavailable` is the only error.** Everything the peer can say — not found, conflict,
-   forbidden — is an in-band `head.status`. `Unavailable` means the exchange did not
+   forbidden — comes back as an `Ok` response. `Unavailable` means the exchange did not
    complete, and *the request may already have been applied*. Retries must be idempotent.
 
 An in-process worker holds `Arc<dyn ResonateServer>` and calls `process` directly: no HTTP

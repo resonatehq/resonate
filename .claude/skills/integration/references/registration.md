@@ -141,17 +141,16 @@ impl ResonateWorker for AirflowWorker {
 }
 ```
 
-The work is in the spawned task. Below is the lifecycle from
-`src/transport/transport_airflow.rs`, **verbatim** — two functions, split where the error
-channel changes. `run` is the protocol frame: claim, work, settle. `execute` is the work,
-and everything that can go wrong in it comes back as one `AirflowError`, so `run` has
-exactly one place where the promise is settled and one rule for when it is not.
+The work is in the spawned task, split where the error channel changes. `run` is the
+protocol frame: claim, work, settle. `execute` is the work, and everything that can go
+wrong in it comes back as one `MyError`, so `run` has exactly one place where the promise
+is settled and one rule for when it is not.
 
 ```rust
 /// The protocol frame: claim the task, do the work, settle the promise.
 ///
 /// Everything that can go wrong inside `execute` comes back as one
-/// `AirflowError`, so this body has exactly one place where the promise is
+/// `MyError`, so this body has exactly one place where the promise is
 /// settled and one rule for when it is not.
 async fn run(self) {
     // ── 1. Claim the task ────────────────────────────────────────────────
@@ -168,19 +167,16 @@ async fn run(self) {
     let claim = self
         .worker
         .server
-        .call(Request::TaskAcquire(TaskAcquireData {
+        .process(Request::TaskAcquire(TaskAcquireData {
             id: self.task.id.clone(),
             version: self.task.version, // the fencing token from `execute`
             pid: PID.to_string(),
             ttl: self.worker.lease_timeout,
         }))
         .await;
-    let acquired = match claim {
-        Ok(Response::TaskAcquire(acquired)) => acquired,
-        other => {
-            tracing::debug!(task_id = %self.task.id, ?other, "airflow: task not acquired");
-            return;
-        }
+    let Ok(Response::TaskAcquire(acquired)) = claim else {
+        tracing::debug!(task_id = %self.task.id, "my: task not acquired");
+        return;
     };
     let version = acquired.task.version; // the RESPONSE version (n+1), from here on
     let promise = acquired.promise; // param, timeoutAt, createdAt, tags
@@ -194,27 +190,20 @@ async fn run(self) {
     // server settles a timed-out promise itself, and a transient failure
     // must be left for redelivery to retry.
     let (state, value) = match outcome {
-        Ok(Monitored::Succeeded { run, output }) => (
-            SettleState::Resolved,
-            json!({ "run": run, "output": output }),
-        ),
-        Ok(Monitored::Failed { run, message }) => (
-            SettleState::Rejected,
-            json!({ "run": run, "error": { "kind": "downstream_failed", "message": message } }),
-        ),
-        Err(AirflowError::Permanent { kind, message }) => {
-            tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: permanent failure");
-            (
-                SettleState::Rejected,
-                json!({ "run": {}, "error": { "kind": kind, "message": message } }),
-            )
+        Ok(Monitored::Succeeded { run, output }) => (SettleState::Resolved, value_of(run, output)),
+        Ok(Monitored::Failed { run, message }) => {
+            (SettleState::Rejected, error_of(run, "downstream_failed", message))
+        }
+        Err(MyError::Permanent { kind, message }) => {
+            tracing::warn!(task_id = %self.task.id, kind, %message, "my: permanent failure");
+            (SettleState::Rejected, error_of(Run::none(), kind, message))
         }
         Ok(Monitored::DeadlineReached) => {
-            tracing::warn!(task_id = %self.task.id, "airflow: promise deadline reached, stopped monitoring");
+            tracing::warn!(task_id = %self.task.id, "my: promise deadline reached, stopped monitoring");
             return;
         }
-        Err(AirflowError::Transient(message)) => {
-            tracing::warn!(task_id = %self.task.id, %message, "airflow: transient failure, dropping task for redelivery");
+        Err(MyError::Transient(message)) => {
+            tracing::warn!(task_id = %self.task.id, %message, "my: transient failure, dropping task for redelivery");
             return;
         }
     };
@@ -222,19 +211,15 @@ async fn run(self) {
     let settled = self
         .worker
         .server
-        .call(Request::TaskFulfill(TaskFulfillData {
+        .process(Request::TaskFulfill(TaskFulfillData {
             id: self.task.id.clone(),
             version,
             action: TaskFulfillAction {
                 kind: "promise.settle".to_string(),
-                head: json!({}),
                 data: TaskFulfillActionData {
                     id: self.task.id.clone(), // must equal the task id
                     state,
-                    value: PromiseValue {
-                        headers: None,
-                        data: Some(b64_encode(&value.to_string())),
-                    },
+                    value, // the integration's own value schema, opaque here
                 },
             },
         }))
@@ -242,51 +227,43 @@ async fn run(self) {
 
     match settled {
         Ok(Response::TaskFulfill(_)) => {
-            tracing::info!(task_id = %self.task.id, ?state, "airflow: promise settled")
+            tracing::info!(task_id = %self.task.id, ?state, "my: promise settled")
         }
-        // The lease was lost, or the promise already settled — almost always
-        // a timeout. Nothing is retryable either way.
-        Ok(Response::Error { status, message }) => {
-            tracing::warn!(task_id = %self.task.id, ?state, status, %message, "airflow: promise not settled")
-        }
-        other => {
-            tracing::warn!(task_id = %self.task.id, ?state, ?other, "airflow: promise not settled")
-        }
+        // The lease was lost, or the promise already settled — almost always a
+        // timeout. Nothing is retryable either way.
+        other => tracing::warn!(task_id = %self.task.id, ?state, ?other, "my: promise not settled"),
     }
 }
 ```
 
 ```rust
-/// Resolve, create, monitor. One error channel, so `?` does the work the
-/// combinator chain used to.
+/// Resolve, create, monitor. One error channel, so `?` does the work.
 ///
 /// The two ways resolution fails are not the same failure: a malformed
-/// address is the caller's error and can never become valid, because
-/// promise tags are immutable, so it rejects the promise; an unconfigured
-/// deployment is the operator's error that a rollout fixes, so it retries.
+/// address is the caller's error and can never become valid, because promise
+/// tags are immutable, so it rejects the promise; an unconfigured deployment
+/// is the operator's error that a rollout fixes, so it retries.
 async fn execute(
     &self,
     promise: &PromiseRecord,
     version: i64,
-) -> Result<Monitored, AirflowError> {
-    // The address comes off the promise, not off the message: the promise
-    // is the durable record, and it is where every other input already
-    // comes from. A promise that has a task always carries this tag — that
-    // tag is what caused the task to exist.
-    let address = promise.tags.get(TARGET_TAG).ok_or_else(|| {
-        AirflowError::permanent("invalid_request", format!("no {TARGET_TAG} tag"))
-    })?;
-    let addr = AirflowAddress::parse(address).map_err(|e| {
-        AirflowError::permanent("invalid_request", format!("bad address '{address}': {e}"))
-    })?;
+) -> Result<Monitored, MyError> {
+    // The address comes off the promise, not off the message: the promise is
+    // the durable record, and it is where every other input already comes
+    // from. A promise that has a task always carries this tag — that tag is
+    // what caused the task to exist.
+    let address = promise
+        .tags
+        .get(TARGET_TAG)
+        .ok_or_else(|| MyError::permanent("invalid_request", format!("no {TARGET_TAG} tag")))?;
+    let addr = MyAddress::parse(address)
+        .map_err(|e| MyError::permanent("invalid_request", format!("bad address '{address}': {e}")))?;
     let deployment = self
         .worker
         .deployments
         .get(&addr.deployment)
         .cloned()
-        .ok_or_else(|| {
-            AirflowError::transient(format!("no deployment '{}' configured", addr.deployment))
-        })?;
+        .ok_or_else(|| MyError::transient(format!("no deployment '{}' configured", addr.deployment)))?;
     let target = Target { addr, deployment };
 
     let input = decode_param(promise.param.data.as_deref())?;
@@ -296,8 +273,8 @@ async fn execute(
     // early return would leave it beating for a lease nobody holds.
     let heartbeat = {
         // The lease clock. Its own task, on a cadence derived from the lease
-        // TTL and nothing else — which is what lets the downstream clock
-        // back off past the lease without the lease lapsing.
+        // TTL and nothing else — which is what lets the downstream clock back
+        // off past the lease without the lease lapsing.
         let server = Arc::clone(&self.worker.server);
         let task_id = self.task.id.clone();
         let beat_ms = heartbeat_interval_ms(self.worker.lease_timeout);
@@ -306,104 +283,44 @@ async fn execute(
             ticker.tick().await;
             loop {
                 ticker.tick().await;
-                // Deliberately ignored. `task.heartbeat` answers 200 whether
-                // or not it refreshed anything — a heartbeat for a lease this
+                // Deliberately ignored. `task.heartbeat` answers 200 whether or
+                // not it refreshed anything — a heartbeat for a lease this
                 // worker no longer holds is a silent no-op — so the response
                 // carries no signal. Losing the lease surfaces at
-                // `task.fulfill`, as a 409.
+                // `task.fulfill`.
                 let _ = server
-                    .call(Request::TaskHeartbeat(TaskHeartbeatData {
+                    .process(Request::TaskHeartbeat(TaskHeartbeatData {
                         pid: PID.to_string(),
-                        tasks: vec![TaskHeartbeatTask {
-                            id: task_id.clone(),
-                            version,
-                        }],
+                        tasks: vec![TaskHeartbeatTask { id: task_id.clone(), version }],
                     }))
                     .await;
             }
         })
     };
 
-    let outcome = self
-        .create_and_monitor(&target, promise, &run_id, &input)
-        .await;
+    // The downstream clock: create once, then poll on an interval sized for
+    // the downstream system rather than for the lease.
+    let outcome = self.create_and_monitor(&target, promise, &run_id, &input).await;
     heartbeat.abort();
     outcome
-}
-
-/// Phases 1 and 2. Returns the terminal run, or `Pending` if the promise
-/// deadline arrived first.
-async fn create_and_monitor(
-    &self,
-    target: &Target,
-    promise: &PromiseRecord,
-    run_id: &str,
-    input: &Value,
-) -> Result<Monitored, AirflowError> {
-    // Phase 1 — create. Idempotent by construction.
-    self.create_dag_run(target, run_id, input).await?;
-
-    // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
-    // and latency, and deliberately unrelated to the lease TTL: the
-    // heartbeat task holds the lease open independently, so this interval
-    // may back off well past it.
-    let mut interval = self.worker.poll_interval;
-    loop {
-        let now = crate::util::system_time_ms();
-        if now >= promise.timeout_at {
-            return Ok(Monitored::DeadlineReached);
-        }
-        match self.get_dag_run(target, run_id).await? {
-            RunState::Pending => {}
-            RunState::Succeeded(run) => {
-                return Ok(Monitored::Succeeded {
-                    output: json!({
-                        "runType": run.get("run_type").cloned().unwrap_or(Value::Null),
-                        "conf": run.get("conf").cloned().unwrap_or_else(|| json!({})),
-                        "note": run.get("note").cloned().unwrap_or(Value::Null),
-                        "logicalDate": run.get("logical_date").cloned().unwrap_or(Value::Null),
-                    }),
-                    run: self.run_summary(target, &run),
-                })
-            }
-            RunState::Failed(run) => {
-                return Ok(Monitored::Failed {
-                    message: format!(
-                        "DAG run finished in state {}",
-                        run.get("state")
-                            .and_then(Value::as_str)
-                            .unwrap_or("unknown")
-                    ),
-                    run: self.run_summary(target, &run),
-                })
-            }
-        }
-        // Never sleep past the promise deadline: the next iteration has to
-        // observe it and stop rather than wake up after the server has
-        // already settled the promise.
-        let sleep_ms = interval.min(promise.timeout_at - now).max(0) as u64;
-        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-        interval = interval
-            .saturating_mul(2)
-            .min(self.worker.max_poll_interval);
-    }
 }
 ```
 
 Three things to notice in the shape:
 
-- **Every state change goes through `server.call`** — a typed `Request` in, a typed
-  `Response` out. An in-process worker has no socket, so it has no reason to hand-build an
-  envelope, spell a `kind` as a string, or pick a response apart with
-  `serde_json::from_value`; each of those is a way to get the protocol wrong at runtime
-  instead of at compile time. `process` is still the port, because that is what the HTTP
-  adapter implements.
-- **The claim has one interesting case.** A 409 race, a transient error, an unreachable
-  server and an unreadable answer are all "this attempt does not run" — there is nothing
-  to decide between them, so they share one arm. `Response::Acquired` is the other.
+- **Every state change goes through `server.process`** — a typed `Request` in, a typed
+  `Response` out. There is no envelope to build, no `kind` to spell as a string, and no
+  response to pick apart: those are wire concerns, and an in-process worker has no wire.
+- **The claim has one interesting case.** A 409 race, a transient error and an unreachable
+  server are all "this attempt does not run"; there is nothing to decide between them, so
+  they share one `let … else`. `Response::TaskAcquire` is the other.
 - **Five outcomes, three of which settle.** A timed-out promise is settled by the server
   itself, and a transient failure must be left for redelivery; settling either would be
   wrong. That `match` is where an integration's whole error policy lives.
+
+The only JSON left is the promise *value* — `value_of` and `error_of` build the
+integration's own value schema, which the protocol carries as opaque bytes. See
+`references/schemas.md`.
 
 ### Why the claim comes first
 

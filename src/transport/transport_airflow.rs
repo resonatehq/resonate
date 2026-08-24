@@ -68,9 +68,8 @@ use serde_json::{json, Value};
 
 use crate::config::{AirflowConfig, AirflowDeployment};
 use crate::core::types::{
-    ExecuteMsgTask, Message, PromiseRecord, PromiseValue, Request, Response, SettleState,
-    TaskAcquireData, TaskFulfillAction, TaskFulfillActionData, TaskFulfillData, TaskHeartbeatData,
-    TaskHeartbeatTask, TARGET_TAG,
+    ExecuteMsgTask, Message, PromiseRecord, RequestEnvelope, RequestHead, TaskAcquireResponseData,
+    PROTOCOL_VERSION, TARGET_TAG,
 };
 use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 
@@ -276,20 +275,39 @@ impl RunContext {
         // Anything that is not "here is the task" — a 409 race, a transient
         // error, an unreachable server — means this attempt does not run.
         // Redelivery brings us back; there is nothing to decide between them.
-        let claim = self
+        let Ok(claimed) = self
             .worker
             .server
-            .call(Request::TaskAcquire(TaskAcquireData {
-                id: self.task.id.clone(),
-                version: self.task.version, // the fencing token from `execute`
-                pid: PID.to_string(),
-                ttl: self.worker.lease_timeout,
-            }))
-            .await;
-        let acquired = match claim {
-            Ok(Response::TaskAcquire(acquired)) => acquired,
-            other => {
-                tracing::debug!(task_id = %self.task.id, ?other, "airflow: task not acquired");
+            .process(&RequestEnvelope {
+                kind: "task.acquire".to_string(),
+                head: RequestHead {
+                    corr_id: format!("airflow-{}", fastrand::u64(..)),
+                    version: PROTOCOL_VERSION.to_string(),
+                    // In process: there is no caller to authenticate.
+                    auth: None,
+                    debug_time: None,
+                },
+                data: json!({
+                    "id": self.task.id,
+                    "version": self.task.version,   // the fencing token from `execute`
+                    "pid": PID,
+                    "ttl": self.worker.lease_timeout,
+                }),
+            })
+            .await
+        else {
+            return;
+        };
+        if claimed.head.status != 200 {
+            tracing::debug!(task_id = %self.task.id, status = claimed.head.status, "airflow: task not acquired");
+            return;
+        }
+        // The one case that should never happen: the server answered 200 and
+        // the payload is not a task.
+        let acquired: TaskAcquireResponseData = match serde_json::from_value(claimed.data) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(task_id = %self.task.id, error = %e, "airflow: malformed acquire response");
                 return;
             }
         };
@@ -305,18 +323,17 @@ impl RunContext {
         // server settles a timed-out promise itself, and a transient failure
         // must be left for redelivery to retry.
         let (state, value) = match outcome {
-            Ok(Monitored::Succeeded { run, output }) => (
-                SettleState::Resolved,
-                json!({ "run": run, "output": output }),
-            ),
+            Ok(Monitored::Succeeded { run, output }) => {
+                ("resolved", json!({ "run": run, "output": output }))
+            }
             Ok(Monitored::Failed { run, message }) => (
-                SettleState::Rejected,
+                "rejected",
                 json!({ "run": run, "error": { "kind": "downstream_failed", "message": message } }),
             ),
             Err(AirflowError::Permanent { kind, message }) => {
                 tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: permanent failure");
                 (
-                    SettleState::Rejected,
+                    "rejected",
                     json!({ "run": {}, "error": { "kind": kind, "message": message } }),
                 )
             }
@@ -333,35 +350,41 @@ impl RunContext {
         let settled = self
             .worker
             .server
-            .call(Request::TaskFulfill(TaskFulfillData {
-                id: self.task.id.clone(),
-                version,
-                action: TaskFulfillAction {
-                    kind: "promise.settle".to_string(),
-                    head: json!({}),
-                    data: TaskFulfillActionData {
-                        id: self.task.id.clone(), // must equal the task id
-                        state,
-                        value: PromiseValue {
-                            headers: None,
-                            data: Some(b64_encode(&value.to_string())),
-                        },
-                    },
+            .process(&RequestEnvelope {
+                kind: "task.fulfill".to_string(),
+                head: RequestHead {
+                    corr_id: format!("airflow-{}", fastrand::u64(..)),
+                    version: PROTOCOL_VERSION.to_string(),
+                    auth: None,
+                    debug_time: None,
                 },
-            }))
+                data: json!({
+                    "id": self.task.id,
+                    "version": version,
+                    "action": {
+                        "kind": "promise.settle",
+                        "head": {},
+                        "data": {
+                            "id": self.task.id,   // must equal the task id
+                            "state": state,
+                            "value": {
+                                "headers": { "content-type": "application/json" },
+                                "data": b64_encode(&value.to_string())
+                            }
+                        }
+                    }
+                }),
+            })
             .await;
 
         match settled {
-            Ok(Response::TaskFulfill(_)) => {
-                tracing::info!(task_id = %self.task.id, ?state, "airflow: promise settled")
+            Ok(r) if (200..300).contains(&r.head.status) => {
+                tracing::info!(task_id = %self.task.id, state, "airflow: promise settled");
             }
-            // The lease was lost, or the promise already settled — almost always
-            // a timeout. Nothing is retryable either way.
-            Ok(Response::Error { status, message }) => {
-                tracing::warn!(task_id = %self.task.id, ?state, status, %message, "airflow: promise not settled")
-            }
+            // A 409 means the lease was lost or the promise already settled —
+            // almost always a timeout. Nothing here is retryable either way.
             other => {
-                tracing::warn!(task_id = %self.task.id, ?state, ?other, "airflow: promise not settled")
+                tracing::warn!(task_id = %self.task.id, state, ?other, "airflow: promise not settled")
             }
         }
     }
@@ -421,13 +444,19 @@ impl RunContext {
                     // carries no signal. Losing the lease surfaces at
                     // `task.fulfill`, as a 409.
                     let _ = server
-                        .call(Request::TaskHeartbeat(TaskHeartbeatData {
-                            pid: PID.to_string(),
-                            tasks: vec![TaskHeartbeatTask {
-                                id: task_id.clone(),
-                                version,
-                            }],
-                        }))
+                        .process(&RequestEnvelope {
+                            kind: "task.heartbeat".to_string(),
+                            head: RequestHead {
+                                corr_id: format!("airflow-hb-{}", fastrand::u64(..)),
+                                version: PROTOCOL_VERSION.to_string(),
+                                auth: None,
+                                debug_time: None,
+                            },
+                            data: json!({
+                                "pid": PID,
+                                "tasks": [{ "id": task_id, "version": version }]
+                            }),
+                        })
                         .await;
                 }
             })

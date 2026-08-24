@@ -180,15 +180,24 @@ the server sends a fresh `execute` and the worker re-enters at Phase 1 — re-cr
 idempotently, re-attaching, and polling again.
 
 ```rust
-// promise.create
-{ "id": format!("{}:timer.{}", promise.id, version),   // unique per acquisition
-  "timeoutAt": wake_at,                                 // must be > now
-  "param": {}, "tags": { "resonate:timer": "true" } }   // timers RESOLVE at timeoutAt
+let timer_id = format!("{}:timer.{}", promise.id, version);   // unique per acquisition
 
-// task.suspend
-{ "id": task_id, "version": version,
-  "actions": [ { "kind": "promise.register_callback", "head": {},
-                 "data": { "awaited": timer_id, "awaiter": task_id } } ] }
+server.process(Request::PromiseCreate(PromiseCreateData {
+    id: timer_id.clone(),
+    timeout_at: wake_at,                                       // must be > now
+    param: PromiseValue::default(),
+    // Timers RESOLVE at timeoutAt rather than rejecting.
+    tags: HashMap::from([("resonate:timer".to_string(), "true".to_string())]),
+})).await?;
+
+server.process(Request::TaskSuspend(TaskSuspendData {
+    id: task_id.clone(),
+    version,
+    actions: vec![TaskSuspendAction {
+        kind: "promise.register_callback".to_string(),
+        data: PromiseRegisterCallbackData { awaited: timer_id, awaiter: task_id },
+    }],
+})).await?;
 ```
 
 Details that matter:
@@ -217,7 +226,7 @@ routinely outlive server deployments.
 ## Phase 3 — Settle
 
 ```rust
-self.settle(version, "resolved", json!({ "run": …, "output": … })).await;
+self.settle(version, SettleState::Resolved, value_of(run, output)).await;
 ```
 
 `task.fulfill` completes task and promise in one transaction — this is what finally stops
