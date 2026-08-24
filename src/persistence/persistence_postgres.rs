@@ -138,9 +138,13 @@ impl PostgresStorage {
         F: FnMut(&dyn Db) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        // On serialization failure (40001), retry once immediately.
+        // On serialization failure (40001) or deadlock (40P01), retry once
+        // immediately — both roll the transaction back entirely, so a retry is
+        // always safe. Deadlocks can occur even under READ COMMITTED (e.g. a
+        // TRUNCATE racing a row-locking transaction), so retrying must not
+        // depend on the isolation level — this mirrors the MySQL backend.
         // If the retry also fails, return Serialization error (maps to 503).
-        let max_retries: u32 = if serializable { 1 } else { 0 };
+        let max_retries: u32 = 1;
 
         let mut f = f;
         for attempt in 0..=max_retries {
