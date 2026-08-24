@@ -1,3 +1,4 @@
+pub mod transport_airflow;
 pub mod transport_exec_bash;
 pub mod transport_gcps;
 pub mod transport_http_poll;

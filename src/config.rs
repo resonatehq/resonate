@@ -325,6 +325,10 @@ pub struct TransportsConfig {
     /// Bash execution transport configuration
     #[serde(default)]
     pub bash_exec: BashExecConfig,
+
+    /// Apache Airflow integration configuration
+    #[serde(default)]
+    pub airflow: AirflowConfig,
 }
 
 /// Bash execution transport configuration.
@@ -358,6 +362,144 @@ impl BashExecConfig {
     /// The lease TTL to request, falling back to the server-wide task default.
     pub fn resolve_lease_timeout(&self, tasks: &TasksConfig) -> i64 {
         self.lease_timeout.unwrap_or(tasks.lease_timeout)
+    }
+}
+
+/// Apache Airflow integration configuration.
+///
+/// When `enabled`, the `airflow://<deployment>/dags/<dag_id>` scheme is
+/// routable. The authority of an address is a key into `deployments` — a name,
+/// not a hostname — which is what keeps credentials out of addresses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AirflowConfig {
+    /// Enable the airflow:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Lease TTL (ms) this worker requests when acquiring a task, and the basis
+    /// for its heartbeat interval (a third of it).
+    ///
+    /// Unset means "follow `tasks.lease_timeout`". DAG runs outlive the lease
+    /// by design — the lease is refreshed by heartbeats, so it only has to
+    /// outlast one heartbeat interval plus jitter.
+    #[serde(default)]
+    pub lease_timeout: Option<i64>,
+
+    /// First interval (ms) between DAG run status checks [default: 5000]
+    #[serde(default = "default_airflow_poll_interval")]
+    pub poll_interval: i64,
+
+    /// Ceiling (ms) for the backing-off status check interval [default: 60000]
+    #[serde(default = "default_airflow_max_poll_interval")]
+    pub max_poll_interval: i64,
+
+    /// Deployment name -> connection details. The name is the address
+    /// authority, so `airflow://prod/dags/x` needs a `prod` entry here.
+    #[serde(default)]
+    pub deployments: std::collections::HashMap<String, AirflowDeployment>,
+}
+
+fn default_airflow_poll_interval() -> i64 {
+    5_000
+}
+fn default_airflow_max_poll_interval() -> i64 {
+    60_000
+}
+
+impl Default for AirflowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            lease_timeout: None,
+            poll_interval: default_airflow_poll_interval(),
+            max_poll_interval: default_airflow_max_poll_interval(),
+            deployments: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl AirflowConfig {
+    /// The lease TTL to request, falling back to the server-wide task default.
+    pub fn resolve_lease_timeout(&self, tasks: &TasksConfig) -> i64 {
+        self.lease_timeout.unwrap_or(tasks.lease_timeout)
+    }
+}
+
+/// One Airflow deployment: where it is, and how to authenticate to it.
+///
+/// Credentials belong here rather than in an address. Supply them through the
+/// environment in production, e.g.
+/// `RESONATE_TRANSPORTS__AIRFLOW__DEPLOYMENTS__PROD__TOKEN=...`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AirflowDeployment {
+    /// Airflow origin, without the `/api` suffix, e.g. `https://airflow.internal:8080`
+    pub base_url: String,
+
+    /// `v2` for Airflow 3.x (JWT), `v1` for Airflow 2.x (HTTP Basic) [default: v2]
+    #[serde(default = "default_airflow_api_version")]
+    pub api_version: String,
+
+    /// Pre-minted bearer token. Takes precedence over username/password.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// Username for Basic auth (Airflow 2) or `/auth/token` (Airflow 3).
+    #[serde(default)]
+    pub username: Option<String>,
+
+    /// Password for Basic auth (Airflow 2) or `/auth/token` (Airflow 3).
+    #[serde(default)]
+    pub password: Option<String>,
+
+    /// Base URL for the links put into promise values [default: `base_url`]
+    #[serde(default)]
+    pub web_url: Option<String>,
+}
+
+fn default_airflow_api_version() -> String {
+    "v2".to_string()
+}
+
+impl AirflowDeployment {
+    /// The REST API base, e.g. `https://airflow.internal:8080/api/v2`.
+    pub fn api_base(&self) -> String {
+        format!(
+            "{}/api/{}",
+            self.base_url.trim_end_matches('/'),
+            self.api_version
+        )
+    }
+
+    /// Apply this deployment's credentials to an outgoing request.
+    ///
+    /// Airflow 2 (`v1`) uses HTTP Basic; Airflow 3 (`v2`) uses a bearer token.
+    /// Managed platforms mint the token out of band, which is why `token` wins
+    /// over username/password.
+    pub fn authenticate(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(token) = &self.token {
+            return req.bearer_auth(token);
+        }
+        if self.api_version == "v1" {
+            return req.basic_auth(
+                self.username.clone().unwrap_or_default(),
+                self.password.clone(),
+            );
+        }
+        req
+    }
+
+    /// Deep link to a DAG run in the Airflow UI. Airflow 2 and 3 differ here.
+    pub fn run_url(&self, dag_id: &str, run_id: &str) -> String {
+        let base = self
+            .web_url
+            .as_deref()
+            .unwrap_or(&self.base_url)
+            .trim_end_matches('/');
+        if self.api_version == "v1" {
+            format!("{base}/dags/{dag_id}/grid?dag_run_id={run_id}")
+        } else {
+            format!("{base}/dags/{dag_id}/runs/{run_id}")
+        }
     }
 }
 
@@ -661,6 +803,38 @@ impl Config {
                 "tasks.lease_timeout must be at least 1 (got {})",
                 self.tasks.lease_timeout
             ));
+        }
+
+        // Same reasoning as bash_exec: a non-positive ttl would make every
+        // `task.acquire` fail with a 400 and the worker would silently never
+        // run anything.
+        if let Some(ttl) = self.transports.airflow.lease_timeout {
+            if ttl < 1 {
+                return Err(format!(
+                    "transports.airflow.lease_timeout must be at least 1 (got {ttl})"
+                ));
+            }
+        }
+        // A zero or negative poll interval is a busy loop against the Airflow
+        // API, and a max below the first interval makes the backoff shrink.
+        if self.transports.airflow.poll_interval < 1 {
+            return Err(format!(
+                "transports.airflow.poll_interval must be at least 1 (got {})",
+                self.transports.airflow.poll_interval
+            ));
+        }
+        if self.transports.airflow.max_poll_interval < self.transports.airflow.poll_interval {
+            return Err(format!(
+                "transports.airflow.max_poll_interval ({}) must be at least poll_interval ({})",
+                self.transports.airflow.max_poll_interval, self.transports.airflow.poll_interval
+            ));
+        }
+        // An enabled worker with no deployments can never deliver anything:
+        // every address would fail the lookup at delivery time.
+        if self.transports.airflow.enabled && self.transports.airflow.deployments.is_empty() {
+            return Err(
+                "transports.airflow is enabled but no deployments are configured".to_string(),
+            );
         }
 
         Ok(())

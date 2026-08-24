@@ -329,6 +329,26 @@ async fn run_server(config: Config) -> Result<(), String> {
         );
     }
 
+    if state.config.transports.airflow.enabled {
+        tracing::info!(
+            deployments = ?state.config.transports.airflow.deployments.keys().collect::<Vec<_>>(),
+            poll_interval_ms = state.config.transports.airflow.poll_interval,
+            "Airflow integration enabled"
+        );
+        workers.insert(
+            "airflow".to_string(),
+            Arc::new(transport::transport_airflow::AirflowWorker::new(
+                Arc::clone(&server),
+                &state.config.transports.airflow,
+                state
+                    .config
+                    .transports
+                    .airflow
+                    .resolve_lease_timeout(&state.config.tasks),
+            )),
+        );
+    }
+
     let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
 
     // Spawn background loops
