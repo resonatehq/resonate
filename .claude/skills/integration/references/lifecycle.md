@@ -30,8 +30,8 @@ Start the heartbeat immediately after acquiring, **before** the downstream creat
 create is exactly when the lease is most likely to lapse.
 
 ```rust
-let heartbeat = self.spawn_heartbeat(pid.clone(), version);   // ticks at ttl/3
-let outcome = self.create_and_monitor(&promise).await;
+let heartbeat = self.spawn_heartbeat(pid.clone(), version);   // lease clock
+let outcome = self.create_and_monitor(&promise).await;        // downstream clock
 heartbeat.abort();
 ```
 
@@ -83,6 +83,53 @@ credentials routinely, treating them as transient with alerting is the better tr
 
 ## Phase 2 — Monitor
 
+Monitoring is **two independent clocks**, and collapsing them into one loop is the most
+common way to get this phase wrong.
+
+| | Lease clock | Downstream clock |
+|---|---|---|
+| Does what | `task.heartbeat` so the server does not redispatch the task | Asks the external system whether the run finished |
+| Cadence set by | The lease TTL you passed to `task.acquire` — a third of it | The downstream system's cost, rate limits and latency |
+| Typical | every 5–10 s | every 5 s, backing off to minutes |
+| Consequence of getting it wrong | Lease lapses; the task is redispatched and a second attempt starts | Wasted API calls, or a promise that settles later than it could |
+
+They answer to different authorities, so they belong in different tasks:
+
+```rust
+// Lease clock — its own task, cadence from the lease and nothing else.
+let heartbeat = self.spawn_heartbeat(pid.clone(), version);
+
+// Downstream clock — sleeps as long as the downstream system warrants.
+let outcome = self.create_and_monitor(&promise).await;
+
+heartbeat.abort();
+```
+
+Fold the heartbeat into the poll loop and the two become one cadence, which fails in both
+directions: a poll interval that backs off past the lease TTL silently drops the task, and
+a poll interval short enough to keep the lease alive hammers the downstream API. Keeping
+them separate is precisely what lets `max_poll_interval` exceed `lease_timeout` safely —
+and for long-running jobs it should.
+
+**Two facts about the lease clock:**
+
+- **`task.heartbeat` answers `200` whether or not it refreshed anything.** The storage
+  update is guarded on `state = 'acquired'` at the right version and pid; when the guard
+  fails it updates zero rows and reports nothing back. A worker therefore *cannot* learn
+  from a heartbeat that it lost its lease — ignore the response, and say so in a comment so
+  the next reader does not mistake it for sloppiness. Lease loss surfaces at
+  `task.fulfill`, as a `409`.
+- **The cadence must fit inside the lease.** `ttl / 3` leaves room to miss two beats, but a
+  floor added to avoid hammering (`(ttl / 3).max(1000)`) will push the first beat past a
+  lease shorter than the floor. Clamp against the lease as well:
+
+  ```rust
+  fn heartbeat_interval_ms(lease_timeout: i64) -> u64 {
+      let third = (lease_timeout / 3).max(1_000);
+      third.min((lease_timeout / 2).max(1)).max(1) as u64
+  }
+  ```
+
 ### Shape A — in-process loop (default)
 
 ```rust
@@ -103,8 +150,11 @@ loop {
 
 Restart-safe **because create is idempotent**: a crash drops the lease, the server
 redelivers within the lease timeout, the new attempt re-creates (409 → attach) and resumes.
-Cost: one lease, one heartbeat and one task per active run, and a restart re-polls
-everything it was watching.
+Cost: one lease, one heartbeat task and one poll task per active run, and a restart
+re-polls everything it was watching.
+
+Note what the loop does *not* do: it never heartbeats. That is the other clock's job, and
+the two only meet when the poll loop returns and the heartbeat is aborted.
 
 Back off with a cap. A DAG that runs for six hours must not be polled every five seconds
 for six hours.
@@ -156,6 +206,10 @@ Details that matter:
 - **Orphan timers are expected.** A crash between `promise.create` and `task.suspend`
   leaves a timer nobody awaits. It resolves harmlessly; do not build cleanup for it.
 - Cost: two extra RPCs and one promise per poll, plus one `execute` per cycle.
+- **There is no lease clock at all.** The worker holds no lease between polls, so the
+  heartbeat disappears and the timer promise's `timeoutAt` becomes the only cadence. That
+  is the shape's real attraction for long-running jobs: one clock instead of two, and
+  nothing to keep alive while the downstream system takes its hours.
 
 Start with A. Move to B when lease churn or memory becomes the bottleneck, or when runs
 routinely outlive server deployments.

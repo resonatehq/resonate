@@ -16,9 +16,15 @@
 //!    an earlier attempt already triggered this run, so re-attach and monitor.
 //!    This only works because Airflow lets the caller name the run. A
 //!    downstream system without that property cannot be integrated this way.
-//! 2. **Monitor.** Poll the run's state on a backing-off interval, heartbeating
-//!    the lease so the task is not redispatched, and stop at the promise's
-//!    `timeoutAt`.
+//! 2. **Monitor.** Two clocks, running independently:
+//!    - the **lease clock** — heartbeat `task.heartbeat` at a third of the
+//!      lease TTL, so the server does not redispatch the task;
+//!    - the **downstream clock** — ask Airflow for the run's state on a
+//!      backing-off interval sized for Airflow's cost and latency.
+//!
+//!    They answer to different authorities and must not be collapsed into one
+//!    loop. The heartbeat runs in its own task, which is what lets the poll
+//!    interval back off past the lease TTL without the lease lapsing.
 //! 3. **Settle.** `task.fulfill` with the run's outcome, which is what finally
 //!    stops the redelivery loop.
 //!
@@ -235,6 +241,9 @@ impl RunContext {
         let version = acquired.task.version;
         let promise = acquired.promise;
 
+        // Monitoring runs two independent clocks. The lease clock lives in its
+        // own task so that however long the downstream clock sleeps between
+        // status checks, the lease is still refreshed underneath it.
         let heartbeat = self.spawn_heartbeat(pid.clone(), version);
         let outcome = self.create_and_monitor(&promise).await;
         heartbeat.abort();
@@ -311,7 +320,10 @@ impl RunContext {
         // Phase 1 — create. Idempotent by construction.
         self.create_dag_run(&run_id, &input).await?;
 
-        // Phase 2 — monitor.
+        // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
+        // and latency, and deliberately unrelated to the lease TTL: the
+        // heartbeat task holds the lease open independently, so this interval
+        // may back off well past it.
         let mut interval = self.poll_interval;
         loop {
             let now = crate::util::system_time_ms();
@@ -323,9 +335,12 @@ impl RunContext {
                 RunState::Succeeded(run) => return Ok(Monitored::Succeeded(run)),
                 RunState::Failed(run) => return Ok(Monitored::Failed(run)),
             }
+            // Never sleep past the promise deadline: the next iteration has to
+            // observe it and stop rather than wake up after the server has
+            // already settled the promise.
             let sleep_ms = interval.min(promise.timeout_at - now).max(0) as u64;
             tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-            interval = (interval * 2).min(self.max_poll_interval);
+            interval = interval.saturating_mul(2).min(self.max_poll_interval);
         }
     }
 
@@ -537,16 +552,26 @@ impl RunContext {
         }
     }
 
+    /// The lease clock. Runs until aborted, on a cadence derived from the
+    /// lease TTL and from nothing else.
+    ///
+    /// Its own task on purpose: folding the heartbeat into the poll loop would
+    /// tie the lease to the downstream system's cadence, and a poll interval
+    /// that backed off past the lease TTL would silently drop the task.
     fn spawn_heartbeat(&self, pid: String, version: i64) -> tokio::task::JoinHandle<()> {
         let server = Arc::clone(&self.server);
         let task_id = self.task_id.clone();
-        let lease_timeout = self.lease_timeout;
+        let beat_ms = heartbeat_interval_ms(self.lease_timeout);
         tokio::spawn(async move {
-            let beat_ms = ((lease_timeout / 3).max(1000)) as u64;
             let mut ticker = tokio::time::interval(Duration::from_millis(beat_ms));
             ticker.tick().await;
             loop {
                 ticker.tick().await;
+                // Deliberately ignored. `task.heartbeat` answers 200 whether or
+                // not it refreshed anything — a heartbeat for a lease this
+                // worker no longer holds is a silent no-op — so the response
+                // carries no signal to act on. Losing the lease surfaces at
+                // `task.fulfill`, as a 409.
                 let _ = server
                     .process(&RequestEnvelope {
                         kind: "task.heartbeat".to_string(),
@@ -609,6 +634,18 @@ impl RunContext {
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+/// Heartbeat cadence in ms, derived from the lease TTL — never from the poll
+/// interval, which answers to the downstream system instead.
+///
+/// A third of the lease leaves room to miss two beats before the task is
+/// redispatched. The 1s floor keeps a short lease from hammering the server,
+/// and the half-lease ceiling stops that floor from pushing the first beat past
+/// the very lease it exists to refresh.
+fn heartbeat_interval_ms(lease_timeout: i64) -> u64 {
+    let third = (lease_timeout / 3).max(1_000);
+    third.min((lease_timeout / 2).max(1)).max(1) as u64
+}
 
 /// Airflow DAG run states (`airflow.utils.state.DagRunState`).
 const RUNNING_STATES: [&str; 2] = ["queued", "running"];
@@ -904,6 +941,45 @@ mod tests {
             panic!("expected success");
         };
         assert_eq!(run["dag_run_id"], "run-42");
+    }
+
+    // ---- the two clocks ----
+
+    #[test]
+    fn heartbeat_cadence_is_a_third_of_the_lease() {
+        assert_eq!(heartbeat_interval_ms(15_000), 5_000);
+        assert_eq!(heartbeat_interval_ms(30_000), 10_000);
+        assert_eq!(heartbeat_interval_ms(600_000), 200_000);
+    }
+
+    #[test]
+    fn heartbeat_always_fits_inside_the_lease() {
+        // The 1s floor must never push the first beat past the lease it is
+        // meant to refresh — config allows a lease as short as 1ms.
+        for lease in [1_i64, 2, 500, 999, 1_000, 2_999, 3_000, 15_000] {
+            let beat = heartbeat_interval_ms(lease) as i64;
+            assert!(beat >= 1, "lease {lease}: cadence must be positive");
+            assert!(
+                beat <= lease,
+                "lease {lease}: first beat at {beat}ms lands after the lease expires"
+            );
+        }
+    }
+
+    #[test]
+    fn poll_backoff_does_not_overflow() {
+        // The downstream clock is independent of the lease, so nothing bounds
+        // max_poll_interval from above — including a pathological config.
+        let max_poll_interval = i64::MAX / 2;
+        let mut interval = 5_000_i64;
+        for _ in 0..80 {
+            interval = interval.saturating_mul(2).min(max_poll_interval);
+            assert!(interval > 0, "backoff overflowed to {interval}");
+        }
+        assert_eq!(
+            interval, max_poll_interval,
+            "backoff should settle at the cap"
+        );
     }
 
     // ---- url encoding ----

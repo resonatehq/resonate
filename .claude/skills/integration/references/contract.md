@@ -189,8 +189,14 @@ latter two are stable across retries.
 { "pid": "<same pid>", "tasks": [ { "id": "…", "version": <acquired version> } ] }
 ```
 
-Every `ttl / 3`. Batching is allowed but every task in a batch must share the same origin
-(the substring before the first `:`), so one task per request is the always-correct choice.
+Every `ttl / 3` — a cadence derived from the lease and from nothing else. Batching is
+allowed but every task in a batch must share the same origin (the substring before the
+first `:`), so one task per request is the always-correct choice.
+
+**It always answers `200`.** The storage update is guarded on `state = 'acquired'` at the
+right version and pid; when the guard fails it updates zero rows and the handler still
+returns `200 {}`. So a heartbeat is fire-and-forget by protocol design and a worker cannot
+use it to detect that it lost its lease — that surfaces at `task.fulfill`, as a `409`.
 
 ### `task.fulfill`
 

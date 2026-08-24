@@ -110,8 +110,13 @@ message and never touch the downstream system.
 1. **Create — runs on every delivery.** Issue the create with a deterministic key derived
    from `promise.id`. Treat "already exists" as success and fall through to monitoring.
    Never a UUID, a clock read, or `task.version`.
-2. **Monitor.** Poll on a backing-off interval, heartbeating at `ttl / 3`, and stop at
-   `promise.timeoutAt` — the server settles `rejected_timedout` there regardless.
+2. **Monitor — two independent clocks.** The **lease clock** heartbeats `task.heartbeat`
+   at a third of the lease TTL. The **downstream clock** asks the external system for the
+   run's state on a backing-off interval sized for *its* cost and latency. They answer to
+   different authorities and run at different frequencies; keep the heartbeat in its own
+   task so the poll interval can back off past the lease TTL without the lease lapsing.
+   Both stop at `promise.timeoutAt` — the server settles `rejected_timedout` there
+   regardless.
 3. **Settle.** `task.fulfill`, which completes task and promise in one transaction and is
    what finally stops redelivery.
 
