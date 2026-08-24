@@ -1,6 +1,7 @@
 package io.resonatehq.resonate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -578,6 +579,71 @@ class NetworkTest {
             // surviving into JVM shutdown and dying with NoClassDefFoundError(SseResponse).
             session.close();
             assertThrows(ExecutionException.class, () -> get.get(2, TimeUnit.SECONDS));
+        }
+    }
+
+    // -- scheduler invariant: only targeted promises are timed out -------------
+    //
+    // Mirrors the server's promise.pendingHasTimeout invariant: a pending promise carrying
+    // resonate:target always has a timeout scheduled, and one without a target must NOT. Divergence
+    // here is invisible in ordinary tests -- a simulation that schedules timeouts for *every*
+    // promise simply lets more things succeed than the real server does -- so it is asserted
+    // directly.
+
+    private static JsonNode create(LocalNetwork net, String id, long timeoutAt, Map<String, String> tags)
+            throws Exception {
+        return send(
+                net,
+                Map.of(
+                        "kind",
+                        "promise.create",
+                        "head",
+                        Map.of("corrId", id, "version", "2025-01-15"),
+                        "data",
+                        Map.of("id", id, "timeoutAt", timeoutAt, "param", Map.of(), "tags", tags)));
+    }
+
+    @Test
+    void onlyPromisesWithATargetAreScheduledForTimeout() throws Exception {
+        LocalNetwork net = new LocalNetwork("p1", null);
+        long deadline = Send.nowMs() + 60_000;
+        create(net, "no-target", deadline, Map.of("resonate:scope", "global"));
+        create(
+                net,
+                "with-target",
+                deadline,
+                Map.of("resonate:scope", "global", "resonate:target", "poll://any@default"));
+
+        synchronized (net.state) {
+            java.util.Set<String> scheduled = new java.util.HashSet<>();
+            for (Network.PTimeout pt : net.state.pTimeouts) {
+                scheduled.add(pt.id);
+            }
+            assertTrue(scheduled.contains("with-target"), scheduled.toString());
+            assertFalse(scheduled.contains("no-target"), scheduled.toString());
+        }
+    }
+
+    @Test
+    void tickExpiresOnlyTheTargetedPromise() throws Exception {
+        LocalNetwork net = new LocalNetwork("p1", null);
+        long deadline = Send.nowMs() + 60_000;
+        create(net, "bare", deadline, Map.of("resonate:scope", "global"));
+        create(
+                net,
+                "timer",
+                deadline,
+                Map.of(
+                        "resonate:scope", "global",
+                        "resonate:target", "poll://any@default",
+                        "resonate:timer", "true"));
+
+        synchronized (net.state) {
+            net.state.tick(deadline + 1);
+            // The timer fires -- and resonate:timer settles it RESOLVED, which is what wakes a
+            // sleeping workflow. The bare promise is left alone.
+            assertEquals("resolved", net.state.promises.get("timer").state);
+            assertEquals("pending", net.state.promises.get("bare").state);
         }
     }
 }

@@ -606,10 +606,15 @@ public interface Network {
             promise.settledAt = null;
             Map<String, Object> record = promise.toRecord();
             promises.put(promiseId, promise);
-            setPTimeout(promiseId, timeoutAt);
 
             String address = tags.get("resonate:target");
             if (address != null) {
+                // Only a promise carrying an address is expired by the tick loop. A target-less
+                // promise (a bare ctx.promise) is never timed out by the scheduler, so a durable
+                // timer has to carry a target to fire at all -- see Context.sleep. Scheduling one
+                // here regardless would make this simulation *more* permissive than the server,
+                // which is invisible to every test that only asserts success.
+                setPTimeout(promiseId, timeoutAt);
                 Long delay = parseLong(tags.get("resonate:delay"));
                 boolean deferred = delay != null && now < delay;
                 Task task = new Task();
@@ -786,7 +791,12 @@ public interface Network {
             promise.settledAt = null;
             Map<String, Object> pr = promise.toRecord();
             promises.put(promiseId, promise);
-            setPTimeout(promiseId, timeoutAt);
+            // Same scheduler invariant as promise.create: only a promise carrying a target is
+            // expired by the tick loop. A task.create root always carries one in practice, but the
+            // guard keeps the invariant explicit.
+            if (tags.containsKey("resonate:target")) {
+                setPTimeout(promiseId, timeoutAt);
+            }
 
             Task task = new Task();
             task.id = promiseId;

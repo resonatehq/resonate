@@ -335,7 +335,7 @@ class CoreTest {
         String status = fix.core.executeUntilBlockedOuter("p1-wait", rt.version(), rt.promise(), rt.preload());
         assertEquals("suspended", status);
 
-        PromiseRecord child = fix.promiseGetRaw("p1-wait.1");
+        PromiseRecord child = fix.promiseGetRaw("p1-wait:1");
         assertEquals("pending", child.state());
     }
 
@@ -391,16 +391,16 @@ class CoreTest {
         RootTask rt = fix.createRootTask("p1-pre", "readPre");
         fix.reg.register("readPre", CoreTest::wfReadPreloaded);
 
-        // Pre-resolve the child the workflow will read. ctx.rpc generates the child id "p1-pre.1".
+        // Pre-resolve the child the workflow will read. ctx.rpc generates the child id "p1-pre:1".
         // Children are codec-encoded on the wire just like root promises, so pre-settle with
         // codec.encode to match.
         Value encVal = fix.codec.encode(99);
-        await(fix.sender.promiseCreate(new PromiseCreateReq("p1-pre.1", FAR_FUTURE, new Value(), Map.of())));
-        await(fix.sender.promiseSettle(new PromiseSettleReq("p1-pre.1", "resolved", encVal)));
+        await(fix.sender.promiseCreate(new PromiseCreateReq("p1-pre:1", FAR_FUTURE, new Value(), Map.of())));
+        await(fix.sender.promiseSettle(new PromiseSettleReq("p1-pre:1", "resolved", encVal)));
 
         // Feed the preloaded child to Effects via the preload arg too, exercising the
         // seed-at-construction path.
-        PromiseRecord pre = await(fix.sender.promiseGet("p1-pre.1"));
+        PromiseRecord pre = await(fix.sender.promiseGet("p1-pre:1"));
         List<PromiseRecord> preload = List.of(pre);
 
         String status = fix.core.executeUntilBlockedOuter("p1-pre", rt.version(), rt.promise(), preload);
@@ -631,5 +631,74 @@ class CoreTest {
 
         String status = fix.core.executeUntilBlockedOuter("p1-ff", rt.version(), rt.promise(), rt.preload());
         assertEquals("suspended", status);
+    }
+
+    // ── Timer tasks (durable sleep) ─────────────────────────────────────────
+    //
+    // A resonate:timer promise is a durable sleep: the wake IS its deadline, and resonate:timer
+    // makes timing out settle it *resolved*. It carries a resonate:target only because the server
+    // refuses to schedule a deadline for a promise without one -- which also spawns a task,
+    // dispatched right away rather than at the wake. That task names no function, so Core must
+    // neither run it nor hand it back (a release is re-dispatched immediately, which would spin):
+    // it drops it and lets the deadline do the waking.
+
+    /** Create a timer promise the way {@code ctx.sleep} does, and return its record. */
+    private static PromiseRecord createTimerPromise(CoreFixture fix, String id, long timeoutAt) {
+        await(fix.sender.promiseCreate(new PromiseCreateReq(
+                id,
+                timeoutAt,
+                new Value(),
+                Map.of("resonate:branch", id, "resonate:target", "any", "resonate:timer", "true"))));
+        return fix.promiseGetRaw(id);
+    }
+
+    @Test
+    void notYetDueTimerTaskIsDropped() {
+        CoreFixture fix = new CoreFixture();
+        PromiseRecord promise = createTimerPromise(fix, "t-pending", FAR_FUTURE);
+        assertEquals("pending", promise.state());
+
+        String status = fix.core.executeUntilBlockedOuter("t-pending", 0, promise, List.of());
+
+        assertEquals("suspended", status);
+        // Still pending: the sleep was not ended early by a fulfill.
+        assertEquals("pending", fix.promiseGetRaw("t-pending").state());
+        // Dropped before the lease was taken, so nothing is heartbeating a task this worker is not
+        // working on.
+        assertEquals(0, fix.hb.started);
+    }
+
+    @Test
+    void dueTimerReportsSettlementWithoutDecoding() {
+        // A delivery already in flight when the deadline settled the promise. A timer's empty param
+        // holds no TaskData, so this has to short-circuit before the decode rather than fail on it.
+        // (Driven through the inner: settling a root promise on LocalNetwork auto-fulfills its
+        // task, so the outer's "acquired task + settled promise" pairing is not constructible --
+        // the same reason the ordinary short-circuit branch is untested here.)
+        CoreFixture fix = new CoreFixture();
+        createTimerPromise(fix, "t-due", FAR_FUTURE);
+        await(fix.sender.promiseSettle(new PromiseSettleReq("t-due", "resolved", fix.codec.encode(null))));
+        PromiseRecord settled = fix.promiseGetRaw("t-due");
+
+        Core.ExecOutcome outcome =
+                fix.core.executeUntilBlockedInner(settled, new Effects(fix.sender, fix.codec, List.of()));
+
+        assertInstanceOf(Core.ExecFulfilled.class, outcome);
+        assertEquals("resolved", ((Core.ExecFulfilled) outcome).state());
+    }
+
+    @Test
+    void timerPromiseDeadlineIsScheduledByTheServer() {
+        // The point of the target: the server only schedules a timeout for a promise that carries
+        // one, so a target-less timer would never fire.
+        CoreFixture fix = new CoreFixture();
+        long now = Send.nowMs();
+        createTimerPromise(fix, "t-fires", now + 50);
+        synchronized (fix.net.state) {
+            fix.net.state.tick(now + 100);
+        }
+        // resonate:timer settles a timed-out promise RESOLVED -- that settlement is what wakes
+        // every sleeper suspended on it.
+        assertEquals("resolved", fix.promiseGetRaw("t-fires").state());
     }
 }

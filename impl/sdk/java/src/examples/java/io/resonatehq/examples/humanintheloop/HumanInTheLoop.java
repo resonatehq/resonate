@@ -87,7 +87,7 @@ public final class HumanInTheLoop {
     // -- Orchestrator ----------------------------------------------------------
 
     public static String fulfillOrder(Context ctx, String orderId, int amount) {
-        // Open the human-decision promise first so its id is deterministic ({workflow_id}.1).
+        // Open the human-decision promise first so its id is deterministic ({workflow_id}:1).
         // ctx.promise returns a future whose id() is awaitable; we publish that id through a leaf so a
         // real reviewer would know where to resolve.
         ResonateFuture<Object> approval = ctx.promise(); // inherit workflow timeout

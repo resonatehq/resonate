@@ -90,6 +90,31 @@ public final class Errors {
         }
     }
 
+    /**
+     * A caller-supplied root id the server's id format cannot carry.
+     *
+     * <p>See {@link Ids#validateRootId}.
+     */
+    public static final class InvalidIdError extends ResonateError {
+        private static final long serialVersionUID = 1L;
+        private final String id;
+        private final String reason;
+
+        public InvalidIdError(String id, String reason) {
+            super("invalid id '%s': %s".formatted(id, reason));
+            this.id = id;
+            this.reason = reason;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public String reason() {
+            return reason;
+        }
+    }
+
     /** A function name (and version) is already registered. */
     public static final class AlreadyRegisteredError extends ResonateError {
         private static final long serialVersionUID = 1L;

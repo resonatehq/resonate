@@ -183,6 +183,25 @@ public final class Core {
      */
     public String executeUntilBlockedOuter(
             String taskId, int taskVersion, PromiseRecord promise, List<PromiseRecord> preload) {
+        // A still-pending resonate:timer promise is a durable sleep that has not come due (see
+        // Context.sleep). It names no function to run; it only carries a task at all because the
+        // target that gets the server to *schedule* its deadline also spawns one. Drop it and let
+        // the deadline settle the promise, which is what wakes the sleepers.
+        //
+        // Dropping means exactly that: no fulfill (that would end the sleep early), no suspend (a
+        // task cannot await its own promise), and no release (the server re-dispatches a released
+        // task immediately, which would spin). The lease simply lapses; a re-delivery before the
+        // wake is dropped again, and one after it finds the promise settled and fulfills the task
+        // below.
+        if ("true".equals(promise.tags().get("resonate:timer")) && "pending".equals(promise.state())) {
+            LOGGER.log(
+                    Level.DEBUG,
+                    "core: dropping not-yet-due timer task task_id={0} timeout_at={1}",
+                    taskId,
+                    promise.timeoutAt());
+            return "suspended";
+        }
+
         heartbeat.start(taskId, taskVersion);
         assert sender != null : "sender must be set";
         try {
@@ -274,6 +293,19 @@ public final class Core {
      * Encodes return values through the codec so the caller has a single, uniform fulfill path.
      */
     ExecOutcome executeUntilBlockedInner(PromiseRecord promise, Effects effects) {
+        // 0. A settled resonate:timer promise -- a durable sleep whose wake has passed. It names no
+        //    function and carries no TaskData, so it cannot go through the decode below; report its
+        //    settlement so the caller fulfills the task. (The not-yet-due case never reaches here:
+        //    the caller drops it. The server normally fulfills a timer's task itself when the
+        //    deadline settles the promise, so this only catches a delivery already in flight at that
+        //    moment.)
+        if ("true".equals(promise.tags().get("resonate:timer")) && !"pending".equals(promise.state())) {
+            Tree tree = new Tree(promise.id());
+            tree.settle(promise.id());
+            String state = "rejected_timedout".equals(promise.state()) ? "rejected" : promise.state();
+            return new ExecFulfilled(state, codec.encode(promise.value().data()), tree);
+        }
+
         // 1. Decode TaskData from the (already-decoded) promise param.
         TaskData taskData;
         try {
@@ -315,15 +347,12 @@ public final class Core {
         Context rootCtx = Context.root(
                 promise.id(),
                 // Take the lineage origin from the promise's resonate:origin tag, which the dispatcher
-                // set: a top-level run / rpc propagates its own origin, while detached resets it to the
-                // child's own id (a new lineage). Falling back to promise.id when absent keeps a genuine
-                // top-level root (whose tag equals its id anyway) and any tag-less promise correct.
-                promise.tags().getOrDefault("resonate:origin", promise.id()),
-                // The id-generation prefix from resonate:prefix. Unlike origin it is propagated
-                // unchanged across detached re-roots, so every recursion level mints {prefix}.{16hex}
-                // off the same fixed prefix instead of off its own grown id -- this is what bounds
-                // recursive detached ids. Falls back to promise.id when absent, matching origin.
-                promise.tags().getOrDefault("resonate:prefix", promise.id()),
+                // set: every id in the lineage is {origin}:{lineage}, so this is both the ancestry
+                // root and the anchor this workflow's own child ids extend. A tag-less promise (one
+                // created directly through the promises client, say) falls back to deriving it from
+                // the id the same way the server does -- which for a genuine top-level root is the id
+                // itself.
+                promise.tags().getOrDefault("resonate:origin", Ids.originOf(promise.id())),
                 promise.timeoutAt(),
                 taskData.func(),
                 effects,

@@ -21,8 +21,8 @@ import io.resonatehq.resonate.Resonate;
  * eagerly-spawned local child, so both {@code bar} invocations run to completion regardless of
  * whether {@code foo} awaited them.
  *
- * <p>We prove it durably. {@code ctx.run} children get deterministic ids {@code {foo_id}.1} and
- * {@code {foo_id}.2}. After {@code foo} returns {@code 5} we attach to those two promises by id and
+ * <p>We prove it durably. {@code ctx.run} children get deterministic ids {@code {foo_id}:1} and
+ * {@code {foo_id}:2}. After {@code foo} returns {@code 5} we attach to those two promises by id and
  * assert each one resolved -- evidence the never-awaited work was awaited <i>by the runtime</i> on
  * our behalf.
  *
@@ -69,11 +69,12 @@ public final class StructuredConcurrency {
             System.out.println("[foo] OK: returned " + out + " (never awaited its two children)");
 
             // Structured concurrency: the runtime awaited the two never-awaited ctx.run children
-            // before resolving foo. ctx.run assigns child ids in call order as {parent_id}.{seq}
-            // (seq starts at 1), so foo's two children are {foo_id}.1 and {foo_id}.2. Attach to each
+            // before resolving foo. ctx.run assigns child ids in call order below the workflow's
+            // origin -- a bare root joins its first lineage segment with ':' (deeper ones with '.'),
+            // so foo's two children are {foo_id}:1 and {foo_id}:2. Attach to each
             // durable promise and confirm it resolved with bar's result.
             for (int seq = 1; seq <= 2; seq++) {
-                String childId = fooId + "." + seq;
+                String childId = fooId + ":" + seq;
                 ResonateHandle<Object> childHandle = r.get(childId);
                 int childOut = ((Number) childHandle.result()).intValue();
                 assert childOut == seq * 10 : "child " + childId + " resolved " + childOut + ", expected " + (seq * 10);

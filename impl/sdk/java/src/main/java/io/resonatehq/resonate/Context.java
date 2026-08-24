@@ -151,8 +151,13 @@ public final class Context {
      */
     private static final class State {
         final String id;
+
+        // The lineage origin: everything before the first ":" of every id in this workflow, set at
+        // the top (resonate.run/rpc) and carried through the resonate:origin tag unchanged forever --
+        // including into detached children, which mint {origin}:d{16hex} off it (see
+        // Context.detached). Also the anchor every descendant id extends, so it doubles as the
+        // id-generation root.
         final String originId;
-        final String prefixId;
         final String branchId;
         final String parentId;
         final String funcName;
@@ -180,7 +185,6 @@ public final class Context {
         State(
                 String id,
                 String originId,
-                String prefixId,
                 String branchId,
                 String parentId,
                 String funcName,
@@ -193,7 +197,6 @@ public final class Context {
                 Registry registry) {
             this.id = id;
             this.originId = originId;
-            this.prefixId = prefixId;
             this.branchId = branchId;
             this.parentId = parentId;
             this.funcName = funcName;
@@ -218,15 +221,16 @@ public final class Context {
     /**
      * Build a root context.
      *
-     * <p>{@code originId} is the lineage origin (a {@code detached} child resets it to its own id);
-     * {@code prefixId} is the id-generation prefix, propagated unchanged across {@code detached}
-     * re-roots. For a genuine top-level root both equal {@code id}. A {@code null} {@code retryPolicy}
-     * defaults to {@link Never} and a {@code null} {@code registry} to an empty one (test paths).
+     * <p>{@code originId} is the top of the execution lineage, carried through the {@code
+     * resonate:origin} tag from whoever dispatched this workflow. For a genuine top-level root it
+     * equals {@code id}; below one it is the fixed prefix every id in the lineage extends ({@code
+     * {origin}:{lineage}}), which is also what the server derives by splitting an id on its first
+     * {@code :}. A {@code null} {@code retryPolicy} defaults to {@link Never} and a {@code null}
+     * {@code registry} to an empty one (test paths).
      */
     public static Context root(
             String id,
             String originId,
-            String prefixId,
             long timeoutAt,
             String funcName,
             Effects effects,
@@ -237,7 +241,6 @@ public final class Context {
         State st = new State(
                 id,
                 originId,
-                prefixId,
                 id,
                 id,
                 funcName,
@@ -258,7 +261,6 @@ public final class Context {
         State st = new State(
                 id,
                 state.originId,
-                state.prefixId,
                 id,
                 state.id,
                 funcName,
@@ -331,7 +333,7 @@ public final class Context {
     // ``ctx._next_id()`` / ``ctx._child_timeout(...)``.
     String nextId() {
         state.seq += 1;
-        return state.id + "." + state.seq;
+        return Ids.joinId(state.id, String.valueOf(state.seq));
     }
 
     long childTimeout(Duration requested) {
@@ -347,21 +349,26 @@ public final class Context {
     /**
      * Build a global-scope promise request. {@code data} carries a {@link TaskData} for function
      * dispatch (null otherwise); {@code target} adds the routing tag; {@code timer} adds the timer
-     * tag distinguishing a sleep from a bare promise. {@code origin} overrides the lineage origin
-     * (only {@code detached} does so); the prefix is always this context's.
+     * tag distinguishing a sleep from a bare promise.
+     *
+     * <p>{@code resonate:origin} is <i>always</i> this context's {@code originId} -- the origin is
+     * set once at the top ({@code resonate.run}/{@code rpc}) and propagates down unchanged forever,
+     * including into {@link #detached} children, whose ids are minted off it.
+     *
+     * <p>{@code parent} defaults to this context's id; only {@link #detached} overrides it, because
+     * its id is minted off the origin rather than off the spawning context and the server requires
+     * every id to extend its declared {@code resonate:parent}.
      */
     private PromiseCreateReq globalReq(
-            String id, Duration timeout, Object data, String target, boolean timer, String origin) {
-        String resolvedOrigin = origin != null ? origin : state.originId;
+            String id, Duration timeout, Object data, String target, boolean timer, String parent) {
         Map<String, String> tags = new LinkedHashMap<>();
         tags.put("resonate:scope", "global");
         if (target != null) {
             tags.put("resonate:target", target);
         }
         tags.put("resonate:branch", id);
-        tags.put("resonate:parent", state.id);
-        tags.put("resonate:origin", resolvedOrigin);
-        tags.put("resonate:prefix", state.prefixId);
+        tags.put("resonate:parent", parent != null ? parent : state.id);
+        tags.put("resonate:origin", state.originId);
         if (timer) {
             tags.put("resonate:timer", "true");
         }
@@ -424,7 +431,6 @@ public final class Context {
         tags.put("resonate:branch", state.branchId);
         tags.put("resonate:parent", state.id);
         tags.put("resonate:origin", state.originId);
-        tags.put("resonate:prefix", state.prefixId);
         PromiseCreateReq req = new PromiseCreateReq(nextId(), childTimeout(opts.timeout()), new Value(), tags);
 
         // Record the local child before its promise is created (call-order siblings). Idempotent.
@@ -571,11 +577,27 @@ public final class Context {
         return rpc(Fn.methodOf(ref), args).as();
     }
 
-    /** Create a timer promise that resolves after {@code duration}. */
+    /**
+     * Suspend this workflow durably for {@code duration}.
+     *
+     * <p>The timer is the promise's own deadline: {@code resonate:timer} makes the server settle it
+     * <b>resolved</b> (rather than timed out) when the deadline arrives, which fires the callbacks
+     * every sleeper is suspended on. Its wake is therefore {@code now + duration}, bounded by the
+     * workflow's own deadline so a sleep cannot outlive it.
+     *
+     * <p>The {@code resonate:target} is what makes that deadline <i>happen</i>: the server only
+     * schedules timeouts for promises carrying an address, so a target-less timer would simply never
+     * fire. The flip side is that a target also spawns a task, dispatched immediately rather than at
+     * the wake; a timer names no function to run, so the worker that receives it drops it and lets
+     * the deadline do the waking (see {@link Core#executeUntilBlockedOuter}).
+     *
+     * <p>Nothing is held in memory while sleeping, and the wake survives this worker -- or every
+     * worker -- dying, because it is the server's own deadline that settles the promise.
+     */
     public ResonateFuture<Void> sleep(Duration duration) {
         state.workflow = true;
         Chain.Link link = state.chain.link();
-        PromiseCreateReq req = globalReq(nextId(), duration, null, null, true, null);
+        PromiseCreateReq req = globalReq(nextId(), duration, null, resolveTarget(opts.target()), true, null);
         return remoteFuture(req, link, null).as();
     }
 
@@ -593,17 +615,27 @@ public final class Context {
     }
 
     /**
-     * Fire-and-forget remote dispatch. The id is minted off the propagated prefix as {@code
-     * {prefix}.d{16hex}}, the lineage origin is reset to the child's own id (a fresh lineage), and the
-     * future resolves to the child id without ever suspending.
+     * Fire-and-forget remote dispatch. The future resolves to the child id without ever suspending.
+     *
+     * <p>The id is minted off {@code originId} -- the lineage origin, fixed at the top and propagated
+     * unchanged forever -- as {@code {origin}:d{16hex}}, so recursion stays bounded at one segment
+     * past the origin instead of growing a segment per level. The {@code d} marks the segment as a
+     * detached child (vs a normal child's numeric {@code {seq}}).
+     *
+     * <p>The child keeps the <i>parent's</i> origin rather than re-rooting onto its own id: the
+     * server derives the origin as everything before the first {@code :}, and requires every id in a
+     * lineage to start with {@code {origin}:}. Its declared {@code resonate:parent} is the origin too
+     * -- the id hangs off the origin, not off the spawning context -- while {@code resonate:branch}
+     * stays the child's own id: a detached child roots its own branch.
      */
     public ResonateFuture<String> detached(String fn, Object... args) {
         state.workflow = true;
         Chain.Link link = state.chain.link();
 
-        String childId = state.prefixId + ".d" + hashId(nextId());
+        String childId = Ids.joinId(state.originId, "d" + hashId(nextId()));
         TaskData data = new TaskData(Arrays.asList(args), Map.of(), fn, opts.version());
-        PromiseCreateReq req = globalReq(childId, opts.timeout(), data, resolveTarget(opts.target()), false, childId);
+        PromiseCreateReq req =
+                globalReq(childId, opts.timeout(), data, resolveTarget(opts.target()), false, state.originId);
 
         // Det nodes are exempt from the contract and skipped by the frontier walk.
         state.tree.addChild(state.id, req.id(), Tree.DET);

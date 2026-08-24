@@ -76,7 +76,6 @@ class ContextTest {
         return Context.root(
                 "root",
                 "root",
-                "root",
                 timeoutAt,
                 "root",
                 effects,
@@ -101,8 +100,8 @@ class ContextTest {
         return codec().convert(paramData, TaskData.class);
     }
 
-    private static String detachedId(String prefix, String raw) {
-        return prefix + ".d" + Context.hashId(raw);
+    private static String detachedId(String origin, String raw) {
+        return origin + ":d" + Context.hashId(raw);
     }
 
     // =========================================================================
@@ -248,17 +247,17 @@ class ContextTest {
     @Test
     void nextIdSequential() {
         Context ctx = root();
-        assertEquals("root.1", ctx.nextId());
-        assertEquals("root.2", ctx.nextId());
-        assertEquals("root.3", ctx.nextId());
+        assertEquals("root:1", ctx.nextId());
+        assertEquals("root:2", ctx.nextId());
+        assertEquals("root:3", ctx.nextId());
     }
 
     @Test
     void childParentIsCurrentId() {
-        Context child = root().child("root.1", "fn", I64_MAX);
+        Context child = root().child("root:1", "fn", I64_MAX);
         assertEquals("root", child.info().parentId());
         assertEquals("root", child.info().originId());
-        assertEquals("root.1", child.info().branchId());
+        assertEquals("root:1", child.info().branchId());
     }
 
     @Test
@@ -294,7 +293,7 @@ class ContextTest {
         Dependencies deps = new Dependencies();
         Config cfg = new Config("shared");
         deps.insert(cfg);
-        Context child = root(List.of(), I64_MAX, deps, null, null).child("root.1", "fn", I64_MAX);
+        Context child = root(List.of(), I64_MAX, deps, null, null).child("root:1", "fn", I64_MAX);
         assertSame(cfg, child.getDependency(Config.class));
     }
 
@@ -306,7 +305,7 @@ class ContextTest {
     void runLeafReturnsAndSettlesResolved() {
         Context ctx = root();
         assertEquals(42, ctx.run(ContextTest::doubleFn, 21).await());
-        PromiseRecord record = ctx.effects().cache().get("root.1");
+        PromiseRecord record = ctx.effects().cache().get("root:1");
         assertEquals("resolved", record.state());
         assertEquals(42, record.value().data());
     }
@@ -315,7 +314,7 @@ class ContextTest {
     void runCtxOnlyFunction() {
         Context ctx = root();
         assertEquals("ok", ctx.run(ContextTest::beat).await());
-        assertEquals("resolved", ctx.effects().cache().get("root.1").state());
+        assertEquals("resolved", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
@@ -329,8 +328,8 @@ class ContextTest {
         Context ctx = root();
         assertEquals(4, ctx.run(ContextTest::doubleFn, 2).await());
         assertEquals(6, ctx.run(ContextTest::doubleFn, 3).await());
-        assertEquals(4, ctx.effects().cache().get("root.1").value().data());
-        assertEquals(6, ctx.effects().cache().get("root.2").value().data());
+        assertEquals(4, ctx.effects().cache().get("root:1").value().data());
+        assertEquals(6, ctx.effects().cache().get("root:2").value().data());
     }
 
     // =========================================================================
@@ -347,7 +346,7 @@ class ContextTest {
     void runLocalChildParamIsEmpty() {
         Context ctx = root();
         ctx.run(ContextTest::doubleFn, 21).await();
-        assertEquals(new Value(), ctx.effects().cache().get("root.1").param());
+        assertEquals(new Value(), ctx.effects().cache().get("root:1").param());
     }
 
     @Test
@@ -368,7 +367,7 @@ class ContextTest {
         ApplicationError exc = assertThrows(
                 ApplicationError.class, () -> ctx.run(ContextTest::failing).await());
         assertEquals("denied", exc.getMessage());
-        assertEquals("rejected", ctx.effects().cache().get("root.1").state());
+        assertEquals("rejected", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
@@ -377,7 +376,7 @@ class ContextTest {
         BookingError exc = assertThrows(
                 BookingError.class, () -> ctx.run(ContextTest::failingPlain).await());
         assertEquals("card declined", exc.getMessage());
-        assertEquals("rejected", ctx.effects().cache().get("root.1").state());
+        assertEquals("rejected", ctx.effects().cache().get("root:1").state());
     }
 
     // =========================================================================
@@ -386,13 +385,13 @@ class ContextTest {
 
     @Test
     void runPresettledResolvedSkipsExecution() {
-        Context ctx = root(List.of(resolved("root.1", 99)));
+        Context ctx = root(List.of(resolved("root:1", 99)));
         assertEquals(99, ctx.run(ContextTest::doubleFn, 1).await());
     }
 
     @Test
     void runPresettledRejectedRaisesWithoutExecution() {
-        Context ctx = root(List.of(rejected("root.1", "stored failure")));
+        Context ctx = root(List.of(rejected("root:1", "stored failure")));
         ApplicationError exc = assertThrows(
                 ApplicationError.class, () -> ctx.run(ContextTest::doubleFn, 1).await());
         assertEquals("stored failure", exc.getMessage());
@@ -400,7 +399,7 @@ class ContextTest {
 
     @Test
     void runRecoveryCoercesReturnToStruct() {
-        Context ctx = root(List.of(resolved("root.1", new Point(3, 4))));
+        Context ctx = root(List.of(resolved("root:1", new Point(3, 4))));
         Object result = ctx.run(ContextTest::makePoint, 3, 4).await();
         assertEquals(new Point(3, 4), result);
         assertInstanceOf(Point.class, result);
@@ -435,9 +434,9 @@ class ContextTest {
         Context ctx = root();
         assertEquals(30, ctx.run(ContextTest::parentWorkflow, 5).await());
         assertEquals(List.of(), ctx.spawnedRemote());
-        assertEquals("resolved", ctx.effects().cache().get("root.1").state());
-        assertEquals(10, ctx.effects().cache().get("root.1.1").value().data());
-        assertEquals(20, ctx.effects().cache().get("root.1.2").value().data());
+        assertEquals("resolved", ctx.effects().cache().get("root:1").state());
+        assertEquals(10, ctx.effects().cache().get("root:1.1").value().data());
+        assertEquals(20, ctx.effects().cache().get("root:1.2").value().data());
     }
 
     @Test
@@ -445,7 +444,7 @@ class ContextTest {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::blocksOnRemote).await());
         assertEquals(List.of("remote-dep"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
@@ -453,7 +452,7 @@ class ContextTest {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::fireAndForget).await());
         assertEquals(List.of("ff-dep"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
@@ -461,8 +460,8 @@ class ContextTest {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::deepMiddle).await());
         assertEquals(List.of("deep-dep"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
-        assertEquals("pending", ctx.effects().cache().get("root.1.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1.1").state());
     }
 
     @Test
@@ -470,9 +469,9 @@ class ContextTest {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::deepTop).await());
         assertEquals(List.of("deep-dep"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
-        assertEquals("pending", ctx.effects().cache().get("root.1.1").state());
-        assertEquals("pending", ctx.effects().cache().get("root.1.1.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1.1.1").state());
     }
 
     @Test
@@ -481,10 +480,10 @@ class ContextTest {
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::completesThenSuspends)
                 .await());
         assertEquals(List.of("remote-dep"), ctx.spawnedRemote());
-        assertEquals("resolved", ctx.effects().cache().get("root.1.1").state());
-        assertEquals(42, ctx.effects().cache().get("root.1.1").value().data());
-        assertEquals("pending", ctx.effects().cache().get("root.1.2").state());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals("resolved", ctx.effects().cache().get("root:1.1").state());
+        assertEquals(42, ctx.effects().cache().get("root:1.1").value().data());
+        assertEquals("pending", ctx.effects().cache().get("root:1.2").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
@@ -500,8 +499,8 @@ class ContextTest {
         assertThrows(Suspended.class, () -> ctx.run(ContextTest::parentWithFireAndForget)
                 .await());
         assertEquals(List.of("remote-dep"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
-        assertEquals("pending", ctx.effects().cache().get("root.1.1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:1.1").state());
     }
 
     @Test
@@ -511,10 +510,10 @@ class ContextTest {
         // Python test relies on patching ``settle_promise``; here the join ordering is structural.)
         Context ctx = root();
         assertEquals(1, ctx.run(ContextTest::parentDoesNotAwaitChild).await());
-        assertEquals("resolved", ctx.effects().cache().get("root.1.1").state());
-        assertEquals(42, ctx.effects().cache().get("root.1.1").value().data());
-        assertEquals("resolved", ctx.effects().cache().get("root.1").state());
-        assertEquals(1, ctx.effects().cache().get("root.1").value().data());
+        assertEquals("resolved", ctx.effects().cache().get("root:1.1").state());
+        assertEquals(42, ctx.effects().cache().get("root:1.1").value().data());
+        assertEquals("resolved", ctx.effects().cache().get("root:1").state());
+        assertEquals(1, ctx.effects().cache().get("root:1").value().data());
     }
 
     // =========================================================================
@@ -531,7 +530,7 @@ class ContextTest {
                         .run(ContextTest::doubleFn, 5)
                         .await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
     }
 
@@ -542,7 +541,7 @@ class ContextTest {
         ctx.options(new Opts().withTimeout(Duration.ofDays(365)))
                 .run(ContextTest::doubleFn, 1)
                 .await();
-        assertEquals(cap, ctx.effects().cache().get("root.1").timeoutAt());
+        assertEquals(cap, ctx.effects().cache().get("root:1").timeoutAt());
     }
 
     @Test
@@ -551,9 +550,9 @@ class ContextTest {
         ctx.options(new Opts().withTimeout(Duration.ofSeconds(30)))
                 .run(ContextTest::doubleFn, 1)
                 .await();
-        long shortDeadline = ctx.effects().cache().get("root.1").timeoutAt();
+        long shortDeadline = ctx.effects().cache().get("root:1").timeoutAt();
         ctx.run(ContextTest::doubleFn, 1).await();
-        assertTrue(ctx.effects().cache().get("root.2").timeoutAt() > shortDeadline);
+        assertTrue(ctx.effects().cache().get("root:2").timeoutAt() > shortDeadline);
         assertEquals(new Opts(), ctx.opts());
     }
 
@@ -607,9 +606,9 @@ class ContextTest {
     @Test
     void optionsHandlesShareIdSequence() {
         Context ctx = root();
-        assertEquals("root.1", ctx.options(new Opts().withTarget("x")).nextId());
-        assertEquals("root.2", ctx.options(new Opts().withVersion(2)).nextId());
-        assertEquals("root.3", ctx.nextId());
+        assertEquals("root:1", ctx.options(new Opts().withTarget("x")).nextId());
+        assertEquals("root:2", ctx.options(new Opts().withVersion(2)).nextId());
+        assertEquals("root:3", ctx.nextId());
     }
 
     @Test
@@ -629,9 +628,9 @@ class ContextTest {
         ResonateFuture<Object> f2 = ctx.options(new Opts().withTarget("b")).rpc("fn");
         assertThrows(Suspended.class, f1::await);
         assertThrows(Suspended.class, f2::await);
-        assertEquals(List.of("root.1", "root.2"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
-        assertEquals("pending", ctx.effects().cache().get("root.2").state());
+        assertEquals(List.of("root:1", "root:2"), ctx.spawnedRemote());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
+        assertEquals("pending", ctx.effects().cache().get("root:2").state());
     }
 
     // =========================================================================
@@ -642,7 +641,7 @@ class ContextTest {
     void futureIdReturnsIdAfterCreate() {
         Context ctx = root();
         ResonateFuture<Object> fut = ctx.run(ContextTest::doubleFn, 21);
-        assertEquals("root.1", fut.id());
+        assertEquals("root:1", fut.id());
         assertEquals(42, fut.await());
     }
 
@@ -654,20 +653,20 @@ class ContextTest {
     void rpcPendingRegistersTodoAndSuspends() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.rpc("remote_fn", 1, 2).await());
-        assertEquals(List.of("root.1"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals(List.of("root:1"), ctx.spawnedRemote());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
     void rpcPresettledResolvedReturnsValue() {
-        Context ctx = root(List.of(resolved("root.1", "remote-result")));
+        Context ctx = root(List.of(resolved("root:1", "remote-result")));
         assertEquals("remote-result", ctx.rpc("remote_fn").await());
         assertEquals(List.of(), ctx.spawnedRemote());
     }
 
     @Test
     void rpcPresettledRejectedRaises() {
-        Context ctx = root(List.of(rejected("root.1", "remote failure")));
+        Context ctx = root(List.of(rejected("root:1", "remote failure")));
         ApplicationError exc =
                 assertThrows(ApplicationError.class, () -> ctx.rpc("remote_fn").await());
         assertEquals("remote failure", exc.getMessage());
@@ -678,15 +677,14 @@ class ContextTest {
     void rpcRequestTagsAndParam() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.rpc("remote_fn", 1, 2).await());
-        PromiseRecord record = ctx.effects().cache().get("root.1");
+        PromiseRecord record = ctx.effects().cache().get("root:1");
         assertEquals(
                 Map.of(
                         "resonate:scope", "global",
                         "resonate:target", "",
-                        "resonate:branch", "root.1",
+                        "resonate:branch", "root:1",
                         "resonate:parent", "root",
-                        "resonate:origin", "root",
-                        "resonate:prefix", "root"),
+                        "resonate:origin", "root"),
                 record.tags());
         assertEquals(
                 new TaskData(List.of(1, 2), Map.of(), "remote_fn", 1),
@@ -699,12 +697,12 @@ class ContextTest {
         assertThrows(Suspended.class, () -> ctx.rpc("remote_fn").await());
         assertEquals(
                 new TaskData(List.of(), Map.of(), "remote_fn", 1),
-                taskData(ctx.effects().cache().get("root.1").param().data()));
+                taskData(ctx.effects().cache().get("root:1").param().data()));
     }
 
     @Test
     void rpcSequentialChildIds() {
-        Context ctx = root(List.of(resolved("root.1", "a"), resolved("root.2", "b")));
+        Context ctx = root(List.of(resolved("root:1", "a"), resolved("root:2", "b")));
         assertEquals("a", ctx.rpc("fn").await());
         assertEquals("b", ctx.rpc("fn").await());
     }
@@ -715,7 +713,7 @@ class ContextTest {
         assertThrows(
                 Suspended.class,
                 () -> ctx.options(new Opts().withTarget("worker-1")).rpc("fn").await());
-        assertEquals("worker-1", ctx.effects().cache().get("root.1").tags().get("resonate:target"));
+        assertEquals("worker-1", ctx.effects().cache().get("root:1").tags().get("resonate:target"));
     }
 
     @Test
@@ -726,7 +724,7 @@ class ContextTest {
                 .rpc("fn")
                 .await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
     }
 
@@ -737,12 +735,12 @@ class ContextTest {
         assertThrows(Suspended.class, () -> ctx.options(new Opts().withTimeout(Duration.ofDays(365)))
                 .rpc("fn")
                 .await());
-        assertEquals(cap, ctx.effects().cache().get("root.1").timeoutAt());
+        assertEquals(cap, ctx.effects().cache().get("root:1").timeoutAt());
     }
 
     @Test
     void rpcOptionsDoNotLeakToBaseContext() {
-        Context ctx = root(List.of(resolved("root.1", "a")));
+        Context ctx = root(List.of(resolved("root:1", "a")));
         ctx.options(new Opts().withTimeout(Duration.ofSeconds(30)).withTarget("x"))
                 .rpc("fn")
                 .await();
@@ -754,7 +752,7 @@ class ContextTest {
         Context ctx = root();
         ctx.options(new Opts().withTimeout(Duration.ofSeconds(5)).withTarget("x"));
         assertThrows(Suspended.class, () -> ctx.rpc("fn").await());
-        assertEquals("", ctx.effects().cache().get("root.1").tags().get("resonate:target"));
+        assertEquals("", ctx.effects().cache().get("root:1").tags().get("resonate:target"));
     }
 
     // =========================================================================
@@ -765,13 +763,13 @@ class ContextTest {
     void sleepPendingRegistersTodoAndSuspends() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.sleep(Duration.ofSeconds(30)).await());
-        assertEquals(List.of("root.1"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals(List.of("root:1"), ctx.spawnedRemote());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
     void sleepPresettledResolvedReturnsNull() {
-        Context ctx = root(List.of(resolved("root.1", null)));
+        Context ctx = root(List.of(resolved("root:1", null)));
         assertEquals(null, ctx.sleep(Duration.ofSeconds(1)).await());
         assertEquals(List.of(), ctx.spawnedRemote());
     }
@@ -780,14 +778,14 @@ class ContextTest {
     void sleepRequestTagsAndTimerFlag() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.sleep(Duration.ofSeconds(30)).await());
-        PromiseRecord record = ctx.effects().cache().get("root.1");
+        PromiseRecord record = ctx.effects().cache().get("root:1");
         assertEquals(
                 Map.of(
                         "resonate:scope", "global",
-                        "resonate:branch", "root.1",
+                        "resonate:branch", "root:1",
                         "resonate:parent", "root",
                         "resonate:origin", "root",
-                        "resonate:prefix", "root",
+                        "resonate:target", "",
                         "resonate:timer", "true"),
                 record.tags());
         assertEquals(null, record.param().data());
@@ -799,7 +797,7 @@ class ContextTest {
         long before = Send.nowMs();
         assertThrows(Suspended.class, () -> ctx.sleep(Duration.ofSeconds(30)).await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
     }
 
@@ -808,7 +806,7 @@ class ContextTest {
         long cap = Send.nowMs() + 5_000;
         Context ctx = rootTimeout(cap);
         assertThrows(Suspended.class, () -> ctx.sleep(Duration.ofDays(365)).await());
-        assertEquals(cap, ctx.effects().cache().get("root.1").timeoutAt());
+        assertEquals(cap, ctx.effects().cache().get("root:1").timeoutAt());
     }
 
     @Test
@@ -819,13 +817,13 @@ class ContextTest {
                 .sleep(Duration.ofSeconds(30))
                 .await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
     }
 
     @Test
     void sleepSequentialChildIds() {
-        Context ctx = root(List.of(resolved("root.1", null), resolved("root.2", null)));
+        Context ctx = root(List.of(resolved("root:1", null), resolved("root:2", null)));
         assertEquals(null, ctx.sleep(Duration.ofSeconds(1)).await());
         assertEquals(null, ctx.sleep(Duration.ofSeconds(1)).await());
     }
@@ -838,20 +836,20 @@ class ContextTest {
     void promisePendingRegistersTodoAndSuspends() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.promise(Duration.ofSeconds(30)).await());
-        assertEquals(List.of("root.1"), ctx.spawnedRemote());
-        assertEquals("pending", ctx.effects().cache().get("root.1").state());
+        assertEquals(List.of("root:1"), ctx.spawnedRemote());
+        assertEquals("pending", ctx.effects().cache().get("root:1").state());
     }
 
     @Test
     void promisePresettledResolvedReturnsValue() {
-        Context ctx = root(List.of(resolved("root.1", "external-result")));
+        Context ctx = root(List.of(resolved("root:1", "external-result")));
         assertEquals("external-result", ctx.promise(Duration.ofSeconds(1)).await());
         assertEquals(List.of(), ctx.spawnedRemote());
     }
 
     @Test
     void promisePresettledRejectedRaises() {
-        Context ctx = root(List.of(rejected("root.1", "external failure")));
+        Context ctx = root(List.of(rejected("root:1", "external failure")));
         ApplicationError exc = assertThrows(
                 ApplicationError.class, () -> ctx.promise(Duration.ofSeconds(1)).await());
         assertEquals("external failure", exc.getMessage());
@@ -862,14 +860,13 @@ class ContextTest {
     void promiseRequestTagsAndEmptyParam() {
         Context ctx = root();
         assertThrows(Suspended.class, () -> ctx.promise(Duration.ofSeconds(30)).await());
-        PromiseRecord record = ctx.effects().cache().get("root.1");
+        PromiseRecord record = ctx.effects().cache().get("root:1");
         assertEquals(
                 Map.of(
                         "resonate:scope", "global",
-                        "resonate:branch", "root.1",
+                        "resonate:branch", "root:1",
                         "resonate:parent", "root",
-                        "resonate:origin", "root",
-                        "resonate:prefix", "root"),
+                        "resonate:origin", "root"),
                 record.tags());
         assertEquals(null, record.param().data());
     }
@@ -880,7 +877,7 @@ class ContextTest {
         long before = Send.nowMs();
         assertThrows(Suspended.class, () -> ctx.promise(Duration.ofSeconds(30)).await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
     }
 
@@ -890,7 +887,7 @@ class ContextTest {
         long before = Send.nowMs();
         assertThrows(Suspended.class, () -> ctx.promise(null).await());
         long after = Send.nowMs();
-        long timeoutAt = ctx.effects().cache().get("root.1").timeoutAt();
+        long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         long dayMs = 24L * 60 * 60 * 1000;
         assertTrue(before + dayMs <= timeoutAt && timeoutAt <= after + dayMs);
     }
@@ -900,12 +897,12 @@ class ContextTest {
         long cap = Send.nowMs() + 5_000;
         Context ctx = rootTimeout(cap);
         assertThrows(Suspended.class, () -> ctx.promise(Duration.ofDays(365)).await());
-        assertEquals(cap, ctx.effects().cache().get("root.1").timeoutAt());
+        assertEquals(cap, ctx.effects().cache().get("root:1").timeoutAt());
     }
 
     @Test
     void promiseSequentialChildIds() {
-        Context ctx = root(List.of(resolved("root.1", "a"), resolved("root.2", "b")));
+        Context ctx = root(List.of(resolved("root:1", "a"), resolved("root:2", "b")));
         assertEquals("a", ctx.promise(Duration.ofSeconds(1)).await());
         assertEquals("b", ctx.promise(Duration.ofSeconds(1)).await());
     }
@@ -917,19 +914,20 @@ class ContextTest {
     @Test
     void detachedReturnsIdWithoutSuspending() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         assertEquals(childId, ctx.detached("remote_fn", 1, 2).await());
         assertEquals(List.of(), ctx.spawnedRemote());
         assertEquals("pending", ctx.effects().cache().get(childId).state());
     }
 
     @Test
-    void detachedIdIsPrefixRootedHash() {
+    void detachedIdIsOriginRootedHash() {
+        // {origin}:d{16hex} — one segment past the origin, 'd' marking a detached child.
         Context ctx = root();
         String childId = ctx.detached("remote_fn").await();
-        assertEquals(detachedId("root", "root.1"), childId);
-        assertNotEquals("root.1", childId);
-        String suffix = childId.substring(childId.indexOf('.') + 1);
+        assertEquals(detachedId("root", "root:1"), childId);
+        assertNotEquals("root:1", childId);
+        String suffix = childId.substring(childId.indexOf(':') + 1);
         assertEquals('d', suffix.charAt(0));
         assertEquals(17, suffix.length());
         assertTrue(suffix.substring(1).chars().allMatch(c -> "0123456789abcdef".indexOf(c) >= 0));
@@ -940,15 +938,15 @@ class ContextTest {
         Context ctx = root();
         String id1 = ctx.detached("fn").await();
         String id2 = ctx.detached("fn").await();
-        assertEquals(detachedId("root", "root.1"), id1);
-        assertEquals(detachedId("root", "root.2"), id2);
+        assertEquals(detachedId("root", "root:1"), id1);
+        assertEquals(detachedId("root", "root:2"), id2);
         assertNotEquals(id1, id2);
     }
 
     @Test
     void detachedRequestTagsAndParam() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         ctx.detached("remote_fn", 1, 2).await();
         PromiseRecord record = ctx.effects().cache().get(childId);
         assertEquals(
@@ -957,8 +955,7 @@ class ContextTest {
                         "resonate:target", "",
                         "resonate:branch", childId,
                         "resonate:parent", "root",
-                        "resonate:origin", childId,
-                        "resonate:prefix", "root"),
+                        "resonate:origin", "root"),
                 record.tags());
         assertEquals(
                 new TaskData(List.of(1, 2), Map.of(), "remote_fn", 1),
@@ -968,7 +965,7 @@ class ContextTest {
     @Test
     void detachedNoArgsParamIsEmpty() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         ctx.detached("remote_fn").await();
         assertEquals(
                 new TaskData(List.of(), Map.of(), "remote_fn", 1),
@@ -978,7 +975,7 @@ class ContextTest {
     @Test
     void detachedIdempotentOnPreloadedRecord() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         ctx.effects().cache().put(childId, codec().decodePromise(resolved(childId, "external-result")));
         assertEquals(childId, ctx.detached("fn").await());
         assertEquals(List.of(), ctx.spawnedRemote());
@@ -987,7 +984,7 @@ class ContextTest {
     @Test
     void detachedWithOptionsTargetAndTimeout() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         long before = Send.nowMs();
         ctx.options(new Opts().withTimeout(Duration.ofSeconds(30)).withTarget("worker-1"))
                 .detached("fn")
@@ -1011,7 +1008,7 @@ class ContextTest {
     void detachedTimeoutCappedToParent() {
         long cap = Send.nowMs() + 5_000;
         Context ctx = rootTimeout(cap);
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         ctx.options(new Opts().withTimeout(Duration.ofDays(365))).detached("fn").await();
         assertEquals(cap, ctx.effects().cache().get(childId).timeoutAt());
     }
@@ -1021,9 +1018,9 @@ class ContextTest {
         Context ctx = root();
         assertEquals("done", ctx.run(ContextTest::dispatchesDetached).await());
         assertEquals(List.of(), ctx.spawnedRemote());
-        assertEquals("resolved", ctx.effects().cache().get("root.1").state());
-        assertEquals("done", ctx.effects().cache().get("root.1").value().data());
-        String detached = detachedId("root", "root.1.1");
+        assertEquals("resolved", ctx.effects().cache().get("root:1").state());
+        assertEquals("done", ctx.effects().cache().get("root:1").value().data());
+        String detached = detachedId("root", "root:1.1");
         assertEquals("pending", ctx.effects().cache().get(detached).state());
     }
 
@@ -1040,7 +1037,7 @@ class ContextTest {
     @Test
     void detachedCreatePromiseCompletesByFlushWhenUnawaited() {
         Context ctx = root();
-        String childId = detachedId("root", "root.1");
+        String childId = detachedId("root", "root:1");
         ResonateFuture<String> fut = ctx.detached("remote_fn", 1, 2);
         // The create is driven through the chain; join the flush to guarantee it completed.
         ctx.flushLocalWork().join();
@@ -1219,7 +1216,7 @@ class ContextTest {
         assertThrows(Suspended.class, () -> ctx.rpc(ContextTest::doubleFn, 5).await());
         assertEquals(
                 new TaskData(List.of(5), Map.of(), "remote_impl", 3),
-                taskData(ctx.effects().cache().get("root.1").param().data()));
+                taskData(ctx.effects().cache().get("root:1").param().data()));
     }
 
     @Test
@@ -1231,7 +1228,7 @@ class ContextTest {
                 .rpc(ContextTest::doubleFn, 5)
                 .await());
         assertEquals(
-                2, taskData(ctx.effects().cache().get("root.1").param().data()).version());
+                2, taskData(ctx.effects().cache().get("root:1").param().data()).version());
     }
 
     @Test
@@ -1246,7 +1243,7 @@ class ContextTest {
     void rpcByObjectRecoveryCoercesReturnToStruct() {
         Registry registry = new Registry();
         registry.register("make_point", ContextTest::makePoint, 1);
-        Context ctx = root(List.of(resolved("root.1", new Point(3, 4))), I64_MAX, new Dependencies(), null, registry);
+        Context ctx = root(List.of(resolved("root:1", new Point(3, 4))), I64_MAX, new Dependencies(), null, registry);
         Object result = ctx.rpc(ContextTest::makePoint, 3, 4).await();
         assertInstanceOf(Point.class, result);
         assertEquals(new Point(3, 4), result);
@@ -1254,7 +1251,7 @@ class ContextTest {
 
     @Test
     void rpcByNameRecoveryStaysRawBuiltins() {
-        Context ctx = root(List.of(resolved("root.1", new Point(3, 4))));
+        Context ctx = root(List.of(resolved("root:1", new Point(3, 4))));
         Object result = ctx.rpc("make_point", 3, 4).await();
         assertInstanceOf(Map.class, result);
         assertEquals(Map.of("x", 3, "y", 4), result);

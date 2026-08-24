@@ -435,7 +435,7 @@ class PlatformErrorsTest {
                 ServerError.class,
                 () -> fix.core.executeUntilBlockedOuter("pe-ff", rt.version(), rt.promise(), rt.preload()));
         // The child's settle never landed.
-        assertEquals("pending", fix.promiseGetRaw("pe-ff.1").state());
+        assertEquals("pending", fix.promiseGetRaw("pe-ff:1").state());
         fix.assertReleasedRootPending("pe-ff");
     }
 
@@ -591,7 +591,7 @@ class PlatformErrorsTest {
         Sender sender = new Sender(new Transport(net), null);
         Effects effects = new Effects(sender, new Codec(new NoopEncryptor()), List.of());
         Context ctx = Context.root(
-                "r", "r", "r", FAR_FUTURE, "f", effects, Core.IDENTITY_TARGET_RESOLVER, new Dependencies(), null, null);
+                "r", "r", FAR_FUTURE, "f", effects, Core.IDENTITY_TARGET_RESOLVER, new Dependencies(), null, null);
 
         ResonateFuture<Object> fut1 = ctx.rpc("a");
         ResonateFuture<Object> fut2 = ctx.rpc("b");
