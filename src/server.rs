@@ -26,6 +26,7 @@ use crate::core::types::{
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
     TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
+use crate::core::{ResonateServer, Unavailable};
 use crate::metrics;
 use crate::persistence::{
     PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
@@ -35,6 +36,7 @@ use crate::persistence::{
 use crate::processing::processing_timeouts;
 use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
+use async_trait::async_trait;
 use validator::Validate;
 
 /// The running server — owns configuration, storage, and auth.
@@ -181,7 +183,7 @@ async fn handle_api(
     let start = std::time::Instant::now();
     // Deserialize the envelope using serde. On failure, attempt to extract
     // kind from the raw JSON so the error response can include it.
-    let mut req: RequestEnvelope = match serde_json::from_slice(&body) {
+    let req: RequestEnvelope = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
             let (kind, corr_id) = extract_error_context(&body);
@@ -245,11 +247,6 @@ async fn handle_api(
         "Received request"
     );
 
-    // Gate debug_time behind config
-    if !state.config.debug {
-        req.head.debug_time = None;
-    }
-
     if let Some(auth) = &state.auth {
         if let Err(err_response) = auth::auth_check(auth, &req) {
             let status = err_response.head.status.to_string();
@@ -271,9 +268,13 @@ async fn handle_api(
         }
     }
 
-    let now = util::resolve_time(req.head.debug_time);
-
-    let response = state.dispatch(&req, now).await;
+    let response = match state.process(&req).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::error!(kind = %kind, corr_id = %corr_id, error = %e, "Server unavailable");
+            ResponseEnvelope::error(kind.clone(), corr_id.clone(), 503, &e.to_string())
+        }
+    };
     let status = response.head.status.to_string();
     let elapsed_ms = start.elapsed().as_millis();
 
@@ -401,6 +402,21 @@ impl Drop for PollGuard {
         tokio::spawn(async move {
             registry.deregister(&group, conn_id).await;
         });
+    }
+}
+
+#[async_trait]
+impl ResonateServer for Server {
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        // Debug-time overrides are gated by config, so a caller cannot move the
+        // server's clock. The gate lives here rather than at the HTTP edge so
+        // that every caller of the port is subject to it.
+        let debug_time = if self.config.debug {
+            req.head.debug_time
+        } else {
+            None
+        };
+        Ok(self.dispatch(req, util::resolve_time(debug_time)).await)
     }
 }
 
