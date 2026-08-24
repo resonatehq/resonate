@@ -181,29 +181,22 @@ async fn run(self) {
     let version = acquired.task.version; // the RESPONSE version (n+1), from here on
     let promise = acquired.promise; // param, timeoutAt, createdAt, tags
 
-    // ── 2. Do the work ───────────────────────────────────────────────────
-    let outcome = self.execute(&promise, version).await;
-
-    // ── 3. Settle ────────────────────────────────────────────────────────
+    // ── 2. Do the work, and settle with whatever it decided ──────────────
     //
-    // One exit, and one rule for the two cases that do not take it: the
-    // server settles a timed-out promise itself, and a transient failure
-    // must be left for redelivery to retry.
-    let (state, value) = match outcome {
+    // Three arms because there are three outcomes. `Monitored` has no `Failed`
+    // and `MyError` has no separate "gave up": a run that finished in a failure
+    // state is a permanent error like any other, which is what keeps one arm
+    // per outcome instead of one per variant.
+    let (state, value) = match self.execute(&promise, version).await {
         Ok(Monitored::Succeeded { run, output }) => (SettleState::Resolved, value_of(run, output)),
-        Ok(Monitored::Failed { run, message }) => {
-            (SettleState::Rejected, error_of(run, "downstream_failed", message))
+        Err(MyError::Permanent { kind, message, run }) => {
+            tracing::warn!(task_id = %self.task.id, kind, %message, "my: rejecting");
+            (SettleState::Rejected, error_of(run, kind, message))
         }
-        Err(MyError::Permanent { kind, message }) => {
-            tracing::warn!(task_id = %self.task.id, kind, %message, "my: permanent failure");
-            (SettleState::Rejected, error_of(Run::none(), kind, message))
-        }
-        Ok(Monitored::DeadlineReached) => {
-            tracing::warn!(task_id = %self.task.id, "my: promise deadline reached, stopped monitoring");
-            return;
-        }
-        Err(MyError::Transient(message)) => {
-            tracing::warn!(task_id = %self.task.id, %message, "my: transient failure, dropping task for redelivery");
+        // Nothing to settle: the server settles a timed-out promise itself, and
+        // a transient failure must be left for redelivery to retry.
+        other => {
+            tracing::warn!(task_id = %self.task.id, ?other, "my: promise left unsettled");
             return;
         }
     };
@@ -314,9 +307,30 @@ Three things to notice in the shape:
 - **The claim has one interesting case.** A 409 race, a transient error and an unreachable
   server are all "this attempt does not run"; there is nothing to decide between them, so
   they share one `let … else`. `Response::TaskAcquire` is the other.
-- **Five outcomes, three of which settle.** A timed-out promise is settled by the server
-  itself, and a transient failure must be left for redelivery; settling either would be
-  wrong. That `match` is where an integration's whole error policy lives.
+- **Three outcomes: resolve, reject, leave alone.** That `match` is where an integration's
+  whole error policy lives, and it stays three arms only because the two enums do not
+  cross-cut — see below.
+
+### Keep the outcome enums from cross-cutting
+
+The obvious shapes give you five arms for three outcomes:
+
+```rust
+enum Monitored  { Succeeded { .. }, Failed { .. }, DeadlineReached }
+enum MyError    { Permanent { .. }, Transient(..) }
+```
+
+`Monitored::Failed` and `MyError::Permanent` are both "reject with a reason";
+`DeadlineReached` and `Transient` are both "do not settle". Fold the first pair together —
+a downstream run that finished in a failure state *is* a permanent failure of the work, and
+the run summary rides along on the error:
+
+```rust
+enum Monitored { Succeeded { run, output }, DeadlineReached }
+enum MyError   { Permanent { kind, message, run }, Transient(String) }
+```
+
+Now each arm is one outcome, and the two that do not settle share a catch-all.
 
 The only JSON left is the promise *value* — `value_of` and `error_of` build the
 integration's own value schema, which the protocol carries as opaque bytes. See

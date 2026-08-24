@@ -227,9 +227,13 @@ enum RunState {
 ///
 /// Carries the finished run summary rather than the raw Airflow record, so
 /// settling needs nothing but this.
+///
+/// There is no `Failed`: a run that finished in a failure state is a permanent
+/// error like any other, and folding it into [`AirflowError`] is what lets the
+/// settle match have one arm per *outcome* rather than one per variant.
+#[derive(Debug)]
 enum Monitored {
     Succeeded { run: Value, output: Value },
-    Failed { run: Value, message: String },
     DeadlineReached,
 }
 
@@ -237,11 +241,20 @@ enum Monitored {
 /// promise is settled or the task is dropped for redelivery.
 #[derive(Debug)]
 enum AirflowError {
-    /// Can never succeed: reject the promise now.
-    Permanent { kind: &'static str, message: String },
+    /// Can never succeed: reject the promise now. `run` is the downstream run
+    /// summary when there is one, and empty when the failure happened before a
+    /// run existed.
+    Permanent {
+        kind: &'static str,
+        message: String,
+        run: Value,
+    },
     /// Might succeed later, or the outcome is unknown. Drop the task without
     /// settling; the lease expires and the message is redelivered. Safe
     /// because create is idempotent.
+    // Read through `Debug` when an unsettled outcome is logged, which
+    // `dead_code` cannot see.
+    #[allow(dead_code)]
     Transient(String),
 }
 
@@ -250,6 +263,17 @@ impl AirflowError {
         AirflowError::Permanent {
             kind,
             message: message.into(),
+            run: json!({}),
+        }
+    }
+
+    /// A run that reached a failure state — a permanent error that happens to
+    /// know which run it was.
+    fn failed(run: Value, message: impl Into<String>) -> Self {
+        AirflowError::Permanent {
+            kind: "downstream_failed",
+            message: message.into(),
+            run,
         }
     }
     fn transient(message: impl Into<String>) -> Self {
@@ -326,23 +350,17 @@ impl RunContext {
             Ok(Monitored::Succeeded { run, output }) => {
                 ("resolved", json!({ "run": run, "output": output }))
             }
-            Ok(Monitored::Failed { run, message }) => (
-                "rejected",
-                json!({ "run": run, "error": { "kind": "downstream_failed", "message": message } }),
-            ),
-            Err(AirflowError::Permanent { kind, message }) => {
-                tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: permanent failure");
+            Err(AirflowError::Permanent { kind, message, run }) => {
+                tracing::warn!(task_id = %self.task.id, kind, %message, "airflow: rejecting");
                 (
                     "rejected",
-                    json!({ "run": {}, "error": { "kind": kind, "message": message } }),
+                    json!({ "run": run, "error": { "kind": kind, "message": message } }),
                 )
             }
-            Ok(Monitored::DeadlineReached) => {
-                tracing::warn!(task_id = %self.task.id, "airflow: promise deadline reached, stopped monitoring");
-                return;
-            }
-            Err(AirflowError::Transient(message)) => {
-                tracing::warn!(task_id = %self.task.id, %message, "airflow: transient failure, dropping task for redelivery");
+            // Nothing to settle: the server settles a timed-out promise itself,
+            // and a transient failure must be left for redelivery to retry.
+            other => {
+                tracing::warn!(task_id = %self.task.id, ?other, "airflow: promise left unsettled");
                 return;
             }
         };
@@ -505,15 +523,16 @@ impl RunContext {
                     })
                 }
                 RunState::Failed(run) => {
-                    return Ok(Monitored::Failed {
-                        message: format!(
-                            "DAG run finished in state {}",
-                            run.get("state")
-                                .and_then(Value::as_str)
-                                .unwrap_or("unknown")
-                        ),
-                        run: self.run_summary(target, &run),
-                    })
+                    let message = format!(
+                        "DAG run finished in state {}",
+                        run.get("state")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                    );
+                    return Err(AirflowError::failed(
+                        self.run_summary(target, &run),
+                        message,
+                    ));
                 }
             }
             // Never sleep past the promise deadline: the next iteration has to
