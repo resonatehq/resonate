@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use super::{PollAddress, PollCast};
+use crate::core::address::{PollAddress, PollCast};
 
 /// A single SSE connection to a worker.
 pub struct PollConnection {

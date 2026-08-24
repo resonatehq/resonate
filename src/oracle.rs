@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::types::{
+use crate::core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
     PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
     PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseState, PromiseValue,
@@ -204,7 +204,7 @@ impl Oracle {
             Err(e) => return e,
         };
         if let Some(addr) = r.tags.get("resonate:target") {
-            if !crate::transport::is_valid_address(addr) {
+            if !crate::core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -449,7 +449,7 @@ impl Oracle {
             Ok(r) => r,
             Err(e) => return e,
         };
-        if !crate::transport::is_valid_address(&r.address) {
+        if !crate::core::is_valid_address(&r.address) {
             return ResponseEnvelope::error(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -609,7 +609,7 @@ impl Oracle {
         };
         let action = &r.action.data;
         if let Some(addr) = action.tags.get("resonate:target") {
-            if !crate::transport::is_valid_address(addr) {
+            if !crate::core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -1096,7 +1096,7 @@ impl Oracle {
                     );
                 }
                 if let Some(addr) = create_data.tags.get("resonate:target") {
-                    if !crate::transport::is_valid_address(addr) {
+                    if !crate::core::is_valid_address(addr) {
                         return ResponseEnvelope::error(
                             req.kind.clone(),
                             req.head.corr_id.clone(),

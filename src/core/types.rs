@@ -198,6 +198,35 @@ pub struct ExecuteMsgTask {
     pub version: i64,
 }
 
+/// Head of an `unblock` message. Empty on the wire, unlike [`MessageHead`].
+#[derive(Debug, Serialize)]
+pub struct UnblockMsgHead {}
+
+#[derive(Debug, Serialize)]
+pub struct UnblockMsg {
+    pub kind: String,
+    pub head: UnblockMsgHead,
+    pub data: UnblockMsgData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UnblockMsgData {
+    pub promise: PromiseRecord,
+}
+
+/// A message the server emits toward a worker — the vocabulary of
+/// [`ResonateWorker`](super::ResonateWorker) and
+/// [`ResonateRouter`](super::ResonateRouter).
+///
+/// Untagged: each variant already carries its own `kind` field, so this
+/// serializes exactly as the hand-built JSON it replaces.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Message {
+    Execute(ExecuteMsg),
+    Unblock(UnblockMsg),
+}
+
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

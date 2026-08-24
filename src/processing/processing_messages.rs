@@ -6,10 +6,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 use crate::metrics;
 use crate::persistence::Storage;
 use crate::transport::TransportDispatcher;
-use crate::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
@@ -128,11 +128,11 @@ mod tests {
     use serde_json::json;
 
     use crate::config::Config;
+    use crate::core::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
     use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
     use crate::server::{dispatch as server_dispatch, Server};
     use crate::transport::stubs::{RecordingHttpTransport, RecordingPollTransport};
     use crate::transport::{HttpTransport, PollTransport, TransportDispatcher};
-    use crate::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
 
     // ---- helpers ----
 

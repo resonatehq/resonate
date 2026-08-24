@@ -7,8 +7,8 @@ use std::time::Duration;
 use reqwest::Client;
 use tokio::sync::{mpsc, Semaphore};
 
-use super::HttpAddress;
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
+use crate::core::address::HttpAddress;
 use crate::metrics;
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::HttpAddress;
+    use crate::core::address::HttpAddress;
     use axum::{extract::State, routing::post, Router};
     use std::sync::Arc;
     use std::time::Duration;

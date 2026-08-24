@@ -15,15 +15,7 @@ use serde_json::Value;
 
 use crate::auth;
 use crate::config::Config;
-use crate::metrics;
-use crate::persistence::{
-    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
-    TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
-    TaskFulfillParams,
-};
-use crate::processing::processing_timeouts;
-use crate::transport::transport_http_poll::PollRegistry;
-use crate::types::{
+use crate::core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
     PromiseRegisterListenerData, PromiseResponseData, PromiseSearchData, PromiseSearchResponseData,
     PromiseSettleData, PromiseState, RequestEnvelope, ResponseEnvelope, ScheduleCreateData,
@@ -34,6 +26,14 @@ use crate::types::{
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
     TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
+use crate::metrics;
+use crate::persistence::{
+    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
+    TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
+    TaskFulfillParams,
+};
+use crate::processing::processing_timeouts;
+use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
 use validator::Validate;
 
@@ -581,7 +581,7 @@ async fn op_promise_create(
             }
             let address = r.tags.get("resonate:target").map(|s| s.as_str());
             if let Some(addr) = address {
-                if !crate::transport::is_valid_address(addr) {
+                if !crate::core::is_valid_address(addr) {
                     tracing::warn!(
                         promise_id = %r.id,
                         address = addr,
@@ -879,7 +879,7 @@ async fn op_promise_register_listener(
                     &format_validation_errors(&e),
                 ));
             }
-            if !crate::transport::is_valid_address(&r.address) {
+            if !crate::core::is_valid_address(&r.address) {
                 tracing::warn!(
                     awaited = %r.awaited,
                     address = %r.address,
@@ -1110,7 +1110,7 @@ async fn op_task_create(state: &Arc<Server>, req: &RequestEnvelope, now: i64) ->
             let action_data = &r.action.data;
             let action_id = &action_data.id;
             if let Some(addr) = action_data.tags.get("resonate:target") {
-                if !crate::transport::is_valid_address(addr) {
+                if !crate::core::is_valid_address(addr) {
                     tracing::warn!(
                         task_id = %action_id,
                         address = %addr,
@@ -1792,7 +1792,7 @@ async fn op_task_fence(state: &Arc<Server>, req: &RequestEnvelope, now: i64) -> 
                     let already_timedout = now >= create_data.timeout_at;
                     let address = create_data.tags.get("resonate:target").map(|s| s.as_str());
                     if let Some(addr) = address {
-                        if !crate::transport::is_valid_address(addr) {
+                        if !crate::core::is_valid_address(addr) {
                             tracing::warn!(
                                 task_id = %r.id,
                                 address = addr,

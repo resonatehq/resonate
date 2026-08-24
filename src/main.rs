@@ -1,17 +1,18 @@
 mod auth;
 mod cli;
 mod config;
+mod core;
 mod mcp;
 mod metrics;
 mod persistence;
 mod processing;
 mod server;
 mod transport;
-mod types;
 mod util;
 
 use std::sync::Arc;
 
+use crate::core::types::ResponseEnvelope;
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -27,7 +28,6 @@ use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteSto
 use server::Server;
 use transport::transport_http_poll::PollRegistry;
 use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport};
-use types::ResponseEnvelope;
 
 #[derive(Parser)]
 #[command(

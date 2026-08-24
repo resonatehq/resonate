@@ -9,7 +9,7 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use super::GcpsAddress;
+use crate::core::address::GcpsAddress;
 use crate::metrics;
 
 /// Google Cloud Pub/Sub transport — publishes messages to topics.

@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use resonate::types::TaskState;
+use resonate::core::types::TaskState;
 
 // Serializes tests that share the same Postgres/MySQL database so that
 // concurrent debug.reset calls from one test cannot truncate another's data.
@@ -35,13 +35,13 @@ fn db_lock() -> &'static Mutex<()> {
 
 use resonate::{
     config::Config,
+    core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS},
     oracle::Oracle,
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
         persistence_sqlite::SqliteStorage, Storage,
     },
     server::{dispatch, Server},
-    types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS},
 };
 use serde_json::{json, Value};
 
