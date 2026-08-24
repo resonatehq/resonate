@@ -9,7 +9,44 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::core::address::{PollAddress, PollCast};
+use crate::core::types::Message;
+use crate::core::{ResonateServer, ResonateWorker, Unavailable};
+
+/// A `poll://` destination: `poll://<cast>@<group>[/<id>]`.
+#[derive(Debug, Clone)]
+pub struct PollAddress {
+    pub cast: PollCast,
+    pub group: String,
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PollCast {
+    Uni,
+    Any,
+}
+
+impl PollAddress {
+    /// Parse a `poll://` address. This worker owns the syntax; the router has
+    /// only checked the scheme.
+    pub fn parse(address: &str) -> Result<Self, Unavailable> {
+        let bad = || Unavailable::new(format!("malformed poll address: {address}"));
+        let parsed = url::Url::parse(address).map_err(|_| bad())?;
+        let cast = match parsed.username() {
+            "uni" => PollCast::Uni,
+            "any" => PollCast::Any,
+            _ => return Err(bad()),
+        };
+        let group = parsed.host_str().ok_or_else(bad)?.to_string();
+        let path = parsed.path();
+        let id = if path.len() > 1 {
+            Some(path[1..].to_string())
+        } else {
+            None
+        };
+        Ok(PollAddress { cast, group, id })
+    }
+}
 
 /// A single SSE connection to a worker.
 pub struct PollConnection {
@@ -27,15 +64,24 @@ pub struct PollRegistry {
     next_conn_id: AtomicU64,
     pub max_connections: usize,
     pub buffer_size: usize,
+    /// Held so a delivery failure can be reported back to the server (e.g.
+    /// releasing the task instead of dropping it). Not used yet.
+    #[allow(dead_code)]
+    server: Arc<dyn ResonateServer>,
 }
 
 impl PollRegistry {
-    pub fn new(max_connections: usize, buffer_size: usize) -> Self {
+    pub fn new(
+        server: Arc<dyn ResonateServer>,
+        max_connections: usize,
+        buffer_size: usize,
+    ) -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
             next_conn_id: AtomicU64::new(1),
             max_connections,
             buffer_size,
+            server,
         }
     }
 
@@ -159,5 +205,21 @@ impl PollRegistry {
             );
         }
         delivered
+    }
+}
+
+#[async_trait::async_trait]
+impl ResonateWorker for PollRegistry {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let addr = PollAddress::parse(address)?;
+        let body = serde_json::to_string(msg)
+            .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
+        if PollRegistry::send_poll(self, &addr, &body).await {
+            Ok(())
+        } else {
+            Err(Unavailable::new(format!(
+                "no poll connection accepted delivery for {address}"
+            )))
+        }
     }
 }

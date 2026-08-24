@@ -6,19 +6,13 @@
 //! `use crate::{server, transport, persistence, oracle}` may ever appear
 //! below this module.
 
-// The ports are defined here before their adapters exist. Remove this once
-// `ResonateServer`, `ResonateWorker`, and `ResonateRouter` have implementations
-// — until then the binary crate root (which declares its own module tree and
-// so cannot see these as `pub`) lints every one of them as dead.
-#![allow(dead_code, unused_imports)]
-
 pub mod address;
 pub mod router;
 pub mod server;
 pub mod types;
 pub mod worker;
 
-pub use address::{is_valid_address, parse_address, Address};
+pub use address::{is_valid_address, scheme_of};
 pub use router::ResonateRouter;
 pub use server::ResonateServer;
 pub use worker::ResonateWorker;

@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::process::Command;
 
+use crate::core::types::Message;
+use crate::core::{ResonateWorker, Unavailable};
 use crate::persistence::{Storage, TaskAcquireParams, TaskFulfillParams};
 use crate::server::Server;
 use crate::util::system_time_ms;
@@ -124,18 +126,15 @@ impl BashExecTransport {
         }
     }
 
-    pub async fn send(&self, address: &str, payload: &serde_json::Value) {
-        let task_id = match payload.pointer("/data/task/id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                tracing::warn!("bash-exec: missing task.id in execute payload");
-                return;
-            }
+    pub async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        // Only `execute` gives this worker something to run; an `unblock` is a
+        // notification for a waiting worker and has no local counterpart.
+        let task = match msg {
+            Message::Execute(e) => &e.data.task,
+            Message::Unblock(_) => return Ok(()),
         };
-        let task_version = payload
-            .pointer("/data/task/version")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let task_id = task.id.clone();
+        let task_version = task.version;
 
         let (backend, target): (Arc<dyn ExecBackend>, Option<String>) = match parse_backend(address)
         {
@@ -143,8 +142,9 @@ impl BashExecTransport {
             Ok(BackendChoice::Docker { image }) => (self.docker.clone(), Some(image)),
             Ok(BackendChoice::Tensorlake { image }) => (self.tensorlake.clone(), Some(image)),
             Err(e) => {
-                tracing::warn!(address, error = %e, "bash-exec: cannot parse address");
-                return;
+                return Err(Unavailable::new(format!(
+                    "bash-exec: cannot parse address {address}: {e}"
+                )))
             }
         };
 
@@ -152,6 +152,14 @@ impl BashExecTransport {
         tokio::spawn(async move {
             run_task(server, task_id, task_version, backend, target).await;
         });
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ResonateWorker for BashExecTransport {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        BashExecTransport::send(self, address, msg).await
     }
 }
 

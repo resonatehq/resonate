@@ -876,3 +876,66 @@ impl ResponseEnvelope {
         Self::new(kind, corr_id, 200, serde_json::to_value(data).unwrap())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // `Message` replaced a hand-built `serde_json::json!` for unblock and a
+    // `to_value(ExecuteMsg)` for execute. The enum is `untagged` precisely so
+    // the bytes on the wire do not change; these pin that down.
+
+    #[test]
+    fn execute_message_wire_format() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "execute",
+                "head": { "serverUrl": "http://localhost:8001" },
+                "data": { "task": { "id": "t1", "version": 3 } }
+            })
+        );
+    }
+
+    #[test]
+    fn unblock_message_wire_format() {
+        let promise = PromiseRecord {
+            id: "p1".to_string(),
+            state: PromiseState::Resolved,
+            param: PromiseValue::default(),
+            value: PromiseValue::default(),
+            tags: std::collections::HashMap::new(),
+            timeout_at: 100,
+            created_at: 1,
+            settled_at: Some(50),
+        };
+        let expected_promise = serde_json::to_value(&promise).unwrap();
+        let msg = Message::Unblock(UnblockMsg {
+            kind: "unblock".to_string(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData { promise },
+        });
+        // Note the empty head — unblock has never carried a serverUrl.
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "unblock",
+                "head": {},
+                "data": { "promise": expected_promise }
+            })
+        );
+    }
+}

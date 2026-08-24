@@ -3,143 +3,41 @@ pub mod transport_gcps;
 pub mod transport_http_poll;
 pub mod transport_http_push;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::core::address::{parse_address, Address, GcpsAddress, HttpAddress, PollAddress};
+use crate::core::types::Message;
+use crate::core::{scheme_of, ResonateRouter, ResonateWorker, Unavailable};
 
-// ---- Per-transport traits ----
+// ---- Router ----
 
-#[async_trait]
-pub trait HttpTransport: Send + Sync {
-    async fn send(&self, addr: &HttpAddress, payload: &serde_json::Value);
-}
-
-#[async_trait]
-pub trait PollTransport: Send + Sync {
-    async fn send(&self, addr: &PollAddress, payload: &str) -> bool;
-}
-
-#[async_trait]
-pub trait GcpsTransport: Send + Sync {
-    async fn send(&self, addr: &GcpsAddress, payload: &serde_json::Value);
-}
-
-#[async_trait]
-pub trait BashTransport: Send + Sync {
-    async fn send(&self, address: &str, payload: &serde_json::Value);
-}
-
-// ---- Trait impls for real transport types ----
-
-#[async_trait]
-impl HttpTransport for transport_http_push::HttpPushTransport {
-    async fn send(&self, addr: &HttpAddress, payload: &serde_json::Value) {
-        transport_http_push::HttpPushTransport::send(self, addr, payload).await
-    }
-}
-
-#[async_trait]
-impl PollTransport for transport_http_poll::PollRegistry {
-    async fn send(&self, addr: &PollAddress, payload: &str) -> bool {
-        transport_http_poll::PollRegistry::send_poll(self, addr, payload).await
-    }
-}
-
-#[async_trait]
-impl GcpsTransport for transport_gcps::GcpsPubSubTransport {
-    async fn send(&self, addr: &GcpsAddress, payload: &serde_json::Value) {
-        transport_gcps::GcpsPubSubTransport::send(self, addr, payload).await
-    }
-}
-
-#[async_trait]
-impl BashTransport for transport_exec_bash::BashExecTransport {
-    async fn send(&self, address: &str, payload: &serde_json::Value) {
-        transport_exec_bash::BashExecTransport::send(self, address, payload).await
-    }
-}
-
-// ---- Dispatcher ----
-
-/// Dispatches messages to the appropriate transport by parsing the address once.
-/// Routes by URL scheme: http/https → push, poll → SSE, gcps → GCP Pub/Sub, bash → bash exec.
+/// Routes a message to the worker registered for its address scheme.
+///
+/// The router's knowledge of an address stops at the scheme: it reads the
+/// scheme, looks up a worker, and hands over the untouched address string.
+/// Registering a new scheme is therefore the whole cost of adding a worker —
+/// nothing here, and nothing in `core`, has to change.
 pub struct TransportDispatcher {
-    http: Option<Arc<dyn HttpTransport>>,
-    poll: Option<Arc<dyn PollTransport>>,
-    gcps: Option<Arc<dyn GcpsTransport>>,
-    bash: Option<Arc<dyn BashTransport>>,
+    workers: HashMap<String, Arc<dyn ResonateWorker>>,
 }
 
 impl TransportDispatcher {
-    pub fn new(
-        http: Option<Arc<dyn HttpTransport>>,
-        poll: Option<Arc<dyn PollTransport>>,
-        gcps: Option<Arc<dyn GcpsTransport>>,
-        bash: Option<Arc<dyn BashTransport>>,
-    ) -> Self {
-        Self {
-            http,
-            poll,
-            gcps,
-            bash,
-        }
+    pub fn new(workers: HashMap<String, Arc<dyn ResonateWorker>>) -> Self {
+        Self { workers }
     }
+}
 
-    /// Parse the address, route to the correct transport, deliver.
-    pub async fn send(&self, address: &str, payload: &serde_json::Value) {
-        let kind = payload
-            .get("kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        match parse_address(address) {
-            Some(Address::Http(addr)) => match &self.http {
-                Some(http) => {
-                    tracing::debug!(transport = "http", address = %addr.url, kind = kind, "Dispatching message via HTTP push");
-                    http.send(&addr, payload).await;
-                }
-                None => {
-                    tracing::warn!(address = %address, "HTTP push transport disabled, message dropped")
-                }
-            },
-            Some(Address::Poll(addr)) => match &self.poll {
-                Some(poll) => {
-                    tracing::debug!(transport = "poll", group = %addr.group, kind = kind, "Dispatching message via poll/SSE");
-                    let sse_data = serde_json::to_string(payload).unwrap_or_default();
-                    poll.send(&addr, &sse_data).await;
-                }
-                None => {
-                    tracing::warn!(address = %address, "HTTP poll transport disabled, message dropped")
-                }
-            },
-            Some(Address::Gcps(addr)) => match &self.gcps {
-                Some(gcps) => {
-                    tracing::debug!(transport = "gcps", project = %addr.project, topic = %addr.topic, kind = kind, "Dispatching message via GCP Pub/Sub");
-                    gcps.send(&addr, payload).await;
-                }
-                None => {
-                    tracing::warn!(address = %address, "GCP Pub/Sub transport not configured, message dropped")
-                }
-            },
-            Some(Address::Bash(_)) => match &self.bash {
-                Some(bash) => {
-                    tracing::debug!(
-                        transport = "bash",
-                        address,
-                        kind,
-                        "Dispatching message via bash exec"
-                    );
-                    bash.send(address, payload).await;
-                }
-                None => {
-                    tracing::warn!(address = %address, "Bash exec transport not configured, message dropped")
-                }
-            },
-            None => {
-                tracing::warn!(address = %address, "Invalid address, message cannot be routed");
-            }
-        }
+#[async_trait]
+impl ResonateRouter for TransportDispatcher {
+    async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let scheme = scheme_of(address)
+            .ok_or_else(|| Unavailable::new(format!("address is not a URI: {address}")))?;
+        let worker = self.workers.get(&scheme).ok_or_else(|| {
+            Unavailable::new(format!("no worker registered for scheme '{scheme}'"))
+        })?;
+        worker.send(address, msg).await
     }
 }
 
@@ -148,112 +46,57 @@ impl TransportDispatcher {
 #[cfg(test)]
 pub mod stubs {
     use super::*;
+    use crate::core::types::{RequestEnvelope, ResponseEnvelope};
+    use crate::core::ResonateServer;
     use std::sync::Mutex;
 
-    /// Records every (url, payload) pair delivered via HTTP push.
-    pub struct RecordingHttpTransport {
+    /// A server that answers nothing. Workers hold a `ResonateServer` handle
+    /// for the failure path; tests that never exercise it can use this.
+    pub struct NoopServer;
+
+    #[async_trait]
+    impl ResonateServer for NoopServer {
+        async fn process(&self, _req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+            Err(Unavailable::new("NoopServer answers nothing"))
+        }
+    }
+
+    /// Records every `(address, message)` pair it is asked to deliver.
+    ///
+    /// One stub serves every scheme now that workers share a trait — register
+    /// it under whichever scheme the test is exercising.
+    pub struct RecordingWorker {
         pub calls: Mutex<Vec<(String, serde_json::Value)>>,
     }
 
-    impl RecordingHttpTransport {
+    impl RecordingWorker {
         pub fn new() -> Self {
             Self {
                 calls: Mutex::new(vec![]),
             }
         }
 
+        /// Delivered messages as `(address, serialized message)`.
         pub fn calls(&self) -> Vec<(String, serde_json::Value)> {
             self.calls.lock().unwrap().clone()
         }
     }
 
+    impl Default for RecordingWorker {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     #[async_trait]
-    impl HttpTransport for RecordingHttpTransport {
-        async fn send(&self, addr: &HttpAddress, payload: &serde_json::Value) {
+    impl ResonateWorker for RecordingWorker {
+        async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+            let value = serde_json::to_value(msg).expect("message serializes");
             self.calls
                 .lock()
                 .unwrap()
-                .push((addr.url.clone(), payload.clone()));
-        }
-    }
-
-    /// Records every (group, payload_str) pair delivered via poll/SSE.
-    pub struct RecordingPollTransport {
-        pub calls: Mutex<Vec<(String, String)>>,
-    }
-
-    impl RecordingPollTransport {
-        pub fn new() -> Self {
-            Self {
-                calls: Mutex::new(vec![]),
-            }
-        }
-
-        pub fn calls(&self) -> Vec<(String, String)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl PollTransport for RecordingPollTransport {
-        async fn send(&self, addr: &PollAddress, payload: &str) -> bool {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((addr.group.clone(), payload.to_string()));
-            true
-        }
-    }
-
-    /// Records every (project/topic, payload) pair delivered via GCP Pub/Sub.
-    pub struct RecordingGcpsTransport {
-        pub calls: Mutex<Vec<(String, serde_json::Value)>>,
-    }
-
-    impl RecordingGcpsTransport {
-        pub fn new() -> Self {
-            Self {
-                calls: Mutex::new(vec![]),
-            }
-        }
-
-        pub fn calls(&self) -> Vec<(String, serde_json::Value)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl GcpsTransport for RecordingGcpsTransport {
-        async fn send(&self, addr: &GcpsAddress, payload: &serde_json::Value) {
-            let key = format!("{}/{}", addr.project, addr.topic);
-            self.calls.lock().unwrap().push((key, payload.clone()));
-        }
-    }
-
-    /// Records every (address, payload) pair delivered via bash exec.
-    pub struct RecordingBashTransport {
-        pub calls: Mutex<Vec<(String, serde_json::Value)>>,
-    }
-
-    impl RecordingBashTransport {
-        pub fn new() -> Self {
-            Self {
-                calls: Mutex::new(vec![]),
-            }
-        }
-
-        pub fn calls(&self) -> Vec<(String, serde_json::Value)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl BashTransport for RecordingBashTransport {
-        async fn send(&self, address: &str, payload: &serde_json::Value) {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((address.to_string(), payload.clone()));
+                .push((address.to_string(), value));
+            Ok(())
         }
     }
 }
@@ -262,128 +105,97 @@ pub mod stubs {
 mod tests {
     use super::stubs::*;
     use super::*;
-    use serde_json::json;
+    use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
-    fn payload(kind: &str) -> serde_json::Value {
-        json!({ "kind": kind, "head": {}, "data": {} })
+    fn execute_msg() -> Message {
+        Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 1,
+                },
+            },
+        })
     }
 
-    fn dispatcher_with_http(stub: Arc<RecordingHttpTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(Some(stub as Arc<dyn HttpTransport>), None, None, None)
+    fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> TransportDispatcher {
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        workers.insert(scheme.to_string(), stub);
+        TransportDispatcher::new(workers)
     }
 
-    fn dispatcher_with_poll(stub: Arc<RecordingPollTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, Some(stub as Arc<dyn PollTransport>), None, None)
+    fn empty_router() -> TransportDispatcher {
+        TransportDispatcher::new(HashMap::new())
     }
-
-    fn dispatcher_with_gcps(stub: Arc<RecordingGcpsTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, None, Some(stub as Arc<dyn GcpsTransport>), None)
-    }
-
-    fn dispatcher_with_bash(stub: Arc<RecordingBashTransport>) -> TransportDispatcher {
-        TransportDispatcher::new(None, None, None, Some(stub as Arc<dyn BashTransport>))
-    }
-
-    // ---- http_push ----
 
     #[tokio::test]
-    async fn http_push_enabled_routes_to_stub() {
-        let stub = Arc::new(RecordingHttpTransport::new());
-        let dispatcher = dispatcher_with_http(stub.clone());
-        dispatcher
-            .send("http://example.com/callback", &payload("execute"))
-            .await;
+    async fn routes_by_scheme_to_the_registered_worker() {
+        for (scheme, address) in [
+            ("http", "http://example.com/callback"),
+            ("https", "https://example.com/secure"),
+            ("poll", "poll://any@default"),
+            ("gcps", "gcps://my-project/my-topic"),
+            ("bash", "bash://docker/alpine"),
+        ] {
+            let stub = Arc::new(RecordingWorker::new());
+            let router = router_with(scheme, stub.clone());
+            router.route(address, &execute_msg()).await.unwrap();
+
+            let calls = stub.calls();
+            assert_eq!(calls.len(), 1, "for {address}");
+            // The worker receives the address verbatim — the router does not
+            // decompose it.
+            assert_eq!(calls[0].0, address);
+            assert_eq!(calls[0].1["kind"], "execute");
+        }
+    }
+
+    #[tokio::test]
+    async fn unregistered_scheme_is_reported_not_dropped() {
+        for address in [
+            "http://example.com/callback",
+            "poll://any@default",
+            "gcps://my-project/my-topic",
+            "bash://docker/alpine",
+        ] {
+            let err = empty_router()
+                .route(address, &execute_msg())
+                .await
+                .expect_err("no worker is registered");
+            assert!(
+                err.to_string().contains("no worker registered"),
+                "for {address}: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_uri_address_is_reported() {
+        let stub = Arc::new(RecordingWorker::new());
+        let router = router_with("http", stub.clone());
+        let err = router
+            .route("not a url", &execute_msg())
+            .await
+            .expect_err("not a URI");
+        assert!(err.to_string().contains("not a URI"), "{err}");
+        assert!(stub.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_worker_serves_every_address_of_its_scheme() {
+        let stub = Arc::new(RecordingWorker::new());
+        let router = router_with("poll", stub.clone());
+        for address in ["poll://any@a", "poll://uni@b/id", "poll://malformed"] {
+            router.route(address, &execute_msg()).await.unwrap();
+        }
         let calls = stub.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "http://example.com/callback");
-        assert_eq!(calls[0].1["kind"], "execute");
-    }
-
-    #[tokio::test]
-    async fn http_push_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
-        // Should return without panicking — message silently dropped
-        dispatcher
-            .send("http://example.com/callback", &payload("execute"))
-            .await;
-    }
-
-    #[tokio::test]
-    async fn https_push_enabled_routes_to_stub() {
-        let stub = Arc::new(RecordingHttpTransport::new());
-        let dispatcher = dispatcher_with_http(stub.clone());
-        dispatcher
-            .send("https://example.com/secure", &payload("execute"))
-            .await;
-        let calls = stub.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "https://example.com/secure");
-    }
-
-    // ---- http_poll ----
-
-    #[tokio::test]
-    async fn http_poll_enabled_routes_to_stub() {
-        let stub = Arc::new(RecordingPollTransport::new());
-        let dispatcher = dispatcher_with_poll(stub.clone());
-        dispatcher
-            .send("poll://any@default", &payload("execute"))
-            .await;
-        let calls = stub.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "default");
-        let body: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
-        assert_eq!(body["kind"], "execute");
-    }
-
-    #[tokio::test]
-    async fn http_poll_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
-        dispatcher
-            .send("poll://any@default", &payload("execute"))
-            .await;
-    }
-
-    // ---- gcps ----
-
-    #[tokio::test]
-    async fn gcps_enabled_routes_to_stub() {
-        let stub = Arc::new(RecordingGcpsTransport::new());
-        let dispatcher = dispatcher_with_gcps(stub.clone());
-        dispatcher
-            .send("gcps://my-project/my-topic", &payload("execute"))
-            .await;
-        let calls = stub.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "my-project/my-topic");
-        assert_eq!(calls[0].1["kind"], "execute");
-    }
-
-    #[tokio::test]
-    async fn gcps_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
-        dispatcher
-            .send("gcps://my-project/my-topic", &payload("execute"))
-            .await;
-    }
-
-    // ---- bash ----
-
-    #[tokio::test]
-    async fn bash_enabled_routes_to_stub() {
-        let stub = Arc::new(RecordingBashTransport::new());
-        let dispatcher = dispatcher_with_bash(stub.clone());
-        // bash:// is the inline-script address scheme
-        dispatcher.send("bash://", &payload("execute")).await;
-        let calls = stub.calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "bash://");
-        assert_eq!(calls[0].1["kind"], "execute");
-    }
-
-    #[tokio::test]
-    async fn bash_disabled_drops_without_error() {
-        let dispatcher = TransportDispatcher::new(None, None, None, None);
-        dispatcher.send("bash://", &payload("execute")).await;
+        assert_eq!(calls.len(), 3);
+        // Including the malformed one: rejecting it is the worker's job, not
+        // the router's.
+        assert_eq!(calls[2].0, "poll://malformed");
     }
 }
