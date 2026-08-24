@@ -13,7 +13,15 @@ oracle}`.
 ### `ResonateServer` — the inbound port
 
 ```rust
-async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+#[async_trait]
+pub trait ResonateServer: Send + Sync {
+    /// Apply one request and return its response.
+    ///
+    /// A non-2xx outcome is still a completed exchange: it comes back as `Ok`
+    /// with the status in `ResponseHead::status`. `Err` is reserved for "there
+    /// is no answer".
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+}
 ```
 
 One request in, one response out. The in-process server, the in-memory reference model, and
@@ -33,8 +41,21 @@ envelope.
 ### `ResonateWorker` — the outbound port
 
 ```rust
-async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+#[async_trait]
+pub trait ResonateWorker: Send + Sync {
+    /// Deliver one message to the worker at `address`.
+    ///
+    /// The router guarantees only that `address` carries this worker's
+    /// registered scheme; everything past the scheme is this worker's to
+    /// parse and to reject.
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+}
 ```
+
+`Send + Sync` because the router holds it as `Arc<dyn ResonateWorker>` and calls it from
+whichever task is draining the outgoing queue. `&self`, not `&mut self`: one worker
+instance serves every address of its scheme concurrently, so any mutable state it keeps
+needs its own synchronisation.
 
 The dual of `ResonateServer`: a server receives requests and returns responses; a worker
 receives messages and — for the ones that do real work — issues requests back at a server.
@@ -56,7 +77,15 @@ parse and to reject.
 ### `ResonateRouter` — scheme to worker
 
 ```rust
-async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+#[async_trait]
+pub trait ResonateRouter: Send + Sync {
+    /// Route and deliver one message.
+    ///
+    /// Returns `Err(Unavailable)` when the message could not be handed off:
+    /// the address does not parse as a URL, no worker is registered for its
+    /// scheme, or the worker itself was unreachable.
+    async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+}
 ```
 
 `TransportDispatcher` is a `HashMap<String, Arc<dyn ResonateWorker>>`. It reads the scheme,
@@ -67,6 +96,117 @@ unreachable.
 The dispatch loop logs and drops on all three. The message has already been dequeued, so
 the task stays pending and the retry loop produces another `execute` within
 `tasks.retry_timeout`. **An unregistered scheme costs latency, never correctness.**
+
+## The in-process sequence
+
+How a message becomes a settled promise, in the shape the protocol docs use.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant L as Message loop
+  participant R as ResonateRouter
+  participant W as ResonateWorker
+  participant S as ResonateServer
+  participant D as Downstream
+
+  Note over L,S: one process, one shared Server
+
+  L->>L: take_outgoing(batch)
+  L->>R: route(address, Execute id, ver=n)
+  R->>R: scheme_of(address)
+  R->>W: send(address, msg)<br/>address verbatim, scheme guaranteed
+  W->>W: Address::parse(address)<br/>worker owns the syntax past the scheme
+  W-)W: tokio::spawn(run)
+  W-->>R: Ok(()) accepted for delivery
+  R-->>L: Ok(())
+
+  Note over W,S: the spawned task, now a protocol client
+
+  W->>S: process(task.acquire id, ver=n, pid, ttl)
+  alt claimed
+    S-->>W: 200 task ver=n+1, promise
+  else lost the race
+    S-->>W: 409 drop, never touch D
+  end
+
+  par lease clock — every ttl/3
+    loop until aborted
+      W->>S: process(task.heartbeat pid, [id, ver=n+1])
+      S-->>W: 200 always, even when it refreshed nothing
+    end
+  and downstream clock — sized for D
+    W->>D: create run<br/>run_id = f(promise.id), deterministic
+    alt first attempt
+      D-->>W: 200 created
+    else a previous delivery got there first
+      D-->>W: 409 re-attach, not an error
+    end
+    loop until terminal or promise.timeoutAt
+      W->>D: get run run_id
+      D-->>W: queued | running | success | failed
+    end
+  end
+
+  W->>S: process(task.fulfill id, ver=n+1<br/>promise.settle resolved | rejected)
+  alt still holds the lease
+    S-->>W: 200 settled, redelivery stops
+  else lease lost or already settled
+    S-->>W: 409 do not retry
+  end
+```
+
+Four things the diagram is about:
+
+- **Steps 6–8 are the point of the port.** `send` spawns and returns `Ok(())` before any
+  work happens, so the dispatch loop is not blocked for the hours a downstream run may take.
+- **Step 9 reverses direction.** The worker becomes a client of the same `ResonateServer`
+  the message came from. The worker holds `Arc<dyn ResonateServer>` and `Server` never
+  holds the router, so it stays a DAG rather than a cycle.
+- **The `par` block is two independent clocks** — steps 12–13 against the lease, steps
+  14–18 against the downstream system. Neither branch knows the other's cadence.
+- **Nothing in the diagram tells the worker which delivery this is.** The `Execute` at step
+  2 is identical on attempt one and attempt five. That is why step 16 — a `409` from the
+  downstream create — means *success*, while the `409` at step 21, from `task.fulfill`,
+  means this attempt no longer owns the task.
+
+### Redelivery
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant L as Message loop
+  participant R as ResonateRouter
+  participant W as ResonateWorker
+  participant S as ResonateServer
+  participant D as Downstream
+
+  Note over W,D: attempt 1 dies after creating the run
+
+  L->>R: route(address, Execute id, ver=n)
+  R->>W: send(address, msg)
+  W->>S: process(task.acquire id, ver=n)
+  S-->>W: 200 ver=n+1
+  W->>D: create run run_id
+  D-->>W: 200 created
+  Note over W: crash — no settle, no heartbeat
+
+  S->>S: lease expires<br/>task -> pending, execute re-enqueued
+
+  Note over L,D: attempt 2, indistinguishable from the first
+
+  L->>R: route(address, Execute id, ver=n+1)
+  R->>W: send(address, msg)
+  W->>S: process(task.acquire id, ver=n+1)
+  S-->>W: 200 ver=n+2
+  W->>D: create run run_id<br/>same key — nothing was remembered
+  D-->>W: 409 already exists
+  Note over W,D: re-attach and monitor the existing run
+  W->>D: get run run_id
+  D-->>W: success
+  W->>S: process(task.fulfill id, ver=n+2)
+  S-->>W: 200 settled
+```
 
 ## `Unavailable` — the only error
 

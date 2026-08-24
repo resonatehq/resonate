@@ -40,13 +40,80 @@ compiled and unit-tested in this repo, so it cannot drift from the ports it impl
 
 ## The ports
 
-Defined in `src/core/`, which depends on nothing else in the crate:
+Three traits in `src/core/`, which depends on nothing else in the crate. Verbatim:
 
-| Port | Signature | Meaning |
-|---|---|---|
-| `ResonateServer` | `process(&RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>` | One request in, one response out |
-| `ResonateWorker` | `send(&self, address: &str, msg: &Message) -> Result<(), Unavailable>` | Deliver one message to the thing at `address` |
-| `ResonateRouter` | `route(&self, address: &str, msg: &Message) -> Result<(), Unavailable>` | Scheme → worker, then deliver |
+```rust
+/// The inbound port — src/core/server.rs
+#[async_trait]
+pub trait ResonateServer: Send + Sync {
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+}
+
+/// The outbound port — src/core/worker.rs
+#[async_trait]
+pub trait ResonateWorker: Send + Sync {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+}
+
+/// The routing port — src/core/router.rs
+#[async_trait]
+pub trait ResonateRouter: Send + Sync {
+    async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+}
+```
+
+`Message` is what a server emits toward a worker, and `Unavailable` is the only error any
+port returns:
+
+```rust
+#[derive(Debug, Serialize)]
+#[serde(untagged)]                    // each variant carries its own `kind`
+pub enum Message {
+    Execute(ExecuteMsg),              // { kind, head: { serverUrl }, data: { task: { id, version } } }
+    Unblock(UnblockMsg),              // { kind, head: {},            data: { promise } }
+}
+
+pub struct Unavailable { pub message: String }
+```
+
+### The shape an integration implements
+
+One trait, one method. Everything else is a free choice.
+
+```rust
+pub struct MyWorker {
+    /// In process, so it holds the inbound port directly rather than dialling
+    /// it. `Server` never holds the router, which keeps this a DAG.
+    server: Arc<dyn ResonateServer>,
+    client: reqwest::Client,
+    deployments: HashMap<String, MyDeployment>,
+    lease_timeout: i64,
+}
+
+#[async_trait]
+impl ResonateWorker for MyWorker {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let task = match msg {
+            Message::Execute(e) => &e.data.task,   // { id, version }
+            Message::Unblock(_) => return Ok(()),  // for workers that *wait*; not this one
+        };
+
+        // Cheap, worth failing fast on: this worker owns the syntax past the scheme.
+        let addr = MyAddress::parse(address)
+            .map_err(|e| Unavailable::new(format!("my: bad address {address}: {e}")))?;
+
+        // `send` is accepted-for-delivery. Spawn; the run may take hours.
+        tokio::spawn(async move { ctx.run().await });
+        Ok(())
+    }
+}
+```
+
+Registering it is one line, and nothing in `core` changes:
+
+```rust
+workers.insert("my".to_string(), Arc::new(MyWorker::new(...)));
+```
 
 Four consequences that shape every integration:
 
