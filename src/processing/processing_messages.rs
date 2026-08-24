@@ -130,7 +130,7 @@ mod tests {
     use crate::config::Config;
     use crate::core::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
     use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
-    use crate::server::{dispatch as server_dispatch, Server};
+    use crate::server::Server;
     use crate::transport::stubs::{RecordingHttpTransport, RecordingPollTransport};
     use crate::transport::{HttpTransport, PollTransport, TransportDispatcher};
 
@@ -158,7 +158,7 @@ mod tests {
     }
 
     async fn dispatch(server: &Arc<Server>, kind: &str, data: serde_json::Value) {
-        let resp = server_dispatch(server, &req(kind, data), 1_000_000).await;
+        let resp = server.dispatch(&req(kind, data), 1_000_000).await;
         assert_eq!(resp.head.status, 200, "{kind} failed: {:?}", resp.data);
     }
 

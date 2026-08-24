@@ -41,7 +41,7 @@ use resonate::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
         persistence_sqlite::SqliteStorage, Storage,
     },
-    server::{dispatch, Server},
+    server::Server,
 };
 use serde_json::{json, Value};
 
@@ -108,7 +108,7 @@ enum Backend {
 impl Backend {
     async fn dispatch(&self, envelope: &RequestEnvelope, now: i64) -> ResponseEnvelope {
         match self {
-            Backend::Server(srv) => dispatch(srv, envelope, now).await,
+            Backend::Server(srv) => srv.dispatch(envelope, now).await,
             Backend::Oracle(o) => {
                 let mut req = envelope.clone();
                 req.head.debug_time = Some(now);
