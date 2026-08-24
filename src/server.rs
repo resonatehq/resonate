@@ -2350,6 +2350,23 @@ impl Server {
                         &format_validation_errors(&e),
                     ));
                 }
+                // Every promise this schedule fires carries the target, so it is
+                // held to the same standard promise create holds a target to.
+                if let Some(addr) = r.promise_tags.get("resonate:target") {
+                    if !crate::core::is_valid_address(addr) {
+                        tracing::warn!(
+                            schedule_id = %r.id,
+                            address = addr,
+                            "Schedule create rejected: invalid resonate:target address"
+                        );
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            "Invalid resonate:target address",
+                        ));
+                    }
+                }
                 if !util::is_valid_cron(&r.cron) {
                     tracing::warn!(
                         schedule_id = %r.id,

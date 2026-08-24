@@ -316,9 +316,18 @@ fn validate_promise_create_data(
             .with_message("Promise ID must not contain null bytes".into()));
     }
     if let Some(origin) = data.tags.get("resonate:origin") {
-        if origin.contains('.') {
-            return Err(validator::ValidationError::new("dot_in_origin")
-                .with_message("resonate:origin must not contain '.'".into()));
+        // '.' is deliberately *not* rejected: it separates lineage segments below
+        // the origin, which are only ever read once the origin has been split off
+        // at the first ':', so a caller-supplied dotted root id ('my.app.workflow'
+        // -> 'my.app.workflow:1' -> 'my.app.workflow:1.1') round-trips intact.
+        //
+        // The origin is everything before an id's first ':' (see `origin()`), so
+        // an origin that itself holds one is unrepresentable: no id could ever
+        // split back to it. Rejecting it here keeps ':' reserved as the
+        // origin/lineage separator in caller-supplied ids.
+        if origin.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_origin")
+                .with_message("resonate:origin must not contain ':'".into()));
         }
         if data.id != origin.as_str() && !data.id.starts_with(&format!("{}:", origin)) {
             return Err(validator::ValidationError::new("origin_prefix")
@@ -669,9 +678,13 @@ pub struct ScheduleCreateData {
 fn validate_schedule_create_data(
     data: &ScheduleCreateData,
 ) -> Result<(), validator::ValidationError> {
-    if data.id.contains('.') {
-        return Err(validator::ValidationError::new("dot_in_schedule_id")
-            .with_message("Schedule ID must not contain '.'".into()));
+    // A schedule id is caller-supplied and is stamped, via the promise id
+    // template, onto the resonate:origin of every promise the schedule fires --
+    // so it is bound by exactly the rules `validate_promise_create_data` applies
+    // to an origin: '.' is not one of them, ':' is (see the comment there).
+    if data.id.contains(':') {
+        return Err(validator::ValidationError::new("colon_in_schedule_id")
+            .with_message("Schedule ID must not contain ':'".into()));
     }
     if !data.promise_tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")
