@@ -340,6 +340,25 @@ pub struct BashExecConfig {
     /// Enable the bash:// address scheme [default: false]
     #[serde(default)]
     pub enabled: bool,
+
+    /// Lease TTL (ms) this worker requests when acquiring a task, and the basis
+    /// for its heartbeat interval (a third of it).
+    ///
+    /// The lease has to outlast the script: if it expires the task is
+    /// redispatched to another worker while this one is still running.
+    ///
+    /// Unset means "follow `tasks.lease_timeout`" — the server-wide default
+    /// this worker used before it had a setting of its own. Set it when scripts
+    /// here run longer than tasks generally do.
+    #[serde(default)]
+    pub lease_timeout: Option<i64>,
+}
+
+impl BashExecConfig {
+    /// The lease TTL to request, falling back to the server-wide task default.
+    pub fn resolve_lease_timeout(&self, tasks: &TasksConfig) -> i64 {
+        self.lease_timeout.unwrap_or(tasks.lease_timeout)
+    }
 }
 
 /// Google Cloud Pub/Sub transport configuration.
@@ -623,6 +642,18 @@ impl Config {
             return Err("transports.gcps.concurrency must be at least 1 (got 0)".to_string());
         }
 
+        // `task.acquire` validates `ttl >= 1`, so a non-positive lease would
+        // make every acquire fail with a 400 and the worker would silently
+        // never run anything. Reject it here instead.
+
+        if let Some(ttl) = self.transports.bash_exec.lease_timeout {
+            if ttl < 1 {
+                return Err(format!(
+                    "transports.bash_exec.lease_timeout must be at least 1 (got {ttl})"
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -630,6 +661,47 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bash_lease_timeout_defaults_to_the_server_task_lease() {
+        let mut config = Config::default();
+        config.tasks.lease_timeout = 120_000;
+        assert_eq!(config.transports.bash_exec.lease_timeout, None);
+        assert_eq!(
+            config
+                .transports
+                .bash_exec
+                .resolve_lease_timeout(&config.tasks),
+            120_000,
+            "unset means follow tasks.lease_timeout, including when that is customised"
+        );
+    }
+
+    #[test]
+    fn bash_lease_timeout_overrides_the_server_task_lease() {
+        let mut config = Config::default();
+        config.tasks.lease_timeout = 15_000;
+        config.transports.bash_exec.lease_timeout = Some(600_000);
+        assert_eq!(
+            config
+                .transports
+                .bash_exec
+                .resolve_lease_timeout(&config.tasks),
+            600_000
+        );
+    }
+
+    #[test]
+    fn non_positive_bash_lease_timeout_is_rejected() {
+        for ttl in [0, -1] {
+            let mut config = Config::default();
+            config.transports.bash_exec.lease_timeout = Some(ttl);
+            let err = config
+                .validate()
+                .expect_err("task.acquire would 400 on every acquire");
+            assert!(err.contains("bash_exec.lease_timeout"), "{err}");
+        }
+    }
 
     #[test]
     fn default_config_is_valid() {

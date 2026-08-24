@@ -319,7 +319,12 @@ async fn run_server(config: Config) -> Result<(), String> {
         workers.insert(
             "bash".to_string(),
             Arc::new(transport::transport_exec_bash::BashExecTransport::new(
-                Arc::clone(&state),
+                Arc::clone(&server),
+                state
+                    .config
+                    .transports
+                    .bash_exec
+                    .resolve_lease_timeout(&state.config.tasks),
             )),
         );
     }

@@ -721,7 +721,9 @@ pub struct TaskCreateResponseData {
     pub preload: Vec<PromiseRecord>,
 }
 
-#[derive(Debug, Serialize)]
+// Deserialize as well as Serialize: an in-process worker reads this back off
+// its own `task.acquire` response.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskAcquireResponseData {
     pub task: TaskRecord,
     pub promise: PromiseRecord,
