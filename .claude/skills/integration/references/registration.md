@@ -176,7 +176,7 @@ async fn run(self) {
         }))
         .await;
     let acquired = match claim {
-        Ok(Response::Acquired(acquired)) => acquired,
+        Ok(Response::TaskAcquire(acquired)) => acquired,
         other => {
             tracing::debug!(task_id = %self.task.id, ?other, "airflow: task not acquired");
             return;
@@ -241,13 +241,13 @@ async fn run(self) {
         .await;
 
     match settled {
-        Ok(Response::Ok) => {
+        Ok(Response::TaskFulfill(_)) => {
             tracing::info!(task_id = %self.task.id, ?state, "airflow: promise settled")
         }
         // The lease was lost, or the promise already settled — almost always
         // a timeout. Nothing is retryable either way.
-        Ok(Response::Rejected { status }) => {
-            tracing::warn!(task_id = %self.task.id, ?state, status, "airflow: promise not settled")
+        Ok(Response::Error { status, message }) => {
+            tracing::warn!(task_id = %self.task.id, ?state, status, %message, "airflow: promise not settled")
         }
         other => {
             tracing::warn!(task_id = %self.task.id, ?state, ?other, "airflow: promise not settled")

@@ -28,28 +28,35 @@ pub trait ResonateServer: Send + Sync {
 ```
 
 **Workers use `call`, not `process`.** The envelopes are the *wire* form — what an HTTP
-adapter decodes off a socket. A caller in the same process has no socket:
+adapter decodes off a socket. A caller in the same process has no socket, so it uses the
+typed union instead:
 
 ```rust
 pub enum Request {
+    PromiseGet(PromiseGetData),
+    PromiseCreate(PromiseCreateData),
+    …
     TaskAcquire(TaskAcquireData),
-    TaskHeartbeat(TaskHeartbeatData),
     TaskFulfill(TaskFulfillData),
+    TaskHeartbeat(TaskHeartbeatData),
+    …
 }
 
-/// Three variants, because three is how many outcomes a caller acts on
-/// differently.
 pub enum Response {
-    /// `task.acquire` succeeded: the task belongs to this caller now.
-    Acquired(Box<TaskAcquireResponseData>),
-    /// Succeeded, with nothing the caller needs back.
+    TaskAcquire(Box<TaskAcquireResponseData>),
+    …
+    /// A 2xx for an operation that returns nothing the caller needs.
     Ok,
-    /// The exchange completed and the request did not apply — a 409 race, a
-    /// version mismatch, a validation failure. The status is carried for the
-    /// log; a caller does the same thing in every case.
-    Rejected { status: i32 },
+    /// The exchange completed and the request did not apply.
+    Error { status: i32, message: String },
 }
 ```
+
+`Request` and `Response` mirror the unions of the same name in the canonical
+`types-raw.ts`, member for member and in the same order — `src/core/types.rs` holds them as
+a macro table so the two can be diffed by eye. Every non-2xx member of the canonical
+`Response` carries `data: string`, which is why the error half collapses into one variant
+without losing anything.
 
 A 2xx whose body is not what that kind returns comes back as `Err(Unavailable)` — the
 exchange completed but there is no answer in it, which is what `Unavailable` means. It

@@ -243,42 +243,84 @@ pub enum Message {
 // and no reason to hand-build JSON, so it uses the types below and lets
 // [`ResonateServer::call`](super::ResonateServer::call) do the conversion.
 
-/// A protocol request, typed.
+/// The request union, mirroring `Request` in the canonical `types-raw.ts`.
 ///
-/// Enumerates the operations a worker performs. Everything else still reaches
-/// the server as an envelope, because everything else arrives as one.
-// The shared `Task` prefix is not redundant: it says which noun the operation
-// is on, and `PromiseCreate`/`ScheduleCreate` join this enum the moment
-// something in process needs them.
-#[allow(clippy::enum_variant_names)]
-#[derive(Debug)]
-pub enum Request {
-    TaskAcquire(TaskAcquireData),
-    TaskHeartbeat(TaskHeartbeatData),
-    TaskFulfill(TaskFulfillData),
+/// The table below is the mirror: one line per member of that union, in the
+/// same order, so the two can be diffed by eye. Adding a protocol operation
+/// means adding a line here and nowhere else.
+macro_rules! protocol_requests {
+    (
+        $( $variant:ident($data:ty) => $kind:literal, )*
+        --- empty data ---
+        $( $unit:ident => $unit_kind:literal, )*
+    ) => {
+        // Complete because the protocol is, not because today's callers are:
+        // this mirrors the canonical union, so a variant with no in-process
+        // caller yet is the normal state rather than dead weight.
+        #[allow(dead_code)]
+        #[derive(Debug)]
+        pub enum Request {
+            $( $variant($data), )*
+            $( $unit, )*
+        }
+
+        impl Request {
+            /// The `kind` this request is spelled as on the wire.
+            pub fn kind(&self) -> &'static str {
+                match self {
+                    $( Request::$variant(_) => $kind, )*
+                    $( Request::$unit => $unit_kind, )*
+                }
+            }
+
+            fn data(&self) -> Value {
+                match self {
+                    $( Request::$variant(d) => serde_json::to_value(d), )*
+                    $( Request::$unit => Ok(serde_json::json!({})), )*
+                }
+                // Infallible: these types serialize by construction, which is
+                // the point of having them.
+                .expect("protocol request types serialize")
+            }
+        }
+    };
+}
+
+protocol_requests! {
+    PromiseGet(PromiseGetData) => "promise.get",
+    PromiseCreate(PromiseCreateData) => "promise.create",
+    PromiseSettle(PromiseSettleData) => "promise.settle",
+    PromiseRegisterCallback(PromiseRegisterCallbackData) => "promise.register_callback",
+    PromiseRegisterListener(PromiseRegisterListenerData) => "promise.register_listener",
+    PromiseSearch(PromiseSearchData) => "promise.search",
+    TaskGet(TaskGetData) => "task.get",
+    TaskCreate(TaskCreateData) => "task.create",
+    TaskAcquire(TaskAcquireData) => "task.acquire",
+    TaskRelease(TaskReleaseData) => "task.release",
+    TaskSuspend(TaskSuspendData) => "task.suspend",
+    TaskHalt(TaskHaltData) => "task.halt",
+    TaskContinue(TaskContinueData) => "task.continue",
+    TaskFulfill(TaskFulfillData) => "task.fulfill",
+    TaskFence(TaskFenceData) => "task.fence",
+    TaskHeartbeat(TaskHeartbeatData) => "task.heartbeat",
+    TaskSearch(TaskSearchData) => "task.search",
+    ScheduleGet(ScheduleGetData) => "schedule.get",
+    ScheduleCreate(ScheduleCreateData) => "schedule.create",
+    ScheduleDelete(ScheduleDeleteData) => "schedule.delete",
+    ScheduleSearch(ScheduleSearchData) => "schedule.search",
+    --- empty data ---
+    DebugStart => "debug.start",
+    DebugReset => "debug.reset",
+    DebugTick => "debug.tick",
+    DebugSnap => "debug.snap",
+    DebugStop => "debug.stop",
 }
 
 impl Request {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Request::TaskAcquire(_) => "task.acquire",
-            Request::TaskHeartbeat(_) => "task.heartbeat",
-            Request::TaskFulfill(_) => "task.fulfill",
-        }
-    }
-
-    /// The wire form. Infallible: these types serialize by construction, which
-    /// is the point of having them.
+    /// The wire form.
     pub fn into_envelope(self) -> RequestEnvelope {
-        let kind = self.kind().to_string();
-        let data = match self {
-            Request::TaskAcquire(d) => serde_json::to_value(d),
-            Request::TaskHeartbeat(d) => serde_json::to_value(d),
-            Request::TaskFulfill(d) => serde_json::to_value(d),
-        }
-        .expect("protocol request types serialize");
         RequestEnvelope {
-            kind,
+            kind: self.kind().to_string(),
             head: RequestHead {
                 corr_id: format!("{:016x}", fastrand::u64(..)),
                 version: PROTOCOL_VERSION.to_string(),
@@ -287,52 +329,80 @@ impl Request {
                 auth: None,
                 debug_time: None,
             },
-            data,
+            data: self.data(),
         }
     }
 }
 
-/// The answer to a [`Request`], typed.
+/// The response union, mirroring `Response` in the canonical `types-raw.ts`.
 ///
-/// Three variants rather than a status code, because three is how many
-/// outcomes a caller acts on differently.
-#[derive(Debug)]
-pub enum Response {
-    /// `task.acquire` succeeded: the task belongs to this caller now.
-    Acquired(Box<TaskAcquireResponseData>),
-    /// Succeeded, with nothing the caller needs back.
-    Ok,
-    /// The exchange completed and the request did not apply — a 409 race, a
-    /// version mismatch, a validation failure. A caller does the same thing in
-    /// every case (it does not own the task), so the status is carried for the
-    /// log and nothing else.
-    Rejected { status: i32 },
+/// That union is per-kind and then per-status, but every non-2xx member of it
+/// carries `data: string` — so the error half collapses into one variant
+/// without losing anything, and what is left is the 2xx payload per kind.
+macro_rules! protocol_responses {
+    ( $( $variant:ident($data:ty) => $kind:literal, )* ) => {
+        // Same: complete because the protocol is.
+        #[allow(dead_code)]
+        #[derive(Debug)]
+        pub enum Response {
+            $( $variant($data), )*
+            /// A 2xx for an operation that returns nothing the caller needs.
+            Ok,
+            /// The exchange completed and the request did not apply. Callers
+            /// mostly act the same way whatever the status is, so it is carried
+            /// for the log rather than matched on.
+            Error { status: i32, message: String },
+        }
+
+        impl Response {
+            /// Read a response envelope back as the answer to `request_kind`.
+            ///
+            /// A 2xx whose body is not what that kind returns is `Err`: the
+            /// exchange completed, but there is no answer in it, which is what
+            /// [`Unavailable`](super::Unavailable) means. It also means a caller
+            /// never has to write that case out.
+            pub fn from_envelope(
+                request_kind: &str,
+                envelope: ResponseEnvelope,
+            ) -> Result<Self, super::Unavailable> {
+                let status = envelope.head.status;
+                if !(200..300).contains(&status) {
+                    return Ok(Response::Error {
+                        status,
+                        message: envelope.data.as_str().unwrap_or_default().to_string(),
+                    });
+                }
+                match request_kind {
+                    $(
+                        $kind => serde_json::from_value(envelope.data)
+                            .map(Response::$variant)
+                            .map_err(|e| super::Unavailable::new(
+                                format!("malformed {} response: {e}", $kind)
+                            )),
+                    )*
+                    _ => Ok(Response::Ok),
+                }
+            }
+        }
+    };
 }
 
-impl Response {
-    /// Read a response envelope back as the answer to `request_kind`.
-    ///
-    /// A 2xx whose body is not what that kind returns is `Err`: the exchange
-    /// technically completed, but there is no answer in it, which is exactly
-    /// what [`Unavailable`](super::Unavailable) means. It also means a caller
-    /// never has to write that case out.
-    pub fn from_envelope(
-        request_kind: &str,
-        envelope: ResponseEnvelope,
-    ) -> Result<Self, super::Unavailable> {
-        let status = envelope.head.status;
-        if !(200..300).contains(&status) {
-            return Ok(Response::Rejected { status });
-        }
-        match request_kind {
-            "task.acquire" => serde_json::from_value(envelope.data)
-                .map(|d| Response::Acquired(Box::new(d)))
-                .map_err(|e| {
-                    super::Unavailable::new(format!("malformed task.acquire response: {e}"))
-                }),
-            _ => Ok(Response::Ok),
-        }
-    }
+protocol_responses! {
+    PromiseGet(PromiseResponseData) => "promise.get",
+    PromiseCreate(PromiseResponseData) => "promise.create",
+    PromiseSettle(PromiseResponseData) => "promise.settle",
+    PromiseRegisterCallback(PromiseResponseData) => "promise.register_callback",
+    PromiseRegisterListener(PromiseResponseData) => "promise.register_listener",
+    PromiseSearch(PromiseSearchResponseData) => "promise.search",
+    TaskGet(TaskResponseData) => "task.get",
+    TaskCreate(Box<TaskCreateResponseData>) => "task.create",
+    TaskAcquire(Box<TaskAcquireResponseData>) => "task.acquire",
+    TaskFulfill(TaskFulfillResponseData) => "task.fulfill",
+    TaskFence(TaskFenceResponseData) => "task.fence",
+    TaskSearch(TaskSearchResponseData) => "task.search",
+    ScheduleGet(ScheduleResponseData) => "schedule.get",
+    ScheduleCreate(ScheduleResponseData) => "schedule.create",
+    ScheduleSearch(ScheduleSearchResponseData) => "schedule.search",
 }
 
 // --- Record Types ---
@@ -396,7 +466,7 @@ pub struct ScheduleRecord {
 // --- Request Data Structs ---
 // These mirror the `data` field of each request kind in types.ts.
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct PromiseGetData {
     #[validate(length(min = 1, message = "Promise ID is required"))]
     pub id: String,
@@ -476,7 +546,7 @@ fn validate_promise_create_data(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct PromiseSettleData {
     #[validate(length(min = 1, message = "Promise ID is required"))]
     pub id: String,
@@ -514,7 +584,7 @@ fn validate_callback_data(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct PromiseRegisterListenerData {
     #[validate(length(min = 1, message = "Awaited promise ID is required"))]
     pub awaited: String,
@@ -522,7 +592,7 @@ pub struct PromiseRegisterListenerData {
     pub address: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct PromiseSearchData {
     pub state: Option<PromiseState>,
     pub tags: Option<std::collections::HashMap<String, String>>,
@@ -531,13 +601,13 @@ pub struct PromiseSearchData {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskGetData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_task_create_data"))]
 pub struct TaskCreateData {
     #[validate(length(min = 1, message = "Process ID is required"))]
@@ -582,7 +652,7 @@ pub struct TaskAcquireData {
     pub ttl: i64,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskReleaseData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
@@ -600,7 +670,7 @@ pub struct TaskSuspendAction {
     pub data: PromiseRegisterCallbackData,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_task_suspend_data"))]
 pub struct TaskSuspendData {
     #[validate(length(min = 1, message = "Task ID is required"))]
@@ -671,7 +741,7 @@ fn validate_task_fulfill_data(data: &TaskFulfillData) -> Result<(), validator::V
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskFenceActionData {
     pub kind: String,
     #[allow(dead_code)]
@@ -679,7 +749,7 @@ pub struct TaskFenceActionData {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_task_fence_data"))]
 pub struct TaskFenceData {
     #[validate(length(min = 1, message = "Task ID is required"))]
@@ -729,19 +799,19 @@ fn validate_task_heartbeat_data(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskHaltData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskContinueData {
     #[validate(length(min = 1, message = "Task ID is required"))]
     pub id: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct TaskSearchData {
     pub state: Option<TaskState>,
     #[validate(range(min = 1, message = "Limit must be a positive integer"))]
@@ -749,13 +819,13 @@ pub struct TaskSearchData {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct ScheduleGetData {
     #[validate(length(min = 1, message = "Schedule ID is required"))]
     pub id: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 #[validate(schema(function = "validate_schedule_create_data"))]
 pub struct ScheduleCreateData {
     #[validate(length(min = 1, message = "Schedule ID is required"))]
@@ -788,13 +858,13 @@ fn validate_schedule_create_data(
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct ScheduleDeleteData {
     #[validate(length(min = 1, message = "Schedule ID is required"))]
     pub id: String,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct ScheduleSearchData {
     pub tags: Option<std::collections::HashMap<String, String>>,
     #[validate(range(min = 1, message = "Limit must be a positive integer"))]
@@ -805,24 +875,24 @@ pub struct ScheduleSearchData {
 // --- Response Data Structs ---
 // These mirror the `data` field of each successful (200) response in types.ts.
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PromiseResponseData {
     pub promise: PromiseRecord,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PromiseSearchResponseData {
     pub promises: Vec<PromiseRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskResponseData {
     pub task: TaskRecord,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskCreateResponseData {
     pub task: TaskRecord,
     pub promise: PromiseRecord,
@@ -838,35 +908,35 @@ pub struct TaskAcquireResponseData {
     pub preload: Vec<PromiseRecord>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskSuspendPreloadData {
     pub preload: Vec<PromiseRecord>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskFulfillResponseData {
     pub promise: PromiseRecord,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskFenceResponseData {
     pub action: Value,
     pub preload: Vec<PromiseRecord>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct TaskSearchResponseData {
     pub tasks: Vec<TaskRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScheduleResponseData {
     pub schedule: ScheduleRecord,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ScheduleSearchResponseData {
     pub schedules: Vec<ScheduleRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
