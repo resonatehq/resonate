@@ -36,6 +36,7 @@ fn db_lock() -> &'static Mutex<()> {
 use resonate::{
     config::Config,
     core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS},
+    core::ResonateServer,
     oracle::Oracle,
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
@@ -100,26 +101,27 @@ fn req(kind: &str, data: Value) -> RequestEnvelope {
 // Backend abstraction
 // ---------------------------------------------------------------------------
 
-enum Backend {
-    Server(Arc<Server>),
-    Oracle(Arc<Mutex<Oracle>>),
-}
+// A backend is anything that answers the protocol. The real server, the
+// reference model, and (eventually) a client for a remote server are all the
+// same thing here — that is the point of the port.
+type Backend = Arc<dyn ResonateServer>;
 
-impl Backend {
-    async fn dispatch(&self, envelope: &RequestEnvelope, now: i64) -> ResponseEnvelope {
-        match self {
-            Backend::Server(srv) => srv.dispatch(envelope, now).await,
-            Backend::Oracle(o) => {
-                let mut req = envelope.clone();
-                req.head.debug_time = Some(now);
-                o.lock().unwrap().apply(&req)
-            }
-        }
-    }
+/// Send one request to a backend at time `now`.
+///
+/// `now` rides in the envelope rather than alongside it: `process` resolves the
+/// effective time from `head.debug_time`, identically for every backend. The
+/// server gates that on `config.debug`, which `debug_config()` enables.
+async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+    let mut req = envelope.clone();
+    req.head.debug_time = Some(now);
+    backend
+        .process(&req)
+        .await
+        .expect("in-process backends are always available")
 }
 
 fn server_backend(storage: Storage) -> Backend {
-    Backend::Server(Arc::new(Server::new(debug_config(), None, storage)))
+    Arc::new(Server::new(debug_config(), None, storage))
 }
 
 // Pick a random element from a slice.
@@ -184,7 +186,7 @@ async fn differential_random() {
 
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
-        ("oracle".into(), Backend::Oracle(Arc::clone(&oracle))),
+        ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
     if let Some(pg) = pg_backend {
         backends.push(("postgres".into(), pg));
@@ -385,7 +387,7 @@ fn percentile(sorted: &[u64], p: f64) -> u64 {
 async fn setup_all(backends: &[(String, Backend)], now: i64) {
     for envelope in &[req("debug.start", json!({})), req("debug.reset", json!({}))] {
         for (name, b) in backends {
-            let resp = b.dispatch(envelope, now).await;
+            let resp = send(b, envelope, now).await;
             assert_eq!(resp.head.status, 200, "{} failed on {name}", envelope.kind);
         }
     }
@@ -394,7 +396,7 @@ async fn setup_all(backends: &[(String, Backend)], now: i64) {
 async fn reset_all(backends: &[(String, Backend)], now: i64) {
     let envelope = req("debug.reset", json!({}));
     for (name, b) in backends {
-        let resp = b.dispatch(&envelope, now).await;
+        let resp = send(b, &envelope, now).await;
         assert_eq!(resp.head.status, 200, "debug.reset failed on {name}");
     }
 }
@@ -409,7 +411,7 @@ async fn send_all(
     let kind = envelope.kind.clone();
     for (name, b) in backends {
         let t0 = Instant::now();
-        let resp = b.dispatch(envelope, now).await;
+        let resp = send(b, envelope, now).await;
         let ns = t0.elapsed().as_nanos() as u64;
         timings
             .entry((name.clone(), kind.clone()))
@@ -424,7 +426,7 @@ async fn snap_all(backends: &[(String, Backend)], now: i64) -> Vec<(String, Valu
     let envelope = req("debug.snap", json!({}));
     let mut out = Vec::new();
     for (name, b) in backends {
-        let resp = b.dispatch(&envelope, now).await;
+        let resp = send(b, &envelope, now).await;
         assert_eq!(resp.head.status, 200, "debug.snap failed on {name}");
         let mut data = resp.data;
         normalize_snap(&mut data);

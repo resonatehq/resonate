@@ -16,7 +16,10 @@ use crate::core::types::{
     TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData,
     TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
+use crate::core::{ResonateServer, Unavailable};
 use crate::util;
+use async_trait::async_trait;
+use std::sync::Mutex;
 
 const PENDING_RETRY_TTL: i64 = 30_000;
 
@@ -2297,5 +2300,27 @@ impl Oracle {
 
     pub fn has_schedules(&self) -> bool {
         !self.schedules.is_empty()
+    }
+}
+
+/// The reference model behind the same port as the real server.
+///
+/// `Oracle::apply` takes `&mut self`, so the impl lands on `Mutex<Oracle>` —
+/// the orphan rule permits it because the trait is local. That also states the
+/// truth honestly: the real server serves requests concurrently, and the
+/// reference model is its serialized equivalent.
+///
+/// Unlike [`Server`](crate::server::Server), the oracle honours
+/// `head.debug_time` unconditionally. It has no config to gate on and no clock
+/// of its own, and every caller of it is a test driving a synthetic clock.
+#[async_trait]
+impl ResonateServer for Mutex<Oracle> {
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        // No await while the guard is held.
+        let resp = {
+            let mut oracle = self.lock().expect("oracle mutex poisoned");
+            oracle.apply(req)
+        };
+        Ok(resp)
     }
 }
