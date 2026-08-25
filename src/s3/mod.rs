@@ -6,3 +6,4 @@
 //! server implementation, not a fourth `Db`.
 
 pub mod codec;
+pub mod store;
