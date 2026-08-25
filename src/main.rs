@@ -1,17 +1,18 @@
 mod auth;
 mod cli;
 mod config;
+mod core;
 mod mcp;
 mod metrics;
 mod persistence;
 mod processing;
 mod server;
 mod transport;
-mod types;
 mod util;
 
 use std::sync::Arc;
 
+use crate::core::types::ResponseEnvelope;
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -23,11 +24,11 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use config::Config;
+use core::{ResonateRouter, ResonateServer, ResonateWorker};
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use server::Server;
+use std::collections::HashMap;
 use transport::transport_http_poll::PollRegistry;
-use transport::{BashTransport, GcpsTransport, HttpTransport, PollTransport};
-use types::ResponseEnvelope;
 
 #[derive(Parser)]
 #[command(
@@ -244,12 +245,27 @@ async fn run_server(config: Config) -> Result<(), String> {
         http_poll_buffer_size = poll_buffer_size,
         "Transport config"
     );
-    let poll_registry = Arc::new(PollRegistry::new(poll_max_connections, poll_buffer_size));
+    // Every worker holds a handle to the server: an in-process worker calls it
+    // directly, and a remote worker uses it to report a delivery failure rather
+    // than dropping the message. `Server` never holds the router, so this stays
+    // a DAG.
+    let server: Arc<dyn ResonateServer> = state.clone();
+
+    let poll_registry = Arc::new(PollRegistry::new(
+        Arc::clone(&server),
+        poll_max_connections,
+        poll_buffer_size,
+    ));
     let connect_timeout =
         std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout);
     let request_timeout =
         std::time::Duration::from_millis(state.config.transports.http_push.request_timeout);
-    let http_push: Option<Arc<dyn HttpTransport>> = if state.config.transports.http_push.enabled {
+
+    // Scheme -> worker. A disabled transport is simply not registered, and the
+    // router reports its addresses as undeliverable.
+    let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+
+    if state.config.transports.http_push.enabled {
         let outbound_auth = match &state.config.transports.http_push.auth {
             Some(auth_cfg) => {
                 let mode_label = format!("{:?}", auth_cfg.mode);
@@ -262,50 +278,58 @@ async fn run_server(config: Config) -> Result<(), String> {
                 transport::transport_http_push::Auth::None
             }
         };
-        Some(Arc::new(
-            transport::transport_http_push::HttpPushTransport::new(
+        let worker: Arc<dyn ResonateWorker> =
+            Arc::new(transport::transport_http_push::HttpPushTransport::new(
+                Arc::clone(&server),
                 connect_timeout,
                 request_timeout,
                 outbound_auth,
                 state.config.transports.http_push.concurrency,
-            ),
-        ))
+            ));
+        workers.insert("http".to_string(), Arc::clone(&worker));
+        workers.insert("https".to_string(), worker);
     } else {
         tracing::info!("HTTP push transport disabled");
-        None
-    };
-    let http_poll: Option<Arc<dyn PollTransport>> = if state.config.transports.http_poll.enabled {
-        Some(poll_registry.clone())
+    }
+
+    if state.config.transports.http_poll.enabled {
+        workers.insert("poll".to_string(), poll_registry.clone());
     } else {
         tracing::info!("HTTP poll transport disabled");
-        None
-    };
-    let gcps: Option<Arc<dyn GcpsTransport>> = if state.config.transports.gcps.enabled {
+    }
+
+    if state.config.transports.gcps.enabled {
         tracing::info!(
             concurrency = state.config.transports.gcps.concurrency,
             timeout_ms = state.config.transports.gcps.timeout,
             "GCP Pub/Sub transport enabled"
         );
-        Some(Arc::new(
-            transport::transport_gcps::GcpsPubSubTransport::new(
+        workers.insert(
+            "gcps".to_string(),
+            Arc::new(transport::transport_gcps::GcpsPubSubTransport::new(
+                Arc::clone(&server),
                 state.config.transports.gcps.concurrency,
                 std::time::Duration::from_millis(state.config.transports.gcps.timeout),
-            ),
-        ))
-    } else {
-        None
-    };
-    let bash: Option<Arc<dyn BashTransport>> = if state.config.transports.bash_exec.enabled {
+            )),
+        );
+    }
+
+    if state.config.transports.bash_exec.enabled {
         tracing::info!("Bash exec transport enabled (local + docker + tensorlake)");
-        Some(Arc::new(
-            transport::transport_exec_bash::BashExecTransport::new(Arc::clone(&state)),
-        ))
-    } else {
-        None
-    };
-    let dispatcher = Arc::new(transport::TransportDispatcher::new(
-        http_push, http_poll, gcps, bash,
-    ));
+        workers.insert(
+            "bash".to_string(),
+            Arc::new(transport::transport_exec_bash::BashExecTransport::new(
+                Arc::clone(&server),
+                state
+                    .config
+                    .transports
+                    .bash_exec
+                    .resolve_lease_timeout(&state.config.tasks),
+            )),
+        );
+    }
+
+    let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -320,11 +344,11 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     let message_state = Arc::clone(&state);
     let message_shutdown = shutdown_rx.clone();
-    let message_dispatcher = Arc::clone(&dispatcher);
+    let message_router = Arc::clone(&router);
     handles.push(tokio::spawn(async move {
         processing::processing_messages::message_processing_loop(
             message_state,
-            message_dispatcher,
+            message_router,
             message_shutdown,
         )
         .await;

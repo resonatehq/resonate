@@ -9,8 +9,36 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use super::GcpsAddress;
 use crate::metrics;
+
+use crate::core::types::Message;
+use crate::core::{ResonateServer, ResonateWorker, Unavailable};
+
+/// A `gcps://` destination: `gcps://<project>/<topic>`.
+#[derive(Debug, Clone)]
+pub struct GcpsAddress {
+    pub project: String,
+    pub topic: String,
+}
+
+impl GcpsAddress {
+    /// Parse a `gcps://` address. This worker owns the syntax; the router has
+    /// only checked the scheme.
+    pub fn parse(address: &str) -> Result<Self, Unavailable> {
+        let bad = || Unavailable::new(format!("malformed gcps address: {address}"));
+        let parsed = url::Url::parse(address).map_err(|_| bad())?;
+        let project = parsed.host_str().ok_or_else(bad)?.to_string();
+        let path = parsed.path();
+        if path.len() <= 1 {
+            return Err(bad());
+        }
+        let topic = path[1..].to_string();
+        if topic.is_empty() {
+            return Err(bad());
+        }
+        Ok(GcpsAddress { project, topic })
+    }
+}
 
 /// Google Cloud Pub/Sub transport — publishes messages to topics.
 ///
@@ -20,6 +48,10 @@ use crate::metrics;
 /// only blocks if the queue is full, never on the publish RPC.
 pub struct GcpsPubSubTransport {
     tx: mpsc::Sender<PublishJob>,
+    /// Held so a delivery failure can be reported back to the server (e.g.
+    /// releasing the task instead of dropping it). Not used yet.
+    #[allow(dead_code)]
+    server: Arc<dyn ResonateServer>,
 }
 
 struct PublishJob {
@@ -28,7 +60,7 @@ struct PublishJob {
 }
 
 impl GcpsPubSubTransport {
-    pub fn new(concurrency: usize, timeout: Duration) -> Self {
+    pub fn new(server: Arc<dyn ResonateServer>, concurrency: usize, timeout: Duration) -> Self {
         let publishers = Arc::new(Mutex::new(HashMap::<String, Publisher>::new()));
         let semaphore = Arc::new(Semaphore::new(concurrency));
         // Queue capacity larger than concurrency so short bursts smooth out;
@@ -39,7 +71,7 @@ impl GcpsPubSubTransport {
 
         tokio::spawn(dispatcher(publishers, semaphore, timeout, rx));
 
-        Self { tx }
+        Self { tx, server }
     }
 
     /// Enqueue a publish. Returns once the job is on the in-memory queue.
@@ -150,5 +182,16 @@ async fn deliver(
                 .with_label_values(&["error"])
                 .inc();
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl ResonateWorker for GcpsPubSubTransport {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let addr = GcpsAddress::parse(address)?;
+        let payload = serde_json::to_value(msg)
+            .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
+        GcpsPubSubTransport::send(self, &addr, &payload).await;
+        Ok(())
     }
 }

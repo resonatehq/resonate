@@ -5,9 +5,11 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::process::Command;
 
-use crate::persistence::{Storage, TaskAcquireParams, TaskFulfillParams};
-use crate::server::Server;
-use crate::util::system_time_ms;
+use crate::core::types::{
+    Message, RequestEnvelope, RequestHead, ResponseEnvelope, TaskAcquireResponseData,
+    PROTOCOL_VERSION,
+};
+use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 
 // ─── Backend trait ────────────────────────────────────────────────────────────
 //
@@ -108,34 +110,39 @@ fn parse_backend(address: &str) -> Result<BackendChoice, String> {
 // ─── Transport ────────────────────────────────────────────────────────────────
 
 pub struct BashExecTransport {
-    server: Arc<Server>,
+    /// This worker runs in the server's own process, so it holds the port
+    /// directly instead of reaching it over the wire. Every state change it
+    /// makes goes through `process` — the same path a remote worker's HTTP
+    /// calls take.
+    server: Arc<dyn ResonateServer>,
+    /// Lease TTL for tasks this worker acquires. Configuration of the worker,
+    /// not of the server it talks to.
+    lease_timeout: i64,
     local: Arc<LocalBackend>,
     docker: Arc<DockerBackend>,
     tensorlake: Arc<TensorlakeBackend>,
 }
 
 impl BashExecTransport {
-    pub fn new(server: Arc<Server>) -> Self {
+    pub fn new(server: Arc<dyn ResonateServer>, lease_timeout: i64) -> Self {
         Self {
             server,
+            lease_timeout,
             local: Arc::new(LocalBackend),
             docker: Arc::new(DockerBackend),
             tensorlake: Arc::new(TensorlakeBackend::from_env()),
         }
     }
 
-    pub async fn send(&self, address: &str, payload: &serde_json::Value) {
-        let task_id = match payload.pointer("/data/task/id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => {
-                tracing::warn!("bash-exec: missing task.id in execute payload");
-                return;
-            }
+    pub async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        // Only `execute` gives this worker something to run; an `unblock` is a
+        // notification for a waiting worker and has no local counterpart.
+        let task = match msg {
+            Message::Execute(e) => &e.data.task,
+            Message::Unblock(_) => return Ok(()),
         };
-        let task_version = payload
-            .pointer("/data/task/version")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let task_id = task.id.clone();
+        let task_version = task.version;
 
         let (backend, target): (Arc<dyn ExecBackend>, Option<String>) = match parse_backend(address)
         {
@@ -143,47 +150,123 @@ impl BashExecTransport {
             Ok(BackendChoice::Docker { image }) => (self.docker.clone(), Some(image)),
             Ok(BackendChoice::Tensorlake { image }) => (self.tensorlake.clone(), Some(image)),
             Err(e) => {
-                tracing::warn!(address, error = %e, "bash-exec: cannot parse address");
-                return;
+                return Err(Unavailable::new(format!(
+                    "bash-exec: cannot parse address {address}: {e}"
+                )))
             }
         };
 
         let server = Arc::clone(&self.server);
+        let lease_timeout = self.lease_timeout;
         tokio::spawn(async move {
-            run_task(server, task_id, task_version, backend, target).await;
+            run_task(
+                server,
+                lease_timeout,
+                task_id,
+                task_version,
+                backend,
+                target,
+            )
+            .await;
         });
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ResonateWorker for BashExecTransport {
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        BashExecTransport::send(self, address, msg).await
     }
 }
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
+/// Issue one protocol request at the server this worker is attached to.
+///
+/// In-process, so no HTTP hop and no auth — but the same `process` entry point,
+/// and therefore the same validation, ghost-timeout handling and response
+/// shaping that a remote worker's request would go through.
+async fn request(
+    server: &dyn ResonateServer,
+    kind: &str,
+    data: serde_json::Value,
+) -> Result<ResponseEnvelope, Unavailable> {
+    server
+        .process(&RequestEnvelope {
+            kind: kind.to_string(),
+            head: RequestHead {
+                corr_id: format!("bash-exec-{}", fastrand::u64(..)),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: None,
+            },
+            data,
+        })
+        .await
+}
+
+/// Settle the task's promise via `task.fulfill`.
+///
+/// The promise id is the task id in this flow — `op_task_fulfill` settles
+/// `data.id`, and `action.data.id` is what the ghost timeout runs against.
+async fn settle_task(
+    server: &dyn ResonateServer,
+    task_id: &str,
+    version: i64,
+    state: &str,
+    value: &str,
+) {
+    let resp = request(
+        server,
+        "task.fulfill",
+        json!({
+            "id": task_id,
+            "version": version,
+            "action": {
+                "kind": "promise.settle",
+                "head": {},
+                "data": { "id": task_id, "state": state, "value": { "data": value } }
+            }
+        }),
+    )
+    .await;
+
+    match resp {
+        Ok(r) if (200..300).contains(&r.head.status) => {}
+        Ok(r) => tracing::warn!(
+            task_id,
+            status = r.head.status,
+            state,
+            "bash-exec: task fulfill rejected"
+        ),
+        Err(e) => tracing::error!(task_id, error = %e, "bash-exec: task fulfill failed"),
+    }
+}
+
 async fn run_task(
-    server: Arc<Server>,
+    server: Arc<dyn ResonateServer>,
+    lease_timeout: i64,
     task_id: String,
     task_version: i64,
     backend: Arc<dyn ExecBackend>,
     target: Option<String>,
 ) {
     let pid = format!("bash-exec-{}", fastrand::u64(..));
-    let lease_timeout = server.config.tasks.lease_timeout;
 
-    // 1. Acquire — racing is normal; storage errors are transient (drop, let lease expire).
-    let acquire_result = match server
-        .storage
-        .transact({
-            let task_id = task_id.clone();
-            let pid = pid.clone();
-            move |db| {
-                db.task_acquire(&TaskAcquireParams {
-                    task_id: &task_id,
-                    version: task_version,
-                    time: system_time_ms(),
-                    ttl: lease_timeout,
-                    pid: &pid,
-                })
-            }
-        })
-        .await
+    // 1. Acquire — racing is normal (409); anything else is transient, so drop
+    //    the task and let the lease expire rather than settling the promise.
+    let resp = match request(
+        server.as_ref(),
+        "task.acquire",
+        json!({
+            "id": task_id,
+            "version": task_version,
+            "pid": pid,
+            "ttl": lease_timeout
+        }),
+    )
+    .await
     {
         Ok(r) => r,
         Err(e) => {
@@ -192,35 +275,38 @@ async fn run_task(
         }
     };
 
-    if !acquire_result.was_acquired {
+    if resp.head.status == 409 {
         tracing::debug!(task_id, "bash-exec: task not acquired");
         return;
     }
+    if resp.head.status != 200 {
+        tracing::warn!(
+            task_id,
+            status = resp.head.status,
+            "bash-exec: task acquire rejected"
+        );
+        return;
+    }
 
-    let acquired_version = acquire_result.task_version.unwrap_or(task_version + 1);
-
-    let promise = match acquire_result.promise {
-        Some(p) => p,
-        None => {
-            reject_promise(
-                &server.storage,
-                &task_id,
-                acquired_version,
-                "no promise returned after acquire",
-            )
-            .await;
+    let acquired: TaskAcquireResponseData = match serde_json::from_value(resp.data) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!(task_id, error = %e, "bash-exec: malformed acquire response");
             return;
         }
     };
+    let acquired_version = acquired.task.version;
+    let promise = acquired.promise;
 
     // 2. Decode script — param.data is base64-encoded; the decoded value IS the script.
     let script = match decode_param(promise.param.data.as_deref()) {
         Some(s) => s,
         None => {
-            reject_promise(
-                &server.storage,
+            settle_task(
+                server.as_ref(),
                 &task_id,
                 acquired_version,
+                "rejected",
                 "param.data is missing or not valid base64/utf-8",
             )
             .await;
@@ -230,7 +316,7 @@ async fn run_task(
 
     // 3. Heartbeat — refreshes the lease while the backend runs.
     let heartbeat = {
-        let storage = Arc::clone(&server.storage);
+        let server = Arc::clone(&server);
         let task_id = task_id.clone();
         let pid = pid.clone();
         let version = acquired_version;
@@ -240,12 +326,15 @@ async fn run_task(
             interval.tick().await;
             loop {
                 interval.tick().await;
-                let task_id = task_id.clone();
-                let pid = pid.clone();
-                let now = system_time_ms();
-                let _ = storage
-                    .transact(move |db| db.task_heartbeat(&pid, &[(&task_id, version)], now))
-                    .await;
+                let _ = request(
+                    server.as_ref(),
+                    "task.heartbeat",
+                    json!({
+                        "pid": pid,
+                        "tasks": [{ "id": task_id, "version": version }]
+                    }),
+                )
+                .await;
             }
         })
     };
@@ -265,7 +354,16 @@ async fn run_task(
 
     // 5. Fulfill, reject, or drop-for-reschedule.
     match outcome.result {
-        Err(msg) => reject_promise(&server.storage, &task_id, acquired_version, &msg).await,
+        Err(msg) => {
+            settle_task(
+                server.as_ref(),
+                &task_id,
+                acquired_version,
+                "rejected",
+                &msg,
+            )
+            .await
+        }
         Ok(status) if status.killed => {
             // Process was killed (signal locally; SIGKILL/SIGTERM in container;
             // "signaled" in sandbox). Treat as infrastructure failure: drop the
@@ -279,7 +377,14 @@ async fn run_task(
         }
         Ok(status) if status.code == 0 => {
             let value = status.stdout.trim().to_string();
-            fulfill_promise(&server.storage, &task_id, acquired_version, &value).await;
+            settle_task(
+                server.as_ref(),
+                &task_id,
+                acquired_version,
+                "resolved",
+                &value,
+            )
+            .await;
         }
         Ok(status) => {
             let stderr = status.stderr.trim();
@@ -288,7 +393,14 @@ async fn run_task(
             } else {
                 stderr.to_string()
             };
-            reject_promise(&server.storage, &task_id, acquired_version, &reason).await;
+            settle_task(
+                server.as_ref(),
+                &task_id,
+                acquired_version,
+                "rejected",
+                &reason,
+            )
+            .await;
         }
     }
 }
@@ -635,47 +747,189 @@ fn decode_param(data: Option<&str>) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-async fn fulfill_promise(storage: &Storage, task_id: &str, version: i64, value: &str) {
-    let now = system_time_ms();
-    let task_id = task_id.to_string();
-    let value = value.to_string();
-    let _ = storage
-        .transact(move |db| {
-            db.task_fulfill(&TaskFulfillParams {
-                task_id: &task_id,
-                version,
-                promise_id: &task_id,
-                state: "resolved",
-                value_headers: None,
-                value_data: Some(&value),
-                settled_at: now,
-            })
-        })
-        .await;
-}
-
-async fn reject_promise(storage: &Storage, task_id: &str, version: i64, reason: &str) {
-    let now = system_time_ms();
-    let task_id = task_id.to_string();
-    let reason = reason.to_string();
-    let _ = storage
-        .transact(move |db| {
-            db.task_fulfill(&TaskFulfillParams {
-                task_id: &task_id,
-                version,
-                promise_id: &task_id,
-                state: "rejected",
-                value_headers: None,
-                value_data: Some(&reason),
-                settled_at: now,
-            })
-        })
-        .await;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use base64::Engine;
+    use std::collections::HashMap;
+
+    use crate::config::Config;
+    use crate::core::types::PromiseState;
+    use crate::core::ResonateRouter;
+    use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
+    use crate::processing::processing_messages::process_batch;
+    use crate::server::Server;
+    use crate::transport::TransportDispatcher;
+
+    // ---- end-to-end: the worker drives the task through the protocol ----
+    //
+    // These are the only coverage of the acquire/run/settle path: the
+    // differential test never exercises a worker, so nothing else checks that
+    // `run_task`'s envelopes are accepted by the server.
+
+    fn test_server() -> Arc<Server> {
+        let storage = Storage::Sqlite(SqliteStorage::open(":memory:", 30_000).unwrap());
+        let mut config = Config::default();
+        config.server.url = Some("http://localhost:8001".to_string());
+        Arc::new(Server::new(config, None, storage))
+    }
+
+    /// Create a promise whose `resonate:target` is a bash address and whose
+    /// param carries `script`, then release the task so a message is queued.
+    async fn queue_bash_task(server: &Arc<Server>, id: &str, script: &str, address: &str) {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(script);
+        let create = json!({
+            "pid": "test-worker",
+            "ttl": 60_000,
+            "action": {
+                "kind": "promise.create",
+                "head": {},
+                "data": {
+                    "id": id,
+                    "timeoutAt": 9_000_000_000_000i64,
+                    "param": { "data": encoded },
+                    "tags": { "resonate:target": address }
+                }
+            }
+        });
+        let resp = server
+            .dispatch(&envelope("task.create", create), 1_000)
+            .await;
+        assert_eq!(resp.head.status, 200, "task.create: {:?}", resp.data);
+
+        let resp = server
+            .dispatch(
+                &envelope("task.release", json!({"id": id, "version": 1})),
+                1_000,
+            )
+            .await;
+        assert_eq!(resp.head.status, 200, "task.release: {:?}", resp.data);
+    }
+
+    fn envelope(kind: &str, data: serde_json::Value) -> RequestEnvelope {
+        RequestEnvelope {
+            kind: kind.to_string(),
+            head: RequestHead {
+                corr_id: "test".to_string(),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: None,
+            },
+            data,
+        }
+    }
+
+    async fn promise_state(server: &Arc<Server>, id: &str) -> (PromiseState, Option<String>) {
+        let resp = server
+            .dispatch(&envelope("promise.get", json!({ "id": id })), 1_000)
+            .await;
+        assert_eq!(resp.head.status, 200, "promise.get: {:?}", resp.data);
+        let promise = &resp.data["promise"];
+        let state = serde_json::from_value(promise["state"].clone()).unwrap();
+        let data = promise["value"]["data"].as_str().map(|s| s.to_string());
+        (state, data)
+    }
+
+    /// Poll until the promise leaves `pending`, or give up.
+    async fn await_settled(server: &Arc<Server>, id: &str) -> (PromiseState, Option<String>) {
+        for _ in 0..100 {
+            let (state, data) = promise_state(server, id).await;
+            if state != PromiseState::Pending {
+                return (state, data);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("promise {id} never settled");
+    }
+
+    async fn run_one_task(
+        server: &Arc<Server>,
+        id: &str,
+        script: &str,
+    ) -> (PromiseState, Option<String>) {
+        queue_bash_task(server, id, script, "bash://").await;
+
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        workers.insert(
+            "bash".to_string(),
+            Arc::new(BashExecTransport::new(server.clone(), 60_000)),
+        );
+        let router = TransportDispatcher::new(workers);
+
+        process_batch(
+            &server.storage,
+            &router as &dyn ResonateRouter,
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+        await_settled(server, id).await
+    }
+
+    /// The heartbeat loop hand-builds a `task.heartbeat` envelope and ignores
+    /// the result, so a malformed one would fail silently: the lease would
+    /// expire mid-script and the task be redispatched while still running.
+    /// Scripts in the other tests finish before the first beat, so this checks
+    /// the envelope shape directly.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn heartbeat_envelope_is_accepted_by_the_server() {
+        let server = test_server();
+        queue_bash_task(&server, "bash-beat", "echo hi", "bash://").await;
+
+        // Acquire exactly as run_task does, so the pid/version match.
+        let pid = "bash-exec-test";
+        let resp = server
+            .dispatch(
+                &envelope(
+                    "task.acquire",
+                    json!({ "id": "bash-beat", "version": 1, "pid": pid, "ttl": 60_000 }),
+                ),
+                1_000,
+            )
+            .await;
+        assert_eq!(resp.head.status, 200, "task.acquire: {:?}", resp.data);
+        let acquired: TaskAcquireResponseData = serde_json::from_value(resp.data).unwrap();
+
+        // The exact envelope the heartbeat loop sends.
+        let resp = server
+            .dispatch(
+                &envelope(
+                    "task.heartbeat",
+                    json!({
+                        "pid": pid,
+                        "tasks": [{ "id": "bash-beat", "version": acquired.task.version }]
+                    }),
+                ),
+                2_000,
+            )
+            .await;
+        assert_eq!(resp.head.status, 200, "task.heartbeat: {:?}", resp.data);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn successful_script_resolves_the_promise_with_stdout() {
+        let server = test_server();
+        let (state, data) = run_one_task(&server, "bash-ok", "echo hello").await;
+        assert_eq!(state, PromiseState::Resolved);
+        assert_eq!(data.as_deref(), Some("hello"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failing_script_rejects_the_promise_with_stderr() {
+        let server = test_server();
+        let (state, data) = run_one_task(&server, "bash-fail", "echo boom >&2; exit 3").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert_eq!(data.as_deref(), Some("boom"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failing_script_without_stderr_rejects_with_the_exit_code() {
+        let server = test_server();
+        let (state, data) = run_one_task(&server, "bash-code", "exit 7").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert_eq!(data.as_deref(), Some("exit code 7"));
+    }
 
     #[test]
     fn parse_local_empty() {

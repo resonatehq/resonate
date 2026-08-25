@@ -6,15 +6,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::core::types::{
+    ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, UnblockMsg, UnblockMsgData,
+    UnblockMsgHead,
+};
+use crate::core::ResonateRouter;
 use crate::metrics;
 use crate::persistence::Storage;
-use crate::transport::TransportDispatcher;
-use crate::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
     state: Arc<crate::server::Server>,
-    dispatcher: Arc<TransportDispatcher>,
+    router: Arc<dyn ResonateRouter>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     let interval = Duration::from_millis(state.config.messages.poll_interval);
@@ -34,7 +37,7 @@ pub async fn message_processing_loop(
         }
 
         let server_url = state.config.server.url.clone().unwrap_or_default();
-        process_batch(&state.storage, &dispatcher, batch_size, &server_url).await;
+        process_batch(&state.storage, router.as_ref(), batch_size, &server_url).await;
     }
 }
 
@@ -43,7 +46,7 @@ pub async fn message_processing_loop(
 /// Called by the background loop and `debug.tick`.
 pub async fn process_batch(
     storage: &Storage,
-    dispatcher: &TransportDispatcher,
+    router: &dyn ResonateRouter,
     batch_size: i64,
     server_url: &str,
 ) {
@@ -84,7 +87,7 @@ pub async fn process_batch(
             address = %msg.address,
             "Dispatching execute message"
         );
-        let payload = ExecuteMsg {
+        let payload = Message::Execute(ExecuteMsg {
             kind: "execute".to_string(),
             head: MessageHead {
                 server_url: server_url.to_string(),
@@ -95,10 +98,10 @@ pub async fn process_batch(
                     version: msg.version,
                 },
             },
-        };
-        dispatcher
-            .send(&msg.address, &serde_json::to_value(&payload).unwrap())
-            .await;
+        });
+        if let Err(e) = router.route(&msg.address, &payload).await {
+            tracing::warn!(address = %msg.address, error = %e, "Execute message not delivered");
+        }
     }
 
     for msg in unblock_msgs {
@@ -109,14 +112,16 @@ pub async fn process_batch(
             address = %msg.address,
             "Dispatching unblock message"
         );
-        let payload = serde_json::json!({
-            "kind": "unblock",
-            "head": {},
-            "data": {
-                "promise": msg.promise
-            }
+        let payload = Message::Unblock(UnblockMsg {
+            kind: "unblock".to_string(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData {
+                promise: msg.promise,
+            },
         });
-        dispatcher.send(&msg.address, &payload).await;
+        if let Err(e) = router.route(&msg.address, &payload).await {
+            tracing::warn!(address = %msg.address, error = %e, "Unblock message not delivered");
+        }
     }
 }
 
@@ -128,11 +133,25 @@ mod tests {
     use serde_json::json;
 
     use crate::config::Config;
+    use crate::core::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
+    use crate::core::ResonateWorker;
     use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
-    use crate::server::{dispatch as server_dispatch, Server};
-    use crate::transport::stubs::{RecordingHttpTransport, RecordingPollTransport};
-    use crate::transport::{HttpTransport, PollTransport, TransportDispatcher};
-    use crate::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
+    use crate::server::Server;
+    use crate::transport::stubs::RecordingWorker;
+    use crate::transport::TransportDispatcher;
+    use std::collections::HashMap;
+
+    /// A router with `stub` registered for `scheme` and nothing else, so an
+    /// address of any other scheme is undeliverable.
+    fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> TransportDispatcher {
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        workers.insert(scheme.to_string(), stub);
+        TransportDispatcher::new(workers)
+    }
+
+    fn empty_router() -> TransportDispatcher {
+        TransportDispatcher::new(HashMap::new())
+    }
 
     // ---- helpers ----
 
@@ -158,7 +177,7 @@ mod tests {
     }
 
     async fn dispatch(server: &Arc<Server>, kind: &str, data: serde_json::Value) {
-        let resp = server_dispatch(server, &req(kind, data), 1_000_000).await;
+        let resp = server.dispatch(&req(kind, data), 1_000_000).await;
         assert_eq!(resp.head.status, 200, "{kind} failed: {:?}", resp.data);
     }
 
@@ -218,6 +237,62 @@ mod tests {
         .await;
     }
 
+    /// Is an undeliverable execute message *permanently* lost, or re-queued?
+    ///
+    /// `take_outgoing` deletes before delivery (at-most-once), so a failed
+    /// route loses that attempt. But a task left `pending` keeps its type-0
+    /// retry timeout, and `process_timeouts` re-inserts `outgoing_execute` when
+    /// it fires — so the message comes back.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn undeliverable_execute_message_is_requeued_not_lost() {
+        let server = make_server();
+        create_task_with_target(&server, "task-requeue", "http://stub-server/webhook").await;
+
+        // First pass with nothing registered: the message is dequeued and dropped.
+        process_batch(
+            &server.storage,
+            &empty_router(),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+
+        let stub = Arc::new(RecordingWorker::new());
+        process_batch(
+            &server.storage,
+            &router_with("http", stub.clone()),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+        assert_eq!(stub.calls().len(), 0, "that attempt really was consumed");
+
+        // Advance past the task retry timeout and let timeout processing run.
+        let retry_deadline = 1_000_000 + 60_000;
+        server
+            .storage
+            .transact(move |db| db.process_timeouts(retry_deadline))
+            .await
+            .unwrap();
+
+        // The message should be back.
+        process_batch(
+            &server.storage,
+            &router_with("http", stub.clone()),
+            100,
+            "http://localhost:8001",
+        )
+        .await;
+        let calls = stub.calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "a pending task re-queues its execute message on retry timeout — \
+             the message is lost for one attempt, not permanently"
+        );
+        assert_eq!(calls[0].0, "http://stub-server/webhook");
+    }
+
     // ---- execute-message tests ----
 
     #[tokio::test(flavor = "multi_thread")]
@@ -225,13 +300,8 @@ mod tests {
         let server = make_server();
         create_task_with_target(&server, "task-1", "http://stub-server/webhook").await;
 
-        let stub = Arc::new(RecordingHttpTransport::new());
-        let dispatcher = TransportDispatcher::new(
-            Some(stub.clone() as Arc<dyn HttpTransport>),
-            None,
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let dispatcher = router_with("http", stub.clone());
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
 
@@ -249,17 +319,12 @@ mod tests {
         create_task_with_target(&server, "task-2", "http://stub-server/webhook").await;
 
         // First pass: http_push disabled — message is consumed from queue and dropped.
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = empty_router();
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: http_push now enabled — queue should already be empty.
-        let stub = Arc::new(RecordingHttpTransport::new());
-        let enabled = TransportDispatcher::new(
-            Some(stub.clone() as Arc<dyn HttpTransport>),
-            None,
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let enabled = router_with("http", stub.clone());
         process_batch(&server.storage, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(
@@ -274,20 +339,16 @@ mod tests {
         let server = make_server();
         create_task_with_target(&server, "task-3", "poll://any@default").await;
 
-        let stub = Arc::new(RecordingPollTransport::new());
-        let dispatcher = TransportDispatcher::new(
-            None,
-            Some(stub.clone() as Arc<dyn PollTransport>),
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let dispatcher = router_with("poll", stub.clone());
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
 
         let calls = stub.calls();
         assert_eq!(calls.len(), 1, "expected exactly one poll dispatch");
-        assert_eq!(calls[0].0, "default");
-        let body: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+        // The worker receives the address verbatim, not a decomposed group.
+        assert_eq!(calls[0].0, "poll://any@default");
+        let body = &calls[0].1;
         assert_eq!(body["kind"], "execute");
         assert_eq!(body["data"]["task"]["id"], "task-3");
     }
@@ -297,16 +358,11 @@ mod tests {
         let server = make_server();
         create_task_with_target(&server, "task-4", "poll://any@default").await;
 
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = empty_router();
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
-        let stub = Arc::new(RecordingPollTransport::new());
-        let enabled = TransportDispatcher::new(
-            None,
-            Some(stub.clone() as Arc<dyn PollTransport>),
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let enabled = router_with("poll", stub.clone());
         process_batch(&server.storage, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(stub.calls().len(), 0);
@@ -333,20 +389,15 @@ mod tests {
         register_listener(&server, "p-unblock-1", "poll://uni@worker-group/worker-1").await;
         settle_promise(&server, "p-unblock-1").await;
 
-        let stub = Arc::new(RecordingPollTransport::new());
-        let dispatcher = TransportDispatcher::new(
-            None,
-            Some(stub.clone() as Arc<dyn PollTransport>),
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let dispatcher = router_with("poll", stub.clone());
 
         process_batch(&server.storage, &dispatcher, 100, "http://localhost:8001").await;
 
         let calls = stub.calls();
         assert_eq!(calls.len(), 1, "expected exactly one unblock dispatch");
-        assert_eq!(calls[0].0, "worker-group");
-        let body: serde_json::Value = serde_json::from_str(&calls[0].1).unwrap();
+        assert_eq!(calls[0].0, "poll://uni@worker-group/worker-1");
+        let body = &calls[0].1;
         assert_eq!(body["kind"], "unblock");
         assert_eq!(body["data"]["promise"]["id"], "p-unblock-1");
         assert_eq!(body["data"]["promise"]["state"], "resolved");
@@ -371,17 +422,12 @@ mod tests {
         settle_promise(&server, "p-unblock-2").await;
 
         // First pass: poll disabled — message consumed and dropped.
-        let disabled = TransportDispatcher::new(None, None, None, None);
+        let disabled = empty_router();
         process_batch(&server.storage, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: poll enabled — queue already drained.
-        let stub = Arc::new(RecordingPollTransport::new());
-        let enabled = TransportDispatcher::new(
-            None,
-            Some(stub.clone() as Arc<dyn PollTransport>),
-            None,
-            None,
-        );
+        let stub = Arc::new(RecordingWorker::new());
+        let enabled = router_with("poll", stub.clone());
         process_batch(&server.storage, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(stub.calls().len(), 0);

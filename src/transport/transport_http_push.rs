@@ -7,9 +7,19 @@ use std::time::Duration;
 use reqwest::Client;
 use tokio::sync::{mpsc, Semaphore};
 
-use super::HttpAddress;
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
+use async_trait::async_trait;
+
+use crate::core::types::Message;
+use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 use crate::metrics;
+
+/// An `http://` or `https://` destination. The whole address is the URL, so
+/// parsing is the identity — the type exists to keep the delivery queue typed.
+#[derive(Debug, Clone)]
+pub struct HttpAddress {
+    pub url: String,
+}
 
 // ---------------------------------------------------------------------------
 // Token provider abstraction
@@ -126,10 +136,15 @@ struct DeliveryJob {
 
 pub struct HttpPushTransport {
     tx: mpsc::Sender<DeliveryJob>,
+    /// Held so a delivery failure can be reported back to the server (e.g.
+    /// releasing the task instead of dropping it). Not used yet.
+    #[allow(dead_code)]
+    server: Arc<dyn ResonateServer>,
 }
 
 impl HttpPushTransport {
     pub fn new(
+        server: Arc<dyn ResonateServer>,
         connect_timeout: Duration,
         request_timeout: Duration,
         auth: Auth,
@@ -150,7 +165,7 @@ impl HttpPushTransport {
 
         tokio::spawn(dispatcher(client, auth, semaphore, rx));
 
-        Self { tx }
+        Self { tx, server }
     }
 
     /// Enqueue a delivery. Returns once the job is on the in-memory queue.
@@ -173,6 +188,25 @@ impl HttpPushTransport {
                 .with_label_values(&["dropped"])
                 .inc();
         }
+    }
+}
+
+#[async_trait]
+impl ResonateWorker for HttpPushTransport {
+    /// The address is the URL verbatim; the router has already guaranteed the
+    /// scheme is `http` or `https`.
+    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let payload = serde_json::to_value(msg)
+            .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
+        HttpPushTransport::send(
+            self,
+            &HttpAddress {
+                url: address.to_string(),
+            },
+            &payload,
+        )
+        .await;
+        Ok(())
     }
 }
 
@@ -248,7 +282,6 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::HttpAddress;
     use axum::{extract::State, routing::post, Router};
     use std::sync::Arc;
     use std::time::Duration;
@@ -319,7 +352,13 @@ mod tests {
     }
 
     fn make_transport(auth: Auth) -> HttpPushTransport {
-        HttpPushTransport::new(Duration::from_secs(5), Duration::from_secs(5), auth, 16)
+        HttpPushTransport::new(
+            Arc::new(crate::transport::stubs::NoopServer),
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            auth,
+            16,
+        )
     }
 
     #[tokio::test]

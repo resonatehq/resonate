@@ -198,6 +198,35 @@ pub struct ExecuteMsgTask {
     pub version: i64,
 }
 
+/// Head of an `unblock` message. Empty on the wire, unlike [`MessageHead`].
+#[derive(Debug, Serialize)]
+pub struct UnblockMsgHead {}
+
+#[derive(Debug, Serialize)]
+pub struct UnblockMsg {
+    pub kind: String,
+    pub head: UnblockMsgHead,
+    pub data: UnblockMsgData,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UnblockMsgData {
+    pub promise: PromiseRecord,
+}
+
+/// A message the server emits toward a worker — the vocabulary of
+/// [`ResonateWorker`](super::ResonateWorker) and
+/// [`ResonateRouter`](super::ResonateRouter).
+///
+/// Untagged: each variant already carries its own `kind` field, so this
+/// serializes exactly as the hand-built JSON it replaces.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum Message {
+    Execute(ExecuteMsg),
+    Unblock(UnblockMsg),
+}
+
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -705,7 +734,9 @@ pub struct TaskCreateResponseData {
     pub preload: Vec<PromiseRecord>,
 }
 
-#[derive(Debug, Serialize)]
+// Deserialize as well as Serialize: an in-process worker reads this back off
+// its own `task.acquire` response.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TaskAcquireResponseData {
     pub task: TaskRecord,
     pub promise: PromiseRecord,
@@ -858,5 +889,95 @@ impl ResponseEnvelope {
 
     pub fn success<T: Serialize>(kind: String, corr_id: String, data: &T) -> Self {
         Self::new(kind, corr_id, 200, serde_json::to_value(data).unwrap())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // `Message` replaced a hand-built `serde_json::json!` for unblock and a
+    // `to_value(ExecuteMsg)` for execute. The enum is `untagged` precisely so
+    // the bytes on the wire do not change; these pin that down.
+
+    /// The poll/SSE worker sends a serialized *string*, so key order is part of
+    /// its wire format — and `Value` comparison cannot see key order, which is
+    /// why the two tests below are not enough on their own.
+    #[test]
+    fn message_serializes_with_sorted_keys_like_the_value_hop() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        let via_value = serde_json::to_string(&serde_json::to_value(&msg).unwrap()).unwrap();
+        assert_eq!(
+            via_value,
+            r#"{"data":{"task":{"id":"t1","version":3}},"head":{"serverUrl":"http://localhost:8001"},"kind":"execute"}"#,
+            "SSE consumers have always received alphabetically ordered keys"
+        );
+        // Serializing the struct directly would emit declaration order instead.
+        assert_ne!(serde_json::to_string(&msg).unwrap(), via_value);
+    }
+
+    #[test]
+    fn execute_message_wire_format() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "execute",
+                "head": { "serverUrl": "http://localhost:8001" },
+                "data": { "task": { "id": "t1", "version": 3 } }
+            })
+        );
+    }
+
+    #[test]
+    fn unblock_message_wire_format() {
+        let promise = PromiseRecord {
+            id: "p1".to_string(),
+            state: PromiseState::Resolved,
+            param: PromiseValue::default(),
+            value: PromiseValue::default(),
+            tags: std::collections::HashMap::new(),
+            timeout_at: 100,
+            created_at: 1,
+            settled_at: Some(50),
+        };
+        let expected_promise = serde_json::to_value(&promise).unwrap();
+        let msg = Message::Unblock(UnblockMsg {
+            kind: "unblock".to_string(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData { promise },
+        });
+        // Note the empty head — unblock has never carried a serverUrl.
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "unblock",
+                "head": {},
+                "data": { "promise": expected_promise }
+            })
+        );
     }
 }

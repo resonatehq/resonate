@@ -8,7 +8,7 @@ use super::{
     TaskCreateResult, TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams,
     TaskFulfillParams, TaskFulfillResult, TaskHaltResult, TaskReleaseResult, TaskSuspendResult,
 };
-use crate::types::{
+use crate::core::types::{
     PromiseRecord, PromiseState, PromiseValue, ScheduleRecord, Snapshot, SnapshotCallback,
     SnapshotListener, SnapshotMessage, SnapshotPromiseTimeout, SnapshotTaskTimeout, TaskRecord,
     TaskState,
