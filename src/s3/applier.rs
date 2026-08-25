@@ -349,6 +349,10 @@ impl ApplierPool {
         &self.shared.cache
     }
 
+    pub fn cfg_kernel(&self) -> KernelCfg {
+        self.shared.cfg.kernel
+    }
+
     /// Decide one request against its origin's document.
     pub async fn submit(&self, origin: &str, req: Req, now: i64) -> Result<Reply, Unavailable> {
         let (tx, rx) = oneshot::channel();

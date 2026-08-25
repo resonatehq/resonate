@@ -11,5 +11,6 @@ pub mod codec;
 pub mod outbox;
 pub mod scan;
 pub mod schedules;
+pub mod server;
 pub mod store;
 pub mod timerd;
