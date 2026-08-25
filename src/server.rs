@@ -40,15 +40,19 @@ use async_trait::async_trait;
 use validator::Validate;
 
 /// The running server — owns configuration, storage, and auth.
+///
+/// `auth` is shared rather than owned: the HTTP adapter enforces it, and the
+/// adapter is generic over the backend, so the configuration has to be
+/// reachable without one.
 pub struct Server {
     pub config: Config,
     pub storage: Arc<Storage>,
-    pub auth: Option<auth::AuthConfig>,
+    pub auth: Option<Arc<auth::AuthConfig>>,
     pub debug_mode: AtomicBool,
 }
 
 impl Server {
-    pub fn new(config: Config, auth: Option<auth::AuthConfig>, storage: Storage) -> Self {
+    pub fn new(config: Config, auth: Option<Arc<auth::AuthConfig>>, storage: Storage) -> Self {
         Self {
             config,
             storage: Arc::new(storage),
@@ -60,31 +64,67 @@ impl Server {
 
 // === Shared application state ===
 
+/// Whether the backend can serve traffic — the only thing `/ready` needs to
+/// know, and the only reason the HTTP adapter would touch storage.
+///
+/// A trait because "reachable" means a different query for each backend, and
+/// because the adapter otherwise has no business knowing there is storage at
+/// all.
+#[async_trait]
+pub trait ReadinessProbe: Send + Sync {
+    async fn ready(&self) -> bool;
+}
+
+#[async_trait]
+impl ReadinessProbe for Server {
+    async fn ready(&self) -> bool {
+        match self.storage.query(|db| db.ping()).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!(error = %e, "Readiness check failed: storage database unavailable");
+                false
+            }
+        }
+    }
+}
+
+/// What the HTTP adapter needs, and nothing more: something that answers the
+/// protocol, something that reports readiness, the auth configuration, and the
+/// poll registry.
+///
+/// Holding [`ResonateServer`] rather than a concrete `Server` is what lets a
+/// second backend be served by the same routes.
 #[derive(Clone)]
 pub struct AppState {
-    pub server: Arc<Server>,
+    pub server: Arc<dyn ResonateServer>,
+    pub ready: Arc<dyn ReadinessProbe>,
+    pub auth: Option<Arc<auth::AuthConfig>>,
     pub poll_registry: Arc<PollRegistry>,
     pub sse_shutdown_rx: tokio::sync::watch::Receiver<bool>,
 }
 
-// Sub-state for API handlers — only needs the server.
+// Sub-state for API handlers.
 #[derive(Clone)]
 pub struct ApiState {
-    pub server: Arc<Server>,
+    pub server: Arc<dyn ResonateServer>,
+    pub ready: Arc<dyn ReadinessProbe>,
+    pub auth: Option<Arc<auth::AuthConfig>>,
 }
 
 impl axum::extract::FromRef<AppState> for ApiState {
     fn from_ref(state: &AppState) -> Self {
         ApiState {
             server: state.server.clone(),
+            ready: state.ready.clone(),
+            auth: state.auth.clone(),
         }
     }
 }
 
-// Sub-state for poll handler — needs server (for auth) and poll registry.
+// Sub-state for the poll handler — auth, and the registry it serves from.
 #[derive(Clone)]
 pub struct PollState {
-    pub server: Arc<Server>,
+    pub auth: Option<Arc<auth::AuthConfig>>,
     pub poll_registry: Arc<PollRegistry>,
     pub sse_shutdown_rx: tokio::sync::watch::Receiver<bool>,
 }
@@ -92,7 +132,7 @@ pub struct PollState {
 impl axum::extract::FromRef<AppState> for PollState {
     fn from_ref(state: &AppState) -> Self {
         PollState {
-            server: state.server.clone(),
+            auth: state.auth.clone(),
             poll_registry: state.poll_registry.clone(),
             sse_shutdown_rx: state.sse_shutdown_rx.clone(),
         }
@@ -136,12 +176,10 @@ async fn handle_health() -> StatusCode {
 }
 
 async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
-    match state.server.storage.query(|db| db.ping()).await {
-        Ok(()) => StatusCode::OK,
-        Err(e) => {
-            tracing::error!(error = %e, "Readiness check failed: storage database unavailable");
-            StatusCode::SERVICE_UNAVAILABLE
-        }
+    if state.ready.ready().await {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
     }
 }
 
@@ -176,10 +214,9 @@ fn extract_error_context(body: &[u8]) -> (String, String) {
 }
 
 async fn handle_api(
-    State(api_state): State<ApiState>,
+    State(state): State<ApiState>,
     body: axum::body::Bytes,
 ) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
-    let state = &api_state.server;
     let start = std::time::Instant::now();
     // Deserialize the envelope using serde. On failure, attempt to extract
     // kind from the raw JSON so the error response can include it.
@@ -268,7 +305,7 @@ async fn handle_api(
         }
     }
 
-    let response = match state.process(&req).await {
+    let response = match state.server.process(&req).await {
         Ok(resp) => resp,
         Err(e) => {
             tracing::error!(kind = %kind, corr_id = %corr_id, error = %e, "Server unavailable");
@@ -320,7 +357,7 @@ async fn handle_poll(
     Path((group, id)): Path<(String, String)>,
 ) -> Response {
     // Authenticate when auth is configured.
-    if let Some(auth) = &poll_state.server.auth {
+    if let Some(auth) = &poll_state.auth {
         let token = headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())

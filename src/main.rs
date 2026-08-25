@@ -175,11 +175,11 @@ async fn run_server(config: Config) -> Result<(), String> {
             if let Some(aud) = &auth_cfg.aud {
                 tracing::info!(audience = %aud, "Auth audience configured");
             }
-            Some(auth::AuthConfig {
+            Some(Arc::new(auth::AuthConfig {
                 key,
                 iss: auth_cfg.iss.clone(),
                 aud: auth_cfg.aud.clone(),
-            })
+            }))
         }
         None => {
             tracing::info!("Auth disabled — all requests accepted");
@@ -235,7 +235,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
     let is_sqlite = config.storage.storage_type == "sqlite";
-    let state = Arc::new(Server::new(config, auth_config, storage));
+    let state = Arc::new(Server::new(config, auth_config.clone(), storage));
 
     // Build transports
     tracing::info!(
@@ -389,7 +389,9 @@ async fn run_server(config: Config) -> Result<(), String> {
     }
 
     let app_state = server::AppState {
-        server: state,
+        server: Arc::clone(&server),
+        ready: Arc::clone(&state) as Arc<dyn server::ReadinessProbe>,
+        auth: auth_config,
         poll_registry,
         sse_shutdown_rx,
     };
