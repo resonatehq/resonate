@@ -5,6 +5,7 @@
 // Backends:
 //   SQLite   — always active (in-memory, :memory:)
 //   Oracle   — always active (in-memory reference model)
+//   S3       — always active (kernel + shell over an in-process object store)
 //   Postgres — active when TEST_POSTGRES_URL env var is set
 //   MySQL    — active when TEST_MYSQL_URL env var is set
 //
@@ -41,6 +42,10 @@ use resonate::{
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
         persistence_sqlite::SqliteStorage, Storage,
+    },
+    s3::{
+        applier::{ApplierCfg, KeySpace},
+        server::{S3Server, S3ServerCfg},
     },
     server::Server,
 };
@@ -124,6 +129,26 @@ fn server_backend(storage: Storage) -> Backend {
     Arc::new(Server::new(debug_config(), None, storage))
 }
 
+/// The S3 backend over `object_store`'s in-process store, which implements the
+/// conditional writes the design requires.
+///
+/// Built through the same constructor `main` uses, so what the suite compares is
+/// the graph that ships.
+fn s3_backend() -> Backend {
+    S3Server::in_memory(S3ServerCfg {
+        keys: KeySpace::new("diff", 4),
+        applier: ApplierCfg {
+            kernel: resonate::kernel::KernelCfg {
+                retry_timeout: TASK_RETRY_TIMEOUT_MS,
+            },
+            ..Default::default()
+        },
+        debug: true,
+        server_url: String::new(),
+        ..Default::default()
+    })
+}
+
 // Pick a random element from a slice.
 fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
     if v.is_empty() {
@@ -187,6 +212,7 @@ async fn differential_random() {
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
+        ("s3".into(), s3_backend()),
     ];
     if let Some(pg) = pg_backend {
         backends.push(("postgres".into(), pg));
