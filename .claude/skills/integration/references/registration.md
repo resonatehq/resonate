@@ -3,10 +3,12 @@
 Adding an integration is five edits. Nothing in `src/core/` changes: a new scheme is a
 registration, by design.
 
-Names and layout come from `references/conformance.md` — follow it rather than inventing,
-so this integration reads like every other one.
+Names and layout come from `references/structure.md` — follow them rather than inventing, so
+this integration reads like every other one. What goes *in* those slots — the address beyond
+the scheme, the config fields, the param fields — is yours to decide for your system.
 
-Use `src/transport/transport_airflow.rs` and its config/registration as the template.
+`src/transport/transport_airflow.rs` and its config/registration show that structure filled in
+for one system. Read it as an instance, not as a form to copy.
 
 ## 1. The worker — `src/transport/transport_<name>.rs`
 

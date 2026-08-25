@@ -27,17 +27,19 @@ on it, and gets back a value.
 An integration is **not** a Resonate SDK application, and not a place for business logic.
 It maps a request to a run, and a run's state to a promise's state.
 
-## Why the shape is prescribed
+## Why integrations look alike
 
-There will be a lot of these. Someone who has read one should be able to open another and
-know where everything is, what its value will look like, and which failures reject rather
-than retry — without reading it first. That only holds if the shape is the same every time,
-so this skill prescribes rather than suggests: file layout, function names, the value
-envelope, the error kinds, the config keys, the test names.
+There will be a lot of these, and they all work the same way: claim a task, start one run,
+watch two clocks, settle one promise. Because the mechanism is the same, the code should be
+recognisable — someone who has read one integration should open the next and find *where it
+starts the run, where it decides, where it settles* in the same place, under the same name.
 
-`references/conformance.md` is the canon. Deviate where the downstream system genuinely
-forces it, and say so in the README's *Limitations* — an unexplained deviation is a bug, not
-a style choice.
+They are not the same integration with the names changed. Addresses, config, params and what
+"done" means all differ, in whatever way makes sense for the system being wrapped — forcing
+those to match would make the integration lie about the system.
+
+`references/structure.md` splits the two: the skeleton that is fixed everywhere, and the
+parts you decide for your system.
 
 ## The two in-tree references
 
@@ -234,9 +236,11 @@ transient. `references/lifecycle.md` has the full table.
 1. **Check the precondition.** Does downstream create accept a client-supplied id or
    idempotency key? If not → `references/idempotency.md`, then ask the user.
 2. **Write the three schemas** and get them reviewed. They are the public contract.
-3. **Follow `references/conformance.md`.** File layout, function names, the value envelope,
-   the error kinds, the config keys. `src/transport/transport_airflow.rs` is the worked
-   example of exactly that shape.
+3. **Build it on the shared skeleton** — `references/structure.md`. Fixed: the
+   `run`/`execute`/`work` layering, claim-first, the two clocks, the value envelope, the
+   error classification. Yours: the address beyond the scheme, the config fields, the param
+   fields, what "done" means downstream. `src/transport/transport_airflow.rs` is that
+   skeleton filled in for one system.
 4. **Register it** — five edits, listed in `references/registration.md`.
 5. **Write the README** from `references/readme-template.md`. The three schemas, the
    idempotency key and what the downstream does with duplicates, the configuration, and an
@@ -256,7 +260,7 @@ transient. `references/lifecycle.md` has the full table.
 | `references/lifecycle.md` | Acquire / create / monitor / settle, error classification, timeouts and orphans |
 | `references/idempotency.md` | Decision tree, and what to do when the downstream offers no dedupe |
 | `references/schemas.md` | Address, param and value schema rules |
-| `references/conformance.md` | **The uniform shape** — layout, names, schemas, kinds, config, tests |
+| `references/structure.md` | **What every integration shares, and what differs per system** |
 | `references/registration.md` | The five edits that plug a worker into the server |
 | `references/readme-template.md` | The README every integration ships, section by section |
 | `references/testing.md` | The four layers, and the ways these tests quietly lie |

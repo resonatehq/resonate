@@ -172,9 +172,11 @@ Same encoding. Define **both** branches.
              "message": "DAG run finished in state failed" } }
 ```
 
-`error.kind` is a **closed set**, identical across every integration, because callers branch
-on it and should not have to know which integration they are talking to. Adding a kind is a
-change to `references/conformance.md`, not a local decision:
+`error.kind` is **shared vocabulary**: these five mean the same thing in every integration,
+because callers branch on them and should not have to know which integration they are talking
+to. Use them where they apply; if your system has a failure none of them describes, add a kind
+and document it in the README rather than stretching one of these to cover it
+(`references/structure.md`).
 
 | kind | Meaning |
 |---|---|
@@ -184,8 +186,8 @@ change to `references/conformance.md`, not a local decision:
 | `downstream_failed` | The run was created and finished in a failure state. The normal failure. |
 | `canceled` | The run was cancelled out of band. The promise settles `rejected`, not `rejected_canceled` — that state is reserved for cancellation initiated through Resonate. |
 
-The outer shape is fixed — `run` plus exactly one of `output` / `error`. Only what is inside
-`output` differs between integrations. See `references/conformance.md`.
+The outer shape is fixed — `run` plus exactly one of `output` / `error`. What is inside
+`output` is entirely the integration's own. See `references/structure.md`.
 
 Rules:
 
