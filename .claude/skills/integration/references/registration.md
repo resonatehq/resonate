@@ -152,19 +152,30 @@ the protocol frame — claim, ask, settle — and knows nothing about the downst
 `?` carries the failures.
 
 Keeping `run` at the protocol's altitude is the point of the split: it hands off to
-something unspecified and gets back a `Settlement`, so a downstream run, an error kind and
-a value schema never appear in it.
+something unspecified and gets back one of three answers, so a downstream run, an error kind
+and a value schema never appear in it.
 
-`run` and `execute` below are complete — they are the same in every integration. `work` is
-a **sketch**: its shape is fixed (resolve, start, watch, report) but every line of it is
-yours. `src/transport/transport_airflow.rs` is one filled-in version.
+What matters is the flow, not the types below. There are **three outcomes** and `run` has to
+be able to tell them apart:
+
+| Outcome | `run` does |
+|---|---|
+| The work produced a result | fulfill the task `resolved`, with a value |
+| The work failed in a way that can never succeed | fulfill the task `rejected`, with a value |
+| Transient failure, or the deadline passed | fulfill nothing — the delivery is given back, and redelivery retries or the server times the promise out |
+
+Encode that however you like — a three-variant enum, `Option<Result<..>>`, a struct, a
+callback. The code below is one way, written out so the flow is readable end to end; treat
+it as a sketch to adapt, not a base class to inherit. `work` especially: its rhythm is
+fixed (resolve, start, watch, report) but every line of it is yours.
+`src/transport/transport_airflow.rs` is one filled-in version.
 
 ```rust
 /// The protocol frame: claim the task, do the work, settle the promise.
 ///
 /// Nothing here is integration-specific. It never sees a downstream run, an
-/// error kind or a value schema — `execute` decides all of that and hands
-/// back a `Settlement`, and this body's whole job is to apply it.
+/// error kind or a value schema — `execute` decides all of that, and this
+/// body's whole job is to apply the answer.
 async fn run(self) {
     // ── 1. Claim the task ────────────────────────────────────────────────
     //
@@ -227,12 +238,11 @@ async fn run(self) {
 }
 ```
 
+One way to carry the three outcomes back — pick whatever suits the integration, as long as
+"settle nothing" cannot be confused with "settle rejected":
+
 ```rust
-/// What the work decided the promise should become.
-///
-/// `None` leaves it alone — the server settles a timed-out promise itself, and
-/// a transient failure must be left for redelivery to retry. This is the only
-/// vocabulary `run` needs: it settles, it does not interpret.
+/// What the work decided the promise should become. `None` leaves it alone.
 type Settlement = Option<(SettleState, PromiseValue)>;
 
 /// Do the work, and decide what the promise becomes.

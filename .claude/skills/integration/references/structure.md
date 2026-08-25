@@ -18,21 +18,23 @@ So: **the skeleton is fixed, the flesh is yours.** Two lists follow.
 
 ## What is the same everywhere
 
-These are the things a reader relies on without checking. Change one and the integration
-stops being recognisable — or stops being safe.
+These are the things a reader relies on without checking. They are properties of the flow,
+not of any particular code — how you express them is yours. Lose one, though, and the
+integration stops being recognisable, or stops being safe.
 
 ### The layering
 
 ```
 send      hand off, return Ok(())        — never blocks the router
 run       claim → execute → settle       — the protocol frame
-execute   outcome → Settlement           — the error policy, and nothing else
+execute   what happened → which outcome  — the error policy, and nothing else
 work      resolve, validate, start, watch — the integration proper
 ```
 
 `run` never does downstream work; `work` never settles. `execute` is the only place that
-decides *whether* a failure settles the promise. Splitting them differently is the one
-deviation that always reads as a different integration rather than a variation.
+decides *whether* a failure settles the promise. Four functions is one way to draw those
+lines and the one the example uses; what has to survive is the separation, because it is
+what keeps "the run failed" from being confused with "we could not tell".
 
 ### Claim first
 
@@ -103,7 +105,7 @@ should not have to guess what you called it.
 | `PID` | The pid this worker claims under |
 | `RunContext` | One delivery in flight: `{ worker, task }` |
 | `Target` | The resolved deployment, looked up after the claim |
-| `Settlement` | `Option<(SettleState, PromiseValue)>` — `None` leaves the promise alone |
+| `Settlement` | The answer `execute` hands back: resolve with a value, reject with a value, or settle nothing. The type is the implementer's call; only the three outcomes are. |
 | `run` / `execute` / `work` | The layering above |
 | `start` | The idempotent create. A duplicate is success. |
 | `check` | One status check |
