@@ -9,5 +9,6 @@ pub mod applier;
 pub mod cache;
 pub mod codec;
 pub mod outbox;
+pub mod schedules;
 pub mod store;
 pub mod timerd;

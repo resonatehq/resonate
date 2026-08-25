@@ -112,6 +112,7 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
         Req::TaskHeartbeat(r) => op_task_heartbeat(&mut tx, r, now),
         Req::TaskHalt(r) => op_task_halt(&mut tx, r, now, cfg),
         Req::TaskContinue(r) => op_task_continue(&mut tx, r, now, cfg),
+        Req::ScheduleFire(r) => op_schedule_fire(&mut tx, r, now, cfg),
     };
     (tx.finish(doc), reply)
 }
@@ -666,6 +667,76 @@ pub(crate) fn acquire(tx: &mut Tx, id: &str, ttl: i64, pid: &str, now: i64) -> T
     t.resumes.clear();
     t.arm_lease(now + ttl);
     t.to_record(id)
+}
+
+// ============================================================================
+// Schedules
+// ============================================================================
+
+/// Create the promise a due schedule owes, if it is not already there.
+///
+/// Two stamps differ from an ordinary create, and both come from
+/// `process_schedule_timeout` (`persistence_sqlite.rs:1329-1400`):
+///
+/// - `created_at` is the *occurrence*, not `now`, and stays the occurrence even
+///   when the promise is born settled — where an ordinary create would stamp
+///   the deadline. A schedule's promise is dated by the tick it represents.
+/// - the first dispatch is timed from `now`, the sweep that noticed, not from
+///   `created_at` — an occurrence noticed late is retried from when it was
+///   noticed.
+///
+/// Idempotent on the promise id, which is what lets the firing path create the
+/// promise before advancing the schedule: a crash in between refires, and the
+/// second attempt finds the promise already there.
+fn op_schedule_fire(
+    tx: &mut Tx,
+    r: &crate::kernel::state::ScheduleFireData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    if tx.doc.promises.contains_key(&r.id) {
+        return Reply::status(200, json!({}));
+    }
+    let already_timedout = now >= r.timeout_at;
+    let mut promise = PromiseDoc {
+        state: PromiseState::Pending,
+        param: r.param.clone(),
+        value: PromiseValue::default(),
+        tags: r.tags.clone(),
+        timeout_at: r.timeout_at,
+        created_at: r.fired_at,
+        settled_at: None,
+        callbacks: Vec::new(),
+        listeners: Vec::new(),
+    };
+    if already_timedout {
+        promise.state = promise.timeout_state();
+        promise.settled_at = Some(r.timeout_at);
+    }
+    let has_target = promise.target().is_some();
+    tx.doc.promises.insert(r.id.clone(), promise);
+
+    if !has_target {
+        return Reply::status(200, json!({}));
+    }
+    let mut task = TaskDoc {
+        state: TaskState::Fulfilled,
+        version: 0,
+        pid: None,
+        ttl: None,
+        resumes: BTreeSet::new(),
+        retry_at: None,
+        lease_at: None,
+    };
+    if already_timedout {
+        tx.doc.tasks.insert(r.id.clone(), task);
+        return Reply::status(200, json!({}));
+    }
+    task.state = TaskState::Pending;
+    task.arm_retry(now + cfg.retry_timeout);
+    tx.doc.tasks.insert(r.id.clone(), task);
+    tx.send_execute(&r.id, 0);
+    Reply::status(200, json!({}))
 }
 
 // ============================================================================

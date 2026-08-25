@@ -205,6 +205,27 @@ pub enum Req {
     TaskHeartbeat(TaskHeartbeatData),
     TaskHalt(TaskHaltData),
     TaskContinue(TaskContinueData),
+    /// A schedule's occurrence coming due.
+    ///
+    /// Not a protocol operation — no caller can send it — but a transition on
+    /// an origin document all the same, and one whose stamps differ from an
+    /// ordinary create: the promise is created *as of* the occurrence it
+    /// represents, while its first dispatch is timed from the sweep that
+    /// noticed. See `process_schedule_timeout`
+    /// (`persistence_sqlite.rs:1329-1400`).
+    ScheduleFire(ScheduleFireData),
+}
+
+/// The promise a due schedule creates, with its template already rendered and
+/// its tags already stamped.
+#[derive(Debug, Clone)]
+pub struct ScheduleFireData {
+    pub id: String,
+    pub timeout_at: i64,
+    pub param: PromiseValue,
+    pub tags: BTreeMap<String, String>,
+    /// The occurrence this promise represents. Becomes `created_at`.
+    pub fired_at: i64,
 }
 
 /// A message the shell must deliver after the document commits.
