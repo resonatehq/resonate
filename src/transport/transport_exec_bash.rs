@@ -772,7 +772,7 @@ mod tests {
         let storage = Storage::Sqlite(SqliteStorage::open(":memory:", 30_000).unwrap());
         let mut config = Config::default();
         config.server.url = Some("http://localhost:8001".to_string());
-        Arc::new(Server::new(config, None, storage))
+        Arc::new(Server::new(config, storage))
     }
 
     /// Create a promise whose `resonate:target` is a bash address and whose

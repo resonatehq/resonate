@@ -235,11 +235,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .await
                 .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
             tracing::info!("PostgreSQL initialized");
-            Backend::Sql(Arc::new(Server::new(
-                config.clone(),
-                auth_config.clone(),
-                Storage::Postgres(pg),
-            )))
+            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Postgres(pg))))
         }
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();
@@ -251,11 +247,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .init()
                 .await
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
-            Backend::Sql(Arc::new(Server::new(
-                config.clone(),
-                auth_config.clone(),
-                Storage::Mysql(mysql),
-            )))
+            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Mysql(mysql))))
         }
         "s3" => {
             let s3 = &config.storage.s3;
@@ -319,11 +311,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
-            Backend::Sql(Arc::new(Server::new(
-                config.clone(),
-                auth_config.clone(),
-                Storage::Sqlite(sqlite),
-            )))
+            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Sqlite(sqlite))))
         }
     };
 

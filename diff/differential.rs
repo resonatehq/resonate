@@ -126,7 +126,7 @@ async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> Respon
 }
 
 fn server_backend(storage: Storage) -> Backend {
-    Arc::new(Server::new(debug_config(), None, storage))
+    Arc::new(Server::new(debug_config(), storage))
 }
 
 /// The S3 backend over `object_store`'s in-process store, which implements the

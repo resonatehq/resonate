@@ -39,24 +39,22 @@ use crate::util;
 use async_trait::async_trait;
 use validator::Validate;
 
-/// The running server — owns configuration, storage, and auth.
+/// The running server — owns configuration and storage.
 ///
-/// `auth` is shared rather than owned: the HTTP adapter enforces it, and the
-/// adapter is generic over the backend, so the configuration has to be
-/// reachable without one.
+/// Not auth: the HTTP adapter enforces that, and the adapter is generic over
+/// the backend, so the configuration lives beside it in [`AppState`] rather
+/// than inside any one backend.
 pub struct Server {
     pub config: Config,
     pub storage: Arc<Storage>,
-    pub auth: Option<Arc<auth::AuthConfig>>,
     pub debug_mode: AtomicBool,
 }
 
 impl Server {
-    pub fn new(config: Config, auth: Option<Arc<auth::AuthConfig>>, storage: Storage) -> Self {
+    pub fn new(config: Config, storage: Storage) -> Self {
         Self {
             config,
             storage: Arc::new(storage),
-            auth,
             debug_mode: AtomicBool::new(false),
         }
     }

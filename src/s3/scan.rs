@@ -348,10 +348,6 @@ mod tests {
         }
     }
 
-    fn origin_of(id: &str) -> &str {
-        id.split_once(':').map(|(o, _)| o).unwrap_or(id)
-    }
-
     async fn submit(r: &Rig, origin: &str, req: Req, now: i64) -> Reply {
         r.applier.submit(origin, req, now).await.unwrap()
     }

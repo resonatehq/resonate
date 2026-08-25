@@ -160,7 +160,7 @@ mod tests {
         let storage = Storage::Sqlite(sqlite);
         let mut config = Config::default();
         config.server.url = Some("http://localhost:8001".to_string());
-        Arc::new(Server::new(config, None, storage))
+        Arc::new(Server::new(config, storage))
     }
 
     fn req(kind: &str, data: serde_json::Value) -> RequestEnvelope {
