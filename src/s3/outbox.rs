@@ -26,15 +26,53 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use async_trait::async_trait;
 
 use crate::core::types::{
     ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, PromiseRecord,
     SnapshotMessage, UnblockMsg, UnblockMsgData, UnblockMsgHead,
 };
-use crate::core::ResonateRouter;
+use crate::core::{ResonateRouter, Unavailable};
 use crate::kernel::state::OutEntry;
 use crate::metrics;
+
+/// A router registered after the thing that needs it was built.
+///
+/// The dependency graph has one knot: the outbox needs a router, the router
+/// needs its workers, and a worker needs a handle to the server the outbox
+/// lives in. Something has to be filled in late, and a router is the safest
+/// candidate — nothing is delivered until the server is listening.
+#[derive(Default)]
+pub struct LateRouter {
+    inner: OnceLock<Arc<dyn ResonateRouter>>,
+}
+
+impl LateRouter {
+    pub fn new() -> Self {
+        Self {
+            inner: OnceLock::new(),
+        }
+    }
+
+    /// Register the router. Returns false if one was already registered.
+    pub fn bind(&self, router: Arc<dyn ResonateRouter>) -> bool {
+        self.inner.set(router).is_ok()
+    }
+}
+
+#[async_trait]
+impl ResonateRouter for LateRouter {
+    async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        match self.inner.get() {
+            Some(router) => router.route(address, msg).await,
+            None => Err(Unavailable::new(
+                "no router registered yet; message dropped",
+            )),
+        }
+    }
+}
 
 #[derive(Default)]
 struct Pending {
@@ -212,8 +250,6 @@ impl Outbox {
 mod tests {
     use super::*;
     use crate::core::types::{PromiseState, PromiseValue};
-    use crate::core::Unavailable;
-    use async_trait::async_trait;
 
     /// A router that records what it was asked to deliver.
     struct Recorder {
@@ -488,5 +524,67 @@ mod tests {
         ob.set_paused(false);
         ob.deliver().await;
         assert!(rec.sent().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod late_router_tests {
+    use super::*;
+    use crate::core::types::{PromiseState, PromiseValue, PromiseRecord};
+
+    struct Counting(Mutex<usize>);
+
+    #[async_trait]
+    impl ResonateRouter for Counting {
+        async fn route(&self, _address: &str, _msg: &Message) -> Result<(), Unavailable> {
+            *self.0.lock().unwrap() += 1;
+            Ok(())
+        }
+    }
+
+    fn unblock() -> Message {
+        Message::Unblock(UnblockMsg {
+            kind: "unblock".into(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData {
+                promise: PromiseRecord {
+                    id: "o:p".into(),
+                    state: PromiseState::Resolved,
+                    param: PromiseValue::default(),
+                    value: PromiseValue::default(),
+                    tags: Default::default(),
+                    timeout_at: 1,
+                    created_at: 0,
+                    settled_at: Some(1),
+                },
+            },
+        })
+    }
+
+    #[tokio::test]
+    async fn routing_before_binding_reports_the_message_undelivered() {
+        let late = LateRouter::new();
+        let err = late.route("http://w", &unblock()).await.expect_err("no router");
+        assert!(err.to_string().contains("no router registered"));
+    }
+
+    #[tokio::test]
+    async fn once_bound_every_message_reaches_the_router() {
+        let late = LateRouter::new();
+        let counting = Arc::new(Counting(Mutex::new(0)));
+        assert!(late.bind(Arc::clone(&counting) as Arc<dyn ResonateRouter>));
+        late.route("http://w", &unblock()).await.unwrap();
+        late.route("http://w", &unblock()).await.unwrap();
+        assert_eq!(*counting.0.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_second_binding_is_refused_rather_than_silently_replacing_the_first() {
+        let late = LateRouter::new();
+        let first = Arc::new(Counting(Mutex::new(0)));
+        assert!(late.bind(Arc::clone(&first) as Arc<dyn ResonateRouter>));
+        assert!(!late.bind(Arc::new(Counting(Mutex::new(0))) as Arc<dyn ResonateRouter>));
+        late.route("http://w", &unblock()).await.unwrap();
+        assert_eq!(*first.0.lock().unwrap(), 1);
     }
 }

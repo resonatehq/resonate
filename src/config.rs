@@ -123,11 +123,11 @@ impl Default for ServerConfig {
 
 /// Storage backend configuration.
 ///
-/// The `type` field selects the active backend ("sqlite", "postgres", or "mysql").
-/// Backend-specific settings are in the `sqlite`, `postgres`, and `mysql` sub-structs.
+/// The `type` field selects the active backend ("sqlite", "postgres", "mysql",
+/// or "s3"). Backend-specific settings live in the matching sub-struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Active backend: "sqlite", "postgres", or "mysql"
+    /// Active backend: "sqlite", "postgres", "mysql", or "s3"
     #[serde(default = "default_storage_type", rename = "type")]
     pub storage_type: String,
 
@@ -142,6 +142,10 @@ pub struct StorageConfig {
     /// MySQL-specific configuration
     #[serde(default)]
     pub mysql: MysqlConfig,
+
+    /// S3-specific configuration
+    #[serde(default)]
+    pub s3: S3Config,
 }
 
 fn default_storage_type() -> String {
@@ -208,6 +212,77 @@ impl Default for MysqlConfig {
     }
 }
 
+/// S3 backend configuration.
+///
+/// **The store must implement real conditional writes.** The whole design rests
+/// on `If-Match` and `If-None-Match: *`: S3, R2, GCS and Azure have them, and
+/// MinIO, B2 and Spaces do not — pointed at one of those, this backend silently
+/// loses writes rather than failing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3Config {
+    /// Bucket holding every object. Required when `type = "s3"`.
+    #[serde(default)]
+    pub bucket: Option<String>,
+
+    /// Region. Defaults to whatever the environment or instance metadata says.
+    #[serde(default)]
+    pub region: Option<String>,
+
+    /// Endpoint override, for an S3-compatible service.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    /// Allow a plain-HTTP endpoint. Only for a local test service.
+    #[serde(default)]
+    pub allow_http: bool,
+
+    /// Prefix under which every key lives, so one bucket can hold several
+    /// deployments.
+    #[serde(default)]
+    pub prefix: String,
+
+    /// How many prefixes the timer keys are spread across.
+    ///
+    /// Timer keys carry their deadline, so they increase monotonically — the
+    /// classic S3 hot-prefix anti-pattern. Sharding spreads the writes.
+    #[serde(default = "default_timer_shards")]
+    pub timer_shards: u32,
+
+    /// Documents held in the read cache.
+    #[serde(default = "default_cache_capacity")]
+    pub cache_capacity: usize,
+
+    /// How many times a batch is re-decided after losing a race before the
+    /// caller is told there is no answer.
+    #[serde(default = "default_max_cas_retries")]
+    pub max_cas_retries: u32,
+}
+
+fn default_timer_shards() -> u32 {
+    4
+}
+fn default_cache_capacity() -> usize {
+    10_000
+}
+fn default_max_cas_retries() -> u32 {
+    8
+}
+
+impl Default for S3Config {
+    fn default() -> Self {
+        Self {
+            bucket: None,
+            region: None,
+            endpoint: None,
+            allow_http: false,
+            prefix: String::new(),
+            timer_shards: default_timer_shards(),
+            cache_capacity: default_cache_capacity(),
+            max_cas_retries: default_max_cas_retries(),
+        }
+    }
+}
+
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
@@ -215,6 +290,7 @@ impl Default for StorageConfig {
             sqlite: SqliteConfig::default(),
             postgres: PostgresConfig::default(),
             mysql: MysqlConfig::default(),
+            s3: S3Config::default(),
         }
     }
 }
@@ -623,9 +699,19 @@ impl Config {
         // Validate storage type
         match self.storage.storage_type.as_str() {
             "sqlite" | "postgres" | "mysql" => {}
+            "s3" => {
+                if self.storage.s3.bucket.as_deref().unwrap_or("").is_empty() {
+                    return Err(
+                        "S3 storage selected but no bucket configured. Set --storage-s3-bucket or RESONATE_STORAGE__S3__BUCKET".to_string(),
+                    );
+                }
+                if self.storage.s3.timer_shards == 0 {
+                    return Err("storage.s3.timer_shards must be at least 1 (got 0)".to_string());
+                }
+            }
             other => {
                 return Err(format!(
-                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
+                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', 'mysql', and 's3'.",
                     other
                 ));
             }
@@ -663,6 +749,18 @@ impl Config {
             ));
         }
 
+        // The S3 backend deletes a fired timer key only after sweeping it, which
+        // is safe only while a re-armed deadline is strictly later than the
+        // instant it was swept at. A non-positive retry timeout would re-arm
+        // into the past and the sweep would delete the key it had just written,
+        // stranding the origin.
+        if self.tasks.retry_timeout < 1 {
+            return Err(format!(
+                "tasks.retry_timeout must be at least 1 (got {})",
+                self.tasks.retry_timeout
+            ));
+        }
+
         Ok(())
     }
 }
@@ -670,6 +768,66 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn s3_config() -> Config {
+        let mut config = Config::default();
+        config.storage.storage_type = "s3".to_string();
+        config.storage.s3.bucket = Some("my-bucket".to_string());
+        config
+    }
+
+    #[test]
+    fn s3_storage_needs_a_bucket() {
+        let mut config = s3_config();
+        config.storage.s3.bucket = None;
+        let err = config.validate().expect_err("rejected");
+        assert!(err.contains("no bucket configured"), "{err}");
+
+        config.storage.s3.bucket = Some(String::new());
+        assert!(config.validate().is_err(), "an empty bucket is no bucket");
+
+        config.storage.s3.bucket = Some("my-bucket".into());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn s3_storage_needs_at_least_one_timer_shard() {
+        // Zero shards would leave the timer prefix unreadable: there would be
+        // no prefix to list.
+        let mut config = s3_config();
+        config.storage.s3.timer_shards = 0;
+        let err = config.validate().expect_err("rejected");
+        assert!(err.contains("timer_shards"), "{err}");
+    }
+
+    #[test]
+    fn the_retry_timeout_must_be_positive() {
+        // The S3 poller deletes a fired timer key only after sweeping it, which
+        // is safe only while the re-armed deadline is strictly later than the
+        // sweep. A zero retry timeout would re-arm into the past.
+        let mut config = Config::default();
+        config.tasks.retry_timeout = 0;
+        let err = config.validate().expect_err("rejected");
+        assert!(err.contains("retry_timeout"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_storage_type_names_every_valid_one() {
+        let mut config = Config::default();
+        config.storage.storage_type = "cassandra".to_string();
+        let err = config.validate().expect_err("rejected");
+        assert!(err.contains("s3"), "{err}");
+    }
+
+    #[test]
+    fn s3_defaults_are_usable_as_they_stand() {
+        let s3 = S3Config::default();
+        assert_eq!(s3.timer_shards, 4);
+        assert_eq!(s3.cache_capacity, 10_000);
+        assert_eq!(s3.max_cas_retries, 8);
+        assert_eq!(s3.prefix, "");
+        assert!(!s3.allow_http);
+    }
 
     #[test]
     fn bash_lease_timeout_defaults_to_the_server_task_lease() {

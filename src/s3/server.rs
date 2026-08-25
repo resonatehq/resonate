@@ -157,6 +157,17 @@ impl S3Server {
         &self.timerd
     }
 
+    /// Whether the store answers at all — what `/ready` reports.
+    pub async fn store_reachable(&self) -> bool {
+        match self.store.list(&self.keys.doc_prefix(), 1).await {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::error!(error = %e, "Readiness check failed: object store unavailable");
+                false
+            }
+        }
+    }
+
     /// The flag the timer poller watches. `debug.start` sets it.
     pub fn debug_mode(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.debug_mode)

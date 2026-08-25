@@ -76,6 +76,13 @@ pub trait ReadinessProbe: Send + Sync {
 }
 
 #[async_trait]
+impl ReadinessProbe for crate::s3::server::S3Server {
+    async fn ready(&self) -> bool {
+        self.store_reachable().await
+    }
+}
+
+#[async_trait]
 impl ReadinessProbe for Server {
     async fn ready(&self) -> bool {
         match self.storage.query(|db| db.ping()).await {

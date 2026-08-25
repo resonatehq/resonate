@@ -69,6 +69,22 @@ pub struct CommonArgs {
     #[arg(long = "storage-mysql-pool-size", value_name = "N")]
     pub mysql_pool_size: Option<u32>,
 
+    /// S3 bucket (selects the s3 backend; the store must support conditional writes)
+    #[arg(long = "storage-s3-bucket", value_name = "BUCKET")]
+    pub s3_bucket: Option<String>,
+
+    /// S3 region
+    #[arg(long = "storage-s3-region", value_name = "REGION")]
+    pub s3_region: Option<String>,
+
+    /// S3 endpoint override, for an S3-compatible service
+    #[arg(long = "storage-s3-endpoint", value_name = "URL")]
+    pub s3_endpoint: Option<String>,
+
+    /// Key prefix, so one bucket can hold several deployments
+    #[arg(long = "storage-s3-prefix", value_name = "PREFIX")]
+    pub s3_prefix: Option<String>,
+
     // --- Auth ---
     /// Public key for JWT verification (enables auth; use "none" for unsigned mode)
     #[arg(long = "auth-publickey", value_name = "KEY")]
@@ -237,6 +253,23 @@ impl CommonArgs {
         }
         if let Some(v) = self.mysql_pool_size {
             config.storage.mysql.pool_size = v;
+        }
+
+        // Naming a bucket selects the backend, as naming a MySQL URL does.
+        if let Some(bucket) = &self.s3_bucket {
+            config.storage.s3.bucket = Some(bucket.clone());
+            if config.storage.storage_type == "sqlite" {
+                config.storage.storage_type = "s3".to_string();
+            }
+        }
+        if let Some(v) = self.s3_region {
+            config.storage.s3.region = Some(v);
+        }
+        if let Some(v) = self.s3_endpoint {
+            config.storage.s3.endpoint = Some(v);
+        }
+        if let Some(v) = self.s3_prefix {
+            config.storage.s3.prefix = v;
         }
 
         if let Some(key) = self.auth_publickey {
@@ -1376,6 +1409,45 @@ pub async fn run_mcp(args: Box<McpArgs>) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ---- Storage selection ----
+
+    #[test]
+    fn naming_a_bucket_selects_the_s3_backend() {
+        // Same shape as --storage-mysql-url: naming the thing selects it.
+        let mut args = CommonArgs::default();
+        args.s3_bucket = Some("my-bucket".into());
+        let config = args.apply(crate::config::Config::default());
+        assert_eq!(config.storage.storage_type, "s3");
+        assert_eq!(config.storage.s3.bucket.as_deref(), Some("my-bucket"));
+    }
+
+    #[test]
+    fn an_explicit_storage_type_is_not_overridden_by_a_bucket() {
+        let mut args = CommonArgs::default();
+        args.storage_type = Some("postgres".into());
+        args.s3_bucket = Some("my-bucket".into());
+        let config = args.apply(crate::config::Config::default());
+        assert_eq!(config.storage.storage_type, "postgres");
+        // The bucket is still recorded, so switching type alone is enough.
+        assert_eq!(config.storage.s3.bucket.as_deref(), Some("my-bucket"));
+    }
+
+    #[test]
+    fn the_s3_flags_reach_the_config() {
+        let mut args = CommonArgs::default();
+        args.s3_bucket = Some("b".into());
+        args.s3_region = Some("us-east-1".into());
+        args.s3_endpoint = Some("http://localhost:9000".into());
+        args.s3_prefix = Some("tenant-a".into());
+        let config = args.apply(crate::config::Config::default());
+        assert_eq!(config.storage.s3.region.as_deref(), Some("us-east-1"));
+        assert_eq!(
+            config.storage.s3.endpoint.as_deref(),
+            Some("http://localhost:9000")
+        );
+        assert_eq!(config.storage.s3.prefix, "tenant-a");
+    }
 
     // ---- Duration parsing tests (existing) ----
 
