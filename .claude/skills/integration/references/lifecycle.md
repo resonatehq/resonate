@@ -165,8 +165,15 @@ for six hours.
 |---|---|
 | Completed successfully | `resolved`, value carries `output` |
 | Failed / errored | `rejected`, `error.kind = "downstream_failed"` |
+| Cancelled in the downstream system | `rejected`, `error.kind = "canceled"` |
 | Queued / running | not terminal — keep monitoring |
 | **Unrecognised state** | **not terminal** — keep monitoring and log loudly |
+
+Note the two cancellations, which are not the same event. A run cancelled **in the
+downstream system** settles `rejected` with `kind = "canceled"`. The promise state
+`rejected_canceled` is reserved for cancellation initiated **through Resonate** — including
+the deadline-driven cancel below. One rule, every integration, so a caller does not have to
+know which one it is talking to.
 
 Treating an unknown state as failure turns a downstream upgrade into a fleet of spuriously
 rejected promises. Treating it as success is worse. `classify_run` in the Airflow worker
@@ -242,15 +249,18 @@ retry. Read the promise if you need to know which.
 the promise is settled `rejected_timedout`, the task is marked `fulfilled`, and **the worker
 is not notified**. The downstream run keeps going.
 
-That orphan is a design decision:
+**The default is to leave it running**, and every integration does that unless it says
+otherwise. It is usually right — the run may still be valuable, and cancelling costs
+downstream state — and it is the behaviour a reader should be able to assume without
+checking. Log the run id so an operator can find the orphan.
 
-- **Leave it running (what the Airflow worker does).** Simplest and usually right — the run
-  may still be valuable, and cancelling costs downstream state. Log the run id so an
-  operator can find it.
+Two deviations, both of which belong in the README's *Limitations* if you take them:
+
 - **Cancel on deadline.** Watch the clock, cancel downstream at `timeoutAt - grace`, then
-  attempt `task.fulfill` with `rejected_canceled`. It races the server and often returns
-  `409`; the cancel is the part that matters. Gate it behind an option — it is not safe for
-  every downstream system.
+  attempt `task.fulfill` with `rejected_canceled` — Resonate initiated this one, so it is
+  the `rejected_canceled` case rather than `kind = "canceled"`. It races the server and
+  often returns `409`; the cancel is the part that matters. Gate it behind a config option,
+  off by default: it is not safe for every downstream system.
 - **Reap out of band.** `promise.register_listener` plus a separate reaper. Most robust,
   most machinery; worth it only when orphans are expensive.
 

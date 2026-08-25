@@ -172,7 +172,9 @@ Same encoding. Define **both** branches.
              "message": "DAG run finished in state failed" } }
 ```
 
-Suggested `error.kind` values — keep the set small and stable, since callers branch on it:
+`error.kind` is a **closed set**, identical across every integration, because callers branch
+on it and should not have to know which integration they are talking to. Adding a kind is a
+change to `references/conformance.md`, not a local decision:
 
 | kind | Meaning |
 |---|---|
@@ -180,7 +182,10 @@ Suggested `error.kind` values — keep the set small and stable, since callers b
 | `not_found` | The addressed downstream resource does not exist. |
 | `unauthorized` | The worker's credentials were rejected. |
 | `downstream_failed` | The run was created and finished in a failure state. The normal failure. |
-| `canceled` | The run was cancelled out of band. |
+| `canceled` | The run was cancelled out of band. The promise settles `rejected`, not `rejected_canceled` — that state is reserved for cancellation initiated through Resonate. |
+
+The outer shape is fixed — `run` plus exactly one of `output` / `error`. Only what is inside
+`output` differs between integrations. See `references/conformance.md`.
 
 Rules:
 

@@ -3,6 +3,9 @@
 Adding an integration is five edits. Nothing in `src/core/` changes: a new scheme is a
 registration, by design.
 
+Names and layout come from `references/conformance.md` — follow it rather than inventing,
+so this integration reads like every other one.
+
 Use `src/transport/transport_airflow.rs` and its config/registration as the template.
 
 ## 1. The worker — `src/transport/transport_<name>.rs`
@@ -294,7 +297,7 @@ async fn work(
     // Reject with enough detail to fix the caller: which field, what was wrong.
     // The promise value is the only channel back, so a bare "invalid request"
     // strands whoever sent it.
-    let input = self.decode_param(&promise.param)?;   // permanent error on violation
+    let request = decode_param(promise.param.data.as_deref())?;   // permanent on violation
 
     // ── Start the downstream run ─────────────────────────────────────────
     //
@@ -312,7 +315,7 @@ async fn work(
     // A downstream system that cannot deduplicate a create cannot be integrated
     // this way. That is the precondition, not a detail — references/idempotency.md.
     let run_id = derive_run_id(&promise.id);        // deterministic: no uuid, no clock
-    self.start(&target, &run_id, &input).await?;    // duplicate ⇒ Ok, re-attach
+    self.start(&target, &request, &run_id).await?;   // duplicate ⇒ Ok, re-attach
 
     // ── Watch it, on two independent clocks ──────────────────────────────
     //
@@ -340,7 +343,7 @@ async fn work(
     //   * A state you do not recognise is NOT done. A downstream release that
     //     adds one must not turn healthy promises into rejected ones — keep
     //     waiting and log it.
-    let outcome = self.poll_until_done(&target, promise, &run_id).await;
+    let outcome = self.poll_until_done(&target, promise, &request, &run_id).await;
 
     // The heartbeat has to be stopped on every path out of here, which is why
     // there is no `?` between the spawn and this line: an early return would

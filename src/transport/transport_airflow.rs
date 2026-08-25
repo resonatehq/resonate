@@ -506,26 +506,31 @@ impl RunContext {
             })
         };
 
-        let outcome = self
-            .create_and_monitor(&target, promise, &request, &run_id)
-            .await;
+        // Start the run. Idempotent by construction: this line runs on every
+        // delivery, and the duplicate is the recovery path.
+        let outcome = match self.start(&target, &request, &run_id).await {
+            Err(e) => Err(e),
+            Ok(()) => {
+                self.poll_until_done(&target, promise, &request, &run_id)
+                    .await
+            }
+        };
         heartbeat.abort();
         outcome
     }
 
     /// Phases 1 and 2. Returns the terminal run, or `Pending` if the promise
     /// deadline arrived first.
-    async fn create_and_monitor(
+    /// Watch the run on the downstream clock until it reaches a terminal state
+    /// or the promise deadline arrives.
+    async fn poll_until_done(
         &self,
         target: &Target,
         promise: &PromiseRecord,
         request: &TriggerRequest,
         run_id: &str,
     ) -> Result<Monitored, AirflowError> {
-        // Phase 1 — create. Idempotent by construction.
-        self.create_dag_run(target, request, run_id).await?;
-
-        // Phase 2 — monitor, on the downstream clock. Sized for Airflow's cost
+        // The downstream clock. Sized for Airflow's cost
         // and latency, and deliberately unrelated to the lease TTL: the
         // heartbeat task holds the lease open independently, so this interval
         // may back off well past it.
@@ -535,7 +540,7 @@ impl RunContext {
             if now >= promise.timeout_at {
                 return Ok(Monitored::DeadlineReached);
             }
-            match self.get_dag_run(target, &request.dag, run_id).await? {
+            match self.check(target, &request.dag, run_id).await? {
                 RunState::Pending => {}
                 RunState::Succeeded(run) => {
                     return Ok(Monitored::Succeeded {
@@ -572,8 +577,11 @@ impl RunContext {
         }
     }
 
-    /// Trigger the DAG run, treating "already exists" as success.
-    async fn create_dag_run(
+    /// Start the DAG run, treating "already exists" as success.
+    ///
+    /// The canonical `start`: idempotent, keyed by `run_id`, and a duplicate is
+    /// success rather than an error.
+    async fn start(
         &self,
         target: &Target,
         request: &TriggerRequest,
@@ -628,7 +636,8 @@ impl RunContext {
         }
     }
 
-    async fn get_dag_run(
+    /// One status check. The canonical `check`.
+    async fn check(
         &self,
         target: &Target,
         dag: &str,
