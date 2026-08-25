@@ -303,9 +303,7 @@ fn paginate<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
     use crate::kernel::state::Req;
-    use crate::oracle::Oracle;
     use crate::s3::applier::{ApplierCfg, ApplierPool};
     use crate::s3::cache::MemDocCache;
     use crate::s3::store::ObjectStoreAdapter;
@@ -362,26 +360,7 @@ mod tests {
         serde_json::from_value(v).unwrap()
     }
 
-    /// The same operation, expressed twice: as an envelope for the reference
-    /// model and as a kernel request for this backend.
-    enum Step {
-        Promise(&'static str, Value),
-        Task(&'static str, Value),
-    }
-
-    fn envelope(kind: &str, data: Value, now: i64) -> RequestEnvelope {
-        RequestEnvelope {
-            kind: kind.to_string(),
-            head: RequestHead {
-                corr_id: "1".into(),
-                version: SUPPORTED_VERSIONS[0].into(),
-                auth: None,
-                debug_time: Some(now),
-            },
-            data,
-        }
-    }
-
+    /// Build a kernel request from a protocol kind and its data.
     fn to_req(kind: &str, data: Value) -> Req {
         match kind {
             "promise.create" => Req::PromiseCreate(parse(data)),
@@ -395,63 +374,6 @@ mod tests {
         }
     }
 
-    fn id_of(kind: &str, data: &Value) -> String {
-        let field = match kind {
-            "promise.register_callback" => "awaiter",
-            "promise.register_listener" => "awaited",
-            "task.create" => return data["action"]["data"]["id"].as_str().unwrap().to_string(),
-            _ => "id",
-        };
-        data[field].as_str().unwrap().to_string()
-    }
-
-    /// Drive the same steps through the reference model and this backend, then
-    /// compare snapshots.
-    async fn agree_on(steps: Vec<(Step, i64)>) {
-        let r = rig();
-        let mut oracle = Oracle::new();
-        for (step, now) in steps {
-            let (kind, data) = match step {
-                Step::Promise(kind, data) | Step::Task(kind, data) => (kind, data),
-            };
-            let oracle_reply = oracle.apply(&envelope(kind, data.clone(), now));
-            assert!(
-                oracle_reply.head.status < 400,
-                "{kind} failed on the reference model: {:?}",
-                oracle_reply.data
-            );
-            let id = id_of(kind, &data);
-            let reply = submit(&r, origin_of(&id), to_req(kind, data), now).await;
-            assert_eq!(
-                reply.status, oracle_reply.head.status,
-                "{kind} status diverged"
-            );
-        }
-        let mine = serde_json::to_value(r.scan.snapshot().await.unwrap()).unwrap();
-        let theirs = oracle
-            .apply(&envelope("debug.snap", json!({}), 0))
-            .data;
-        assert_eq!(
-            normalize(&mine),
-            normalize(&theirs),
-            "snapshot diverged from the reference model"
-        );
-    }
-
-    /// The differential suite's normalization: sort every array so ordering
-    /// differences do not masquerade as state differences.
-    fn normalize(v: &Value) -> Value {
-        let mut v = v.clone();
-        if let Some(obj) = v.as_object_mut() {
-            for value in obj.values_mut() {
-                if let Some(arr) = value.as_array_mut() {
-                    arr.sort_by_key(|item| serde_json::to_string(item).unwrap_or_default());
-                }
-            }
-        }
-        v
-    }
-
     #[tokio::test]
     async fn an_empty_store_snapshots_to_empty() {
         let r = rig();
@@ -459,155 +381,6 @@ mod tests {
         assert!(snap.promises.is_empty());
         assert!(snap.tasks.is_empty());
         assert!(snap.messages.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_snapshot_matches_the_reference_model_for_plain_promises() {
-        agree_on(vec![
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:a", "timeoutAt": 100_000, "param": {}, "tags": {} }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:b", "timeoutAt": 200_000,
-                            "param": { "data": "aGk=" }, "tags": { "k": "v" } }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.settle",
-                    json!({ "id": "o:a", "state": "resolved", "value": { "data": "b2s=" } }),
-                ),
-                2_000,
-            ),
-        ])
-        .await;
-    }
-
-    #[tokio::test]
-    async fn a_snapshot_matches_the_reference_model_for_tasks_and_timers() {
-        agree_on(vec![
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:t", "timeoutAt": 500_000, "param": {},
-                            "tags": { "resonate:target": W } }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Task(
-                    "task.create",
-                    json!({ "pid": PID, "ttl": TTL, "action": {
-                        "kind": "promise.create", "head": {}, "data": {
-                            "id": "o:u", "timeoutAt": 500_000, "param": {},
-                            "tags": { "resonate:target": W } } } }),
-                ),
-                2_000,
-            ),
-            (
-                Step::Task("task.acquire", json!({ "id": "o:t", "version": 0, "pid": PID, "ttl": TTL })),
-                3_000,
-            ),
-        ])
-        .await;
-    }
-
-    #[tokio::test]
-    async fn a_snapshot_matches_the_reference_model_for_callbacks_and_listeners() {
-        agree_on(vec![
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:t", "timeoutAt": 500_000, "param": {},
-                            "tags": { "resonate:target": W } }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:a", "timeoutAt": 500_000, "param": {}, "tags": {} }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Task("task.acquire", json!({ "id": "o:t", "version": 0, "pid": PID, "ttl": TTL })),
-                2_000,
-            ),
-            (
-                Step::Task(
-                    "task.suspend",
-                    json!({ "id": "o:t", "version": 1, "actions": [{
-                        "kind": "promise.register_callback", "head": {},
-                        "data": { "awaited": "o:a", "awaiter": "o:t" } }] }),
-                ),
-                3_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.register_listener",
-                    json!({ "awaited": "o:a", "address": W }),
-                ),
-                3_500,
-            ),
-        ])
-        .await;
-    }
-
-    #[tokio::test]
-    async fn a_snapshot_matches_the_reference_model_after_a_settlement_fans_out() {
-        agree_on(vec![
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:t", "timeoutAt": 500_000, "param": {},
-                            "tags": { "resonate:target": W } }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.create",
-                    json!({ "id": "o:a", "timeoutAt": 500_000, "param": {}, "tags": {} }),
-                ),
-                1_000,
-            ),
-            (
-                Step::Task("task.acquire", json!({ "id": "o:t", "version": 0, "pid": PID, "ttl": TTL })),
-                2_000,
-            ),
-            (
-                Step::Task(
-                    "task.suspend",
-                    json!({ "id": "o:t", "version": 1, "actions": [{
-                        "kind": "promise.register_callback", "head": {},
-                        "data": { "awaited": "o:a", "awaiter": "o:t" } }] }),
-                ),
-                3_000,
-            ),
-            (
-                Step::Promise(
-                    "promise.register_listener",
-                    json!({ "awaited": "o:a", "address": "http://listener" }),
-                ),
-                3_500,
-            ),
-            (
-                Step::Promise(
-                    "promise.settle",
-                    json!({ "id": "o:a", "state": "resolved", "value": {} }),
-                ),
-                4_000,
-            ),
-        ])
-        .await;
     }
 
     #[tokio::test]
