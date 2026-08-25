@@ -205,6 +205,11 @@ pub enum Req {
     TaskHeartbeat(TaskHeartbeatData),
     TaskHalt(TaskHaltData),
     TaskContinue(TaskContinueData),
+    /// The fence check alone, with no action attached.
+    ///
+    /// The shell needs this when a fenced action targets a promise in another
+    /// origin — a different document, so a single decision cannot cover both.
+    TaskFencePrepare(TaskFencePrepareData),
     /// A schedule's occurrence coming due.
     ///
     /// Not a protocol operation — no caller can send it — but a transition on
@@ -214,6 +219,13 @@ pub enum Req {
     /// noticed. See `process_schedule_timeout`
     /// (`persistence_sqlite.rs:1329-1400`).
     ScheduleFire(ScheduleFireData),
+}
+
+/// A task's identity, for a fence check with no action attached.
+#[derive(Debug, Clone)]
+pub struct TaskFencePrepareData {
+    pub id: String,
+    pub version: i64,
 }
 
 /// The promise a due schedule creates, with its template already rendered and

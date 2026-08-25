@@ -109,6 +109,7 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
         Req::TaskFulfill(r) => op_task_fulfill(&mut tx, r, now, cfg),
         Req::TaskSuspend(r) => op_task_suspend(&mut tx, r, now, cfg),
         Req::TaskFence { data, corr_id } => op_task_fence(&mut tx, data, corr_id, now, cfg),
+        Req::TaskFencePrepare(r) => op_task_fence_prepare(&mut tx, r, now, cfg),
         Req::TaskHeartbeat(r) => op_task_heartbeat(&mut tx, r, now),
         Req::TaskHalt(r) => op_task_halt(&mut tx, r, now, cfg),
         Req::TaskContinue(r) => op_task_continue(&mut tx, r, now, cfg),
@@ -561,6 +562,30 @@ fn op_task_fence(
         }
         _ => Reply::err(400, "Invalid fence action kind"),
     }
+}
+
+/// The fence check on its own: does this caller still hold the task?
+///
+/// Reports the preload on success, because the preload is drawn from the
+/// *task's* document and the action the shell is about to apply is not.
+///
+/// The rejections are `op_task_fence`'s, in the same order, so a caller cannot
+/// tell from the status whether the action was in this origin or another.
+fn op_task_fence_prepare(
+    tx: &mut Tx,
+    r: &crate::kernel::state::TaskFencePrepareData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Acquired || version != r.version {
+        return Reply::err(409, "Version mismatch");
+    }
+    Reply::status(200, json!({ "preload": preload(&tx.doc, &r.id) }))
 }
 
 /// Wrap a fenced action's outcome as a nested response envelope.
