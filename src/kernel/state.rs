@@ -196,7 +196,12 @@ pub enum Req {
     TaskRelease(TaskReleaseData),
     TaskFulfill(TaskFulfillData),
     TaskSuspend(TaskSuspendData),
-    TaskFence(TaskFenceData),
+    /// The one variant carrying envelope metadata: a fenced action's reply *is*
+    /// a nested response envelope, and an envelope has a `corrId`.
+    TaskFence {
+        data: TaskFenceData,
+        corr_id: String,
+    },
     TaskHeartbeat(TaskHeartbeatData),
     TaskHalt(TaskHaltData),
     TaskContinue(TaskContinueData),

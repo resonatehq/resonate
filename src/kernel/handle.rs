@@ -18,12 +18,17 @@
 //! Statuses and messages are `Server::dispatch`'s, verbatim: a rejection is a
 //! [`Reply`] with a status, never an `Err`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+
+use serde_json::json;
+use validator::Validate;
 
 use crate::core::is_valid_address;
 use crate::core::types::{
-    PromiseCreateData, PromiseRecord, PromiseResponseData, PromiseState, PromiseValue, SettleState,
-    TaskState,
+    format_validation_errors, PromiseCreateData, PromiseRecord, PromiseResponseData, PromiseState,
+    PromiseValue, SettleState, TaskAcquireResponseData, TaskCreateResponseData,
+    TaskFenceResponseData, TaskFulfillResponseData, TaskRecord, TaskResponseData, TaskState,
+    TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
 
 use super::state::{
@@ -97,8 +102,16 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
         Req::PromiseSettle(r) => op_promise_settle(&mut tx, r, now, cfg),
         Req::PromiseRegisterCallback(r) => op_promise_register_callback(&mut tx, r, now, cfg),
         Req::PromiseRegisterListener(r) => op_promise_register_listener(&mut tx, r, now, cfg),
-        // Task operations land in the next commit; nothing routes here yet.
-        _ => Reply::err(501, "Operation not implemented"),
+        Req::TaskGet(r) => op_task_get(&mut tx, r, now, cfg),
+        Req::TaskCreate(r) => op_task_create(&mut tx, r, now, cfg),
+        Req::TaskAcquire(r) => op_task_acquire(&mut tx, r, now, cfg),
+        Req::TaskRelease(r) => op_task_release(&mut tx, r, now, cfg),
+        Req::TaskFulfill(r) => op_task_fulfill(&mut tx, r, now, cfg),
+        Req::TaskSuspend(r) => op_task_suspend(&mut tx, r, now, cfg),
+        Req::TaskFence { data, corr_id } => op_task_fence(&mut tx, data, corr_id, now, cfg),
+        Req::TaskHeartbeat(r) => op_task_heartbeat(&mut tx, r, now),
+        Req::TaskHalt(r) => op_task_halt(&mut tx, r, now, cfg),
+        Req::TaskContinue(r) => op_task_continue(&mut tx, r, now, cfg),
     };
     (tx.finish(doc), reply)
 }
@@ -224,6 +237,438 @@ fn op_promise_register_listener(
 }
 
 // ============================================================================
+// Task operations
+// ============================================================================
+
+fn op_task_get(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskGetData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    match tx.doc.tasks.get(&r.id) {
+        Some(t) => Reply::ok(&TaskResponseData {
+            task: t.to_record(&r.id),
+        }),
+        None => Reply::err(404, "Task not found"),
+    }
+}
+
+/// `task.create` is a worker claiming work by describing it: it creates the
+/// promise if absent and hands back a task already acquired by the caller — no
+/// dispatch, because the caller *is* the worker.
+///
+/// Mirrors `Server::op_task_create` (`server.rs:1086-1300`).
+fn op_task_create(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskCreateData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    // Every task.create action carries a resonate:target (its validator
+    // requires one), so the promise it creates always has a task.
+    let action = &r.action.data;
+    if let Some(addr) = action.tags.get(TAG_TARGET) {
+        if !is_valid_address(addr) {
+            return Reply::err(400, "Invalid resonate:target address");
+        }
+    }
+    let id = action.id.as_str();
+    try_timeout(tx, &[id], now, cfg);
+
+    if let Some(t) = tx.doc.tasks.get(id) {
+        match t.state {
+            TaskState::Pending => {
+                let task = acquire(tx, id, r.ttl, &r.pid, now);
+                return Reply::ok(&TaskCreateResponseData {
+                    task,
+                    promise: tx.doc.promises[id].to_record(id),
+                    preload: preload(&tx.doc, id),
+                });
+            }
+            TaskState::Fulfilled => {
+                // The work is already done. server.rs sends no preload on this
+                // branch, so neither do we.
+                return Reply::ok(&TaskCreateResponseData {
+                    task: t.to_record(id),
+                    promise: tx.doc.promises[id].to_record(id),
+                    preload: Vec::new(),
+                });
+            }
+            TaskState::Acquired | TaskState::Suspended | TaskState::Halted => {
+                return Reply::err(409, "Already exists");
+            }
+        }
+    }
+    if tx.doc.promises.contains_key(id) {
+        // A promise without a task is a promise nobody can be dispatched for.
+        return Reply::err(422, "The promise does not have a resonate:target tag");
+    }
+
+    // Neither exists: create both. The task is born acquired by the caller —
+    // never pending — so no dispatch is emitted, which is why this builds the
+    // task itself rather than going through create_promise.
+    let promise = insert_promise(tx, id, action, now);
+    let settled = promise.state != PromiseState::Pending;
+    let mut t = TaskDoc {
+        state: TaskState::Fulfilled,
+        version: 0,
+        pid: None,
+        ttl: None,
+        resumes: BTreeSet::new(),
+        retry_at: None,
+        lease_at: None,
+    };
+    if !settled {
+        t.state = TaskState::Acquired;
+        t.version = 1;
+        t.pid = Some(r.pid.clone());
+        t.ttl = Some(r.ttl);
+        t.arm_lease(now + r.ttl);
+    }
+    let task = t.to_record(id);
+    tx.doc.tasks.insert(id.to_string(), t);
+    Reply::ok(&TaskCreateResponseData {
+        task,
+        promise,
+        preload: preload(&tx.doc, id),
+    })
+}
+
+fn op_task_acquire(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskAcquireData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Pending {
+        return Reply::err(409, "Task is not pending");
+    }
+    if version != r.version {
+        return Reply::err(409, "Version mismatch");
+    }
+    let task = acquire(tx, &r.id, r.ttl, &r.pid, now);
+    Reply::ok(&TaskAcquireResponseData {
+        task,
+        promise: tx.doc.promises[&r.id].to_record(&r.id),
+        preload: preload(&tx.doc, &r.id),
+    })
+}
+
+fn op_task_release(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskReleaseData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Acquired || version != r.version {
+        return Reply::err(409, "Task version mismatch or invalid state");
+    }
+    // Releasing hands the task back unclaimed at the *same* version — only a
+    // claim bumps it — so the next worker acquires with the version it saw.
+    let t = tx.doc.tasks.get_mut(&r.id).expect("checked above");
+    t.state = TaskState::Pending;
+    t.pid = None;
+    t.ttl = None;
+    t.arm_retry(now + cfg.retry_timeout);
+    tx.send_execute(&r.id, version);
+    Reply::status(200, serde_json::json!({}))
+}
+
+fn op_task_fulfill(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskFulfillData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    let action = &r.action.data;
+    try_timeout(tx, &[&action.id], now, cfg);
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Acquired || version != r.version {
+        return Reply::err(409, "Task version mismatch or invalid state");
+    }
+    let pending = match tx.doc.promises.get(&action.id) {
+        Some(p) => p.state == PromiseState::Pending,
+        None => return Reply::err(404, "Promise not found"),
+    };
+    if !pending {
+        // Unreachable while the invariants hold — an acquired task's promise is
+        // pending — but the SQL path fulfils the task regardless, so mirror it.
+        trigger_fulfilled(tx, &r.id);
+        return Reply::ok(&TaskFulfillResponseData {
+            promise: tx.doc.promises[&action.id].to_record(&action.id),
+        });
+    }
+    let promise = settle(tx, &action.id, action.state, &action.value, now, cfg);
+    Reply::ok(&TaskFulfillResponseData { promise })
+}
+
+/// `task.suspend` parks a task on a set of promises — unless one of them has
+/// already settled, in which case there is nothing to wait for and the caller
+/// is told to carry on (300).
+fn op_task_suspend(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskSuspendData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    let mut named: Vec<&str> = vec![r.id.as_str()];
+    for action in &r.actions {
+        named.push(action.data.awaited.as_str());
+    }
+    try_timeout(tx, &named, now, cfg);
+
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Acquired || version != r.version {
+        return Reply::err(409, "Task is not acquired or version mismatch");
+    }
+    for action in &r.actions {
+        if !tx.doc.promises.contains_key(&action.data.awaited) {
+            return Reply::err(422, "Awaited promise not found");
+        }
+    }
+    let mut awaited: Vec<String> = Vec::new();
+    for action in &r.actions {
+        if !awaited.contains(&action.data.awaited) {
+            awaited.push(action.data.awaited.clone());
+        }
+    }
+    let any_settled = awaited
+        .iter()
+        .any(|id| tx.doc.promises[id].state != PromiseState::Pending);
+
+    // Either way the resumes buffered by a previous suspension are stale.
+    tx.doc
+        .tasks
+        .get_mut(&r.id)
+        .expect("checked above")
+        .resumes
+        .clear();
+
+    if any_settled {
+        return Reply::status(
+            300,
+            serde_json::to_value(TaskSuspendPreloadData {
+                preload: preload(&tx.doc, &r.id),
+            })
+            .expect("preload serializes"),
+        );
+    }
+    for id in &awaited {
+        register_callback(tx, id, &r.id);
+    }
+    let t = tx.doc.tasks.get_mut(&r.id).expect("checked above");
+    t.state = TaskState::Suspended;
+    t.pid = None;
+    t.ttl = None;
+    t.disarm();
+    Reply::status(200, serde_json::json!({}))
+}
+
+/// `task.fence` runs one promise operation under the task's version, so a
+/// worker that lost its lease cannot write.
+fn op_task_fence(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskFenceData,
+    corr_id: &str,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    let action_id = r
+        .action
+        .data
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    try_timeout(tx, &[&r.id, &action_id], now, cfg);
+
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Acquired || version != r.version {
+        return Reply::err(409, "Version mismatch");
+    }
+
+    match r.action.kind.as_str() {
+        "promise.create" => {
+            let create: PromiseCreateData = match serde_json::from_value(r.action.data.clone()) {
+                Ok(d) => d,
+                Err(e) => return Reply::err(400, &format!("Invalid action data: {}", e)),
+            };
+            if let Err(e) = create.validate() {
+                return Reply::err(400, &format_validation_errors(&e));
+            }
+            if let Some(addr) = create.tags.get(TAG_TARGET) {
+                if !is_valid_address(addr) {
+                    return Reply::err(400, "Invalid resonate:target address");
+                }
+            }
+            let record = match tx.doc.promises.get(&create.id) {
+                Some(p) => p.to_record(&create.id),
+                None => create_promise(tx, &create.id, &create, now, cfg),
+            };
+            fence_reply(tx, &r.id, &r.action.kind, corr_id, 200, json!({ "promise": record }))
+        }
+        "promise.settle" => {
+            let settle_data: crate::core::types::PromiseSettleData =
+                match serde_json::from_value(r.action.data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => return Reply::err(400, &format!("Invalid action data: {}", e)),
+                };
+            if let Err(e) = settle_data.validate() {
+                return Reply::err(400, &format_validation_errors(&e));
+            }
+            let pending = tx
+                .doc
+                .promises
+                .get(&settle_data.id)
+                .is_some_and(|p| p.state == PromiseState::Pending);
+            if pending {
+                settle(
+                    tx,
+                    &settle_data.id,
+                    settle_data.state,
+                    &settle_data.value,
+                    now,
+                    cfg,
+                );
+            }
+            let (status, data) = match tx.doc.promises.get(&settle_data.id) {
+                Some(p) => (200, json!({ "promise": p.to_record(&settle_data.id) })),
+                None => (404, json!("Promise not found")),
+            };
+            fence_reply(tx, &r.id, &r.action.kind, corr_id, status, data)
+        }
+        _ => Reply::err(400, "Invalid fence action kind"),
+    }
+}
+
+/// Wrap a fenced action's outcome as a nested response envelope.
+fn fence_reply(
+    tx: &Tx,
+    task_id: &str,
+    kind: &str,
+    corr_id: &str,
+    status: i32,
+    data: serde_json::Value,
+) -> Reply {
+    Reply::ok(&TaskFenceResponseData {
+        action: json!({
+            "kind": kind,
+            "head": { "corrId": corr_id, "status": status, "version": PROTOCOL_VERSION },
+            "data": data,
+        }),
+        preload: preload(&tx.doc, task_id),
+    })
+}
+
+/// A heartbeat extends the lease of every task in the batch the caller still
+/// owns, and silently ignores the rest — it is a liveness signal, not a query.
+fn op_task_heartbeat(tx: &mut Tx, r: &crate::core::types::TaskHeartbeatData, now: i64) -> Reply {
+    for want in &r.tasks {
+        let ttl = tx
+            .doc
+            .tasks
+            .get(&want.id)
+            .filter(|t| {
+                t.state == TaskState::Acquired
+                    && t.version == want.version
+                    && t.pid.as_deref() == Some(r.pid.as_str())
+            })
+            .and_then(|t| t.ttl);
+        if let Some(ttl) = ttl {
+            tx.doc
+                .tasks
+                .get_mut(&want.id)
+                .expect("checked above")
+                .arm_lease(now + ttl);
+        }
+    }
+    Reply::status(200, serde_json::json!({}))
+}
+
+fn op_task_halt(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskHaltData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    let state = match tx.doc.tasks.get(&r.id) {
+        Some(t) => t.state,
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state == TaskState::Fulfilled {
+        return Reply::err(409, "Task is fulfilled");
+    }
+    if state == TaskState::Halted {
+        return Reply::status(200, serde_json::json!({}));
+    }
+    let t = tx.doc.tasks.get_mut(&r.id).expect("checked above");
+    t.state = TaskState::Halted;
+    t.pid = None;
+    t.ttl = None;
+    t.disarm();
+    Reply::status(200, serde_json::json!({}))
+}
+
+fn op_task_continue(
+    tx: &mut Tx,
+    r: &crate::core::types::TaskContinueData,
+    now: i64,
+    cfg: &KernelCfg,
+) -> Reply {
+    try_timeout(tx, &[&r.id], now, cfg);
+    let (state, version) = match tx.doc.tasks.get(&r.id) {
+        Some(t) => (t.state, t.version),
+        None => return Reply::err(404, "Task not found"),
+    };
+    if state != TaskState::Halted {
+        return Reply::err(409, "Task is not halted");
+    }
+    let t = tx.doc.tasks.get_mut(&r.id).expect("checked above");
+    t.state = TaskState::Pending;
+    t.arm_retry(now + cfg.retry_timeout);
+    tx.send_execute(&r.id, version);
+    Reply::status(200, serde_json::json!({}))
+}
+
+/// Claim a pending task: bump the version, take the lease, and drop the
+/// resumes the previous run buffered.
+///
+/// The version bump is the fence — every later write by the previous holder
+/// fails its version check.
+pub(crate) fn acquire(tx: &mut Tx, id: &str, ttl: i64, pid: &str, now: i64) -> TaskRecord {
+    let t = tx.doc.tasks.get_mut(id).expect("caller checked presence");
+    t.state = TaskState::Acquired;
+    t.version += 1;
+    t.pid = Some(pid.to_string());
+    t.ttl = Some(ttl);
+    t.resumes.clear();
+    t.arm_lease(now + ttl);
+    t.to_record(id)
+}
+
+// ============================================================================
 // Shared state transitions
 // ============================================================================
 
@@ -241,58 +686,19 @@ pub(crate) fn create_promise(
     now: i64,
     cfg: &KernelCfg,
 ) -> PromiseRecord {
-    let tags: BTreeMap<String, String> = r
-        .tags
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let already_timedout = now >= r.timeout_at;
-    let doc = PromiseDoc {
-        state: PromiseState::Pending,
-        param: r.param.clone(),
-        value: PromiseValue::default(),
-        tags,
-        timeout_at: r.timeout_at,
-        created_at: if already_timedout { r.timeout_at } else { now },
-        settled_at: None,
-        callbacks: Vec::new(),
-        listeners: Vec::new(),
-    };
-    let mut doc = doc;
-    if already_timedout {
-        doc.state = doc.timeout_state();
-        doc.settled_at = Some(r.timeout_at);
-    }
-    let has_target = doc.target().is_some();
-    let created_at = doc.created_at;
-    let delay_at = doc.tags.get(TAG_DELAY).and_then(|v| v.parse::<i64>().ok());
-    let record = doc.to_record(id);
-    tx.doc.promises.insert(id.to_string(), doc);
-
-    if !has_target {
+    let record = insert_promise(tx, id, r, now);
+    let p = &tx.doc.promises[id];
+    if p.target().is_none() {
         // No target means no task and no armed deadline: such a promise only
         // ever expires lazily, when someone reads it.
         return record;
     }
-
-    if already_timedout {
-        tx.doc.tasks.insert(
-            id.to_string(),
-            TaskDoc {
-                state: TaskState::Fulfilled,
-                version: 0,
-                pid: None,
-                ttl: None,
-                resumes: BTreeSet::new(),
-                retry_at: None,
-                lease_at: None,
-            },
-        );
-        return record;
-    }
+    let settled = p.state != PromiseState::Pending;
+    let created_at = p.created_at;
+    let delay_at = p.tags.get(TAG_DELAY).and_then(|v| v.parse::<i64>().ok());
 
     let mut task = TaskDoc {
-        state: TaskState::Pending,
+        state: TaskState::Fulfilled,
         version: 0,
         pid: None,
         ttl: None,
@@ -300,6 +706,12 @@ pub(crate) fn create_promise(
         retry_at: None,
         lease_at: None,
     };
+    if settled {
+        // Born settled, so its task is born done.
+        tx.doc.tasks.insert(id.to_string(), task);
+        return record;
+    }
+    task.state = TaskState::Pending;
     // `resonate:delay` is an absolute instant before which the task must not be
     // dispatched: arm the retry timer there and send nothing. This follows
     // `src/oracle.rs:281-299`; the SQL backends do not implement it.
@@ -314,6 +726,38 @@ pub(crate) fn create_promise(
             tx.send_execute(id, 0);
         }
     }
+    record
+}
+
+/// Insert the promise row alone, with no task and no dispatch.
+///
+/// A promise created past its own deadline is born settled — resolved if it is
+/// a timer, timed out otherwise — with `created_at` and `settled_at` both
+/// stamped at the deadline rather than at `now`.
+pub(crate) fn insert_promise(
+    tx: &mut Tx,
+    id: &str,
+    r: &PromiseCreateData,
+    now: i64,
+) -> PromiseRecord {
+    let already_timedout = now >= r.timeout_at;
+    let mut doc = PromiseDoc {
+        state: PromiseState::Pending,
+        param: r.param.clone(),
+        value: PromiseValue::default(),
+        tags: r.tags.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        timeout_at: r.timeout_at,
+        created_at: if already_timedout { r.timeout_at } else { now },
+        settled_at: None,
+        callbacks: Vec::new(),
+        listeners: Vec::new(),
+    };
+    if already_timedout {
+        doc.state = doc.timeout_state();
+        doc.settled_at = Some(r.timeout_at);
+    }
+    let record = doc.to_record(id);
+    tx.doc.promises.insert(id.to_string(), doc);
     record
 }
 
@@ -1002,6 +1446,500 @@ mod tests {
         let (doc, _, _) = step(&doc, listener("o:a", "http://one"), 1);
         let (doc, _, _) = step(&doc, listener("o:a", "http://one"), 2);
         assert_eq!(doc.promises["o:a"].listeners, vec!["http://one"]);
+    }
+
+    // --- task.get ----------------------------------------------------------
+
+    fn task_get(id: &str) -> Req {
+        Req::TaskGet(parse(json!({ "id": id })))
+    }
+
+    fn task_create(id: &str, timeout_at: i64, ttl: i64) -> Req {
+        Req::TaskCreate(parse(json!({
+            "pid": PID, "ttl": ttl,
+            "action": { "kind": "promise.create", "head": {}, "data": {
+                "id": id, "timeoutAt": timeout_at, "param": {},
+                "tags": { "resonate:target": W } } }
+        })))
+    }
+
+    fn task_acquire(id: &str, version: i64, ttl: i64) -> Req {
+        Req::TaskAcquire(parse(
+            json!({ "id": id, "version": version, "pid": PID, "ttl": ttl }),
+        ))
+    }
+
+    fn task_release(id: &str, version: i64) -> Req {
+        Req::TaskRelease(parse(json!({ "id": id, "version": version })))
+    }
+
+    fn task_fulfill(id: &str, version: i64, state: &str) -> Req {
+        Req::TaskFulfill(parse(json!({
+            "id": id, "version": version,
+            "action": { "kind": "promise.settle", "head": {}, "data": {
+                "id": id, "state": state, "value": {} } }
+        })))
+    }
+
+    fn task_suspend(id: &str, version: i64, awaited: &[&str]) -> Req {
+        let actions: Vec<serde_json::Value> = awaited
+            .iter()
+            .map(|a| {
+                json!({ "kind": "promise.register_callback", "head": {},
+                        "data": { "awaited": a, "awaiter": id } })
+            })
+            .collect();
+        Req::TaskSuspend(parse(
+            json!({ "id": id, "version": version, "actions": actions }),
+        ))
+    }
+
+    fn task_fence(id: &str, version: i64, action: serde_json::Value) -> Req {
+        Req::TaskFence {
+            data: parse(json!({ "id": id, "version": version, "action": action })),
+            corr_id: "corr-1".to_string(),
+        }
+    }
+
+    fn task_heartbeat(pid: &str, tasks: &[(&str, i64)]) -> Req {
+        let tasks: Vec<serde_json::Value> = tasks
+            .iter()
+            .map(|(id, v)| json!({ "id": id, "version": v }))
+            .collect();
+        Req::TaskHeartbeat(parse(json!({ "pid": pid, "tasks": tasks })))
+    }
+
+    const PID: &str = "pid-1";
+    const TTL: i64 = 60_000;
+
+    /// A document with `o:t` created and acquired by `task.create` at time 0.
+    fn with_acquired(id: &str) -> OriginDoc {
+        let (doc, sends, reply) = step(&OriginDoc::default(), task_create(id, 100_000, TTL), 0);
+        assert_eq!(reply.status, 200);
+        assert!(sends.is_empty(), "task.create never dispatches");
+        doc
+    }
+
+    #[test]
+    fn getting_an_unknown_task_is_a_404() {
+        let (_, _, reply) = step(&OriginDoc::default(), task_get("o:t"), 0);
+        assert_eq!(reply.status, 404);
+        assert_eq!(reply.data, json!("Task not found"));
+    }
+
+    #[test]
+    fn getting_a_task_whose_promise_expired_reports_it_fulfilled() {
+        let doc = with_acquired("o:t");
+        let (next, _, reply) = step(&doc, task_get("o:t"), 200_000);
+        assert_eq!(reply.data["task"]["state"], "fulfilled");
+        assert_eq!(reply.data["task"].get("pid"), None);
+        assert_eq!(reply.data["task"].get("ttl"), None);
+        assert_eq!(next.timer_at, None);
+    }
+
+    // --- task.create -------------------------------------------------------
+
+    #[test]
+    fn task_create_hands_back_an_already_acquired_task() {
+        let (doc, sends, reply) = step(&OriginDoc::default(), task_create("o:t", 100_000, TTL), 1_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["task"]["state"], "acquired");
+        assert_eq!(reply.data["task"]["version"], 1);
+        assert_eq!(reply.data["task"]["pid"], PID);
+        assert_eq!(reply.data["promise"]["state"], "pending");
+        // The caller is the worker, so nothing is dispatched.
+        assert!(sends.is_empty());
+        let t = &doc.tasks["o:t"];
+        assert_eq!(t.lease_at, Some(61_000));
+        assert_eq!(t.retry_at, None);
+        // Both the lease and the promise deadline are armed; the nearer wins.
+        assert_eq!(doc.timer_at, Some(61_000));
+    }
+
+    #[test]
+    fn task_create_past_the_deadline_hands_back_a_fulfilled_task() {
+        let (doc, sends, reply) = step(&OriginDoc::default(), task_create("o:t", 500, TTL), 900);
+        assert_eq!(reply.data["task"]["state"], "fulfilled");
+        assert_eq!(reply.data["task"]["version"], 0);
+        assert_eq!(reply.data["promise"]["state"], "rejected_timedout");
+        assert!(sends.is_empty());
+        assert_eq!(doc.timer_at, None);
+    }
+
+    #[test]
+    fn task_create_claims_a_pending_task_and_bumps_its_version() {
+        // A targeted promise.create leaves a pending task at version 0.
+        let doc = with_targeted("o:t", 100_000);
+        let (next, sends, reply) = step(&doc, task_create("o:t", 999, TTL), 1_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["task"]["version"], 1);
+        assert_eq!(reply.data["task"]["state"], "acquired");
+        // The stored promise wins, so the action's own timeout is ignored.
+        assert_eq!(reply.data["promise"]["timeoutAt"], 100_000);
+        assert!(sends.is_empty());
+        assert_eq!(next.tasks["o:t"].lease_at, Some(61_000));
+    }
+
+    #[test]
+    fn task_create_on_a_claimed_task_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, task_create("o:t", 100_000, TTL), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Already exists"));
+    }
+
+    #[test]
+    fn task_create_on_a_promise_without_a_task_is_a_422() {
+        let (doc, _, _) = step(&OriginDoc::default(), create("o:t", 100_000, json!({})), 0);
+        let (_, _, reply) = step(&doc, task_create("o:t", 100_000, TTL), 1);
+        assert_eq!(reply.status, 422);
+        assert_eq!(
+            reply.data,
+            json!("The promise does not have a resonate:target tag")
+        );
+    }
+
+    // --- task.acquire ------------------------------------------------------
+
+    #[test]
+    fn acquiring_an_unknown_task_is_a_404() {
+        let (_, _, reply) = step(&OriginDoc::default(), task_acquire("o:t", 0, TTL), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn acquiring_a_task_that_is_not_pending_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, task_acquire("o:t", 1, TTL), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Task is not pending"));
+    }
+
+    #[test]
+    fn acquiring_at_the_wrong_version_is_a_conflict() {
+        let doc = with_targeted("o:t", 100_000);
+        let (_, _, reply) = step(&doc, task_acquire("o:t", 7, TTL), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Version mismatch"));
+    }
+
+    #[test]
+    fn acquiring_takes_the_lease_and_drops_buffered_resumes() {
+        let doc = with_targeted("o:t", 100_000);
+        let (mut doc, _, _) = step(&doc, create("o:x", 100_000, json!({})), 0);
+        doc.tasks.get_mut("o:t").unwrap().resumes.insert("o:x".into());
+        let (next, sends, reply) = step(&doc, task_acquire("o:t", 0, TTL), 1_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["task"]["version"], 1);
+        assert_eq!(reply.data["task"]["resumes"], 0);
+        assert!(sends.is_empty());
+        let t = &next.tasks["o:t"];
+        assert_eq!(t.state, TaskState::Acquired);
+        assert_eq!(t.lease_at, Some(61_000));
+        assert!(t.resumes.is_empty());
+    }
+
+    // --- task.release ------------------------------------------------------
+
+    #[test]
+    fn releasing_an_unknown_task_is_a_404() {
+        let (_, _, reply) = step(&OriginDoc::default(), task_release("o:t", 1), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn releasing_at_the_wrong_version_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, task_release("o:t", 9), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Task version mismatch or invalid state"));
+    }
+
+    #[test]
+    fn releasing_re_dispatches_at_the_same_version() {
+        let doc = with_acquired("o:t");
+        let (next, sends, reply) = step(&doc, task_release("o:t", 1), 1_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data, json!({}));
+        let t = &next.tasks["o:t"];
+        assert_eq!(t.state, TaskState::Pending);
+        assert_eq!((t.pid.as_deref(), t.ttl), (None, None));
+        assert_eq!(t.retry_at, Some(31_000));
+        // Only a claim bumps the version, so the next worker acquires at 1.
+        assert_eq!(
+            sends,
+            vec![(
+                W.to_string(),
+                OutEntry::Execute {
+                    task_id: "o:t".into(),
+                    version: 1
+                }
+            )]
+        );
+    }
+
+    // --- task.fulfill ------------------------------------------------------
+
+    #[test]
+    fn fulfilling_an_unknown_task_is_a_404() {
+        let (_, _, reply) = step(&OriginDoc::default(), task_fulfill("o:t", 1, "resolved"), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn fulfilling_at_the_wrong_version_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, task_fulfill("o:t", 9, "resolved"), 1);
+        assert_eq!(reply.status, 409);
+    }
+
+    #[test]
+    fn fulfilling_settles_the_promise_and_runs_the_chain() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, listener("o:t", "http://one"), 1);
+        let (next, sends, reply) = step(&doc, task_fulfill("o:t", 1, "resolved"), 700);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["promise"]["state"], "resolved");
+        assert_eq!(reply.data["promise"]["settledAt"], 700);
+        assert_eq!(next.tasks["o:t"].state, TaskState::Fulfilled);
+        assert_eq!(next.timer_at, None);
+        assert_eq!(sends.len(), 1);
+    }
+
+    // --- task.suspend ------------------------------------------------------
+
+    #[test]
+    fn suspending_an_unknown_task_is_a_404() {
+        let doc = with_targeted("o:a", 100_000);
+        let (_, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:a"]), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn suspending_at_the_wrong_version_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let (_, _, reply) = step(&doc, task_suspend("o:t", 9, &["o:a"]), 2);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Task is not acquired or version mismatch"));
+    }
+
+    #[test]
+    fn suspending_on_a_missing_promise_is_a_422() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:missing"]), 1);
+        assert_eq!(reply.status, 422);
+        assert_eq!(reply.data, json!("Awaited promise not found"));
+    }
+
+    #[test]
+    fn suspending_parks_the_task_and_registers_each_awaited_once() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let (doc, _, _) = step(&doc, create("o:b", 100_000, json!({})), 1);
+        let (next, sends, reply) = step(&doc, task_suspend("o:t", 1, &["o:a", "o:b", "o:a"]), 2);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data, json!({}));
+        assert!(sends.is_empty());
+        let t = &next.tasks["o:t"];
+        assert_eq!(t.state, TaskState::Suspended);
+        assert_eq!((t.pid.as_deref(), t.ttl), (None, None));
+        assert_eq!((t.retry_at, t.lease_at), (None, None));
+        assert_eq!(next.promises["o:a"].callbacks, vec!["o:t"]);
+        assert_eq!(next.promises["o:b"].callbacks, vec!["o:t"]);
+        // The lease is gone, so only the promise deadline remains armed.
+        assert_eq!(next.timer_at, Some(100_000));
+    }
+
+    #[test]
+    fn suspending_on_an_already_settled_promise_tells_the_caller_to_carry_on() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let (doc, _, _) = step(&doc, settle_req("o:a", "resolved"), 2);
+        let (next, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:a"]), 3);
+        assert_eq!(reply.status, 300);
+        assert_eq!(reply.data["preload"], json!([]));
+        // The task stays acquired: it never parked.
+        assert_eq!(next.tasks["o:t"].state, TaskState::Acquired);
+        assert!(next.promises["o:a"].callbacks.is_empty());
+    }
+
+    #[test]
+    fn suspending_drops_the_resumes_a_previous_run_buffered() {
+        let doc = with_acquired("o:t");
+        let (mut doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        doc.tasks.get_mut("o:t").unwrap().resumes.insert("o:a".into());
+        let (next, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:a"]), 2);
+        assert_eq!(reply.status, 200);
+        assert!(next.tasks["o:t"].resumes.is_empty());
+    }
+
+    // --- task.fence --------------------------------------------------------
+
+    #[test]
+    fn fencing_an_unknown_task_is_a_404() {
+        let action = json!({ "kind": "promise.create", "head": {},
+                             "data": { "id": "o:a", "timeoutAt": 100_000, "param": {}, "tags": {} } });
+        let (_, _, reply) = step(&OriginDoc::default(), task_fence("o:t", 1, action), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn fencing_at_the_wrong_version_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let action = json!({ "kind": "promise.create", "head": {},
+                             "data": { "id": "o:a", "timeoutAt": 100_000, "param": {}, "tags": {} } });
+        let (_, _, reply) = step(&doc, task_fence("o:t", 9, action), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Version mismatch"));
+    }
+
+    #[test]
+    fn a_fenced_create_returns_a_nested_envelope() {
+        let doc = with_acquired("o:t");
+        let action = json!({ "kind": "promise.create", "head": {},
+                             "data": { "id": "o:a", "timeoutAt": 100_000, "param": {}, "tags": {} } });
+        let (next, _, reply) = step(&doc, task_fence("o:t", 1, action), 1_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["action"]["kind"], "promise.create");
+        assert_eq!(reply.data["action"]["head"]["status"], 200);
+        assert_eq!(reply.data["action"]["head"]["corrId"], "corr-1");
+        assert_eq!(reply.data["action"]["data"]["promise"]["id"], "o:a");
+        assert_eq!(next.promises["o:a"].state, PromiseState::Pending);
+    }
+
+    #[test]
+    fn a_fenced_settle_of_a_missing_promise_reports_404_inside_a_200() {
+        let doc = with_acquired("o:t");
+        let action = json!({ "kind": "promise.settle", "head": {},
+                             "data": { "id": "o:a", "state": "resolved", "value": {} } });
+        let (_, _, reply) = step(&doc, task_fence("o:t", 1, action), 1);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.data["action"]["head"]["status"], 404);
+        assert_eq!(reply.data["action"]["data"], json!("Promise not found"));
+    }
+
+    #[test]
+    fn a_fenced_settle_runs_the_settlement_chain() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let (doc, _, _) = step(&doc, listener("o:a", "http://one"), 2);
+        let action = json!({ "kind": "promise.settle", "head": {},
+                             "data": { "id": "o:a", "state": "rejected", "value": {} } });
+        let (next, sends, reply) = step(&doc, task_fence("o:t", 1, action), 700);
+        assert_eq!(reply.data["action"]["head"]["status"], 200);
+        assert_eq!(next.promises["o:a"].state, PromiseState::Rejected);
+        assert_eq!(sends.len(), 1);
+    }
+
+    #[test]
+    fn fencing_an_unknown_action_kind_is_a_400() {
+        let doc = with_acquired("o:t");
+        let action = json!({ "kind": "promise.frobnicate", "head": {}, "data": { "id": "o:a" } });
+        let (_, _, reply) = step(&doc, task_fence("o:t", 1, action), 1);
+        assert_eq!(reply.status, 400);
+        assert_eq!(reply.data, json!("Invalid fence action kind"));
+    }
+
+    // --- task.heartbeat ----------------------------------------------------
+
+    #[test]
+    fn a_heartbeat_extends_the_lease_of_a_task_the_caller_owns() {
+        let doc = with_acquired("o:t");
+        assert_eq!(doc.tasks["o:t"].lease_at, Some(TTL));
+        let (next, _, reply) = step(&doc, task_heartbeat(PID, &[("o:t", 1)]), 5_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(next.tasks["o:t"].lease_at, Some(65_000));
+    }
+
+    #[test]
+    fn a_heartbeat_from_another_process_changes_nothing() {
+        let doc = with_acquired("o:t");
+        let (next, _, reply) = step(&doc, task_heartbeat("someone-else", &[("o:t", 1)]), 5_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(next, doc);
+    }
+
+    #[test]
+    fn a_heartbeat_at_a_stale_version_changes_nothing() {
+        let doc = with_acquired("o:t");
+        let (next, _, _) = step(&doc, task_heartbeat(PID, &[("o:t", 0)]), 5_000);
+        assert_eq!(next, doc);
+    }
+
+    #[test]
+    fn a_heartbeat_for_an_unknown_task_is_still_a_200() {
+        let doc = with_acquired("o:t");
+        let (next, _, reply) = step(&doc, task_heartbeat(PID, &[("o:missing", 1)]), 5_000);
+        assert_eq!(reply.status, 200);
+        assert_eq!(next, doc);
+    }
+
+    // --- task.halt / task.continue ----------------------------------------
+
+    #[test]
+    fn halting_an_unknown_task_is_a_404() {
+        let (_, _, reply) = step(&OriginDoc::default(), Req::TaskHalt(parse(json!({ "id": "o:t" }))), 0);
+        assert_eq!(reply.status, 404);
+    }
+
+    #[test]
+    fn halting_disarms_the_task() {
+        let doc = with_acquired("o:t");
+        let (next, _, reply) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 1);
+        assert_eq!(reply.status, 200);
+        let t = &next.tasks["o:t"];
+        assert_eq!(t.state, TaskState::Halted);
+        assert_eq!((t.retry_at, t.lease_at, t.pid.as_deref(), t.ttl), (None, None, None, None));
+        assert_eq!(next.timer_at, Some(100_000));
+    }
+
+    #[test]
+    fn halting_twice_is_idempotent() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 1);
+        let (next, _, reply) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 2);
+        assert_eq!(reply.status, 200);
+        assert_eq!(next, doc);
+    }
+
+    #[test]
+    fn halting_a_finished_task_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, task_fulfill("o:t", 1, "resolved"), 1);
+        let (_, _, reply) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 2);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Task is fulfilled"));
+    }
+
+    #[test]
+    fn continuing_a_task_that_is_not_halted_is_a_conflict() {
+        let doc = with_acquired("o:t");
+        let (_, _, reply) = step(&doc, Req::TaskContinue(parse(json!({ "id": "o:t" }))), 1);
+        assert_eq!(reply.status, 409);
+        assert_eq!(reply.data, json!("Task is not halted"));
+    }
+
+    #[test]
+    fn continuing_re_dispatches_a_halted_task() {
+        let doc = with_acquired("o:t");
+        let (doc, _, _) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 1);
+        let (next, sends, reply) =
+            step(&doc, Req::TaskContinue(parse(json!({ "id": "o:t" }))), 1_000);
+        assert_eq!(reply.status, 200);
+        let t = &next.tasks["o:t"];
+        assert_eq!(t.state, TaskState::Pending);
+        assert_eq!(t.retry_at, Some(31_000));
+        assert_eq!(
+            sends,
+            vec![(
+                W.to_string(),
+                OutEntry::Execute {
+                    task_id: "o:t".into(),
+                    version: 1
+                }
+            )]
+        );
     }
 
     // --- preload -----------------------------------------------------------
