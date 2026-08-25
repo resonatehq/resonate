@@ -5,6 +5,7 @@
 //! module imports `persistence`, `server`, or `oracle` — this is a fourth
 //! server implementation, not a fourth `Db`.
 
+pub mod applier;
 pub mod cache;
 pub mod codec;
 pub mod outbox;
