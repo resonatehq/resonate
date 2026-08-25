@@ -16,8 +16,10 @@
 //! `src/persistence/persistence_sqlite.rs` are the source of truth — except
 //! `resonate:delay`, which follows `src/oracle.rs`.
 
+pub mod handle;
 pub mod state;
 
+pub use handle::handle;
 pub use state::{
     apply_effects, check_invariants, min_deadline, Effect, KernelCfg, OriginDoc, OutEntry,
     PromiseDoc, Reply, Req, TaskDoc,
