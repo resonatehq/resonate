@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::core::types::Message;
-use crate::core::{scheme_of, ResonateRouter, ResonateWorker, Unavailable};
+use resonate_core::types::Message;
+use resonate_core::{scheme_of, ResonateRouter, ResonateWorker, Unavailable};
 
 // ---- Router ----
 
@@ -46,8 +46,8 @@ impl ResonateRouter for TransportDispatcher {
 #[cfg(test)]
 pub mod stubs {
     use super::*;
-    use crate::core::types::{RequestEnvelope, ResponseEnvelope};
-    use crate::core::ResonateServer;
+    use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
+    use resonate_core::ResonateServer;
     use std::sync::Mutex;
 
     /// A server that answers nothing. Workers hold a `ResonateServer` handle
@@ -105,7 +105,7 @@ pub mod stubs {
 mod tests {
     use super::stubs::*;
     use super::*;
-    use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
+    use resonate_core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
     fn execute_msg() -> Message {
         Message::Execute(ExecuteMsg {

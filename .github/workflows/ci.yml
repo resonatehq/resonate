@@ -26,14 +26,16 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Check
-        run: cargo check --all-features
+        run: cargo check --workspace --all-targets --all-features
 
       # clippy fully compiles the crate, so a separate build step is redundant
       - name: Clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      # --workspace, or the members' own tests are silently skipped: this is a
+      # workspace with a root package, so a bare `cargo test` selects only that.
       - name: Test
-        run: cargo test --all-features
+        run: cargo test --workspace --all-features
 
   test:
     name: Run tests

@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::core::types::{
+use crate::util;
+use async_trait::async_trait;
+use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
     PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
     PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseState, PromiseValue,
@@ -16,9 +18,7 @@ use crate::core::types::{
     TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData,
     TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
-use crate::core::{ResonateServer, Unavailable};
-use crate::util;
-use async_trait::async_trait;
+use resonate_core::{ResonateServer, Unavailable};
 use std::sync::Mutex;
 
 const PENDING_RETRY_TTL: i64 = 30_000;
@@ -207,7 +207,7 @@ impl Oracle {
             Err(e) => return e,
         };
         if let Some(addr) = r.tags.get("resonate:target") {
-            if !crate::core::is_valid_address(addr) {
+            if !resonate_core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -452,7 +452,7 @@ impl Oracle {
             Ok(r) => r,
             Err(e) => return e,
         };
-        if !crate::core::is_valid_address(&r.address) {
+        if !resonate_core::is_valid_address(&r.address) {
             return ResponseEnvelope::error(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -612,7 +612,7 @@ impl Oracle {
         };
         let action = &r.action.data;
         if let Some(addr) = action.tags.get("resonate:target") {
-            if !crate::core::is_valid_address(addr) {
+            if !resonate_core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -1099,7 +1099,7 @@ impl Oracle {
                     );
                 }
                 if let Some(addr) = create_data.tags.get("resonate:target") {
-                    if !crate::core::is_valid_address(addr) {
+                    if !resonate_core::is_valid_address(addr) {
                         return ResponseEnvelope::error(
                             req.kind.clone(),
                             req.head.corr_id.clone(),
@@ -2305,20 +2305,42 @@ impl Oracle {
 
 /// The reference model behind the same port as the real server.
 ///
-/// `Oracle::apply` takes `&mut self`, so the impl lands on `Mutex<Oracle>` —
-/// the orphan rule permits it because the trait is local. That also states the
-/// truth honestly: the real server serves requests concurrently, and the
-/// reference model is its serialized equivalent.
+/// `Oracle::apply` takes `&mut self`, so the impl needs interior mutability —
+/// and it needs a newtype rather than `Mutex<Oracle>` directly. With
+/// `ResonateServer` living in `resonate-core`, the orphan rule rejects
+/// `impl ResonateServer for Mutex<Oracle>`: `Mutex` is foreign and not
+/// `#[fundamental]`, so `Mutex<Oracle>` does not count as a local type.
 ///
+/// The wrapper also states the truth plainly — the real server answers requests
+/// concurrently, and the reference model is its serialized equivalent.
+pub struct SharedOracle(Mutex<Oracle>);
+
+impl SharedOracle {
+    pub fn new() -> Self {
+        Self(Mutex::new(Oracle::new()))
+    }
+
+    /// Borrow the model directly, for tests that inspect or seed its state.
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, Oracle> {
+        self.0.lock().expect("oracle mutex poisoned")
+    }
+}
+
+impl Default for SharedOracle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Unlike [`Server`](crate::server::Server), the oracle honours
 /// `head.debug_time` unconditionally. It has no config to gate on and no clock
 /// of its own, and every caller of it is a test driving a synthetic clock.
 #[async_trait]
-impl ResonateServer for Mutex<Oracle> {
+impl ResonateServer for SharedOracle {
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
         // No await while the guard is held.
         let resp = {
-            let mut oracle = self.lock().expect("oracle mutex poisoned");
+            let mut oracle = self.lock();
             oracle.apply(req)
         };
         Ok(resp)

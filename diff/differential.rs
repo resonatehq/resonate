@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use resonate::core::types::TaskState;
+use resonate_core::types::TaskState;
 
 // Serializes tests that share the same Postgres/MySQL database so that
 // concurrent debug.reset calls from one test cannot truncate another's data.
@@ -35,15 +35,15 @@ fn db_lock() -> &'static Mutex<()> {
 
 use resonate::{
     config::Config,
-    core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS},
-    core::ResonateServer,
-    oracle::Oracle,
+    oracle::{Oracle, SharedOracle},
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
         persistence_sqlite::SqliteStorage, Storage,
     },
     server::Server,
 };
+use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
+use resonate_core::ResonateServer;
 use serde_json::{json, Value};
 
 const TASK_RETRY_TIMEOUT_MS: i64 = 30_000;
@@ -142,7 +142,7 @@ async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
     let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
-    let oracle = Arc::new(Mutex::new(Oracle::new()));
+    let oracle = Arc::new(SharedOracle::new());
 
     // Postgres and MySQL are opt-in via env vars.
     let pg_url = std::env::var("TEST_POSTGRES_URL").ok();
@@ -226,7 +226,7 @@ async fn differential_random() {
             // Query oracle state to generate the next request, then release
             // the lock before dispatching so the oracle backend can reacquire it.
             let (envelope, now_after) = {
-                let o = oracle.lock().unwrap();
+                let o = oracle.lock();
                 let op = pick_op(&mut rng, &o, &covered);
                 build_envelope(op, &mut rng, &o, now)
             };

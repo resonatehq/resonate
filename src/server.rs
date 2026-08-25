@@ -15,18 +15,6 @@ use serde_json::Value;
 
 use crate::auth;
 use crate::config::Config;
-use crate::core::types::{
-    format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
-    PromiseRegisterListenerData, PromiseResponseData, PromiseSearchData, PromiseSearchResponseData,
-    PromiseSettleData, PromiseState, RequestEnvelope, ResponseEnvelope, ScheduleCreateData,
-    ScheduleDeleteData, ScheduleGetData, ScheduleResponseData, ScheduleSearchData,
-    ScheduleSearchResponseData, TaskAcquireData, TaskAcquireResponseData, TaskContinueData,
-    TaskCreateData, TaskCreateResponseData, TaskFenceData, TaskFenceResponseData, TaskFulfillData,
-    TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData, TaskRecord,
-    TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
-    TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
-};
-use crate::core::{ResonateServer, Unavailable};
 use crate::metrics;
 use crate::persistence::{
     PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
@@ -37,6 +25,18 @@ use crate::processing::processing_timeouts;
 use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
 use async_trait::async_trait;
+use resonate_core::types::{
+    format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
+    PromiseRegisterListenerData, PromiseResponseData, PromiseSearchData, PromiseSearchResponseData,
+    PromiseSettleData, PromiseState, RequestEnvelope, ResponseEnvelope, ScheduleCreateData,
+    ScheduleDeleteData, ScheduleGetData, ScheduleResponseData, ScheduleSearchData,
+    ScheduleSearchResponseData, TaskAcquireData, TaskAcquireResponseData, TaskContinueData,
+    TaskCreateData, TaskCreateResponseData, TaskFenceData, TaskFenceResponseData, TaskFulfillData,
+    TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData, TaskRecord,
+    TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
+    TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
+};
+use resonate_core::{ResonateServer, Unavailable};
 use validator::Validate;
 
 /// The running server — owns configuration, storage, and auth.
@@ -594,7 +594,7 @@ impl Server {
                 }
                 let address = r.tags.get("resonate:target").map(|s| s.as_str());
                 if let Some(addr) = address {
-                    if !crate::core::is_valid_address(addr) {
+                    if !resonate_core::is_valid_address(addr) {
                         tracing::warn!(
                             promise_id = %r.id,
                             address = addr,
@@ -888,7 +888,7 @@ impl Server {
                         &format_validation_errors(&e),
                     ));
                 }
-                if !crate::core::is_valid_address(&r.address) {
+                if !resonate_core::is_valid_address(&r.address) {
                     tracing::warn!(
                         awaited = %r.awaited,
                         address = %r.address,
@@ -1115,7 +1115,7 @@ impl Server {
                 let action_data = &r.action.data;
                 let action_id = &action_data.id;
                 if let Some(addr) = action_data.tags.get("resonate:target") {
-                    if !crate::core::is_valid_address(addr) {
+                    if !resonate_core::is_valid_address(addr) {
                         tracing::warn!(
                             task_id = %action_id,
                             address = %addr,
@@ -1797,7 +1797,7 @@ impl Server {
                         let already_timedout = now >= create_data.timeout_at;
                         let address = create_data.tags.get("resonate:target").map(|s| s.as_str());
                         if let Some(addr) = address {
-                            if !crate::core::is_valid_address(addr) {
+                            if !resonate_core::is_valid_address(addr) {
                                 tracing::warn!(
                                     task_id = %r.id,
                                     address = addr,
@@ -2353,7 +2353,7 @@ impl Server {
                 // Every promise this schedule fires carries the target, so it is
                 // held to the same standard promise create holds a target to.
                 if let Some(addr) = r.promise_tags.get("resonate:target") {
-                    if !crate::core::is_valid_address(addr) {
+                    if !resonate_core::is_valid_address(addr) {
                         tracing::warn!(
                             schedule_id = %r.id,
                             address = addr,

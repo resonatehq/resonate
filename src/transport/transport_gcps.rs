@@ -11,8 +11,8 @@ use tokio::sync::{mpsc, Mutex, Semaphore};
 
 use crate::metrics;
 
-use crate::core::types::Message;
-use crate::core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_core::types::Message;
+use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
 /// A `gcps://` destination: `gcps://<project>/<topic>`.
 #[derive(Debug, Clone)]

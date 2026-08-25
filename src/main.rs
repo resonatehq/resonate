@@ -1,7 +1,6 @@
 mod auth;
 mod cli;
 mod config;
-mod core;
 mod mcp;
 mod metrics;
 mod persistence;
@@ -12,7 +11,6 @@ mod util;
 
 use std::sync::Arc;
 
-use crate::core::types::ResponseEnvelope;
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -24,8 +22,9 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use config::Config;
-use core::{ResonateRouter, ResonateServer, ResonateWorker};
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
+use resonate_core::types::ResponseEnvelope;
+use resonate_core::{ResonateRouter, ResonateServer, ResonateWorker};
 use server::Server;
 use std::collections::HashMap;
 use transport::transport_http_poll::PollRegistry;

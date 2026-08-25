@@ -10,9 +10,9 @@ use tokio::sync::{mpsc, Semaphore};
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
 use async_trait::async_trait;
 
-use crate::core::types::Message;
-use crate::core::{ResonateServer, ResonateWorker, Unavailable};
 use crate::metrics;
+use resonate_core::types::Message;
+use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
 /// An `http://` or `https://` destination. The whole address is the URL, so
 /// parsing is the identity — the type exists to keep the delivery queue typed.

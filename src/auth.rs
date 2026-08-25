@@ -4,7 +4,7 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::core::types::{RequestEnvelope, ResponseEnvelope};
+use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
 
 // ---------------------------------------------------------------------------
 // Public key — tagged by key family so we know which algorithms to accept

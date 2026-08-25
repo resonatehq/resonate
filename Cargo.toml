@@ -1,7 +1,24 @@
-[package]
-name = "resonate"
+[workspace]
+members = ["crates/resonate-core"]
+
+[workspace.package]
 version = "0.9.8"
 edition = "2021"
+license = "Apache-2.0"
+
+# Shared with the workspace members so a version bump happens in one place.
+[workspace.dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+validator = { version = "0.18", features = ["derive"] }
+
+[package]
+name = "resonate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [lib]
 name = "resonate"
@@ -19,13 +36,14 @@ path = "diff/differential.rs"
 concurrency-stress = []
 
 [dependencies]
+resonate-core = { path = "crates/resonate-core" }
 jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 sqlx = { version = "0.8", features = ["postgres", "mysql", "runtime-tokio-rustls", "macros"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 tracing = "0.1"
@@ -39,9 +57,9 @@ prometheus = "0.13"
 lazy_static = "1"
 fastrand = "2"
 tracing-appender = "0.2"
-async-trait = "0.1"
-validator = { version = "0.18", features = ["derive"] }
-url = "2"
+async-trait = { workspace = true }
+validator = { workspace = true }
+url = { workspace = true }
 base64 = "0.22"
 google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
 google-cloud-pubsub = "0.33.1"

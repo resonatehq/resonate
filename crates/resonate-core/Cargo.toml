@@ -1,0 +1,13 @@
+[package]
+name = "resonate-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate's ports and the vocabulary they speak: the traits a server, worker, and router implement, and the protocol types they exchange."
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+validator = { workspace = true }

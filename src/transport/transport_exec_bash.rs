@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::process::Command;
 
-use crate::core::types::{
+use resonate_core::types::{
     Message, RequestEnvelope, RequestHead, ResponseEnvelope, TaskAcquireResponseData,
     PROTOCOL_VERSION,
 };
-use crate::core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
 // ─── Backend trait ────────────────────────────────────────────────────────────
 //
@@ -755,12 +755,12 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::config::Config;
-    use crate::core::types::PromiseState;
-    use crate::core::ResonateRouter;
     use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
     use crate::processing::processing_messages::process_batch;
     use crate::server::Server;
     use crate::transport::TransportDispatcher;
+    use resonate_core::types::PromiseState;
+    use resonate_core::ResonateRouter;
 
     // ---- end-to-end: the worker drives the task through the protocol ----
     //

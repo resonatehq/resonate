@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::core::types::Message;
-use crate::core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_core::types::Message;
+use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
 /// A `poll://` destination: `poll://<cast>@<group>[/<id>]`.
 #[derive(Debug, Clone)]

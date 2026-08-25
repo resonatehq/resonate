@@ -4,7 +4,7 @@ pub mod persistence_sqlite;
 
 use std::collections::HashMap;
 
-use crate::core::types::{PromiseRecord, ScheduleRecord, Snapshot, TaskRecord, TaskState};
+use resonate_core::types::{PromiseRecord, ScheduleRecord, Snapshot, TaskRecord, TaskState};
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
