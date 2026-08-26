@@ -632,10 +632,7 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
         };
         // Request k sees request k-1's document.
         apply_effects(&mut doc, &fx);
-        sends.extend(
-            fx.into_iter()
-                .filter(|e| matches!(e, Effect::Send { .. })),
-        );
+        sends.extend(fx.into_iter().filter(|e| matches!(e, Effect::Send { .. })));
     }
     doc.clock = clock;
     Decision {
@@ -923,9 +920,16 @@ mod tests {
     #[tokio::test]
     async fn a_create_writes_the_document_and_arms_the_timer() {
         let counting = Counting::new(shared_store());
-        let p = pool_with(Arc::clone(&counting) as Arc<dyn Store>, Arc::new(MemDocCache::new(16)));
+        let p = pool_with(
+            Arc::clone(&counting) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(16)),
+        );
         let reply = p
-            .submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 1_000)
+            .submit(
+                ORIGIN,
+                create("diff:a", 100_000, json!({ "resonate:target": W })),
+                1_000,
+            )
             .await
             .unwrap();
         assert_eq!(reply.status, 200);
@@ -952,7 +956,10 @@ mod tests {
     #[tokio::test]
     async fn a_read_that_changes_nothing_writes_nothing() {
         let counting = Counting::new(shared_store());
-        let p = pool_with(Arc::clone(&counting) as Arc<dyn Store>, Arc::new(MemDocCache::new(16)));
+        let p = pool_with(
+            Arc::clone(&counting) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(16)),
+        );
         p.submit(ORIGIN, create("diff:a", 100_000, json!({})), 1_000)
             .await
             .unwrap();
@@ -970,10 +977,17 @@ mod tests {
     #[tokio::test]
     async fn a_read_that_expires_a_promise_does_write() {
         let counting = Counting::new(shared_store());
-        let p = pool_with(Arc::clone(&counting) as Arc<dyn Store>, Arc::new(MemDocCache::new(16)));
-        p.submit(ORIGIN, create("diff:a", 5_000, json!({ "resonate:target": W })), 1_000)
-            .await
-            .unwrap();
+        let p = pool_with(
+            Arc::clone(&counting) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(16)),
+        );
+        p.submit(
+            ORIGIN,
+            create("diff:a", 5_000, json!({ "resonate:target": W })),
+            1_000,
+        )
+        .await
+        .unwrap();
         let (_, before, _) = counting.counts();
         let reply = p.submit(ORIGIN, get("diff:a"), 9_000).await.unwrap();
         assert_eq!(reply.data["promise"]["state"], "rejected_timedout");
@@ -986,9 +1000,13 @@ mod tests {
     async fn the_timer_object_moves_with_the_earliest_deadline() {
         let store = shared_store();
         let p = pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(16)));
-        p.submit(ORIGIN, create("diff:a", 50_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 50_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         let armed = |store: Arc<dyn Store>| async move {
             store.list(&keys().timer_prefix(), 10).await.unwrap()
         };
@@ -1001,10 +1019,8 @@ mod tests {
         p.submit(
             ORIGIN,
             Req::PromiseSettle(
-                serde_json::from_value(
-                    json!({ "id": "diff:a", "state": "resolved", "value": {} }),
-                )
-                .unwrap(),
+                serde_json::from_value(json!({ "id": "diff:a", "state": "resolved", "value": {} }))
+                    .unwrap(),
             ),
             1,
         )
@@ -1022,9 +1038,13 @@ mod tests {
             Arc::clone(&timers),
         );
         // The retry deadline (30_000) is the earliest, so it is what is armed.
-        p.submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 100_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(timers.next_deadline(), Some(30_000));
         assert_eq!(timers.len(), 1);
 
@@ -1032,10 +1052,8 @@ mod tests {
         p.submit(
             ORIGIN,
             Req::PromiseSettle(
-                serde_json::from_value(
-                    json!({ "id": "diff:a", "state": "resolved", "value": {} }),
-                )
-                .unwrap(),
+                serde_json::from_value(json!({ "id": "diff:a", "state": "resolved", "value": {} }))
+                    .unwrap(),
             ),
             1,
         )
@@ -1056,9 +1074,13 @@ mod tests {
             Arc::new(MemDocCache::new(4)),
             Arc::clone(&timers),
         );
-        p.submit(ORIGIN, create("diff:a", 50_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 50_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(timers.len(), 1);
 
         // Settling disarms: no new timer to PUT, so the CAS is write 1 and the
@@ -1067,17 +1089,18 @@ mod tests {
         p.submit(
             ORIGIN,
             Req::PromiseSettle(
-                serde_json::from_value(
-                    json!({ "id": "diff:a", "state": "resolved", "value": {} }),
-                )
-                .unwrap(),
+                serde_json::from_value(json!({ "id": "diff:a", "state": "resolved", "value": {} }))
+                    .unwrap(),
             ),
             1_000,
         )
         .await
         .unwrap();
         assert_eq!(timers.len(), 1, "the orphan is still armed");
-        assert_eq!(inner.list(&keys().timer_prefix(), 10).await.unwrap().len(), 1);
+        assert_eq!(
+            inner.list(&keys().timer_prefix(), 10).await.unwrap().len(),
+            1
+        );
     }
 
     // --- group commit -----------------------------------------------------
@@ -1119,7 +1142,11 @@ mod tests {
             "group commit should collapse 20 requests into fewer writes, got {writes}"
         );
         // Every promise still landed.
-        let stored = counting.get(&keys().doc_key(ORIGIN)).await.unwrap().unwrap();
+        let stored = counting
+            .get(&keys().doc_key(ORIGIN))
+            .await
+            .unwrap()
+            .unwrap();
         let doc = codec::decode(&stored.0, ORIGIN).unwrap();
         assert_eq!(doc.promises.len(), 21);
     }
@@ -1144,7 +1171,10 @@ mod tests {
         // Create is idempotent, so all ten must report the same promise.
         for reply in &replies {
             assert_eq!(reply.status, 200);
-            assert_eq!(reply.data["promise"]["createdAt"], replies[0].data["promise"]["createdAt"]);
+            assert_eq!(
+                reply.data["promise"]["createdAt"],
+                replies[0].data["promise"]["createdAt"]
+            );
         }
     }
 
@@ -1156,8 +1186,14 @@ mod tests {
         // conditional write re-reads and re-decides, so no transition is lost
         // and none is applied twice.
         let store = shared_store();
-        let a = Arc::new(pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(16))));
-        let b = Arc::new(pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(16))));
+        let a = Arc::new(pool_with(
+            Arc::clone(&store),
+            Arc::new(MemDocCache::new(16)),
+        ));
+        let b = Arc::new(pool_with(
+            Arc::clone(&store),
+            Arc::new(MemDocCache::new(16)),
+        ));
 
         let mut handles = Vec::new();
         for n in 0..12 {
@@ -1269,9 +1305,16 @@ mod tests {
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
         // Let the timer PUT through and kill the document CAS.
         faulty.fail_after(1);
-        let p = pool_with(Arc::clone(&faulty) as Arc<dyn Store>, Arc::new(NoopDocCache));
+        let p = pool_with(
+            Arc::clone(&faulty) as Arc<dyn Store>,
+            Arc::new(NoopDocCache),
+        );
         let err = p
-            .submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 0)
+            .submit(
+                ORIGIN,
+                create("diff:a", 100_000, json!({ "resonate:target": W })),
+                0,
+            )
             .await
             .expect_err("the commit died");
         assert!(err.to_string().contains("injected fault"));
@@ -1293,10 +1336,17 @@ mod tests {
     async fn dying_before_the_old_timer_delete_leaves_a_stale_key_only() {
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
-        let p = pool_with(Arc::clone(&faulty) as Arc<dyn Store>, Arc::new(MemDocCache::new(4)));
-        p.submit(ORIGIN, create("diff:a", 50_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        let p = pool_with(
+            Arc::clone(&faulty) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(4)),
+        );
+        p.submit(
+            ORIGIN,
+            create("diff:a", 50_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         let before = inner.list(&keys().timer_prefix(), 10).await.unwrap();
         assert_eq!(before.len(), 1);
 
@@ -1335,7 +1385,10 @@ mod tests {
         // reports current state.
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
-        let p = pool_with(Arc::clone(&faulty) as Arc<dyn Store>, Arc::new(NoopDocCache));
+        let p = pool_with(
+            Arc::clone(&faulty) as Arc<dyn Store>,
+            Arc::new(NoopDocCache),
+        );
         faulty.fail_after(0);
         assert!(p
             .submit(ORIGIN, create("diff:a", 100_000, json!({})), 0)
@@ -1359,9 +1412,13 @@ mod tests {
     async fn an_origins_clock_never_goes_backwards() {
         let store = shared_store();
         let p = pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(4)));
-        p.submit(ORIGIN, create("diff:a", 500_000, json!({ "resonate:target": W })), 10_000)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 500_000, json!({ "resonate:target": W })),
+            10_000,
+        )
+        .await
+        .unwrap();
         // A caller with a regressed clock must not un-expire anything.
         let reply = p
             .submit(ORIGIN, create("diff:b", 500_000, json!({})), 1)
@@ -1377,9 +1434,13 @@ mod tests {
     async fn a_tick_sweeps_the_origin() {
         let store = shared_store();
         let p = pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(4)));
-        p.submit(ORIGIN, create("diff:a", 5_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 5_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         p.tick(ORIGIN, 9_000).await.unwrap();
         let stored = store.get(&keys().doc_key(ORIGIN)).await.unwrap().unwrap();
         let doc = codec::decode(&stored.0, ORIGIN).unwrap();
@@ -1390,7 +1451,10 @@ mod tests {
     #[tokio::test]
     async fn a_tick_with_nothing_due_writes_nothing() {
         let counting = Counting::new(shared_store());
-        let p = pool_with(Arc::clone(&counting) as Arc<dyn Store>, Arc::new(MemDocCache::new(4)));
+        let p = pool_with(
+            Arc::clone(&counting) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(4)),
+        );
         p.submit(ORIGIN, create("diff:a", 500_000, json!({})), 0)
             .await
             .unwrap();
@@ -1450,7 +1514,10 @@ mod tests {
             .await
             .unwrap();
         let p = pool_with(Arc::clone(&store), Arc::new(NoopDocCache));
-        let err = p.submit(ORIGIN, get("diff:a"), 0).await.expect_err("refused");
+        let err = p
+            .submit(ORIGIN, get("diff:a"), 0)
+            .await
+            .expect_err("refused");
         assert!(err.to_string().contains("unreadable"), "{err}");
     }
 
@@ -1459,11 +1526,17 @@ mod tests {
         let store = shared_store();
         let doc = OriginDoc::default();
         store
-            .put(&keys().doc_key(ORIGIN), codec::encode(&doc, "somewhere-else"))
+            .put(
+                &keys().doc_key(ORIGIN),
+                codec::encode(&doc, "somewhere-else"),
+            )
             .await
             .unwrap();
         let p = pool_with(Arc::clone(&store), Arc::new(NoopDocCache));
-        let err = p.submit(ORIGIN, get("diff:a"), 0).await.expect_err("refused");
+        let err = p
+            .submit(ORIGIN, get("diff:a"), 0)
+            .await
+            .expect_err("refused");
         assert!(err.to_string().contains("origin"), "{err}");
     }
 
@@ -1484,7 +1557,11 @@ mod tests {
         // Kill the document CAS, after the timer PUT.
         faulty.fail_after(1);
         assert!(p
-            .submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 0)
+            .submit(
+                ORIGIN,
+                create("diff:a", 100_000, json!({ "resonate:target": W })),
+                0
+            )
             .await
             .is_err());
         assert!(
@@ -1493,9 +1570,13 @@ mod tests {
         );
 
         faulty.heal();
-        p.submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 0)
-            .await
-            .unwrap();
+        p.submit(
+            ORIGIN,
+            create("diff:a", 100_000, json!({ "resonate:target": W })),
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(outbox.snapshot().len(), 1);
     }
 }

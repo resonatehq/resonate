@@ -135,7 +135,11 @@ impl PromiseDoc {
             state: self.state,
             param: self.param.clone(),
             value: self.value.clone(),
-            tags: self.tags.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            tags: self
+                .tags
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             timeout_at: self.timeout_at,
             created_at: self.created_at,
             settled_at: self.settled_at,
@@ -387,7 +391,10 @@ pub fn check_invariants(doc: &OriginDoc) -> Result<(), String> {
         }
         // Settlement is terminal for the task that owns the promise.
         if p.state != PromiseState::Pending && t.state != TaskState::Fulfilled {
-            return Err(format!("task {id}: promise settled but task is {}", t.state));
+            return Err(format!(
+                "task {id}: promise settled but task is {}",
+                t.state
+            ));
         }
         if p.state == PromiseState::Pending && t.state == TaskState::Fulfilled {
             return Err(format!("task {id}: fulfilled but promise is pending"));

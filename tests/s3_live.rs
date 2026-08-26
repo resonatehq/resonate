@@ -95,7 +95,10 @@ async fn a_live_store_honours_the_conditional_write_contract() {
         .expect("create");
     let (body, read) = store.get(&key).await.unwrap().expect("present");
     assert_eq!(body, b"one", "read-after-write");
-    assert_eq!(read, first, "the ETag a read reports is the one put returned");
+    assert_eq!(
+        read, first,
+        "the ETag a read reports is the one put returned"
+    );
 
     assert_eq!(
         store.put_if_none_match(&key, b"two".to_vec()).await,
@@ -120,7 +123,11 @@ async fn a_live_store_honours_the_conditional_write_contract() {
 
     assert_eq!(
         store
-            .put_if_match(&format!("{prefix}/absent"), b"x".to_vec(), &Etag("\"1\"".into()))
+            .put_if_match(
+                &format!("{prefix}/absent"),
+                b"x".to_vec(),
+                &Etag("\"1\"".into())
+            )
             .await,
         Err(StoreError::PreconditionFailed),
         "a conditional replace of nothing must be refused"
@@ -171,7 +178,14 @@ async fn a_live_store_lists_in_key_order() {
     assert!(capped[1].contains(&format!("{:020}", 200)));
 
     // And the shard prefixes are genuinely separate.
-    assert_eq!(store.list(&format!("{prefix}/t/01"), 10).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .list(&format!("{prefix}/t/01"), 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     teardown(&store, &prefix).await;
 }
@@ -213,7 +227,13 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
         },
     );
     // Pause delivery so the queued messages are visible in the snapshot.
-    assert_eq!(send(&server, "debug.start", json!({}), T0).await.head.status, 200);
+    assert_eq!(
+        send(&server, "debug.start", json!({}), T0)
+            .await
+            .head
+            .status,
+        200
+    );
 
     // Claim work by describing it.
     let created = send(
@@ -325,11 +345,23 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
     for task in final_snap.data["tasks"].as_array().unwrap() {
         assert_eq!(task["state"], "fulfilled", "{task}");
     }
-    assert!(final_snap.data["promiseTimeouts"].as_array().unwrap().is_empty());
-    assert!(final_snap.data["taskTimeouts"].as_array().unwrap().is_empty());
+    assert!(final_snap.data["promiseTimeouts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(final_snap.data["taskTimeouts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     // Search reaches every origin document.
-    let found = send(&server, "promise.search", json!({ "limit": 100 }), T0 + 1_000_000).await;
+    let found = send(
+        &server,
+        "promise.search",
+        json!({ "limit": 100 }),
+        T0 + 1_000_000,
+    )
+    .await;
     let ids: Vec<&str> = found.data["promises"]
         .as_array()
         .unwrap()

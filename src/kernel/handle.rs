@@ -539,7 +539,14 @@ fn op_task_fence(
                 Some(p) => p.to_record(&create.id),
                 None => create_promise(tx, &create.id, &create, now, cfg),
             };
-            fence_reply(tx, &r.id, &r.action.kind, corr_id, 200, json!({ "promise": record }))
+            fence_reply(
+                tx,
+                &r.id,
+                &r.action.kind,
+                corr_id,
+                200,
+                json!({ "promise": record }),
+            )
         }
         "promise.settle" => {
             let settle_data: crate::core::types::PromiseSettleData =
@@ -858,7 +865,11 @@ pub(crate) fn settle(
     cfg: &KernelCfg,
 ) -> PromiseRecord {
     {
-        let p = tx.doc.promises.get_mut(id).expect("caller checked presence");
+        let p = tx
+            .doc
+            .promises
+            .get_mut(id)
+            .expect("caller checked presence");
         debug_assert_eq!(p.state, PromiseState::Pending);
         p.state = match state {
             SettleState::Resolved => PromiseState::Resolved,
@@ -1345,7 +1356,10 @@ mod tests {
         let doc = with_targeted("o:a", 100_000);
         let (doc, _, _) = step(&doc, listener("o:a", "http://one"), 1);
         let (doc, _, _) = step(&doc, listener("o:a", "http://two"), 2);
-        assert_eq!(doc.promises["o:a"].listeners, vec!["http://one", "http://two"]);
+        assert_eq!(
+            doc.promises["o:a"].listeners,
+            vec!["http://one", "http://two"]
+        );
 
         let (next, sends, _) = step(&doc, settle_req("o:a", "resolved"), 700);
         assert_eq!(sends.len(), 2);
@@ -1353,7 +1367,10 @@ mod tests {
         assert_eq!(sends[0].0, "http://one");
         assert_eq!(sends[1].0, "http://two");
         match &sends[0].1 {
-            OutEntry::Unblock { promise_id, promise } => {
+            OutEntry::Unblock {
+                promise_id,
+                promise,
+            } => {
                 assert_eq!(promise_id, "o:a");
                 assert_eq!(promise.state, PromiseState::Resolved);
             }
@@ -1504,7 +1521,10 @@ mod tests {
         let (doc, _, _) = step(&doc, create("o:awaiter", 100_000, json!({})), 0);
         let (next, _, reply) = step(&doc, callback("o:awaited", "o:awaiter"), 0);
         assert_eq!(reply.status, 422);
-        assert_eq!(reply.data, json!("Awaiter promise has no resonate:target tag"));
+        assert_eq!(
+            reply.data,
+            json!("Awaiter promise has no resonate:target tag")
+        );
         assert!(next.promises["o:awaited"].callbacks.is_empty());
     }
 
@@ -1692,7 +1712,11 @@ mod tests {
 
     #[test]
     fn task_create_hands_back_an_already_acquired_task() {
-        let (doc, sends, reply) = step(&OriginDoc::default(), task_create("o:t", 100_000, TTL), 1_000);
+        let (doc, sends, reply) = step(
+            &OriginDoc::default(),
+            task_create("o:t", 100_000, TTL),
+            1_000,
+        );
         assert_eq!(reply.status, 200);
         assert_eq!(reply.data["task"]["state"], "acquired");
         assert_eq!(reply.data["task"]["version"], 1);
@@ -1778,7 +1802,11 @@ mod tests {
     fn acquiring_takes_the_lease_and_drops_buffered_resumes() {
         let doc = with_targeted("o:t", 100_000);
         let (mut doc, _, _) = step(&doc, create("o:x", 100_000, json!({})), 0);
-        doc.tasks.get_mut("o:t").unwrap().resumes.insert("o:x".into());
+        doc.tasks
+            .get_mut("o:t")
+            .unwrap()
+            .resumes
+            .insert("o:x".into());
         let (next, sends, reply) = step(&doc, task_acquire("o:t", 0, TTL), 1_000);
         assert_eq!(reply.status, 200);
         assert_eq!(reply.data["task"]["version"], 1);
@@ -1872,7 +1900,10 @@ mod tests {
         let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
         let (_, _, reply) = step(&doc, task_suspend("o:t", 9, &["o:a"]), 2);
         assert_eq!(reply.status, 409);
-        assert_eq!(reply.data, json!("Task is not acquired or version mismatch"));
+        assert_eq!(
+            reply.data,
+            json!("Task is not acquired or version mismatch")
+        );
     }
 
     #[test]
@@ -1919,7 +1950,11 @@ mod tests {
     fn suspending_drops_the_resumes_a_previous_run_buffered() {
         let doc = with_acquired("o:t");
         let (mut doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
-        doc.tasks.get_mut("o:t").unwrap().resumes.insert("o:a".into());
+        doc.tasks
+            .get_mut("o:t")
+            .unwrap()
+            .resumes
+            .insert("o:a".into());
         let (next, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:a"]), 2);
         assert_eq!(reply.status, 200);
         assert!(next.tasks["o:t"].resumes.is_empty());
@@ -2030,7 +2065,11 @@ mod tests {
 
     #[test]
     fn halting_an_unknown_task_is_a_404() {
-        let (_, _, reply) = step(&OriginDoc::default(), Req::TaskHalt(parse(json!({ "id": "o:t" }))), 0);
+        let (_, _, reply) = step(
+            &OriginDoc::default(),
+            Req::TaskHalt(parse(json!({ "id": "o:t" }))),
+            0,
+        );
         assert_eq!(reply.status, 404);
     }
 
@@ -2041,7 +2080,10 @@ mod tests {
         assert_eq!(reply.status, 200);
         let t = &next.tasks["o:t"];
         assert_eq!(t.state, TaskState::Halted);
-        assert_eq!((t.retry_at, t.lease_at, t.pid.as_deref(), t.ttl), (None, None, None, None));
+        assert_eq!(
+            (t.retry_at, t.lease_at, t.pid.as_deref(), t.ttl),
+            (None, None, None, None)
+        );
         assert_eq!(next.timer_at, Some(100_000));
     }
 
@@ -2075,8 +2117,11 @@ mod tests {
     fn continuing_re_dispatches_a_halted_task() {
         let doc = with_acquired("o:t");
         let (doc, _, _) = step(&doc, Req::TaskHalt(parse(json!({ "id": "o:t" }))), 1);
-        let (next, sends, reply) =
-            step(&doc, Req::TaskContinue(parse(json!({ "id": "o:t" }))), 1_000);
+        let (next, sends, reply) = step(
+            &doc,
+            Req::TaskContinue(parse(json!({ "id": "o:t" }))),
+            1_000,
+        );
         assert_eq!(reply.status, 200);
         let t = &next.tasks["o:t"];
         assert_eq!(t.state, TaskState::Pending);
@@ -2098,7 +2143,11 @@ mod tests {
     #[test]
     fn preload_is_the_rest_of_the_branch() {
         let branch = json!({ "resonate:target": W, "resonate:branch": "o" });
-        let (doc, _, _) = step(&OriginDoc::default(), create("o:a", 100_000, branch.clone()), 0);
+        let (doc, _, _) = step(
+            &OriginDoc::default(),
+            create("o:a", 100_000, branch.clone()),
+            0,
+        );
         let (doc, _, _) = step(&doc, create("o:b", 100_000, branch), 0);
         let (doc, _, _) = step(&doc, create("o:c", 100_000, json!({})), 0);
         let ids: Vec<String> = preload(&doc, "o:a").into_iter().map(|p| p.id).collect();

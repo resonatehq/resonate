@@ -314,7 +314,9 @@ impl S3Server {
             "task.continue" => {
                 let r: TaskContinueData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskContinue(r), now).await
+                self.applier
+                    .submit(&origin, Req::TaskContinue(r), now)
+                    .await
             }
             "task.search" => {
                 let r: TaskSearchData = parsed!(data);
@@ -407,10 +409,7 @@ impl S3Server {
         };
         if let Some(debug_time) = req.head.debug_time {
             if debug_time != time {
-                return Ok(Reply::err(
-                    400,
-                    "resonate:debug_time must equal data.time",
-                ));
+                return Ok(Reply::err(400, "resonate:debug_time must equal data.time"));
             }
         }
         let _ = now;
@@ -459,7 +458,11 @@ impl ResonateServer for S3Server {
         // Debug-time overrides are gated by config, so a caller cannot move the
         // server's clock. The gate is here rather than at the HTTP edge so
         // every caller of the port is subject to it.
-        let debug_time = if self.debug { req.head.debug_time } else { None };
+        let debug_time = if self.debug {
+            req.head.debug_time
+        } else {
+            None
+        };
         let now = util::resolve_time(debug_time);
         let reply = self.dispatch(req, now).await?;
         Ok(ResponseEnvelope::new(
@@ -788,7 +791,6 @@ mod tests {
         assert_eq!(resp.data, json!("Action must belong to the task's origin"));
     }
 
-
     // --- searches ---------------------------------------------------------
 
     #[tokio::test]
@@ -894,10 +896,7 @@ mod tests {
         req.head.debug_time = Some(9);
         let resp = s.process(&req).await.unwrap();
         assert_eq!(resp.head.status, 400);
-        assert_eq!(
-            resp.data,
-            json!("resonate:debug_time must equal data.time")
-        );
+        assert_eq!(resp.data, json!("resonate:debug_time must equal data.time"));
     }
 
     #[tokio::test]
@@ -989,10 +988,12 @@ mod tests {
             1
         );
         send(&s, "debug.stop", json!({}), 1_000).await;
-        assert!(send(&s, "debug.snap", json!({}), 1_000).await.data["messages"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            send(&s, "debug.snap", json!({}), 1_000).await.data["messages"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -1017,7 +1018,10 @@ mod tests {
             1_000,
         )
         .await;
-        assert_eq!(send(&s, "debug.reset", json!({}), 1_000).await.head.status, 200);
+        assert_eq!(
+            send(&s, "debug.reset", json!({}), 1_000).await.head.status,
+            200
+        );
 
         let snap = send(&s, "debug.snap", json!({}), 1_000).await;
         for key in [

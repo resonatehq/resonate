@@ -42,9 +42,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::core::types::{
-    PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData,
-};
+use crate::core::types::{PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData};
 use crate::core::Unavailable;
 use crate::kernel::state::{Reply, Req, ScheduleFireData, TAG_TARGET};
 use crate::metrics;
@@ -443,7 +441,10 @@ mod tests {
         let r = rig();
         let reply = r
             .schedules
-            .create(&create_data("s0", "p-{{.id}}-{{.timestamp}}", 60_000), 1_000)
+            .create(
+                &create_data("s0", "p-{{.id}}-{{.timestamp}}", 60_000),
+                1_000,
+            )
             .await
             .unwrap();
         assert_eq!(reply.status, 200);
@@ -482,7 +483,12 @@ mod tests {
         let reply = r.schedules.create(&d, 0).await.unwrap();
         assert_eq!(reply.status, 400);
         assert_eq!(reply.data, json!("Invalid cron expression"));
-        assert!(r.store.list(&keys().sched_prefix(), 10).await.unwrap().is_empty());
+        assert!(r
+            .store
+            .list(&keys().sched_prefix(), 10)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -513,7 +519,12 @@ mod tests {
         let reply = r.schedules.delete("s0").await.unwrap();
         assert_eq!(reply.status, 200);
         assert_eq!(r.schedules.get("s0").await.unwrap().status, 404);
-        assert!(r.store.list(&keys().timer_prefix(), 10).await.unwrap().is_empty());
+        assert!(r
+            .store
+            .list(&keys().timer_prefix(), 10)
+            .await
+            .unwrap()
+            .is_empty());
         // Deleting twice is a 404, not a second success.
         assert_eq!(r.schedules.delete("s0").await.unwrap().status, 404);
     }
@@ -534,7 +545,9 @@ mod tests {
         r.schedules.fire("s0", due, due).await.unwrap();
         let next = util::compute_next_cron(CRON, due);
         assert!(
-            r.timers.take_due(next).contains(&keys().sched_timer_key("s0", next)),
+            r.timers
+                .take_due(next)
+                .contains(&keys().sched_timer_key("s0", next)),
             "the next occurrence is armed"
         );
 
@@ -751,9 +764,7 @@ mod tests {
             cron: CRON.into(),
             promise_id: "p-{{.id}}".into(),
             promise_timeout: 60_000,
-            promise_param_headers: Some(
-                [("a".to_string(), "1".to_string())].into_iter().collect(),
-            ),
+            promise_param_headers: Some([("a".to_string(), "1".to_string())].into_iter().collect()),
             promise_param_data: Some("aGk=".into()),
             promise_tags: [(TAG_TARGET.to_string(), W.to_string())]
                 .into_iter()
@@ -789,6 +800,9 @@ mod tests {
             .await
             .unwrap();
         let err = r.schedules.get("s0").await.expect_err("refused");
-        assert!(err.to_string().contains("unsupported schedule version"), "{err}");
+        assert!(
+            err.to_string().contains("unsupported schedule version"),
+            "{err}"
+        );
     }
 }

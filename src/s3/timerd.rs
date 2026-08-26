@@ -310,11 +310,9 @@ impl Timerd {
                     PAUSED_NAP
                 } else {
                     match self.queue.next_deadline() {
-                        Some(at) => {
-                            Duration::from_millis(
-                                at.saturating_sub(crate::util::system_time_ms()).max(0) as u64,
-                            )
-                        }
+                        Some(at) => Duration::from_millis(
+                            at.saturating_sub(crate::util::system_time_ms()).max(0) as u64,
+                        ),
                         // Nothing armed: sleep until an arm wakes us.
                         None => Duration::from_secs(3_600),
                     }
@@ -408,7 +406,10 @@ mod tests {
             }))
             .unwrap(),
         );
-        assert_eq!(rig.applier.submit(origin, req, now).await.unwrap().status, 200);
+        assert_eq!(
+            rig.applier.submit(origin, req, now).await.unwrap().status,
+            200
+        );
     }
 
     async fn stored(rig: &Rig, origin: &str) -> Option<crate::kernel::state::OriginDoc> {
@@ -434,7 +435,11 @@ mod tests {
 
     #[async_trait]
     impl Store for NoListing {
-        async fn get(&self, key: &str) -> Result<Option<(Vec<u8>, super::super::store::Etag)>, super::super::store::StoreError> {
+        async fn get(
+            &self,
+            key: &str,
+        ) -> Result<Option<(Vec<u8>, super::super::store::Etag)>, super::super::store::StoreError>
+        {
             self.0.get(key).await
         }
         async fn put_if_match(
@@ -452,13 +457,21 @@ mod tests {
         ) -> Result<super::super::store::Etag, super::super::store::StoreError> {
             self.0.put_if_none_match(key, body).await
         }
-        async fn put(&self, key: &str, body: Vec<u8>) -> Result<super::super::store::Etag, super::super::store::StoreError> {
+        async fn put(
+            &self,
+            key: &str,
+            body: Vec<u8>,
+        ) -> Result<super::super::store::Etag, super::super::store::StoreError> {
             self.0.put(key, body).await
         }
         async fn delete(&self, key: &str) -> Result<(), super::super::store::StoreError> {
             self.0.delete(key).await
         }
-        async fn list(&self, prefix: &str, _max_keys: usize) -> Result<Vec<String>, super::super::store::StoreError> {
+        async fn list(
+            &self,
+            prefix: &str,
+            _max_keys: usize,
+        ) -> Result<Vec<String>, super::super::store::StoreError> {
             panic!("normal operation must not list, but listed {prefix}");
         }
     }
@@ -498,7 +511,11 @@ mod tests {
         assert_eq!(doc.promises["o:a"].state, PromiseState::RejectedTimedout);
         assert!(r.timers.is_empty(), "nothing left armed");
         assert!(
-            inner.list(&keys().timer_prefix(), 10).await.unwrap().is_empty(),
+            inner
+                .list(&keys().timer_prefix(), 10)
+                .await
+                .unwrap()
+                .is_empty(),
             "the fired key was collected"
         );
     }

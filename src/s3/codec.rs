@@ -221,8 +221,10 @@ fn write_payload(out: &mut String, v: &PromiseValue) {
     let mut first = true;
     if let Some(headers) = &v.headers {
         write_key(out, "h", &mut first);
-        let sorted: BTreeMap<String, String> =
-            headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let sorted: BTreeMap<String, String> = headers
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         write_map(out, &sorted);
     }
     if let Some(data) = &v.data {
@@ -506,8 +508,8 @@ fn id_list(v: &Value, origin: &str) -> Result<Vec<String>, CodecError> {
 /// omission-when-empty, is the whole evolution story — a newer server may add
 /// both without breaking an older reader.
 pub fn decode(bytes: &[u8], origin: &str) -> Result<OriginDoc, CodecError> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|e| CodecError::Malformed(format!("not utf-8: {e}")))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|e| CodecError::Malformed(format!("not utf-8: {e}")))?;
     let mut doc = OriginDoc::default();
     let mut saw_header = false;
     // Armed task deadlines arrive on their own lines, after the task lines.
@@ -887,7 +889,10 @@ mod tests {
         let back = decode(&encode(&doc, ORIGIN), ORIGIN).unwrap();
         // A settled promise's listeners were drained, so use a pending one.
         let text = String::from_utf8(encode(&doc, ORIGIN)).unwrap();
-        assert!(!text.contains("diff:poll://"), "address was origin-qualified");
+        assert!(
+            !text.contains("diff:poll://"),
+            "address was origin-qualified"
+        );
         assert_eq!(back, doc);
     }
 

@@ -44,7 +44,9 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use object_store::{path::Path, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload, UpdateVersion};
+use object_store::{
+    path::Path, ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload, UpdateVersion,
+};
 
 /// An object's version, as the store reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,12 +84,8 @@ pub trait Store: Send + Sync {
     async fn get(&self, key: &str) -> Result<Option<(Vec<u8>, Etag)>, StoreError>;
 
     /// Replace the object only if it is still at `etag`.
-    async fn put_if_match(
-        &self,
-        key: &str,
-        body: Vec<u8>,
-        etag: &Etag,
-    ) -> Result<Etag, StoreError>;
+    async fn put_if_match(&self, key: &str, body: Vec<u8>, etag: &Etag)
+        -> Result<Etag, StoreError>;
 
     /// Create the object only if nothing is there.
     async fn put_if_none_match(&self, key: &str, body: Vec<u8>) -> Result<Etag, StoreError>;
@@ -167,12 +165,7 @@ impl<T: ObjectStore> ObjectStoreAdapter<T> {
         })
     }
 
-    async fn put_with(
-        &self,
-        key: &str,
-        body: Vec<u8>,
-        mode: PutMode,
-    ) -> Result<Etag, StoreError> {
+    async fn put_with(&self, key: &str, body: Vec<u8>, mode: PutMode) -> Result<Etag, StoreError> {
         let path = Self::path(key)?;
         let opts = PutOptions {
             mode,
@@ -473,14 +466,13 @@ mod tests {
         // hand over.
         let s = store();
         for n in [500, 100, 400, 200, 300] {
-            s.put(&format!("t/00/{n:020}_o"), b"".to_vec()).await.unwrap();
+            s.put(&format!("t/00/{n:020}_o"), b"".to_vec())
+                .await
+                .unwrap();
         }
         assert_eq!(
             s.list("t/00", 2).await.unwrap(),
-            vec![
-                format!("t/00/{:020}_o", 100),
-                format!("t/00/{:020}_o", 200)
-            ]
+            vec![format!("t/00/{:020}_o", 100), format!("t/00/{:020}_o", 200)]
         );
         assert!(s.list("t/00", 0).await.unwrap().is_empty());
     }

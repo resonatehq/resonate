@@ -263,7 +263,8 @@ async fn run_server(config: Config) -> Result<(), String> {
                  If-None-Match). S3, R2, GCS and Azure qualify; MinIO, B2 and \
                  Spaces do not and will silently lose writes."
             );
-            let mut builder = object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
+            let mut builder =
+                object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
             if let Some(region) = &s3.region {
                 builder = builder.with_region(region);
             }
@@ -307,7 +308,10 @@ async fn run_server(config: Config) -> Result<(), String> {
             let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
-            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Sqlite(sqlite))))
+            Backend::Sql(Arc::new(Server::new(
+                config.clone(),
+                Storage::Sqlite(sqlite),
+            )))
         }
     };
 
@@ -447,10 +451,9 @@ async fn run_server(config: Config) -> Result<(), String> {
             // memory (listing the store only to seed itself at startup), and
             // the outbox delivers as it is written rather than being drained
             // by a second loop.
-            handles.push(Arc::clone(s3_server.timerd()).spawn(
-                s3_server.debug_mode(),
-                shutdown_rx.clone(),
-            ));
+            handles.push(
+                Arc::clone(s3_server.timerd()).spawn(s3_server.debug_mode(), shutdown_rx.clone()),
+            );
         }
     }
 

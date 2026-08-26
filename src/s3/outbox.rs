@@ -339,7 +339,10 @@ mod tests {
             sent[0].1,
             r#"{"data":{"task":{"id":"o:t","version":3}},"head":{"serverUrl":"http://server:8001"},"kind":"execute"}"#
         );
-        assert!(ob.snapshot().is_empty(), "delivered messages leave the queue");
+        assert!(
+            ob.snapshot().is_empty(),
+            "delivered messages leave the queue"
+        );
     }
 
     #[tokio::test]
@@ -546,7 +549,7 @@ mod tests {
 #[cfg(test)]
 mod late_router_tests {
     use super::*;
-    use crate::core::types::{PromiseState, PromiseValue, PromiseRecord};
+    use crate::core::types::{PromiseRecord, PromiseState, PromiseValue};
 
     struct Counting(Mutex<usize>);
 
@@ -580,7 +583,10 @@ mod late_router_tests {
     #[tokio::test]
     async fn routing_before_binding_reports_the_message_undelivered() {
         let late = LateRouter::new();
-        let err = late.route("http://w", &unblock()).await.expect_err("no router");
+        let err = late
+            .route("http://w", &unblock())
+            .await
+            .expect_err("no router");
         assert!(err.to_string().contains("no router registered"));
     }
 

@@ -365,7 +365,10 @@ async fn agree_on(name: &str, steps: &[(&str, Value, i64)]) {
     let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
     let backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
-        ("oracle".into(), Arc::new(Mutex::new(Oracle::new())) as Backend),
+        (
+            "oracle".into(),
+            Arc::new(Mutex::new(Oracle::new())) as Backend,
+        ),
         ("s3".into(), s3_backend()),
     ];
     setup_all(&backends, T0).await;
@@ -547,7 +550,10 @@ async fn every_backend_refuses_a_fence_across_origins() {
     let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
     let backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
-        ("oracle".into(), Arc::new(Mutex::new(Oracle::new())) as Backend),
+        (
+            "oracle".into(),
+            Arc::new(Mutex::new(Oracle::new())) as Backend,
+        ),
         ("s3".into(), s3_backend()),
     ];
     setup_all(&backends, T0).await;
@@ -611,11 +617,7 @@ async fn snapshots_agree_after_a_tick_expires_everything() {
                         "tags": { "resonate:target": WORKER_URL, "resonate:timer": "true" } }),
                 T0,
             ),
-            (
-                "debug.tick",
-                json!({ "time": T0 + 9_000 }),
-                T0 + 9_000,
-            ),
+            ("debug.tick", json!({ "time": T0 + 9_000 }), T0 + 9_000),
         ],
     )
     .await;

@@ -96,9 +96,8 @@ impl ScanService {
             }
             match self.store.get(&key).await {
                 Ok(Some((bytes, _))) => {
-                    let doc = codec::decode(&bytes, &origin).map_err(|e| {
-                        Unavailable::new(format!("document {key} unreadable: {e}"))
-                    })?;
+                    let doc = codec::decode(&bytes, &origin)
+                        .map_err(|e| Unavailable::new(format!("document {key} unreadable: {e}")))?;
                     out.insert(origin, doc);
                 }
                 // Deleted between the listing and the read. It is simply gone.
@@ -413,7 +412,10 @@ mod tests {
         }
         let snap = r.scan.snapshot().await.unwrap();
         assert_eq!(
-            snap.promises.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            snap.promises
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["alpha:a", "beta:a", "gamma:a"],
             "ordered by id across origins"
         );
@@ -483,7 +485,9 @@ mod tests {
         assert_eq!(reply.data["promises"].as_array().unwrap().len(), 1);
         let reply = r
             .scan
-            .search_promises(&parse(json!({ "tags": { "k": "v", "other": "x" }, "limit": 10 })))
+            .search_promises(&parse(
+                json!({ "tags": { "k": "v", "other": "x" }, "limit": 10 }),
+            ))
             .await
             .unwrap();
         assert!(reply.data["promises"].as_array().unwrap().is_empty());
@@ -523,7 +527,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["o:p2", "o:p3"]
         );
-        assert!(second.data.get("cursor").is_none(), "the last page has none");
+        assert!(
+            second.data.get("cursor").is_none(),
+            "the last page has none"
+        );
     }
 
     #[tokio::test]
@@ -623,11 +630,7 @@ mod tests {
             });
             r.schedules.create(&parse(d), 1_000).await.unwrap();
         }
-        let reply = r
-            .scan
-            .search_schedules(&parse(json!({})))
-            .await
-            .unwrap();
+        let reply = r.scan.search_schedules(&parse(json!({}))).await.unwrap();
         assert_eq!(reply.data["schedules"].as_array().unwrap().len(), 10);
         assert_eq!(reply.data["cursor"], "s09");
     }
