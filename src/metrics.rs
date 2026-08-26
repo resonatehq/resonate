@@ -64,4 +64,9 @@ lazy_static! {
         "Workflow document cache misses, each costing a store GET"
     )
     .unwrap();
+    pub static ref DOC_CACHE_HITS_TOTAL: Counter = register_counter!(
+        "resonate_doc_cache_hits_total",
+        "Workflow document cache hits; with misses, gives the hit ratio"
+    )
+    .unwrap();
 }

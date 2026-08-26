@@ -106,6 +106,7 @@ impl DocCache for MemDocCache {
             crate::metrics::DOC_CACHE_MISSES_TOTAL.inc();
             return None;
         };
+        crate::metrics::DOC_CACHE_HITS_TOTAL.inc();
         let cached = cached.clone();
         let previous = std::mem::replace(old_seq, seq);
         inner.order.remove(&previous);
