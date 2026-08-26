@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "differential"
 path = "diff/differential.rs"
 
+[[test]]
+name = "encbench"
+path = "diff/encbench.rs"
+
 [features]
 concurrency-stress = []
 
