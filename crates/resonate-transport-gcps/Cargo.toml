@@ -1,0 +1,15 @@
+[package]
+name = "resonate-transport-gcps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate transport: deliver messages by publishing to a Google Cloud Pub/Sub topic."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tracing = "0.1"
+google-cloud-pubsub = "0.33.1"

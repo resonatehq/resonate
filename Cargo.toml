@@ -1,8 +1,10 @@
 [workspace]
 members = [
     "crates/resonate-core",
+    "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
     "crates/resonate-transport-http-push",
+    "crates/resonate-worker-bash",
 ]
 
 [workspace.package]
@@ -41,8 +43,10 @@ concurrency-stress = []
 
 [dependencies]
 resonate-core = { path = "crates/resonate-core" }
+resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
+resonate-worker-bash = { path = "crates/resonate-worker-bash" }
 jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json"] }
@@ -57,7 +61,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", features = ["json"] }
 cron = "0.12"
 chrono = "0.4"
-futures = "0.3"
 async-stream = "0.3"
 prometheus = "0.13"
 lazy_static = "1"
@@ -67,6 +70,4 @@ async-trait = { workspace = true }
 validator = { workspace = true }
 url = { workspace = true }
 base64 = "0.22"
-google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
-google-cloud-pubsub = "0.33.1"
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }

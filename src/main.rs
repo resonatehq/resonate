@@ -305,7 +305,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         );
         workers.insert(
             "gcps".to_string(),
-            Arc::new(transport::transport_gcps::GcpsPubSubTransport::new(
+            Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
                 Arc::clone(&server),
                 state.config.transports.gcps.concurrency,
                 std::time::Duration::from_millis(state.config.transports.gcps.timeout),
@@ -317,7 +317,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         tracing::info!("Bash exec transport enabled (local + docker + tensorlake)");
         workers.insert(
             "bash".to_string(),
-            Arc::new(transport::transport_exec_bash::BashExecTransport::new(
+            Arc::new(resonate_worker_bash::BashExecTransport::new(
                 Arc::clone(&server),
                 state
                     .config

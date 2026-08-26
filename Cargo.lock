@@ -867,7 +867,6 @@ checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
 dependencies = [
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -947,7 +946,6 @@ version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
- "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -2666,16 +2664,15 @@ dependencies = [
  "cron",
  "fastrand",
  "figment",
- "futures",
- "google-cloud-auth",
- "google-cloud-pubsub",
  "jsonwebtoken 9.3.1",
  "lazy_static",
  "prometheus",
  "reqwest 0.12.28",
  "resonate-core",
+ "resonate-transport-gcps",
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
+ "resonate-worker-bash",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2698,6 +2695,19 @@ dependencies = [
  "serde_json",
  "url",
  "validator",
+]
+
+[[package]]
+name = "resonate-transport-gcps"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "google-cloud-pubsub",
+ "resonate-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2726,6 +2736,21 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "resonate-worker-bash"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "fastrand",
+ "reqwest 0.12.28",
+ "resonate-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

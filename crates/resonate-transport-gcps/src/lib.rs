@@ -1,6 +1,14 @@
-//! Google Cloud Pub/Sub transport — publish messages to GCP topics.
+//! Resonate transport: Google Cloud Pub/Sub.
 //!
-//! Address format: gcps://project/topic
+//! Delivers a message by publishing it to a topic. A transport rather than a
+//! plugin: it knows how to put a message on the wire and nothing about what
+//! the message means.
+//!
+//! Authentication uses Application Default Credentials. Address format:
+//! `gcps://project/topic`.
+
+/// The address scheme this transport serves.
+pub const SCHEME: &str = "gcps";
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -1,3 +1,17 @@
+//! Resonate worker: bash execution.
+//!
+//! A worker rather than a transport: the other end of a `bash://` address is
+//! this process, so it does not deliver anywhere — it acquires the task, runs
+//! the script, and settles the promise. Every state change goes through the
+//! [`ResonateServer`](resonate_core::ResonateServer) port, the same path a
+//! remote worker's HTTP calls take.
+//!
+//! Three backends behind one scheme: `bash://` runs locally, `bash://docker/<image>`
+//! in a container, `bash://tensorlake/<image>` in a Tensorlake sandbox.
+
+/// The address scheme this worker serves.
+pub const SCHEME: &str = "bash";
+
 use std::sync::Arc;
 use std::time::Duration;
 
