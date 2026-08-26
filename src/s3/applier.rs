@@ -283,7 +283,7 @@ impl Default for ApplierCfg {
 /// One unit of work for an origin's actor.
 enum Work {
     Request {
-        req: Req,
+        req: Box<Req>,
         now: i64,
         reply: oneshot::Sender<Result<Reply, Unavailable>>,
     },
@@ -380,7 +380,7 @@ impl ApplierPool {
         self.send(
             origin,
             Work::Request {
-                req,
+                req: Box::new(req),
                 now,
                 reply: tx,
             },

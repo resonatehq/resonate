@@ -253,7 +253,7 @@ pub enum OutEntry {
     /// Notify a listener that a promise settled.
     Unblock {
         promise_id: String,
-        promise: PromiseRecord,
+        promise: Box<PromiseRecord>,
     },
 }
 

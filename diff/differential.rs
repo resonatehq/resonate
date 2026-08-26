@@ -231,7 +231,7 @@ async fn differential_random() {
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
 
-    let mut rng = fastrand::Rng::with_seed(0xc0ffee_dead_beef);
+    let mut rng = fastrand::Rng::with_seed(0x00c0_ffee_dead_beef);
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
@@ -799,8 +799,8 @@ fn normalize_snap(snap: &mut Value) {
     }
 }
 
-fn sort_messages(arr: &mut Vec<Value>) {
-    arr.sort_by(|a, b| msg_sort_key(a).cmp(&msg_sort_key(b)));
+fn sort_messages(arr: &mut [Value]) {
+    arr.sort_by_key(msg_sort_key);
 }
 
 fn msg_sort_key(msg: &Value) -> String {
@@ -836,7 +836,7 @@ fn normalize_resp(data: &mut Value) {
     }
 }
 
-fn sort_by_id(arr: &mut Vec<Value>) {
+fn sort_by_id(arr: &mut [Value]) {
     arr.sort_by(|a, b| {
         let key = |v: &Value| {
             if let Some(id) = v.get("id").and_then(|x| x.as_str()) {

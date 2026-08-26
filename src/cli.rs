@@ -1422,8 +1422,10 @@ mod tests {
     #[test]
     fn naming_a_bucket_selects_the_s3_backend() {
         // Same shape as --storage-mysql-url: naming the thing selects it.
-        let mut args = CommonArgs::default();
-        args.s3_bucket = Some("my-bucket".into());
+        let args = CommonArgs {
+            s3_bucket: Some("my-bucket".into()),
+            ..Default::default()
+        };
         let config = args.apply(crate::config::Config::default());
         assert_eq!(config.storage.storage_type, "s3");
         assert_eq!(config.storage.s3.bucket.as_deref(), Some("my-bucket"));
@@ -1431,9 +1433,11 @@ mod tests {
 
     #[test]
     fn an_explicit_storage_type_is_not_overridden_by_a_bucket() {
-        let mut args = CommonArgs::default();
-        args.storage_type = Some("postgres".into());
-        args.s3_bucket = Some("my-bucket".into());
+        let args = CommonArgs {
+            storage_type: Some("postgres".into()),
+            s3_bucket: Some("my-bucket".into()),
+            ..Default::default()
+        };
         let config = args.apply(crate::config::Config::default());
         assert_eq!(config.storage.storage_type, "postgres");
         // The bucket is still recorded, so switching type alone is enough.
@@ -1442,11 +1446,13 @@ mod tests {
 
     #[test]
     fn the_s3_flags_reach_the_config() {
-        let mut args = CommonArgs::default();
-        args.s3_bucket = Some("b".into());
-        args.s3_region = Some("us-east-1".into());
-        args.s3_endpoint = Some("http://localhost:9000".into());
-        args.s3_prefix = Some("tenant-a".into());
+        let args = CommonArgs {
+            s3_bucket: Some("b".into()),
+            s3_region: Some("us-east-1".into()),
+            s3_endpoint: Some("http://localhost:9000".into()),
+            s3_prefix: Some("tenant-a".into()),
+            ..Default::default()
+        };
         let config = args.apply(crate::config::Config::default());
         assert_eq!(config.storage.s3.region.as_deref(), Some("us-east-1"));
         assert_eq!(

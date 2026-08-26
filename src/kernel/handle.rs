@@ -1062,7 +1062,7 @@ pub(crate) fn trigger_listeners(tx: &mut Tx, id: &str) {
             address,
             OutEntry::Unblock {
                 promise_id: id.to_string(),
-                promise: promise.clone(),
+                promise: Box::new(promise.clone()),
             },
         ));
     }

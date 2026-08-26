@@ -156,7 +156,7 @@ impl Outbox {
                     pending
                         .unblocks
                         .entry((promise_id, address.to_string()))
-                        .or_insert(promise);
+                        .or_insert(*promise);
                 }
             }
         }
@@ -353,7 +353,7 @@ mod tests {
             "poll://any@g",
             OutEntry::Unblock {
                 promise_id: "o:p".into(),
-                promise: promise("o:p"),
+                promise: Box::new(promise("o:p")),
             },
         )
         .await;
@@ -452,7 +452,7 @@ mod tests {
                 "http://w",
                 OutEntry::Unblock {
                     promise_id: "o:p".into(),
-                    promise: promise("o:p"),
+                    promise: Box::new(promise("o:p")),
                 },
             )
             .await;
@@ -470,7 +470,7 @@ mod tests {
                 address,
                 OutEntry::Unblock {
                     promise_id: "o:p".into(),
-                    promise: promise("o:p"),
+                    promise: Box::new(promise("o:p")),
                 },
             )
             .await;
@@ -498,7 +498,7 @@ mod tests {
                 "http://w",
                 OutEntry::Unblock {
                     promise_id: p.into(),
-                    promise: promise(p),
+                    promise: Box::new(promise(p)),
                 },
             )
             .await;
