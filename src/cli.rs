@@ -85,6 +85,10 @@ pub struct CommonArgs {
     #[arg(long = "storage-s3-prefix", value_name = "PREFIX")]
     pub s3_prefix: Option<String>,
 
+    /// Enable/disable search operations (each one reads every document) [default: false]
+    #[arg(long = "storage-s3-search-enabled", value_name = "BOOL")]
+    pub s3_search_enabled: Option<bool>,
+
     // --- Auth ---
     /// Public key for JWT verification (enables auth; use "none" for unsigned mode)
     #[arg(long = "auth-publickey", value_name = "KEY")]
@@ -270,6 +274,9 @@ impl CommonArgs {
         }
         if let Some(v) = self.s3_prefix {
             config.storage.s3.prefix = v;
+        }
+        if let Some(v) = self.s3_search_enabled {
+            config.storage.s3.search_enabled = v;
         }
 
         if let Some(key) = self.auth_publickey {

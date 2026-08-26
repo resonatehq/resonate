@@ -75,6 +75,9 @@ pub struct S3ServerCfg {
     pub cache_capacity: usize,
     /// Whether `debug.*` operations and `resonate:debug_time` are honoured.
     pub debug: bool,
+    /// Whether the search operations are answered. Each search reads every
+    /// document in the store, so this is opt-in.
+    pub search: bool,
     /// Advertised in every `execute` message.
     pub server_url: String,
 }
@@ -87,6 +90,7 @@ impl Default for S3ServerCfg {
             timerd: TimerdCfg::default(),
             cache_capacity: 10_000,
             debug: false,
+            search: false,
             server_url: String::new(),
         }
     }
@@ -101,6 +105,7 @@ pub struct S3Server {
     store: Arc<dyn Store>,
     keys: KeySpace,
     debug: bool,
+    search: bool,
     /// Set by `debug.start`. Shared with the timer poller, which is the point:
     /// with the loop paused, `debug.tick` is the only thing that moves time.
     debug_mode: Arc<AtomicBool>,
@@ -153,6 +158,7 @@ impl S3Server {
             store,
             keys: cfg.keys,
             debug: cfg.debug,
+            search: cfg.search,
             debug_mode: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -194,6 +200,12 @@ impl S3Server {
     async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Result<Reply, Unavailable> {
         let data = &req.data;
         match req.kind.as_str() {
+            // Gated first: every search reads the whole store, so a deployment
+            // that turned them off must refuse them before anything is listed.
+            "promise.search" | "task.search" | "schedule.search" if !self.search => {
+                Ok(Reply::err(403, "Search operations are disabled"))
+            }
+
             // --- promises ---------------------------------------------------
             "promise.get" => {
                 let r: PromiseGetData = parsed!(data);
@@ -578,6 +590,7 @@ mod tests {
         S3Server::in_memory(S3ServerCfg {
             keys: KeySpace::new("p", 4),
             debug,
+            search: true,
             server_url: "http://server:8001".into(),
             ..Default::default()
         })
@@ -1008,6 +1021,24 @@ mod tests {
             let resp = send(&s, kind, json!({ "limit": 10 }), 0).await;
             assert_eq!(resp.head.status, 200, "{kind}");
         }
+    }
+
+    #[tokio::test]
+    async fn searches_are_refused_by_default() {
+        // `search` defaults to false: a deployment opts in.
+        let s = S3Server::in_memory(S3ServerCfg {
+            keys: KeySpace::new("p", 4),
+            server_url: "http://server:8001".into(),
+            ..Default::default()
+        });
+        for kind in ["promise.search", "task.search", "schedule.search"] {
+            let resp = send(&s, kind, json!({ "limit": 10 }), 0).await;
+            assert_eq!(resp.head.status, 403, "{kind}");
+            assert_eq!(resp.data, json!("Search operations are disabled"));
+        }
+        // Everything that reads one document at a time still answers.
+        let resp = send(&s, "promise.get", json!({ "id": "o:a" }), 0).await;
+        assert_eq!(resp.head.status, 404);
     }
 
     #[tokio::test]

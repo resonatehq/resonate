@@ -144,6 +144,7 @@ fn s3_backend() -> Backend {
             ..Default::default()
         },
         debug: true,
+        search: true,
         server_url: String::new(),
         ..Default::default()
     })

@@ -301,6 +301,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                     },
                     cache_capacity: s3.cache_capacity,
                     debug: config.debug,
+                    search: s3.search_enabled,
                     server_url: config.server.url.clone().unwrap_or_default(),
                 },
             ))

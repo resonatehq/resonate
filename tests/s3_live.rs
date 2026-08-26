@@ -208,6 +208,7 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
         S3ServerCfg {
             keys: KeySpace::new(prefix.clone(), 4),
             debug: true,
+            search: true,
             ..Default::default()
         },
     );

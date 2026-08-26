@@ -256,6 +256,12 @@ pub struct S3Config {
     /// caller is told there is no answer.
     #[serde(default = "default_max_cas_retries")]
     pub max_cas_retries: u32,
+
+    /// Whether the search operations are answered. Each search reads every
+    /// document in the store — O(origins) GETs — so they are off unless a
+    /// deployment opts in.
+    #[serde(default)]
+    pub search_enabled: bool,
 }
 
 fn default_timer_shards() -> u32 {
@@ -279,6 +285,7 @@ impl Default for S3Config {
             timer_shards: default_timer_shards(),
             cache_capacity: default_cache_capacity(),
             max_cas_retries: default_max_cas_retries(),
+            search_enabled: false,
         }
     }
 }
