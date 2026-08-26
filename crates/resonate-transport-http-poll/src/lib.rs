@@ -1,8 +1,19 @@
-//! Poll transport — SSE-based message delivery.
+//! Resonate transport: HTTP poll (SSE).
 //!
-//! Workers connect via `GET /poll/{group}/{id}` and receive messages
-//! as Server-Sent Events. The server holds connections open and pushes
-//! messages to them based on poll:// address routing.
+//! For workers that cannot be dialled: the worker opens an SSE connection to
+//! the server and messages are pushed down it. A transport rather than a
+//! plugin — it knows how to reach a worker, not what the message means.
+//!
+//! Unlike the dialled transports this one has an inbound half: the server must
+//! host the endpoint workers connect to. [`PollRegistry`] is that connection
+//! pool, and the server mounts the route.
+
+//! Workers connect via `GET /poll/{group}/{id}` and receive messages as
+//! Server-Sent Events; the server holds the connections open and pushes to
+//! them based on poll:// address routing.
+
+/// The address scheme this transport serves.
+pub const SCHEME: &str = "poll";
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

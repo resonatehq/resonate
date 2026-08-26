@@ -1,0 +1,20 @@
+[package]
+name = "resonate-transport-http-push"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate transport: deliver messages to a worker over HTTP(S), with optional outbound auth."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
+
+[dev-dependencies]
+axum = { version = "0.7", features = ["json"] }
+tokio = { version = "1", features = ["full"] }

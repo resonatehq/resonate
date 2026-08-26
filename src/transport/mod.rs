@@ -1,7 +1,5 @@
 pub mod transport_exec_bash;
 pub mod transport_gcps;
-pub mod transport_http_poll;
-pub mod transport_http_push;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,20 +69,7 @@ impl ResonateRouter for TransportDispatcher {
 #[cfg(test)]
 pub mod stubs {
     use super::*;
-    use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
-    use resonate_core::ResonateServer;
     use std::sync::Mutex;
-
-    /// A server that answers nothing. Workers hold a `ResonateServer` handle
-    /// for the failure path; tests that never exercise it can use this.
-    pub struct NoopServer;
-
-    #[async_trait]
-    impl ResonateServer for NoopServer {
-        async fn process(&self, _req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
-            Err(Unavailable::new("NoopServer answers nothing"))
-        }
-    }
 
     /// Records every `(address, message)` pair it is asked to deliver.
     ///

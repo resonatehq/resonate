@@ -2674,6 +2674,8 @@ dependencies = [
  "prometheus",
  "reqwest 0.12.28",
  "resonate-core",
+ "resonate-transport-http-poll",
+ "resonate-transport-http-push",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2696,6 +2698,34 @@ dependencies = [
  "serde_json",
  "url",
  "validator",
+]
+
+[[package]]
+name = "resonate-transport-http-poll"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "fastrand",
+ "resonate-core",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "resonate-transport-http-push"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "axum",
+ "google-cloud-auth",
+ "reqwest 0.12.28",
+ "resonate-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

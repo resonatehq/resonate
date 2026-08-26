@@ -25,9 +25,9 @@ use config::Config;
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateRouter, ResonateServer, ResonateWorker};
+use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
-use transport::transport_http_poll::PollRegistry;
 
 #[derive(Parser)]
 #[command(
@@ -268,17 +268,17 @@ async fn run_server(config: Config) -> Result<(), String> {
         let outbound_auth = match &state.config.transports.http_push.auth {
             Some(auth_cfg) => {
                 let mode_label = format!("{:?}", auth_cfg.mode);
-                let auth = transport::transport_http_push::Auth::from_config(auth_cfg);
+                let auth = resonate_transport_http_push::Auth::from_config(auth_cfg);
                 tracing::info!(mode = %mode_label, "HTTP push outbound auth enabled");
                 auth
             }
             None => {
                 tracing::debug!("HTTP push outbound auth: none");
-                transport::transport_http_push::Auth::None
+                resonate_transport_http_push::Auth::None
             }
         };
         let worker: Arc<dyn ResonateWorker> =
-            Arc::new(transport::transport_http_push::HttpPushTransport::new(
+            Arc::new(resonate_transport_http_push::HttpPushTransport::new(
                 Arc::clone(&server),
                 connect_timeout,
                 request_timeout,

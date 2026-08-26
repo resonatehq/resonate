@@ -22,7 +22,6 @@ use crate::persistence::{
     TaskFulfillParams,
 };
 use crate::processing::processing_timeouts;
-use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
 use async_trait::async_trait;
 use resonate_core::types::{
@@ -37,6 +36,7 @@ use resonate_core::types::{
     TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
 use resonate_core::{ResonateServer, Unavailable};
+use resonate_transport_http_poll::PollRegistry;
 use validator::Validate;
 
 /// The running server — owns configuration, storage, and auth.

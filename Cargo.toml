@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/resonate-core"]
+members = [
+    "crates/resonate-core",
+    "crates/resonate-transport-http-poll",
+    "crates/resonate-transport-http-push",
+]
 
 [workspace.package]
 version = "0.9.8"
@@ -37,6 +41,8 @@ concurrency-stress = []
 
 [dependencies]
 resonate-core = { path = "crates/resonate-core" }
+resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
+resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json"] }

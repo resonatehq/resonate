@@ -1,4 +1,74 @@
-//! HTTP transport — send messages via HTTP POST to webhook URLs.
+//! Resonate transport: HTTP(S) push.
+//!
+//! Delivers a message by POSTing it to the worker's URL. A transport rather
+//! than a plugin: it knows nothing about what the message means, only how to
+//! put it on the wire.
+
+/// The address schemes this transport serves.
+pub const SCHEMES: &[&str] = &["http", "https"];
+
+use serde::{Deserialize, Serialize};
+
+/// Outbound auth mode for HTTP push deliveries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMode {
+    /// No auth header. Default.
+    #[default]
+    None,
+    /// Static `Authorization: Bearer <token>`.
+    Bearer,
+    /// GCP OIDC ID token via the GCP metadata server.
+    Gcp,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: AuthMode::default(),
+            token: None,
+            audience: None,
+            header: default_auth_header(),
+        }
+    }
+}
+
+/// Outbound authentication for HTTP push deliveries.
+///
+/// Example config:
+/// ```toml
+/// [transports.http_push.auth]
+/// mode = "gcp"
+/// # audience = "https://my-function.example.com"  # optional; defaults to delivery URL
+/// ```
+///
+/// Equivalent env vars (double-underscore nesting):
+///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
+///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// Auth mode. Default: `none`.
+    #[serde(default)]
+    pub mode: AuthMode,
+
+    /// Static bearer token. Used only when `mode = "bearer"`.
+    /// Falls back to the `RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__TOKEN` env var.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// GCP audience override. Used only when `mode = "gcp"`.
+    /// When absent, each delivery target URL is used as its own audience.
+    #[serde(default)]
+    pub audience: Option<String>,
+
+    /// Header name to set. Default: `"Authorization"`.
+    #[serde(default = "default_auth_header")]
+    pub header: String,
+}
+
+fn default_auth_header() -> String {
+    "Authorization".to_string()
+}
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -7,7 +77,6 @@ use std::time::Duration;
 use reqwest::Client;
 use tokio::sync::{mpsc, Semaphore};
 
-use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
 use async_trait::async_trait;
 
 use resonate_core::types::Message;
@@ -78,17 +147,17 @@ pub enum Auth {
 }
 
 impl Auth {
-    pub fn from_config(config: &HttpPushAuthConfig) -> Self {
+    pub fn from_config(config: &AuthConfig) -> Self {
         match config.mode {
-            HttpPushAuthMode::None => Auth::None,
-            HttpPushAuthMode::Bearer => {
+            AuthMode::None => Auth::None,
+            AuthMode::Bearer => {
                 let token = config.token.clone().unwrap_or_default();
                 Auth::StaticBearer {
                     header: config.header.clone(),
                     value: format!("Bearer {token}"),
                 }
             }
-            HttpPushAuthMode::Gcp => Auth::GcpIdToken {
+            AuthMode::Gcp => Auth::GcpIdToken {
                 header: config.header.clone(),
                 fixed_audience: config.audience.clone(),
                 provider: Box::new(GcpIdTokenProvider {
@@ -343,9 +412,23 @@ mod tests {
         axum::http::StatusCode::OK
     }
 
+    /// The transport holds a `ResonateServer` for the failure path it does not
+    /// use yet; these tests never exercise it.
+    struct NoopServer;
+
+    #[async_trait]
+    impl resonate_core::ResonateServer for NoopServer {
+        async fn process(
+            &self,
+            _req: &resonate_core::types::RequestEnvelope,
+        ) -> Result<resonate_core::types::ResponseEnvelope, Unavailable> {
+            Err(Unavailable::new("NoopServer answers nothing"))
+        }
+    }
+
     fn make_transport(auth: Auth) -> HttpPushTransport {
         HttpPushTransport::new(
-            Arc::new(crate::transport::stubs::NoopServer),
+            Arc::new(NoopServer),
             Duration::from_secs(5),
             Duration::from_secs(5),
             auth,
