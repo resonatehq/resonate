@@ -2,8 +2,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use lazy_static::lazy_static;
 use prometheus::{
-    register_counter, register_counter_vec, register_histogram_vec, Counter, CounterVec,
-    HistogramVec,
+    register_counter, register_counter_vec, register_histogram_vec, register_int_gauge, Counter,
+    CounterVec, HistogramVec, IntGauge,
 };
 
 /// Serve Prometheus metrics in text exposition format.
@@ -52,6 +52,11 @@ lazy_static! {
     pub static ref SCHEDULE_PROMISES_TOTAL: Counter = register_counter!(
         "resonate_schedule_promises_total",
         "Total number of promises created by schedules"
+    )
+    .unwrap();
+    pub static ref TIMER_QUEUE_LEN: IntGauge = register_int_gauge!(
+        "resonate_timer_queue_len",
+        "Armed timer entries held in memory (one per in-flight origin plus schedules)"
     )
     .unwrap();
 }

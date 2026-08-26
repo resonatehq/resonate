@@ -21,7 +21,9 @@
 //!
 //! # Dependencies
 //!
-//! `tokio::sync::Notify` alone — no store handle, no kernel, no keys' meanings.
+//! `tokio::sync::Notify`, and the `resonate_timer_queue_len` gauge — the queue
+//! is the process's one workload-proportional structure, so its size is the
+//! number to watch. No store handle, no kernel, no keys' meanings.
 //!
 //! # Dependants
 //!
@@ -57,6 +59,12 @@ impl TimerQueue {
         self.armed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Report the size while still holding the lock, so the gauge never
+    /// interleaves with another mutation.
+    fn observe(armed: &BTreeSet<(i64, String)>) {
+        crate::metrics::TIMER_QUEUE_LEN.set(armed.len() as i64);
+    }
+
     /// Record an armed timer key. Call only after the key is durable in the
     /// store, never before, so the queue can only under-promise.
     pub fn arm(&self, deadline: i64, key: impl Into<String>) {
@@ -64,6 +72,7 @@ impl TimerQueue {
         let mut armed = self.lock();
         let nearer = armed.first().is_none_or(|(head, _)| deadline < *head);
         armed.insert((deadline, key));
+        Self::observe(&armed);
         drop(armed);
         if nearer {
             self.nearer.notify_one();
@@ -73,8 +82,10 @@ impl TimerQueue {
     /// Forget a key whose object was deleted. Forgetting what is not armed is
     /// fine — the store is the authority, not the queue.
     pub fn disarm(&self, deadline: i64, key: &str) {
+        let mut armed = self.lock();
         // Borrowed lookup keys for a BTreeSet of pairs need an owned tuple.
-        self.lock().remove(&(deadline, key.to_string()));
+        armed.remove(&(deadline, key.to_string()));
+        Self::observe(&armed);
     }
 
     /// Remove and return every key due at `now`, nearest deadline first.
@@ -83,6 +94,7 @@ impl TimerQueue {
         // Everything at `now` sorts before (now + 1, ""), whatever its key.
         let future = armed.split_off(&(now.saturating_add(1), String::new()));
         let due = std::mem::replace(&mut *armed, future);
+        Self::observe(&armed);
         due.into_iter().map(|(_, key)| key).collect()
     }
 
@@ -100,7 +112,9 @@ impl TimerQueue {
     /// Forget everything. `debug.reset` deletes the keys out from under the
     /// queue, so it has to say so.
     pub fn clear(&self) {
-        self.lock().clear();
+        let mut armed = self.lock();
+        armed.clear();
+        Self::observe(&armed);
     }
 
     /// Entries armed. Diagnostics and tests.
