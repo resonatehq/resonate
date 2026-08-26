@@ -592,15 +592,6 @@ impl Server {
                         &format_validation_errors(&e),
                     ));
                 }
-                if crate::core::types::timer_targeted(&r.tags) {
-                    tracing::warn!(promise_id = %r.id, "Promise create rejected: timer promise carries a resonate:target tag");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "A timer promise cannot carry a resonate:target tag",
-                    ));
-                }
                 let address = r.tags.get("resonate:target").map(|s| s.as_str());
                 if let Some(addr) = address {
                     if !crate::core::is_valid_address(addr) {
@@ -1123,15 +1114,6 @@ impl Server {
                 }
                 let action_data = &r.action.data;
                 let action_id = &action_data.id;
-                if let Some(msg) = crate::core::types::task_create_tags_rejected(&action_data.tags) {
-                    tracing::warn!(task_id = %action_id, reason = msg, "Task create rejected");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        msg,
-                    ));
-                }
                 if let Some(addr) = action_data.tags.get("resonate:target") {
                     if !crate::core::is_valid_address(addr) {
                         tracing::warn!(
@@ -2370,15 +2352,6 @@ impl Server {
                 }
                 // Every promise this schedule fires carries the target, so it is
                 // held to the same standard promise create holds a target to.
-                if crate::core::types::timer_targeted(&r.promise_tags) {
-                    tracing::warn!(schedule_id = %r.id, "Schedule create rejected: promise tags make a targeted timer");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "A timer promise cannot carry a resonate:target tag",
-                    ));
-                }
                 if let Some(addr) = r.promise_tags.get("resonate:target") {
                     if !crate::core::is_valid_address(addr) {
                         tracing::warn!(

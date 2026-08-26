@@ -249,25 +249,6 @@ pub fn timer_targeted(tags: &std::collections::HashMap<String, String>) -> bool 
         && tags.contains_key("resonate:target")
 }
 
-/// A task exists to hand a promise's execution to a worker, so `task.create`
-/// requires a `resonate:target` naming one. Without it there is no worker to
-/// hand it to, and the task would violate `consistent_task_iff_targeted_promise`.
-///
-/// Specification: `taskCreate` (`spec/02-abstract/external.lean`) —
-/// `if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then 400`,
-/// answered before any state is read.
-pub fn task_create_tags_rejected(
-    tags: &std::collections::HashMap<String, String>,
-) -> Option<&'static str> {
-    if !tags.contains_key("resonate:target") {
-        Some("Task create requires a resonate:target tag")
-    } else if timer_targeted(tags) {
-        Some("A timer promise cannot carry a resonate:target tag")
-    } else {
-        None
-    }
-}
-
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -355,6 +336,18 @@ fn validate_promise_create_data(
     if data.id.contains('\0') {
         return Err(validator::ValidationError::new("null_bytes")
             .with_message("Promise ID must not contain null bytes".into()));
+    }
+    // ':' separates the origin from the lineage below it, so an id carries at
+    // most one. The catalogue enforces the same shape with
+    // `well_formed_promise_id_at_most_one_separator`; refusing it here is what
+    // keeps that a 400 rather than a constraint violation at insert time.
+    if data.id.matches(':').count() > 1 {
+        return Err(validator::ValidationError::new("multiple_separators")
+            .with_message("Promise ID must contain at most one ':'".into()));
+    }
+    if timer_targeted(&data.tags) {
+        return Err(validator::ValidationError::new("timer_targeted")
+            .with_message("A timer promise must not carry a resonate:target tag".into()));
     }
     if let Some(origin) = data.tags.get("resonate:origin") {
         // '.' is deliberately *not* rejected: it separates lineage segments below
@@ -499,6 +492,10 @@ fn validate_task_create_data(data: &TaskCreateData) -> Result<(), validator::Val
         return Err(validator::ValidationError::new("delay_in_task_action")
             .with_message("Action must not have a resonate:delay tag".into()));
     }
+    if timer_targeted(&data.action.data.tags) {
+        return Err(validator::ValidationError::new("timer_targeted")
+            .with_message("A timer promise must not carry a resonate:target tag".into()));
+    }
     Ok(())
 }
 
@@ -570,6 +567,17 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
                     "Awaited promise must belong to the same origin as the task".into(),
                 ),
             );
+        }
+    }
+    // Distinct awaited ids. A repeat would ask for the same callback twice,
+    // which the catalogue forbids as `well_formed_promise_callbacks_unique` —
+    // and which the storage layer currently miscounts as a *missing* promise,
+    // since it compares the request's length against the number of rows found.
+    let mut seen = std::collections::HashSet::with_capacity(data.actions.len());
+    for action in &data.actions {
+        if !seen.insert(action.data.awaited.as_str()) {
+            return Err(validator::ValidationError::new("duplicate_awaited")
+                .with_message("Awaited promise ids must be distinct".into()));
         }
     }
     Ok(())
@@ -730,6 +738,10 @@ fn validate_schedule_create_data(
     if !data.promise_tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")
             .with_message("promiseTags must include a resonate:target tag".into()));
+    }
+    if timer_targeted(&data.promise_tags) {
+        return Err(validator::ValidationError::new("timer_targeted")
+            .with_message("A timer promise must not carry a resonate:target tag".into()));
     }
     Ok(())
 }

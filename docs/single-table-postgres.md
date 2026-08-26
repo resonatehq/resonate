@@ -236,7 +236,7 @@ The starting DDL has `resumes BOOLEAN NOT NULL`. The API returns `resumes` as a
 ids that are ready for this row's task — which is also what the Oracle models
 (`Task.resumes: HashSet<String>`).
 
-### 2. The promise-timeout queue is derivable — resolved
+### 2. The promise-timeout queue is derivable
 
 `promise_timeouts` is not `(state='pending' AND timeout_at)`. A promise created
 *without* a `resonate:target` never enters the queue and only times out lazily,
@@ -244,9 +244,15 @@ on first touch. Making the queue a derived predicate — which is what the
 recommended `idx_promises_timeout_at ... WHERE state = 'pending'` index assumes —
 therefore depends on `consistent_task_iff_targeted_promise`.
 
-That constraint did not hold, because `task.create` created a task whether or
-not the action carried a `resonate:target`. The specification is explicit that
-it should not — `spec/02-abstract/external.lean`:
+**Correction.** An earlier draft of this document claimed that constraint did
+not hold, because `task.create` created a task whether or not the action carried
+a `resonate:target`. That was wrong: `validate_task_create_data` in
+`src/core/types.rs` has always refused a targetless action with 400, and the
+handler runs it first. I read the handler's inline address check and stopped
+there. The predicate was sound all along, and no `timeout_sweep` column is
+needed.
+
+The specification agrees, in `spec/02-abstract/external.lean`:
 
 ```lean
 def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
@@ -255,37 +261,70 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
     return { status := 400 }
 ```
 
-400, before any state is read. That door check is now implemented (see
-finding 3), so a task always implies a target, the predicate is sound, and no
-`timeout_sweep` column is needed.
+The second half of that disjunct *was* missing — see finding 3.
 
-### 3. Three door checks the server was missing
+### 3. The door audit
 
-The specification refuses malformed tag combinations with a 400 at every door a
-promise can be born through, before any state is read. Three of those checks
-were absent from both `server.rs` and the Oracle:
+Everything decidable from the request alone should be decided before any state
+is read. The specification's request-only guards, and where each is enforced:
 
-| door | spec | rule |
-|---|---|---|
-| `promise.create` | `external.lean:31` | `Tags.timerTargeted` → 400 |
-| `task.create` | `external.lean:119` | no `resonate:target`, **or** `timerTargeted` → 400 |
-| `schedule.create` | `external.lean:365` | `promiseTags.timerTargeted` → 400 |
+| request | rule | source | enforced by |
+|---|---|---|---|
+| `promise.create` | `Tags.timerTargeted` | `external.lean:31` | **added** — `validate_promise_create_data` |
+| `promise.create` | id carries at most one `:` | catalogue | **added** — `validate_promise_create_data` |
+| `promise.create` | no null bytes in id | impl | existing |
+| `promise.create` | id prefixed by `resonate:origin` / `branch` / `parent`; origin free of `:`; prefix free of `.` | impl | existing |
+| `promise.create` | `resonate:delay` is a non-negative int, `< timeoutAt`, and requires a target | impl | existing |
+| `promise.settle` | state is settable | `external.lean:41` | `SettleState` — refused at deserialize |
+| `promise.register_callback` | `awaited ≠ awaiter` | `external.lean:56` | `validate_callback_data` |
+| `promise.register_callback` | same origin | impl | existing |
+| `promise.register_listener` | `addressValid` | `external.lean:79` | handler — *different predicate*, see below |
+| `task.create` | action carries `resonate:target` | `external.lean:119` | existing — `validate_task_create_data` |
+| `task.create` | `Tags.timerTargeted` | `external.lean:119` | **added** — same validator |
+| `task.create` | action carries no `resonate:delay`; ttl ≥ 1; pid non-empty | impl | existing |
+| `task.create` | every `promise.create` rule, on the action | — | nested validator |
+| `task.fence` | `action.targetId ≠ req.id` | `external.lean:185` | `validate_task_fence_data` |
+| `task.suspend` | actions non-empty | `external.lean:249` | `length(min = 1)` |
+| `task.suspend` | no awaited equals the task id | `external.lean:251` | `awaited_is_self` |
+| `task.suspend` | awaited ids distinct | `external.lean:253` | **added** — `validate_task_suspend_data` |
+| `task.suspend` | awaiter equals the task id; same origin | impl | existing |
+| `task.fulfill` | action state is settable | `external.lean:281` | `SettleState` |
+| `task.fulfill` | action id equals the task id | impl | existing |
+| `schedule.create` | `promiseTags.timerTargeted` | `external.lean:365` | **added** — `validate_schedule_create_data` |
+| `schedule.create` | promiseTags carry a target; id free of `:` | impl | existing |
+| `schedule.create` | cron parses | impl (spec's cron is opaque) | handler |
 
-A timer is never targeted: `resonate:target` says a worker owns the promise's
-execution and the server gives it a task to carry it, while `resonate:timer`
-says nothing executes it at all. A promise carrying both would be handed a task
-no worker should ever run.
+Three rules were missing. All three now live in the `validate_*_data` functions
+rather than in handler bodies, because those functions are already **one door
+serving both machines**: `Server::op_*` calls `r.validate()` first, and the
+Oracle's `parse` calls it too. A check added to a handler body has to be written
+twice and can drift; a check added to a validator cannot.
 
-Two related checks were already correct: `task.create` against an existing
-untargeted promise returns 422, and every door validates a `resonate:target`
-that is present.
+`well_formed_promise_id_at_most_one_separator` is the one rule that comes from
+the catalogue rather than the Lean machine — the constraints file calls it "this
+deployment's convention". It is decidable from the request, so it belongs at the
+door; without it, an id like `a:b:c` reaches the insert and the catalogue turns
+it into a 500.
 
-**`task.fence` is still open, and deliberately so.** The spec says the fence
-needs no guard of its own — its create action *is* a `promise.create` and the
-inner refusal is what it reports, nested inside a 200. The server does not
-delegate: `task_fence_create` builds the promise directly, so there is no inner
-handler to carry the check. Adding one at the top of the fence handler is wrong
-in a way the differential test caught immediately:
+**A predicate mismatch worth a decision.** The spec's `addressValid` accepts
+`http://`, `https://`, and `poll://` carrying an `@group` — nothing else. The
+server's `is_valid_address` accepts any URI with a scheme, so `gcps://project/topic`
+passes, and this repo ships a `gcps` transport that needs it to. The two machines
+therefore do not accept the same address language. That matters beyond taste:
+`consistent_listener_addresses_deliverable` checks stored listeners with
+`_addrs_valid`, so whichever predicate the SQL helper implements has to be the
+one the door implements, or a legal request becomes a 500. The `_addr_valid` in
+`config/postgres/single-table.sql` deliberately mirrors the server, not the spec.
+Either the spec's `addressValid` predates the `gcps` transport, or the server is
+too permissive — that is a specification question, so it is left as one.
+
+**`task.fence` remains open.** The spec says the fence needs no guard of its own
+— its create action *is* a `promise.create` and the inner refusal is what it
+reports, nested inside a 200. The server does not delegate: `task_fence_create`
+builds the promise directly, and its action is an untyped `serde_json::Value`
+rather than a nested `PromiseCreateData`, so none of the create rules apply to
+it. Putting a guard at the top of the fence handler is wrong, and the
+differential test said so at once:
 
 ```
 step=413 op=task.fence: status mismatch
@@ -294,26 +333,16 @@ step=413 op=task.fence: status mismatch
 ```
 
 The fence's own outcome precedes the action's validity — `taskFence` reads the
-task and answers 404/409 *before* running the inner create. Closing this
-properly means either carrying the malformed-action verdict into the fence CTE
-(so the fence check still happens first and the insert is skipped), or reading
-the task before validating and accepting a benign race on an already-invalid
-request. Both are more than this change should carry, so `task.fence` can still
-give birth to a targeted timer, and with the catalogue enforced that surfaces as
-a 500 rather than a 400.
+task and answers 404/409 *before* running the inner create. Closing it means
+either typing the fence action as a real `PromiseCreateData` and carrying the
+verdict into the fence CTE so the fence check still runs first, or reading the
+task before validating and accepting a benign race on an already-invalid
+request. Both are their own change. Until then `task.fence` can still give birth
+to a promise the other three doors would refuse, and with the catalogue enforced
+that surfaces as a 500.
 
-The same latent ordering discrepancy already exists for the fence's
-`resonate:target` address check, which the differential test never exercises
-because it only ever generates valid addresses.
-
-Without these, `well_formed_promise_timer_not_targeted` in the catalogue turns
-a malformed request into a 500 at insert time instead of a 400 at the door —
-which is how a database-enforced catalogue behaves when a door check is
-missing, and is worth remembering as a diagnostic.
-
-The differential generators now produce both malformed `task.create` shapes,
-and the targeted-timer shape at `promise.create` and `schedule.create`, about
-one time in twelve each — so all four backends are compared on them.
+The differential generators now produce each malformed shape about one time in
+twelve, so all four backends are compared on them.
 
 ### 4. One catalogue constraint the server violates today
 

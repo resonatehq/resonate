@@ -206,14 +206,6 @@ impl Oracle {
             Ok(r) => r,
             Err(e) => return e,
         };
-        if crate::core::types::timer_targeted(&r.tags) {
-            return ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                400,
-                "A timer promise cannot carry a resonate:target tag",
-            );
-        }
         if let Some(addr) = r.tags.get("resonate:target") {
             if !crate::core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
@@ -619,9 +611,6 @@ impl Oracle {
             Err(e) => return e,
         };
         let action = &r.action.data;
-        if let Some(msg) = crate::core::types::task_create_tags_rejected(&action.tags) {
-            return ResponseEnvelope::error(req.kind.clone(), req.head.corr_id.clone(), 400, msg);
-        }
         if let Some(addr) = action.tags.get("resonate:target") {
             if !crate::core::is_valid_address(addr) {
                 return ResponseEnvelope::error(
@@ -1510,14 +1499,6 @@ impl Oracle {
                 req.head.corr_id.clone(),
                 400,
                 "Invalid cron expression",
-            );
-        }
-        if crate::core::types::timer_targeted(&r.promise_tags) {
-            return ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                400,
-                "A timer promise cannot carry a resonate:target tag",
             );
         }
         if let Some(s) = self.schedules.get(&r.id) {

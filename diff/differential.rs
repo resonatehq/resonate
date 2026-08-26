@@ -793,7 +793,11 @@ fn gen_task_create_tags(rng: &mut fastrand::Rng) -> Value {
 
 fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> RequestEnvelope {
     let all = oracle.all_promise_ids();
-    let id = pick(rng, &all).unwrap_or_else(|| random_promise_id(rng));
+    let id = if rng.u32(0..12) == 0 {
+        format!("{}:extra", promise_id(rng.u32(0..8)))
+    } else {
+        pick(rng, &all).unwrap_or_else(|| random_promise_id(rng))
+    };
     let timeout_at = now + rng.i64(30_000..300_000);
     let tags = if rng.u32(0..12) == 0 {
         json!({ "resonate:target": WORKER_URL, "resonate:timer": "true" })
@@ -934,17 +938,21 @@ fn gen_task_suspend(rng: &mut fastrand::Rng, oracle: &Oracle) -> RequestEnvelope
         .find(|p| p.as_str() != task_id)
         .cloned()
         .unwrap_or_else(|| promise_id_different_from(rng, &task_id));
+    let action = json!({
+        "kind": "promise.register_callback",
+        "head": {},
+        "data": { "awaited": awaited, "awaiter": task_id }
+    });
+    // One time in twelve, name the same awaited promise twice: the
+    // specification refuses a duplicate with 400 before reading any state.
+    let actions = if rng.u32(0..12) == 0 {
+        json!([action, action])
+    } else {
+        json!([action])
+    };
     req(
         "task.suspend",
-        json!({
-            "id": task_id,
-            "version": version,
-            "actions": [{
-                "kind": "promise.register_callback",
-                "head": {},
-                "data": { "awaited": awaited, "awaiter": task_id }
-            }]
-        }),
+        json!({ "id": task_id, "version": version, "actions": actions }),
     )
 }
 
