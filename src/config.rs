@@ -176,6 +176,16 @@ pub struct PostgresConfig {
     /// Connection pool size
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+
+    /// Experimental: collapse the eight-table layout into one row per promise.
+    /// See `persistence_postgres_single`.
+    #[serde(default)]
+    pub single_table: bool,
+
+    /// Experimental: with `single_table`, also install the constraint
+    /// catalogue so the database enforces the specification.
+    #[serde(default)]
+    pub constraints: bool,
 }
 
 fn default_pool_size() -> u32 {
@@ -187,6 +197,8 @@ impl Default for PostgresConfig {
         Self {
             url: None,
             pool_size: default_pool_size(),
+            single_table: false,
+            constraints: false,
         }
     }
 }

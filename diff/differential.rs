@@ -6,6 +6,9 @@
 //   SQLite   — always active (in-memory, :memory:)
 //   Oracle   — always active (in-memory reference model)
 //   Postgres — active when TEST_POSTGRES_URL env var is set
+//   Postgres (single-table) — same URL, schema `resonate`; skip with
+//              TEST_POSTGRES_SINGLE=0, enforce the constraint catalogue with
+//              TEST_POSTGRES_CONSTRAINTS=1
 //   MySQL    — active when TEST_MYSQL_URL env var is set
 //
 // Coverage requirement: the test runs until every operation kind has produced
@@ -40,7 +43,8 @@ use resonate::{
     oracle::Oracle,
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
-        persistence_sqlite::SqliteStorage, Storage,
+        persistence_postgres_single::PostgresSingleStorage, persistence_sqlite::SqliteStorage,
+        Storage,
     },
     server::Server,
 };
@@ -156,8 +160,19 @@ async fn differential_random() {
         None
     };
 
+    let pg_url_single = pg_url.clone();
     let pg_backend: Option<Backend> = match pg_url {
         Some(url) => {
+            // The single-table backend lives in schema `resonate`. Postgres'
+            // default search_path is `"$user", public`, and the role here is
+            // also called `resonate` — so once that schema exists, `"$user"`
+            // resolves to it and the multi-table backend would silently read
+            // the single-table tables. Pin this connection to `public`.
+            let url = if url.contains('?') {
+                format!("{url}&options=-c%20search_path%3Dpublic")
+            } else {
+                format!("{url}?options=-c%20search_path%3Dpublic")
+            };
             let pg = PostgresStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
                 .await
                 .expect("postgres connect");
@@ -168,6 +183,45 @@ async fn differential_random() {
             eprintln!("[diff] TEST_POSTGRES_URL not set — PostgreSQL skipped");
             None
         }
+    };
+
+    // Single-table Postgres lives in schema `resonate`, so it shares the URL
+    // with the multi-table backend without sharing any table.
+    let pg_single_backend: Option<Backend> = match (
+        &pg_url_single,
+        std::env::var("TEST_POSTGRES_SINGLE").as_deref(),
+    ) {
+        (_, Ok("0")) => None,
+        (Some(url), _) => {
+            let pg = PostgresSingleStorage::connect(url, 5, TASK_RETRY_TIMEOUT_MS)
+                .await
+                .expect("postgres (single-table) connect");
+            if std::env::var("TEST_POSTGRES_CONSTRAINTS").as_deref() == Ok("1") {
+                let skip: Vec<String> = std::env::var("TEST_POSTGRES_CONSTRAINTS_SKIP")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                pg.init_with_constraints(&skip)
+                    .await
+                    .expect("postgres (single-table) schema + constraints init");
+                eprintln!(
+                    "[diff] single-table Postgres: constraint catalogue ENFORCED (skipping {})",
+                    if skip.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        skip.join(", ")
+                    }
+                );
+            } else {
+                pg.init()
+                    .await
+                    .expect("postgres (single-table) schema init");
+            }
+            Some(server_backend(Storage::PostgresSingle(pg)))
+        }
+        (None, _) => None,
     };
 
     let my_backend: Option<Backend> = match my_url {
@@ -190,6 +244,9 @@ async fn differential_random() {
     ];
     if let Some(pg) = pg_backend {
         backends.push(("postgres".into(), pg));
+    }
+    if let Some(pg) = pg_single_backend {
+        backends.push(("postgres-single".into(), pg));
     }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
@@ -439,9 +496,9 @@ fn assert_resps_agree(results: &[(String, i32, Value)], ctx: &str) {
     let all_statuses: Vec<(&str, i32)> = results.iter().map(|(n, s, _)| (n.as_str(), *s)).collect();
     let statuses_agree = all_statuses.windows(2).all(|w| w[0].1 == w[1].1);
     if !statuses_agree {
-        let detail: String = all_statuses
+        let detail: String = results
             .iter()
-            .map(|(n, s)| format!("  {n}={s}"))
+            .map(|(n, s, d)| format!("  {n}={s} {d}"))
             .collect::<Vec<_>>()
             .join("\n");
         panic!("{ctx}: status mismatch\n{detail}");

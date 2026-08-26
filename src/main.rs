@@ -192,20 +192,43 @@ async fn run_server(config: Config) -> Result<(), String> {
         "postgres" => {
             let url = config.storage.postgres.url.as_ref().unwrap();
             let pool_size = config.storage.postgres.pool_size;
-            tracing::info!("Using PostgreSQL backend");
             tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg = persistence::persistence_postgres::PostgresStorage::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-            )
-            .await
-            .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
-            pg.init()
+            if config.storage.postgres.single_table {
+                tracing::info!("Using PostgreSQL backend (single-table, experimental)");
+                let pg = persistence::persistence_postgres_single::PostgresSingleStorage::connect(
+                    url,
+                    pool_size,
+                    config.tasks.retry_timeout,
+                )
                 .await
-                .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
-            tracing::info!("PostgreSQL initialized");
-            Storage::Postgres(pg)
+                .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
+                if config.storage.postgres.constraints {
+                    pg.init_with_constraints(&[]).await.map_err(|e| {
+                        format!("Failed to initialize Postgres schema + constraints: {e}")
+                    })?;
+                    tracing::info!("PostgreSQL initialized (single-table, constraints enforced)");
+                } else {
+                    pg.init()
+                        .await
+                        .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
+                    tracing::info!("PostgreSQL initialized (single-table)");
+                }
+                Storage::PostgresSingle(pg)
+            } else {
+                tracing::info!("Using PostgreSQL backend");
+                let pg = persistence::persistence_postgres::PostgresStorage::connect(
+                    url,
+                    pool_size,
+                    config.tasks.retry_timeout,
+                )
+                .await
+                .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
+                pg.init()
+                    .await
+                    .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
+                tracing::info!("PostgreSQL initialized");
+                Storage::Postgres(pg)
+            }
         }
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();

@@ -1,5 +1,6 @@
 pub mod persistence_mysql;
 pub mod persistence_postgres;
+pub mod persistence_postgres_single;
 pub mod persistence_sqlite;
 
 use std::collections::HashMap;
@@ -354,6 +355,7 @@ pub trait Db {
 pub enum Storage {
     Sqlite(persistence_sqlite::SqliteStorage),
     Postgres(persistence_postgres::PostgresStorage),
+    PostgresSingle(persistence_postgres_single::PostgresSingleStorage),
     Mysql(persistence_mysql::MysqlStorage),
 }
 
@@ -366,6 +368,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.transact(f).await,
             Storage::Postgres(p) => p.transact(f, false).await,
+            Storage::PostgresSingle(p) => p.transact(f, false).await,
             Storage::Mysql(m) => m.transact(f).await,
         }
     }
@@ -378,6 +381,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.query(f).await,
             Storage::Postgres(p) => p.query(f).await,
+            Storage::PostgresSingle(p) => p.query(f).await,
             Storage::Mysql(m) => m.query(f).await,
         }
     }
