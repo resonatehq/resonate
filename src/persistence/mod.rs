@@ -8,7 +8,7 @@ use crate::core::types::{PromiseRecord, ScheduleRecord, Snapshot, TaskRecord, Ta
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageError {
     /// A backend-agnostic storage error. Carries the formatted error message
     /// without exposing the underlying driver type (rusqlite, sqlx, etc.).
@@ -37,15 +37,39 @@ impl From<rusqlite::Error> for StorageError {
     }
 }
 
+/// Is this driver error code a retriable write conflict?
+///
+/// | code    | backend  | meaning                          |
+/// |---------|----------|----------------------------------|
+/// | `40001` | Postgres | serialization failure            |
+/// | `40P01` | Postgres | deadlock detected                |
+/// | `1213`  | MySQL    | deadlock found                   |
+/// | `1205`  | MySQL    | lock wait timeout exceeded       |
+///
+/// All four mean nothing was committed and the transaction can be replayed.
+///
+/// This predicate was previously written out in three places that disagreed:
+/// `From<sqlx::Error>` recognised only the Postgres pair, while each backend's
+/// commit path re-checked its own pair inline. The consequence was that a
+/// MySQL deadlock *inside a query* converted to `Backend` rather than
+/// `Serialization` — so MySQL's in-query retry arm could never match, and the
+/// conflict surfaced to the client as a non-retriable error instead of being
+/// retried. One pure function, one table, one set of tests.
+pub fn is_serialization_conflict(code: Option<&str>) -> bool {
+    matches!(code, Some("40001" | "40P01" | "1213" | "1205"))
+}
+
+/// Whether an `sqlx` error is a retriable write conflict.
+pub fn is_sqlx_serialization_conflict(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|db_err| db_err.code())
+        .is_some_and(|code| is_serialization_conflict(Some(code.as_ref())))
+}
+
 impl From<sqlx::Error> for StorageError {
     fn from(e: sqlx::Error) -> Self {
-        // Detect serialization failures (40001) and deadlocks (40P01) from within queries.
-        // Both mean nothing was committed and the transaction can be safely retried.
-        if let Some(db_err) = e.as_database_error() {
-            let code = db_err.code().map(|c| c.to_string());
-            if code.as_deref() == Some("40001") || code.as_deref() == Some("40P01") {
-                return StorageError::Serialization;
-            }
+        if is_sqlx_serialization_conflict(&e) {
+            return StorageError::Serialization;
         }
         StorageError::Backend(e.to_string())
     }
@@ -350,11 +374,40 @@ pub trait Db {
     ) -> StorageResult<(Vec<OutgoingExecute>, Vec<OutgoingUnblock>)>;
 }
 
+/// A storage backend that fails every transaction with a chosen error.
+///
+/// The [`Db`] trait is the seam, but [`Storage`] is a closed enum of three
+/// real databases — so until this existed there was no way to construct a
+/// [`Server`](crate::server::Server) that returns a given [`StorageError`].
+/// Every error arm in `server.rs` was therefore unreachable from a test, which
+/// is precisely why `StorageError::Serialization` went unmapped: producing one
+/// required a genuinely racing Postgres.
+///
+/// It fails at the `transact`/`query` boundary rather than inside a [`Db`]
+/// method, which is exactly where the real backends surface a serialization
+/// failure after exhausting their retries.
+pub struct FailingStorage {
+    error: StorageError,
+}
+
+impl FailingStorage {
+    pub fn new(error: StorageError) -> Self {
+        Self { error }
+    }
+
+    pub fn error(&self) -> StorageError {
+        self.error.clone()
+    }
+}
+
 /// Enum-based storage to avoid trait object limitations with generic methods
 pub enum Storage {
     Sqlite(persistence_sqlite::SqliteStorage),
     Postgres(persistence_postgres::PostgresStorage),
     Mysql(persistence_mysql::MysqlStorage),
+    /// A backend that fails every operation. Test-only; never constructed by
+    /// `main.rs`, which selects a backend from `config.storage.type`.
+    Failing(FailingStorage),
 }
 
 impl Storage {
@@ -367,6 +420,7 @@ impl Storage {
             Storage::Sqlite(s) => s.transact(f).await,
             Storage::Postgres(p) => p.transact(f, false).await,
             Storage::Mysql(m) => m.transact(f).await,
+            Storage::Failing(s) => Err(s.error()),
         }
     }
 
@@ -379,6 +433,87 @@ impl Storage {
             Storage::Sqlite(s) => s.query(f).await,
             Storage::Postgres(p) => p.query(f).await,
             Storage::Mysql(m) => m.query(f).await,
+            Storage::Failing(s) => Err(s.error()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- retriable write conflicts ----
+    //
+    // The predicate is a closed table, so this is its whole contract. It is a
+    // pure function of a driver code, which is what makes the retry decision
+    // testable without inducing a real deadlock against a live database.
+
+    #[test]
+    fn postgres_conflict_codes_are_retriable() {
+        assert!(
+            is_serialization_conflict(Some("40001")),
+            "serialization failure"
+        );
+        assert!(
+            is_serialization_conflict(Some("40P01")),
+            "deadlock detected"
+        );
+    }
+
+    /// The regression: these were recognised only by MySQL's *commit* path, so
+    /// a deadlock inside a query converted to `Backend` and was never retried.
+    #[test]
+    fn mysql_conflict_codes_are_retriable() {
+        assert!(is_serialization_conflict(Some("1213")), "deadlock found");
+        assert!(is_serialization_conflict(Some("1205")), "lock wait timeout");
+    }
+
+    #[test]
+    fn every_backends_conflict_codes_are_recognised_by_one_predicate() {
+        // The point of the shared predicate: the query path and the commit
+        // path of both backends agree, because there is only one table.
+        for code in ["40001", "40P01", "1213", "1205"] {
+            assert!(is_serialization_conflict(Some(code)), "{code} should retry");
+        }
+    }
+
+    #[test]
+    fn ordinary_errors_are_not_retriable() {
+        for code in ["23505", "42P01", "1062", "", "40002", "121"] {
+            assert!(
+                !is_serialization_conflict(Some(code)),
+                "{code} must not retry"
+            );
+        }
+        assert!(!is_serialization_conflict(None), "a driverless error");
+    }
+
+    // ---- the storage error vocabulary ----
+
+    #[test]
+    fn storage_errors_describe_themselves() {
+        assert_eq!(
+            StorageError::Serialization.to_string(),
+            "Serialization conflict"
+        );
+        assert_eq!(
+            StorageError::InvalidInput("too long".into()).to_string(),
+            "Invalid input: too long"
+        );
+        assert_eq!(
+            StorageError::Backend("boom".into()).to_string(),
+            "Storage error: boom"
+        );
+    }
+
+    #[test]
+    fn a_failing_storage_returns_the_error_it_was_given() {
+        for error in [
+            StorageError::Serialization,
+            StorageError::InvalidInput("bad".into()),
+            StorageError::Backend("boom".into()),
+        ] {
+            assert_eq!(FailingStorage::new(error.clone()).error(), error);
         }
     }
 }

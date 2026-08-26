@@ -229,11 +229,7 @@ impl MysqlStorage {
             }) {
                 Ok(_) => return Ok(result),
                 Err(e) => {
-                    let mysql_err = e
-                        .as_database_error()
-                        .and_then(|dbe| dbe.code().map(|c| c.to_string()));
-                    if mysql_err.as_deref() == Some("1213") || mysql_err.as_deref() == Some("1205")
-                    {
+                    if crate::persistence::is_sqlx_serialization_conflict(&e) {
                         if attempt < max_retries {
                             tracing::warn!(
                                 attempt = attempt + 1,

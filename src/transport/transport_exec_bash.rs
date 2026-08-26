@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -45,10 +45,12 @@ fn exec_env(req: &ExecRequest) -> [(&'static str, String); 3] {
     ]
 }
 
+#[derive(Debug)]
 pub struct ExecOutcome {
     pub result: Result<ExitStatus, String>,
 }
 
+#[derive(Debug)]
 pub struct ExitStatus {
     pub code: i32,
     pub stdout: String,
@@ -109,6 +111,46 @@ fn parse_backend(address: &str) -> Result<BackendChoice, String> {
 
 // ─── Transport ────────────────────────────────────────────────────────────────
 
+/// The three backends a [`BashExecTransport`] can route to.
+///
+/// A struct rather than three hardcoded fields so a test can substitute a
+/// scripted [`ExecBackend`] for any of them. The `ExecBackend` seam existed
+/// before this, but nothing could reach it: `new` built `LocalBackend` and
+/// friends internally, so every test had to shell out to real `bash`.
+pub struct ExecBackends {
+    pub local: Arc<dyn ExecBackend>,
+    pub docker: Arc<dyn ExecBackend>,
+    pub tensorlake: Arc<dyn ExecBackend>,
+}
+
+impl ExecBackends {
+    /// The real backends: local bash, docker, and Tensorlake from the
+    /// environment.
+    pub fn production() -> Self {
+        Self {
+            local: Arc::new(LocalBackend),
+            docker: Arc::new(DockerBackend),
+            tensorlake: Arc::new(TensorlakeBackend::from_env()),
+        }
+    }
+
+    /// Every choice routed to the same backend. For tests that do not care
+    /// which one the address selected.
+    pub fn all(backend: Arc<dyn ExecBackend>) -> Self {
+        Self {
+            local: Arc::clone(&backend),
+            docker: Arc::clone(&backend),
+            tensorlake: backend,
+        }
+    }
+}
+
+impl Default for ExecBackends {
+    fn default() -> Self {
+        Self::production()
+    }
+}
+
 pub struct BashExecTransport {
     /// This worker runs in the server's own process, so it holds the port
     /// directly instead of reaching it over the wire. Every state change it
@@ -118,19 +160,47 @@ pub struct BashExecTransport {
     /// Lease TTL for tasks this worker acquires. Configuration of the worker,
     /// not of the server it talks to.
     lease_timeout: i64,
-    local: Arc<LocalBackend>,
-    docker: Arc<DockerBackend>,
-    tensorlake: Arc<TensorlakeBackend>,
+    backends: ExecBackends,
+    /// Handles for tasks spawned by `send`, so a caller can wait for a run to
+    /// finish instead of polling the server until the promise settles.
+    running: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl BashExecTransport {
+    /// A transport over the real backends.
     pub fn new(server: Arc<dyn ResonateServer>, lease_timeout: i64) -> Self {
+        Self::with_backends(server, lease_timeout, ExecBackends::production())
+    }
+
+    /// A transport over the supplied backends.
+    pub fn with_backends(
+        server: Arc<dyn ResonateServer>,
+        lease_timeout: i64,
+        backends: ExecBackends,
+    ) -> Self {
         Self {
             server,
             lease_timeout,
-            local: Arc::new(LocalBackend),
-            docker: Arc::new(DockerBackend),
-            tensorlake: Arc::new(TensorlakeBackend::from_env()),
+            backends,
+            running: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Wait for every run this transport has started.
+    ///
+    /// `send` is fire-and-forget by contract — it means "accepted for
+    /// delivery", not "executed" — so the handles are retained rather than
+    /// dropped. Without this a test can only sleep-and-poll until the promise
+    /// settles, which is both slow and flaky.
+    pub async fn join_all(&self) {
+        let handles: Vec<_> = self
+            .running
+            .lock()
+            .expect("not poisoned")
+            .drain(..)
+            .collect();
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -146,9 +216,11 @@ impl BashExecTransport {
 
         let (backend, target): (Arc<dyn ExecBackend>, Option<String>) = match parse_backend(address)
         {
-            Ok(BackendChoice::Local) => (self.local.clone(), None),
-            Ok(BackendChoice::Docker { image }) => (self.docker.clone(), Some(image)),
-            Ok(BackendChoice::Tensorlake { image }) => (self.tensorlake.clone(), Some(image)),
+            Ok(BackendChoice::Local) => (Arc::clone(&self.backends.local), None),
+            Ok(BackendChoice::Docker { image }) => (Arc::clone(&self.backends.docker), Some(image)),
+            Ok(BackendChoice::Tensorlake { image }) => {
+                (Arc::clone(&self.backends.tensorlake), Some(image))
+            }
             Err(e) => {
                 return Err(Unavailable::new(format!(
                     "bash-exec: cannot parse address {address}: {e}"
@@ -158,7 +230,7 @@ impl BashExecTransport {
 
         let server = Arc::clone(&self.server);
         let lease_timeout = self.lease_timeout;
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             run_task(
                 server,
                 lease_timeout,
@@ -169,6 +241,7 @@ impl BashExecTransport {
             )
             .await;
         });
+        self.running.lock().expect("not poisoned").push(handle);
         Ok(())
     }
 }
@@ -510,19 +583,36 @@ impl ExecBackend for DockerBackend {
 
 pub struct TensorlakeBackend {
     api_key: Option<String>,
+    /// API root. A field rather than a `const` so the backend can be pointed at
+    /// a local stub; defaults to [`DEFAULT_TENSORLAKE_API`].
+    base_url: String,
     client: reqwest::Client,
 }
 
 impl TensorlakeBackend {
+    /// The production backend: key from `TENSORLAKE_API_KEY`, real API root.
+    ///
+    /// Reading the environment is confined to this constructor — everything
+    /// below takes the resolved values as data.
     pub fn from_env() -> Self {
+        Self::new(
+            std::env::var("TENSORLAKE_API_KEY").ok(),
+            DEFAULT_TENSORLAKE_API.to_string(),
+        )
+    }
+
+    /// A backend with an explicit key and API root.
+    pub fn new(api_key: Option<String>, base_url: String) -> Self {
         Self {
-            api_key: std::env::var("TENSORLAKE_API_KEY").ok(),
+            api_key,
+            base_url,
             client: reqwest::Client::new(),
         }
     }
 }
 
-const TENSORLAKE_API: &str = "https://api.tensorlake.ai";
+/// Default Tensorlake API root.
+pub const DEFAULT_TENSORLAKE_API: &str = "https://api.tensorlake.ai";
 const SANDBOX_READY_TIMEOUT_MS: u64 = 120_000;
 const SANDBOX_POLL_INTERVAL_MS: u64 = 1_000;
 const PROCESS_POLL_INTERVAL_MS: u64 = 500;
@@ -548,7 +638,7 @@ impl ExecBackend for TensorlakeBackend {
         }
         let create: serde_json::Value = match self
             .client
-            .post(format!("{TENSORLAKE_API}/sandboxes"))
+            .post(format!("{}/sandboxes", self.base_url))
             .bearer_auth(&api_key)
             .json(&body)
             .send()
@@ -569,7 +659,7 @@ impl ExecBackend for TensorlakeBackend {
         let outcome = self.run_in_sandbox(&api_key, &sandbox_id, &req).await;
         let _ = self
             .client
-            .delete(format!("{TENSORLAKE_API}/sandboxes/{sandbox_id}"))
+            .delete(format!("{}/sandboxes/{sandbox_id}", self.base_url))
             .bearer_auth(&api_key)
             .send()
             .await;
@@ -589,7 +679,7 @@ impl TensorlakeBackend {
         loop {
             let st = match self
                 .client
-                .get(format!("{TENSORLAKE_API}/sandboxes/{sandbox_id}"))
+                .get(format!("{}/sandboxes/{sandbox_id}", self.base_url))
                 .bearer_auth(api_key)
                 .send()
                 .await
@@ -747,6 +837,104 @@ fn decode_param(data: Option<&str>) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+// ─── Test double ──────────────────────────────────────────────────────────────
+
+/// An [`ExecBackend`] that returns a scripted outcome and records what it was
+/// asked to run.
+///
+/// The point of the `ExecBackend` seam. With this, the acquire → run → settle
+/// orchestration is testable against every outcome the contract allows —
+/// including the killed-by-signal path, which is not reachable by running real
+/// `bash` — and without spawning a process or sleeping.
+pub struct ScriptedBackend {
+    name: &'static str,
+    outcome: Mutex<Option<ExecOutcome>>,
+    /// Every `(script, target, created_at, timeout_at)` this backend was asked to run.
+    runs: Mutex<Vec<(String, Option<String>, i64, i64)>>,
+    /// Env vars the last run would have been given.
+    env: Mutex<Vec<(String, String)>>,
+}
+
+impl ScriptedBackend {
+    /// A backend that exits `code` with the given output.
+    pub fn exiting(code: i32, stdout: &str, stderr: &str) -> Self {
+        Self::returning(ExecOutcome {
+            result: Ok(ExitStatus {
+                code,
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+                killed: false,
+            }),
+        })
+    }
+
+    /// A backend whose run was killed by the runtime.
+    pub fn killed() -> Self {
+        Self::returning(ExecOutcome {
+            result: Ok(ExitStatus {
+                code: 137,
+                stdout: String::new(),
+                stderr: String::new(),
+                killed: true,
+            }),
+        })
+    }
+
+    /// A backend that could not run the script at all.
+    pub fn erroring(message: &str) -> Self {
+        Self::returning(ExecOutcome {
+            result: Err(message.to_string()),
+        })
+    }
+
+    pub fn returning(outcome: ExecOutcome) -> Self {
+        Self {
+            name: "scripted",
+            outcome: Mutex::new(Some(outcome)),
+            runs: Mutex::new(Vec::new()),
+            env: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// `(script, target, created_at, timeout_at)` per run.
+    pub fn runs(&self) -> Vec<(String, Option<String>, i64, i64)> {
+        self.runs.lock().expect("not poisoned").clone()
+    }
+
+    /// Env vars the backend was handed on its most recent run.
+    pub fn env(&self) -> Vec<(String, String)> {
+        self.env.lock().expect("not poisoned").clone()
+    }
+}
+
+#[async_trait]
+impl ExecBackend for ScriptedBackend {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    async fn run(&self, req: ExecRequest) -> ExecOutcome {
+        self.runs.lock().expect("not poisoned").push((
+            req.script.clone(),
+            req.target.clone(),
+            req.created_at,
+            req.timeout_at,
+        ));
+        *self.env.lock().expect("not poisoned") = exec_env(&req)
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+
+        self.outcome
+            .lock()
+            .expect("not poisoned")
+            .take()
+            .unwrap_or_else(|| ExecOutcome {
+                result: Err("ScriptedBackend was run more than once".into()),
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -754,13 +942,15 @@ mod tests {
     use base64::Engine;
     use std::collections::HashMap;
 
-    use crate::config::Config;
     use crate::core::types::PromiseState;
     use crate::core::ResonateRouter;
-    use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
+    use crate::metrics::Metrics;
     use crate::processing::processing_messages::process_batch;
     use crate::server::Server;
+    use crate::testing::{self, ok, T0};
     use crate::transport::TransportDispatcher;
+
+    const TIMEOUT_AT: i64 = T0 + 1_000_000;
 
     // ---- end-to-end: the worker drives the task through the protocol ----
     //
@@ -768,93 +958,75 @@ mod tests {
     // differential test never exercises a worker, so nothing else checks that
     // `run_task`'s envelopes are accepted by the server.
 
-    fn test_server() -> Arc<Server> {
-        let storage = Storage::Sqlite(SqliteStorage::open(":memory:", 30_000).unwrap());
-        let mut config = Config::default();
-        config.server.url = Some("http://localhost:8001".to_string());
-        Arc::new(Server::new(config, None, storage))
-    }
-
     /// Create a promise whose `resonate:target` is a bash address and whose
     /// param carries `script`, then release the task so a message is queued.
     async fn queue_bash_task(server: &Arc<Server>, id: &str, script: &str, address: &str) {
         let encoded = base64::engine::general_purpose::STANDARD.encode(script);
-        let create = json!({
-            "pid": "test-worker",
-            "ttl": 60_000,
-            "action": {
-                "kind": "promise.create",
-                "head": {},
-                "data": {
-                    "id": id,
-                    "timeoutAt": 9_000_000_000_000i64,
-                    "param": { "data": encoded },
-                    "tags": { "resonate:target": address }
+        ok(
+            server,
+            "task.create",
+            json!({
+                "pid": "test-worker",
+                "ttl": 60_000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": {},
+                    "data": {
+                        "id": id,
+                        "timeoutAt": TIMEOUT_AT,
+                        "param": { "data": encoded },
+                        "tags": { "resonate:target": address }
+                    }
                 }
-            }
-        });
-        let resp = server
-            .dispatch(&envelope("task.create", create), 1_000)
-            .await;
-        assert_eq!(resp.head.status, 200, "task.create: {:?}", resp.data);
+            }),
+            T0,
+        )
+        .await;
 
-        let resp = server
-            .dispatch(
-                &envelope("task.release", json!({"id": id, "version": 1})),
-                1_000,
-            )
-            .await;
-        assert_eq!(resp.head.status, 200, "task.release: {:?}", resp.data);
-    }
-
-    fn envelope(kind: &str, data: serde_json::Value) -> RequestEnvelope {
-        RequestEnvelope {
-            kind: kind.to_string(),
-            head: RequestHead {
-                corr_id: "test".to_string(),
-                version: PROTOCOL_VERSION.to_string(),
-                auth: None,
-                debug_time: None,
-            },
-            data,
-        }
+        ok(
+            server,
+            "task.release",
+            json!({ "id": id, "version": 1 }),
+            T0,
+        )
+        .await;
     }
 
     async fn promise_state(server: &Arc<Server>, id: &str) -> (PromiseState, Option<String>) {
-        let resp = server
-            .dispatch(&envelope("promise.get", json!({ "id": id })), 1_000)
-            .await;
-        assert_eq!(resp.head.status, 200, "promise.get: {:?}", resp.data);
-        let promise = &resp.data["promise"];
-        let state = serde_json::from_value(promise["state"].clone()).unwrap();
-        let data = promise["value"]["data"].as_str().map(|s| s.to_string());
-        (state, data)
+        let data = ok(server, "promise.get", json!({ "id": id }), T0).await;
+        let promise = &data["promise"];
+        let state = serde_json::from_value(promise["state"].clone()).expect("known state");
+        let value = promise["value"]["data"].as_str().map(|s| s.to_string());
+        (state, value)
     }
 
-    /// Poll until the promise leaves `pending`, or give up.
-    async fn await_settled(server: &Arc<Server>, id: &str) -> (PromiseState, Option<String>) {
-        for _ in 0..100 {
-            let (state, data) = promise_state(server, id).await;
-            if state != PromiseState::Pending {
-                return (state, data);
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        panic!("promise {id} never settled");
+    async fn task_state(server: &Arc<Server>, id: &str) -> String {
+        let data = ok(server, "task.get", json!({ "id": id }), T0).await;
+        data["task"]["state"].as_str().expect("state").to_string()
     }
 
+    /// Queue a task at `address`, deliver it through a transport backed by
+    /// `backend`, and wait for the run to finish.
+    ///
+    /// Deterministic: `join_all` waits on the spawned run rather than polling
+    /// the server until the promise settles.
     async fn run_one_task(
         server: &Arc<Server>,
         id: &str,
         script: &str,
-    ) -> (PromiseState, Option<String>) {
-        queue_bash_task(server, id, script, "bash://").await;
+        address: &str,
+        backend: Arc<ScriptedBackend>,
+    ) -> Arc<BashExecTransport> {
+        queue_bash_task(server, id, script, address).await;
+
+        let transport = Arc::new(BashExecTransport::with_backends(
+            server.clone() as Arc<dyn ResonateServer>,
+            60_000,
+            ExecBackends::all(backend as Arc<dyn ExecBackend>),
+        ));
 
         let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
-        workers.insert(
-            "bash".to_string(),
-            Arc::new(BashExecTransport::new(server.clone(), 60_000)),
-        );
+        workers.insert("bash".to_string(), transport.clone());
         let router = TransportDispatcher::new(workers);
 
         process_batch(
@@ -862,74 +1034,339 @@ mod tests {
             &router as &dyn ResonateRouter,
             100,
             "http://localhost:8001",
+            &Metrics::isolated(),
         )
         .await;
-        await_settled(server, id).await
+
+        transport.join_all().await;
+        transport
     }
+
+    // ---- outcome mapping ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_successful_run_resolves_the_promise_with_stdout() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "hello\n", ""));
+        run_one_task(&server, "bash-ok", "echo hello", "bash://", backend).await;
+
+        let (state, value) = promise_state(&server, "bash-ok").await;
+        assert_eq!(state, PromiseState::Resolved);
+        assert_eq!(value.as_deref(), Some("hello"), "stdout is trimmed");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failing_run_rejects_the_promise_with_stderr() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(3, "", "boom\n"));
+        run_one_task(&server, "bash-fail", "exit 3", "bash://", backend).await;
+
+        let (state, value) = promise_state(&server, "bash-fail").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert_eq!(value.as_deref(), Some("boom"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failing_run_without_stderr_rejects_with_the_exit_code() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(7, "", "   \n  "));
+        run_one_task(&server, "bash-code", "exit 7", "bash://", backend).await;
+
+        let (state, value) = promise_state(&server, "bash-code").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert_eq!(
+            value.as_deref(),
+            Some("exit code 7"),
+            "whitespace-only stderr is treated as empty"
+        );
+    }
+
+    /// A killed run is an infrastructure failure, not a workflow failure.
+    ///
+    /// The documented contract on `ExitStatus::killed`: drop the task so the
+    /// lease expires and the message is re-dispatched to a fresh worker, rather
+    /// than settling the promise. Unreachable when the test runs real `bash`,
+    /// which is why it had no coverage before.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_killed_run_leaves_the_promise_pending_for_another_worker() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::killed());
+        run_one_task(&server, "bash-killed", "sleep 999", "bash://", backend).await;
+
+        let (state, _) = promise_state(&server, "bash-killed").await;
+        assert_eq!(
+            state,
+            PromiseState::Pending,
+            "a kill must not be reported as a workflow rejection"
+        );
+    }
+
+    /// A backend that could not run the script rejects the promise.
+    ///
+    /// Note the asymmetry with the killed case above: a run that was killed is
+    /// retried, but a run that never started (`failed to spawn bash`, a
+    /// missing Tensorlake key, a docker daemon that is down) is reported to the
+    /// caller as a workflow rejection. Both are arguably infrastructure
+    /// failures. This pins today's behaviour so that a deliberate change to it
+    /// shows up here rather than silently.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backend_that_cannot_run_at_all_rejects_the_promise() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::erroring("failed to spawn bash: ENOENT"));
+        run_one_task(&server, "bash-spawn-fail", "true", "bash://", backend).await;
+
+        let (state, value) = promise_state(&server, "bash-spawn-fail").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert_eq!(value.as_deref(), Some("failed to spawn bash: ENOENT"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_promise_whose_param_is_not_base64_is_rejected_immediately() {
+        let server = testing::server();
+        // Bypass `queue_bash_task` so the param is raw, not base64.
+        ok(
+            &server,
+            "task.create",
+            json!({
+                "pid": "test-worker",
+                "ttl": 60_000,
+                "action": {
+                    "kind": "promise.create",
+                    "head": {},
+                    "data": {
+                        "id": "bash-badparam",
+                        "timeoutAt": TIMEOUT_AT,
+                        "param": { "data": "!!!not base64!!!" },
+                        "tags": { "resonate:target": "bash://" }
+                    }
+                }
+            }),
+            T0,
+        )
+        .await;
+        ok(
+            &server,
+            "task.release",
+            json!({ "id": "bash-badparam", "version": 1 }),
+            T0,
+        )
+        .await;
+
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        let transport = Arc::new(BashExecTransport::with_backends(
+            server.clone() as Arc<dyn ResonateServer>,
+            60_000,
+            ExecBackends::all(backend.clone() as Arc<dyn ExecBackend>),
+        ));
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        workers.insert("bash".to_string(), transport.clone());
+        process_batch(
+            &server.storage,
+            &TransportDispatcher::new(workers) as &dyn ResonateRouter,
+            100,
+            "http://localhost:8001",
+            &Metrics::isolated(),
+        )
+        .await;
+        transport.join_all().await;
+
+        let (state, value) = promise_state(&server, "bash-badparam").await;
+        assert_eq!(state, PromiseState::Rejected);
+        assert!(
+            value.as_deref().unwrap_or_default().contains("base64"),
+            "expected a decode error, got {value:?}"
+        );
+        assert!(
+            backend.runs().is_empty(),
+            "the backend must never be reached with an undecodable script"
+        );
+    }
+
+    // ---- what the backend is handed ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_decoded_script_reaches_the_backend() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        run_one_task(
+            &server,
+            "bash-script",
+            "echo 'quoted $VAR'\nsecond line",
+            "bash://",
+            backend.clone(),
+        )
+        .await;
+
+        let runs = backend.runs();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].0, "echo 'quoted $VAR'\nsecond line",
+            "the script arrives decoded and byte-identical"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_promise_deadline_reaches_the_backend_as_env() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        run_one_task(&server, "bash-env", "true", "bash://", backend.clone()).await;
+
+        let env: HashMap<String, String> = backend.env().into_iter().collect();
+        assert_eq!(
+            env.get("RESONATE_PROMISE_ID").map(String::as_str),
+            Some("bash-env")
+        );
+        assert_eq!(
+            env.get("RESONATE_PROMISE_TIMEOUT_AT").map(String::as_str),
+            Some(TIMEOUT_AT.to_string().as_str()),
+            "scripts loop until the deadline, so it must be the promise's own"
+        );
+        assert_eq!(
+            env.get("RESONATE_PROMISE_CREATED_AT").map(String::as_str),
+            Some(T0.to_string().as_str()),
+            "created_at is stable across retries"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_image_from_the_address_reaches_the_backend_as_the_target() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        run_one_task(
+            &server,
+            "bash-image",
+            "true",
+            "bash://docker/library/ubuntu:latest",
+            backend.clone(),
+        )
+        .await;
+
+        let runs = backend.runs();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].1.as_deref(), Some("library/ubuntu:latest"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_local_backend_is_given_no_target() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        run_one_task(&server, "bash-local", "true", "bash://", backend.clone()).await;
+
+        assert_eq!(backend.runs()[0].1, None);
+    }
+
+    // ---- routing ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unparseable_address_is_reported_not_run() {
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        let transport = BashExecTransport::with_backends(
+            Arc::new(testing::NoopServer) as Arc<dyn ResonateServer>,
+            60_000,
+            ExecBackends::all(backend.clone() as Arc<dyn ExecBackend>),
+        );
+
+        let msg = Message::Execute(crate::core::types::ExecuteMsg {
+            kind: "execute".to_string(),
+            head: crate::core::types::MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: crate::core::types::ExecuteMsgData {
+                task: crate::core::types::ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 1,
+                },
+            },
+        });
+
+        let err = transport
+            .send("bash://nope/foo", &msg)
+            .await
+            .expect_err("unknown backend");
+        assert!(err.to_string().contains("cannot parse address"), "{err}");
+        assert!(backend.runs().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unblock_message_is_accepted_and_runs_nothing() {
+        let backend = Arc::new(ScriptedBackend::exiting(0, "", ""));
+        let transport = BashExecTransport::with_backends(
+            Arc::new(testing::NoopServer) as Arc<dyn ResonateServer>,
+            60_000,
+            ExecBackends::all(backend.clone() as Arc<dyn ExecBackend>),
+        );
+
+        let msg = Message::Unblock(crate::core::types::UnblockMsg {
+            kind: "unblock".to_string(),
+            head: crate::core::types::UnblockMsgHead {},
+            data: crate::core::types::UnblockMsgData {
+                promise: crate::core::types::PromiseRecord {
+                    id: "p1".to_string(),
+                    state: PromiseState::Resolved,
+                    param: Default::default(),
+                    value: Default::default(),
+                    tags: HashMap::new(),
+                    timeout_at: 0,
+                    created_at: 0,
+                    settled_at: None,
+                },
+            },
+        });
+
+        transport
+            .send("bash://", &msg)
+            .await
+            .expect("unblock is accepted");
+        transport.join_all().await;
+        assert!(
+            backend.runs().is_empty(),
+            "an unblock has no local counterpart to run"
+        );
+    }
+
+    // ---- lifecycle ----
 
     /// The heartbeat loop hand-builds a `task.heartbeat` envelope and ignores
     /// the result, so a malformed one would fail silently: the lease would
     /// expire mid-script and the task be redispatched while still running.
-    /// Scripts in the other tests finish before the first beat, so this checks
-    /// the envelope shape directly.
     #[tokio::test(flavor = "multi_thread")]
     async fn heartbeat_envelope_is_accepted_by_the_server() {
-        let server = test_server();
+        let server = testing::server();
         queue_bash_task(&server, "bash-beat", "echo hi", "bash://").await;
 
         // Acquire exactly as run_task does, so the pid/version match.
         let pid = "bash-exec-test";
-        let resp = server
-            .dispatch(
-                &envelope(
-                    "task.acquire",
-                    json!({ "id": "bash-beat", "version": 1, "pid": pid, "ttl": 60_000 }),
-                ),
-                1_000,
-            )
-            .await;
-        assert_eq!(resp.head.status, 200, "task.acquire: {:?}", resp.data);
-        let acquired: TaskAcquireResponseData = serde_json::from_value(resp.data).unwrap();
+        let data = ok(
+            &server,
+            "task.acquire",
+            json!({ "id": "bash-beat", "version": 1, "pid": pid, "ttl": 60_000 }),
+            T0,
+        )
+        .await;
+        let acquired: TaskAcquireResponseData = serde_json::from_value(data).expect("acquire data");
 
-        // The exact envelope the heartbeat loop sends.
-        let resp = server
-            .dispatch(
-                &envelope(
-                    "task.heartbeat",
-                    json!({
-                        "pid": pid,
-                        "tasks": [{ "id": "bash-beat", "version": acquired.task.version }]
-                    }),
-                ),
-                2_000,
-            )
-            .await;
-        assert_eq!(resp.head.status, 200, "task.heartbeat: {:?}", resp.data);
+        ok(
+            &server,
+            "task.heartbeat",
+            json!({
+                "pid": pid,
+                "tasks": [{ "id": "bash-beat", "version": acquired.task.version }]
+            }),
+            T0 + 1_000,
+        )
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn successful_script_resolves_the_promise_with_stdout() {
-        let server = test_server();
-        let (state, data) = run_one_task(&server, "bash-ok", "echo hello").await;
-        assert_eq!(state, PromiseState::Resolved);
-        assert_eq!(data.as_deref(), Some("hello"));
+    async fn a_settled_run_leaves_the_task_fulfilled() {
+        let server = testing::server();
+        let backend = Arc::new(ScriptedBackend::exiting(0, "done", ""));
+        run_one_task(&server, "bash-fulfil", "true", "bash://", backend).await;
+
+        assert_eq!(task_state(&server, "bash-fulfil").await, "fulfilled");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn failing_script_rejects_the_promise_with_stderr() {
-        let server = test_server();
-        let (state, data) = run_one_task(&server, "bash-fail", "echo boom >&2; exit 3").await;
-        assert_eq!(state, PromiseState::Rejected);
-        assert_eq!(data.as_deref(), Some("boom"));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn failing_script_without_stderr_rejects_with_the_exit_code() {
-        let server = test_server();
-        let (state, data) = run_one_task(&server, "bash-code", "exit 7").await;
-        assert_eq!(state, PromiseState::Rejected);
-        assert_eq!(data.as_deref(), Some("exit code 7"));
-    }
+    // ---- address parsing ----
 
     #[test]
     fn parse_local_empty() {
@@ -951,7 +1388,7 @@ mod tests {
 
     #[test]
     fn parse_docker() {
-        match parse_backend("bash://docker/alpine").unwrap() {
+        match parse_backend("bash://docker/alpine").expect("valid") {
             BackendChoice::Docker { image } => assert_eq!(image, "alpine"),
             _ => panic!("expected Docker"),
         }
@@ -959,7 +1396,7 @@ mod tests {
 
     #[test]
     fn parse_docker_with_tag() {
-        match parse_backend("bash://docker/library/ubuntu:latest").unwrap() {
+        match parse_backend("bash://docker/library/ubuntu:latest").expect("valid") {
             BackendChoice::Docker { image } => assert_eq!(image, "library/ubuntu:latest"),
             _ => panic!("expected Docker"),
         }
@@ -973,7 +1410,7 @@ mod tests {
 
     #[test]
     fn parse_tensorlake() {
-        match parse_backend("bash://tensorlake/python-3.11").unwrap() {
+        match parse_backend("bash://tensorlake/python-3.11").expect("valid") {
             BackendChoice::Tensorlake { image } => assert_eq!(image, "python-3.11"),
             _ => panic!("expected Tensorlake"),
         }
@@ -981,7 +1418,7 @@ mod tests {
 
     #[test]
     fn parse_tensorlake_default_image() {
-        match parse_backend("bash://tensorlake/").unwrap() {
+        match parse_backend("bash://tensorlake/").expect("valid") {
             BackendChoice::Tensorlake { image } => assert_eq!(image, ""),
             _ => panic!("expected Tensorlake"),
         }
@@ -995,5 +1432,23 @@ mod tests {
     #[test]
     fn parse_wrong_scheme() {
         assert!(parse_backend("http://x").is_err());
+    }
+
+    // ---- tensorlake configuration ----
+
+    #[tokio::test]
+    async fn the_tensorlake_backend_without_a_key_reports_rather_than_calling_out() {
+        let backend = TensorlakeBackend::new(None, "http://127.0.0.1:1".to_string());
+        let outcome = backend
+            .run(ExecRequest {
+                task_id: "t".to_string(),
+                script: "true".to_string(),
+                target: None,
+                created_at: T0,
+                timeout_at: TIMEOUT_AT,
+            })
+            .await;
+        let err = outcome.result.expect_err("no API key");
+        assert!(err.contains("TENSORLAKE_API_KEY"), "{err}");
     }
 }

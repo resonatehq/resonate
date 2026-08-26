@@ -9,7 +9,7 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use crate::metrics;
+use crate::metrics::Metrics;
 
 use crate::core::types::Message;
 use crate::core::{ResonateServer, ResonateWorker, Unavailable};
@@ -52,6 +52,7 @@ pub struct GcpsPubSubTransport {
     /// releasing the task instead of dropping it). Not used yet.
     #[allow(dead_code)]
     server: Arc<dyn ResonateServer>,
+    metrics: Metrics,
 }
 
 struct PublishJob {
@@ -60,7 +61,18 @@ struct PublishJob {
 }
 
 impl GcpsPubSubTransport {
+    /// Build a transport reporting into the global metric set.
     pub fn new(server: Arc<dyn ResonateServer>, concurrency: usize, timeout: Duration) -> Self {
+        Self::with_metrics(server, concurrency, timeout, Metrics::default())
+    }
+
+    /// Build a transport reporting into `metrics`.
+    pub fn with_metrics(
+        server: Arc<dyn ResonateServer>,
+        concurrency: usize,
+        timeout: Duration,
+        metrics: Metrics,
+    ) -> Self {
         let publishers = Arc::new(Mutex::new(HashMap::<String, Publisher>::new()));
         let semaphore = Arc::new(Semaphore::new(concurrency));
         // Queue capacity larger than concurrency so short bursts smooth out;
@@ -69,9 +81,19 @@ impl GcpsPubSubTransport {
         // the durable buffer.
         let (tx, rx) = mpsc::channel::<PublishJob>(concurrency);
 
-        tokio::spawn(dispatcher(publishers, semaphore, timeout, rx));
+        tokio::spawn(dispatcher(
+            publishers,
+            semaphore,
+            timeout,
+            rx,
+            metrics.clone(),
+        ));
 
-        Self { tx, server }
+        Self {
+            tx,
+            server,
+            metrics,
+        }
     }
 
     /// Enqueue a publish. Returns once the job is on the in-memory queue.
@@ -86,7 +108,8 @@ impl GcpsPubSubTransport {
                 address = %format!("gcps://{}/{}", job.address.project, job.address.topic),
                 "GCP Pub/Sub dispatcher gone, message dropped"
             );
-            metrics::DELIVERIES_TOTAL
+            self.metrics
+                .deliveries_total
                 .with_label_values(&["dropped"])
                 .inc();
         }
@@ -98,6 +121,7 @@ async fn dispatcher(
     semaphore: Arc<Semaphore>,
     timeout: Duration,
     mut rx: mpsc::Receiver<PublishJob>,
+    metrics: Metrics,
 ) {
     while let Some(job) = rx.recv().await {
         let permit = match Arc::clone(&semaphore).acquire_owned().await {
@@ -105,9 +129,10 @@ async fn dispatcher(
             Err(_) => return,
         };
         let publishers = Arc::clone(&publishers);
+        let metrics = metrics.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            deliver(publishers, job, timeout).await;
+            deliver(publishers, job, timeout, metrics).await;
         });
     }
 }
@@ -142,6 +167,7 @@ async fn deliver(
     publishers: Arc<Mutex<HashMap<String, Publisher>>>,
     job: PublishJob,
     timeout: Duration,
+    metrics: Metrics,
 ) {
     let PublishJob { address, data } = job;
     let address_str = format!("gcps://{}/{}", address.project, address.topic);
@@ -151,9 +177,7 @@ async fn deliver(
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(address = %address_str, error = %e, "Failed to get GCP Pub/Sub publisher");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
             return;
         }
     };
@@ -166,21 +190,18 @@ async fn deliver(
     match tokio::time::timeout(timeout, fut).await {
         Ok(Ok(_message_id)) => {
             tracing::debug!(project = %address.project, topic = %address.topic, "GCP Pub/Sub delivery succeeded");
-            metrics::DELIVERIES_TOTAL
+            metrics
+                .deliveries_total
                 .with_label_values(&["success"])
                 .inc();
         }
         Ok(Err(e)) => {
             tracing::warn!(project = %address.project, topic = %address.topic, error = %e, "GCP Pub/Sub delivery failed");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
         }
         Err(_) => {
             tracing::warn!(project = %address.project, topic = %address.topic, "GCP Pub/Sub publish timed out");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
         }
     }
 }

@@ -85,6 +85,10 @@ pub struct Oracle {
     t_timeouts: Vec<TTimeout>,
     s_timeouts: Vec<STimeout>,
     outgoing: Vec<(String, Value)>,
+    /// The model's own clock, so it resolves `now` exactly the way a
+    /// [`Server`](crate::server::Server) does — the differential test depends
+    /// on the two agreeing on time, not just on state.
+    clock: crate::util::Clock,
 }
 
 impl Default for Oracle {
@@ -95,6 +99,11 @@ impl Default for Oracle {
 
 impl Oracle {
     pub fn new() -> Self {
+        Self::with_clock(crate::util::Clock::system())
+    }
+
+    /// A model reading "now" from `clock`.
+    pub fn with_clock(clock: crate::util::Clock) -> Self {
         Self {
             promises: HashMap::new(),
             tasks: HashMap::new(),
@@ -103,11 +112,23 @@ impl Oracle {
             t_timeouts: Vec::new(),
             s_timeouts: Vec::new(),
             outgoing: Vec::new(),
+            clock,
         }
     }
 
     pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
-        let now = util::resolve_time(req.head.debug_time);
+        // Same envelope rules as the real server, from the same function, so
+        // the differential harness compares them rather than skipping them.
+        if let Err(reason) = req.validate_envelope() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &reason,
+            );
+        }
+
+        let now = self.clock.resolve(req.head.debug_time);
         match req.kind.as_str() {
             "promise.get" => self.op_promise_get(req, now),
             "promise.create" => self.op_promise_create(req, now),

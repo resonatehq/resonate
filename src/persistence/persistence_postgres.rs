@@ -202,10 +202,7 @@ impl PostgresStorage {
             }) {
                 Ok(_) => return Ok(result),
                 Err(e) => {
-                    let pg_err = e
-                        .as_database_error()
-                        .and_then(|dbe| dbe.code().map(|c| c.to_string()));
-                    if pg_err.as_deref() == Some("40001") || pg_err.as_deref() == Some("40P01") {
+                    if crate::persistence::is_sqlx_serialization_conflict(&e) {
                         if attempt < max_retries {
                             tracing::warn!(
                                 attempt = attempt + 1,

@@ -228,3 +228,320 @@ impl ResonateWorker for PollRegistry {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
+    use crate::testing::NoopServer;
+
+    fn registry(max_connections: usize, buffer_size: usize) -> PollRegistry {
+        PollRegistry::new(Arc::new(NoopServer), max_connections, buffer_size)
+    }
+
+    fn execute_msg(task_id: &str) -> Message {
+        Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: task_id.to_string(),
+                    version: 1,
+                },
+            },
+        })
+    }
+
+    /// Register a connection, failing the test if the registry refused.
+    async fn register(
+        reg: &PollRegistry,
+        group: &str,
+        id: &str,
+    ) -> (Arc<PollConnection>, mpsc::Receiver<String>) {
+        reg.register(group, id)
+            .await
+            .unwrap_or_else(|| panic!("registry refused {group}/{id}"))
+    }
+
+    // ---- address parsing ----
+
+    #[test]
+    fn parses_a_unicast_address_with_an_id() {
+        let addr = PollAddress::parse("poll://uni@workers/worker-1").expect("valid");
+        assert_eq!(addr.cast, PollCast::Uni);
+        assert_eq!(addr.group, "workers");
+        assert_eq!(addr.id.as_deref(), Some("worker-1"));
+    }
+
+    #[test]
+    fn parses_an_anycast_address_without_an_id() {
+        let addr = PollAddress::parse("poll://any@workers").expect("valid");
+        assert_eq!(addr.cast, PollCast::Any);
+        assert_eq!(addr.group, "workers");
+        assert_eq!(addr.id, None);
+    }
+
+    #[test]
+    fn parses_an_anycast_address_with_a_preferred_id() {
+        let addr = PollAddress::parse("poll://any@workers/preferred").expect("valid");
+        assert_eq!(addr.cast, PollCast::Any);
+        assert_eq!(addr.id.as_deref(), Some("preferred"));
+    }
+
+    #[test]
+    fn rejects_addresses_that_are_not_uni_or_any() {
+        for bad in [
+            "poll://workers",       // no cast
+            "poll://multi@workers", // unknown cast
+            "poll://@workers",      // empty cast
+            "not a url",
+        ] {
+            assert!(PollAddress::parse(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    // ---- capacity ----
+
+    #[tokio::test]
+    async fn registration_is_refused_at_capacity() {
+        let reg = registry(2, 4);
+        let _a = register(&reg, "g", "a").await;
+        let _b = register(&reg, "g", "b").await;
+
+        assert!(
+            reg.register("g", "c").await.is_none(),
+            "the third connection exceeds max_connections"
+        );
+    }
+
+    #[tokio::test]
+    async fn capacity_counts_across_groups_not_within_them() {
+        let reg = registry(2, 4);
+        let _a = register(&reg, "group-one", "a").await;
+        let _b = register(&reg, "group-two", "b").await;
+
+        assert!(
+            reg.register("group-three", "c").await.is_none(),
+            "max_connections is a total, not a per-group limit"
+        );
+    }
+
+    #[tokio::test]
+    async fn deregistering_frees_capacity() {
+        let reg = registry(1, 4);
+        let (conn, _rx) = register(&reg, "g", "a").await;
+        assert!(reg.register("g", "b").await.is_none(), "at capacity");
+
+        reg.deregister("g", conn.conn_id).await;
+
+        assert!(reg.register("g", "b").await.is_some(), "the slot came back");
+    }
+
+    #[tokio::test]
+    async fn deregistering_an_unknown_connection_is_harmless() {
+        let reg = registry(4, 4);
+        let (conn, mut rx) = register(&reg, "g", "a").await;
+
+        reg.deregister("g", conn.conn_id + 999).await;
+        reg.deregister("no-such-group", conn.conn_id).await;
+
+        // The real connection still works.
+        reg.send(&"poll://uni@g/a".to_string(), &execute_msg("t1"))
+            .await
+            .expect("still registered");
+        assert!(rx.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn connection_ids_are_unique_even_within_a_group() {
+        let reg = registry(4, 4);
+        let (a, _ra) = register(&reg, "g", "same-id").await;
+        let (b, _rb) = register(&reg, "g", "same-id").await;
+        assert_ne!(
+            a.conn_id, b.conn_id,
+            "two connections may share a worker id; the conn_id disambiguates"
+        );
+    }
+
+    // ---- unicast ----
+
+    #[tokio::test]
+    async fn unicast_reaches_exactly_the_named_connection() {
+        let reg = registry(4, 4);
+        let (_a, mut rx_a) = register(&reg, "g", "a").await;
+        let (_b, mut rx_b) = register(&reg, "g", "b").await;
+
+        reg.send("poll://uni@g/b", &execute_msg("t1"))
+            .await
+            .expect("b is registered");
+
+        let msg = rx_b.recv().await.expect("b receives");
+        assert!(msg.contains("\"t1\""), "{msg}");
+        assert!(
+            rx_a.try_recv().is_err(),
+            "a must not receive a message addressed to b"
+        );
+    }
+
+    #[tokio::test]
+    async fn unicast_to_an_unknown_id_is_reported_not_rerouted() {
+        let reg = registry(4, 4);
+        let (_a, mut rx_a) = register(&reg, "g", "a").await;
+
+        let err = reg
+            .send("poll://uni@g/nobody", &execute_msg("t1"))
+            .await
+            .expect_err("no such connection");
+        assert!(err.to_string().contains("no poll connection"), "{err}");
+        assert!(
+            rx_a.try_recv().is_err(),
+            "unicast must never fall back to another connection"
+        );
+    }
+
+    #[tokio::test]
+    async fn unicast_without_an_id_is_undeliverable() {
+        let reg = registry(4, 4);
+        let (_a, _rx) = register(&reg, "g", "a").await;
+        assert!(
+            reg.send("poll://uni@g", &execute_msg("t1")).await.is_err(),
+            "unicast requires a target id"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_message_to_a_group_with_no_connections_is_reported() {
+        let reg = registry(4, 4);
+        for address in ["poll://uni@empty/a", "poll://any@empty"] {
+            assert!(
+                reg.send(address, &execute_msg("t1")).await.is_err(),
+                "nothing is listening on {address}"
+            );
+        }
+    }
+
+    // ---- anycast ----
+
+    #[tokio::test]
+    async fn anycast_prefers_the_named_connection_when_present() {
+        // Stay within the per-connection buffer so a refusal means "not
+        // preferred", not "queue full".
+        let reg = registry(4, 8);
+        let (_a, mut rx_a) = register(&reg, "g", "a").await;
+        let (_b, mut rx_b) = register(&reg, "g", "b").await;
+
+        for _ in 0..8 {
+            reg.send("poll://any@g/b", &execute_msg("t"))
+                .await
+                .expect("b is present");
+        }
+
+        assert!(
+            rx_a.try_recv().is_err(),
+            "the preference is honoured every time"
+        );
+        assert!(rx_b.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn anycast_falls_back_when_the_preferred_connection_is_gone() {
+        let reg = registry(4, 4);
+        let (_a, mut rx_a) = register(&reg, "g", "a").await;
+
+        reg.send("poll://any@g/not-here", &execute_msg("t1"))
+            .await
+            .expect("falls back to any connection in the group");
+
+        assert!(
+            rx_a.recv().await.is_some(),
+            "anycast may be served by any member of the group"
+        );
+    }
+
+    #[tokio::test]
+    async fn anycast_without_an_id_reaches_some_connection_in_the_group() {
+        let reg = registry(4, 8);
+        let (_a, mut rx_a) = register(&reg, "g", "a").await;
+        let (_b, mut rx_b) = register(&reg, "g", "b").await;
+
+        for _ in 0..8 {
+            reg.send("poll://any@g", &execute_msg("t"))
+                .await
+                .expect("someone is listening");
+        }
+
+        let total = {
+            let mut n = 0;
+            while rx_a.try_recv().is_ok() {
+                n += 1;
+            }
+            while rx_b.try_recv().is_ok() {
+                n += 1;
+            }
+            n
+        };
+        assert_eq!(total, 8, "every message landed somewhere, exactly once");
+    }
+
+    // ---- backpressure ----
+
+    #[tokio::test]
+    async fn a_full_connection_buffer_is_reported_not_silently_dropped() {
+        let reg = registry(4, 1);
+        let (_a, _rx) = register(&reg, "g", "a").await;
+
+        reg.send("poll://uni@g/a", &execute_msg("t1"))
+            .await
+            .expect("first fits the 1-slot buffer");
+
+        let err = reg
+            .send("poll://uni@g/a", &execute_msg("t2"))
+            .await
+            .expect_err("buffer is full");
+        assert!(err.to_string().contains("no poll connection"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_closed_receiver_is_reported() {
+        let reg = registry(4, 4);
+        let (_a, rx) = register(&reg, "g", "a").await;
+        drop(rx);
+
+        assert!(
+            reg.send("poll://uni@g/a", &execute_msg("t1"))
+                .await
+                .is_err(),
+            "the worker went away"
+        );
+    }
+
+    // ---- serialization ----
+
+    #[tokio::test]
+    async fn the_payload_is_json_with_alphabetically_ordered_keys() {
+        // SSE consumers have always received keys in this order, because the
+        // message is serialized via `Value` (a BTreeMap) rather than straight
+        // from the struct. Going direct would emit declaration order and change
+        // the bytes on the wire.
+        let reg = registry(4, 4);
+        let (_a, mut rx) = register(&reg, "g", "a").await;
+
+        reg.send("poll://uni@g/a", &execute_msg("task-42"))
+            .await
+            .expect("delivered");
+
+        let body = rx.recv().await.expect("received");
+        let data_at = body.find("\"data\"").expect("has data");
+        let head_at = body.find("\"head\"").expect("has head");
+        let kind_at = body.find("\"kind\"").expect("has kind");
+        assert!(
+            data_at < head_at && head_at < kind_at,
+            "expected data < head < kind, got {body}"
+        );
+
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+        assert_eq!(parsed["data"]["task"]["id"], "task-42");
+    }
+}

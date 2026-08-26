@@ -148,6 +148,25 @@ fn default_storage_type() -> String {
     "sqlite".to_string()
 }
 
+/// A storage backend that has been *proven* selectable, with the settings it
+/// needs already extracted.
+///
+/// `Config::validate` checked that `type=postgres` implies a URL, but nothing
+/// carried that proof to the call site — so `main.rs` read
+/// `config.storage.postgres.url.as_ref().unwrap()`, an `unwrap` whose safety
+/// depended on a check several hundred lines away in another file. And because
+/// the selection was a `match` on a string with a `_ =>` arm, an unrecognised
+/// backend silently started SQLite instead of failing.
+///
+/// Parsing the config into this value fixes both: the URL is present because
+/// the type says so, and an unknown backend is an `Err`, not a fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageBackend {
+    Sqlite { path: String },
+    Postgres { url: String, pool_size: u32 },
+    Mysql { url: String, pool_size: u32 },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqliteConfig {
     /// Path to SQLite database file
@@ -599,16 +618,52 @@ impl Config {
     ///   RESONATE_STORAGE__TYPE=postgres
     ///   RESONATE_STORAGE__POSTGRES__URL=postgres://...
     pub fn load() -> Result<Self, String> {
+        Self::load_from(Self::figment(DEFAULT_CONFIG_FILE, EnvVars::Process))
+    }
+
+    /// The [`Figment`] `load` uses, with the config file path and the source of
+    /// environment variables both as parameters.
+    ///
+    /// Separated from [`Config::load`] so tests can build the exact same layer
+    /// stack over a temp file and a fixed env map, instead of mutating
+    /// process-wide state that leaks into every other test in the binary.
+    pub fn figment(config_file: &str, env: EnvVars<'_>) -> Figment {
         let mut figment = Figment::new()
             .merge(Serialized::defaults(Config::default()))
-            .merge(Toml::file("resonate.toml"))
-            .merge(Env::prefixed("RESONATE_").split("__"));
+            .merge(Toml::file(config_file));
 
-        // Support standard OTEL env var (no RESONATE_ prefix)
-        if let Ok(val) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+        // Support standard OTEL env var (no RESONATE_ prefix). Applied before
+        // the RESONATE_ layer so an explicit RESONATE_OBSERVABILITY__OTLP_ENDPOINT
+        // still wins.
+        if let Some(val) = env.get("OTEL_EXPORTER_OTLP_ENDPOINT") {
             figment = figment.merge(Serialized::default("observability.otlp_endpoint", val));
         }
 
+        match env {
+            EnvVars::Process => figment.merge(Env::prefixed("RESONATE_").split("__")),
+            // `Env` can only read the real process environment, so a fixed map
+            // is replayed through the same `RESONATE_` prefix + `__` nesting
+            // rules as an explicit override layer.
+            EnvVars::Fixed(pairs) => {
+                for (key, value) in pairs {
+                    if let Some(rest) = key.strip_prefix("RESONATE_") {
+                        let path = rest.to_lowercase().replace("__", ".");
+                        // Parse through figment's own loose value parser, which
+                        // is what the real `Env` provider does — otherwise every
+                        // value would arrive as a String and fail to coerce into
+                        // numeric and boolean fields.
+                        let parsed: figment::value::Value =
+                            value.parse().expect("figment value parsing is infallible");
+                        figment = figment.merge(Serialized::default(&path, parsed));
+                    }
+                }
+                figment
+            }
+        }
+    }
+
+    /// Extract and validate a [`Config`] from an already-built [`Figment`].
+    pub fn load_from(figment: Figment) -> Result<Self, String> {
         let config: Config = figment
             .extract()
             .map_err(|e| format!("Configuration error: {e}"))?;
@@ -618,19 +673,49 @@ impl Config {
         Ok(config)
     }
 
-    /// Validate semantic constraints that serde/figment cannot express.
-    fn validate(&self) -> Result<(), String> {
-        // Validate storage type
+    /// Resolve `storage.type` and its settings into a backend that can be
+    /// opened, or say why it cannot.
+    ///
+    /// This is the storage half of `validate`, and the only place a backend
+    /// name is interpreted. `main.rs` matches on the returned value rather
+    /// than on the string, so adding a backend is a compile error until every
+    /// site handles it.
+    pub fn backend(&self) -> Result<StorageBackend, String> {
         match self.storage.storage_type.as_str() {
-            "sqlite" | "postgres" | "mysql" => {}
-            other => {
-                return Err(format!(
-                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
-                    other
-                ));
-            }
+            "sqlite" => Ok(StorageBackend::Sqlite {
+                path: self.storage.sqlite.path.clone(),
+            }),
+            "postgres" => match &self.storage.postgres.url {
+                Some(url) => Ok(StorageBackend::Postgres {
+                    url: url.clone(),
+                    pool_size: self.storage.postgres.pool_size,
+                }),
+                None => Err("storage.type=postgres requires a URL. Set --storage-postgres-url or \
+                     RESONATE_STORAGE__POSTGRES__URL"
+                    .to_string()),
+            },
+            "mysql" => match &self.storage.mysql.url {
+                Some(url) => Ok(StorageBackend::Mysql {
+                    url: url.clone(),
+                    pool_size: self.storage.mysql.pool_size,
+                }),
+                None => Err("storage.type=mysql requires a URL. Set --storage-mysql-url or \
+                     RESONATE_STORAGE__MYSQL__URL"
+                    .to_string()),
+            },
+            other => Err(format!(
+                "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
+                other
+            )),
         }
+    }
 
+    /// Validate semantic constraints that serde/figment cannot express.
+    ///
+    /// This is the single place semantic config validation lives. Anything the
+    /// server refuses to start with belongs here rather than in `main.rs`, so
+    /// that it is reachable from the library and therefore testable.
+    pub fn validate(&self) -> Result<(), String> {
         // Validate transport concurrency caps. A value of 0 sizes the delivery
         // semaphore to zero permits, so the dispatcher could never acquire a
         // slot — every message would queue and then block the processing loop
@@ -663,9 +748,50 @@ impl Config {
             ));
         }
 
+        // A backend selected without a URL cannot connect. Delegated to
+        // `backend()` so the rule has exactly one implementation: validation
+        // and selection cannot drift apart if they are the same code.
+        self.backend()?;
+
+        // `tokio::sync::mpsc::channel` panics on a zero capacity, and a zero
+        // connection cap would reject every poll registration.
+        if self.transports.http_poll.buffer_size == 0 {
+            return Err("transports.http_poll.buffer_size must be at least 1 (got 0)".to_string());
+        }
+        if self.transports.http_poll.max_connections == 0 {
+            return Err(
+                "transports.http_poll.max_connections must be at least 1 (got 0)".to_string(),
+            );
+        }
+
         Ok(())
     }
 }
+
+/// Where [`Config::figment`] reads environment variables from.
+#[derive(Debug, Clone, Copy)]
+pub enum EnvVars<'a> {
+    /// The real process environment. What `Config::load` uses.
+    Process,
+    /// A fixed set of `(key, value)` pairs. For tests, so that config loading
+    /// never depends on — or perturbs — process-wide state.
+    Fixed(&'a [(&'a str, &'a str)]),
+}
+
+impl EnvVars<'_> {
+    fn get(&self, key: &str) -> Option<String> {
+        match self {
+            EnvVars::Process => std::env::var(key).ok(),
+            EnvVars::Fixed(pairs) => pairs
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.to_string()),
+        }
+    }
+}
+
+/// Default config file path, relative to the working directory.
+pub const DEFAULT_CONFIG_FILE: &str = "resonate.toml";
 
 #[cfg(test)]
 mod tests {
@@ -752,5 +878,262 @@ mod tests {
             .validate()
             .expect_err("zero concurrency must be rejected");
         assert!(err.contains("gcps.concurrency"), "unexpected error: {err}");
+    }
+
+    // ---- storage backend URLs ----
+    //
+    // These four used to live in `main.rs`, where nothing could reach them.
+
+    #[test]
+    fn postgres_without_a_url_is_rejected() {
+        let mut config = Config::default();
+        config.storage.storage_type = "postgres".to_string();
+        assert!(config.storage.postgres.url.is_none());
+        let err = config.validate().expect_err("cannot connect without a URL");
+        assert!(err.contains("postgres"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn postgres_with_a_url_is_accepted() {
+        let mut config = Config::default();
+        config.storage.storage_type = "postgres".to_string();
+        config.storage.postgres.url = Some("postgres://localhost/resonate".to_string());
+        config.validate().expect("a URL is all that was missing");
+    }
+
+    #[test]
+    fn mysql_without_a_url_is_rejected() {
+        let mut config = Config::default();
+        config.storage.storage_type = "mysql".to_string();
+        let err = config.validate().expect_err("cannot connect without a URL");
+        assert!(err.contains("mysql"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mysql_with_a_url_is_accepted() {
+        let mut config = Config::default();
+        config.storage.storage_type = "mysql".to_string();
+        config.storage.mysql.url = Some("mysql://localhost/resonate".to_string());
+        config.validate().expect("a URL is all that was missing");
+    }
+
+    #[test]
+    fn sqlite_needs_no_url() {
+        let config = Config::default();
+        assert_eq!(config.storage.storage_type, "sqlite");
+        config.validate().expect("sqlite has a default path");
+    }
+
+    // ---- poll transport sizing ----
+
+    #[test]
+    fn rejects_zero_poll_buffer_size() {
+        // tokio::sync::mpsc::channel panics on a zero capacity.
+        let mut config = Config::default();
+        config.transports.http_poll.buffer_size = 0;
+        let err = config.validate().expect_err("would panic at runtime");
+        assert!(
+            err.contains("http_poll.buffer_size"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_zero_poll_max_connections() {
+        let mut config = Config::default();
+        config.transports.http_poll.max_connections = 0;
+        let err = config
+            .validate()
+            .expect_err("would reject every registration");
+        assert!(
+            err.contains("http_poll.max_connections"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // ---- layered loading ----
+    //
+    // `load()` reads process-wide state, so these drive `figment()` with an
+    // explicit file path and a fixed env map instead.
+
+    #[test]
+    fn defaults_apply_when_no_file_and_no_env() {
+        let config = Config::load_from(Config::figment("does-not-exist.toml", EnvVars::Fixed(&[])))
+            .expect("defaults alone are valid");
+        assert_eq!(config.server.port, 8001);
+        assert_eq!(config.storage.storage_type, "sqlite");
+        assert_eq!(config.level, "info");
+    }
+
+    #[test]
+    fn env_overrides_defaults_with_double_underscore_nesting() {
+        let config = Config::load_from(Config::figment(
+            "does-not-exist.toml",
+            EnvVars::Fixed(&[
+                ("RESONATE_SERVER__PORT", "3000"),
+                ("RESONATE_STORAGE__TYPE", "postgres"),
+                ("RESONATE_STORAGE__POSTGRES__URL", "postgres://localhost/x"),
+            ]),
+        ))
+        .expect("valid override");
+        assert_eq!(config.server.port, 3000);
+        assert_eq!(config.storage.storage_type, "postgres");
+        assert_eq!(
+            config.storage.postgres.url.as_deref(),
+            Some("postgres://localhost/x")
+        );
+    }
+
+    #[test]
+    fn otel_endpoint_env_var_is_honoured_without_the_resonate_prefix() {
+        let config = Config::load_from(Config::figment(
+            "does-not-exist.toml",
+            EnvVars::Fixed(&[("OTEL_EXPORTER_OTLP_ENDPOINT", "collector:4317")]),
+        ))
+        .expect("valid override");
+        assert_eq!(config.observability.otlp_endpoint, "collector:4317");
+    }
+
+    #[test]
+    fn an_explicit_resonate_otlp_endpoint_beats_the_otel_one() {
+        let config = Config::load_from(Config::figment(
+            "does-not-exist.toml",
+            EnvVars::Fixed(&[
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "collector:4317"),
+                ("RESONATE_OBSERVABILITY__OTLP_ENDPOINT", "explicit:4317"),
+            ]),
+        ))
+        .expect("valid override");
+        assert_eq!(config.observability.otlp_endpoint, "explicit:4317");
+    }
+
+    #[test]
+    fn a_config_file_overrides_defaults_and_env_overrides_the_file() {
+        let dir = std::env::temp_dir().join(format!("resonate-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("resonate.toml");
+        std::fs::write(
+            &path,
+            "level = \"debug\"\n[server]\nport = 4000\nshutdown_timeout = 22000\n",
+        )
+        .expect("write config");
+
+        let file = path.to_str().expect("utf-8 path");
+        let from_file = Config::load_from(Config::figment(file, EnvVars::Fixed(&[])))
+            .expect("file config is valid");
+        assert_eq!(from_file.level, "debug");
+        assert_eq!(from_file.server.port, 4000);
+        assert_eq!(from_file.server.shutdown_timeout, 22000);
+
+        let with_env = Config::load_from(Config::figment(
+            file,
+            EnvVars::Fixed(&[("RESONATE_SERVER__PORT", "5000")]),
+        ))
+        .expect("env override is valid");
+        assert_eq!(with_env.server.port, 5000, "env beats the file");
+        assert_eq!(
+            with_env.server.shutdown_timeout, 22000,
+            "untouched file values survive"
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn load_from_rejects_a_semantically_invalid_layer_stack() {
+        // Selecting postgres via env without a URL must fail at load time, not
+        // at first query.
+        let err = Config::load_from(Config::figment(
+            "does-not-exist.toml",
+            EnvVars::Fixed(&[("RESONATE_STORAGE__TYPE", "postgres")]),
+        ))
+        .expect_err("no URL configured");
+        assert!(err.contains("postgres"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn unknown_storage_backend_is_rejected() {
+        let err = Config::load_from(Config::figment(
+            "does-not-exist.toml",
+            EnvVars::Fixed(&[("RESONATE_STORAGE__TYPE", "cassandra")]),
+        ))
+        .expect_err("not a supported backend");
+        assert!(err.contains("cassandra"), "unexpected error: {err}");
+    }
+
+    // ---- storage backend selection ----
+    //
+    // `backend()` is the only interpreter of `storage.type`, so these walk its
+    // whole return union: three backends and three ways to be unselectable.
+
+    #[test]
+    fn sqlite_is_the_default_backend() {
+        let config = Config::default();
+        assert_eq!(
+            config.backend(),
+            Ok(StorageBackend::Sqlite {
+                path: default_db_path()
+            })
+        );
+    }
+
+    #[test]
+    fn postgres_carries_its_url_and_pool_size() {
+        let mut config = Config::default();
+        config.storage.storage_type = "postgres".to_string();
+        config.storage.postgres.url = Some("postgres://host/db".to_string());
+        config.storage.postgres.pool_size = 42;
+        assert_eq!(
+            config.backend(),
+            Ok(StorageBackend::Postgres {
+                url: "postgres://host/db".to_string(),
+                pool_size: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn mysql_carries_its_url_and_pool_size() {
+        let mut config = Config::default();
+        config.storage.storage_type = "mysql".to_string();
+        config.storage.mysql.url = Some("mysql://host/db".to_string());
+        config.storage.mysql.pool_size = 7;
+        assert_eq!(
+            config.backend(),
+            Ok(StorageBackend::Mysql {
+                url: "mysql://host/db".to_string(),
+                pool_size: 7,
+            })
+        );
+    }
+
+    #[test]
+    fn postgres_without_a_url_is_not_selectable() {
+        let mut config = Config::default();
+        config.storage.storage_type = "postgres".to_string();
+        let err = config.backend().expect_err("no URL was configured");
+        assert!(err.contains("requires a URL"), "unexpected error: {err}");
+        // and the same rule must reject the config as a whole
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn mysql_without_a_url_is_not_selectable() {
+        let mut config = Config::default();
+        config.storage.storage_type = "mysql".to_string();
+        let err = config.backend().expect_err("no URL was configured");
+        assert!(err.contains("requires a URL"), "unexpected error: {err}");
+        assert!(config.validate().is_err());
+    }
+
+    /// The regression that matters: an unrecognised backend used to reach
+    /// `main.rs`'s `_ =>` arm and quietly start SQLite instead.
+    #[test]
+    fn an_unknown_backend_is_an_error_not_a_fallback_to_sqlite() {
+        let mut config = Config::default();
+        config.storage.storage_type = "cassandra".to_string();
+        let err = config.backend().expect_err("cassandra is not a backend");
+        assert!(err.contains("cassandra"), "unexpected error: {err}");
+        assert!(!err.contains("sqlite") || err.contains("Valid options"));
     }
 }

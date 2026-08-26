@@ -143,6 +143,38 @@ pub struct RequestEnvelope {
     pub data: Value,
 }
 
+impl RequestEnvelope {
+    /// Check the envelope itself — not the operation's payload.
+    ///
+    /// A pure function of the envelope, returning the reason as a value so the
+    /// caller decides what a rejection looks like on its transport.
+    ///
+    /// This used to live in the HTTP adapter alone, which meant an in-process
+    /// caller reached the operations without these checks while an HTTP caller
+    /// got a 400 — so the two were not interchangeable for malformed input,
+    /// and the differential harness (which drives the port, not HTTP) could
+    /// not cover them. Both [`Server::dispatch`](crate::server::Server::dispatch)
+    /// and [`Oracle::apply`](crate::oracle::Oracle::apply) now run it, so the
+    /// differential does.
+    pub fn validate_envelope(&self) -> Result<(), String> {
+        // serde accepts "" as a valid String.
+        if self.kind.is_empty() {
+            return Err("Missing or invalid 'kind' field — must be a non-empty string".to_string());
+        }
+        // serde deserializes any JSON value into Value.
+        if !self.data.is_object() {
+            return Err("Invalid 'data' field — must be an object".to_string());
+        }
+        if !SUPPORTED_VERSIONS.contains(&self.head.version.as_str()) {
+            return Err(format!(
+                "Unsupported protocol version '{}', supported versions: {:?}",
+                self.head.version, SUPPORTED_VERSIONS
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RequestHead {
     #[serde(rename = "corrId")]
