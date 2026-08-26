@@ -1,9 +1,11 @@
 //! `ResonateServer` over S3.
 //!
+//! # Contract
+//!
 //! The adapter between the protocol and the shell: resolve `now`, deserialize,
 //! validate, route. It answers the same statuses `Server::dispatch` does
 //! (`server.rs:424-500`) because it is the same decision tree — only the state
-//! behind it is different.
+//! behind it is different. The differential suite holds the two byte-equal.
 //!
 //! Two routing notes worth stating outright:
 //!
@@ -17,6 +19,18 @@
 //!   origin. A same-origin fence is one decision and therefore atomic; a
 //!   cross-origin one is a check in the task's document followed by the action
 //!   in the promise's, which is *not*. See `fence_across_origins`.
+//!
+//! # Dependencies
+//!
+//! [`S3Server::build`] wires the whole backend — store, cache, outbox,
+//! applier, schedule service, timer poller, scan service — and it is the one
+//! constructor for production and for tests, so the differential suite
+//! exercises the graph `main` builds rather than a lookalike.
+//!
+//! # Dependants
+//!
+//! `main`'s backend selection, the differential suite, and the live-bucket
+//! smoke tests, all through the `ResonateServer` port.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

@@ -1,18 +1,31 @@
 //! The document read cache.
 //!
-//! Safe only because every write is conditional. A stale entry, or a missing
-//! one, costs a round trip — the conditional write fails, the applier re-reads
-//! and re-decides — and never costs correctness. That is what lets an
-//! implementation evict, drop, or persist entries however it likes, and what
-//! would let a future tier spill to local NVMe under this same trait.
+//! # Contract
+//!
+//! A hit returns a document and the version it was read at; an implementation
+//! may evict, drop, or persist entries however it likes, because the cache is
+//! never authoritative. It is safe only because every write is conditional: a
+//! stale entry, or a missing one, costs a round trip — the conditional write
+//! fails, the applier re-reads and re-decides — and never costs correctness.
+//! That is also what would let a future tier spill to local NVMe under this
+//! same trait.
 //!
 //! The API is deliberately synchronous: a cache lookup must never await, or the
 //! hit path stops being a hit. A tiered implementation that needs I/O does it
 //! internally and reports a miss.
 //!
-//! Only the applier writes here, with either a post-write ETag or a fresh read,
-//! and only the applier invalidates — on a lost conditional write. Because the
-//! applier serializes per origin, no two writers race on one key.
+//! # Dependencies
+//!
+//! `kernel::state::OriginDoc` and the store's [`Etag`] — no I/O, no store
+//! handle.
+//!
+//! # Dependants
+//!
+//! Only the applier writes here, with either a post-write ETag or a fresh
+//! read, and only the applier invalidates — on a lost conditional write.
+//! Because the applier serializes per origin, no two writers race on one key.
+//! The scan service reads cache-first but never writes, so a scan racing a
+//! write cannot leave a stale entry behind.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};

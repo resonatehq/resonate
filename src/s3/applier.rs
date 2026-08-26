@@ -41,6 +41,21 @@
 //! is now stale. The cache entry is dropped, the document re-read, and the
 //! whole batch **re-decided** — never replayed. That is the only correct
 //! response, and it is why `handle` is a pure function of the document.
+//!
+//! # Dependencies
+//!
+//! The kernel (`handle`, `drain`, `apply_effects`) for every decision, the
+//! codec for the bytes, the store for the objects, the cache for the read
+//! path, and the outbox for post-commit sends. [`KeySpace`], defined here,
+//! names every key in the bucket.
+//!
+//! # Dependants
+//!
+//! Every write in the backend goes through [`ApplierPool::submit`]: `S3Server`
+//! routes each request to it, the timer poller sweeps origins through
+//! [`ApplierPool::tick`], and the schedule service submits `ScheduleFire`
+//! through it. The other modules share [`KeySpace`] to agree on where things
+//! live.
 
 use std::collections::HashMap;
 use std::sync::Arc;

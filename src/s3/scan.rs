@@ -1,11 +1,14 @@
 //! Whole-store reads: the three searches and `debug.snap`.
 //!
+//! # Contract
+//!
 //! Everything here is a LIST of the document prefix followed by a decode of
 //! each object, filtered and projected in memory. That is O(origins) GETs per
 //! query, which is honest for a small deployment and for the differential
 //! suite, and plainly wrong for a large one — the production caveat, stated
-//! rather than hidden. This module is the seam where a secondary index would
-//! go, and adding one would not touch the applier or the kernel.
+//! rather than hidden (and why the searches can be disabled by config). This
+//! module is the seam where a secondary index would go, and adding one would
+//! not touch the applier or the kernel.
 //!
 //! Reads are cache-first but never *write* the cache. Only the applier does
 //! that, so a scan racing a write cannot leave a stale entry behind for the
@@ -15,6 +18,17 @@
 //! passed but which nothing has named yet still reads as pending. The SQL
 //! backends behave identically — a row changes when `try_timeout` or the
 //! timeout sweep touches it, not when someone looks at it.
+//!
+//! # Dependencies
+//!
+//! The store and the codec to list and read every document, the cache
+//! (read-only), the schedule service for `schedule.search`, and the outbox for
+//! the `messages` half of `debug.snap`.
+//!
+//! # Dependants
+//!
+//! `S3Server` alone, which routes `promise.search`, `task.search`,
+//! `schedule.search` and `debug.snap` here.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

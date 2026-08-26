@@ -1,5 +1,7 @@
 //! The kernel's state, requests, and effects.
 //!
+//! # Contract
+//!
 //! Everything here is data. The transition function lives in
 //! [`handle`](super::handle) and [`drain`](super::drain), and is *defined* as
 //! `apply_effects(handle(&doc, ..).0)` — there is no second updater that could
@@ -13,6 +15,16 @@
 //!
 //! Collections are `BTree*` so iteration order — and therefore the encoded
 //! bytes and the drain sweep — is a function of the state alone.
+//!
+//! # Dependencies
+//!
+//! `core::types` for the records, payloads and request shapes the document
+//! embeds.
+//!
+//! # Dependants
+//!
+//! `handle` and `drain` decide over these types; the s3 applier applies the
+//! effects and the s3 codec encodes the document.
 
 use std::collections::{BTreeMap, BTreeSet};
 

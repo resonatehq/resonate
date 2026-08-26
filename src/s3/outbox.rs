@@ -1,28 +1,44 @@
 //! Outgoing messages: the `outgoing_execute` and `outgoing_unblock` tables,
 //! held in memory instead of in the document.
 //!
+//! # Contract
+//!
 //! Sends are post-commit effects. The kernel decides them, the applier hands
 //! them here *after* the document lands, and delivery is at-most-once — the
 //! same contract `take_outgoing` has today, because a claimed row is deleted
 //! before it is routed. A lost `Execute` is recovered by the task's retry
 //! deadline; a lost `Unblock` is lost, exactly as it is today.
 //!
-//! Two things this holds that the plan's sketch did not, both because they are
-//! observable behaviour rather than convenience:
+//! Two properties are observable behaviour, not convenience:
 //!
-//! - **A pending set with the tables' keys.** `outgoing_execute`'s primary key
-//!   is the task id, so a newer dispatch supersedes an older one; the pending
-//!   set must collapse the same way or `debug.snap` diverges.
+//! - **The pending set collapses with the tables' keys.** `outgoing_execute`'s
+//!   primary key is the task id, so a newer dispatch supersedes an older one;
+//!   the pending set must collapse the same way or `debug.snap` diverges.
 //!   `outgoing_unblock`'s is `(promise_id, address)` and its insert is
 //!   `ON CONFLICT DO NOTHING`, so the first write wins.
-//! - **A pause.** `debug.start` stops the message-processing loop, leaving rows
-//!   queued for `debug.snap` to see. Pausing delivery here is that, and it is
-//!   what makes the differential suite's `messages` comparison meaningful.
+//! - **Delivery pauses.** `debug.start` stops the message-processing loop,
+//!   leaving rows queued for `debug.snap` to see. Pausing delivery here is
+//!   that, and it is what makes the differential suite's `messages` comparison
+//!   meaningful.
 //!
 //! The pending set is *not* durable, which is the one place this is weaker than
 //! a table: a crash loses queued messages rather than delivering them late.
 //! At-most-once already permits that, and the retry deadline covers the
 //! dispatches that matter.
+//!
+//! # Dependencies
+//!
+//! The message types in `core::types`, the [`ResonateRouter`] port for actual
+//! delivery (via [`LateRouter`] in production, because the router is built
+//! after the server), and `kernel::state::OutEntry`, the shape the kernel
+//! decides sends in.
+//!
+//! # Dependants
+//!
+//! The applier hands sends here after every commit; `S3Server` pauses, resumes
+//! and clears it for the `debug.*` operations; the scan service reads
+//! `snapshot()` into `debug.snap`; `main` binds the real router into the
+//! [`LateRouter`] once the transports exist.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};

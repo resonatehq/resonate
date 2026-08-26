@@ -1,29 +1,39 @@
-//! The document body: format.md's snapshot encoding.
+//! The document codec: an `OriginDoc` as bytes on the store, and back.
 //!
 //! One line of canonical JSON per entity — a header, then promises, tasks, and
-//! armed deadlines — joined by `\n` with no trailing newline. This is §2–§4 of
-//! `../resonate-verus/format.md`.
+//! armed deadlines — joined by `\n` with no trailing newline. The header
+//! carries `v`, the format version, so a document written by a newer server is
+//! refused rather than misread, and `og`, a hash binding the object to the key
+//! it lives under.
 //!
-//! What is *not* here is the append log: frames, epochs, seal and rewrite, the
-//! pad, and the CAS-on-length primitive. Those need S3 Express One Zone
-//! appends; v1 replaces the whole object under an ETag compare-and-swap
-//! instead. The header's `v` is the dispatch point for graduating to the full
-//! snapshot-plus-log layout later, which format.md names as its own evolution
-//! path — so that move is a codec swap and nothing else.
+//! # Contract
 //!
-//! **Canonical encoding is load-bearing** (format.md §4.2). Two encoders given
-//! equal state must produce identical bytes, because that is what lets the
-//! shell compare bytes to decide whether a write is needed at all, and lets a
-//! writer recognize its own landed write after a lost response. The rules:
-//! ASCII only (everything else `\uXXXX`), minimal escapes, integers with no
-//! exponent, no insignificant whitespace, fixed key order, fixed line order,
-//! and omission — never `null`, `[]` or `false` — for anything empty.
+//! - `decode(encode(doc, origin), origin)` returns `doc` exactly.
+//! - **Encoding is canonical**: two encoders given equal state produce
+//!   identical bytes. The rules: ASCII only (everything else `\uXXXX`),
+//!   minimal escapes, integers with no exponent, no insignificant whitespace,
+//!   fixed key order, fixed line order, and omission — never `null`, `[]` or
+//!   `false` — for anything empty. This is load-bearing: it is what lets the
+//!   applier compare bytes to decide whether a write is needed at all, and
+//!   lets a writer recognize its own landed write after a lost response.
+//! - Ids are stored relative to the origin, and `encode` takes the origin as
+//!   a parameter — it is the key, not a field of the document. A document
+//!   whose `og` does not hash the origin it was read under is refused
+//!   ([`CodecError::OriginMismatch`]), so a misrouted read or a misdirected
+//!   write is caught rather than silently corrupting another workflow.
 //!
-//! Two relaxations of §4.2, both deliberate: integers may be negative (this
-//! port's clocks are `i64` milliseconds, not `nat`), and payloads are encoded
-//! from the structured `PromiseValue` rather than carried as opaque bytes,
-//! which is sound only because a `PromiseValue` is strings all the way down and
-//! so has no float-formatting ambiguity to preserve.
+//! # Dependencies
+//!
+//! `kernel::state` for the document types (`OriginDoc`, `PromiseDoc`,
+//! `TaskDoc`) and `core::types` for the enums and payloads they embed.
+//! Nothing else — the codec never touches the store.
+//!
+//! # Dependants
+//!
+//! The applier, which encodes and decodes around every conditional write and
+//! compares the bytes for the write law; the scan service, which decodes every
+//! document for searches and `debug.snap`; and `origin_hash` is also the
+//! spread the applier's timer-key sharding reuses.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -355,7 +365,7 @@ pub fn encode(doc: &OriginDoc, origin: &str) -> Vec<u8> {
     }
 
     // Armed deadlines, sorted by (deadline, id) so that the first line of each
-    // kind *is* the minimum — the reading property format.md §4 keeps.
+    // kind *is* the minimum armed deadline.
     let mut pt: Vec<(i64, String)> = doc
         .promises
         .iter()
@@ -968,8 +978,7 @@ mod tests {
 
     #[test]
     fn a_negative_clock_round_trips() {
-        // format.md restricts integers to non-negative; this port's clocks are
-        // i64 milliseconds, so the encoder carries a sign.
+        // Clocks are i64 milliseconds, so the encoder carries a sign.
         let doc = OriginDoc {
             clock: -5,
             ..Default::default()

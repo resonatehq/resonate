@@ -29,6 +29,20 @@
 //! retry timeout or plus a task's ttl, and both are required to be positive —
 //! `config::validate` holds the retry timeout above zero and `TaskAcquireData`
 //! validates `ttl >= 1`.
+//!
+//! # Dependencies
+//!
+//! The store, to list the timer shards and collect fired keys; the applier, to
+//! sweep an origin (`tick`) and to parse timer keys (`KeySpace`); and the
+//! [`ScheduleFirer`] port, so the poller can hand a due schedule over without
+//! knowing what a schedule is. The poller holds no state of its own — every
+//! round starts from a listing.
+//!
+//! # Dependants
+//!
+//! `main` spawns the wall-clock loop; `S3Server` calls [`Timerd::round`]
+//! directly from `debug.tick` and pauses the loop from `debug.start`, so a
+//! test on a synthetic clock and a server on a real one take the same path.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};

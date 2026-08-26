@@ -17,6 +17,18 @@
 //!
 //! Statuses and messages are `Server::dispatch`'s, verbatim: a rejection is a
 //! [`Reply`] with a status, never an `Err`.
+//!
+//! # Dependencies
+//!
+//! [`state`](super::state) for the document and effect vocabulary, and
+//! `core::types` for the protocol shapes. No I/O, no clock, no id generation —
+//! `now` and every id arrive in the request.
+//!
+//! # Dependants
+//!
+//! The s3 applier decides every submitted request through [`handle`], and
+//! [`drain`](super::drain) reuses the settlement machinery here (`Tx`,
+//! `trigger_settlement`).
 
 use std::collections::BTreeSet;
 

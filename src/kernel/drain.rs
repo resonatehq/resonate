@@ -10,6 +10,16 @@
 //! Where [`handle`](super::handle) settles only the promises a request *names*,
 //! `drain` settles every armed one. That is the whole difference between the
 //! two, and it is why the shell needs a timer at all.
+//!
+//! # Dependencies
+//!
+//! [`handle`](super::handle)'s settlement machinery (`Tx`,
+//! `trigger_settlement`) and the state types. Pure, like `handle`.
+//!
+//! # Dependants
+//!
+//! The s3 applier's `tick`, which the timer poller's sweep and `debug.tick`
+//! drive.
 
 use crate::core::types::{PromiseState, TaskState};
 

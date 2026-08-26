@@ -22,6 +22,18 @@
 //! (`persistence_sqlite.rs:1332-1340`), which checks the timeout row still
 //! holds the deadline that fired, and it is what makes a duplicate timer key
 //! harmless.
+//!
+//! # Dependencies
+//!
+//! The store, for the schedule objects and their timer keys; the applier, to
+//! submit `Req::ScheduleFire` so the promise is created through the same
+//! serialized path as everything else, and for `KeySpace`.
+//!
+//! # Dependants
+//!
+//! The timer poller fires due schedules through the [`ScheduleFirer`] impl;
+//! `S3Server` routes `schedule.get/create/delete` here; the scan service reads
+//! `list_all` for `schedule.search`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

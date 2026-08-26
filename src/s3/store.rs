@@ -1,9 +1,12 @@
 //! The object-store port: bytes in, bytes out, one conditional write.
 //!
-//! Six operations, because that is all the shell needs: read an object with its
-//! version, write it conditionally (on a version, or on absence), write it
-//! unconditionally, delete it, and list a prefix in key order. Everything about
-//! *what* the bytes mean lives in [`codec`](super::codec).
+//! # Contract
+//!
+//! Six operations, because that is all the shell needs: read an object with
+//! its version, write it conditionally (on a version, or on absence), write it
+//! unconditionally, delete it, and list a prefix in ascending key order —
+//! read-after-write consistent, capped at `max_keys` smallest keys. Everything
+//! about *what* the bytes mean lives in [`codec`](super::codec).
 //!
 //! The error taxonomy is the load-bearing part. A conditional write can fail
 //! two ways and they demand opposite responses:
@@ -22,6 +25,19 @@
 //! **Not every S3-compatible store qualifies.** Real conditional writes are
 //! required: S3, R2, GCS and Azure have them; MinIO, B2 and Spaces do not, and
 //! silently lose writes if pointed at.
+//!
+//! # Dependencies
+//!
+//! The `object_store` crate alone. This module knows nothing about documents,
+//! keys' meanings, or the kernel.
+//!
+//! # Dependants
+//!
+//! Everything in the backend that touches the bucket goes through [`Store`]:
+//! the applier (documents and timer objects), the timer poller (listing and
+//! collecting due keys), the schedule service, the scan service, and
+//! `S3Server` itself (readiness, `debug.reset`). Tests use [`FaultStore`] to
+//! cut the power between two effects and inspect exactly what landed.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};

@@ -4,6 +4,14 @@
 //! decides over it and the shell here performs what it decides. Nothing in this
 //! module imports `persistence`, `server`, or `oracle` — this is a fourth
 //! server implementation, not a fourth `Db`.
+//!
+//! The internal graph, bottom up: [`store`] is the port to the bucket and
+//! [`codec`] the bytes on it; [`applier`] decides and writes through both,
+//! backed by [`cache`] and handing post-commit sends to [`outbox`]; [`timerd`]
+//! and [`schedules`] drive deadlines through the applier; [`scan`] reads the
+//! whole store; and [`server`] wires all of it behind the `ResonateServer`
+//! port. Each module's own comment carries its contract, dependencies and
+//! dependants.
 
 pub mod applier;
 pub mod cache;
