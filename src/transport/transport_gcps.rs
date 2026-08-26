@@ -81,9 +81,19 @@ impl GcpsPubSubTransport {
         // the durable buffer.
         let (tx, rx) = mpsc::channel::<PublishJob>(concurrency);
 
-        tokio::spawn(dispatcher(publishers, semaphore, timeout, rx, metrics.clone()));
+        tokio::spawn(dispatcher(
+            publishers,
+            semaphore,
+            timeout,
+            rx,
+            metrics.clone(),
+        ));
 
-        Self { tx, server, metrics }
+        Self {
+            tx,
+            server,
+            metrics,
+        }
     }
 
     /// Enqueue a publish. Returns once the job is on the in-memory queue.
@@ -167,10 +177,7 @@ async fn deliver(
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(address = %address_str, error = %e, "Failed to get GCP Pub/Sub publisher");
-            metrics
-                .deliveries_total
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
             return;
         }
     };
@@ -190,17 +197,11 @@ async fn deliver(
         }
         Ok(Err(e)) => {
             tracing::warn!(project = %address.project, topic = %address.topic, error = %e, "GCP Pub/Sub delivery failed");
-            metrics
-                .deliveries_total
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
         }
         Err(_) => {
             tracing::warn!(project = %address.project, topic = %address.topic, "GCP Pub/Sub publish timed out");
-            metrics
-                .deliveries_total
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
         }
     }
 }

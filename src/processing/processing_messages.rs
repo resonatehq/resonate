@@ -147,7 +147,11 @@ mod tests {
     const SERVER_URL: &str = "http://localhost:8001";
 
     /// Run one delivery batch against `router`, reporting into `metrics`.
-    async fn drain(server: &Arc<crate::server::Server>, router: &dyn ResonateRouter, metrics: &Metrics) {
+    async fn drain(
+        server: &Arc<crate::server::Server>,
+        router: &dyn ResonateRouter,
+        metrics: &Metrics,
+    ) {
         process_batch(&server.storage, router, 100, SERVER_URL, metrics).await;
     }
 

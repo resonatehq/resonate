@@ -291,7 +291,10 @@ mod tests {
     #[test]
     fn the_default_clock_is_the_system_clock() {
         let clock = Clock::default();
-        assert!(clock.now_ms() > 1_600_000_000_000, "a real epoch millis value");
+        assert!(
+            clock.now_ms() > 1_600_000_000_000,
+            "a real epoch millis value"
+        );
     }
 
     // ---- cron validation ----

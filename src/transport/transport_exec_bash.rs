@@ -217,9 +217,7 @@ impl BashExecTransport {
         let (backend, target): (Arc<dyn ExecBackend>, Option<String>) = match parse_backend(address)
         {
             Ok(BackendChoice::Local) => (Arc::clone(&self.backends.local), None),
-            Ok(BackendChoice::Docker { image }) => {
-                (Arc::clone(&self.backends.docker), Some(image))
-            }
+            Ok(BackendChoice::Docker { image }) => (Arc::clone(&self.backends.docker), Some(image)),
             Ok(BackendChoice::Tensorlake { image }) => {
                 (Arc::clone(&self.backends.tensorlake), Some(image))
             }
@@ -985,7 +983,13 @@ mod tests {
         )
         .await;
 
-        ok(server, "task.release", json!({ "id": id, "version": 1 }), T0).await;
+        ok(
+            server,
+            "task.release",
+            json!({ "id": id, "version": 1 }),
+            T0,
+        )
+        .await;
     }
 
     async fn promise_state(server: &Arc<Server>, id: &str) -> (PromiseState, Option<String>) {
@@ -1208,7 +1212,10 @@ mod tests {
         run_one_task(&server, "bash-env", "true", "bash://", backend.clone()).await;
 
         let env: HashMap<String, String> = backend.env().into_iter().collect();
-        assert_eq!(env.get("RESONATE_PROMISE_ID").map(String::as_str), Some("bash-env"));
+        assert_eq!(
+            env.get("RESONATE_PROMISE_ID").map(String::as_str),
+            Some("bash-env")
+        );
         assert_eq!(
             env.get("RESONATE_PROMISE_TIMEOUT_AT").map(String::as_str),
             Some(TIMEOUT_AT.to_string().as_str()),

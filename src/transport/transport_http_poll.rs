@@ -293,9 +293,9 @@ mod tests {
     #[test]
     fn rejects_addresses_that_are_not_uni_or_any() {
         for bad in [
-            "poll://workers",           // no cast
-            "poll://multi@workers",     // unknown cast
-            "poll://@workers",          // empty cast
+            "poll://workers",       // no cast
+            "poll://multi@workers", // unknown cast
+            "poll://@workers",      // empty cast
             "not a url",
         ] {
             assert!(PollAddress::parse(bad).is_err(), "should reject {bad:?}");
@@ -336,10 +336,7 @@ mod tests {
 
         reg.deregister("g", conn.conn_id).await;
 
-        assert!(
-            reg.register("g", "b").await.is_some(),
-            "the slot came back"
-        );
+        assert!(reg.register("g", "b").await.is_some(), "the slot came back");
     }
 
     #[tokio::test]
@@ -441,7 +438,10 @@ mod tests {
                 .expect("b is present");
         }
 
-        assert!(rx_a.try_recv().is_err(), "the preference is honoured every time");
+        assert!(
+            rx_a.try_recv().is_err(),
+            "the preference is honoured every time"
+        );
         assert!(rx_b.try_recv().is_ok());
     }
 
@@ -510,7 +510,9 @@ mod tests {
         drop(rx);
 
         assert!(
-            reg.send("poll://uni@g/a", &execute_msg("t1")).await.is_err(),
+            reg.send("poll://uni@g/a", &execute_msg("t1"))
+                .await
+                .is_err(),
             "the worker went away"
         );
     }

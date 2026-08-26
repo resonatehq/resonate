@@ -6,8 +6,6 @@
 
 use std::sync::Arc;
 
-use resonate::core::types::ResponseEnvelope;
-use resonate::{auth, cli, config, core, metrics, persistence, processing, server, transport};
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -21,6 +19,8 @@ use clap::{Parser, Subcommand};
 use config::Config;
 use core::{ResonateRouter, ResonateServer, ResonateWorker};
 use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
+use resonate::core::types::ResponseEnvelope;
+use resonate::{auth, cli, config, core, metrics, persistence, processing, server, transport};
 use server::Server;
 use std::collections::HashMap;
 use transport::transport_http_poll::PollRegistry;

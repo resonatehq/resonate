@@ -122,9 +122,7 @@ impl Metrics {
     /// A read-back helper so tests can assert on what was recorded without
     /// scraping and parsing the text exposition format.
     pub fn request_count(&self, kind: &str, status: &str) -> f64 {
-        self.request_total
-            .with_label_values(&[kind, status])
-            .get()
+        self.request_total.with_label_values(&[kind, status]).get()
     }
 
     /// Current value of `resonate_messages_total{kind}`.
@@ -197,9 +195,15 @@ mod tests {
     #[test]
     fn counters_are_readable_back_by_label() {
         let m = Metrics::isolated();
-        m.request_total.with_label_values(&["task.create", "409"]).inc();
-        m.request_total.with_label_values(&["task.create", "409"]).inc();
-        m.request_total.with_label_values(&["task.create", "200"]).inc();
+        m.request_total
+            .with_label_values(&["task.create", "409"])
+            .inc();
+        m.request_total
+            .with_label_values(&["task.create", "409"])
+            .inc();
+        m.request_total
+            .with_label_values(&["task.create", "200"])
+            .inc();
 
         assert_eq!(m.request_count("task.create", "409"), 2.0);
         assert_eq!(m.request_count("task.create", "200"), 1.0);

@@ -186,7 +186,11 @@ impl HttpPushTransport {
 
         tokio::spawn(dispatcher(client, auth, semaphore, rx, metrics.clone()));
 
-        Self { tx, server, metrics }
+        Self {
+            tx,
+            server,
+            metrics,
+        }
     }
 
     /// Enqueue a delivery. Returns once the job is on the in-memory queue.
@@ -281,10 +285,7 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob, metrics: Met
                     .inc();
             } else {
                 tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
-                metrics
-                    .deliveries_total
-                    .with_label_values(&["error"])
-                    .inc();
+                metrics.deliveries_total.with_label_values(&["error"]).inc();
             }
         }
         Err(e) => {
@@ -294,10 +295,7 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob, metrics: Met
                 error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
                 "HTTP push delivery failed"
             );
-            metrics
-                .deliveries_total
-                .with_label_values(&["error"])
-                .inc();
+            metrics.deliveries_total.with_label_values(&["error"]).inc();
         }
     }
 }

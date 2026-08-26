@@ -450,8 +450,14 @@ mod tests {
 
     #[test]
     fn postgres_conflict_codes_are_retriable() {
-        assert!(is_serialization_conflict(Some("40001")), "serialization failure");
-        assert!(is_serialization_conflict(Some("40P01")), "deadlock detected");
+        assert!(
+            is_serialization_conflict(Some("40001")),
+            "serialization failure"
+        );
+        assert!(
+            is_serialization_conflict(Some("40P01")),
+            "deadlock detected"
+        );
     }
 
     /// The regression: these were recognised only by MySQL's *commit* path, so
@@ -474,7 +480,10 @@ mod tests {
     #[test]
     fn ordinary_errors_are_not_retriable() {
         for code in ["23505", "42P01", "1062", "", "40002", "121"] {
-            assert!(!is_serialization_conflict(Some(code)), "{code} must not retry");
+            assert!(
+                !is_serialization_conflict(Some(code)),
+                "{code} must not retry"
+            );
         }
         assert!(!is_serialization_conflict(None), "a driverless error");
     }

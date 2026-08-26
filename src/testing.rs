@@ -20,9 +20,13 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::config::Config;
-use crate::core::types::{Message, RequestEnvelope, RequestHead, ResponseEnvelope, PROTOCOL_VERSION};
+use crate::core::types::{
+    Message, RequestEnvelope, RequestHead, ResponseEnvelope, PROTOCOL_VERSION,
+};
 use crate::core::{ResonateServer, ResonateWorker, Unavailable};
-use crate::persistence::{persistence_sqlite::SqliteStorage, FailingStorage, Storage, StorageError};
+use crate::persistence::{
+    persistence_sqlite::SqliteStorage, FailingStorage, Storage, StorageError,
+};
 use crate::server::Server;
 use crate::util::Clock;
 
@@ -139,7 +143,11 @@ pub fn request_at(kind: &str, data: Value, now: i64) -> RequestEnvelope {
 ///
 /// Panics if the backend reports itself unavailable — an in-process backend
 /// always answers, so that is a bug rather than an outcome under test.
-pub async fn send(backend: &Arc<dyn ResonateServer>, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+pub async fn send(
+    backend: &Arc<dyn ResonateServer>,
+    req: &RequestEnvelope,
+    now: i64,
+) -> ResponseEnvelope {
     let mut req = req.clone();
     req.head.debug_time = Some(now);
     backend
@@ -231,7 +239,12 @@ impl RecordingWorker {
     /// The single delivery this worker received. Panics on any other count.
     pub fn only_call(&self) -> (String, Value) {
         let calls = self.calls();
-        assert_eq!(calls.len(), 1, "expected exactly one delivery, got {}", calls.len());
+        assert_eq!(
+            calls.len(),
+            1,
+            "expected exactly one delivery, got {}",
+            calls.len()
+        );
         calls.into_iter().next().expect("length checked")
     }
 }

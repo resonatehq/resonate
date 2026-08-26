@@ -27,12 +27,12 @@ use crate::core::types::{
     TaskSuspendData, TaskSuspendPreloadData,
 };
 use crate::core::{ResonateServer, Unavailable};
+use crate::metrics::Metrics;
 use crate::persistence::{
     PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
     TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
     TaskFulfillParams,
 };
-use crate::metrics::Metrics;
 use crate::processing::processing_timeouts;
 use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
@@ -244,12 +244,9 @@ fn storage_error(req: &RequestEnvelope, e: StorageError) -> ResponseEnvelope {
         }
         // Retries exhausted, nothing was committed. 503 tells the client this
         // is a retriable no-op; a 500 would tell it the opposite.
-        StorageError::Serialization => ResponseEnvelope::error(
-            kind,
-            corr_id,
-            503,
-            "Serialization conflict, please retry",
-        ),
+        StorageError::Serialization => {
+            ResponseEnvelope::error(kind, corr_id, 503, "Serialization conflict, please retry")
+        }
         StorageError::Backend(msg) => {
             ResponseEnvelope::error(kind, corr_id, 500, &format!("Internal error: {}", msg))
         }
@@ -2725,7 +2722,9 @@ mod tests {
         let resp = server.dispatch(&req, testing::T0).await;
         assert_eq!(resp.head.status, 400);
         assert!(
-            resp.data.to_string().contains("Unsupported protocol version"),
+            resp.data
+                .to_string()
+                .contains("Unsupported protocol version"),
             "got: {}",
             resp.data
         );

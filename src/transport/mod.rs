@@ -44,8 +44,8 @@ impl ResonateRouter for TransportDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{empty_router, router_with, RecordingWorker};
     use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
+    use crate::testing::{empty_router, router_with, RecordingWorker};
 
     fn execute_msg() -> Message {
         Message::Execute(ExecuteMsg {

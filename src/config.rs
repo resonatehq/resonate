@@ -1071,7 +1071,9 @@ mod tests {
         let config = Config::default();
         assert_eq!(
             config.backend(),
-            Ok(StorageBackend::Sqlite { path: default_db_path() })
+            Ok(StorageBackend::Sqlite {
+                path: default_db_path()
+            })
         );
     }
 

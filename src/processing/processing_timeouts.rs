@@ -178,7 +178,10 @@ mod tests {
 
     #[test]
     fn the_timestamp_placeholder_expands_to_the_fire_time() {
-        let fired = schedule_promise(&schedule("s1", "job-{{.timestamp}}", &[]), 1_700_000_000_000);
+        let fired = schedule_promise(
+            &schedule("s1", "job-{{.timestamp}}", &[]),
+            1_700_000_000_000,
+        );
         assert_eq!(fired.promise_id, "job-1700000000000");
     }
 
