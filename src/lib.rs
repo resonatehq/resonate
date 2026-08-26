@@ -1,10 +1,12 @@
 pub mod auth;
 pub mod config;
 pub mod core;
+pub mod kernel;
 pub mod metrics;
 pub mod oracle;
 pub mod persistence;
 pub mod processing;
+pub mod s3;
 pub mod server;
 pub mod transport;
 pub mod util;

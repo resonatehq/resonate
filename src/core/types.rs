@@ -229,7 +229,7 @@ pub enum Message {
 
 // --- Record Types ---
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromiseValue {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<std::collections::HashMap<String, String>>,
@@ -237,7 +237,7 @@ pub struct PromiseValue {
     pub data: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromiseRecord {
     pub id: String,
     pub state: PromiseState,
@@ -252,7 +252,7 @@ pub struct PromiseRecord {
     pub settled_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,
     pub state: TaskState,
@@ -595,6 +595,10 @@ fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::Valid
         if action_id == data.id {
             return Err(validator::ValidationError::new("action_id_equals_task_id")
                 .with_message("Action ID must not equal the task ID".into()));
+        }
+        if origin(action_id) != origin(&data.id) {
+            return Err(validator::ValidationError::new("origin_mismatch")
+                .with_message("Action must belong to the task's origin".into()));
         }
     }
     Ok(())

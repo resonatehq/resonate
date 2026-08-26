@@ -2,10 +2,18 @@ mod auth;
 mod cli;
 mod config;
 mod core;
+// The binary re-declares the crate's modules rather than depending on the
+// library, so its dead-code analysis sees everything the *binary* does not
+// reach as unused — which for these two is most of their surface, since they
+// exist to be driven by the library's tests and by the differential suite.
+#[allow(dead_code, unused_imports)]
+mod kernel;
 mod mcp;
 mod metrics;
 mod persistence;
 mod processing;
+#[allow(dead_code, unused_imports)]
+mod s3;
 mod server;
 mod transport;
 mod util;
@@ -122,6 +130,14 @@ async fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
+/// The active backend. Only the inbound port is common to both arms; the SQL
+/// one also needs its concrete `Server` for the two background loops that read
+/// storage directly.
+enum Backend {
+    Sql(Arc<Server>),
+    S3(Arc<s3::server::S3Server>),
+}
+
 async fn run_server(config: Config) -> Result<(), String> {
     // Initialize tracing
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -175,11 +191,11 @@ async fn run_server(config: Config) -> Result<(), String> {
             if let Some(aud) = &auth_cfg.aud {
                 tracing::info!(audience = %aud, "Auth audience configured");
             }
-            Some(auth::AuthConfig {
+            Some(Arc::new(auth::AuthConfig {
                 key,
                 iss: auth_cfg.iss.clone(),
                 aud: auth_cfg.aud.clone(),
-            })
+            }))
         }
         None => {
             tracing::info!("Auth disabled — all requests accepted");
@@ -187,8 +203,22 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
     };
 
-    // Backend selection
-    let storage = match config.storage.storage_type.as_str() {
+    let port = config.server.port;
+    let bind = config.server.bind.clone();
+    let poll_max_connections = config.transports.http_poll.max_connections;
+    let poll_buffer_size = config.transports.http_poll.buffer_size;
+    let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
+    // Only SQLite aborts on a panic in a handler: it is the one backend whose
+    // in-process connection a poisoned handler could leave inconsistent.
+    let is_sqlite = config.storage.storage_type == "sqlite";
+    let late_router = Arc::new(s3::outbox::LateRouter::new());
+
+    // Backend selection.
+    //
+    // The SQL backends share one `Server` over a `Db`; S3 is a fourth
+    // implementation of the inbound port with no `Db` under it at all, so the
+    // two arms produce different types and only the port is common.
+    let backend = match config.storage.storage_type.as_str() {
         "postgres" => {
             let url = config.storage.postgres.url.as_ref().unwrap();
             let pool_size = config.storage.postgres.pool_size;
@@ -205,7 +235,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .await
                 .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
             tracing::info!("PostgreSQL initialized");
-            Storage::Postgres(pg)
+            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Postgres(pg))))
         }
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();
@@ -217,7 +247,60 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .init()
                 .await
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
-            Storage::Mysql(mysql)
+            Backend::Sql(Arc::new(Server::new(config.clone(), Storage::Mysql(mysql))))
+        }
+        "s3" => {
+            let s3 = &config.storage.s3;
+            let bucket = s3.bucket.as_deref().expect("validated at load");
+            tracing::info!(
+                bucket = bucket,
+                prefix = %s3.prefix,
+                timer_shards = s3.timer_shards,
+                "Using S3 backend"
+            );
+            tracing::warn!(
+                "The S3 backend requires real conditional writes (If-Match / \
+                 If-None-Match). S3, R2, GCS and Azure qualify; MinIO, B2 and \
+                 Spaces do not and will silently lose writes."
+            );
+            let mut builder =
+                object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
+            if let Some(region) = &s3.region {
+                builder = builder.with_region(region);
+            }
+            if let Some(endpoint) = &s3.endpoint {
+                builder = builder.with_endpoint(endpoint);
+            }
+            if s3.allow_http {
+                builder = builder.with_allow_http(true);
+            }
+            let store = builder
+                .build()
+                .map_err(|e| format!("Failed to configure S3 store: {e}"))?;
+            let store: Arc<dyn s3::store::Store> =
+                Arc::new(s3::store::ObjectStoreAdapter::new(store));
+            // The router does not exist yet — its workers need a handle to the
+            // server being built here — so the outbox gets a placeholder that is
+            // filled in once the router is up, below.
+            Backend::S3(s3::server::S3Server::build(
+                store,
+                Some(Arc::clone(&late_router) as Arc<dyn ResonateRouter>),
+                s3::server::S3ServerCfg {
+                    keys: s3::applier::KeySpace::new(s3.prefix.clone(), s3.timer_shards),
+                    applier: s3::applier::ApplierCfg {
+                        max_cas_retries: s3.max_cas_retries,
+                        kernel: kernel::KernelCfg {
+                            retry_timeout: config.tasks.retry_timeout,
+                        },
+                        ..Default::default()
+                    },
+                    timerd: s3::timerd::TimerdCfg::default(),
+                    cache_capacity: s3.cache_capacity,
+                    debug: config.debug,
+                    search: s3.search_enabled,
+                    server_url: config.server.url.clone().unwrap_or_default(),
+                },
+            ))
         }
         _ => {
             let path = &config.storage.sqlite.path;
@@ -225,22 +308,17 @@ async fn run_server(config: Config) -> Result<(), String> {
             let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
-            Storage::Sqlite(sqlite)
+            Backend::Sql(Arc::new(Server::new(
+                config.clone(),
+                Storage::Sqlite(sqlite),
+            )))
         }
     };
 
-    let port = config.server.port;
-    let bind = config.server.bind.clone();
-    let poll_max_connections = config.transports.http_poll.max_connections;
-    let poll_buffer_size = config.transports.http_poll.buffer_size;
-    let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
-    let is_sqlite = config.storage.storage_type == "sqlite";
-    let state = Arc::new(Server::new(config, auth_config, storage));
-
     // Build transports
     tracing::info!(
-        http_push_connect_timeout_ms = state.config.transports.http_push.connect_timeout,
-        http_push_request_timeout_ms = state.config.transports.http_push.request_timeout,
+        http_push_connect_timeout_ms = config.transports.http_push.connect_timeout,
+        http_push_request_timeout_ms = config.transports.http_push.request_timeout,
         http_poll_max_connections = poll_max_connections,
         http_poll_buffer_size = poll_buffer_size,
         "Transport config"
@@ -249,7 +327,14 @@ async fn run_server(config: Config) -> Result<(), String> {
     // directly, and a remote worker uses it to report a delivery failure rather
     // than dropping the message. `Server` never holds the router, so this stays
     // a DAG.
-    let server: Arc<dyn ResonateServer> = state.clone();
+    let server: Arc<dyn ResonateServer> = match &backend {
+        Backend::Sql(s) => Arc::clone(s) as Arc<dyn ResonateServer>,
+        Backend::S3(s) => Arc::clone(s) as Arc<dyn ResonateServer>,
+    };
+    let ready: Arc<dyn server::ReadinessProbe> = match &backend {
+        Backend::Sql(s) => Arc::clone(s) as Arc<dyn server::ReadinessProbe>,
+        Backend::S3(s) => Arc::clone(s) as Arc<dyn server::ReadinessProbe>,
+    };
 
     let poll_registry = Arc::new(PollRegistry::new(
         Arc::clone(&server),
@@ -257,16 +342,16 @@ async fn run_server(config: Config) -> Result<(), String> {
         poll_buffer_size,
     ));
     let connect_timeout =
-        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout);
+        std::time::Duration::from_millis(config.transports.http_push.connect_timeout);
     let request_timeout =
-        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout);
+        std::time::Duration::from_millis(config.transports.http_push.request_timeout);
 
     // Scheme -> worker. A disabled transport is simply not registered, and the
     // router reports its addresses as undeliverable.
     let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
 
-    if state.config.transports.http_push.enabled {
-        let outbound_auth = match &state.config.transports.http_push.auth {
+    if config.transports.http_push.enabled {
+        let outbound_auth = match &config.transports.http_push.auth {
             Some(auth_cfg) => {
                 let mode_label = format!("{:?}", auth_cfg.mode);
                 let auth = transport::transport_http_push::Auth::from_config(auth_cfg);
@@ -284,7 +369,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 connect_timeout,
                 request_timeout,
                 outbound_auth,
-                state.config.transports.http_push.concurrency,
+                config.transports.http_push.concurrency,
             ));
         workers.insert("http".to_string(), Arc::clone(&worker));
         workers.insert("https".to_string(), worker);
@@ -292,69 +377,87 @@ async fn run_server(config: Config) -> Result<(), String> {
         tracing::info!("HTTP push transport disabled");
     }
 
-    if state.config.transports.http_poll.enabled {
+    if config.transports.http_poll.enabled {
         workers.insert("poll".to_string(), poll_registry.clone());
     } else {
         tracing::info!("HTTP poll transport disabled");
     }
 
-    if state.config.transports.gcps.enabled {
+    if config.transports.gcps.enabled {
         tracing::info!(
-            concurrency = state.config.transports.gcps.concurrency,
-            timeout_ms = state.config.transports.gcps.timeout,
+            concurrency = config.transports.gcps.concurrency,
+            timeout_ms = config.transports.gcps.timeout,
             "GCP Pub/Sub transport enabled"
         );
         workers.insert(
             "gcps".to_string(),
             Arc::new(transport::transport_gcps::GcpsPubSubTransport::new(
                 Arc::clone(&server),
-                state.config.transports.gcps.concurrency,
-                std::time::Duration::from_millis(state.config.transports.gcps.timeout),
+                config.transports.gcps.concurrency,
+                std::time::Duration::from_millis(config.transports.gcps.timeout),
             )),
         );
     }
 
-    if state.config.transports.bash_exec.enabled {
+    if config.transports.bash_exec.enabled {
         tracing::info!("Bash exec transport enabled (local + docker + tensorlake)");
         workers.insert(
             "bash".to_string(),
             Arc::new(transport::transport_exec_bash::BashExecTransport::new(
                 Arc::clone(&server),
-                state
-                    .config
+                config
                     .transports
                     .bash_exec
-                    .resolve_lease_timeout(&state.config.tasks),
+                    .resolve_lease_timeout(&config.tasks),
             )),
         );
     }
 
     let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
+    // Close the knot: the outbox has been holding a placeholder since the
+    // backend was built, and nothing has been delivered through it yet.
+    late_router.bind(Arc::clone(&router));
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut handles = Vec::new();
 
-    let timeout_state = Arc::clone(&state);
-    let timeout_shutdown = shutdown_rx.clone();
-    handles.push(tokio::spawn(async move {
-        processing::processing_timeouts::timeout_processing_loop(timeout_state, timeout_shutdown)
-            .await;
-    }));
+    match &backend {
+        Backend::Sql(state) => {
+            let timeout_state = Arc::clone(state);
+            let timeout_shutdown = shutdown_rx.clone();
+            handles.push(tokio::spawn(async move {
+                processing::processing_timeouts::timeout_processing_loop(
+                    timeout_state,
+                    timeout_shutdown,
+                )
+                .await;
+            }));
 
-    let message_state = Arc::clone(&state);
-    let message_shutdown = shutdown_rx.clone();
-    let message_router = Arc::clone(&router);
-    handles.push(tokio::spawn(async move {
-        processing::processing_messages::message_processing_loop(
-            message_state,
-            message_router,
-            message_shutdown,
-        )
-        .await;
-    }));
+            let message_state = Arc::clone(state);
+            let message_shutdown = shutdown_rx.clone();
+            let message_router = Arc::clone(&router);
+            handles.push(tokio::spawn(async move {
+                processing::processing_messages::message_processing_loop(
+                    message_state,
+                    message_router,
+                    message_shutdown,
+                )
+                .await;
+            }));
+        }
+        Backend::S3(s3_server) => {
+            // One loop, not two: the timer loop fires armed deadlines from
+            // memory (listing the store only to seed itself at startup), and
+            // the outbox delivers as it is written rather than being drained
+            // by a second loop.
+            handles.push(
+                Arc::clone(s3_server.timerd()).spawn(s3_server.debug_mode(), shutdown_rx.clone()),
+            );
+        }
+    }
 
-    let metrics_port = state.config.observability.metrics_port;
+    let metrics_port = config.observability.metrics_port;
     if metrics_port > 0 {
         let metrics_shutdown = shutdown_rx.clone();
         handles.push(tokio::spawn(async move {
@@ -377,19 +480,21 @@ async fn run_server(config: Config) -> Result<(), String> {
     }
 
     // Build HTTP router
-    let effective_url = state.config.server.url.clone().unwrap_or_default();
+    let effective_url = config.server.url.clone().unwrap_or_default();
     let (sse_shutdown_tx, sse_shutdown_rx) = tokio::sync::watch::channel(false);
 
-    let cors_layer = build_cors_layer(&state.config.server.cors.allow_origins);
-    if !state.config.server.cors.allow_origins.is_empty() {
+    let cors_layer = build_cors_layer(&config.server.cors.allow_origins);
+    if !config.server.cors.allow_origins.is_empty() {
         tracing::info!(
-            origins = ?state.config.server.cors.allow_origins,
+            origins = ?config.server.cors.allow_origins,
             "CORS enabled"
         );
     }
 
     let app_state = server::AppState {
-        server: state,
+        server: Arc::clone(&server),
+        ready,
+        auth: auth_config,
         poll_registry,
         sse_shutdown_rx,
     };

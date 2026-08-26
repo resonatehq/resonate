@@ -5,6 +5,7 @@
 // Backends:
 //   SQLite   — always active (in-memory, :memory:)
 //   Oracle   — always active (in-memory reference model)
+//   S3       — always active (kernel + shell over an in-process object store)
 //   Postgres — active when TEST_POSTGRES_URL env var is set
 //   MySQL    — active when TEST_MYSQL_URL env var is set
 //
@@ -41,6 +42,10 @@ use resonate::{
     persistence::{
         persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
         persistence_sqlite::SqliteStorage, Storage,
+    },
+    s3::{
+        applier::{ApplierCfg, KeySpace},
+        server::{S3Server, S3ServerCfg},
     },
     server::Server,
 };
@@ -121,7 +126,28 @@ async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> Respon
 }
 
 fn server_backend(storage: Storage) -> Backend {
-    Arc::new(Server::new(debug_config(), None, storage))
+    Arc::new(Server::new(debug_config(), storage))
+}
+
+/// The S3 backend over `object_store`'s in-process store, which implements the
+/// conditional writes the design requires.
+///
+/// Built through the same constructor `main` uses, so what the suite compares is
+/// the graph that ships.
+fn s3_backend() -> Backend {
+    S3Server::in_memory(S3ServerCfg {
+        keys: KeySpace::new("diff", 4),
+        applier: ApplierCfg {
+            kernel: resonate::kernel::KernelCfg {
+                retry_timeout: TASK_RETRY_TIMEOUT_MS,
+            },
+            ..Default::default()
+        },
+        debug: true,
+        search: true,
+        server_url: String::new(),
+        ..Default::default()
+    })
 }
 
 // Pick a random element from a slice.
@@ -187,6 +213,7 @@ async fn differential_random() {
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
+        ("s3".into(), s3_backend()),
     ];
     if let Some(pg) = pg_backend {
         backends.push(("postgres".into(), pg));
@@ -204,7 +231,7 @@ async fn differential_random() {
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
 
-    let mut rng = fastrand::Rng::with_seed(0xc0ffee_dead_beef);
+    let mut rng = fastrand::Rng::with_seed(0x00c0_ffee_dead_beef);
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
@@ -326,6 +353,274 @@ async fn differential_random() {
     );
 
     print_timing_summary(&mut timings, &backends);
+}
+
+/// Drive one scripted operation stream through every backend and compare
+/// snapshots.
+///
+/// The random walk above finds divergences nobody thought of; these pin the
+/// ones that were, so a regression names itself instead of surfacing 2000 steps
+/// into a seed.
+async fn agree_on(name: &str, steps: &[(&str, Value, i64)]) {
+    let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
+    let backends: Vec<(String, Backend)> = vec![
+        ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
+        (
+            "oracle".into(),
+            Arc::new(Mutex::new(Oracle::new())) as Backend,
+        ),
+        ("s3".into(), s3_backend()),
+    ];
+    setup_all(&backends, T0).await;
+
+    for (kind, data, now) in steps {
+        let envelope = req(kind, data.clone());
+        let mut statuses = Vec::new();
+        for (backend_name, b) in &backends {
+            let resp = send(b, &envelope, *now).await;
+            statuses.push((backend_name.clone(), resp.head.status, resp.data));
+        }
+        for (_, _, d) in statuses.iter_mut() {
+            normalize_resp(d);
+        }
+        assert_resps_agree(&statuses, &format!("{name}: {kind}"));
+        assert!(
+            statuses[0].1 < 400,
+            "{name}: {kind} failed with {} — the script is wrong, not the backends",
+            statuses[0].1
+        );
+    }
+
+    let final_now = steps.last().map(|(_, _, now)| *now).unwrap_or(T0);
+    let snaps = snap_all(&backends, final_now).await;
+    assert_snaps_agree(&snaps, name);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_agree_on_plain_promises() {
+    agree_on(
+        "plain promises",
+        &[
+            (
+                "promise.create",
+                json!({ "id": "diff:a", "timeoutAt": T0 + 100_000, "param": {}, "tags": {} }),
+                T0,
+            ),
+            (
+                "promise.create",
+                json!({ "id": "diff:b", "timeoutAt": T0 + 200_000,
+                        "param": { "data": "aGk=" }, "tags": { "k": "v" } }),
+                T0,
+            ),
+            (
+                "promise.settle",
+                json!({ "id": "diff:a", "state": "resolved", "value": { "data": "b2s=" } }),
+                T0 + 1_000,
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_agree_on_tasks_and_their_timers() {
+    agree_on(
+        "tasks and timers",
+        &[
+            (
+                "promise.create",
+                json!({ "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL } }),
+                T0,
+            ),
+            (
+                "task.create",
+                json!({ "pid": PID, "ttl": TTL, "action": {
+                    "kind": "promise.create", "head": {}, "data": {
+                        "id": "diff:u", "timeoutAt": T0 + 500_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL } } } }),
+                T0 + 1_000,
+            ),
+            (
+                "task.acquire",
+                json!({ "id": "diff:t", "version": 0, "pid": PID, "ttl": TTL }),
+                T0 + 2_000,
+            ),
+            (
+                "task.heartbeat",
+                json!({ "pid": PID, "tasks": [{ "id": "diff:t", "version": 1 }] }),
+                T0 + 3_000,
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_agree_after_a_settlement_fans_out() {
+    agree_on(
+        "settlement fanout",
+        &[
+            (
+                "promise.create",
+                json!({ "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL } }),
+                T0,
+            ),
+            (
+                "promise.create",
+                json!({ "id": "diff:a", "timeoutAt": T0 + 500_000, "param": {}, "tags": {} }),
+                T0,
+            ),
+            (
+                "task.acquire",
+                json!({ "id": "diff:t", "version": 0, "pid": PID, "ttl": TTL }),
+                T0 + 1_000,
+            ),
+            (
+                "task.suspend",
+                json!({ "id": "diff:t", "version": 1, "actions": [{
+                    "kind": "promise.register_callback", "head": {},
+                    "data": { "awaited": "diff:a", "awaiter": "diff:t" } }] }),
+                T0 + 2_000,
+            ),
+            (
+                "promise.register_listener",
+                json!({ "awaited": "diff:a", "address": WORKER_URL }),
+                T0 + 2_500,
+            ),
+            (
+                "promise.settle",
+                json!({ "id": "diff:a", "state": "resolved", "value": {} }),
+                T0 + 3_000,
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_agree_on_a_halted_task_buffering_a_resume() {
+    // The divergence the random walk found at step 2276: a settlement fanning
+    // out marks a halted awaiter's callback ready, so it reads resumes: 1.
+    agree_on(
+        "halted awaiter",
+        &[
+            (
+                "promise.create",
+                json!({ "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL } }),
+                T0,
+            ),
+            (
+                "promise.create",
+                json!({ "id": "diff:a", "timeoutAt": T0 + 500_000, "param": {}, "tags": {} }),
+                T0,
+            ),
+            (
+                "task.acquire",
+                json!({ "id": "diff:t", "version": 0, "pid": PID, "ttl": TTL }),
+                T0 + 1_000,
+            ),
+            (
+                "task.suspend",
+                json!({ "id": "diff:t", "version": 1, "actions": [{
+                    "kind": "promise.register_callback", "head": {},
+                    "data": { "awaited": "diff:a", "awaiter": "diff:t" } }] }),
+                T0 + 2_000,
+            ),
+            ("task.halt", json!({ "id": "diff:t" }), T0 + 2_500),
+            (
+                "promise.settle",
+                json!({ "id": "diff:a", "state": "resolved", "value": {} }),
+                T0 + 3_000,
+            ),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_backend_refuses_a_fence_across_origins() {
+    // Pinned: a fenced action must share the task's origin, so the fence is
+    // always one atomic decision. The random walk once found the backends
+    // diverging on this case; now the validator refuses it everywhere, and
+    // what is pinned is that the refusal — and the state it leaves — is
+    // identical.
+    let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
+    let backends: Vec<(String, Backend)> = vec![
+        ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
+        (
+            "oracle".into(),
+            Arc::new(Mutex::new(Oracle::new())) as Backend,
+        ),
+        ("s3".into(), s3_backend()),
+    ];
+    setup_all(&backends, T0).await;
+
+    for (kind, data, now) in [
+        (
+            "task.create",
+            json!({ "pid": PID, "ttl": TTL, "action": {
+                "kind": "promise.create", "head": {}, "data": {
+                    "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
+                    "tags": { "resonate:target": WORKER_URL } } } }),
+            T0,
+        ),
+        (
+            "promise.create",
+            json!({ "id": "elsewhere", "timeoutAt": T0 + 500_000, "param": {}, "tags": {} }),
+            T0,
+        ),
+    ] {
+        let envelope = req(kind, data);
+        for (_, b) in &backends {
+            assert!(send(b, &envelope, now).await.head.status < 400, "{kind}");
+        }
+    }
+
+    let fence = req(
+        "task.fence",
+        json!({ "id": "diff:t", "version": 1, "action": {
+            "kind": "promise.settle", "head": {}, "data": {
+                "id": "elsewhere", "state": "resolved", "value": {} } } }),
+    );
+    let mut statuses = Vec::new();
+    for (backend_name, b) in &backends {
+        let resp = send(b, &fence, T0 + 1_000).await;
+        statuses.push((backend_name.clone(), resp.head.status, resp.data));
+    }
+    for (_, _, d) in statuses.iter_mut() {
+        normalize_resp(d);
+    }
+    assert_resps_agree(&statuses, "cross-origin fence");
+    assert_eq!(statuses[0].1, 400, "refused at validation");
+
+    let snaps = snap_all(&backends, T0 + 1_000).await;
+    assert_snaps_agree(&snaps, "cross-origin fence");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_agree_after_a_tick_expires_everything() {
+    agree_on(
+        "tick",
+        &[
+            (
+                "promise.create",
+                json!({ "id": "diff:a", "timeoutAt": T0 + 5_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL } }),
+                T0,
+            ),
+            (
+                "promise.create",
+                json!({ "id": "diff:b", "timeoutAt": T0 + 5_000, "param": {},
+                        "tags": { "resonate:target": WORKER_URL, "resonate:timer": "true" } }),
+                T0,
+            ),
+            ("debug.tick", json!({ "time": T0 + 9_000 }), T0 + 9_000),
+        ],
+    )
+    .await;
 }
 
 fn print_timing_summary(
@@ -504,8 +799,8 @@ fn normalize_snap(snap: &mut Value) {
     }
 }
 
-fn sort_messages(arr: &mut Vec<Value>) {
-    arr.sort_by(|a, b| msg_sort_key(a).cmp(&msg_sort_key(b)));
+fn sort_messages(arr: &mut [Value]) {
+    arr.sort_by_key(msg_sort_key);
 }
 
 fn msg_sort_key(msg: &Value) -> String {
@@ -541,7 +836,7 @@ fn normalize_resp(data: &mut Value) {
     }
 }
 
-fn sort_by_id(arr: &mut Vec<Value>) {
+fn sort_by_id(arr: &mut [Value]) {
     arr.sort_by(|a, b| {
         let key = |v: &Value| {
             if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
