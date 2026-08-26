@@ -538,35 +538,60 @@ async fn snapshots_agree_on_a_halted_task_buffering_a_resume() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn snapshots_agree_on_a_fence_across_origins() {
-    // The other divergence: a `diff:` task fencing an action against a promise
-    // that lives in its own origin, and therefore its own document.
-    agree_on(
-        "cross-origin fence",
-        &[
-            (
-                "task.create",
-                json!({ "pid": PID, "ttl": TTL, "action": {
-                    "kind": "promise.create", "head": {}, "data": {
-                        "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
-                        "tags": { "resonate:target": WORKER_URL } } } }),
-                T0,
-            ),
-            (
-                "promise.create",
-                json!({ "id": "elsewhere", "timeoutAt": T0 + 500_000, "param": {}, "tags": {} }),
-                T0,
-            ),
-            (
-                "task.fence",
-                json!({ "id": "diff:t", "version": 1, "action": {
-                    "kind": "promise.settle", "head": {}, "data": {
-                        "id": "elsewhere", "state": "resolved", "value": {} } } }),
-                T0 + 1_000,
-            ),
-        ],
-    )
-    .await;
+async fn every_backend_refuses_a_fence_across_origins() {
+    // Pinned: a fenced action must share the task's origin, so the fence is
+    // always one atomic decision. The random walk once found the backends
+    // diverging on this case; now the validator refuses it everywhere, and
+    // what is pinned is that the refusal — and the state it leaves — is
+    // identical.
+    let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
+    let backends: Vec<(String, Backend)> = vec![
+        ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
+        ("oracle".into(), Arc::new(Mutex::new(Oracle::new())) as Backend),
+        ("s3".into(), s3_backend()),
+    ];
+    setup_all(&backends, T0).await;
+
+    for (kind, data, now) in [
+        (
+            "task.create",
+            json!({ "pid": PID, "ttl": TTL, "action": {
+                "kind": "promise.create", "head": {}, "data": {
+                    "id": "diff:t", "timeoutAt": T0 + 500_000, "param": {},
+                    "tags": { "resonate:target": WORKER_URL } } } }),
+            T0,
+        ),
+        (
+            "promise.create",
+            json!({ "id": "elsewhere", "timeoutAt": T0 + 500_000, "param": {}, "tags": {} }),
+            T0,
+        ),
+    ] {
+        let envelope = req(kind, data);
+        for (_, b) in &backends {
+            assert!(send(b, &envelope, now).await.head.status < 400, "{kind}");
+        }
+    }
+
+    let fence = req(
+        "task.fence",
+        json!({ "id": "diff:t", "version": 1, "action": {
+            "kind": "promise.settle", "head": {}, "data": {
+                "id": "elsewhere", "state": "resolved", "value": {} } } }),
+    );
+    let mut statuses = Vec::new();
+    for (backend_name, b) in &backends {
+        let resp = send(b, &fence, T0 + 1_000).await;
+        statuses.push((backend_name.clone(), resp.head.status, resp.data));
+    }
+    for (_, _, d) in statuses.iter_mut() {
+        normalize_resp(d);
+    }
+    assert_resps_agree(&statuses, "cross-origin fence");
+    assert_eq!(statuses[0].1, 400, "refused at validation");
+
+    let snaps = snap_all(&backends, T0 + 1_000).await;
+    assert_snaps_agree(&snaps, "cross-origin fence");
 }
 
 #[tokio::test(flavor = "multi_thread")]

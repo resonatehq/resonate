@@ -14,11 +14,11 @@
 //!   nothing costs no S3 operations at all on a cache hit, by the write law. So
 //!   there is nothing to gain from a separate read path and a correctness bug
 //!   waiting in one.
-//! - **`task.fence` may span two documents.** Its validator constrains the
-//!   fenced action's id only to differ from the task's, not to share its
-//!   origin. A same-origin fence is one decision and therefore atomic; a
-//!   cross-origin one is a check in the task's document followed by the action
-//!   in the promise's, which is *not*. See `fence_across_origins`.
+//! - **Every operation is single-origin, `task.fence` included.** Its validator
+//!   requires the fenced action's id to share the task's origin, so one
+//!   document always covers the check and the action and the fence is atomic.
+//!   Without that rule the fence would need a two-object commit, which the
+//!   single-document design deliberately does not have.
 //!
 //! # Dependencies
 //!
@@ -277,32 +277,21 @@ impl S3Server {
                 self.applier.submit(&origin, Req::TaskSuspend(r), now).await
             }
             "task.fence" => {
+                // The validator requires the action's id (when it has one) to
+                // share the task's origin, so one document covers the check and
+                // the action and the fence is atomic.
                 let r: TaskFenceData = parsed!(data);
-                let task_origin = origin_of(&r.id).to_string();
-                let action_id = r
-                    .action
-                    .data
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                // Same document: one decision covers the check and the action,
-                // so the fence is atomic. An action with no id takes this path
-                // too — the action fails to parse either way, and this keeps the
-                // order of the rejections identical.
-                if action_id.is_empty() || origin_of(action_id) == task_origin {
-                    return self
-                        .applier
-                        .submit(
-                            &task_origin,
-                            Req::TaskFence {
-                                data: r,
-                                corr_id: req.head.corr_id.clone(),
-                            },
-                            now,
-                        )
-                        .await;
-                }
-                self.fence_across_origins(&r, &req.head.corr_id, now).await
+                let origin = origin_of(&r.id).to_string();
+                self.applier
+                    .submit(
+                        &origin,
+                        Req::TaskFence {
+                            data: r,
+                            corr_id: req.head.corr_id.clone(),
+                        },
+                        now,
+                    )
+                    .await
             }
             "task.heartbeat" => {
                 let r: TaskHeartbeatData = parsed!(data);
@@ -378,105 +367,6 @@ impl S3Server {
 
             other => Ok(Reply::err(400, &format!("Unknown operation: {other}"))),
         }
-    }
-
-    /// A fence whose action targets a promise in another origin.
-    ///
-    /// Two documents, so two decisions: check the fence in the task's document,
-    /// then apply the action in the promise's. The check and the action are
-    /// therefore **not atomic** — a worker that loses its lease in the gap can
-    /// still apply the action, where the SQL backends would have fenced it out.
-    ///
-    /// That is a real weakening, and it is confined to exactly this case. The
-    /// fenced action's validator only requires its id to differ from the task's,
-    /// not to share its origin, so the case is reachable; but every id an SDK
-    /// generates lives under its workflow's origin, so the atomic path above is
-    /// the one real callers take. Closing the gap properly needs a
-    /// two-object commit, which the single-document design deliberately does not
-    /// have.
-    ///
-    /// Outside that gap the outcome is identical, because a fenced
-    /// `promise.create` and a fenced `promise.settle` are exactly
-    /// `promise.create` and `promise.settle`: same ghost-timeout pass, same
-    /// idempotence, same 404 when the promise is absent.
-    async fn fence_across_origins(
-        &self,
-        r: &TaskFenceData,
-        corr_id: &str,
-        now: i64,
-    ) -> Result<Reply, Unavailable> {
-        let prepared = self
-            .applier
-            .submit(
-                origin_of(&r.id),
-                Req::TaskFencePrepare(crate::kernel::state::TaskFencePrepareData {
-                    id: r.id.clone(),
-                    version: r.version,
-                }),
-                now,
-            )
-            .await?;
-        if prepared.status != 200 {
-            return Ok(prepared);
-        }
-        let preload = prepared
-            .data
-            .get("preload")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new()));
-
-        // The action is parsed only after the fence passes, so that a bad
-        // action on a task the caller no longer holds reports the fence, not
-        // the action — the order op_task_fence uses.
-        let (origin, inner) = match r.action.kind.as_str() {
-            "promise.create" => {
-                let create: PromiseCreateData =
-                    match serde_json::from_value(r.action.data.clone()) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            return Ok(Reply::err(400, &format!("Invalid action data: {e}")))
-                        }
-                    };
-                if let Err(e) = create.validate() {
-                    return Ok(Reply::err(400, &format_validation_errors(&e)));
-                }
-                (origin_of(&create.id).to_string(), Req::PromiseCreate(create))
-            }
-            "promise.settle" => {
-                let settle: PromiseSettleData = match serde_json::from_value(r.action.data.clone())
-                {
-                    Ok(d) => d,
-                    Err(e) => return Ok(Reply::err(400, &format!("Invalid action data: {e}"))),
-                };
-                if let Err(e) = settle.validate() {
-                    return Ok(Reply::err(400, &format_validation_errors(&e)));
-                }
-                (origin_of(&settle.id).to_string(), Req::PromiseSettle(settle))
-            }
-            _ => return Ok(Reply::err(400, "Invalid fence action kind")),
-        };
-
-        let applied = self.applier.submit(&origin, inner, now).await?;
-        // A rejection the operation itself raises — an unroutable target, say —
-        // is the fence's own answer, not something to nest.
-        if applied.status >= 400 && applied.status != 404 {
-            return Ok(applied);
-        }
-        Ok(Reply::status(
-            200,
-            serde_json::json!({
-                "action": {
-                    "kind": r.action.kind,
-                    "head": {
-                        "corrId": corr_id,
-                        "status": applied.status,
-                        "version": crate::core::types::PROTOCOL_VERSION,
-                    },
-                    "data": applied.data,
-                },
-                "preload": preload,
-            }),
-        ))
     }
 
     /// Delete everything, then forget everything that referred to it.
@@ -817,8 +707,8 @@ mod tests {
 
     // --- fencing across origins -------------------------------------------
 
-    /// Claim `diff:t` and create a promise in a *different* origin to fence
-    /// against.
+    /// Claim `diff:t` and create a promise in a *different* origin, so a fence
+    /// naming it would have to span two documents.
     async fn with_cross_origin_target(s: &Arc<S3Server>) {
         send(
             s,
@@ -840,95 +730,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_fence_can_settle_a_promise_in_another_origin() {
+    async fn a_cross_origin_fence_is_a_400() {
+        // The validator requires the fenced action to share the task's origin;
+        // anything else would need a two-object commit this design does not
+        // have. Both action kinds are refused the same way.
         let s = started().await;
         with_cross_origin_target(&s).await;
-        let fenced = send(
-            &s,
-            "task.fence",
-            json!({ "id": "diff:t", "version": 1, "action": {
-                "kind": "promise.settle", "head": {}, "data": {
-                    "id": "elsewhere", "state": "resolved", "value": {} } } }),
-            2_000,
-        )
-        .await;
-        assert_eq!(fenced.head.status, 200);
-        assert_eq!(fenced.data["action"]["head"]["status"], 200);
-        assert_eq!(fenced.data["action"]["head"]["corrId"], "corr-1");
-        assert_eq!(fenced.data["action"]["data"]["promise"]["state"], "resolved");
-        assert_eq!(fenced.data["action"]["data"]["promise"]["settledAt"], 2_000);
-        assert_eq!(fenced.data["preload"], json!([]));
-        // And the promise really moved, in its own document.
-        let got = send(&s, "promise.get", json!({ "id": "elsewhere" }), 2_000).await;
-        assert_eq!(got.data["promise"]["state"], "resolved");
-    }
-
-    #[tokio::test]
-    async fn a_fence_can_create_a_promise_in_another_origin() {
-        let s = started().await;
-        with_cross_origin_target(&s).await;
-        let fenced = send(
-            &s,
-            "task.fence",
-            json!({ "id": "diff:t", "version": 1, "action": {
-                "kind": "promise.create", "head": {}, "data": {
-                    "id": "brand-new", "timeoutAt": 500_000, "param": {}, "tags": {} } } }),
-            2_000,
-        )
-        .await;
-        assert_eq!(fenced.head.status, 200);
-        assert_eq!(fenced.data["action"]["data"]["promise"]["id"], "brand-new");
-        let got = send(&s, "promise.get", json!({ "id": "brand-new" }), 2_000).await;
-        assert_eq!(got.head.status, 200);
-    }
-
-    #[tokio::test]
-    async fn a_cross_origin_fence_of_a_missing_promise_nests_a_404() {
-        let s = started().await;
-        with_cross_origin_target(&s).await;
-        let fenced = send(
-            &s,
-            "task.fence",
-            json!({ "id": "diff:t", "version": 1, "action": {
-                "kind": "promise.settle", "head": {}, "data": {
-                    "id": "nowhere", "state": "resolved", "value": {} } } }),
-            2_000,
-        )
-        .await;
-        assert_eq!(fenced.head.status, 200);
-        assert_eq!(fenced.data["action"]["head"]["status"], 404);
-        assert_eq!(fenced.data["action"]["data"], json!("Promise not found"));
-    }
-
-    #[tokio::test]
-    async fn a_cross_origin_fence_reports_the_fence_before_the_action() {
-        // The order matters: a caller that no longer holds the task is told so,
-        // whatever is wrong with the action it sent.
-        let s = started().await;
-        with_cross_origin_target(&s).await;
-        for (version, expected) in [(9, 409), (1, 400)] {
+        for action in [
+            json!({ "kind": "promise.settle", "head": {}, "data": {
+                "id": "elsewhere", "state": "resolved", "value": {} } }),
+            json!({ "kind": "promise.create", "head": {}, "data": {
+                "id": "brand-new", "timeoutAt": 500_000, "param": {}, "tags": {} } }),
+        ] {
             let resp = send(
                 &s,
                 "task.fence",
-                json!({ "id": "diff:t", "version": version, "action": {
-                    "kind": "promise.frobnicate", "head": {}, "data": { "id": "elsewhere" } } }),
+                json!({ "id": "diff:t", "version": 1, "action": action }),
                 2_000,
             )
             .await;
-            assert_eq!(resp.head.status, expected, "version {version}");
+            assert_eq!(resp.head.status, 400);
+            assert_eq!(resp.data, json!("Action must belong to the task's origin"));
         }
+        // Nothing moved in either document.
+        let got = send(&s, "promise.get", json!({ "id": "elsewhere" }), 2_000).await;
+        assert_eq!(got.data["promise"]["state"], "pending");
+        assert_eq!(
+            send(&s, "promise.get", json!({ "id": "brand-new" }), 2_000)
+                .await
+                .head
+                .status,
+            404
+        );
     }
 
     #[tokio::test]
-    async fn a_cross_origin_fence_on_an_unknown_task_is_a_404() {
+    async fn a_cross_origin_fence_is_refused_before_the_task_is_looked_up() {
+        // Validation runs before any state is read, on every backend alike: a
+        // cross-origin fence on an unknown task is the validator's 400, not a
+        // 404.
         let s = started().await;
-        send(
-            &s,
-            "promise.create",
-            json!({ "id": "elsewhere", "timeoutAt": 500_000, "param": {}, "tags": {} }),
-            1_000,
-        )
-        .await;
         let resp = send(
             &s,
             "task.fence",
@@ -938,79 +779,10 @@ mod tests {
             2_000,
         )
         .await;
-        assert_eq!(resp.head.status, 404);
-        assert_eq!(resp.data, json!("Task not found"));
-    }
-
-    #[tokio::test]
-    async fn a_cross_origin_fence_surfaces_the_actions_own_rejection() {
-        // An unroutable target is the fence's own 400, not a nested one — the
-        // same-document path answers that way too.
-        let s = started().await;
-        with_cross_origin_target(&s).await;
-        let resp = send(
-            &s,
-            "task.fence",
-            json!({ "id": "diff:t", "version": 1, "action": {
-                "kind": "promise.create", "head": {}, "data": {
-                    "id": "brand-new", "timeoutAt": 500_000, "param": {},
-                    "tags": { "resonate:target": "not a url" } } } }),
-            2_000,
-        )
-        .await;
         assert_eq!(resp.head.status, 400);
-        assert_eq!(resp.data, json!("Invalid resonate:target address"));
+        assert_eq!(resp.data, json!("Action must belong to the task's origin"));
     }
 
-    #[tokio::test]
-    async fn a_cross_origin_fence_carries_the_tasks_preload() {
-        // The preload comes from the task's document, which is not the one the
-        // action touches.
-        let s = started().await;
-        send(
-            &s,
-            "task.create",
-            json!({ "pid": PID, "ttl": TTL, "action": {
-                "kind": "promise.create", "head": {}, "data": {
-                    "id": "diff:t", "timeoutAt": 500_000, "param": {},
-                    "tags": { "resonate:target": W, "resonate:branch": "diff" } } } }),
-            1_000,
-        )
-        .await;
-        send(
-            &s,
-            "promise.create",
-            json!({ "id": "diff:sibling", "timeoutAt": 500_000, "param": {},
-                    "tags": { "resonate:branch": "diff" } }),
-            1_000,
-        )
-        .await;
-        send(
-            &s,
-            "promise.create",
-            json!({ "id": "elsewhere", "timeoutAt": 500_000, "param": {}, "tags": {} }),
-            1_000,
-        )
-        .await;
-        let fenced = send(
-            &s,
-            "task.fence",
-            json!({ "id": "diff:t", "version": 1, "action": {
-                "kind": "promise.settle", "head": {}, "data": {
-                    "id": "elsewhere", "state": "resolved", "value": {} } } }),
-            2_000,
-        )
-        .await;
-        assert_eq!(
-            fenced.data["preload"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|p| p["id"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            vec!["diff:sibling"]
-        );
-    }
 
     // --- searches ---------------------------------------------------------
 

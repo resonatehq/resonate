@@ -596,6 +596,10 @@ fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::Valid
             return Err(validator::ValidationError::new("action_id_equals_task_id")
                 .with_message("Action ID must not equal the task ID".into()));
         }
+        if origin(action_id) != origin(&data.id) {
+            return Err(validator::ValidationError::new("origin_mismatch")
+                .with_message("Action must belong to the task's origin".into()));
+        }
     }
     Ok(())
 }
