@@ -16,8 +16,10 @@
 //!
 //! # Dependencies
 //!
-//! `kernel::state::OriginDoc` and the store's [`Etag`] — no I/O, no store
-//! handle.
+//! `kernel::state::OriginDoc`, the store's [`Etag`], and the
+//! `resonate_doc_cache_misses_total` counter — a miss is what costs a store
+//! GET, so it is the number that says whether the cache is earning its keep.
+//! No I/O, no store handle.
 //!
 //! # Dependants
 //!
@@ -100,7 +102,10 @@ impl DocCache for MemDocCache {
     fn get(&self, origin: &str) -> Option<Cached> {
         let seq = self.next_seq();
         let mut inner = self.lock();
-        let (cached, old_seq) = inner.entries.get_mut(origin)?;
+        let Some((cached, old_seq)) = inner.entries.get_mut(origin) else {
+            crate::metrics::DOC_CACHE_MISSES_TOTAL.inc();
+            return None;
+        };
         let cached = cached.clone();
         let previous = std::mem::replace(old_seq, seq);
         inner.order.remove(&previous);
@@ -151,6 +156,7 @@ pub struct NoopDocCache;
 
 impl DocCache for NoopDocCache {
     fn get(&self, _origin: &str) -> Option<Cached> {
+        crate::metrics::DOC_CACHE_MISSES_TOTAL.inc();
         None
     }
     fn put(&self, _origin: &str, _doc: Arc<OriginDoc>, _etag: Etag) {}

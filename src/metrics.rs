@@ -59,4 +59,9 @@ lazy_static! {
         "Armed timer entries held in memory (one per in-flight origin plus schedules)"
     )
     .unwrap();
+    pub static ref DOC_CACHE_MISSES_TOTAL: Counter = register_counter!(
+        "resonate_doc_cache_misses_total",
+        "Workflow document cache misses, each costing a store GET"
+    )
+    .unwrap();
 }
