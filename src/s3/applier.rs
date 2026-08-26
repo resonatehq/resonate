@@ -12,11 +12,12 @@
 //!
 //! 1. **PUT the new timer object** (unconditional) — *before* the document, so
 //!    a deadline the document is about to arm is already covered if the process
-//!    dies here.
+//!    dies here. Once durable, the key is mirrored into the timer queue, which
+//!    is what lets the firing loop run without listing.
 //! 2. **CAS the document.**
 //! 3. **DELETE the old timer object** (best effort) — after, so nothing is
-//!    left uncovered in between. A failure leaves an orphan, which the timer
-//!    poller collects.
+//!    left uncovered in between. A failure leaves an orphan armed in the
+//!    queue, which fires it as a no-op and collects it.
 //! 4. **Hand the sends to the outbox** — strictly post-commit, at most once.
 //! 5. **Answer the callers.**
 //!
@@ -46,8 +47,9 @@
 //!
 //! The kernel (`handle`, `drain`, `apply_effects`) for every decision, the
 //! codec for the bytes, the store for the objects, the cache for the read
-//! path, and the outbox for post-commit sends. [`KeySpace`], defined here,
-//! names every key in the bucket.
+//! path, the timer queue mirroring every timer key it writes, and the outbox
+//! for post-commit sends. [`KeySpace`], defined here, names every key in the
+//! bucket.
 //!
 //! # Dependants
 //!
@@ -71,6 +73,7 @@ use super::cache::DocCache;
 use super::codec;
 use super::outbox::Outbox;
 use super::store::{Etag, Store, StoreError};
+use super::timer_queue::TimerQueue;
 
 // ---------------------------------------------------------------------------
 // Keys
@@ -314,6 +317,7 @@ struct Shared {
     store: Arc<dyn Store>,
     cache: Arc<dyn DocCache>,
     outbox: Arc<Outbox>,
+    timers: Arc<TimerQueue>,
     keys: KeySpace,
     cfg: ApplierCfg,
     /// Origin to its actor's mailbox, tagged with the actor's identity so a
@@ -332,6 +336,7 @@ impl ApplierPool {
         store: Arc<dyn Store>,
         cache: Arc<dyn DocCache>,
         outbox: Arc<Outbox>,
+        timers: Arc<TimerQueue>,
         keys: KeySpace,
         cfg: ApplierCfg,
     ) -> Self {
@@ -340,6 +345,7 @@ impl ApplierPool {
                 store,
                 cache,
                 outbox,
+                timers,
                 keys,
                 cfg,
                 actors: AsyncMutex::new(HashMap::new()),
@@ -392,11 +398,12 @@ impl ApplierPool {
             .map_err(|_| Unavailable::new("origin worker stopped before answering"))?
     }
 
-    /// Drop every actor and forget every cached document — `debug.reset` has
-    /// deleted the objects they refer to.
+    /// Drop every actor and forget every cached document and armed timer —
+    /// `debug.reset` has deleted the objects they refer to.
     pub async fn reset(&self) {
         self.shared.actors.lock().await.clear();
         self.shared.cache.clear();
+        self.shared.timers.clear();
     }
 
     /// Hand `work` to `origin`'s actor, starting one if needed.
@@ -665,10 +672,11 @@ async fn perform(
     // (1) The new timer first, so the deadline is covered even if we die here.
     if new_timer != old_timer {
         if let Some(at) = new_timer {
-            shared
-                .store
-                .put(&shared.keys.timer_key(origin, at), Vec::new())
-                .await?;
+            let key = shared.keys.timer_key(origin, at);
+            shared.store.put(&key, Vec::new()).await?;
+            // Durable, so it may be mirrored: the firing loop reads the
+            // queue, not the bucket.
+            shared.timers.arm(at, key);
         }
     }
 
@@ -684,11 +692,16 @@ async fn perform(
     shared.cache.put(origin, Arc::new(doc), etag);
 
     // (3) The old timer, after the commit. A failure here only orphans a key,
-    // which the poller collects, so it must not fail the request.
+    // so it must not fail the request — and the entry stays armed, which
+    // makes the firing loop the collector.
     if new_timer != old_timer {
         if let Some(at) = old_timer {
-            if let Err(e) = shared.store.delete(&shared.keys.timer_key(origin, at)).await {
-                tracing::debug!(origin = %origin, deadline = at, error = %e, "Stale timer object left behind; the poller will collect it");
+            let key = shared.keys.timer_key(origin, at);
+            match shared.store.delete(&key).await {
+                Ok(()) => shared.timers.disarm(at, &key),
+                Err(e) => {
+                    tracing::debug!(origin = %origin, deadline = at, error = %e, "Stale timer object left behind; its armed entry will collect it");
+                }
             }
         }
     }
@@ -771,9 +784,17 @@ mod tests {
     }
 
     fn pool_with(store: Arc<dyn Store>, cache: Arc<dyn DocCache>) -> ApplierPool {
+        pool_with_timers(store, cache, Arc::new(TimerQueue::new()))
+    }
+
+    fn pool_with_timers(
+        store: Arc<dyn Store>,
+        cache: Arc<dyn DocCache>,
+        timers: Arc<TimerQueue>,
+    ) -> ApplierPool {
         let outbox = Arc::new(Outbox::new(None, "http://server"));
         outbox.set_paused(true);
-        ApplierPool::new(store, cache, outbox, keys(), ApplierCfg::default())
+        ApplierPool::new(store, cache, outbox, timers, keys(), ApplierCfg::default())
     }
 
     fn shared_store() -> Arc<dyn Store> {
@@ -992,6 +1013,73 @@ mod tests {
         assert!(armed(store).await.is_empty());
     }
 
+    #[tokio::test]
+    async fn every_timer_write_is_mirrored_into_the_queue() {
+        let timers = Arc::new(TimerQueue::new());
+        let p = pool_with_timers(
+            shared_store(),
+            Arc::new(MemDocCache::new(16)),
+            Arc::clone(&timers),
+        );
+        // The retry deadline (30_000) is the earliest, so it is what is armed.
+        p.submit(ORIGIN, create("diff:a", 100_000, json!({ "resonate:target": W })), 0)
+            .await
+            .unwrap();
+        assert_eq!(timers.next_deadline(), Some(30_000));
+        assert_eq!(timers.len(), 1);
+
+        // Settling disarms everything: the entry goes with the object.
+        p.submit(
+            ORIGIN,
+            Req::PromiseSettle(
+                serde_json::from_value(
+                    json!({ "id": "diff:a", "state": "resolved", "value": {} }),
+                )
+                .unwrap(),
+            ),
+            1,
+        )
+        .await
+        .unwrap();
+        assert!(timers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_cleanup_leaves_the_orphan_armed() {
+        // The old timer's DELETE fails after the commit; the key stays in the
+        // store and its entry stays in the queue, which is what collects it.
+        let inner = shared_store();
+        let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
+        let timers = Arc::new(TimerQueue::new());
+        let p = pool_with_timers(
+            Arc::clone(&faulty) as Arc<dyn Store>,
+            Arc::new(MemDocCache::new(4)),
+            Arc::clone(&timers),
+        );
+        p.submit(ORIGIN, create("diff:a", 50_000, json!({ "resonate:target": W })), 0)
+            .await
+            .unwrap();
+        assert_eq!(timers.len(), 1);
+
+        // Settling disarms: no new timer to PUT, so the CAS is write 1 and the
+        // old timer's DELETE is write 2 — let the first through, kill the second.
+        faulty.fail_after(1);
+        p.submit(
+            ORIGIN,
+            Req::PromiseSettle(
+                serde_json::from_value(
+                    json!({ "id": "diff:a", "state": "resolved", "value": {} }),
+                )
+                .unwrap(),
+            ),
+            1_000,
+        )
+        .await
+        .unwrap();
+        assert_eq!(timers.len(), 1, "the orphan is still armed");
+        assert_eq!(inner.list(&keys().timer_prefix(), 10).await.unwrap().len(), 1);
+    }
+
     // --- group commit -----------------------------------------------------
 
     #[tokio::test]
@@ -1156,6 +1244,7 @@ mod tests {
             Arc::clone(&store),
             cache,
             outbox,
+            Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg {
                 max_cas_retries: 2,
@@ -1337,6 +1426,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(MemDocCache::new(4)),
             outbox,
+            Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg {
                 idle_timeout: Duration::from_millis(20),
@@ -1387,6 +1477,7 @@ mod tests {
             Arc::clone(&faulty) as Arc<dyn Store>,
             Arc::new(NoopDocCache),
             Arc::clone(&outbox),
+            Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg::default(),
         );

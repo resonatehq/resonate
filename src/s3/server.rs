@@ -57,6 +57,7 @@ use super::outbox::Outbox;
 use super::scan::ScanService;
 use super::schedules::ScheduleService;
 use super::store::Store;
+use super::timer_queue::TimerQueue;
 use super::timerd::{ScheduleFirer, Timerd, TimerdCfg};
 
 /// The origin a promise or task id belongs to: everything before the first
@@ -123,10 +124,12 @@ impl S3Server {
     ) -> Arc<Self> {
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(cfg.cache_capacity));
         let outbox = Arc::new(Outbox::new(router, cfg.server_url.clone()));
+        let timers = Arc::new(TimerQueue::new());
         let applier = Arc::new(ApplierPool::new(
             Arc::clone(&store),
             Arc::clone(&cache),
             Arc::clone(&outbox),
+            Arc::clone(&timers),
             cfg.keys.clone(),
             cfg.applier.clone(),
         ));

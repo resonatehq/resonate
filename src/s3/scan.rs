@@ -346,6 +346,7 @@ mod tests {
             Arc::clone(&store),
             Arc::clone(&cache),
             Arc::clone(&outbox),
+            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
             keys(),
             ApplierCfg::default(),
         ));
