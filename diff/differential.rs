@@ -36,14 +36,14 @@ fn db_lock() -> &'static Mutex<()> {
 use resonate::{
     config::Config,
     oracle::{Oracle, SharedOracle},
-    persistence::{
-        persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
-        persistence_sqlite::SqliteStorage, Storage,
-    },
     server::Server,
 };
 use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::ResonateServer;
+use resonate_server_dbms::{
+    persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
+    persistence_sqlite::SqliteStorage, Storage,
+};
 use serde_json::{json, Value};
 
 const TASK_RETRY_TIMEOUT_MS: i64 = 30_000;

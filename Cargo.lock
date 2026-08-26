@@ -2669,14 +2669,13 @@ dependencies = [
  "prometheus",
  "reqwest 0.12.28",
  "resonate-core",
+ "resonate-server-dbms",
  "resonate-transport-gcps",
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
  "resonate-worker-bash",
- "rusqlite",
  "serde",
  "serde_json",
- "sqlx",
  "tokio",
  "tower-http",
  "tracing",
@@ -2695,6 +2694,18 @@ dependencies = [
  "serde_json",
  "url",
  "validator",
+]
+
+[[package]]
+name = "resonate-server-dbms"
+version = "0.9.8"
+dependencies = [
+ "resonate-core",
+ "rusqlite",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

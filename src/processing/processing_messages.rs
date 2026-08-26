@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::metrics;
-use crate::persistence::Storage;
 use resonate_core::types::{
     ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, UnblockMsg, UnblockMsgData,
     UnblockMsgHead,
 };
 use resonate_core::ResonateRouter;
+use resonate_server_dbms::Storage;
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
@@ -133,12 +133,12 @@ mod tests {
     use serde_json::json;
 
     use crate::config::Config;
-    use crate::persistence::{persistence_sqlite::SqliteStorage, Storage};
     use crate::server::Server;
     use crate::transport::stubs::RecordingWorker;
     use crate::transport::TransportDispatcher;
     use resonate_core::types::{RequestEnvelope, RequestHead, SUPPORTED_VERSIONS};
     use resonate_core::ResonateWorker;
+    use resonate_server_dbms::{persistence_sqlite::SqliteStorage, Storage};
     use std::collections::HashMap;
 
     /// A router with `stub` registered for `scheme` and nothing else, so an

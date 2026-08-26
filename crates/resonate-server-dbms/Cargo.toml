@@ -1,0 +1,14 @@
+[package]
+name = "resonate-server-dbms"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server storage over a relational database: the Db contract and its SQLite, PostgreSQL and MySQL implementations."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
+tracing = "0.1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+sqlx = { version = "0.8", features = ["postgres", "mysql", "runtime-tokio-rustls", "macros"] }

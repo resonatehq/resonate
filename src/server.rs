@@ -16,11 +16,6 @@ use serde_json::Value;
 use crate::auth;
 use crate::config::Config;
 use crate::metrics;
-use crate::persistence::{
-    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
-    TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
-    TaskFulfillParams,
-};
 use crate::processing::processing_timeouts;
 use crate::util;
 use async_trait::async_trait;
@@ -36,6 +31,11 @@ use resonate_core::types::{
     TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
 use resonate_core::{ResonateServer, Unavailable};
+use resonate_server_dbms::{
+    PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
+    TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
+    TaskFulfillParams,
+};
 use resonate_transport_http_poll::PollRegistry;
 use validator::Validate;
 

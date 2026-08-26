@@ -3,7 +3,6 @@ mod cli;
 mod config;
 mod mcp;
 mod metrics;
-mod persistence;
 mod processing;
 mod server;
 mod transport;
@@ -22,9 +21,11 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use config::Config;
-use persistence::{persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage};
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateRouter, ResonateServer, ResonateWorker};
+use resonate_server_dbms::{
+    persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage,
+};
 use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
@@ -193,7 +194,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             let pool_size = config.storage.postgres.pool_size;
             tracing::info!("Using PostgreSQL backend");
             tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg = persistence::persistence_postgres::PostgresStorage::connect(
+            let pg = resonate_server_dbms::persistence_postgres::PostgresStorage::connect(
                 url,
                 pool_size,
                 config.tasks.retry_timeout,

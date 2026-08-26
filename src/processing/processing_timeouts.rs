@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::metrics;
-use crate::persistence::{Db, StorageResult};
 use crate::server::Server;
 use crate::util;
+use resonate_server_dbms::{Db, StorageResult};
 
 /// Background timeout processing loop.
 pub async fn timeout_processing_loop(

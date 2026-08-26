@@ -1,3 +1,13 @@
+//! Resonate server storage, over a relational database.
+//!
+//! Holds the `Db` contract — the state transitions a Resonate server needs —
+//! and the three relational implementations of it. The transitions are the
+//! same everywhere; only the SQL differs, which is what makes one crate the
+//! right home for all three.
+//!
+//! This is where `ResonateEngine` will be defined, and where the shared server
+//! built on top of it will live. Today it is the storage layer alone.
+
 pub mod persistence_mysql;
 pub mod persistence_postgres;
 pub mod persistence_sqlite;
