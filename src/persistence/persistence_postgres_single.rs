@@ -23,7 +23,7 @@
 //! | `tasks(id, state, version)`          | `task_state` (NULL ⟺ no task), `task_version`     |
 //! | `task_timeouts` type 0 (retry)       | `retry_at`   (live ⟺ `task_state='pending'`)      |
 //! | `task_timeouts` type 1 (lease)       | `expires_at` (live ⟺ `task_state='acquired'`), `ttl`, `pid` |
-//! | `callbacks(awaited, awaiter, false)` | `awaiters TEXT[]` on the **awaited** row           |
+//! | `callbacks(awaited, awaiter, false)` | `callbacks TEXT[]` on the **awaited** row           |
 //! | `callbacks(awaited, awaiter, true)`  | `resumes  TEXT[]` on the **awaiter** row           |
 //! | `listeners(promise_id, address)`     | `listeners TEXT[]`                                 |
 //! | `outgoing_execute(id, version, addr)`| `outbox` row, `key = 'e:'||task_id`                |
@@ -360,7 +360,7 @@ const SETTLE_SELF: &str = "
     ttl        = CASE WHEN :FULFILLED THEN NULL ELSE p.ttl END,
     pid        = CASE WHEN :FULFILLED THEN NULL ELSE p.pid END,
     resumes    = CASE WHEN :FULFILLED THEN '{}' ELSE p.resumes END,
-    awaiters   = '{}',
+    callbacks   = '{}',
     listeners  = '{}'";
 
 /// The half of the settlement cascade that fans out to *other* rows.
@@ -388,7 +388,7 @@ suspended_awaiters AS (
 ),
 fanout AS (
   UPDATE promises q SET
-    awaiters = CASE WHEN :FULFILLED THEN array_remove(q.awaiters, :AWAITED) ELSE q.awaiters END,
+    callbacks = CASE WHEN :FULFILLED THEN array_remove(q.callbacks, :AWAITED) ELSE q.callbacks END,
     resumes = CASE WHEN q.id = ANY(:AWAITERS) AND NOT (q.resumes @> ARRAY[:AWAITED])
                 THEN q.resumes || :AWAITED ELSE q.resumes END,
     task_state = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
@@ -403,7 +403,7 @@ fanout AS (
                 THEN NULL ELSE q.pid END
   WHERE q.id <> :AWAITED
     AND ( q.id = ANY(:AWAITERS)
-          OR (:FULFILLED AND q.awaiters @> ARRAY[:AWAITED]) )
+          OR (:FULFILLED AND q.callbacks @> ARRAY[:AWAITED]) )
   RETURNING q.id
 ),
 outbox_resume AS (
@@ -473,7 +473,7 @@ fn expire_batch_sql(selection: &str, time_param: &str, trt: i64) -> String {
     fill(
         "
 WITH expired AS (
-  SELECT id, awaiters, listeners, task_state FROM promises
+  SELECT id, callbacks, listeners, task_state FROM promises
   WHERE :SELECTION
   FOR UPDATE
 ),
@@ -486,7 +486,7 @@ fulfilled_ids AS (
 -- marked_ready, aggregated: one awaiter may be woken by several expiring promises
 ready_agg AS (
   SELECT aw AS awaiter, array_agg(DISTINCT e.id) AS awaited_ids
-  FROM expired e CROSS JOIN LATERAL unnest(e.awaiters) aw
+  FROM expired e CROSS JOIN LATERAL unnest(e.callbacks) aw
   WHERE aw NOT IN (SELECT id FROM fulfilled)
   GROUP BY aw
 ),
@@ -513,7 +513,7 @@ outbox_unblock AS (
 ),
 fanout AS (
   UPDATE promises q SET
-    awaiters = (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.awaiters) b
+    callbacks = (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.callbacks) b
                 WHERE b NOT IN (SELECT id FROM fulfilled)),
     resumes = q.resumes || COALESCE((SELECT r.awaited_ids FROM ready_agg r WHERE r.awaiter = q.id), '{}'),
     task_state = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
@@ -528,7 +528,7 @@ fanout AS (
                    THEN NULL ELSE q.pid END
   WHERE q.id NOT IN (SELECT id FROM expired)
     AND ( EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
-          OR q.awaiters && (SELECT ids FROM fulfilled_ids) )
+          OR q.callbacks && (SELECT ids FROM fulfilled_ids) )
   RETURNING q.id
 ),
 outbox_resume AS (
@@ -598,7 +598,7 @@ impl Db for PostgresSingleDb<'_> {
     fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
         let fanout = settle_fanout(
             "$1",
-            "(SELECT b.awaiters FROM before b)",
+            "(SELECT b.callbacks FROM before b)",
             "false",
             "$2",
             self.task_retry_timeout,
@@ -606,10 +606,10 @@ impl Db for PostgresSingleDb<'_> {
         let sql = format!(
             "
             WITH before AS (
-              SELECT id, awaiters FROM promises WHERE id = $1 AND state <> 'pending'
+              SELECT id, callbacks FROM promises WHERE id = $1 AND state <> 'pending'
             ),
             cleared AS (
-              UPDATE promises SET awaiters = '{{}}'
+              UPDATE promises SET callbacks = '{{}}'
               WHERE id = $1 AND EXISTS (SELECT 1 FROM before)
               RETURNING id
             ),
@@ -710,7 +710,7 @@ impl Db for PostgresSingleDb<'_> {
         } = *params;
 
         // Statement 1: acquire the row lock — blocks until a concurrent
-        // task.suspend writing our `awaiters` finishes.
+        // task.suspend writing our `callbacks` finishes.
         rt_block_on(
             sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
                 .bind(id)
@@ -724,7 +724,7 @@ impl Db for PostgresSingleDb<'_> {
         let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
         let fanout = settle_fanout(
             "$1",
-            "(SELECT CASE WHEN b.state = 'pending' THEN b.awaiters END FROM before b)",
+            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
             "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
             "$5",
             self.task_retry_timeout,
@@ -732,7 +732,7 @@ impl Db for PostgresSingleDb<'_> {
 
         let rows = rt_block_on(sqlx::query(&format!("
             WITH before AS (
-              SELECT id, state, task_state, awaiters, listeners FROM promises WHERE id = $1
+              SELECT id, state, task_state, callbacks, listeners FROM promises WHERE id = $1
             ),
             updated_promise AS (
               UPDATE promises p
@@ -784,9 +784,9 @@ impl Db for PostgresSingleDb<'_> {
             ),
             -- link: awaited still pending, awaiter targeted and pending
             linked AS (
-              UPDATE promises p SET awaiters = p.awaiters || $2
+              UPDATE promises p SET callbacks = p.callbacks || $2
               WHERE p.id = $1
-                AND NOT (p.awaiters @> ARRAY[$2])
+                AND NOT (p.callbacks @> ARRAY[$2])
                 AND EXISTS (SELECT 1 FROM awaited WHERE state = 'pending')
                 AND EXISTS (SELECT 1 FROM awaiter WHERE target IS NOT NULL AND state = 'pending')
               RETURNING p.id
@@ -1134,7 +1134,7 @@ impl Db for PostgresSingleDb<'_> {
         let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
         let fanout = settle_fanout(
             "$3",
-            "(SELECT CASE WHEN b.state = 'pending' THEN b.awaiters END FROM before b)",
+            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
             "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
             "$7",
             self.task_retry_timeout,
@@ -1151,7 +1151,7 @@ impl Db for PostgresSingleDb<'_> {
               SELECT * FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
             ),
             before AS (
-              SELECT id, state, task_state, awaiters, listeners FROM locked_promise
+              SELECT id, state, task_state, callbacks, listeners FROM locked_promise
             ),
             updated_promise AS (
               UPDATE promises p
@@ -1267,9 +1267,9 @@ impl Db for PostgresSingleDb<'_> {
             ),
             -- link the awaited rows (other than the task's own, handled below)
             linked AS (
-              UPDATE promises p SET awaiters = p.awaiters || $1
+              UPDATE promises p SET callbacks = p.callbacks || $1
               WHERE p.id = ANY($3) AND p.id <> $1
-                AND NOT (p.awaiters @> ARRAY[$1])
+                AND NOT (p.callbacks @> ARRAY[$1])
                 AND EXISTS (SELECT 1 FROM can_suspend)
               RETURNING p.id
             ),
@@ -1284,9 +1284,9 @@ impl Db for PostgresSingleDb<'_> {
                 -- the suspend itself is refused because an awaited promise settled
                 resumes    = CASE WHEN (SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
                                THEN '{}' ELSE p.resumes END,
-                awaiters   = CASE WHEN $1 = ANY($3) AND EXISTS (SELECT 1 FROM can_suspend)
-                                    AND NOT (p.awaiters @> ARRAY[$1])
-                               THEN p.awaiters || $1 ELSE p.awaiters END
+                callbacks   = CASE WHEN $1 = ANY($3) AND EXISTS (SELECT 1 FROM can_suspend)
+                                    AND NOT (p.callbacks @> ARRAY[$1])
+                               THEN p.callbacks || $1 ELSE p.callbacks END
               WHERE p.id = $1
                 AND ((SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0)
               RETURNING p.id
@@ -1340,7 +1340,7 @@ impl Db for PostgresSingleDb<'_> {
         let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
         let fanout = settle_fanout(
             "$3",
-            &format!("(SELECT CASE WHEN {settle_guard} THEN b.awaiters END FROM before b)"),
+            &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
             guard,
             "$7",
             self.task_retry_timeout,
@@ -1348,7 +1348,7 @@ impl Db for PostgresSingleDb<'_> {
 
         let rows = rt_block_on(sqlx::query(&format!("
             WITH before AS (
-              SELECT id, state, task_state, task_version, awaiters, listeners FROM promises WHERE id = $3
+              SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
             ),
             updated_promise AS (
               UPDATE promises p
@@ -1819,7 +1819,7 @@ impl Db for PostgresSingleDb<'_> {
         let cb_rows = rt_block_on(
             sqlx::query(
                 "SELECT aw AS awaiter_id, id AS awaited_id
-                 FROM promises CROSS JOIN LATERAL unnest(awaiters) AS aw
+                 FROM promises CROSS JOIN LATERAL unnest(callbacks) AS aw
                  ORDER BY aw, id",
             )
             .fetch_all(self.tx().as_mut()),

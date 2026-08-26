@@ -38,6 +38,12 @@
 --     `origin_id` is `split_part(id, ':', 1)`.
 -- =============================================================================
 
+-- LOCAL EDIT: the callback array is named `callbacks` in single-table.sql, so the
+-- three entries that reference it read `callbacks` here where the generated
+-- catalogue reads `awaiters`. Constraint names are untouched — they are the
+-- specification's property names, and a violation must report the same string
+-- the Lean catalogue and the trace checker use.
+
 SET search_path TO resonate, public;
 
 -- The outbox foreign key needs a TOTAL key to reference, and "the promises that
@@ -143,12 +149,12 @@ ALTER TABLE promises ADD CONSTRAINT well_formed_promise_timer_not_targeted
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_obligations_require_external;
 ALTER TABLE promises ADD CONSTRAINT well_formed_promise_obligations_require_external
-  CHECK ((external OR ((awaiters = '{}'::text[]) AND (listeners =
+  CHECK ((external OR ((callbacks = '{}'::text[]) AND (listeners =
   '{}'::text[]))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_awaiter_is_not_self;
 ALTER TABLE promises ADD CONSTRAINT well_formed_promise_awaiter_is_not_self
-  CHECK ((NOT (id = ANY (awaiters))));
+  CHECK ((NOT (id = ANY (callbacks))));
 
 
 -- --- promises: task well-formedness ----------------------------------------
@@ -202,7 +208,7 @@ ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_version_positive
 -- --- promises: obligations and uniqueness ----------------------------------
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_callbacks_unique;
 ALTER TABLE promises ADD CONSTRAINT well_formed_promise_callbacks_unique
-  CHECK (((cardinality(awaiters) < 2) OR resonate._arr_uniq(awaiters)));
+  CHECK (((cardinality(callbacks) < 2) OR resonate._arr_uniq(callbacks)));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_listeners_unique;
 ALTER TABLE promises ADD CONSTRAINT well_formed_promise_listeners_unique

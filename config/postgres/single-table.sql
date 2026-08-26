@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS promises (
   pid           TEXT,
 
   -- callbacks, both directions ------------------------------------------------
-  awaiters      TEXT[] NOT NULL DEFAULT '{}',  -- ids blocked on me   (ready = false)
+  callbacks      TEXT[] NOT NULL DEFAULT '{}',  -- ids blocked on me   (ready = false)
   resumes       TEXT[] NOT NULL DEFAULT '{}',  -- ids ready for me    (ready = true)
 
   -- listeners -----------------------------------------------------------------
@@ -113,8 +113,8 @@ CREATE INDEX IF NOT EXISTS idx_promises_task
 
 -- Fan-out in the other direction: "which rows list me as an awaiter", the
 -- single-table stand-in for `DELETE FROM callbacks WHERE awaiter_id = $1`.
-CREATE INDEX IF NOT EXISTS idx_promises_awaiters
-  ON promises USING GIN (awaiters);
+CREATE INDEX IF NOT EXISTS idx_promises_callbacks
+  ON promises USING GIN (callbacks);
 
 -- --- outbox -----------------------------------------------------------------
 -- `key` carries the deduplication the two outgoing_* tables got from their

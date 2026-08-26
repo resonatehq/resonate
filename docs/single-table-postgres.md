@@ -7,16 +7,23 @@ Oracle on the same random operation stream.
 
 - Implementation: `src/persistence/persistence_postgres_single.rs`
 - Schema: `config/postgres/single-table.sql`
-- Constraint catalogue: `config/postgres/single-table-constraints.sql`
+- Constraint catalogue: `config/postgres/single-table-constraints.sql` — applies
+  to this schema unchanged, which is why the columns are named `state` and
+  `task_state` rather than the starting DDL's `p_state` and `t_state`. The one
+  place this schema departs from the catalogue as delivered is the callback
+  array: it is `callbacks` here, and the three constraints that reference it
+  (`well_formed_promise_awaiter_is_not_self`,
+  `well_formed_promise_callbacks_unique`,
+  `well_formed_promise_obligations_require_external`) are patched to match
 - Select it with `RESONATE_STORAGE__POSTGRES__SINGLE_TABLE=true`
   (and `RESONATE_STORAGE__POSTGRES__CONSTRAINTS=true` to have the database
   enforce the catalogue).
 
 ## Result
 
-It works, and it is faster. The differential test passes at **58,200 steps with
+It works, and it is faster. The differential test passes at **83,800 steps with
 four backends** (SQLite, Oracle, multi-table Postgres, single-table Postgres),
-all 22 operations covered, 721 behavioural signatures — every response body and
+all 22 operations covered, 745 behavioural signatures — every response body and
 every state snapshot byte-identical across all four.
 
 Ten tables become three, and 118 named CTEs become 41:
@@ -37,7 +44,7 @@ Ten tables become three, and 118 named CTEs become 41:
 | `tasks(id, state, version)` | `task_state` (NULL ⟺ no task), `task_version` |
 | `task_timeouts` type 0 (retry) | `retry_at` — live ⟺ `task_state='pending'` |
 | `task_timeouts` type 1 (lease) | `expires_at` — live ⟺ `task_state='acquired'` — plus `ttl`, `pid` |
-| `callbacks(awaited, awaiter, ready=false)` | `awaiters TEXT[]` on the **awaited** row |
+| `callbacks(awaited, awaiter, ready=false)` | `callbacks TEXT[]` on the **awaited** row |
 | `callbacks(awaited, awaiter, ready=true)` | `resumes TEXT[]` on the **awaiter** row |
 | `listeners(promise_id, address)` | `listeners TEXT[]` |
 | `outgoing_execute(id, version, address)` | `outbox` row, `key = 'e:'‖task_id` |
@@ -50,6 +57,61 @@ the two `outgoing_*` primary keys used to provide.
 
 Column names, the `resonate` schema and the shape of `outbox` follow
 `constraints-all.sql`, so that file applies to this schema unchanged.
+
+## Messages
+
+Messages are the one thing that did not collapse into the promise row.
+
+`outgoing_execute` is 1:1 with a task and *could* have been a column — an early
+draft had `out_execute_version INT`, NULL meaning nothing queued. `outgoing_unblock`
+is one row per listener, so a settled promise can owe several at once, and that
+never folds into a scalar. Once one kind needs a table, splitting the two kinds
+across a column and a table is worse than one `outbox`. The second reason is the
+benchmark below: an outbox column is a *hot* column, so every enqueue and every
+take would rewrite the whole promise row, payload included.
+
+```sql
+CREATE TABLE outbox (
+  key      TEXT PRIMARY KEY,
+  kind     TEXT NOT NULL CHECK (kind IN ('execute', 'unblock')),
+  address  TEXT NOT NULL,
+  task_id  TEXT,      -- execute only
+  version  INT,       -- execute only
+  promise  JSONB      -- unblock only
+);
+```
+
+`key` carries the deduplication the two tables got structurally from their
+primary keys, so every `ON CONFLICT` clause states what the old schema stated
+by shape:
+
+| kind | key | replaces | on conflict |
+|---|---|---|---|
+| execute | `'e:' ‖ task_id` | `outgoing_execute (id)` | `DO UPDATE SET address, version` |
+| unblock | `'u:' ‖ promise_id ‖ ':' ‖ address` | `outgoing_unblock (promise_id, address)` | `DO NOTHING` |
+
+**Unblock carries a snapshot, not a join.** The multi-table backend stores
+`(promise_id, address)` and joins back to `promises` at delivery time. Here the
+settled promise is serialised into the row by `resonate._promise_json(...)`, an
+`IMMUTABLE` SQL function reproducing `PromiseRecord`'s serde exactly — camelCase
+timestamps, `settledAt`/`headers`/`data` omitted when absent — so `take_outgoing`
+deserialises it straight back into a `PromiseRecord` with no join. Two reasons:
+`consistent_outbox_unblock_names_settled_promise` checks
+`promise->>'state' <> 'pending'`, which is only checkable if the payload is in
+the row; and the promise is settled and therefore immutable at enqueue time, so
+the snapshot cannot go stale.
+
+`outbox.task_id REFERENCES promises(task_key)` — "the promises that are tasks" is
+a partial set and a foreign key needs a total one, which is what the generated
+`task_key` column is for.
+
+Enqueue is a CTE in the same statement as the state change, so it commits with
+it; take is still delete-then-deliver, for at-most-once. One behavioural note:
+for unblocks the batch limit now counts *promises* rather than
+(promise, address) pairs, so a batch can expand slightly past `batch_size` when
+one promise has many listeners. `take_outgoing` is not exercised by the
+differential test — background loops are paused in debug mode — so that is
+reasoned, not measured.
 
 ## The one structural constraint the collapse imposes
 
@@ -65,9 +127,9 @@ because in a two-promise await cycle a single row is *both*, and two CTEs
 updating it is undefined behaviour in Postgres. The multi-table layout gets this
 for free — those are different rows of the `callbacks` table.
 
-One consequence: `SETTLE_FANOUT` reads the set of suspended awaiters from a
+One consequence: `SETTLE_FANOUT` reads the set of suspended callbacks from a
 snapshot CTE rather than from the `UPDATE`'s `RETURNING`, because `RETURNING`
-yields post-update values and the outbox needs to know *which* awaiters were
+yields post-update values and the outbox needs to know *which* callbacks were
 suspended. The multi-table backend gets that set from `resumed_tasks RETURNING`,
 which is re-checked under EvalPlanQual; the snapshot read is not. This is
 documented at the fragment.
@@ -120,16 +182,16 @@ included — because Postgres has no in-place update.
 
 | layout | payload | update ms | heap growth |
 |---|---|---|---|
-| multi-table | none | 427 | 7.5 MB |
-| single-table | none | 651 | 12.8 MB |
-| multi-table | 200 B | 436 | 7.5 MB |
-| single-table | 200 B | 679 | 21.2 MB |
-| multi-table | 1000 B | 421 | 7.5 MB |
-| **single-table** | **1000 B** | **926** | **57.7 MB** |
-| multi-table | 1900 B | 432 | 7.5 MB |
-| single-table | 1900 B | 620 | 12.8 MB |
-| multi-table | 8000 B | 510 | 7.5 MB |
-| single-table | 8000 B | 626 | 12.8 MB |
+| multi-table | none | 427 | 7.4 MB |
+| single-table | none | 651 | 12.5 MB |
+| multi-table | 200 B | 436 | 7.4 MB |
+| single-table | 200 B | 679 | 20.7 MB |
+| multi-table | 1000 B | 421 | 7.4 MB |
+| **single-table** | **1000 B** | **926** | **56.3 MB** |
+| multi-table | 1900 B | 432 | 7.4 MB |
+| single-table | 1900 B | 620 | 12.5 MB |
+| multi-table | 8000 B | 510 | 7.4 MB |
+| single-table | 8000 B | 626 | 12.5 MB |
 
 The penalty peaks just **below** the TOAST threshold. Above roughly 2 KB the
 payload moves out of line, the main tuple stays narrow, and updating other
@@ -150,10 +212,10 @@ with a payload:
 
 | layout | payload | update ms | heap growth |
 |---|---|---|---|
-| single + payload side table | none | 373 | 9.8 MB |
-| single + payload side table | 200 B | 414 | 10.3 MB |
-| single + payload side table | 1000 B | 337 | 9.8 MB |
-| single + payload side table | 1900 B | 378 | 9.8 MB |
+| single + payload side table | none | 373 | 9.6 MB |
+| single + payload side table | 200 B | 414 | 10.0 MB |
+| single + payload side table | 1000 B | 337 | 9.6 MB |
+| single + payload side table | 1900 B | 378 | 9.6 MB |
 
 Flat in payload size, and faster than the multi-table layout (which needs two
 `UPDATE`s across two tables where this needs one).
@@ -196,12 +258,13 @@ Running the differential test with all 44 constraints enforced
 
 ```
 well_formed_promise_obligations_require_external
-  CHECK (external OR (awaiters = '{}' AND listeners = '{}'))
+  CHECK (external OR (callbacks = '{}' AND listeners = '{}'))
 ```
 
 `promise.register_listener` accepts any pending promise, including one created
-with no tags at all, which is not `external`. With that one constraint skipped
-the remaining 43 hold across a full differential run.
+with no tags at all, which is not `external`. With that one constraint skipped,
+the remaining 43 are enforced by Postgres across a full **57,200-step**
+differential run without a single violation.
 
 Whether this is a server bug or a test-generator artefact depends on whether real
 clients ever register a listener on a non-external promise. The server permits it.
