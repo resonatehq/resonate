@@ -21,13 +21,17 @@ use super::Unavailable;
 /// metrics, tracing — belongs outside, in the adapter hosting the
 /// implementation.
 ///
-/// **Not yet the full protocol boundary.** Envelope validation — empty `kind`,
-/// non-object `data`, unsupported `head.version` — still lives in the HTTP
-/// adapter, not here. So an in-process caller reaches the operations without
-/// those checks while an HTTP caller gets a 400, and the two are not yet
-/// interchangeable for malformed input. Moving those checks in (and teaching
-/// the reference model to apply them identically, so the differential covers
-/// them) is the remaining work to make this claim true.
+/// **This is the protocol boundary.** Envelope validation — empty `kind`,
+/// non-object `data`, unsupported `head.version` — is
+/// [`RequestEnvelope::validate_envelope`](super::types::RequestEnvelope::validate_envelope),
+/// which every implementation runs before dispatching. An in-process caller
+/// and an HTTP caller therefore get identical rejections for malformed input,
+/// and because the reference model applies the same function, the differential
+/// harness covers them.
+///
+/// What remains outside is genuinely transport-level: a body that is not JSON
+/// at all never becomes a `RequestEnvelope`, so the HTTP adapter still owns
+/// that one.
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
     /// Apply one request and return its response.
