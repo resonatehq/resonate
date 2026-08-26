@@ -49,6 +49,9 @@ use resonate::core::types::{PromiseRecord, PromiseValue};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::time::Instant;
 
+// Decoded but never inspected: the benchmark measures the cost of producing the
+// value, and reading the fields back would measure the reader instead.
+#[allow(dead_code, clippy::large_enum_variant)]
 #[derive(serde::Deserialize, Debug)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum OutMessage {
@@ -65,6 +68,7 @@ enum OutMessage {
 
 /// One element of `out_message[]` — the composite encoding decodes flat and is
 /// converted to `OutMessage` client-side.
+#[allow(dead_code)]
 #[derive(sqlx::Type, Debug)]
 #[sqlx(type_name = "out_message")]
 struct CompositeMsg {

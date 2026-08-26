@@ -779,13 +779,30 @@ fn build_envelope(
     }
 }
 
+/// Tags for a `task.create` action. The two malformed variants are the door
+/// checks the specification answers with 400 before reading any state: no
+/// `resonate:target` at all, and a targeted timer (`Tags.timerTargeted`).
+/// Rare enough that the well-formed path still dominates.
+fn gen_task_create_tags(rng: &mut fastrand::Rng) -> Value {
+    match rng.u32(0..12) {
+        0 => json!({}),
+        1 => json!({ "resonate:target": WORKER_URL, "resonate:timer": "true" }),
+        _ => json!({ "resonate:target": WORKER_URL }),
+    }
+}
+
 fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> RequestEnvelope {
     let all = oracle.all_promise_ids();
     let id = pick(rng, &all).unwrap_or_else(|| random_promise_id(rng));
     let timeout_at = now + rng.i64(30_000..300_000);
+    let tags = if rng.u32(0..12) == 0 {
+        json!({ "resonate:target": WORKER_URL, "resonate:timer": "true" })
+    } else {
+        json!({})
+    };
     req(
         "promise.create",
-        json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": {} }),
+        json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": tags }),
     )
 }
 
@@ -857,7 +874,7 @@ fn gen_task_create(rng: &mut fastrand::Rng, now: i64) -> RequestEnvelope {
                     "id": id,
                     "timeoutAt": timeout_at,
                     "param": {},
-                    "tags": { "resonate:target": WORKER_URL }
+                    "tags": gen_task_create_tags(rng)
                 }
             }
         }),
@@ -947,6 +964,9 @@ fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Request
                 "action": {
                     "kind": "promise.create",
                     "head": {},
+                    // No malformed variant here: task.fence has no door check of
+                    // its own, and the server builds the fenced promise directly
+                    // rather than delegating to promise.create — see finding 3.
                     "data": { "id": new_promise_id, "timeoutAt": timeout_at, "param": {}, "tags": {} }
                 }
             }),
@@ -1037,7 +1057,11 @@ fn gen_schedule_create(rng: &mut fastrand::Rng, now: i64) -> RequestEnvelope {
             "promiseId": format!("sched-promise-{{{{.id}}}}-{{{{.timestamp}}}}"),
             "promiseTimeout": promise_timeout,
             "promiseParam": {},
-            "promiseTags": { "resonate:target": WORKER_URL }
+            "promiseTags": if rng.u32(0..12) == 0 {
+                json!({ "resonate:target": WORKER_URL, "resonate:timer": "true" })
+            } else {
+                json!({ "resonate:target": WORKER_URL })
+            }
         }),
     )
 }

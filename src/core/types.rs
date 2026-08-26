@@ -227,6 +227,47 @@ pub enum Message {
     Unblock(UnblockMsg),
 }
 
+// --- Tag algebra ---
+
+/// A timer is never targeted. The two tags name incompatible things:
+/// `resonate:target` says a worker owns this promise's execution and the server
+/// gives it a task to carry that execution; `resonate:timer` says nothing
+/// executes it at all — it resolves when its deadline arrives, and that is its
+/// whole life. A promise carrying both would be handed a task no worker should
+/// ever run.
+///
+/// Specification: `Tags.timerTargeted` (`spec/01-protocol/validation.lean`),
+/// refused with 400 at every door a promise can be born through —
+/// `promise.create`, `task.create` and `schedule.create`, whose `promiseTags`
+/// become its occurrences' tags. `task.fence` needs no guard of its own: its
+/// create action is a `promise.create` and the inner refusal is what it reports.
+///
+/// Presence, not value, decides `resonate:target` — matching the spec's
+/// `Tags.has`, which is `isSome`.
+pub fn timer_targeted(tags: &std::collections::HashMap<String, String>) -> bool {
+    tags.get("resonate:timer").map(|v| v.as_str()) == Some("true")
+        && tags.contains_key("resonate:target")
+}
+
+/// A task exists to hand a promise's execution to a worker, so `task.create`
+/// requires a `resonate:target` naming one. Without it there is no worker to
+/// hand it to, and the task would violate `consistent_task_iff_targeted_promise`.
+///
+/// Specification: `taskCreate` (`spec/02-abstract/external.lean`) —
+/// `if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then 400`,
+/// answered before any state is read.
+pub fn task_create_tags_rejected(
+    tags: &std::collections::HashMap<String, String>,
+) -> Option<&'static str> {
+    if !tags.contains_key("resonate:target") {
+        Some("Task create requires a resonate:target tag")
+    } else if timer_targeted(tags) {
+        Some("A timer promise cannot carry a resonate:target tag")
+    } else {
+        None
+    }
+}
+
 // --- Record Types ---
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

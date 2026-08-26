@@ -236,7 +236,7 @@ The starting DDL has `resumes BOOLEAN NOT NULL`. The API returns `resumes` as a
 ids that are ready for this row's task — which is also what the Oracle models
 (`Task.resumes: HashSet<String>`).
 
-### 2. The promise-timeout queue is only derivable if a task implies a target
+### 2. The promise-timeout queue is derivable — resolved
 
 `promise_timeouts` is not `(state='pending' AND timeout_at)`. A promise created
 *without* a `resonate:target` never enters the queue and only times out lazily,
@@ -244,14 +244,78 @@ on first touch. Making the queue a derived predicate — which is what the
 recommended `idx_promises_timeout_at ... WHERE state = 'pending'` index assumes —
 therefore depends on `consistent_task_iff_targeted_promise`.
 
-That constraint does not hold today: `task.create` creates a task whether or not
-the action carries a `resonate:target` (`src/server.rs:1117`). Under the
-catalogue that is illegal, and this backend follows the catalogue. **If
-targetless `task.create` is meant to stay legal, the sweep flag has to be
-materialised as a column.** Nothing in the differential test exercises the case,
-because it always tags task actions with a target.
+That constraint did not hold, because `task.create` created a task whether or
+not the action carried a `resonate:target`. The specification is explicit that
+it should not — `spec/02-abstract/external.lean`:
 
-### 3. One catalogue constraint the server violates today
+```lean
+def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
+  let a := req.action
+  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
+    return { status := 400 }
+```
+
+400, before any state is read. That door check is now implemented (see
+finding 3), so a task always implies a target, the predicate is sound, and no
+`timeout_sweep` column is needed.
+
+### 3. Three door checks the server was missing
+
+The specification refuses malformed tag combinations with a 400 at every door a
+promise can be born through, before any state is read. Three of those checks
+were absent from both `server.rs` and the Oracle:
+
+| door | spec | rule |
+|---|---|---|
+| `promise.create` | `external.lean:31` | `Tags.timerTargeted` → 400 |
+| `task.create` | `external.lean:119` | no `resonate:target`, **or** `timerTargeted` → 400 |
+| `schedule.create` | `external.lean:365` | `promiseTags.timerTargeted` → 400 |
+
+A timer is never targeted: `resonate:target` says a worker owns the promise's
+execution and the server gives it a task to carry it, while `resonate:timer`
+says nothing executes it at all. A promise carrying both would be handed a task
+no worker should ever run.
+
+Two related checks were already correct: `task.create` against an existing
+untargeted promise returns 422, and every door validates a `resonate:target`
+that is present.
+
+**`task.fence` is still open, and deliberately so.** The spec says the fence
+needs no guard of its own — its create action *is* a `promise.create` and the
+inner refusal is what it reports, nested inside a 200. The server does not
+delegate: `task_fence_create` builds the promise directly, so there is no inner
+handler to carry the check. Adding one at the top of the fence handler is wrong
+in a way the differential test caught immediately:
+
+```
+step=413 op=task.fence: status mismatch
+  sqlite=400 "A timer promise cannot carry a resonate:target tag"
+  oracle=404 "Task not found"
+```
+
+The fence's own outcome precedes the action's validity — `taskFence` reads the
+task and answers 404/409 *before* running the inner create. Closing this
+properly means either carrying the malformed-action verdict into the fence CTE
+(so the fence check still happens first and the insert is skipped), or reading
+the task before validating and accepting a benign race on an already-invalid
+request. Both are more than this change should carry, so `task.fence` can still
+give birth to a targeted timer, and with the catalogue enforced that surfaces as
+a 500 rather than a 400.
+
+The same latent ordering discrepancy already exists for the fence's
+`resonate:target` address check, which the differential test never exercises
+because it only ever generates valid addresses.
+
+Without these, `well_formed_promise_timer_not_targeted` in the catalogue turns
+a malformed request into a 500 at insert time instead of a 400 at the door —
+which is how a database-enforced catalogue behaves when a door check is
+missing, and is worth remembering as a diagnostic.
+
+The differential generators now produce both malformed `task.create` shapes,
+and the targeted-timer shape at `promise.create` and `schedule.create`, about
+one time in twelve each — so all four backends are compared on them.
+
+### 4. One catalogue constraint the server violates today
 
 Running the differential test with all 44 constraints enforced
 (`TEST_POSTGRES_CONSTRAINTS=1`) fails at step 7:
@@ -269,7 +333,7 @@ differential run without a single violation.
 Whether this is a server bug or a test-generator artefact depends on whether real
 clients ever register a listener on a non-external promise. The server permits it.
 
-### 4. Naming a schema `resonate` shadows `public` for the `resonate` role
+### 5. Naming a schema `resonate` shadows `public` for the `resonate` role
 
 Postgres' default `search_path` is `"$user", public`. Creating a schema named
 `resonate` while connected as role `resonate` makes `"$user"` resolve to it, so
@@ -279,7 +343,7 @@ database. The single-table pool pins its own `search_path` in `after_connect`;
 the differential test pins the multi-table connection to `public`. Worth knowing
 before any migration that creates the schema alongside live tables.
 
-### 5. `ANY((SELECT ...))` is the subquery form
+### 6. `ANY((SELECT ...))` is the subquery form
 
 `x = ANY((SELECT arr FROM t))` parses as `ANY(subquery)` and fails with
 `operator does not exist: text = text[]`, even with the extra parentheses.
@@ -287,15 +351,15 @@ Wrapping in `COALESCE(..., '{}'::text[])` makes it an array expression — which
 wanted anyway, so the "settlement did not fire" case is an empty array and not
 NULL.
 
-### 6. Untested divergence: a targetless task's outbox row
+### 7. Unreachable divergence: a targetless task's outbox row
 
 `outgoing_execute.address` is `NOT NULL`, so in the multi-table backend a
-resumed/released/retried task whose promise has no `resonate:target` raises a
-constraint error. Here those inserts are guarded on `target IS NOT NULL` and are
-skipped instead. Reachable only through targetless `task.create`, so finding 2
-settles it either way.
+resumed/released/retried task whose promise has no `resonate:target` would raise
+a constraint error. Here those inserts are guarded on `target IS NOT NULL` and
+are skipped instead. Reachable only through a targetless `task.create`, which
+finding 3 now refuses at the door — so the difference is moot.
 
-### 7. Headers normalise `NULL` to `{}`
+### 8. Headers normalise `NULL` to `{}`
 
 The catalogue's `well_formed_promise_pending_has_no_value` compares
 `value_headers` against `'{}'::jsonb`, so the header columns are
@@ -303,7 +367,7 @@ The catalogue's `well_formed_promise_pending_has_no_value` compares
 an explicitly empty `headers` map gets it back omitted. Indistinguishable in
 practice, but it is a real narrowing of the wire format.
 
-### 8. Carried but unconsumed
+### 9. Carried but unconsumed
 
 `origin_id`, `parent_id` and `external` are in the schema as the starting DDL
 asked, with the recommended index on `origin_id`. Nothing in the server reads
@@ -311,7 +375,7 @@ them yet; `external` is load-bearing only for the constraint in finding 3.
 `origin_id` is `split_part(id, ':', 1)`, which is *not* the same as the
 multi-table backend's unused `origin` column (`tags->>'resonate:origin'`).
 
-### 9. Minor, in the starting DDL
+### 10. Minor, in the starting DDL
 
 `p_state TEXT ... CHECK (state IN (...))` names a column that does not exist, and
 there is a trailing comma before the closing paren.
@@ -325,10 +389,8 @@ workload, and it keeps every simplification that motivated the exercise: one loc
 per promise, no joins on the read path, no referential fan-out, and a schema the
 constraint catalogue can actually be enforced against.
 
-Before that, findings 2 and 3 need decisions, because they are specification
-questions rather than implementation details:
+One specification question remains open:
 
-- Is a targetless `task.create` legal? If yes, `timeout_sweep` returns as a column.
 - Is `promise.register_listener` on a non-external promise legal? If no, the
   server should reject it and the catalogue can be enforced in full.
 
