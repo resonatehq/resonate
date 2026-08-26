@@ -136,6 +136,7 @@ impl S3Server {
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
             Arc::clone(&applier),
+            Arc::clone(&timers),
             cfg.keys.clone(),
         ));
         let timerd = Arc::new(Timerd::new(

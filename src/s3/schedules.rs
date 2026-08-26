@@ -25,9 +25,10 @@
 //!
 //! # Dependencies
 //!
-//! The store, for the schedule objects and their timer keys; the applier, to
-//! submit `Req::ScheduleFire` so the promise is created through the same
-//! serialized path as everything else, and for `KeySpace`.
+//! The store, for the schedule objects and their timer keys; the timer queue,
+//! which mirrors every timer key written here; the applier, to submit
+//! `Req::ScheduleFire` so the promise is created through the same serialized
+//! path as everything else, and for `KeySpace`.
 //!
 //! # Dependants
 //!
@@ -51,6 +52,7 @@ use crate::util;
 
 use super::applier::{ApplierPool, KeySpace};
 use super::store::{Etag, Store, StoreError};
+use super::timer_queue::TimerQueue;
 use super::timerd::ScheduleFirer;
 
 /// A schedule as stored.
@@ -130,14 +132,21 @@ fn origin_of(id: &str) -> &str {
 pub struct ScheduleService {
     store: Arc<dyn Store>,
     applier: Arc<ApplierPool>,
+    timers: Arc<TimerQueue>,
     keys: KeySpace,
 }
 
 impl ScheduleService {
-    pub fn new(store: Arc<dyn Store>, applier: Arc<ApplierPool>, keys: KeySpace) -> Self {
+    pub fn new(
+        store: Arc<dyn Store>,
+        applier: Arc<ApplierPool>,
+        timers: Arc<TimerQueue>,
+        keys: KeySpace,
+    ) -> Self {
         Self {
             store,
             applier,
+            timers,
             keys,
         }
     }
@@ -220,10 +229,12 @@ impl ScheduleService {
         // The timer first, as everywhere else: a schedule with no timer would
         // never run, while a timer with no schedule is collected on its first
         // sweep.
+        let timer_key = self.keys.sched_timer_key(&r.id, next_run_at);
         self.store
-            .put(&self.keys.sched_timer_key(&r.id, next_run_at), Vec::new())
+            .put(&timer_key, Vec::new())
             .await
             .map_err(|e| Unavailable::new(e.to_string()))?;
+        self.timers.arm(next_run_at, timer_key);
         match self
             .store
             .put_if_none_match(&self.keys.sched_key(&r.id), encode(&doc))
@@ -265,12 +276,12 @@ impl ScheduleService {
             .delete(&self.keys.sched_key(id))
             .await
             .map_err(|e| Unavailable::new(e.to_string()))?;
-        if let Err(e) = self
-            .store
-            .delete(&self.keys.sched_timer_key(id, doc.next_run_at))
-            .await
-        {
-            tracing::debug!(schedule_id = %id, error = %e, "Schedule timer key not collected; the poller will");
+        let timer_key = self.keys.sched_timer_key(id, doc.next_run_at);
+        match self.store.delete(&timer_key).await {
+            Ok(()) => self.timers.disarm(doc.next_run_at, &timer_key),
+            Err(e) => {
+                tracing::debug!(schedule_id = %id, error = %e, "Schedule timer key not collected; its armed entry will collect it");
+            }
         }
         Ok(Reply::status(200, serde_json::json!({})))
     }
@@ -327,10 +338,12 @@ impl ScheduleService {
         next.last_run_at = Some(deadline);
         next.next_run_at = next_run_at;
 
+        let timer_key = self.keys.sched_timer_key(id, next_run_at);
         self.store
-            .put(&self.keys.sched_timer_key(id, next_run_at), Vec::new())
+            .put(&timer_key, Vec::new())
             .await
             .map_err(|e| Unavailable::new(e.to_string()))?;
+        self.timers.arm(next_run_at, timer_key);
         match self
             .store
             .put_if_match(&self.keys.sched_key(id), encode(&next), &etag)
@@ -378,6 +391,7 @@ mod tests {
         applier: Arc<ApplierPool>,
         schedules: Arc<ScheduleService>,
         outbox: Arc<Outbox>,
+        timers: Arc<TimerQueue>,
     }
 
     fn rig() -> Rig {
@@ -385,17 +399,20 @@ mod tests {
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(16));
         let outbox = Arc::new(Outbox::new(None, "http://server"));
         outbox.set_paused(true);
+        // One queue, as `S3Server::build` wires it.
+        let timers = Arc::new(TimerQueue::new());
         let applier = Arc::new(ApplierPool::new(
             Arc::clone(&store),
             cache,
             Arc::clone(&outbox),
-            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
+            Arc::clone(&timers),
             keys(),
             ApplierCfg::default(),
         ));
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
             Arc::clone(&applier),
+            Arc::clone(&timers),
             keys(),
         ));
         Rig {
@@ -403,6 +420,7 @@ mod tests {
             applier,
             schedules,
             outbox,
+            timers,
         }
     }
 
@@ -498,6 +516,38 @@ mod tests {
         assert!(r.store.list(&keys().timer_prefix(), 10).await.unwrap().is_empty());
         // Deleting twice is a 404, not a second success.
         assert_eq!(r.schedules.delete("s0").await.unwrap().status, 404);
+    }
+
+    #[tokio::test]
+    async fn schedule_timers_are_mirrored_into_the_queue() {
+        let r = rig();
+        let reply = r
+            .schedules
+            .create(&create_data("s0", "p-{{.timestamp}}", 60_000), 1_000)
+            .await
+            .unwrap();
+        let due = reply.data["schedule"]["nextRunAt"].as_i64().unwrap();
+        assert_eq!(r.timers.next_deadline(), Some(due));
+
+        // Firing arms the next occurrence; the fired key's entry is collected
+        // by whoever swept it, not here.
+        r.schedules.fire("s0", due, due).await.unwrap();
+        let next = util::compute_next_cron(CRON, due);
+        assert!(
+            r.timers.take_due(next).contains(&keys().sched_timer_key("s0", next)),
+            "the next occurrence is armed"
+        );
+
+        // Deleting disarms the current occurrence's entry.
+        let r = rig();
+        let reply = r
+            .schedules
+            .create(&create_data("s1", "p-{{.id}}", 60_000), 1_000)
+            .await
+            .unwrap();
+        assert_eq!(reply.status, 200);
+        r.schedules.delete("s1").await.unwrap();
+        assert!(r.timers.is_empty());
     }
 
     #[tokio::test]

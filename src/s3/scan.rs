@@ -353,6 +353,7 @@ mod tests {
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
             Arc::clone(&applier),
+            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
             keys(),
         ));
         let scan = ScanService::new(store, cache, Arc::clone(&schedules), outbox, keys());
