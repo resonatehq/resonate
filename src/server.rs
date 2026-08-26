@@ -24,36 +24,111 @@ use crate::core::types::{
     TaskCreateData, TaskCreateResponseData, TaskFenceData, TaskFenceResponseData, TaskFulfillData,
     TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData, TaskRecord,
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
-    TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
+    TaskSuspendData, TaskSuspendPreloadData,
 };
 use crate::core::{ResonateServer, Unavailable};
-use crate::metrics;
 use crate::persistence::{
     PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,
     TaskAcquireParams, TaskCreateParams, TaskFenceCreateParams, TaskFenceSettleParams,
     TaskFulfillParams,
 };
+use crate::metrics::Metrics;
 use crate::processing::processing_timeouts;
 use crate::transport::transport_http_poll::PollRegistry;
 use crate::util;
+use crate::util::Clock;
 use async_trait::async_trait;
 use validator::Validate;
 
-/// The running server — owns configuration, storage, and auth.
+/// The running server — owns configuration, storage, auth, clock and metrics.
 pub struct Server {
     pub config: Config,
     pub storage: Arc<Storage>,
     pub auth: Option<auth::AuthConfig>,
     pub debug_mode: AtomicBool,
+    /// Where this server reads "now" from. Defaults to the wall clock; a test
+    /// supplies a fixed one via [`Server::new_with_clock`].
+    pub clock: Clock,
+    /// This server's metric handles. Defaults to the process-wide set that
+    /// `/metrics` scrapes; a test supplies an isolated set.
+    pub metrics: Metrics,
 }
 
 impl Server {
+    /// A server on the wall clock, reporting into the global metric set.
     pub fn new(config: Config, auth: Option<auth::AuthConfig>, storage: Storage) -> Self {
-        Self {
+        Self::builder(config, auth, storage).build()
+    }
+
+    /// A server whose clock the caller controls.
+    pub fn new_with_clock(
+        config: Config,
+        auth: Option<auth::AuthConfig>,
+        storage: Storage,
+        clock: Clock,
+    ) -> Self {
+        Self::builder(config, auth, storage).clock(clock).build()
+    }
+
+    /// Start configuring a server. Clock and metrics default to the production
+    /// choices, so only a caller that cares has to say anything.
+    pub fn builder(
+        config: Config,
+        auth: Option<auth::AuthConfig>,
+        storage: Storage,
+    ) -> ServerBuilder {
+        ServerBuilder {
             config,
-            storage: Arc::new(storage),
             auth,
+            storage,
+            clock: None,
+            metrics: None,
+        }
+    }
+
+    /// The effective `now` for a request.
+    ///
+    /// Debug-time overrides are gated by config, so a caller cannot move the
+    /// server's clock unless the server was started in debug mode.
+    fn now_for(&self, req: &RequestEnvelope) -> i64 {
+        let debug_time = if self.config.debug {
+            req.head.debug_time
+        } else {
+            None
+        };
+        self.clock.resolve(debug_time)
+    }
+}
+
+/// Builder for [`Server`], so that adding an injected dependency does not
+/// change every construction site.
+pub struct ServerBuilder {
+    config: Config,
+    auth: Option<auth::AuthConfig>,
+    storage: Storage,
+    clock: Option<Clock>,
+    metrics: Option<Metrics>,
+}
+
+impl ServerBuilder {
+    pub fn clock(mut self, clock: Clock) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    pub fn metrics(mut self, metrics: Metrics) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    pub fn build(self) -> Server {
+        Server {
+            config: self.config,
+            storage: Arc::new(self.storage),
+            auth: self.auth,
             debug_mode: AtomicBool::new(false),
+            clock: self.clock.unwrap_or_default(),
+            metrics: self.metrics.unwrap_or_default(),
         }
     }
 }
@@ -145,6 +220,42 @@ async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
     }
 }
 
+/// Map a [`StorageError`] onto the protocol response — in exactly one place.
+///
+/// This is the transport mapping for the storage boundary. It used to be
+/// written out at each of the twenty-five call sites that can surface a
+/// `StorageError`, and it was written out incompletely: only two of them
+/// mapped [`StorageError::InvalidInput`] to a 400, and *none* of them mapped
+/// [`StorageError::Serialization`] to a 503 — so a serialization conflict, a
+/// transaction that provably committed nothing and is safe to retry, was
+/// reported to the client as a 500 and therefore never retried.
+///
+/// Matching the enum exhaustively here means a new `StorageError` variant is a
+/// compile error until someone decides what it looks like on the wire.
+fn storage_error(req: &RequestEnvelope, e: StorageError) -> ResponseEnvelope {
+    let kind = req.kind.clone();
+    let corr_id = req.head.corr_id.clone();
+    match e {
+        // A storage-level constraint the request violated (e.g. a value too
+        // long for a MySQL VARCHAR column). The client sent it; the client
+        // must change it.
+        StorageError::InvalidInput(msg) => {
+            ResponseEnvelope::error(kind, corr_id, 400, &format!("Invalid request: {}", msg))
+        }
+        // Retries exhausted, nothing was committed. 503 tells the client this
+        // is a retriable no-op; a 500 would tell it the opposite.
+        StorageError::Serialization => ResponseEnvelope::error(
+            kind,
+            corr_id,
+            503,
+            "Serialization conflict, please retry",
+        ),
+        StorageError::Backend(msg) => {
+            ResponseEnvelope::error(kind, corr_id, 500, &format!("Internal error: {}", msg))
+        }
+    }
+}
+
 fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let code = axum::http::StatusCode::from_u16(resp.head.status as u16)
         .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
@@ -204,40 +315,13 @@ async fn handle_api(
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
 
-    // Reject empty kind (serde accepts "" as a valid String)
-    if kind.is_empty() {
-        tracing::warn!(corr_id = %corr_id, "Invalid request: empty 'kind' field");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            "Missing or invalid 'kind' field — must be a non-empty string",
-        ));
-    }
-
-    // Reject non-object data (serde deserializes any JSON value into Value)
-    if !req.data.is_object() {
-        tracing::warn!(kind = %kind, corr_id = %corr_id, "Invalid request: 'data' is not an object");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            "Invalid 'data' field — must be an object",
-        ));
-    }
-
-    // Validate protocol version
-    if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
-        tracing::warn!(kind = %kind, corr_id = %corr_id, version = %req.head.version, "Invalid request: unsupported protocol version");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            &format!(
-                "Unsupported protocol version '{}', supported versions: {:?}",
-                req.head.version, SUPPORTED_VERSIONS
-            ),
-        ));
+    // Envelope validation itself lives on `RequestEnvelope`, so the in-process
+    // port applies the identical rules — see `RequestEnvelope::validate_envelope`.
+    // It runs here too, ahead of auth, to keep rejecting malformed input before
+    // doing any work on the caller's behalf.
+    if let Err(reason) = req.validate_envelope() {
+        tracing::warn!(kind = %kind, corr_id = %corr_id, reason = %reason, "Invalid request envelope");
+        return into_response(ResponseEnvelope::error(kind, corr_id, 400, &reason));
     }
 
     // Log incoming request at the application protocol level
@@ -258,10 +342,14 @@ async fn handle_api(
                 elapsed_ms = elapsed_ms,
                 "Request rejected by auth"
             );
-            metrics::REQUEST_TOTAL
+            state
+                .metrics
+                .request_total
                 .with_label_values(&[&kind, &status])
                 .inc();
-            metrics::REQUEST_DURATION
+            state
+                .metrics
+                .request_duration
                 .with_label_values(&[&kind])
                 .observe(start.elapsed().as_secs_f64());
             return into_response(*err_response);
@@ -305,10 +393,14 @@ async fn handle_api(
         );
     }
 
-    metrics::REQUEST_TOTAL
+    state
+        .metrics
+        .request_total
         .with_label_values(&[&kind, &status])
         .inc();
-    metrics::REQUEST_DURATION
+    state
+        .metrics
+        .request_duration
         .with_label_values(&[&kind])
         .observe(start.elapsed().as_secs_f64());
     into_response(response)
@@ -408,20 +500,26 @@ impl Drop for PollGuard {
 #[async_trait]
 impl ResonateServer for Server {
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
-        // Debug-time overrides are gated by config, so a caller cannot move the
-        // server's clock. The gate lives here rather than at the HTTP edge so
-        // that every caller of the port is subject to it.
-        let debug_time = if self.config.debug {
-            req.head.debug_time
-        } else {
-            None
-        };
-        Ok(self.dispatch(req, util::resolve_time(debug_time)).await)
+        // The gate lives here rather than at the HTTP edge so that every caller
+        // of the port is subject to it.
+        let now = self.now_for(req);
+        Ok(self.dispatch(req, now).await)
     }
 }
 
 impl Server {
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        // The port is the protocol boundary: an in-process caller gets exactly
+        // the same envelope rejections an HTTP caller does.
+        if let Err(reason) = req.validate_envelope() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &reason,
+            );
+        }
+
         let kind = req.kind.as_str();
 
         match kind {
@@ -557,12 +655,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -665,18 +758,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(StorageError::InvalidInput(msg)) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                400,
-                &format!("Invalid request: {}", msg),
-            ),
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -760,12 +842,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -849,12 +926,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -930,12 +1002,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1009,12 +1076,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1077,12 +1139,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1313,18 +1370,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(StorageError::InvalidInput(msg)) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                400,
-                &format!("Invalid request: {}", msg),
-            ),
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1435,12 +1481,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1511,12 +1552,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1610,12 +1646,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1729,12 +1760,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -1990,12 +2016,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2043,12 +2064,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2109,12 +2125,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2175,12 +2186,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2248,12 +2254,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2315,12 +2316,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2413,12 +2409,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2469,12 +2460,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2544,12 +2530,7 @@ impl Server {
             .await
         {
             Ok(resp) => resp,
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2586,12 +2567,7 @@ impl Server {
                 let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
                 ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
             }
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Snap failed: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
         }
     }
 
@@ -2618,9 +2594,10 @@ impl Server {
             }
         }
 
+        let metrics = self.metrics.clone();
         match self
             .storage
-            .transact(move |db| processing_timeouts::process_all_timeouts(db, time))
+            .transact(move |db| processing_timeouts::process_all_timeouts(db, time, &metrics))
             .await
         {
             Ok(_) => ResponseEnvelope::new(
@@ -2629,12 +2606,167 @@ impl Server {
                 200,
                 Value::Array(vec![]),
             ),
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Tick failed: {}", e),
-            ),
+            Err(e) => storage_error(req, e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::types::PROTOCOL_VERSION;
+    use crate::testing;
+    use serde_json::json;
+
+    // ---- the storage boundary maps onto transport in exactly one place ----
+    //
+    // One test per `StorageError` variant. The union is small and closed, so
+    // this is the whole contract of `storage_error`, and a new variant will
+    // not compile until it is mapped and covered here.
+
+    #[tokio::test]
+    async fn a_serialization_conflict_is_a_retriable_503() {
+        // Nothing was committed and the request is safe to replay. Reporting
+        // this as a 500 tells a client the opposite, so it never retries.
+        let server = testing::failing_server(StorageError::Serialization);
+        let resp = server
+            .dispatch(&testing::request("promise.create", json!({})), testing::T0)
+            .await;
+        assert_eq!(resp.head.status, 503, "got: {}", resp.data);
+    }
+
+    #[tokio::test]
+    async fn a_storage_constraint_violation_is_a_400() {
+        // e.g. a value too long for a MySQL VARCHAR column: the client sent it,
+        // the client has to change it. Retrying verbatim can never succeed.
+        let server = testing::failing_server(StorageError::InvalidInput("id too long".into()));
+        let resp = server
+            .dispatch(&testing::request("promise.create", json!({})), testing::T0)
+            .await;
+        assert_eq!(resp.head.status, 400, "got: {}", resp.data);
+    }
+
+    #[tokio::test]
+    async fn an_unclassified_backend_failure_is_a_500() {
+        let server = testing::failing_server(StorageError::Backend("disk on fire".into()));
+        let resp = server
+            .dispatch(&testing::request("promise.create", json!({})), testing::T0)
+            .await;
+        assert_eq!(resp.head.status, 500, "got: {}", resp.data);
+    }
+
+    /// The mapping is shared, so it must hold for *every* operation — not just
+    /// the two that happened to spell out an `InvalidInput` arm by hand.
+    #[tokio::test]
+    async fn every_operation_maps_a_storage_error_the_same_way() {
+        for kind in [
+            "promise.create",
+            "promise.get",
+            "promise.settle",
+            "promise.search",
+            "promise.register_callback",
+            "promise.register_listener",
+            "task.create",
+            "task.acquire",
+            "task.release",
+            "task.fulfill",
+            "task.suspend",
+            "task.fence",
+            "task.heartbeat",
+            "task.halt",
+            "task.continue",
+            "task.search",
+            "schedule.create",
+            "schedule.get",
+            "schedule.delete",
+            "schedule.search",
+        ] {
+            let server = testing::failing_server(StorageError::Serialization);
+            let resp = server
+                .dispatch(&testing::request(kind, json!({})), testing::T0)
+                .await;
+            assert_eq!(resp.head.status, 503, "{kind} should be retriable");
+
+            let server = testing::failing_server(StorageError::InvalidInput("bad".into()));
+            let resp = server
+                .dispatch(&testing::request(kind, json!({})), testing::T0)
+                .await;
+            assert_eq!(resp.head.status, 400, "{kind} should reject the input");
+        }
+    }
+
+    // ---- the port is the protocol boundary ----
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_port_rejects_an_empty_kind() {
+        let server = testing::server();
+        let resp = server
+            .dispatch(&testing::request("", json!({})), testing::T0)
+            .await;
+        assert_eq!(resp.head.status, 400);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_port_rejects_non_object_data() {
+        let server = testing::server();
+        for data in [json!(null), json!(7), json!("x"), json!([])] {
+            let resp = server
+                .dispatch(&testing::request("promise.get", data.clone()), testing::T0)
+                .await;
+            assert_eq!(resp.head.status, 400, "for data {data}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_port_rejects_an_unsupported_protocol_version() {
+        let server = testing::server();
+        let mut req = testing::request("promise.get", json!({ "id": "p1" }));
+        req.head.version = "1999-01-01".to_string();
+        let resp = server.dispatch(&req, testing::T0).await;
+        assert_eq!(resp.head.status, 400);
+        assert!(
+            resp.data.to_string().contains("Unsupported protocol version"),
+            "got: {}",
+            resp.data
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_well_formed_envelope_reaches_the_operation() {
+        // The guard rejects malformed envelopes and nothing else: a valid one
+        // still gets the operation's own 404, not a 400.
+        let server = testing::server();
+        let req = testing::request("promise.get", json!({ "id": "nope" }));
+        assert_eq!(req.head.version, PROTOCOL_VERSION);
+        let resp = server.dispatch(&req, testing::T0).await;
+        assert_eq!(resp.head.status, 404, "got: {}", resp.data);
+    }
+
+    /// The reference model and the real server must reject identically — that
+    /// is what makes them interchangeable, and what lets the differential
+    /// harness cover malformed input at all.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_oracle_and_the_server_reject_the_same_envelopes() {
+        let server = testing::server();
+        let mut oracle = crate::oracle::Oracle::new();
+
+        let mut bad_version = testing::request("promise.get", json!({ "id": "p1" }));
+        bad_version.head.version = "1999-01-01".to_string();
+
+        for req in [
+            testing::request("", json!({})),
+            testing::request("promise.get", json!(null)),
+            testing::request("promise.get", json!([])),
+            bad_version,
+        ] {
+            let from_server = server.dispatch(&req, testing::T0).await;
+            let from_oracle = oracle.apply(&req);
+            assert_eq!(
+                from_server.head.status, from_oracle.head.status,
+                "divergence on kind={:?} data={}",
+                req.kind, req.data
+            );
+            assert_eq!(from_server.data, from_oracle.data, "message divergence");
         }
     }
 }

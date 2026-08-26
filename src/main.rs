@@ -1,18 +1,13 @@
-mod auth;
-mod cli;
-mod config;
-mod core;
-mod mcp;
-mod metrics;
-mod persistence;
-mod processing;
-mod server;
-mod transport;
-mod util;
+//! The Resonate binary — a thin shell over the `resonate` library.
+//!
+//! Nothing but argument parsing and wiring lives here. Every rule the server
+//! enforces belongs in the library, where it is reachable from a test; see
+//! `Config::validate` for the config rules that used to live in this file.
 
 use std::sync::Arc;
 
-use crate::core::types::ResponseEnvelope;
+use resonate::core::types::ResponseEnvelope;
+use resonate::{auth, cli, config, core, metrics, persistence, processing, server, transport};
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -142,21 +137,10 @@ async fn run_server(config: Config) -> Result<(), String> {
         tracing::info!("Debug mode enabled — debug operations allowed, background loops paused");
     }
 
-    // Validate storage config
-    if config.storage.storage_type == "postgres" && config.storage.postgres.url.is_none() {
-        return Err("storage.type=postgres requires RESONATE_STORAGE__POSTGRES__URL".into());
-    }
-    if config.storage.storage_type == "mysql" && config.storage.mysql.url.is_none() {
-        return Err("MySQL storage selected but no URL configured. Set --storage-mysql-url or RESONATE_STORAGE__MYSQL__URL".to_string());
-    }
-
-    // Validate poll config (buffer_size=0 panics in tokio::mpsc::channel)
-    if config.transports.http_poll.buffer_size == 0 {
-        return Err("http_poll.buffer_size must be at least 1".into());
-    }
-    if config.transports.http_poll.max_connections == 0 {
-        return Err("http_poll.max_connections must be at least 1".into());
-    }
+    // Semantic validation lives in `Config::validate` so it is reachable from
+    // the library and covered by tests. `Config::load` runs it, but the CLI
+    // `apply` layer mutates the config afterwards, so re-check here.
+    config.validate()?;
 
     // Load auth configuration
     let auth_config = match &config.auth {
@@ -187,15 +171,17 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
     };
 
-    // Backend selection
-    let storage = match config.storage.storage_type.as_str() {
-        "postgres" => {
-            let url = config.storage.postgres.url.as_ref().unwrap();
-            let pool_size = config.storage.postgres.pool_size;
+    // Backend selection. `config.backend()` has already proved the settings
+    // each variant needs are present, so there is nothing to unwrap here and
+    // no `_` arm that could silently fall back to SQLite.
+    let backend = config.backend()?;
+    let is_sqlite = matches!(backend, config::StorageBackend::Sqlite { .. });
+    let storage = match backend {
+        config::StorageBackend::Postgres { url, pool_size } => {
             tracing::info!("Using PostgreSQL backend");
             tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
             let pg = persistence::persistence_postgres::PostgresStorage::connect(
-                url,
+                &url,
                 pool_size,
                 config.tasks.retry_timeout,
             )
@@ -207,22 +193,21 @@ async fn run_server(config: Config) -> Result<(), String> {
             tracing::info!("PostgreSQL initialized");
             Storage::Postgres(pg)
         }
-        "mysql" => {
-            let url = config.storage.mysql.url.as_deref().unwrap();
-            let pool_size = config.storage.mysql.pool_size;
-            let mysql = MysqlStorage::connect(url, pool_size, config.tasks.retry_timeout)
+        config::StorageBackend::Mysql { url, pool_size } => {
+            tracing::info!("Using MySQL backend");
+            let mysql = MysqlStorage::connect(&url, pool_size, config.tasks.retry_timeout)
                 .await
                 .map_err(|e| format!("MySQL connection failed: {e}"))?;
             mysql
                 .init()
                 .await
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
+            tracing::info!("MySQL initialized");
             Storage::Mysql(mysql)
         }
-        _ => {
-            let path = &config.storage.sqlite.path;
+        config::StorageBackend::Sqlite { path } => {
             tracing::info!(path = %path, "Using SQLite backend");
-            let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
+            let sqlite = SqliteStorage::open(&path, config.tasks.retry_timeout)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
             Storage::Sqlite(sqlite)
@@ -234,7 +219,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_max_connections = config.transports.http_poll.max_connections;
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
-    let is_sqlite = config.storage.storage_type == "sqlite";
     let state = Arc::new(Server::new(config, auth_config, storage));
 
     // Build transports
@@ -358,7 +342,9 @@ async fn run_server(config: Config) -> Result<(), String> {
     if metrics_port > 0 {
         let metrics_shutdown = shutdown_rx.clone();
         handles.push(tokio::spawn(async move {
-            let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
+            let metrics_app = Router::new()
+                .route("/metrics", get(metrics::metrics_handler))
+                .with_state(metrics::Metrics::global());
             match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
                 Ok(listener) => {
                     tracing::info!(port = metrics_port, "Metrics server listening");

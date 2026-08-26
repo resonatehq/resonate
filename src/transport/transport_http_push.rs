@@ -12,7 +12,7 @@ use async_trait::async_trait;
 
 use crate::core::types::Message;
 use crate::core::{ResonateServer, ResonateWorker, Unavailable};
-use crate::metrics;
+use crate::metrics::Metrics;
 
 /// An `http://` or `https://` destination. The whole address is the URL, so
 /// parsing is the identity — the type exists to keep the delivery queue typed.
@@ -140,15 +140,36 @@ pub struct HttpPushTransport {
     /// releasing the task instead of dropping it). Not used yet.
     #[allow(dead_code)]
     server: Arc<dyn ResonateServer>,
+    metrics: Metrics,
 }
 
 impl HttpPushTransport {
+    /// Build a transport reporting into the global metric set.
     pub fn new(
         server: Arc<dyn ResonateServer>,
         connect_timeout: Duration,
         request_timeout: Duration,
         auth: Auth,
         concurrency: usize,
+    ) -> Self {
+        Self::with_metrics(
+            server,
+            connect_timeout,
+            request_timeout,
+            auth,
+            concurrency,
+            Metrics::default(),
+        )
+    }
+
+    /// Build a transport reporting into `metrics`.
+    pub fn with_metrics(
+        server: Arc<dyn ResonateServer>,
+        connect_timeout: Duration,
+        request_timeout: Duration,
+        auth: Auth,
+        concurrency: usize,
+        metrics: Metrics,
     ) -> Self {
         let client = Client::builder()
             .connect_timeout(connect_timeout)
@@ -163,9 +184,9 @@ impl HttpPushTransport {
         // processing_messages — the DB is the durable buffer.
         let (tx, rx) = mpsc::channel::<DeliveryJob>(concurrency);
 
-        tokio::spawn(dispatcher(client, auth, semaphore, rx));
+        tokio::spawn(dispatcher(client, auth, semaphore, rx, metrics.clone()));
 
-        Self { tx, server }
+        Self { tx, server, metrics }
     }
 
     /// Enqueue a delivery. Returns once the job is on the in-memory queue.
@@ -184,7 +205,8 @@ impl HttpPushTransport {
                 address = %job.address.url,
                 "HTTP push dispatcher gone, message dropped"
             );
-            metrics::DELIVERIES_TOTAL
+            self.metrics
+                .deliveries_total
                 .with_label_values(&["dropped"])
                 .inc();
         }
@@ -215,6 +237,7 @@ async fn dispatcher(
     auth: Arc<Auth>,
     semaphore: Arc<Semaphore>,
     mut rx: mpsc::Receiver<DeliveryJob>,
+    metrics: Metrics,
 ) {
     while let Some(job) = rx.recv().await {
         // Wait for an in-flight slot rather than dropping. Backpressure
@@ -226,14 +249,15 @@ async fn dispatcher(
         };
         let client = client.clone();
         let auth = Arc::clone(&auth);
+        let metrics = metrics.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            deliver(client, auth, job).await;
+            deliver(client, auth, job, metrics).await;
         });
     }
 }
 
-async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
+async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob, metrics: Metrics) {
     let DeliveryJob { address, payload } = job;
     let auth_header = auth.resolve(&address.url).await;
 
@@ -251,12 +275,14 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
             let status = resp.status().as_u16();
             if resp.status().is_success() {
                 tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
-                metrics::DELIVERIES_TOTAL
+                metrics
+                    .deliveries_total
                     .with_label_values(&["success"])
                     .inc();
             } else {
                 tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
-                metrics::DELIVERIES_TOTAL
+                metrics
+                    .deliveries_total
                     .with_label_values(&["error"])
                     .inc();
             }
@@ -268,7 +294,8 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
                 error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
                 "HTTP push delivery failed"
             );
-            metrics::DELIVERIES_TOTAL
+            metrics
+                .deliveries_total
                 .with_label_values(&["error"])
                 .inc();
         }
@@ -353,7 +380,7 @@ mod tests {
 
     fn make_transport(auth: Auth) -> HttpPushTransport {
         HttpPushTransport::new(
-            Arc::new(crate::transport::stubs::NoopServer),
+            Arc::new(crate::testing::NoopServer),
             Duration::from_secs(5),
             Duration::from_secs(5),
             auth,

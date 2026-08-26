@@ -41,70 +41,10 @@ impl ResonateRouter for TransportDispatcher {
     }
 }
 
-// ---- Test stubs ----
-
-#[cfg(test)]
-pub mod stubs {
-    use super::*;
-    use crate::core::types::{RequestEnvelope, ResponseEnvelope};
-    use crate::core::ResonateServer;
-    use std::sync::Mutex;
-
-    /// A server that answers nothing. Workers hold a `ResonateServer` handle
-    /// for the failure path; tests that never exercise it can use this.
-    pub struct NoopServer;
-
-    #[async_trait]
-    impl ResonateServer for NoopServer {
-        async fn process(&self, _req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
-            Err(Unavailable::new("NoopServer answers nothing"))
-        }
-    }
-
-    /// Records every `(address, message)` pair it is asked to deliver.
-    ///
-    /// One stub serves every scheme now that workers share a trait — register
-    /// it under whichever scheme the test is exercising.
-    pub struct RecordingWorker {
-        pub calls: Mutex<Vec<(String, serde_json::Value)>>,
-    }
-
-    impl RecordingWorker {
-        pub fn new() -> Self {
-            Self {
-                calls: Mutex::new(vec![]),
-            }
-        }
-
-        /// Delivered messages as `(address, serialized message)`.
-        pub fn calls(&self) -> Vec<(String, serde_json::Value)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    impl Default for RecordingWorker {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
-    #[async_trait]
-    impl ResonateWorker for RecordingWorker {
-        async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
-            let value = serde_json::to_value(msg).expect("message serializes");
-            self.calls
-                .lock()
-                .unwrap()
-                .push((address.to_string(), value));
-            Ok(())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::stubs::*;
     use super::*;
+    use crate::testing::{empty_router, router_with, RecordingWorker};
     use crate::core::types::{ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead};
 
     fn execute_msg() -> Message {
@@ -120,16 +60,6 @@ mod tests {
                 },
             },
         })
-    }
-
-    fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> TransportDispatcher {
-        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
-        workers.insert(scheme.to_string(), stub);
-        TransportDispatcher::new(workers)
-    }
-
-    fn empty_router() -> TransportDispatcher {
-        TransportDispatcher::new(HashMap::new())
     }
 
     #[tokio::test]
