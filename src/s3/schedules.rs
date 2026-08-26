@@ -683,6 +683,7 @@ mod tests {
             Arc::clone(&r.store),
             Arc::clone(&r.applier),
             Some(Arc::clone(&r.schedules) as Arc<dyn ScheduleFirer>),
+            Arc::clone(&r.timers),
             keys(),
             TimerdCfg::default(),
         );
@@ -711,6 +712,7 @@ mod tests {
             Arc::clone(&r.store),
             Arc::clone(&r.applier),
             Some(Arc::clone(&r.schedules) as Arc<dyn ScheduleFirer>),
+            Arc::clone(&r.timers),
             keys(),
             TimerdCfg::default(),
         );

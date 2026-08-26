@@ -1,10 +1,19 @@
-//! The timer poller: find what is due, sweep it, collect the keys.
+//! The timer service: fire what is due from memory, list only to recover.
 //!
-//! Deadlines live as empty objects under a timer prefix, keyed by
-//! zero-padded deadline then target. Lexicographic order is therefore time
-//! order, so a capped `ListObjectsV2` returns the nearest deadlines first and
-//! finding what is due costs one small, strongly-consistent listing per shard —
-//! no index, no scan, no second store.
+//! Deadlines live twice. Durably, as empty objects under a timer prefix keyed
+//! by zero-padded deadline then target — written *before* the state that arms
+//! them, so no crash window leaves a deadline uncovered. And in memory, in the
+//! timer queue every writer arms right after its PUT lands. Normal operation
+//! fires from the queue alone: the loop sleeps until the nearest armed
+//! deadline, wakes, sweeps, collects — finding what is due costs zero store
+//! operations.
+//!
+//! The listing path survives for exactly two callers. [`Timerd::seed`]
+//! rebuilds the queue from one full listing at startup — the deployment is a
+//! single node, so the queue and the store can only disagree across a crash,
+//! and this is what repairs it. And [`Timerd::round`] is the sweep behind
+//! `debug.tick`, driven by a synthetic clock with the loop paused, so the
+//! differential suite exercises the same sweep the firing loop performs.
 //!
 //! **The deadline in the key is the fence.** A timer write is an unconditional
 //! PUT, because the key carries everything the write means: arming the same
@@ -12,16 +21,14 @@
 //! object. Nothing can be lost by a racing writer. Deletes are free, so
 //! collecting an orphan costs nothing.
 //!
-//! Multi-node safe with no coordination at all: two pollers may both see the
-//! same due key and both sweep it. One conditional write lands, the other is
-//! refused and re-decides into a no-op, and the sweep is idempotent to begin
-//! with.
-//!
 //! # Why the delete comes after the sweep
 //!
-//! A key is deleted only once its target has been swept, so a poller that dies
-//! mid-round leaves the key behind and the next round retries it. That is
+//! A key is deleted only once its target has been swept, so a process that
+//! dies mid-fire leaves the key behind and the next seed retries it. That is
 //! at-least-once firing over an idempotent sweep, which is the safe direction.
+//! A sweep that fails outright re-arms its keys in memory a beat later, so a
+//! struggling store is retried rather than spun on — and the keys it could
+//! not collect are still durable if the retrying stops the hard way.
 //!
 //! It relies on one precondition: a deadline re-armed by a sweep is strictly
 //! later than the `now` it swept at, so the key just written is never one of
@@ -32,11 +39,11 @@
 //!
 //! # Dependencies
 //!
-//! The store, to list the timer shards and collect fired keys; the applier, to
-//! sweep an origin (`tick`) and to parse timer keys (`KeySpace`); and the
-//! [`ScheduleFirer`] port, so the poller can hand a due schedule over without
-//! knowing what a schedule is. The poller holds no state of its own — every
-//! round starts from a listing.
+//! The timer queue, for what is armed; the store, to seed, to list for
+//! `debug.tick`, and to collect fired keys; the applier, to sweep an origin
+//! (`tick`) and to parse timer keys (`KeySpace`); and the [`ScheduleFirer`]
+//! port, so a due schedule can be handed over without knowing what a schedule
+//! is.
 //!
 //! # Dependants
 //!
@@ -55,6 +62,7 @@ use crate::core::Unavailable;
 
 use super::applier::{ApplierPool, KeySpace, TimerEntry};
 use super::store::Store;
+use super::timer_queue::TimerQueue;
 
 /// Something that can fire a due schedule.
 ///
@@ -67,26 +75,29 @@ pub trait ScheduleFirer: Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct TimerdCfg {
-    /// How often the wall-clock loop sweeps.
-    pub poll_interval: Duration,
-    /// Keys read per shard per round. Small: the nearest deadlines sort first,
-    /// so a round that fills its batch simply leaves the rest for the next one.
+    /// Keys read per shard per `debug.tick` round. Small: the nearest
+    /// deadlines sort first, so a round that fills its batch simply leaves the
+    /// rest for the next one.
     pub batch: usize,
 }
 
 impl Default for TimerdCfg {
     fn default() -> Self {
-        Self {
-            poll_interval: Duration::from_millis(1_000),
-            batch: 256,
-        }
+        Self { batch: 256 }
     }
 }
+
+/// How long a failed sweep's keys wait in memory before the loop looks again.
+const RETRY_DELAY_MS: i64 = 1_000;
+
+/// How long the loop naps between pause checks while `debug.start` holds it.
+const PAUSED_NAP: Duration = Duration::from_millis(100);
 
 pub struct Timerd {
     store: Arc<dyn Store>,
     applier: Arc<ApplierPool>,
     schedules: Option<Arc<dyn ScheduleFirer>>,
+    queue: Arc<TimerQueue>,
     keys: KeySpace,
     cfg: TimerdCfg,
 }
@@ -96,6 +107,7 @@ impl Timerd {
         store: Arc<dyn Store>,
         applier: Arc<ApplierPool>,
         schedules: Option<Arc<dyn ScheduleFirer>>,
+        queue: Arc<TimerQueue>,
         keys: KeySpace,
         cfg: TimerdCfg,
     ) -> Self {
@@ -103,21 +115,63 @@ impl Timerd {
             store,
             applier,
             schedules,
+            queue,
             keys,
             cfg,
         }
     }
 
-    /// One sweep at `now`. Returns how many targets were swept.
+    /// Rebuild the queue from one full listing — the recovery read.
     ///
-    /// This is the whole body of the background loop, and it is what
-    /// `debug.tick` calls — so a test driving a synthetic clock and a server
-    /// driving a real one take exactly the same path.
+    /// The last process's queue died with it; the keys did not. Everything
+    /// parseable is re-armed, so what was about to fire fires now and what was
+    /// far off waits in memory as it did before. Returns how many keys were
+    /// armed.
+    pub async fn seed(&self) -> Result<usize, Unavailable> {
+        let keys = self
+            .store
+            .list(&self.keys.timer_prefix(), usize::MAX)
+            .await
+            .map_err(|e| Unavailable::new(e.to_string()))?;
+        let mut armed = 0;
+        for key in keys {
+            match self.keys.parse_timer_key(&key) {
+                Some(entry) => {
+                    self.queue.arm(entry.deadline(), key);
+                    armed += 1;
+                }
+                None => tracing::warn!(key = %key, "Unparseable timer key ignored"),
+            }
+        }
+        Ok(armed)
+    }
+
+    /// Fire everything the queue says is due at `now`. No listing: this is
+    /// the whole normal-operation read path, and it reads nothing.
+    pub async fn fire_due(&self, now: i64) -> u64 {
+        let due = self.queue.take_due(now);
+        if due.is_empty() {
+            return 0;
+        }
+        let grouped = self.group(due);
+        self.sweep(grouped, now).await
+    }
+
+    /// One listing-driven sweep at `now`. Returns how many targets were swept.
+    ///
+    /// This is what `debug.tick` calls, with a synthetic clock and the firing
+    /// loop paused, so the differential suite exercises the same sweep the
+    /// loop performs.
     pub async fn round(&self, now: i64) -> Result<u64, Unavailable> {
         let due = self.due(now).await?;
         if due.is_empty() {
             return Ok(0);
         }
+        Ok(self.sweep(due, now).await)
+    }
+
+    /// Sweep every target, then collect its keys. In that order, always.
+    async fn sweep(&self, due: Vec<(TimerEntry, Vec<String>)>, now: i64) -> u64 {
         let mut swept = 0u64;
         for (entry, keys) in due {
             let outcome = match &entry {
@@ -133,29 +187,35 @@ impl Timerd {
             match outcome {
                 Ok(()) => {
                     swept += 1;
-                    // Only now: a poller that dies before this leaves the key
-                    // for the next round, which is the safe direction.
+                    // Only now: a process that dies before this leaves the key
+                    // for the next seed, which is the safe direction.
                     for key in keys {
+                        if let Some(entry) = self.keys.parse_timer_key(&key) {
+                            self.queue.disarm(entry.deadline(), &key);
+                        }
                         if let Err(e) = self.store.delete(&key).await {
-                            tracing::debug!(key = %key, error = %e, "Fired timer key not collected; a later round will retry");
+                            // Not collected, so re-armed: the entry becomes
+                            // the collector, a beat later.
+                            self.queue.arm(now + RETRY_DELAY_MS, key.clone());
+                            tracing::debug!(key = %key, error = %e, "Fired timer key not collected; its armed entry will retry");
                         }
                     }
                 }
                 Err(e) => {
-                    // Leave the keys: whatever is wrong, the deadline is still
-                    // due and must fire eventually.
-                    tracing::warn!(error = %e, "Timer sweep failed; keys left for the next round");
+                    // Still due, so still armed — a beat later, so a store
+                    // that is down is retried rather than spun on. The keys
+                    // themselves were never deleted.
+                    tracing::warn!(error = %e, "Timer sweep failed; keys re-armed to retry");
+                    for key in keys {
+                        self.queue.arm(now + RETRY_DELAY_MS, key);
+                    }
                 }
             }
         }
-        Ok(swept)
+        swept
     }
 
-    /// Every due target, with all of its due keys.
-    ///
-    /// Grouping matters: an origin can own several due keys — one current, the
-    /// rest orphaned by a crash between a commit and its cleanup — and it must
-    /// be swept once and have all of them collected.
+    /// Every due target, with all of its due keys — the listing path.
     async fn due(&self, now: i64) -> Result<Vec<(TimerEntry, Vec<String>)>, Unavailable> {
         let prefixes: Vec<String> = (0..self.keys.timer_shards)
             .map(|shard| self.keys.timer_shard_prefix(shard))
@@ -166,42 +226,58 @@ impl Timerd {
                 .map(|prefix| self.store.list(prefix, self.cfg.batch)),
         )
         .await;
-
-        // Keyed by target, holding the earliest due deadline for it and every
-        // due key that names it. BTreeMap so a round is deterministic.
-        let mut grouped: BTreeMap<String, (TimerEntry, Vec<String>)> = BTreeMap::new();
+        let mut due = Vec::new();
         for listing in listings {
             for key in listing.map_err(|e| Unavailable::new(e.to_string()))? {
-                let entry = match self.keys.parse_timer_key(&key) {
-                    Some(entry) => entry,
-                    None => {
-                        tracing::warn!(key = %key, "Unparseable timer key ignored");
-                        continue;
-                    }
-                };
-                if entry.deadline() > now {
-                    // The keys sort by deadline, so everything after this one in
-                    // this shard is also in the future — but shards interleave,
-                    // so keep reading rather than breaking.
-                    continue;
+                match self.keys.parse_timer_key(&key) {
+                    // The keys sort by deadline, so everything after a future
+                    // one in its shard is also in the future — but shards
+                    // interleave, so keep reading rather than breaking.
+                    Some(entry) if entry.deadline() <= now => due.push(key),
+                    Some(_) => {}
+                    None => tracing::warn!(key = %key, "Unparseable timer key ignored"),
                 }
-                let target = match &entry {
-                    TimerEntry::Origin { origin, .. } => format!("o:{origin}"),
-                    TimerEntry::Schedule { id, .. } => format!("s:{id}"),
-                };
-                let slot = grouped.entry(target).or_insert_with(|| (entry.clone(), Vec::new()));
-                // Fire at the earliest due deadline: a schedule's occurrence is
-                // identified by it.
-                if entry.deadline() < slot.0.deadline() {
-                    slot.0 = entry;
-                }
-                slot.1.push(key);
             }
         }
-        Ok(grouped.into_values().collect())
+        Ok(self.group(due))
     }
 
-    /// The wall-clock loop. Paused while `paused` is set, which is what
+    /// Group keys by target, earliest deadline first per target.
+    ///
+    /// Grouping matters: an origin can own several due keys — one current, the
+    /// rest orphaned by a crash between a commit and its cleanup — and it must
+    /// be swept once and have all of them collected.
+    fn group(&self, keys: Vec<String>) -> Vec<(TimerEntry, Vec<String>)> {
+        // Keyed by target, holding the earliest due deadline for it and every
+        // due key that names it. BTreeMap so a sweep is deterministic.
+        let mut grouped: BTreeMap<String, (TimerEntry, Vec<String>)> = BTreeMap::new();
+        for key in keys {
+            let entry = match self.keys.parse_timer_key(&key) {
+                Some(entry) => entry,
+                None => {
+                    tracing::warn!(key = %key, "Unparseable timer key ignored");
+                    continue;
+                }
+            };
+            let target = match &entry {
+                TimerEntry::Origin { origin, .. } => format!("o:{origin}"),
+                TimerEntry::Schedule { id, .. } => format!("s:{id}"),
+            };
+            let slot = grouped
+                .entry(target)
+                .or_insert_with(|| (entry.clone(), Vec::new()));
+            // Fire at the earliest due deadline: a schedule's occurrence is
+            // identified by it.
+            if entry.deadline() < slot.0.deadline() {
+                slot.0 = entry;
+            }
+            slot.1.push(key);
+        }
+        grouped.into_values().collect()
+    }
+
+    /// The wall-clock loop: seed once, then sleep until the nearest armed
+    /// deadline and fire it. Paused while `paused` is set, which is what
     /// `debug.start` does: with the loop stopped, `debug.tick` is the only
     /// thing that moves time.
     pub fn spawn(
@@ -210,11 +286,44 @@ impl Timerd {
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            // Recovery first: the queue died with the last process, the keys
+            // did not. Nothing may fire until what survived is re-armed, so
+            // this retries rather than proceeds.
             loop {
+                match self.seed().await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        tracing::info!(armed = n, "Timer queue seeded from the store");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Timer queue could not be seeded; retrying");
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS as u64)) => {}
+                            _ = shutdown.changed() => return,
+                        }
+                    }
+                }
+            }
+            loop {
+                let sleep_for = if paused.load(Ordering::SeqCst) {
+                    PAUSED_NAP
+                } else {
+                    match self.queue.next_deadline() {
+                        Some(at) => {
+                            Duration::from_millis(
+                                at.saturating_sub(crate::util::system_time_ms()).max(0) as u64,
+                            )
+                        }
+                        // Nothing armed: sleep until an arm wakes us.
+                        None => Duration::from_secs(3_600),
+                    }
+                };
                 tokio::select! {
-                    _ = tokio::time::sleep(self.cfg.poll_interval) => {}
+                    _ = tokio::time::sleep(sleep_for) => {}
+                    _ = self.queue.armed_nearer() => {}
                     _ = shutdown.changed() => {
-                        tracing::info!("Timer poller shutting down");
+                        tracing::info!("Timer loop shutting down");
                         return;
                     }
                 }
@@ -222,10 +331,9 @@ impl Timerd {
                     continue;
                 }
                 let now = crate::util::system_time_ms();
-                match self.round(now).await {
-                    Ok(0) => {}
-                    Ok(n) => tracing::debug!(swept = n, "Timer round"),
-                    Err(e) => tracing::error!(error = %e, "Timer round failed"),
+                match self.fire_due(now).await {
+                    0 => {}
+                    n => tracing::debug!(swept = n, "Timers fired"),
                 }
             }
         })
@@ -255,6 +363,7 @@ mod tests {
         store: Arc<dyn Store>,
         applier: Arc<ApplierPool>,
         outbox: Arc<Outbox>,
+        timers: Arc<TimerQueue>,
     }
 
     fn rig() -> Rig {
@@ -262,11 +371,13 @@ mod tests {
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(16));
         let outbox = Arc::new(Outbox::new(None, "http://server"));
         outbox.set_paused(true);
+        // One queue, as `S3Server::build` wires it.
+        let timers = Arc::new(TimerQueue::new());
         let applier = Arc::new(ApplierPool::new(
             Arc::clone(&store),
             cache,
             Arc::clone(&outbox),
-            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
+            Arc::clone(&timers),
             keys(),
             ApplierCfg::default(),
         ));
@@ -274,6 +385,7 @@ mod tests {
             store,
             applier,
             outbox,
+            timers,
         }
     }
 
@@ -282,6 +394,7 @@ mod tests {
             Arc::clone(&rig.store),
             Arc::clone(&rig.applier),
             firer,
+            Arc::clone(&rig.timers),
             keys(),
             TimerdCfg::default(),
         )
@@ -311,6 +424,148 @@ mod tests {
     async fn a_round_with_nothing_armed_does_nothing() {
         let r = rig();
         assert_eq!(timerd(&r, None).round(1_000_000).await.unwrap(), 0);
+    }
+
+    // --- firing from memory -------------------------------------------------
+
+    /// A store that refuses to be listed, so a test can prove the normal
+    /// firing path never does.
+    struct NoListing(Arc<dyn Store>);
+
+    #[async_trait]
+    impl Store for NoListing {
+        async fn get(&self, key: &str) -> Result<Option<(Vec<u8>, super::super::store::Etag)>, super::super::store::StoreError> {
+            self.0.get(key).await
+        }
+        async fn put_if_match(
+            &self,
+            key: &str,
+            body: Vec<u8>,
+            etag: &super::super::store::Etag,
+        ) -> Result<super::super::store::Etag, super::super::store::StoreError> {
+            self.0.put_if_match(key, body, etag).await
+        }
+        async fn put_if_none_match(
+            &self,
+            key: &str,
+            body: Vec<u8>,
+        ) -> Result<super::super::store::Etag, super::super::store::StoreError> {
+            self.0.put_if_none_match(key, body).await
+        }
+        async fn put(&self, key: &str, body: Vec<u8>) -> Result<super::super::store::Etag, super::super::store::StoreError> {
+            self.0.put(key, body).await
+        }
+        async fn delete(&self, key: &str) -> Result<(), super::super::store::StoreError> {
+            self.0.delete(key).await
+        }
+        async fn list(&self, prefix: &str, _max_keys: usize) -> Result<Vec<String>, super::super::store::StoreError> {
+            panic!("normal operation must not list, but listed {prefix}");
+        }
+    }
+
+    #[tokio::test]
+    async fn firing_what_is_due_reads_nothing_from_the_store() {
+        let inner: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
+        let r = {
+            let store: Arc<dyn Store> = Arc::new(NoListing(Arc::clone(&inner)));
+            let outbox = Arc::new(Outbox::new(None, "http://server"));
+            outbox.set_paused(true);
+            let timers = Arc::new(TimerQueue::new());
+            let applier = Arc::new(ApplierPool::new(
+                Arc::clone(&store),
+                Arc::new(MemDocCache::new(16)),
+                Arc::clone(&outbox),
+                Arc::clone(&timers),
+                keys(),
+                ApplierCfg::default(),
+            ));
+            Rig {
+                store,
+                applier,
+                outbox,
+                timers,
+            }
+        };
+        create(&r, "o", "o:a", 5_000, 0).await;
+        assert_eq!(r.timers.next_deadline(), Some(5_000));
+
+        // The whole fire — find, sweep, collect — without a single listing.
+        assert_eq!(timerd(&r, None).fire_due(9_000).await, 1);
+        let doc = {
+            let bytes = inner.get(&keys().doc_key("o")).await.unwrap().unwrap();
+            codec::decode(&bytes.0, "o").unwrap()
+        };
+        assert_eq!(doc.promises["o:a"].state, PromiseState::RejectedTimedout);
+        assert!(r.timers.is_empty(), "nothing left armed");
+        assert!(
+            inner.list(&keys().timer_prefix(), 10).await.unwrap().is_empty(),
+            "the fired key was collected"
+        );
+    }
+
+    #[tokio::test]
+    async fn firing_with_nothing_due_leaves_the_future_armed() {
+        let r = rig();
+        create(&r, "o", "o:a", 500_000, 0).await;
+        assert_eq!(timerd(&r, None).fire_due(1_000).await, 0);
+        assert_eq!(r.timers.len(), 1, "the future deadline stays armed");
+    }
+
+    #[tokio::test]
+    async fn a_fire_that_re_arms_covers_the_new_deadline_in_memory() {
+        let r = rig();
+        create(&r, "o", "o:a", 500_000, 0).await;
+        // The retry deadline (30_000) fires and re-dispatches; the applier
+        // arms the next retry (60_000) as part of the sweep's own commit.
+        assert_eq!(timerd(&r, None).fire_due(30_000).await, 1);
+        assert_eq!(r.timers.next_deadline(), Some(60_000));
+        assert_eq!(r.timers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn seeding_rebuilds_the_queue_after_a_restart() {
+        let r = rig();
+        create(&r, "o", "o:a", 5_000, 0).await;
+        r.store
+            .put(&keys().sched_timer_key("s0", 8_000), Vec::new())
+            .await
+            .unwrap();
+
+        // A new process: same store, empty queue.
+        let restarted = Rig {
+            store: Arc::clone(&r.store),
+            applier: Arc::clone(&r.applier),
+            outbox: Arc::clone(&r.outbox),
+            timers: Arc::new(TimerQueue::new()),
+        };
+        let td = timerd(&restarted, None);
+        assert_eq!(td.seed().await.unwrap(), 2);
+        assert_eq!(restarted.timers.next_deadline(), Some(5_000));
+        assert_eq!(restarted.timers.len(), 2);
+        // And what was seeded fires.
+        assert_eq!(td.fire_due(9_000).await, 2);
+        assert!(timer_keys(&restarted).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_sweep_re_arms_its_keys_a_beat_later() {
+        struct Failing;
+        #[async_trait]
+        impl ScheduleFirer for Failing {
+            async fn fire(&self, _: &str, _: i64, _: i64) -> Result<(), Unavailable> {
+                Err(Unavailable::new("store down"))
+            }
+        }
+        let r = rig();
+        let key = keys().sched_timer_key("s0", 4_000);
+        r.store.put(&key, Vec::new()).await.unwrap();
+        r.timers.arm(4_000, key.clone());
+
+        let td = timerd(&r, Some(Arc::new(Failing)));
+        assert_eq!(td.fire_due(9_000).await, 0);
+        // Still armed — but a beat later, so a dead store is not spun on.
+        assert_eq!(r.timers.next_deadline(), Some(9_000 + 1_000));
+        assert_eq!(timer_keys(&r).await, vec![key], "the key was never deleted");
     }
 
     #[tokio::test]
@@ -511,30 +766,61 @@ mod tests {
         assert_eq!(timer_keys(&r).await.len(), 1);
     }
 
-    #[tokio::test]
-    async fn the_loop_does_nothing_while_paused() {
+    /// Wait until `condition` holds, or fail after a couple of seconds.
+    async fn eventually<F, Fut>(mut condition: F, what: &str)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        for _ in 0..200 {
+            if condition().await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("{what}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_loop_does_nothing_while_paused_and_fires_once_resumed() {
         let r = rig();
+        // A deadline already in wall-clock terms overdue.
         create(&r, "o", "o:a", 5_000, 0).await;
         let paused = Arc::new(AtomicBool::new(true));
         let (tx, rx) = tokio::sync::watch::channel(false);
-        let td = Arc::new(Timerd::new(
-            Arc::clone(&r.store),
-            Arc::clone(&r.applier),
-            None,
-            keys(),
-            TimerdCfg {
-                poll_interval: Duration::from_millis(5),
-                batch: 16,
-            },
-        ));
+        let td = Arc::new(timerd(&r, None));
         let handle = Arc::clone(&td).spawn(Arc::clone(&paused), rx);
         tokio::time::sleep(Duration::from_millis(60)).await;
         assert_eq!(timer_keys(&r).await.len(), 1, "paused, so nothing swept");
 
         paused.store(false, Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(60)).await;
-        assert!(timer_keys(&r).await.is_empty(), "resumed and swept");
+        eventually(
+            || async { timer_keys(&r).await.is_empty() },
+            "resumed, so the overdue key must be swept",
+        )
+        .await;
 
+        let _ = tx.send(true);
+        handle.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_loop_seeds_from_the_store_before_firing() {
+        // Keys written by a previous process: nothing has armed this rig's
+        // queue, so only the seed can know about them.
+        let r = rig();
+        r.store
+            .put(&keys().timer_key("ghost", 100), Vec::new())
+            .await
+            .unwrap();
+        assert!(r.timers.is_empty());
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let handle = Arc::new(timerd(&r, None)).spawn(Arc::new(AtomicBool::new(false)), rx);
+        eventually(
+            || async { timer_keys(&r).await.is_empty() },
+            "the seeded key must fire and be collected",
+        )
+        .await;
         let _ = tx.send(true);
         handle.await.unwrap();
     }

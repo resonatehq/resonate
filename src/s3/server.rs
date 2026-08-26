@@ -143,6 +143,7 @@ impl S3Server {
             Arc::clone(&store),
             Arc::clone(&applier),
             Some(Arc::clone(&schedules) as Arc<dyn ScheduleFirer>),
+            Arc::clone(&timers),
             cfg.keys.clone(),
             cfg.timerd.clone(),
         ));

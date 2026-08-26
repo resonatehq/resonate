@@ -293,12 +293,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                         },
                         ..Default::default()
                     },
-                    timerd: s3::timerd::TimerdCfg {
-                        poll_interval: std::time::Duration::from_millis(
-                            config.timeouts.poll_interval,
-                        ),
-                        ..Default::default()
-                    },
+                    timerd: s3::timerd::TimerdCfg::default(),
                     cache_capacity: s3.cache_capacity,
                     debug: config.debug,
                     search: s3.search_enabled,
@@ -448,9 +443,10 @@ async fn run_server(config: Config) -> Result<(), String> {
             }));
         }
         Backend::S3(s3_server) => {
-            // One loop, not two: the timer poller replaces the timeout loop, and
-            // the outbox delivers as it is written rather than being drained by a
-            // second loop.
+            // One loop, not two: the timer loop fires armed deadlines from
+            // memory (listing the store only to seed itself at startup), and
+            // the outbox delivers as it is written rather than being drained
+            // by a second loop.
             handles.push(Arc::clone(s3_server.timerd()).spawn(
                 s3_server.debug_mode(),
                 shutdown_rx.clone(),
