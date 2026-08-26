@@ -9,8 +9,6 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use crate::metrics;
-
 use resonate_core::types::Message;
 use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
@@ -76,20 +74,22 @@ impl GcpsPubSubTransport {
 
     /// Enqueue a publish. Returns once the job is on the in-memory queue.
     /// Blocks only when the queue is full (never on the publish RPC).
-    pub async fn send(&self, address: &GcpsAddress, payload: &serde_json::Value) {
+    pub async fn send(
+        &self,
+        address: &GcpsAddress,
+        payload: &serde_json::Value,
+    ) -> Result<(), Unavailable> {
         let job = PublishJob {
             address: address.clone(),
             data: serde_json::to_vec(payload).unwrap_or_default(),
         };
         if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
-            tracing::warn!(
-                address = %format!("gcps://{}/{}", job.address.project, job.address.topic),
-                "GCP Pub/Sub dispatcher gone, message dropped"
-            );
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["dropped"])
-                .inc();
+            return Err(Unavailable::new(format!(
+                "GCP Pub/Sub dispatcher gone, gcps://{}/{} not enqueued",
+                job.address.project, job.address.topic
+            )));
         }
+        Ok(())
     }
 }
 
@@ -151,9 +151,6 @@ async fn deliver(
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(address = %address_str, error = %e, "Failed to get GCP Pub/Sub publisher");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
             return;
         }
     };
@@ -166,21 +163,12 @@ async fn deliver(
     match tokio::time::timeout(timeout, fut).await {
         Ok(Ok(_message_id)) => {
             tracing::debug!(project = %address.project, topic = %address.topic, "GCP Pub/Sub delivery succeeded");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["success"])
-                .inc();
         }
         Ok(Err(e)) => {
             tracing::warn!(project = %address.project, topic = %address.topic, error = %e, "GCP Pub/Sub delivery failed");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
         }
         Err(_) => {
             tracing::warn!(project = %address.project, topic = %address.topic, "GCP Pub/Sub publish timed out");
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
         }
     }
 }
@@ -191,7 +179,6 @@ impl ResonateWorker for GcpsPubSubTransport {
         let addr = GcpsAddress::parse(address)?;
         let payload = serde_json::to_value(msg)
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
-        GcpsPubSubTransport::send(self, &addr, &payload).await;
-        Ok(())
+        GcpsPubSubTransport::send(self, &addr, &payload).await
     }
 }

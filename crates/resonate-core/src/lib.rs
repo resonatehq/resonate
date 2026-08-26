@@ -39,12 +39,39 @@ use std::fmt;
 pub struct Unavailable {
     /// Human-readable cause, for logs and diagnostics.
     pub message: String,
+    /// How far the message got. See [`Cause`].
+    pub cause: Cause,
+}
+
+/// How far a message got before it failed.
+///
+/// The distinction is not cosmetic: `Unroutable` is a property of the address
+/// and will not change on its own, while `Delivery` may well succeed on a later
+/// attempt. Anything deciding whether to retry, or recording why a message did
+/// not land, needs to tell them apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// Never reached a worker: the address did not parse, or no worker is
+    /// registered for its scheme.
+    Unroutable,
+    /// A worker accepted the address and could not deliver.
+    Delivery,
 }
 
 impl Unavailable {
+    /// A worker took the message and could not deliver it.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            cause: Cause::Delivery,
+        }
+    }
+
+    /// The message never reached a worker at all.
+    pub fn unroutable(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            cause: Cause::Unroutable,
         }
     }
 }

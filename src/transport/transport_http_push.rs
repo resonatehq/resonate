@@ -10,7 +10,6 @@ use tokio::sync::{mpsc, Semaphore};
 use crate::config::{HttpPushAuthConfig, HttpPushAuthMode};
 use async_trait::async_trait;
 
-use crate::metrics;
 use resonate_core::types::Message;
 use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
@@ -172,22 +171,25 @@ impl HttpPushTransport {
     /// Blocks only when the queue is full (never on network I/O), which
     /// applies natural backpressure to the message-processing loop instead
     /// of dropping messages.
-    pub async fn send(&self, address: &HttpAddress, payload: &serde_json::Value) {
+    pub async fn send(
+        &self,
+        address: &HttpAddress,
+        payload: &serde_json::Value,
+    ) -> Result<(), Unavailable> {
         let job = DeliveryJob {
             address: address.clone(),
             payload: payload.clone(),
         };
         if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
             // Dispatcher task is gone (transport shutting down). Should not
-            // happen during normal operation; surface for diagnosis.
-            tracing::warn!(
-                address = %job.address.url,
-                "HTTP push dispatcher gone, message dropped"
-            );
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["dropped"])
-                .inc();
+            // happen during normal operation; surface it to the caller, which
+            // is what records the outcome.
+            return Err(Unavailable::new(format!(
+                "HTTP push dispatcher gone, {} not enqueued",
+                job.address.url
+            )));
         }
+        Ok(())
     }
 }
 
@@ -205,8 +207,7 @@ impl ResonateWorker for HttpPushTransport {
             },
             &payload,
         )
-        .await;
-        Ok(())
+        .await
     }
 }
 
@@ -251,14 +252,8 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
             let status = resp.status().as_u16();
             if resp.status().is_success() {
                 tracing::debug!(address = %address.url, status, "HTTP push delivery succeeded");
-                metrics::DELIVERIES_TOTAL
-                    .with_label_values(&["success"])
-                    .inc();
             } else {
                 tracing::warn!(address = %address.url, status, "HTTP push delivery rejected by target");
-                metrics::DELIVERIES_TOTAL
-                    .with_label_values(&["error"])
-                    .inc();
             }
         }
         Err(e) => {
@@ -268,9 +263,6 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
                 error_kind = if e.is_connect() { "connect" } else if e.is_timeout() { "timeout" } else { "other" },
                 "HTTP push delivery failed"
             );
-            metrics::DELIVERIES_TOTAL
-                .with_label_values(&["error"])
-                .inc();
         }
     }
 }
@@ -366,7 +358,8 @@ mod tests {
         let (url, mut rx) = spawn_capture_server().await;
         make_transport(Auth::None)
             .send(&HttpAddress { url }, &serde_json::json!({}))
-            .await;
+            .await
+            .expect("enqueued");
         let headers = rx.recv().await.expect("server received no request");
         assert!(
             !headers.contains_key("authorization"),
@@ -382,7 +375,8 @@ mod tests {
             value: "Bearer secret-token".to_string(),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         let headers = rx.recv().await.expect("server received no request");
         assert_eq!(
             headers
@@ -402,7 +396,8 @@ mod tests {
             value: "Bearer custom-token".to_string(),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         let headers = rx.recv().await.expect("server received no request");
         assert_eq!(
             headers
@@ -427,7 +422,8 @@ mod tests {
             provider: Box::new(MockTokenProvider::ok("mock-token")),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         assert_eq!(
             rx.recv()
                 .await
@@ -450,7 +446,8 @@ mod tests {
             provider: Box::new(Arc::clone(&mock)),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         // send() spawns the request; wait for the server to receive it so the
         // mock's recorded_audience is populated before we assert on it.
         rx.recv()
@@ -472,7 +469,8 @@ mod tests {
             provider: Box::new(Arc::clone(&mock)),
         })
         .send(&HttpAddress { url: url.clone() }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         rx.recv()
             .await
             .expect("delivery target received no request");
@@ -491,7 +489,8 @@ mod tests {
             provider: Box::new(MockTokenProvider::ok("mock-token")),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         let headers = rx
             .recv()
             .await
@@ -519,7 +518,8 @@ mod tests {
             provider: Box::new(MockTokenProvider::err("simulated failure")),
         })
         .send(&HttpAddress { url }, &serde_json::json!({}))
-        .await;
+        .await
+        .expect("enqueued");
         let headers = rx
             .recv()
             .await

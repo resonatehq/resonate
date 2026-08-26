@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::metrics;
+
 use resonate_core::types::Message;
-use resonate_core::{scheme_of, ResonateRouter, ResonateWorker, Unavailable};
+use resonate_core::{scheme_of, Cause, ResonateRouter, ResonateWorker, Unavailable};
 
 // ---- Router ----
 
@@ -29,15 +31,38 @@ impl TransportDispatcher {
     }
 }
 
+impl TransportDispatcher {
+    async fn route_inner(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        let scheme = scheme_of(address)
+            .ok_or_else(|| Unavailable::unroutable(format!("address is not a URI: {address}")))?;
+        let worker = self.workers.get(&scheme).ok_or_else(|| {
+            Unavailable::unroutable(format!("no worker registered for scheme '{scheme}'"))
+        })?;
+        worker.send(address, msg).await
+    }
+}
+
 #[async_trait]
 impl ResonateRouter for TransportDispatcher {
     async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
-        let scheme = scheme_of(address)
-            .ok_or_else(|| Unavailable::new(format!("address is not a URI: {address}")))?;
-        let worker = self.workers.get(&scheme).ok_or_else(|| {
-            Unavailable::new(format!("no worker registered for scheme '{scheme}'"))
-        })?;
-        worker.send(address, msg).await
+        // Delivery outcomes are recorded here rather than in the workers: the
+        // router is the one place that sees every message, so a worker needs no
+        // opinion about metrics — and "never reached a worker" is a distinct
+        // outcome only visible from here.
+        //
+        // Note this counts the hand-off, not the eventual result. The HTTP push
+        // and Pub/Sub workers enqueue onto a bounded channel and deliver
+        // asynchronously past it, so `success` here means accepted for
+        // delivery.
+        let outcome = self.route_inner(address, msg).await;
+        metrics::DELIVERIES_TOTAL
+            .with_label_values(&[match &outcome {
+                Ok(()) => "success",
+                Err(e) if e.cause == Cause::Unroutable => "dropped",
+                Err(_) => "error",
+            }])
+            .inc();
+        outcome
     }
 }
 
@@ -171,6 +196,40 @@ mod tests {
                 "for {address}: {err}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn unroutable_is_distinguishable_from_a_worker_failure() {
+        // The router records delivery outcomes, and "never reached a worker"
+        // is a different outcome from "a worker tried and failed" — the first
+        // will never succeed on a retry, the second may.
+        let err = empty_router()
+            .route("poll://any@g", &execute_msg())
+            .await
+            .expect_err("no worker registered");
+        assert_eq!(err.cause, Cause::Unroutable);
+
+        let err = empty_router()
+            .route("not a url", &execute_msg())
+            .await
+            .expect_err("not a URI");
+        assert_eq!(err.cause, Cause::Unroutable);
+
+        // A registered worker that fails is a delivery failure, not unroutable.
+        struct FailingWorker;
+        #[async_trait]
+        impl ResonateWorker for FailingWorker {
+            async fn send(&self, _a: &str, _m: &Message) -> Result<(), Unavailable> {
+                Err(Unavailable::new("worker said no"))
+            }
+        }
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        workers.insert("poll".to_string(), Arc::new(FailingWorker));
+        let err = TransportDispatcher::new(workers)
+            .route("poll://any@g", &execute_msg())
+            .await
+            .expect_err("worker failed");
+        assert_eq!(err.cause, Cause::Delivery);
     }
 
     #[tokio::test]
