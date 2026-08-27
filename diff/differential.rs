@@ -41,6 +41,7 @@ use resonate_server_dbms::{
     oracle::{Oracle, SharedOracle},
     persistence_mysql::MysqlStorage,
     persistence_postgres::PostgresStorage,
+    persistence_postgres_single::PostgresSingleStorage,
     persistence_sqlite::SqliteStorage,
     Storage,
 };
@@ -148,8 +149,20 @@ async fn differential_random() {
         None
     };
 
+    let pg_url_single = pg_url.clone();
     let pg_backend: Option<Backend> = match pg_url {
         Some(url) => {
+            // The single-table backend lives in schema `resonate`. Postgres'
+            // default search_path is `"$user", public`, and the role here is
+            // also called `resonate` — so once that schema exists, `"$user"`
+            // resolves to it and the multi-table backend would silently read
+            // the single-table tables, comparing a backend against itself.
+            // Pin this connection to `public`.
+            let url = if url.contains('?') {
+                format!("{url}&options=-c%20search_path%3Dpublic")
+            } else {
+                format!("{url}?options=-c%20search_path%3Dpublic")
+            };
             let pg = PostgresStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
                 .await
                 .expect("postgres connect");
@@ -160,6 +173,25 @@ async fn differential_random() {
             eprintln!("[diff] TEST_POSTGRES_URL not set — PostgreSQL skipped");
             None
         }
+    };
+
+    // Ten tables collapsed into three, behind the same Db contract and so the
+    // same engine port. Skip with TEST_POSTGRES_SINGLE=0.
+    let pg_single_backend: Option<Backend> = match (
+        &pg_url_single,
+        std::env::var("TEST_POSTGRES_SINGLE").as_deref(),
+    ) {
+        (_, Ok("0")) => None,
+        (Some(url), _) => {
+            let pg = PostgresSingleStorage::connect(url, 5, TASK_RETRY_TIMEOUT_MS)
+                .await
+                .expect("postgres (single-table) connect");
+            pg.init()
+                .await
+                .expect("postgres (single-table) schema init");
+            Some(engine_backend(Storage::PostgresSingle(pg)))
+        }
+        (None, _) => None,
     };
 
     let my_backend: Option<Backend> = match my_url {
@@ -183,8 +215,39 @@ async fn differential_random() {
     if let Some(pg) = pg_backend {
         backends.push(("postgres".into(), pg));
     }
+    if let Some(pg) = pg_single_backend {
+        backends.push(("postgres-single".into(), pg));
+    }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
+    }
+
+    // Iterating on one backend does not need all of them, and a full run is
+    // slow enough to discourage running it. TEST_BACKENDS=sqlite,sqlite-single
+    // narrows the comparison; unset runs everything available.
+    if let Ok(want) = std::env::var("TEST_BACKENDS") {
+        let want: Vec<&str> = want
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        for name in &want {
+            assert!(
+                backends.iter().any(|(n, _)| n == name),
+                "TEST_BACKENDS names '{name}', which is not available; have: {}",
+                backends
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        backends.retain(|(n, _)| want.contains(&n.as_str()));
+        assert!(
+            backends.len() >= 2,
+            "a differential needs at least two backends, got {}",
+            backends.len()
+        );
     }
 
     let names: Vec<&str> = backends.iter().map(|(n, _)| n.as_str()).collect();
