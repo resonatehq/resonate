@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
+use crate::engine_port::ResonateEngine;
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
@@ -2344,5 +2345,20 @@ impl ResonateServer for SharedOracle {
             oracle.apply(req)
         };
         Ok(resp)
+    }
+}
+
+/// The reference model as an engine.
+///
+/// `apply` already takes the effective time out of `head.debug_time`, so the
+/// engine contract — same request, same instant, same response — is what it
+/// has always provided.
+#[async_trait]
+impl ResonateEngine for SharedOracle {
+    async fn process(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let mut req = req.clone();
+        req.head.debug_time = Some(now);
+        let mut oracle = self.lock();
+        oracle.apply(&req)
     }
 }

@@ -33,10 +33,11 @@ fn db_lock() -> &'static Mutex<()> {
     DB_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-use resonate::{config::Config, server::Server};
 use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
-use resonate_core::ResonateServer;
+
 use resonate_server_dbms::{
+    engine::Engine,
+    engine_port::ResonateEngine,
     oracle::{Oracle, SharedOracle},
     persistence_mysql::MysqlStorage,
     persistence_postgres::PostgresStorage,
@@ -79,10 +80,6 @@ const ALL_OPS: &[&str] = &[
     "debug.tick",
 ];
 
-fn debug_config() -> Config {
-    serde_json::from_value(json!({ "debug": true })).expect("valid default config")
-}
-
 fn req(kind: &str, data: Value) -> RequestEnvelope {
     RequestEnvelope {
         kind: kind.to_string(),
@@ -100,10 +97,11 @@ fn req(kind: &str, data: Value) -> RequestEnvelope {
 // Backend abstraction
 // ---------------------------------------------------------------------------
 
-// A backend is anything that answers the protocol. The real server, the
-// reference model, and (eventually) a client for a remote server are all the
-// same thing here — that is the point of the port.
-type Backend = Arc<dyn ResonateServer>;
+// A backend is any implementation of durable state. Comparing engines rather
+// than servers keeps the server layer — envelope validation, the clock gate,
+// the HTTP edge — out of the comparison, so a divergence is a divergence in
+// the thing being tested.
+type Backend = Arc<dyn ResonateEngine>;
 
 /// Send one request to a backend at time `now`.
 ///
@@ -111,16 +109,11 @@ type Backend = Arc<dyn ResonateServer>;
 /// effective time from `head.debug_time`, identically for every backend. The
 /// server gates that on `config.debug`, which `debug_config()` enables.
 async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> ResponseEnvelope {
-    let mut req = envelope.clone();
-    req.head.debug_time = Some(now);
-    backend
-        .process(&req)
-        .await
-        .expect("in-process backends are always available")
+    backend.process(envelope, now).await
 }
 
-fn server_backend(storage: Storage) -> Backend {
-    Arc::new(Server::new(debug_config(), None, storage))
+fn engine_backend(storage: Storage) -> Backend {
+    Arc::new(Engine::new(Arc::new(storage), true))
 }
 
 // Pick a random element from a slice.
@@ -161,7 +154,7 @@ async fn differential_random() {
                 .await
                 .expect("postgres connect");
             pg.init().await.expect("postgres schema init");
-            Some(server_backend(Storage::Postgres(pg)))
+            Some(engine_backend(Storage::Postgres(pg)))
         }
         None => {
             eprintln!("[diff] TEST_POSTGRES_URL not set — PostgreSQL skipped");
@@ -175,7 +168,7 @@ async fn differential_random() {
                 .await
                 .expect("mysql connect");
             my.init().await.expect("mysql schema init");
-            Some(server_backend(Storage::Mysql(my)))
+            Some(engine_backend(Storage::Mysql(my)))
         }
         None => {
             eprintln!("[diff] TEST_MYSQL_URL not set — MySQL skipped");
@@ -184,7 +177,7 @@ async fn differential_random() {
     };
 
     let mut backends: Vec<(String, Backend)> = vec![
-        ("sqlite".into(), server_backend(Storage::Sqlite(sqlite))),
+        ("sqlite".into(), engine_backend(Storage::Sqlite(sqlite))),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
     if let Some(pg) = pg_backend {

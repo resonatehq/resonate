@@ -11,6 +11,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
     PromiseRegisterListenerData, PromiseResponseData, PromiseSearchData, PromiseSearchResponseData,
@@ -22,6 +23,8 @@ use resonate_core::types::{
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
     TaskSuspendData, TaskSuspendPreloadData,
 };
+
+use crate::engine_port::ResonateEngine;
 use resonate_core::util;
 
 use crate::Db;
@@ -2370,4 +2373,11 @@ fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<usize> {
     }
 
     Ok(fired)
+}
+
+#[async_trait]
+impl ResonateEngine for Engine {
+    async fn process(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        self.dispatch(req, now).await
+    }
 }
