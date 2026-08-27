@@ -12,7 +12,7 @@ use resonate_core::types::{
     UnblockMsgHead,
 };
 use resonate_core::ResonateRouter;
-use resonate_server_dbms::Storage;
+use resonate_server_dbms::engine::Engine;
 
 /// Background message processing loop.
 pub async fn message_processing_loop(
@@ -32,22 +32,12 @@ pub async fn message_processing_loop(
             }
         }
 
-        if state
-            .engine
-            .debug_mode
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
+        if state.engine.is_paused() {
             continue;
         }
 
         let server_url = state.config.server.url.clone().unwrap_or_default();
-        process_batch(
-            &state.engine.storage,
-            router.as_ref(),
-            batch_size,
-            &server_url,
-        )
-        .await;
+        process_batch(&state.engine, router.as_ref(), batch_size, &server_url).await;
     }
 }
 
@@ -55,15 +45,12 @@ pub async fn message_processing_loop(
 ///
 /// Called by the background loop and `debug.tick`.
 pub async fn process_batch(
-    storage: &Storage,
+    engine: &Engine,
     router: &dyn ResonateRouter,
     batch_size: i64,
     server_url: &str,
 ) {
-    let (execute_msgs, unblock_msgs) = match storage
-        .transact(move |db| db.take_outgoing(batch_size))
-        .await
-    {
+    let (execute_msgs, unblock_msgs) = match engine.take_outgoing(batch_size).await {
         Ok(msgs) => msgs,
         Err(e) => {
             tracing::error!(error = %e, "Failed to take outgoing messages: storage error");
@@ -260,7 +247,7 @@ mod tests {
 
         // First pass with nothing registered: the message is dequeued and dropped.
         process_batch(
-            &server.engine.storage,
+            &server.engine,
             &empty_router(),
             100,
             "http://localhost:8001",
@@ -269,7 +256,7 @@ mod tests {
 
         let stub = Arc::new(RecordingWorker::new());
         process_batch(
-            &server.engine.storage,
+            &server.engine,
             &router_with("http", stub.clone()),
             100,
             "http://localhost:8001",
@@ -279,16 +266,11 @@ mod tests {
 
         // Advance past the task retry timeout and let timeout processing run.
         let retry_deadline = 1_000_000 + 60_000;
-        server
-            .engine
-            .storage
-            .transact(move |db| db.process_timeouts(retry_deadline))
-            .await
-            .unwrap();
+        server.engine.tick(retry_deadline).await.unwrap();
 
         // The message should be back.
         process_batch(
-            &server.engine.storage,
+            &server.engine,
             &router_with("http", stub.clone()),
             100,
             "http://localhost:8001",
@@ -314,13 +296,7 @@ mod tests {
         let stub = Arc::new(RecordingWorker::new());
         let dispatcher = router_with("http", stub.clone());
 
-        process_batch(
-            &server.engine.storage,
-            &dispatcher,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &dispatcher, 100, "http://localhost:8001").await;
 
         let calls = stub.calls();
         assert_eq!(calls.len(), 1, "expected exactly one HTTP dispatch");
@@ -337,24 +313,12 @@ mod tests {
 
         // First pass: http_push disabled — message is consumed from queue and dropped.
         let disabled = empty_router();
-        process_batch(
-            &server.engine.storage,
-            &disabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: http_push now enabled — queue should already be empty.
         let stub = Arc::new(RecordingWorker::new());
         let enabled = router_with("http", stub.clone());
-        process_batch(
-            &server.engine.storage,
-            &enabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(
             stub.calls().len(),
@@ -371,13 +335,7 @@ mod tests {
         let stub = Arc::new(RecordingWorker::new());
         let dispatcher = router_with("poll", stub.clone());
 
-        process_batch(
-            &server.engine.storage,
-            &dispatcher,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &dispatcher, 100, "http://localhost:8001").await;
 
         let calls = stub.calls();
         assert_eq!(calls.len(), 1, "expected exactly one poll dispatch");
@@ -394,23 +352,11 @@ mod tests {
         create_task_with_target(&server, "task-4", "poll://any@default").await;
 
         let disabled = empty_router();
-        process_batch(
-            &server.engine.storage,
-            &disabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &disabled, 100, "http://localhost:8001").await;
 
         let stub = Arc::new(RecordingWorker::new());
         let enabled = router_with("poll", stub.clone());
-        process_batch(
-            &server.engine.storage,
-            &enabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(stub.calls().len(), 0);
     }
@@ -439,13 +385,7 @@ mod tests {
         let stub = Arc::new(RecordingWorker::new());
         let dispatcher = router_with("poll", stub.clone());
 
-        process_batch(
-            &server.engine.storage,
-            &dispatcher,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &dispatcher, 100, "http://localhost:8001").await;
 
         let calls = stub.calls();
         assert_eq!(calls.len(), 1, "expected exactly one unblock dispatch");
@@ -476,24 +416,12 @@ mod tests {
 
         // First pass: poll disabled — message consumed and dropped.
         let disabled = empty_router();
-        process_batch(
-            &server.engine.storage,
-            &disabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &disabled, 100, "http://localhost:8001").await;
 
         // Second pass: poll enabled — queue already drained.
         let stub = Arc::new(RecordingWorker::new());
         let enabled = router_with("poll", stub.clone());
-        process_batch(
-            &server.engine.storage,
-            &enabled,
-            100,
-            "http://localhost:8001",
-        )
-        .await;
+        process_batch(&server.engine, &enabled, 100, "http://localhost:8001").await;
 
         assert_eq!(stub.calls().len(), 0);
     }

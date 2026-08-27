@@ -36,13 +36,17 @@ use crate::{
 };
 
 /// Durable state, and every transition over it.
+///
+/// The storage handle is private: everything callers need is a method here, so
+/// that how a transition reaches the database stays this type's business. That
+/// is what lets the internals change — which they are about to.
 pub struct Engine {
-    pub storage: Arc<Storage>,
+    storage: Arc<Storage>,
     /// Whether `debug.*` operations are permitted at all.
-    pub debug: bool,
+    debug: bool,
     /// Set by `debug.start` / `debug.stop`; pauses the background loops so a
     /// test can drive the clock with `debug.tick`.
-    pub debug_mode: AtomicBool,
+    debug_mode: AtomicBool,
 }
 
 impl Engine {
@@ -52,6 +56,39 @@ impl Engine {
             debug,
             debug_mode: AtomicBool::new(false),
         }
+    }
+
+    /// Is the engine paused? `debug.start` sets this, and the background loops
+    /// honour it so a test can drive the clock with `debug.tick` instead of
+    /// racing wall time.
+    pub fn is_paused(&self) -> bool {
+        self.debug_mode.load(Ordering::SeqCst)
+    }
+
+    /// Lightweight liveness probe.
+    pub async fn ping(&self) -> StorageResult<()> {
+        self.storage.query(|db| db.ping()).await
+    }
+
+    /// One tick of the timer wheel: the three timeout sweeps, then expired
+    /// schedules. Returns how many schedules fired, for the caller to record.
+    pub async fn tick(&self, now: i64) -> StorageResult<usize> {
+        self.storage
+            .transact(move |db| process_all_timeouts(db, now))
+            .await
+    }
+
+    /// Claim a batch of outgoing messages.
+    ///
+    /// Temporary. Once a transition returns what it emitted, nothing is queued
+    /// and this goes away with the outbox tables.
+    pub async fn take_outgoing(
+        &self,
+        batch_size: i64,
+    ) -> StorageResult<(Vec<crate::OutgoingExecute>, Vec<crate::OutgoingUnblock>)> {
+        self.storage
+            .transact(move |db| db.take_outgoing(batch_size))
+            .await
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {

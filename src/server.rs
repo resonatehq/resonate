@@ -120,7 +120,7 @@ async fn handle_health() -> StatusCode {
 }
 
 async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
-    match state.server.engine.storage.query(|db| db.ping()).await {
+    match state.server.engine.ping().await {
         Ok(()) => StatusCode::OK,
         Err(e) => {
             tracing::error!(error = %e, "Readiness check failed: storage database unavailable");

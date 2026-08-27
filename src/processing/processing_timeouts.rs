@@ -9,7 +9,6 @@ use std::time::Duration;
 use crate::metrics;
 use crate::server::Server;
 use resonate_core::util;
-use resonate_server_dbms::engine::process_all_timeouts;
 
 /// Background timeout processing loop.
 pub async fn timeout_processing_loop(
@@ -27,21 +26,12 @@ pub async fn timeout_processing_loop(
             }
         }
 
-        if state
-            .engine
-            .debug_mode
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
+        if state.engine.is_paused() {
             continue;
         }
 
         let now = util::system_time_ms();
-        match state
-            .engine
-            .storage
-            .transact(move |db| process_all_timeouts(db, now))
-            .await
-        {
+        match state.engine.tick(now).await {
             // The engine reports what happened; recording it is the caller's
             // job, the same way the router counts deliveries and the workers
             // do not.
