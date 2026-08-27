@@ -69,6 +69,7 @@ from resonate.core import (
 )
 from resonate.error import ResonateError
 from resonate.registry import Registry
+from resonate.testing import RecordingTaskLifecycle, UnusedFencing
 from resonate.types import PromiseCreateReq, PromiseRecord, Value
 
 if TYPE_CHECKING:
@@ -159,7 +160,12 @@ def _setup(reg: Registry) -> tuple[Core, MockEffects, PromiseRecord]:
     ``TaskData`` naming the registered ``"func"``.
     """
     core = Core(
-        sender=None,
+        # The inner loop touches neither port; these stand-ins make that a
+        # *checked* claim -- either would fail the test loudly if called,
+        # where the previous ``sender=None`` merely tripped an assert in
+        # production code.
+        sender=RecordingTaskLifecycle(),
+        fencing=UnusedFencing(),
         codec=Codec(NoopEncryptor()),
         registry=reg,
         resolver=identity_target_resolver,

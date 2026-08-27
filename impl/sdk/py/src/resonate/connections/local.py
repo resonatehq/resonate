@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import msgspec
 
-from resonate import PROTOCOL_VERSION, now_ms
+from resonate import PROTOCOL_VERSION
 from resonate.error import DecodingError, ServerError
+from resonate.timing import Clock, Sleeper, now_ms, sleep
 from resonate.types import PromiseState
 
 if TYPE_CHECKING:
@@ -1128,8 +1129,25 @@ class LocalConnection:
     asyncio tasks.
     """
 
-    def __init__(self, pid: str | None = None, group: str | None = None) -> None:
+    def __init__(
+        self,
+        pid: str | None = None,
+        group: str | None = None,
+        clock: Clock = now_ms,
+        sleeper: Sleeper = sleep,
+        tick_interval: float = 1.0,
+    ) -> None:
+        """Build an in-process server simulation.
+
+        ``clock``, ``sleeper`` and ``tick_interval`` are the test seams: the
+        deadline sweep reads ``clock`` rather than the wall clock and waits
+        ``tick_interval`` through ``sleeper``, so a test can drive promise
+        timeouts deterministically instead of waiting out real seconds.
+        """
         self.state = ServerState()
+        self._clock = clock
+        self._sleeper = sleeper
+        self._tick_interval = tick_interval
 
         self._pid = pid if pid is not None else "default"
         self._group = group if group is not None else "default"
@@ -1160,14 +1178,14 @@ class LocalConnection:
         # thereafter.
         with contextlib.suppress(asyncio.CancelledError):
             while True:
-                now = now_ms()
+                now = self._clock()
                 async with self._lock:
                     self.state.outgoing.clear()
                     self.state.tick(now)
                     outgoing = self.state.outgoing
                     self.state.outgoing = []
                 self._dispatch_messages(outgoing)
-                await asyncio.sleep(1)
+                await self._sleeper(self._tick_interval)
 
     async def stop(self) -> None:
         handle = self._tick_handle
@@ -1188,7 +1206,7 @@ class LocalConnection:
         # Unwrap envelope if present: extract flat request for internal processing.
         flat_req = unwrap_request_envelope(req_json)
 
-        now = now_ms()
+        now = self._clock()
         async with self._lock:
             flat_response = self.state.apply(now, flat_req)
             outgoing = self.state.outgoing

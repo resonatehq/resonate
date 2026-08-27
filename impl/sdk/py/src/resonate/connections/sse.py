@@ -8,17 +8,63 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 
+from resonate.retry import ExponentialBackoff
+from resonate.timing import sleep
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
+
+    from resonate.retry import Backoff
+    from resonate.timing import Sleeper
 
 logger = logging.getLogger(__name__)
 
+
 # =============================================================================
-# CONSTANTS
+# SSE framing -- pure, no IO
 # =============================================================================
 
-_INITIAL_BACKOFF_SECS = 1
-_MAX_BACKOFF_SECS = 60
+
+class SseFramer:
+    """Incremental SSE frame parser: bytes in, ``data:`` payloads out.
+
+    Extracted from the read loop so the framing rules -- events separated by a
+    blank line, every ``data:`` line in an event dispatched, a chunk boundary
+    falling mid-frame -- can be tested by calling a function with a ``bytes``
+    literal, instead of by standing up an HTTP server and a real socket.
+
+    Stateful across calls (a frame may span chunks) but entirely in-memory:
+    :meth:`feed` performs no IO and never raises.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+
+    def feed(self, chunk: bytes) -> list[str]:
+        """Absorb one chunk and return every complete ``data:`` payload in it.
+
+        A chunk that is not valid UTF-8 is discarded rather than raising: the
+        stream is a long-lived connection and one bad frame must not tear it
+        down. A partial frame is retained for the next call.
+        """
+        try:
+            self._buffer += chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            return []
+
+        out: list[str] = []
+        while "\n\n" in self._buffer:
+            block, self._buffer = self._buffer.split("\n\n", 1)
+            out.extend(_data_lines(block))
+        return out
+
+
+def _data_lines(block: str) -> Iterable[str]:
+    """Yield the payload of every ``data:`` line in one SSE event block."""
+    for line in block.splitlines():
+        data = _strip_data_prefix(line)
+        if data is not None:
+            yield data
 
 
 class SSEConnection:
@@ -42,7 +88,15 @@ class SSEConnection:
         pid: str | None = None,
         group: str | None = None,
         auth: str | None = None,
+        backoff: Backoff | None = None,
+        sleeper: Sleeper = sleep,
     ) -> None:
+        #: Reconnect ladder, shared with :class:`HttpConnection` so the two
+        #: cannot drift, and injectable so a test pins every delay to zero.
+        self._backoff: Backoff = (
+            backoff if backoff is not None else ExponentialBackoff()
+        )
+        self._sleeper = sleeper
         self._pid = pid if pid is not None else uuid.uuid4().hex
         self._group = group if group is not None else "default"
         self._unicast = f"poll://uni@{self._group}/{self._pid}"
@@ -128,69 +182,59 @@ class SSEConnection:
         """Connect to the SSE endpoint, reconnecting with exponential backoff."""
         url = f"{self._url}/poll/{self._group}/{self._pid}"
         headers = self._auth_headers({"Accept": "text/event-stream"})
-        backoff = _INITIAL_BACKOFF_SECS
+        attempt = 0
         with contextlib.suppress(asyncio.CancelledError):
             while self._running:
                 try:
                     session = self._ensure_session()
                     async with session.get(url, headers=headers) as resp:
                         if not (200 <= resp.status < 300):
+                            delay = self._backoff.delay(attempt)
                             logger.warning(
                                 "SSE endpoint returned %s, retrying (backoff=%ss)",
                                 resp.status,
-                                backoff,
+                                delay,
                             )
-                            await asyncio.sleep(backoff)
-                            backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
+                            await self._sleeper(delay)
+                            attempt += 1
                             continue
 
                         # Connection succeeded, reset backoff.
-                        backoff = _INITIAL_BACKOFF_SECS
+                        attempt = 0
                         logger.info("SSE connection established: %s", url)
                         await self._read_stream(resp)
                 except asyncio.CancelledError:
                     raise
                 except aiohttp.ClientError as exc:
+                    delay = self._backoff.delay(attempt)
                     logger.warning(
                         "SSE connection failed, retrying (backoff=%ss): %s",
-                        backoff,
+                        delay,
                         exc,
                     )
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
+                    await self._sleeper(delay)
+                    attempt += 1
                     continue
 
                 if not self._running:
                     break
-                logger.info(
-                    "SSE connection closed, reconnecting (backoff=%ss)", backoff
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
+                delay = self._backoff.delay(attempt)
+                logger.info("SSE connection closed, reconnecting (backoff=%ss)", delay)
+                await self._sleeper(delay)
+                attempt += 1
 
     async def _read_stream(self, resp: aiohttp.ClientResponse) -> None:
-        """Parse the SSE byte stream and dispatch each ``data:`` line.
+        """Pump the response body through :class:`SseFramer` and dispatch.
 
-        SSE events are separated by a blank line; every ``data:`` line in an
-        event is dispatched to each subscriber.
+        Pure IO: every framing decision lives in :class:`SseFramer`, so this
+        method is a loop with no logic to get wrong.
         """
-        buffer = ""
+        framer = SseFramer()
         async for chunk in resp.content.iter_any():
-            try:
-                text = chunk.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-            buffer += text
-
-            while "\n\n" in buffer:
-                block, buffer = buffer.split("\n\n", 1)
-                for line in block.splitlines():
-                    data = _strip_data_prefix(line)
-                    if data is None:
-                        continue
-                    logger.debug("sse_connection sse_recv: %s", data)
-                    for cb in list(self._subscribers):
-                        cb(data)
+            for data in framer.feed(chunk):
+                logger.debug("sse_connection sse_recv: %s", data)
+                for cb in list(self._subscribers):
+                    cb(data)
 
 
 def _strip_data_prefix(line: str) -> str | None:

@@ -1,152 +1,148 @@
+"""Heartbeat behaviour, driven one beat at a time.
+
+These tests used to say ``await asyncio.sleep(0.12)`` and hope two 50ms beats
+had landed -- slow, and flaky on a loaded CI box. The interval is now an
+injected :class:`~resonate.testing.ManualSleeper`, so a test releases exactly
+the beats it wants and asserts on exactly those.
+"""
+
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import msgspec
 import pytest
+from resonate_testing import RecordingNetwork
 
 from resonate.heartbeat import AsyncHeartbeat, NoopHeartbeat
 from resonate.send import Sender
+from resonate.testing import ManualSleeper
 from resonate.transport import Transport
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 
 # -- Test harness -------------------------------------------------------------
 
 
-class _RecordingNetwork:
-    """A ``Network`` stub that records every sent body and echoes a 200 reply.
-
-    It records each raw envelope and replies with the matching ``kind`` /
-    ``corrId`` so :class:`Transport` validation passes.
-    """
-
-    def __init__(self, sent: list[str]) -> None:
-        self.sent = sent
-
-    def pid(self) -> str:
-        return "test-pid"
-
-    def group(self) -> str:
-        return "default"
-
-    def unicast(self) -> str:
-        return "local://uni@default/test-pid"
-
-    def anycast(self) -> str:
-        return "local://any@default/test-pid"
-
-    async def start(self) -> None: ...
-
-    async def stop(self) -> None: ...
-
-    def recv(self, callback: Callable[[str], None]) -> None: ...
-
-    def target_resolver(self, target: str) -> str:
-        return f"local://any@{target}"
-
-    async def send(self, req: str) -> str:
-        self.sent.append(req)
-        parsed = msgspec.json.decode(req)
-        kind = parsed["kind"]
-        corr_id = parsed["head"]["corrId"]
-        return msgspec.json.encode(
-            {"kind": kind, "head": {"corrId": corr_id, "status": 200}, "data": {}}
-        ).decode("utf-8")
-
-
 class Harness:
-    """Records sent requests and builds a :class:`Sender` over them."""
+    """A heartbeat wired to a recording network and a hand-driven sleeper."""
 
-    def __init__(self) -> None:
-        self.sent: list[str] = []
+    def __init__(self, interval_ms: int = 50) -> None:
+        self.net = RecordingNetwork()
+        self.sleeper = ManualSleeper()
+        self.heartbeat = AsyncHeartbeat(
+            "test-pid", interval_ms, Sender(Transport(self.net), None), self.sleeper
+        )
 
-    def build_sender(self) -> Sender:
-        return Sender(Transport(_RecordingNetwork(self.sent)), None)
+    async def beat(self, times: int = 1) -> None:
+        """Let the loop complete ``times`` further iterations."""
+        await self.sleeper.tick(times)
 
-    def sent_requests_json(self) -> list[dict[str, Any]]:
-        """Return sent requests as flattened JSON (``data`` fields plus ``kind``)."""
+    def heartbeats(self) -> list[dict[str, Any]]:
+        """Every ``task.heartbeat`` request sent, as decoded ``data`` payloads."""
         out: list[dict[str, Any]] = []
-        for raw in self.sent:
+        for raw in self.net.sent:
             req = msgspec.json.decode(raw)
-            if isinstance(req, dict) and "head" in req and "data" in req:
-                data = req.get("data")
-                flat: dict[str, Any] = dict(data) if isinstance(data, dict) else {}
-                if "kind" in req:
-                    flat["kind"] = req["kind"]
-                out.append(flat)
-            else:
-                out.append(req)
+            if req.get("kind") == "task.heartbeat":
+                out.append(req["data"])
         return out
 
-
-def _test_heartbeat(sender: Sender) -> AsyncHeartbeat:
-    return AsyncHeartbeat("test-pid", 50, sender)
+    def last_task_ids(self) -> list[str]:
+        """Ids carried by the most recent heartbeat."""
+        tasks: list[dict[str, Any]] = self.heartbeats()[-1]["tasks"]
+        return sorted(t["id"] for t in tasks)
 
 
 # ── Heartbeat sends ────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
+async def test_first_beat_is_immediate() -> None:
+    """The loop beats on start, before consulting the sleeper."""
+    h = Harness()
+    h.heartbeat.start("task-1", 1)
+
+    # No tick released yet: the first beat must already have gone out.
+    await _settle()
+
+    assert len(h.heartbeats()) == 1
+    h.heartbeat.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_sends_request_with_tracked_tasks() -> None:
-    harness = Harness()
-    hb = _test_heartbeat(harness.build_sender())
+    h = Harness()
+    h.heartbeat.start("task-1", 1)
+    h.heartbeat.start("task-2", 5)
 
-    hb.start("task-1", 1)
-    hb.start("task-2", 5)
+    await h.beat()
 
-    # Wait for at least one heartbeat tick.
-    await asyncio.sleep(0.12)
-
-    hb.shutdown()
-
-    requests = harness.sent_requests_json()
-    heartbeats = [r for r in requests if r.get("kind") == "task.heartbeat"]
-
-    assert heartbeats, "should have sent at least one heartbeat"
-
-    # Check the last heartbeat contains both tasks.
-    last_hb = heartbeats[-1]
-    assert last_hb["pid"] == "test-pid"
-
-    tasks = last_hb["tasks"]
-    assert len(tasks) == 2
-
-    ids = [t["id"] for t in tasks]
-    assert "task-1" in ids
-    assert "task-2" in ids
+    assert h.heartbeats(), "should have sent at least one heartbeat"
+    assert h.heartbeats()[-1]["pid"] == "test-pid"
+    assert h.last_task_ids() == ["task-1", "task-2"]
+    h.heartbeat.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_heartbeat_reflects_task_removal() -> None:
-    harness = Harness()
-    hb = _test_heartbeat(harness.build_sender())
+    h = Harness()
+    h.heartbeat.start("task-1", 1)
+    h.heartbeat.start("task-2", 2)
+    await h.beat()
+    assert h.last_task_ids() == ["task-1", "task-2"]
 
-    hb.start("task-1", 1)
-    hb.start("task-2", 2)
+    h.heartbeat.stop("task-1")
+    await h.beat()
 
-    # Wait for a heartbeat with both tasks.
-    await asyncio.sleep(0.08)
+    assert h.last_task_ids() == ["task-2"]
+    h.heartbeat.shutdown()
 
-    # Remove task-1.
-    hb.stop("task-1")
 
-    # Wait for another heartbeat with only task-2.
-    await asyncio.sleep(0.08)
+@pytest.mark.asyncio
+async def test_beats_use_the_configured_interval() -> None:
+    """The loop sleeps ``interval_ms / 1000`` between beats -- assert the list.
 
-    hb.shutdown()
+    The delay sequence is the policy's real behaviour; previously it was
+    unobservable and only the *effect* of sleeping could be waited on.
+    """
+    h = Harness(interval_ms=250)
+    h.heartbeat.start("task-1", 1)
 
-    requests = harness.sent_requests_json()
-    heartbeats = [r for r in requests if r.get("kind") == "task.heartbeat"]
+    await h.beat(3)
 
-    # The last heartbeat should only contain task-2.
-    last_hb = heartbeats[-1]
-    tasks = last_hb["tasks"]
-    assert len(tasks) == 1
-    assert tasks[0]["id"] == "task-2"
+    assert h.sleeper.delays[:3] == [0.25, 0.25, 0.25]
+    h.heartbeat.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_beat_with_no_tasks_sends_nothing() -> None:
+    """A tracked-then-untracked heartbeat keeps looping but stops sending."""
+    h = Harness()
+    h.heartbeat.start("task-1", 1)
+    await h.beat()
+    before = len(h.heartbeats())
+
+    # ``stop`` of the last task cancels the loop entirely.
+    h.heartbeat.stop("task-1")
+    await _settle()
+
+    assert len(h.heartbeats()) == before
+    h.heartbeat.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_send_failure_does_not_kill_the_loop() -> None:
+    """A failed beat is logged and the next one still goes out."""
+    h = Harness()
+    h.heartbeat.start("task-1", 1)
+    await h.beat()
+
+    # Fail exactly the next send, then recover.
+    h.net.fail_next(RuntimeError("network down"))
+    await h.beat()
+    await h.beat()
+
+    assert len(h.heartbeats()) >= 2
+    h.heartbeat.shutdown()
 
 
 # ── NoopHeartbeat ──────────────────────────────────────────────
@@ -159,3 +155,9 @@ def test_noop_heartbeat_start_stop_shutdown_are_harmless() -> None:
     hb.stop("task-1")
     hb.stop("nonexistent")
     hb.shutdown()
+
+
+async def _settle() -> None:
+    """Yield enough turns for pending event-loop work to run."""
+    for _ in range(5):
+        await asyncio.sleep(0)

@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, Any
 import msgspec
 
 from resonate.error import DecodingError, ServerError
+from resonate.observability import Dropped, logging_observer
 from resonate.types import PromiseRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from resonate.connections import Network, Source
+    from resonate.observability import Observer
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +67,37 @@ Message = ExecuteMsg | UnblockMsg
 
 
 # =============================================================================
-# Envelope helpers
+# Outgoing responses (send path)
 # =============================================================================
 
 
-def _nested_str(value: Any, *keys: str) -> str:
-    """Walk nested mapping ``keys`` and return the final string, or ``""``.
+class ResponseHead(msgspec.Struct, kw_only=True, frozen=True, rename="camel"):
+    """The ``head`` of a protocol response envelope.
 
-    Any missing key, non-mapping node, or non-string leaf collapses to ``""``.
+    Every field is defaulted: a server that omits ``head`` entirely, or any
+    field within it, is a *valid* response meaning "200, no correlation echo",
+    and the mismatch checks in :meth:`Transport.send` catch the cases that
+    matter. Defaulting here is what lets the rest of the SDK read
+    ``resp.head.status`` unconditionally instead of re-deriving it behind
+    ``isinstance`` guards at every call site.
     """
-    for key in keys:
-        if not isinstance(value, dict):
-            return ""
-        value = value.get(key)
-    return value if isinstance(value, str) else ""
+
+    corr_id: str = ""
+    status: int = 200
+
+
+class Response(msgspec.Struct, kw_only=True, frozen=True):
+    """A parsed protocol response envelope: ``{ kind, head, data }``.
+
+    The single parse boundary for everything arriving over the
+    :class:`~resonate.connections.Network`. Below this point the SDK works
+    with a typed value and never asks "is this a dict?" again -- the shape
+    questions are all answered here, once.
+    """
+
+    kind: str = ""
+    head: ResponseHead = msgspec.field(default_factory=ResponseHead)
+    data: Any = msgspec.field(default_factory=dict)
 
 
 # =============================================================================
@@ -92,33 +111,49 @@ class Transport:
     Resonate and its sub-components use the transport -- never the raw
     connections. Requests go out over the single ``network``; push messages
     come in over every ``source``.
+
+    ``observer`` receives a :class:`~resonate.observability.Dropped` event for
+    each incoming push message that cannot be parsed, so the drop is
+    assertable rather than merely logged.
     """
 
-    def __init__(self, network: Network, sources: Sequence[Source] = ()) -> None:
+    def __init__(
+        self,
+        network: Network,
+        sources: Sequence[Source] = (),
+        observer: Observer = logging_observer,
+    ) -> None:
         self._network = network
         self._sources = tuple(sources)
+        self._observer = observer
 
-    async def send(self, kind: str, corr_id: str, body: str) -> Any:
-        """Send an already-serialized request, returning the parsed response."""
+    async def send(self, kind: str, corr_id: str, body: str) -> Response:
+        """Send an already-serialized request, returning the parsed response.
+
+        Parses at the edge: the raw JSON is decoded straight into
+        :class:`Response`, so callers receive a typed value whose ``status``
+        and ``corrId`` have already been validated.
+        """
         logger.debug("transport send_req: %s", body)
 
         resp_str = await self._network.send(body)
         logger.debug("transport send_res: %s", resp_str)
 
         try:
-            response = msgspec.json.decode(resp_str)
-        except msgspec.DecodeError as exc:
+            response = msgspec.json.decode(resp_str, type=Response)
+        except msgspec.MsgspecError as exc:
             msg = f"invalid response JSON: {exc}, resp: {resp_str}"
             raise DecodingError(msg) from exc
 
-        resp_kind = _nested_str(response, "kind")
-        if resp_kind != kind:
-            msg = f"response kind mismatch: expected '{kind}', got '{resp_kind}'"
+        if response.kind != kind:
+            msg = f"response kind mismatch: expected '{kind}', got '{response.kind}'"
             raise ServerError(500, msg)
 
-        resp_corr = _nested_str(response, "head", "corrId")
-        if resp_corr != corr_id:
-            msg = f"response corrId mismatch: expected '{corr_id}', got '{resp_corr}'"
+        if response.head.corr_id != corr_id:
+            msg = (
+                f"response corrId mismatch: expected '{corr_id}', "
+                f"got '{response.head.corr_id}'"
+            )
             raise ServerError(500, msg)
 
         return response
@@ -130,6 +165,7 @@ class Transport:
             try:
                 msg = msgspec.json.decode(raw, type=Message)
             except msgspec.MsgspecError as exc:
+                self._observer(Dropped(what="incoming-message", id="", cause=str(exc)))
                 logger.warning(
                     "failed to parse incoming message: %s; raw: %s", exc, raw
                 )

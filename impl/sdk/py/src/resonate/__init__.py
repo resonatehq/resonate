@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import time
+from resonate.timing import Clock, Sleeper, now_ms, sleep
 
 #: Protocol version string sent in all requests to the Resonate server.
 PROTOCOL_VERSION = "2026-04-01"
 
-
-def now_ms() -> int:
-    """Return the current time in milliseconds since the UNIX epoch."""
-    return time.time_ns() // 1_000_000
+__all__ = ["PROTOCOL_VERSION", "Clock", "Sleeper", "now_ms", "sleep"]

@@ -57,3 +57,46 @@ class Constant(msgspec.Struct, frozen=True, kw_only=True):
 class Never(msgspec.Struct, frozen=True, kw_only=True):
     def next(self, attempt: int) -> int | None:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Connection backoff -- reconnect/resend, never gives up
+# ═══════════════════════════════════════════════════════════════
+
+
+class Backoff(Protocol):
+    def delay(self, attempt: int) -> float:
+        """Return seconds to wait before ``attempt``.
+
+        Distinct from :class:`RetryPolicy`: a connection retries *forever* (a
+        server being down is not a reason to abandon a durable workflow), so
+        there is no ``None`` stop signal and the delay is a ``float``.
+        ``attempt`` is the number of consecutive failures so far, starting at
+        ``0`` for the first retry.
+        """
+
+
+class ExponentialBackoff(msgspec.Struct, frozen=True, kw_only=True):
+    """Doubling backoff, capped -- the connection layer's reconnect ladder.
+
+    Shared by :class:`~resonate.connections.HttpConnection` (resend) and
+    :class:`~resonate.connections.SSEConnection` (reconnect) so the two cannot
+    drift, and injectable so a test can pin every delay to zero instead of
+    waiting out a real ``1s -> 60s`` ladder.
+    """
+
+    initial: float = 1.0
+    factor: float = 2.0
+    max_delay: float = 60.0
+
+    def delay(self, attempt: int) -> float:
+        if attempt < 0:
+            return self.initial
+        return min(self.initial * self.factor**attempt, self.max_delay)
+
+
+class NoBackoff(msgspec.Struct, frozen=True, kw_only=True):
+    """Retry immediately, forever. For tests that assert attempt counts."""
+
+    def delay(self, attempt: int) -> float:
+        return 0.0

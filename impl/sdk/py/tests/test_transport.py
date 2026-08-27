@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 import msgspec
 import pytest
+from resonate_testing import StubNetwork, envelope
 
 from resonate.error import DecodingError, ServerError
 from resonate.transport import (
@@ -14,56 +14,6 @@ from resonate.transport import (
     UnblockMsg,
 )
 from resonate.types import PromiseRecord, Value
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-class StubNetwork:
-    """A minimal dual-role connection standing in for ``LocalConnection``.
-
-    Implements both ``Network`` and ``Source``. The stub plays the server:
-    ``send`` returns a canned response and ``recv`` captures the registered
-    callback so tests can feed it raw messages.
-    """
-
-    def __init__(self, response: str = "") -> None:
-        self.response = response
-        self.sent: list[str] = []
-        self.callbacks: list[Callable[[str], None]] = []
-
-    def pid(self) -> str:
-        return "test"
-
-    def group(self) -> str:
-        return "default"
-
-    def unicast(self) -> str:
-        return "local://uni@default/test"
-
-    def anycast(self) -> str:
-        return "local://any@default/test"
-
-    async def start(self) -> None: ...
-
-    async def stop(self) -> None: ...
-
-    async def send(self, req: str) -> str:
-        self.sent.append(req)
-        return self.response
-
-    def recv(self, callback: Callable[[str], None]) -> None:
-        self.callbacks.append(callback)
-
-    def target_resolver(self, target: str) -> str:
-        return f"local://any@{target}"
-
-
-def envelope(kind: str, corr_id: str, data: object) -> str:
-    return msgspec.json.encode(
-        {"kind": kind, "head": {"corrId": corr_id}, "data": data}
-    ).decode("utf-8")
-
 
 # -- send: envelope validation ------------------------------------------------
 
@@ -81,9 +31,10 @@ def test_send_and_validate_envelope_format() -> None:
     ).decode("utf-8")
 
     resp = asyncio.run(transport.send("promise.create", "env123", body))
-    assert resp["kind"] == "promise.create"
-    assert resp["head"]["corrId"] == "env123"
-    assert resp["data"]["promise"]["id"] == "p2"
+    assert resp.kind == "promise.create"
+    assert resp.head.corr_id == "env123"
+    assert resp.head.status == 200  # defaulted: the server omitted it
+    assert resp.data["promise"]["id"] == "p2"
 
 
 def test_send_passes_body_to_network() -> None:
@@ -129,7 +80,7 @@ def feed(transport: Transport, net: StubNetwork, raw: str) -> list[Message]:
     """Register a recv callback (fanned out to ``net`` as a source) and inject ``raw``."""
     received: list[Message] = []
     transport.recv(received.append)
-    net.callbacks[0](raw)
+    net.push(raw)
     return received
 
 

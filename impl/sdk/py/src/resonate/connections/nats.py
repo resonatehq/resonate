@@ -5,16 +5,13 @@ import contextlib
 import json
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from resonate.error import NatsError
 from resonate.ids import origin_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from nats.aio.client import Client
-    from nats.aio.subscription import Subscription
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +77,66 @@ def _publish_subject(prefix: str, origin: str) -> str:
     return f"{prefix}.{token.decode('ascii')}"
 
 
+# ═══════════════════════════════════════════════════════════════
+#  The client seam
+# ═══════════════════════════════════════════════════════════════
+#
+# ``NatsConnection`` used to take ``nats.aio.client.Client`` by name, which
+# meant its own IO -- ``start``, ``stop``, ``send``, ``_on_msg`` -- could only
+# be exercised against a real broker (or a hand-rolled mock of a class this
+# module does not own). These three protocols describe exactly the surface
+# this connection touches, nothing more, so a test can hand in a small fake
+# instead: the real ``nats-py`` client already implements them structurally,
+# with no inheritance required on either side.
+
+
+class NatsMsg(Protocol):
+    """The minimal ``nats.aio.msg.Msg`` surface :class:`NatsConnection` reads."""
+
+    data: bytes
+    subject: str
+
+
+@runtime_checkable
+class NatsSubscription(Protocol):
+    """The minimal ``nats.aio.subscription.Subscription`` surface this needs."""
+
+    async def unsubscribe(self, limit: int = 0) -> None: ...
+
+    # ``timeout`` mirrors ``nats-py``'s own ``Subscription.next_msg`` parameter
+    # name -- this seam calls into it by keyword, so the name must match.
+    async def next_msg(self, timeout: float | None = 1.0) -> NatsMsg: ...  # noqa: ASYNC109
+
+
+@runtime_checkable
+class NatsClient(Protocol):
+    """The minimal ``nats.aio.client.Client`` surface :class:`NatsConnection` needs.
+
+    A structural seam, not a copy of ``nats-py``'s ``Client``: any object with
+    these three methods satisfies it -- the real client, or a fake a test
+    constructs in memory. Pass an already-connected real client in production;
+    pass a fake in a test and ``start``/``stop``/``send``/message dispatch
+    become as testable as the rest of the SDK's connection logic.
+    """
+
+    def new_inbox(self) -> str: ...
+
+    async def subscribe(
+        self,
+        subject: str,
+        queue: str = "",
+        cb: Callable[[Any], Any] | None = None,
+        max_msgs: int = 0,
+    ) -> NatsSubscription: ...
+
+    async def publish(
+        self,
+        subject: str,
+        payload: bytes = b"",
+        headers: dict[str, str] | None = None,
+    ) -> None: ...
+
+
 class NatsConnection:
     """NATS connection to resonate-on-nats.
 
@@ -110,7 +167,7 @@ class NatsConnection:
 
     def __init__(
         self,
-        conn: Client,
+        conn: NatsClient,
         pid: str | None = None,
         group: str | None = None,
         *,
@@ -133,7 +190,7 @@ class NatsConnection:
         self._request_timeout = request_timeout
 
         self._subscribers: list[Callable[[str], None]] = []
-        self._subs: list[Subscription] = []
+        self._subs: list[NatsSubscription] = []
         self._running = False
 
     def pid(self) -> str:
@@ -215,7 +272,7 @@ class NatsConnection:
 
     # -- internals ------------------------------------------------------------
 
-    async def _on_msg(self, msg: Any) -> None:
+    async def _on_msg(self, msg: NatsMsg) -> None:
         try:
             data = msg.data.decode("utf-8")
         except UnicodeDecodeError:

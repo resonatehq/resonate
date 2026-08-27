@@ -6,9 +6,11 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 
 from resonate.send import TaskRef
+from resonate.timing import sleep
 
 if TYPE_CHECKING:
-    from resonate.send import Sender
+    from resonate.send import TaskHeartbeating
+    from resonate.timing import Sleeper
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +60,18 @@ class AsyncHeartbeat:
     ``await``.
     """
 
-    def __init__(self, pid: str, interval_ms: int, sender: Sender) -> None:
+    def __init__(
+        self,
+        pid: str,
+        interval_ms: int,
+        sender: TaskHeartbeating,
+        sleeper: Sleeper = sleep,
+    ) -> None:
         self.pid = pid
         self.interval_ms = interval_ms
         self.sender = sender
         self.active_tasks: dict[str, int] = {}
+        self._sleeper = sleeper
         self._handle: asyncio.Task[None] | None = None
 
     def _ensure_loop_running(self) -> None:
@@ -80,7 +89,7 @@ class AsyncHeartbeat:
                 if first:
                     first = False
                 else:
-                    await asyncio.sleep(interval)
+                    await self._sleeper(interval)
 
                 # Snapshot active tasks.
                 tasks = [

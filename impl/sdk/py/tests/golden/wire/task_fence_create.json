@@ -1,0 +1,29 @@
+{
+  "data": {
+    "action": {
+      "data": {
+        "id": "wf-1.1",
+        "param": {},
+        "tags": {
+          "resonate:branch": "wf-1",
+          "resonate:origin": "wf-1",
+          "resonate:parent": "wf-1",
+          "resonate:scope": "local"
+        },
+        "timeoutAt": 4611686018427387903
+      },
+      "head": {
+        "corrId": "sr-golden",
+        "version": "2026-04-01"
+      },
+      "kind": "promise.create"
+    },
+    "id": "t1",
+    "version": 3
+  },
+  "head": {
+    "corrId": "sr-golden",
+    "version": "2026-04-01"
+  },
+  "kind": "task.fence"
+}

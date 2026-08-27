@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 
 class ResonateError(Exception):
     """Top-level error type for the Resonate SDK."""
@@ -169,3 +171,87 @@ class ResonateTimeoutError(ResonateError):
 
     def __str__(self) -> str:
         return "timeout"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Per-boundary error vocabularies
+# ═══════════════════════════════════════════════════════════════
+#
+# Python models failure with exceptions, not ``Result`` values, so a function's
+# signature cannot carry its failure set. These aliases carry it instead: each
+# names the closed union one *boundary* is allowed to fail with, so the failure
+# space is documented in one place and the test plan falls out of the union --
+# one test per variant.
+#
+# They are checked, not decorative: :func:`_pin_unions` below makes the type
+# checker reject a variant added to a boundary without being added here.
+
+
+#: What a :class:`~resonate.send.Sender` call can fail with. Every one of these
+#: reaches the caller from the wire: a non-2xx status, an unparseable response,
+#: or the underlying connection giving up.
+type SenderError = ServerError | DecodingError | HttpError | NatsError
+
+#: What one durable operation (:mod:`resonate.effects`) can fail with -- the
+#: sender's vocabulary plus the codec's, plus the circuit-breaker's
+#: :class:`StoppedError` for an op skipped after a prior failure. This is the
+#: set that arrives wrapped in a :class:`PlatformError`'s ``causes``.
+type DurableOpError = (
+    SenderError | SerializationError | Base64DecodeError | StoppedError
+)
+
+#: What the SDK's *front door* (register / run / rpc / get) can fail with
+#: before any durable work starts.
+type DispatchError = (
+    FunctionNotFoundError | AlreadyRegisteredError | InvalidIdError | SenderError
+)
+
+
+if TYPE_CHECKING:
+    from typing import assert_never
+
+    def _pin_unions(
+        sender: SenderError,
+        durable: DurableOpError,
+        dispatch: DispatchError,
+    ) -> None:
+        """Compile-time test: the unions above cannot drift silently.
+
+        Never called. ``ty`` (run in CI) rejects this file if a member is
+        removed from a union without its ``case`` arm going too, or if an arm
+        is added that the union does not contain -- the Python equivalent of
+        pinning a signature with a ``const`` coercion.
+        """
+        match sender:
+            case ServerError() | DecodingError() | HttpError() | NatsError():
+                pass
+            case _:
+                assert_never(sender)
+
+        match durable:
+            case (
+                ServerError()
+                | DecodingError()
+                | HttpError()
+                | NatsError()
+                | SerializationError()
+                | Base64DecodeError()
+                | StoppedError()
+            ):
+                pass
+            case _:
+                assert_never(durable)
+
+        match dispatch:
+            case (
+                FunctionNotFoundError()
+                | AlreadyRegisteredError()
+                | InvalidIdError()
+                | ServerError()
+                | DecodingError()
+                | HttpError()
+                | NatsError()
+            ):
+                pass
+            case _:
+                assert_never(dispatch)

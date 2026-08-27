@@ -1519,6 +1519,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "resonate-testing" },
     { name = "ruff" },
     { name = "ty" },
     { name = "vulture" },
@@ -1544,6 +1545,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "resonate-testing", editable = "packages/resonate-testing" },
     { name = "ruff", specifier = ">=0.15.14" },
     { name = "ty", specifier = ">=0.0.39" },
     { name = "vulture", specifier = ">=2.16" },
@@ -1563,6 +1565,17 @@ requires-dist = [
     { name = "msgspec", specifier = ">=0.21.1,<1" },
     { name = "resonate-sdk", editable = "." },
 ]
+
+[[package]]
+name = "resonate-testing"
+version = "0.1.0"
+source = { editable = "packages/resonate-testing" }
+dependencies = [
+    { name = "msgspec" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "msgspec", specifier = ">=0.21.1,<1" }]
 
 [[package]]
 name = "rich"

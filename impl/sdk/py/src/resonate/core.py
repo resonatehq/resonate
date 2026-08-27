@@ -31,9 +31,11 @@ from resonate.error import (
 )
 from resonate.heartbeat import Heartbeat, NoopHeartbeat
 from resonate.ids import origin_of
+from resonate.observability import Observer, logging_observer
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy
-from resonate.send import Redirect, Sender
+from resonate.send import PromiseFencing, Redirect, TaskLifecycle
+from resonate.timing import Clock, Sleeper, now_ms, sleep
 from resonate.tree import Tree
 from resonate.types import (
     PromiseRegisterCallbackData,
@@ -99,7 +101,16 @@ class Core(msgspec.Struct, kw_only=True):
     context, making registered dependencies available to user functions.
     """
 
-    sender: Sender | None
+    #: The task lifecycle port -- acquire / fulfill / suspend / release. Narrow
+    #: and *required*: the inner execution loop never touches it, so a test that
+    #: only exercises the inner does not need one at all, and a test that
+    #: exercises the outer supplies a four-method recorder rather than ``None``.
+    sender: TaskLifecycle
+    #: The promise-fencing port used to build per-attempt
+    #: :class:`~resonate.effects.Effects`. Same object as ``sender`` in
+    #: production (a :class:`~resonate.send.Sender` satisfies both), separate
+    #: here so each can be faked independently.
+    fencing: PromiseFencing
     codec: Codec
     registry: Registry
     resolver: TargetResolver = msgspec.field(default=identity_target_resolver)
@@ -111,6 +122,13 @@ class Core(msgspec.Struct, kw_only=True):
     #: override registered. Threaded in from :class:`~resonate.Resonate`; defaults
     #: to ``Never`` so a directly-constructed :class:`Core` (tests) does not retry.
     retry_policy: RetryPolicy = msgspec.field(default_factory=Never)
+    #: Wall clock and sleeper handed to every root :class:`Context`, so a test
+    #: can pin child deadlines and observe retry delays without waiting.
+    clock: Clock = msgspec.field(default=now_ms)
+    sleeper: Sleeper = msgspec.field(default=sleep)
+    #: Receives the SDK's non-raising events (dropped records, durable-op
+    #: request/response pairs).
+    observer: Observer = msgspec.field(default=logging_observer)
 
     # ═══════════════════════════════════════════════════════════════
     #  Path 1: on_message -- acquire then execute
@@ -122,7 +140,6 @@ class Core(msgspec.Struct, kw_only=True):
         Acquires the task, decodes the root promise, and runs
         :meth:`execute_until_blocked_outer`.
         """
-        assert self.sender, "sender must be set"
         res = await self.sender.task_acquire(task_id, version, self.pid, self.ttl)
         logger.debug("core: task acquired task_id=%s", task_id)
 
@@ -193,7 +210,6 @@ class Core(msgspec.Struct, kw_only=True):
             return "suspended"
 
         self.heartbeat.start(task_id, task_version)
-        assert self.sender, "sender must be set"
         try:
             try:
                 logger.debug(
@@ -204,11 +220,12 @@ class Core(msgspec.Struct, kw_only=True):
                 current_preload = preload
                 while True:
                     effects = ResonateEffects(
-                        self.sender,
+                        self.fencing,
                         self.codec,
                         task_id,
                         task_version,
                         current_preload,
+                        self.observer,
                     )
                     outcome = await self.execute_until_blocked_inner(promise, effects)
 
@@ -389,6 +406,10 @@ class Core(msgspec.Struct, kw_only=True):
             # Share Core's registry so by-name ``ctx.run`` / by-object ``ctx.rpc``
             # resolve against the same functions this worker registered.
             registry=self.registry,
+            # Injected time: ``clock`` computes child deadlines, ``sleeper``
+            # paces retries. Defaults are the process-wide real ones.
+            clock=self.clock,
+            sleeper=self.sleeper,
         )
 
         suspended: bool = False

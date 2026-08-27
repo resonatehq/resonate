@@ -3,19 +3,23 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
 import aiohttp
 
 from resonate.error import HttpError
+from resonate.retry import ExponentialBackoff
+from resonate.timing import sleep
+
+if TYPE_CHECKING:
+    from resonate.retry import Backoff
+    from resonate.timing import Sleeper
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-
-_INITIAL_BACKOFF_SECS = 1
-_MAX_BACKOFF_SECS = 60
 
 #: Total connection cap for the shared :class:`aiohttp.ClientSession`.
 #: aiohttp's default of 100 can saturate under heavy fan-out, delaying the
@@ -40,11 +44,19 @@ class HttpConnection:
         url: str,
         auth: str | None = None,
         conn_limit: int | None = None,
+        backoff: Backoff | None = None,
+        sleeper: Sleeper = sleep,
     ) -> None:
         # Strip trailing slash(es) from url.
         self._url = url.rstrip("/")
         self._auth = auth
         self._conn_limit = conn_limit if conn_limit is not None else DEFAULT_CONN_LIMIT
+        #: Resend ladder, shared with :class:`~resonate.connections.SSEConnection`
+        #: so the two cannot drift, and injectable so a test pins delays to zero.
+        self._backoff: Backoff = (
+            backoff if backoff is not None else ExponentialBackoff()
+        )
+        self._sleeper = sleeper
 
         self._session: aiohttp.ClientSession | None = None
         self._running: bool = False
@@ -88,7 +100,7 @@ class HttpConnection:
         """
         logger.debug("http_connection http_req: %s", req)
         headers = self._auth_headers({"Content-Type": "application/json"})
-        backoff: float = _INITIAL_BACKOFF_SECS
+        attempt = 0
         while True:
             if self._stopped:
                 msg = "network has been stopped"
@@ -109,13 +121,14 @@ class HttpConnection:
                     raise HttpError(exc) from exc
                 if isinstance(exc, RuntimeError):
                     raise
+                delay = self._backoff.delay(attempt)
                 logger.warning(
-                    "HTTP send failed, retrying (backoff=%ss): %s", backoff, exc
+                    "HTTP send failed, retrying (backoff=%ss): %s", delay, exc
                 )
-                await self._sleep_or_stop(backoff)
+                await self._sleep_or_stop(delay)
                 if not self._running:
                     raise HttpError(exc) from exc
-                backoff = min(backoff * 2, _MAX_BACKOFF_SECS)
+                attempt += 1
                 continue
             logger.debug("http_connection http_res: %s", resp_str)
             return resp_str
@@ -155,7 +168,17 @@ class HttpConnection:
         """Sleep for ``secs``, returning early once :meth:`stop` is called.
 
         Used by :meth:`send`'s retry loop so a pending retry never delays
-        shutdown.
+        shutdown. Races the injected :data:`~resonate.timing.Sleeper` against
+        the stop signal rather than using ``wait_for``'s own timer, so an
+        injected sleeper genuinely controls the delay.
         """
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(self._stop_event.wait(), timeout=secs)
+        napping = asyncio.ensure_future(self._sleeper(secs))
+        stopping = asyncio.ensure_future(self._stop_event.wait())
+        try:
+            await asyncio.wait({napping, stopping}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for pending in (napping, stopping):
+                pending.cancel()
+                if pending is napping:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await pending

@@ -87,6 +87,7 @@ class CoreFixture:
         self.hb = TrackingHeartbeat()
         self.core = Core(
             sender=self.sender,
+            fencing=self.sender,
             codec=self.codec,
             registry=self.reg,
             resolver=identity_target_resolver,
@@ -443,6 +444,7 @@ async def test_noop_heartbeat_does_not_interfere() -> None:
     # heartbeat=None -> NoopHeartbeat.
     core = Core(
         sender=sender,
+        fencing=sender,
         codec=codec,
         registry=reg,
         pid=pid,

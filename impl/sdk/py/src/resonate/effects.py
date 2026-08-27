@@ -1,30 +1,38 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from resonate.error import PlatformError, ResonateError, StoppedError
+from resonate.observability import (
+    Dropped,
+    PromiseCreateRequested,
+    PromiseCreateReturned,
+    PromiseSettleRequested,
+    PromiseSettleReturned,
+    logging_observer,
+)
 from resonate.types import PromiseCreateReq, PromiseSettleReq
 
 if TYPE_CHECKING:
     from resonate.codec import Codec
-    from resonate.send import Sender
+    from resonate.observability import Observer
+    from resonate.send import PromiseFencing
     from resonate.types import PromiseRecord
-
-# The validation harness keys off this logger name rather than the module
-# name, so it must stay "resonate.validation".
-logger = logging.getLogger("resonate.validation")
 
 
 class Effects(Protocol):
-    cache: dict[str, PromiseRecord]
+    """The two durable operations a :class:`~resonate.context.Context` performs.
 
-    # Circuit breaker: flipped True by the first durable-op failure in this
-    # attempt. Once set, every later durable op short-circuits with a generic
-    # platform error so no further work happens; the task is released and
-    # re-delivery retries everything. Rebuilt per attempt (the redirect loop in
-    # ``core.py``) and shared by reference root->child, so it is visible at
-    # every depth and scoped to exactly one execution.
+    Deliberately *only* the two operations: the promise cache is an
+    implementation concern of :class:`ResonateEffects`, not part of the
+    contract, so a stand-in has two methods to write and nothing else.
+
+    Implementations are expected to be idempotent (a cached or already-settled
+    record short-circuits the network) and to behave as a circuit breaker: once
+    a durable op has failed in this attempt, every later one raises rather than
+    doing more work, so the task is released and re-delivery retries the whole
+    execution.
+    """
 
     async def create_promise(self, req: PromiseCreateReq) -> PromiseRecord: ...
     async def settle_promise[T](
@@ -43,23 +51,26 @@ class ResonateEffects:
 
     def __init__(
         self,
-        sender: Sender,
+        sender: PromiseFencing,
         codec: Codec,
         task_id: str,
         task_version: int,
         preload: list[PromiseRecord],
+        observer: Observer = logging_observer,
     ) -> None:
         """Build Effects from a Sender, Codec, task lease, and preloaded promises.
 
         ``task_id``/``task_version`` are the active task's lease, used as the
         fencing token on every durable promise mutation. Each preloaded record
-        is decoded into the cache; a record that fails to decode is skipped.
+        is decoded into the cache; a record that fails to decode is skipped and
+        reported to ``observer``.
         """
         self.sender = sender
         self.codec = codec
         self.task_id = task_id
         self.task_version = task_version
         self.cache: dict[str, PromiseRecord] = {}
+        self._observer = observer
         self._stopped: bool = False
         for p in preload:
             self._absorb(p)
@@ -67,12 +78,15 @@ class ResonateEffects:
     def _absorb(self, record: PromiseRecord) -> None:
         """Decode and cache a server promise record.
 
-        Records that fail to decode are skipped. The decoded record is inserted
-        monotonically (see ``_insert_monotonic``).
+        A record that fails to decode is skipped -- and reported as a
+        :class:`~resonate.observability.Dropped` event, so the skip is a
+        contract a test can assert rather than a silent ``return``. The decoded
+        record is inserted monotonically (see ``_insert_monotonic``).
         """
         try:
             decoded = self.codec.decode_promise(record)
-        except ResonateError:
+        except ResonateError as exc:
+            self._observer(Dropped(what="preload-record", id=record.id, cause=str(exc)))
             return
         self._insert_monotonic(decoded)
 
@@ -108,18 +122,9 @@ class ResonateEffects:
                 tags=req.tags,
             )
 
-            # validation logging
-            scope = encoded_req.tags.get("resonate:scope")
-            if scope == "local":
-                invocation = "run"
-            elif scope == "global":
-                invocation = "rpc"
-            else:
-                invocation = "unknown"
-            logger.info(
-                "promise_create_request promise_id=%s invocation=%s",
-                encoded_req.id,
-                invocation,
+            invocation = _invocation_of(encoded_req.tags.get("resonate:scope"))
+            self._observer(
+                PromiseCreateRequested(id=encoded_req.id, invocation=invocation)
             )
 
             res = await self.sender.task_fence_create(
@@ -132,11 +137,10 @@ class ResonateEffects:
             self._stopped = True
             raise PlatformError([exc]) from exc
         self._insert_monotonic(decoded)
-        logger.info(
-            "promise_create_response promise_id=%s invocation=%s state=%s",
-            decoded.id,
-            invocation,
-            decoded.state,
+        self._observer(
+            PromiseCreateReturned(
+                id=decoded.id, invocation=invocation, state=decoded.state
+            )
         )
         return decoded
 
@@ -166,9 +170,7 @@ class ResonateEffects:
         try:
             req = PromiseSettleReq(id=id, state=state, value=self.codec.encode(result))
 
-            logger.info(
-                "promise_settle_request promise_id=%s state=%s", req.id, req.state
-            )
+            self._observer(PromiseSettleRequested(id=req.id, state=req.state))
             res = await self.sender.task_fence_settle(
                 self.task_id, self.task_version, req
             )
@@ -178,8 +180,17 @@ class ResonateEffects:
         except ResonateError as exc:
             self._stopped = True
             raise PlatformError([exc]) from exc
-        logger.info(
-            "promise_settle_response promise_id=%s state=%s", decoded.id, decoded.state
-        )
+        self._observer(PromiseSettleReturned(id=decoded.id, state=decoded.state))
         self._insert_monotonic(decoded)
         return decoded
+
+
+def _invocation_of(scope: str | None) -> Literal["run", "rpc", "unknown"]:
+    """Map a promise's ``resonate:scope`` tag to the invocation form that made it."""
+    match scope:
+        case "local":
+            return "run"
+        case "global":
+            return "rpc"
+        case _:
+            return "unknown"

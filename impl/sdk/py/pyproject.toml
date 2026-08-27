@@ -32,6 +32,14 @@ module-name = "resonate"
 
 [tool.uv.workspace]
 members = ["packages/*"]
+# ``resonate-testing`` is test-only support shared across every suite in the
+# monorepo. It is excluded from the workspace proper so it never lands in
+# ``uv build --all-packages`` / the release publish step; it is still
+# installed for every ``uv sync`` via the explicit path source below.
+exclude = ["packages/resonate-testing"]
+
+[tool.uv.sources]
+resonate-testing = { path = "packages/resonate-testing", editable = true }
 
 [dependency-groups]
 dev = [
@@ -45,7 +53,11 @@ dev = [
     "pytest-cov>=7.1.0",
     "pydantic-ai-slim[mcp]>=2.8",
     "aws-lambda-typing>=2.20.0",
+    "resonate-testing",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
 
 [tool.coverage.run]
 source = ["resonate", "resonate_aws"]

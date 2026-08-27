@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
 import msgspec
 
-from resonate import now_ms
 from resonate.chain import Chain, Link
 from resonate.codec import decode_settled
 from resonate.durable import DurableFunction
@@ -25,6 +24,7 @@ from resonate.error import (
 from resonate.ids import join_id
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy
+from resonate.timing import Clock, Sleeper, now_ms, sleep
 from resonate.tree import Tree
 from resonate.types import Info, PromiseCreateReq, Status, TaskData, Value
 
@@ -90,8 +90,20 @@ class _State:
         tree: Tree,
         retry_policy: RetryPolicy,
         registry: Registry,
+        clock: Clock,
+        sleeper: Sleeper,
     ) -> None:
         self.id = id
+
+        # Injected time, shared by reference root -> child. ``clock`` is read by
+        # :meth:`Context._child_timeout` to turn a relative timeout into an
+        # absolute deadline; ``sleeper`` paces the retry loop in
+        # :meth:`Context.invoke_with_retry`. Both default to the real ones at
+        # the :meth:`Context.root` boundary, so only a test ever passes
+        # anything else -- and when it does, deadlines become exact and retry
+        # delays become an assertable list instead of a wait.
+        self.clock = clock
+        self.sleeper = sleeper
 
         # The lineage origin: everything before the first ``:`` of every id in
         # this workflow, set at the top (``resonate.run``/``rpc``) and carried
@@ -199,6 +211,8 @@ class Context:
         deps: DependencyMap,
         retry_policy: RetryPolicy | None = None,
         registry: Registry | None = None,
+        clock: Clock = now_ms,
+        sleeper: Sleeper = sleep,
     ) -> Self:
         # ``origin_id`` is the top of the execution lineage, carried through
         # the ``resonate:origin`` tag from whoever dispatched this workflow
@@ -236,6 +250,8 @@ class Context:
                 # empty one, so the by-name durable ops resolve to not-found
                 # rather than crashing on a missing attribute.
                 registry=registry if registry is not None else Registry(),
+                clock=clock,
+                sleeper=sleeper,
             ),
             opts=Opts(),
         )
@@ -267,6 +283,10 @@ class Context:
                 # Share the parent's registry by reference: by-name run / by-object
                 # rpc resolve against the same functions at every depth.
                 registry=self._state.registry,
+                # Share the parent's injected time, so one clock and one sleeper
+                # govern the whole execution tree.
+                clock=self._state.clock,
+                sleeper=self._state.sleeper,
             ),
             opts=Opts(),
         )
@@ -320,7 +340,7 @@ class Context:
                 assert self._state.seq == 0, (
                     "retried pure-leaf must not have advanced seq"
                 )
-                await asyncio.sleep(delay)
+                await self._state.sleeper(delay)
                 attempt += 1
 
     def options(
@@ -437,7 +457,7 @@ class Context:
             raise PlatformError([exc]) from exc
 
     def _child_timeout(self, requested: timedelta | None) -> int:
-        now = now_ms()
+        now = self._state.clock()
         timeout = requested if requested is not None else timedelta(days=1)
         return min(now + int(timeout.total_seconds() * 1000), self._state.timeout_at)
 

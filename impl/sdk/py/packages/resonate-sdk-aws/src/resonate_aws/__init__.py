@@ -57,20 +57,24 @@ from resonate.core import Core
 from resonate.dependencies import DependencyMap
 from resonate.error import ApplicationError
 from resonate.heartbeat import NoopHeartbeat
+from resonate.observability import logging_observer
 from resonate.registry import Registry
 from resonate.retry import Exponential
 from resonate.send import Sender
+from resonate.timing import now_ms, sleep
 from resonate.transport import ExecuteData, Transport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from aws_lambda_typing.context import Context as LambdaContext
     from aws_lambda_typing.events import APIGatewayProxyEventV2
 
     from resonate.codec import Encryptor
     from resonate.context import Context, TargetResolver
+    from resonate.observability import Observer
     from resonate.retry import RetryPolicy
+    from resonate.timing import Clock, Sleeper
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,116 @@ class _ExecuteEnvelope(
     head: _MessageHead = msgspec.field(default_factory=_MessageHead)
 
 
+# ── The request-to-wiring decision, as a value ─────────────────────────────
+#
+# Everything the handler decides *before* touching the network -- is this a
+# POST, does the body parse, which server URL, which function URL -- is pure.
+# :func:`plan_invocation` performs that whole decision and returns it as a
+# value: :class:`Invocation` when the request is good, :class:`Rejected` when
+# it is not, carrying the status and message the caller should reply with.
+#
+# That is what makes each branch a one-line test. Previously they were
+# reachable only by constructing a full Lambda event *and* letting the handler
+# fall through to ``asyncio.run``; now the whole decision table is exercised by
+# calling one function and matching on the result.
+
+
+class Invocation(msgspec.Struct, frozen=True, kw_only=True):
+    """A validated request, resolved down to what :meth:`Resonate._drive` needs."""
+
+    server_url: str
+    function_url: str
+    task_id: str
+    task_version: int
+
+
+class Rejected(msgspec.Struct, frozen=True, kw_only=True):
+    """A request that must not run, and the response it earns."""
+
+    status: int
+    error: str
+
+
+#: The outcome of planning one invocation. A closed union, so the transport
+#: mapping below can match it exhaustively.
+type Plan = Invocation | Rejected
+
+
+def plan_invocation(
+    event: APIGatewayProxyEventV2,
+    configured_server_url: str | None,
+    configured_function_url: str | None,
+) -> Plan:
+    """Decide what (if anything) this request should run. Pure -- no IO.
+
+    Parses at the edge (the raw event dict and the raw body string both become
+    typed values here) and resolves both URLs from the configured values plus
+    the request's own headers. Every failure is a returned :class:`Rejected`,
+    never an exception, so the failure space is the return type.
+    """
+    try:
+        req = msgspec.convert(event, type=_LambdaEvent)
+    except msgspec.ValidationError:
+        return Rejected(status=400, error="Malformed Lambda event.")
+
+    if req.request_context.http.method != "POST":
+        return Rejected(status=405, error="Method not allowed. Use POST.")
+
+    raw = _decode_body(req)
+    if raw is None:
+        return Rejected(status=400, error="Request body missing.")
+
+    try:
+        msg = msgspec.json.decode(raw, type=_ExecuteEnvelope)
+    except msgspec.MsgspecError:
+        return Rejected(
+            status=400, error="Request body must be a valid execute message."
+        )
+
+    # Server URL: prefer the constructor / ``RESONATE_URL`` value, falling back
+    # to a ``serverUrl`` carried on the message head. An explicitly configured
+    # address must win: the server embeds its *own* view of its URL in the head
+    # (e.g. ``localhost:8001``), which is unreachable from inside a Lambda
+    # container -- the deployment knows the routable address, the server does
+    # not. HttpConnection needs this to send acquire/fulfill/suspend back.
+    server_url = configured_server_url or msg.head.server_url
+    if not server_url:
+        return Rejected(
+            status=500,
+            error=(
+                "Cannot determine Resonate server URL: set RESONATE_URL or pass url=."
+            ),
+        )
+
+    # This function's own public URL, used as the anycast address so child
+    # tasks are routed back to this same function. An explicit ``function_url``
+    # / ``RESONATE_FUNCTION_URL`` wins; otherwise it is reconstructed from the
+    # forwarded headers the platform sets (works behind both API Gateway and
+    # Lambda Function URLs). Only ``host`` is required: a missing
+    # ``x-forwarded-proto`` means an unproxied context (e.g. ``sam local``), so
+    # it defaults to ``http`` -- real API Gateway / Function URLs always send it.
+    function_url = configured_function_url
+    if not function_url:
+        host = req.headers.host or req.request_context.domain_name
+        if not host:
+            return Rejected(
+                status=500,
+                error=(
+                    "Cannot determine function URL: no host header or domainName. "
+                    "Set RESONATE_FUNCTION_URL or pass function_url=."
+                ),
+            )
+        proto = req.headers.x_forwarded_proto or "http"
+        function_url = f"{proto}://{host}{req.request_context.http.path}"
+
+    return Invocation(
+        server_url=server_url,
+        function_url=function_url,
+        task_id=msg.data.task.id,
+        task_version=msg.data.task.version,
+    )
+
+
 class Resonate:
     """Serverless entry point for the Resonate SDK on AWS Lambda.
 
@@ -163,6 +277,10 @@ class Resonate:
         token: str | None = None,
         encryptor: Encryptor | None = None,
         retry_policy: RetryPolicy | None = None,
+        env: Mapping[str, str] | None = None,
+        clock: Clock = now_ms,
+        sleeper: Sleeper = sleep,
+        observer: Observer = logging_observer,
     ) -> None:
         """Build the reusable, invocation-independent wiring.
 
@@ -182,15 +300,19 @@ class Resonate:
         pure-leaf root failure, mirroring
         :class:`resonate.resonate.Resonate`.
         """
-        self._url = url if url is not None else os.environ.get("RESONATE_URL")
+        environ: Mapping[str, str] = env if env is not None else os.environ
+        self._url = url if url is not None else environ.get("RESONATE_URL")
         self._function_url = (
             function_url
             if function_url is not None
-            else os.environ.get("RESONATE_FUNCTION_URL")
+            else environ.get("RESONATE_FUNCTION_URL")
         )
         self._pid = pid if pid is not None else uuid.uuid4().hex
         self._ttl = ttl if ttl is not None else DEFAULT_TTL
-        self._auth = token if token is not None else os.environ.get("RESONATE_TOKEN")
+        self._auth = token if token is not None else environ.get("RESONATE_TOKEN")
+        self._clock = clock
+        self._sleeper = sleeper
+        self._observer = observer
 
         self._codec = Codec(encryptor if encryptor is not None else NoopEncryptor())
         self._registry = Registry()
@@ -279,89 +401,25 @@ class Resonate:
             event: APIGatewayProxyEventV2, context: LambdaContext
         ) -> dict[str, Any]:
             try:
-                try:
-                    req = msgspec.convert(event, type=_LambdaEvent)
-                except msgspec.ValidationError:
-                    return _response(400, {"error": "Malformed Lambda event."})
-
-                if req.request_context.http.method != "POST":
-                    return _response(405, {"error": "Method not allowed. Use POST."})
-
-                raw = _decode_body(req)
-                if raw is None:
-                    return _response(400, {"error": "Request body missing."})
-
-                try:
-                    msg = msgspec.json.decode(raw, type=_ExecuteEnvelope)
-                except msgspec.MsgspecError:
-                    return _response(
-                        400,
-                        {"error": "Request body must be a valid execute message."},
-                    )
-
-                # Server URL: prefer the constructor / ``RESONATE_URL`` value,
-                # falling back to a ``serverUrl`` carried on the message head.
-                # An explicitly configured address must win: the server embeds
-                # its *own* view of its URL in the head (e.g. ``localhost:8001``),
-                # which is unreachable from inside a Lambda container -- the
-                # deployment knows the routable address, the server does not.
-                # HttpConnection needs this to send acquire/fulfill/suspend
-                # back.
-                server_url = self._url or msg.head.server_url
-                if not server_url:
-                    return _response(
-                        500,
-                        {
-                            "error": (
-                                "Cannot determine Resonate server URL: set "
-                                "RESONATE_URL or pass url=."
+                plan = plan_invocation(event, self._url, self._function_url)
+                match plan:
+                    case Rejected(status=status, error=error):
+                        return _response(status, {"error": error})
+                    case Invocation():
+                        logger.info("faas: function_url=%s", plan.function_url)
+                        outcome = asyncio.run(
+                            self._drive(
+                                plan.server_url,
+                                plan.function_url,
+                                plan.task_id,
+                                plan.task_version,
                             )
-                        },
-                    )
-
-                # This function's own public URL, used as the anycast address so
-                # child tasks are routed back to this same function. An explicit
-                # ``function_url`` / ``RESONATE_FUNCTION_URL`` wins; otherwise it
-                # is reconstructed from the forwarded headers the platform sets
-                # (works behind both API Gateway and Lambda Function URLs). Only
-                # ``host`` is required: a missing ``x-forwarded-proto`` means an
-                # unproxied context (e.g. ``sam local``), so it defaults to
-                # ``http`` -- real API Gateway / Function URLs always send it.
-                function_url = self._function_url
-                if not function_url:
-                    host = req.headers.host or req.request_context.domain_name
-                    if not host:
-                        logger.warning(
-                            "faas: no host to derive function URL; headers.host and "
-                            "requestContext.domainName both empty"
                         )
-                        return _response(
-                            500,
-                            {
-                                "error": (
-                                    "Cannot determine function URL: no host header "
-                                    "or domainName. Set RESONATE_FUNCTION_URL or "
-                                    "pass function_url=."
-                                )
-                            },
-                        )
-                    proto = req.headers.x_forwarded_proto or "http"
-                    function_url = f"{proto}://{host}{req.request_context.http.path}"
-                    logger.info("faas: derived function_url=%s", function_url)
-
-                status = asyncio.run(
-                    self._drive(
-                        server_url,
-                        function_url,
-                        msg.data.task.id,
-                        msg.data.task.version,
-                    )
-                )
             except Exception as error:  # report any failure back to the server
                 logger.exception("faas: handler failed")
                 return _response(500, {"error": f"Handler failed: {error}"})
 
-            body = _COMPLETED_BODY if status == "done" else _SUSPENDED_BODY
+            body = _COMPLETED_BODY if outcome == "done" else _SUSPENDED_BODY
             return _response(200, body)
 
         return lambda_handler
@@ -379,10 +437,17 @@ class Resonate:
         child target back to ``function_url`` so recursive sub-tasks re-invoke
         this Lambda; explicit URL targets pass through unchanged.
         """
-        network = HttpConnection(url=server_url, auth=self._auth)
+        network = HttpConnection(url=server_url, auth=self._auth, sleeper=self._sleeper)
+        sender = Sender(
+            Transport(network, observer=self._observer),
+            self._auth,
+            observer=self._observer,
+        )
 
         core = Core(
-            sender=Sender(Transport(network), self._auth),
+            # One ``Sender`` satisfies both narrow ports structurally.
+            sender=sender,
+            fencing=sender,
             codec=self._codec,
             registry=self._registry,
             resolver=_self_routing_resolver(function_url),
@@ -391,6 +456,9 @@ class Resonate:
             ttl=_safe_ttl_ms(self._ttl),
             deps=self._deps,
             retry_policy=self._retry_policy,
+            clock=self._clock,
+            sleeper=self._sleeper,
+            observer=self._observer,
         )
 
         await network.start()

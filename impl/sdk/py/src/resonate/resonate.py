@@ -28,7 +28,6 @@ import os
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
-from resonate import now_ms
 from resonate.codec import Codec, NoopEncryptor
 from resonate.connections import (
     HttpConnection,
@@ -49,21 +48,25 @@ from resonate.error import (
 from resonate.handle import PromiseResult, ResonateHandle, Subscription
 from resonate.heartbeat import AsyncHeartbeat, NoopHeartbeat
 from resonate.ids import validate_root_id
+from resonate.observability import BackgroundTaskFailed, logging_observer
 from resonate.promises import Promises
 from resonate.registry import Registry
 from resonate.retry import Exponential
 from resonate.schedules import Schedules
 from resonate.send import Sender
+from resonate.timing import now_ms, sleep
 from resonate.transport import ExecuteMsg, Transport, UnblockMsg
 from resonate.types import Args, PromiseCreateReq, PromiseState, Status, TaskData, Value
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine, Sequence
+    from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 
     from resonate.codec import Encryptor
     from resonate.context import Context
     from resonate.heartbeat import Heartbeat
+    from resonate.observability import Observer
     from resonate.retry import RetryPolicy
+    from resonate.timing import Clock, Sleeper
     from resonate.transport import Message
 
 logger = logging.getLogger(__name__)
@@ -92,9 +95,13 @@ DEFAULT_MAX_CONCURRENT_TASKS = 64
 #: immediately lapse it.
 HEARTBEAT_INTERVAL_DIVISOR = 2
 
-#: How often the background loop re-issues ``promise.register_listener`` for
-#: still-pending subscriptions, defending against a dropped SSE connection.
-_SUBSCRIPTION_REFRESH_SECS = 60
+#: Default interval at which the background loop re-issues
+#: ``promise.register_listener`` for still-pending subscriptions, defending
+#: against a dropped SSE connection. Overridable per instance via
+#: ``Resonate(subscription_refresh_secs=...)``; ``0`` disables the loop, which
+#: is what an in-process transport (and most tests) want -- there is no
+#: connection to drop.
+DEFAULT_SUBSCRIPTION_REFRESH_SECS = 60.0
 
 
 class ResonateSchedule:
@@ -141,8 +148,12 @@ class _Runtime:
         #: live-lease count never exceeds it regardless of how fast ``execute``
         #: messages arrive (see :data:`DEFAULT_MAX_CONCURRENT_TASKS`).
         self.execute_sema = asyncio.Semaphore(max_concurrent_tasks)
-        #: The 60s listener-refresh loop; cancelled by :meth:`Resonate.stop`.
+        #: The listener-refresh loop; cancelled by :meth:`Resonate.stop`.
         self.refresh_handle: asyncio.Task[None] | None = None
+        #: Set by the first :meth:`Resonate.start`, so starting twice (or
+        #: constructing with ``autostart=True`` and then calling ``start``) does
+        #: not open a second set of connections or a second refresh loop.
+        self.started = False
 
 
 class Resonate:
@@ -191,7 +202,30 @@ class Resonate:
         heartbeat: Heartbeat | None = None,
         max_concurrent_tasks: int | None = None,
         retry_policy: RetryPolicy | None = None,
+        env: Mapping[str, str] | None = None,
+        clock: Clock = now_ms,
+        sleeper: Sleeper = sleep,
+        observer: Observer = logging_observer,
+        subscription_refresh_secs: float = DEFAULT_SUBSCRIPTION_REFRESH_SECS,
+        autostart: bool = True,
     ) -> None:
+        """Build the SDK's wiring, and (by default) start it.
+
+        Every ambient dependency is a *parameter that defaults to the ambient
+        value*: ``env`` defaults to :data:`os.environ`, ``clock`` to
+        :func:`~resonate.timing.now_ms`, ``sleeper`` to
+        :func:`~resonate.timing.sleep`, ``observer`` to
+        :func:`~resonate.observability.logging_observer`. A test overrides one
+        without touching process-wide state, so tests stay isolated and can run
+        in parallel.
+
+        ``autostart`` controls whether the constructor also opens connections
+        and spawns the refresh loop. It defaults to ``True`` (the historical
+        behaviour, which requires a running event loop); pass ``False`` to
+        build the wiring synchronously -- no loop, no IO, no background tasks --
+        and call :meth:`start` when ready.
+        """
+        environ: Mapping[str, str] = env if env is not None else os.environ
         resolved_ttl = ttl if ttl is not None else DEFAULT_TTL
         safe_ttl = _safe_ttl_ms(resolved_ttl)
 
@@ -205,18 +239,20 @@ class Resonate:
             else Exponential(delay=1, max_delay=(1 << 63) - 1, factor=2, max_retries=30)
         )
 
-        auth = token if token is not None else os.environ.get("RESONATE_TOKEN")
+        auth = token if token is not None else environ.get("RESONATE_TOKEN")
 
-        net, srcs = _select_connections(url, network, sources, group, pid, auth)
+        net, srcs = _select_connections(
+            url, network, sources, group, pid, auth, environ
+        )
         # The primary source: its identity drives the SDK's pid/group and its
         # addresses are the ones advertised to the server.
         source = srcs[0]
         net_pid = source.pid()
 
-        transport = Transport(net, srcs)
+        transport = Transport(net, srcs, observer)
         codec = Codec(encryptor if encryptor is not None else NoopEncryptor())
         registry = Registry()
-        sender = Sender(transport, auth)
+        sender = Sender(transport, auth, observer=observer)
         deps = DependencyMap()
 
         if heartbeat is not None:
@@ -225,10 +261,13 @@ class Resonate:
             hb = NoopHeartbeat()
         else:
             interval_ms = max(safe_ttl // HEARTBEAT_INTERVAL_DIVISOR, 1)
-            hb = AsyncHeartbeat(net_pid, interval_ms, sender)
+            hb = AsyncHeartbeat(net_pid, interval_ms, sender, sleeper)
 
         core = Core(
+            # One ``Sender`` satisfies both narrow ports structurally; they are
+            # separate fields so a test can fake either half alone.
             sender=sender,
+            fencing=sender,
             codec=codec,
             registry=registry,
             # A bound method invoked lazily at dispatch time, so handing it over
@@ -239,6 +278,9 @@ class Resonate:
             ttl=safe_ttl,
             deps=deps,
             retry_policy=resolved_retry_policy,
+            clock=clock,
+            sleeper=sleeper,
+            observer=observer,
         )
 
         # Construction-time wiring: set once here, never rebound, so every
@@ -259,6 +301,11 @@ class Resonate:
         self._deps = deps
         self._heartbeat = hb
         self._core = core
+        self._clock = clock
+        self._sleeper = sleeper
+        self._observer = observer
+        self._refresh_secs = subscription_refresh_secs
+        self._transport = transport
         #: Public clients for direct promise/schedule manipulation.
         self.promises = Promises(sender, codec)
         self.schedules = Schedules(sender, codec)
@@ -273,18 +320,45 @@ class Resonate:
         #: overriding handle is minted via :meth:`options`.
         self.opts = Opts()
 
+        if autostart:
+            self.start()
+
+    # ── Public API ────────────────────────────────────────────────────────
+
+    def start(self) -> Self:
+        """Open every connection and spawn the background loops. Idempotent.
+
+        Separate from ``__init__`` so construction is pure: building a
+        ``Resonate`` decides the wiring, starting it touches the event loop and
+        the network. A test can therefore assert *what was wired* -- connection
+        selection, target resolution, registered functions -- with no loop
+        running at all, then start only the instances that need to talk.
+
+        Requires a running event loop. Called automatically by ``__init__``
+        unless ``autostart=False``.
+        """
+        if self._runtime.started:
+            return self
+        self._runtime.started = True
+
         # Wire push-message dispatch BEFORE starting any connection so the
         # initial frames are not missed (and so a dual-role connection knows
         # it has receivers when it starts).
-        transport.recv(self._on_message)
+        self._transport.recv(self._on_message)
 
         # Start every connection (fire-and-forget; SSEConnection reconnects
         # via backoff, LocalConnection never fails here).
         for conn in self._connections:
             self._spawn(conn.start())
-        self._runtime.refresh_handle = asyncio.create_task(self._run_refresh())
 
-    # ── Public API ────────────────────────────────────────────────────────────
+        # A non-positive interval disables the loop entirely. Without this a
+        # caller who also injects an instant sleeper -- the natural pairing in
+        # a test -- gets a hot loop that re-registers listeners as fast as the
+        # event loop will allow, and 404s a promise whose create is still in
+        # flight.
+        if self._refresh_secs > 0:
+            self._runtime.refresh_handle = asyncio.create_task(self._run_refresh())
+        return self
 
     def with_dependency(self, value: Any) -> Resonate:
         """Store a typed application dependency, shared with every context.
@@ -797,7 +871,7 @@ class Resonate:
 
         return PromiseCreateReq(
             id=id,
-            timeout_at=now_ms() + _timeout_ms(timeout),
+            timeout_at=self._clock() + _timeout_ms(timeout),
             param=Value(
                 data=TaskData(
                     func=func_name,
@@ -977,7 +1051,7 @@ class Resonate:
             if not task.cancelled():
                 exc = task.exception()
                 if exc is not None:
-                    logger.error("background task failed: %s", exc)
+                    self._observer(BackgroundTaskFailed(cause=str(exc)))
 
         self._runtime.bg_tasks.add(task)
         task.add_done_callback(_)
@@ -990,10 +1064,13 @@ class Resonate:
         no longer exists -- settle the subscription with a synthetic rejection
         (see :meth:`_register_and_settle`) so the awaiting handle is not
         stranded for the rest of the process lifetime.
+
+        Never started when ``subscription_refresh_secs`` is non-positive (see
+        :meth:`start`).
         """
         with contextlib.suppress(asyncio.CancelledError):
             while True:
-                await asyncio.sleep(_SUBSCRIPTION_REFRESH_SECS)
+                await self._sleeper(self._refresh_secs)
                 addr = self._source.unicast()
 
                 for id, sub in list(self._runtime.subs.items()):
@@ -1068,6 +1145,7 @@ def _select_connections(
     group: str | None,
     pid: str | None,
     auth: str | None,
+    env: Mapping[str, str],
 ) -> tuple[Network, list[Source]]:
     """Resolve the network and the (non-empty) list of sources.
 
@@ -1101,7 +1179,7 @@ def _select_connections(
             raise TypeError(msg)
 
     if url is None and network is None:
-        url = _resolve_env_url()
+        url = _resolve_env_url(env)
 
     srcs: list[Source]
     if url is not None:
@@ -1133,18 +1211,23 @@ def _select_connections(
     return net, srcs
 
 
-def _resolve_env_url() -> str | None:
-    """Resolve a server URL from the environment.
+def _resolve_env_url(env: Mapping[str, str]) -> str | None:
+    """Resolve a server URL from an environment mapping.
 
     ``RESONATE_URL`` takes precedence; otherwise a URL is assembled from
     ``RESONATE_HOST`` (with optional ``RESONATE_SCHEME``/``RESONATE_PORT``).
+
+    Takes the mapping as a parameter rather than reading :data:`os.environ`
+    directly, so this is a pure function a test calls with a dict -- no
+    ``monkeypatch.setenv``, no process-wide mutation, no ordering hazard
+    between tests.
     """
-    env_url = os.environ.get("RESONATE_URL")
+    env_url = env.get("RESONATE_URL")
     if env_url:
         return env_url
-    host = os.environ.get("RESONATE_HOST")
+    host = env.get("RESONATE_HOST")
     if not host:
         return None
-    scheme = os.environ.get("RESONATE_SCHEME", "http")
-    port = os.environ.get("RESONATE_PORT", "8001")
+    scheme = env.get("RESONATE_SCHEME", "http")
+    port = env.get("RESONATE_PORT", "8001")
     return f"{scheme}://{host}:{port}"

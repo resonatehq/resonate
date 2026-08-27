@@ -39,6 +39,7 @@ from resonate.error import (
 from resonate.registry import Registry
 from resonate.retry import Constant, Never
 from resonate.send import Sender
+from resonate.testing import cache_of
 from resonate.transport import Transport
 from resonate.types import PromiseRecord, TaskData, Value
 
@@ -289,7 +290,7 @@ def test_get_dependency_shared_with_child_context() -> None:
 async def test_run_leaf_returns_and_settles_resolved() -> None:
     ctx = _root()
     assert await ctx.run(double, 21) == 42
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert record.state == "resolved"
     assert record.value.data == 42
 
@@ -298,7 +299,7 @@ async def test_run_leaf_returns_and_settles_resolved() -> None:
 async def test_run_ctx_only_function() -> None:
     ctx = _root()
     assert await ctx.run(beat) == "ok"
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
+    assert cache_of(ctx)["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -314,8 +315,8 @@ async def test_run_sequential_child_ids() -> None:
     ctx = _root()
     assert await ctx.run(double, 2) == 4  # root:1
     assert await ctx.run(double, 3) == 6  # root:2
-    assert ctx._state.effects.cache["root:1"].value.data == 4
-    assert ctx._state.effects.cache["root:2"].value.data == 6
+    assert cache_of(ctx)["root:1"].value.data == 4
+    assert cache_of(ctx)["root:2"].value.data == 6
 
 
 @pytest.mark.asyncio
@@ -371,7 +372,7 @@ async def test_run_local_child_param_is_empty() -> None:
     # value, never the param.
     ctx = _root()
     await ctx.run(double, 21)
-    assert ctx._state.effects.cache["root:1"].param == Value()
+    assert cache_of(ctx)["root:1"].param == Value()
 
 
 @pytest.mark.asyncio
@@ -397,7 +398,7 @@ async def test_run_function_error_propagates_and_settles_rejected() -> None:
     ctx = _root()
     with pytest.raises(ApplicationError, match="denied"):
         await ctx.run(failing)
-    assert ctx._state.effects.cache["root:1"].state == "rejected"
+    assert cache_of(ctx)["root:1"].state == "rejected"
 
 
 @pytest.mark.asyncio
@@ -414,7 +415,7 @@ async def test_run_plain_exception_preserves_type_and_settles_rejected() -> None
     ctx = _root()
     with pytest.raises(BookingError, match="card declined"):
         await ctx.run(failing_plain)
-    assert ctx._state.effects.cache["root:1"].state == "rejected"
+    assert cache_of(ctx)["root:1"].state == "rejected"
 
 
 # =============================================================================
@@ -527,7 +528,7 @@ async def test_run_live_path_coerces_return_to_declared_type() -> None:
     # The promise stores the raw return (an int); coercion is applied only at the
     # return boundary, matching the top-level run (which stores raw and coerces
     # at the handle).
-    assert ctx._state.effects.cache["root:1"].value.data == 3
+    assert cache_of(ctx)["root:1"].value.data == 3
 
 
 @pytest.mark.asyncio
@@ -563,10 +564,10 @@ async def test_workflow_runs_nested_leaves() -> None:
     ctx = _root()
     assert await ctx.run(parent_workflow, 5) == 30  # a=10, b=20
     assert ctx._state.spawned_remote == []  # nothing pending -> no suspension
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
+    assert cache_of(ctx)["root:1"].state == "resolved"
     # Nested children live under the workflow's own id.
-    assert ctx._state.effects.cache["root:1.1"].value.data == 10
-    assert ctx._state.effects.cache["root:1.2"].value.data == 20
+    assert cache_of(ctx)["root:1.1"].value.data == 10
+    assert cache_of(ctx)["root:1.2"].value.data == 20
 
 
 # =============================================================================
@@ -582,7 +583,7 @@ async def test_run_suspends_when_child_blocks_on_remote() -> None:
     # The child's todo is merged up so the task can suspend on it...
     assert ctx._state.spawned_remote == ["remote-dep"]
     # ...and the child promise is left pending (not settled).
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -593,7 +594,7 @@ async def test_run_suspends_when_child_completes_with_pending_remote() -> None:
     with pytest.raises(Suspended):
         await ctx.run(fire_and_forget)
     assert ctx._state.spawned_remote == ["ff-dep"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -655,8 +656,8 @@ async def test_run_suspension_propagates_through_intermediate_workflow() -> None
         await ctx.run(deep_middle)
     assert ctx._state.spawned_remote == ["deep-dep"]
     # Both promises along the suspension path are left pending.
-    assert ctx._state.effects.cache["root:1"].state == "pending"  # middle
-    assert ctx._state.effects.cache["root:1.1"].state == "pending"  # inner
+    assert cache_of(ctx)["root:1"].state == "pending"  # middle
+    assert cache_of(ctx)["root:1.1"].state == "pending"  # inner
 
 
 @pytest.mark.asyncio
@@ -666,9 +667,9 @@ async def test_run_suspension_propagates_through_three_levels() -> None:
     with pytest.raises(Suspended):
         await ctx.run(deep_top)
     assert ctx._state.spawned_remote == ["deep-dep"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"  # top
-    assert ctx._state.effects.cache["root:1.1"].state == "pending"  # middle
-    assert ctx._state.effects.cache["root:1.1.1"].state == "pending"  # inner
+    assert cache_of(ctx)["root:1"].state == "pending"  # top
+    assert cache_of(ctx)["root:1.1"].state == "pending"  # middle
+    assert cache_of(ctx)["root:1.1.1"].state == "pending"  # inner
 
 
 @pytest.mark.asyncio
@@ -681,13 +682,13 @@ async def test_run_completed_sibling_settles_but_parent_still_suspends() -> None
         await ctx.run(completes_then_suspends)
     assert ctx._state.spawned_remote == ["remote-dep"]
     # First child got fully settled with its computed value.
-    assert ctx._state.effects.cache["root:1.1"].state == "resolved"
-    assert ctx._state.effects.cache["root:1.1"].value.data == 42
+    assert cache_of(ctx)["root:1.1"].state == "resolved"
+    assert cache_of(ctx)["root:1.1"].value.data == 42
     # Second child remains pending -- its body raised Suspended.
-    assert ctx._state.effects.cache["root:1.2"].state == "pending"
+    assert cache_of(ctx)["root:1.2"].state == "pending"
     # Parent workflow itself stays pending: ``outcome == "suspended"`` skips
     # the settle_promise call at the bottom of ``run``.
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -716,8 +717,8 @@ async def test_run_fire_and_forget_child_suspension_propagates() -> None:
     assert ctx._state.spawned_remote == ["remote-dep"]
     # Parent's value (99) was dropped in favour of suspension; both promises
     # along the suspension path are left pending.
-    assert ctx._state.effects.cache["root:1"].state == "pending"
-    assert ctx._state.effects.cache["root:1.1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1.1"].state == "pending"
 
 
 # =============================================================================
@@ -767,10 +768,10 @@ async def test_run_unawaited_child_settles_before_parent() -> None:
     # the parent's bg would settle ahead of the still-pending child task and
     # this order would flip.
     assert settle_order == ["root:1.1", "root:1"]
-    assert ctx._state.effects.cache["root:1.1"].state == "resolved"
-    assert ctx._state.effects.cache["root:1.1"].value.data == 42
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
-    assert ctx._state.effects.cache["root:1"].value.data == 1
+    assert cache_of(ctx)["root:1.1"].state == "resolved"
+    assert cache_of(ctx)["root:1.1"].value.data == 42
+    assert cache_of(ctx)["root:1"].state == "resolved"
+    assert cache_of(ctx)["root:1"].value.data == 1
 
 
 # =============================================================================
@@ -815,13 +816,13 @@ async def test_run_task_pending_while_create_promise_blocked() -> None:
         await entered.wait()
 
         # And the durable record is not in the cache yet.
-        assert "root:1" not in ctx._state.effects.cache
+        assert "root:1" not in cache_of(ctx)
 
         # Releasing the gate lets create_promise return, the event fire, and
         # the body run through to settlement.
         gate.set()
         assert await task == 42
-        assert ctx._state.effects.cache["root:1"].state == "resolved"
+        assert cache_of(ctx)["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -859,10 +860,10 @@ async def test_run_durable_promise_visible_in_cache_before_task_resolves() -> No
     ctx = _root()
     result = await ctx.run(double, 5)
     assert result == 10
-    assert "root:1" in ctx._state.effects.cache
+    assert "root:1" in cache_of(ctx)
     # And it was created *before* it was settled -- the cached record reflects
     # the post-settle state by the time we observe the result.
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
+    assert cache_of(ctx)["root:1"].state == "resolved"
 
 
 @pytest.mark.asyncio
@@ -882,7 +883,7 @@ async def test_run_releases_event_when_create_promise_raises() -> None:
 
     failing.assert_awaited_once()
     # Nothing was cached, because creation never succeeded.
-    assert "root:1" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
 
 
 @pytest.mark.asyncio
@@ -927,7 +928,7 @@ async def test_run_with_options_timeout_sets_child_deadline() -> None:
     before = now_ms()
     assert await ctx.options(timeout=timedelta(seconds=30)).run(double, 5) == 10
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -937,19 +938,19 @@ async def test_run_with_options_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     # A year-long timeout still cannot outlive the parent's deadline.
     await ctx.options(timeout=timedelta(days=365)).run(double, 1)
-    assert ctx._state.effects.cache["root:1"].timeout_at == cap
+    assert cache_of(ctx)["root:1"].timeout_at == cap
 
 
 @pytest.mark.asyncio
 async def test_run_options_do_not_leak_to_base_context() -> None:
     ctx = _root()
     await ctx.options(timeout=timedelta(seconds=30)).run(double, 1)  # root:1
-    short = ctx._state.effects.cache["root:1"].timeout_at
+    short = cache_of(ctx)["root:1"].timeout_at
     # The next run is issued on the base context, which still carries no
     # options -> the 24h default, well past the 30s one. The override rode the
     # throwaway handle and never touched ``ctx``.
     await ctx.run(double, 1)  # root:2
-    assert ctx._state.effects.cache["root:2"].timeout_at > short
+    assert cache_of(ctx)["root:2"].timeout_at > short
     assert ctx.opts == Opts()
 
 
@@ -1072,8 +1073,8 @@ async def test_options_handles_share_spawned_state() -> None:
     with pytest.raises(Suspended):
         await f2
     assert ctx._state.spawned_remote == ["root:1", "root:2"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"
-    assert ctx._state.effects.cache["root:2"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
+    assert cache_of(ctx)["root:2"].state == "pending"
 
 
 # =============================================================================
@@ -1199,8 +1200,8 @@ async def test_run_chain_failure_propagates_to_successor() -> None:
     # Only the first link ever attempted a create: the successor parked on the
     # failed predecessor and unwound without issuing its own create_promise.
     assert seen == ["root:1"]
-    assert "root:1" not in ctx._state.effects.cache
-    assert "root:2" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
+    assert "root:2" not in cache_of(ctx)
 
 
 @pytest.mark.asyncio
@@ -1232,8 +1233,8 @@ async def test_rpc_chain_failure_propagates_to_successor() -> None:
     assert ei1.value is boom
     assert ei2.value is boom
     assert seen == ["root:1"]
-    assert "root:1" not in ctx._state.effects.cache
-    assert "root:2" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
+    assert "root:2" not in cache_of(ctx)
     # A failed create never registered a remote todo.
     assert ctx._state.spawned_remote == []
 
@@ -1269,9 +1270,7 @@ async def test_run_chain_failure_poisons_every_later_link() -> None:
 
     # Only the first link reached create_promise; the rest unwound on the chain.
     assert seen == ["root:1"]
-    assert not any(
-        id in ctx._state.effects.cache for id in ("root:1", "root:2", "root:3")
-    )
+    assert not any(id in cache_of(ctx) for id in ("root:1", "root:2", "root:3"))
 
 
 # =============================================================================
@@ -1321,7 +1320,7 @@ async def test_rpc_pending_registers_todo_and_suspends() -> None:
     with pytest.raises(Suspended):
         await fut
     assert ctx._state.spawned_remote == ["root:1"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1459,7 +1458,7 @@ async def test_rpc_with_options_timeout_sets_child_deadline() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=30)).rpc("fn")
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1469,7 +1468,7 @@ async def test_rpc_with_options_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(days=365)).rpc("fn")
-    assert ctx._state.effects.cache["root:1"].timeout_at == cap
+    assert cache_of(ctx)["root:1"].timeout_at == cap
 
 
 @pytest.mark.asyncio
@@ -1508,12 +1507,12 @@ async def test_rpc_task_pending_while_create_promise_blocked() -> None:
 
         await entered.wait()
 
-        assert "root:1" not in ctx._state.effects.cache
+        assert "root:1" not in cache_of(ctx)
 
         gate.set()
         with pytest.raises(Suspended):
             await task
-        assert ctx._state.effects.cache["root:1"].state == "pending"
+        assert cache_of(ctx)["root:1"].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -1531,7 +1530,7 @@ async def test_rpc_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root:1" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
     assert ctx._state.spawned_remote == []
 
 
@@ -1554,7 +1553,7 @@ async def test_sleep_pending_registers_todo_and_suspends() -> None:
     with pytest.raises(Suspended):
         await fut
     assert ctx._state.spawned_remote == ["root:1"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1608,7 +1607,7 @@ async def test_sleep_timeout_at_is_now_plus_duration() -> None:
     with pytest.raises(Suspended):
         await ctx.sleep(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1620,7 +1619,7 @@ async def test_sleep_duration_capped_to_parent_timeout() -> None:
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.sleep(timedelta(days=365))
-    assert ctx._state.effects.cache["root:1"].timeout_at == cap
+    assert cache_of(ctx)["root:1"].timeout_at == cap
 
 
 # =============================================================================
@@ -1641,7 +1640,7 @@ async def test_sleep_ignores_opts_timeout_for_duration() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=5)).sleep(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1715,7 +1714,7 @@ async def test_sleep_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root:1" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
     assert ctx._state.spawned_remote == []
 
 
@@ -1740,7 +1739,7 @@ async def test_promise_pending_registers_todo_and_suspends() -> None:
     with pytest.raises(Suspended):
         await fut
     assert ctx._state.spawned_remote == ["root:1"]
-    assert ctx._state.effects.cache["root:1"].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "pending"
 
 
 # =============================================================================
@@ -1799,7 +1798,7 @@ async def test_promise_timeout_at_is_now_plus_timeout() -> None:
     with pytest.raises(Suspended):
         await ctx.promise(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1812,7 +1811,7 @@ async def test_promise_none_timeout_uses_default() -> None:
     with pytest.raises(Suspended):
         await ctx.promise(None)
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     day_ms = 24 * 60 * 60 * 1000
     assert before + day_ms <= record.timeout_at <= after + day_ms
 
@@ -1823,7 +1822,7 @@ async def test_promise_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     with pytest.raises(Suspended):
         await ctx.promise(timedelta(days=365))
-    assert ctx._state.effects.cache["root:1"].timeout_at == cap
+    assert cache_of(ctx)["root:1"].timeout_at == cap
 
 
 # =============================================================================
@@ -1840,7 +1839,7 @@ async def test_promise_ignores_opts_timeout_for_deadline() -> None:
     with pytest.raises(Suspended):
         await ctx.options(timeout=timedelta(seconds=5)).promise(timedelta(seconds=30))
     after = now_ms()
-    record = ctx._state.effects.cache["root:1"]
+    record = cache_of(ctx)["root:1"]
     assert before + 30_000 <= record.timeout_at <= after + 30_000
 
 
@@ -1914,7 +1913,7 @@ async def test_promise_releases_event_when_create_promise_raises() -> None:
             await task
 
     failing_mock.assert_awaited_once()
-    assert "root:1" not in ctx._state.effects.cache
+    assert "root:1" not in cache_of(ctx)
     assert ctx._state.spawned_remote == []
 
 
@@ -1947,7 +1946,7 @@ async def test_detached_returns_id_without_suspending() -> None:
     assert ctx._state.spawned_remote == []
     # The durable promise was created (and left pending -- nobody settles it
     # on our behalf within this workflow).
-    assert ctx._state.effects.cache[child_id].state == "pending"
+    assert cache_of(ctx)[child_id].state == "pending"
 
 
 @pytest.mark.asyncio
@@ -2022,7 +2021,7 @@ async def test_detached_idempotent_on_preloaded_record() -> None:
     # regardless of the record's state.
     ctx = _root()
     child_id = _detached_id("root", "root:1")
-    ctx._state.effects.cache[child_id] = _resolved(child_id, "external-result")
+    cache_of(ctx)[child_id] = _resolved(child_id, "external-result")
     assert await ctx.detached("fn") == child_id
     assert ctx._state.spawned_remote == []
 
@@ -2040,7 +2039,7 @@ async def test_detached_with_options_target_and_timeout() -> None:
     [req] = captured
     assert req.tags["resonate:target"] == "worker-1"
     assert before + 30_000 <= req.timeout_at <= after + 30_000
-    assert ctx._state.effects.cache[child_id].timeout_at == req.timeout_at
+    assert cache_of(ctx)[child_id].timeout_at == req.timeout_at
 
 
 @pytest.mark.asyncio
@@ -2057,7 +2056,7 @@ async def test_detached_timeout_capped_to_parent() -> None:
     ctx = _root(timeout_at=cap)
     child_id = _detached_id("root", "root:1")
     await ctx.options(timeout=timedelta(days=365)).detached("fn")
-    assert ctx._state.effects.cache[child_id].timeout_at == cap
+    assert cache_of(ctx)[child_id].timeout_at == cap
 
 
 @pytest.mark.asyncio
@@ -2126,12 +2125,12 @@ async def test_detached_does_not_force_parent_to_suspend() -> None:
     # suspension the way a pending rpc/promise dependency would force.
     assert await ctx.run(dispatches_detached) == "done"
     assert ctx._state.spawned_remote == []
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
-    assert ctx._state.effects.cache["root:1"].value.data == "done"
+    assert cache_of(ctx)["root:1"].state == "resolved"
+    assert cache_of(ctx)["root:1"].value.data == "done"
     # The detached promise was created under the child's own origin-rooted id
     # and left pending.
     detached_id = _detached_id("root", "root:1.1")
-    assert ctx._state.effects.cache[detached_id].state == "pending"
+    assert cache_of(ctx)[detached_id].state == "pending"
 
 
 # =============================================================================
@@ -2167,13 +2166,13 @@ async def test_detached_create_promise_completes_by_flush_when_unawaited() -> No
     ctx = _root()
     child_id = _detached_id("root", "root:1")
     _ = ctx.detached("remote_fn", 1, 2)
-    assert child_id not in ctx._state.effects.cache
+    assert child_id not in cache_of(ctx)
     # ...``flush_local_work`` joins the body before the workflow can settle, so
     # the durable promise IS created by the time we exit. (Without the
     # registration, flush would be a no-op here and the promise would never be
     # created.)
     await ctx.flush_local_work()
-    assert ctx._state.effects.cache[child_id].state == "pending"
+    assert cache_of(ctx)[child_id].state == "pending"
     # The join added no remote todo, so the parent is still free to fulfill.
     assert ctx.take_remote_todos() == []
 
@@ -2224,8 +2223,8 @@ async def test_detached_promise_created_before_parent_settles_unawaited() -> Non
         f"create:{detached_id}",  # detached child -- flushed before settle
         "settle:root:1",  # parent settles last
     ]
-    assert ctx._state.effects.cache["root:1"].state == "resolved"
-    assert ctx._state.effects.cache[detached_id].state == "pending"
+    assert cache_of(ctx)["root:1"].state == "resolved"
+    assert cache_of(ctx)[detached_id].state == "pending"
     # Fire-and-forget: it never became a remote todo for the parent.
     assert ctx._state.spawned_remote == []
 

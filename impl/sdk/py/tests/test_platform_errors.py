@@ -137,6 +137,7 @@ class PlatformFixture:
         self.reg = Registry()
         self.core = Core(
             sender=self.sender,
+            fencing=self.sender,
             codec=self.codec,
             registry=self.reg,
             resolver=identity_target_resolver,

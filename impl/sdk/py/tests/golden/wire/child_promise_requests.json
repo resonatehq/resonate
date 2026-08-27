@@ -1,0 +1,49 @@
+[
+  {
+    "id": "wf-1.1",
+    "param": {},
+    "tags": {
+      "resonate:branch": "wf-1.1",
+      "resonate:origin": "wf-1",
+      "resonate:parent": "wf-1",
+      "resonate:scope": "global",
+      "resonate:target": "poll://any@w"
+    },
+    "timeoutAt": 1700000300000
+  },
+  {
+    "id": "wf-1.2",
+    "param": {},
+    "tags": {
+      "resonate:branch": "wf-1.2",
+      "resonate:origin": "wf-1",
+      "resonate:parent": "wf-1",
+      "resonate:scope": "global",
+      "resonate:target": "poll://x",
+      "resonate:timer": "true"
+    },
+    "timeoutAt": 1700000030000
+  },
+  {
+    "id": "wf-1.3",
+    "param": {},
+    "tags": {
+      "resonate:branch": "wf-1.3",
+      "resonate:origin": "wf-1",
+      "resonate:parent": "wf-1",
+      "resonate:scope": "global"
+    },
+    "timeoutAt": 1700086400000
+  },
+  {
+    "id": "wf-1:dabc",
+    "param": {},
+    "tags": {
+      "resonate:branch": "wf-1:dabc",
+      "resonate:origin": "wf-1",
+      "resonate:parent": "wf-1",
+      "resonate:scope": "global"
+    },
+    "timeoutAt": 1700003600000
+  }
+]
