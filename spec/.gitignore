@@ -17,9 +17,9 @@ spec/**/zz-*.lean
 
 
 # TLC scratch (state queue, fingerprints) and Apalache run output
-tla/states/
-tla/tmp/
-tla/_apalache-out/
+tlap/states/
+tlap/tmp/
+tlap/_apalache-out/
 *.st
-tla/*_TTrace_*.tla
-tla/*_TTrace_*.bin
+tlap/*_TTrace_*.tla
+tlap/*_TTrace_*.bin

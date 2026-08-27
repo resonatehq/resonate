@@ -38,6 +38,7 @@ report rather than a difference of opinion.
 | [`spec/01-protocol`](spec/01-protocol) | the wire surface — records, requests, responses, validation |
 | [`spec/02-abstract`](spec/02-abstract) | the machine: state, effects, handlers, the system definition, and the property catalogue |
 | [`spec/04-theorems`](spec/04-theorems) | what is proved about it, and the harnesses that evaluate it |
+| [`tlap/`](tlap) | the TLA+ machine — the same alphabet with atomicity removed, and the catalogue checked against it |
 | [`valid/`](valid) | the trace checker — `lake exe checktrace < trace.ndjson` |
 | [`work/`](work) | traffic generators that drive real servers and record traces |
 

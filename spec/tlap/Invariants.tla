@@ -7,14 +7,13 @@
    The mapping from Lean's stores to ours: promises and tasks coalesce into
    `objects`, and a task exists iff its state is not "none". Option fields
    read absence as NoTime/NoPid/NoValue. Lists of callbacks, listeners and
-   resumes are sets here, which settles eight catalogue entries by
+   resumes are sets here, which settles seven catalogue entries by
    construction rather than by checking:
 
      well_formed_promise_callbacks_unique     well_formed_promise_listeners_unique
-     well_formed_task_resumes_unique          well_formed_store_promise_ids_unique
-     well_formed_store_task_ids_unique        preserved_promise_no_duplicate_ids
-     well_formed_store_schedule_ids_unique    (and schedule id uniqueness twice over,
-                                               schedules not being modeled at all)
+     well_formed_task_resumes_unique          well_formed_store_object_ids_unique
+     preserved_promise_no_duplicate_ids       well_formed_store_schedule_ids_unique
+                                              (schedules not being modeled at all)
 
    Not carried, and why: the four well_formed_schedule_* properties and
    preserved_schedule_birth_fields_immutable (no schedules in this model);
