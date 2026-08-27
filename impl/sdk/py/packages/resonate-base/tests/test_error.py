@@ -1,16 +1,16 @@
-"""The three errors that cross the connector seam.
+"""The two errors that cross the connector seam.
 
 Small on purpose. Base owns :class:`ResonateError` (the root every failure
-shares), :class:`ConnectorError` (the only one a connector raises) and
-:class:`InvalidIdError` (raised by the id and address formats). Everything else
-is durable-execution vocabulary and is tested in the SDK's own suite.
+shares) and :class:`ConnectorError` (the only one a connector raises).
+Everything else is durable-execution vocabulary and is tested in the SDK's own
+suite.
 """
 
 from __future__ import annotations
 
 import pickle
 
-from resonate_base.error import ConnectorError, InvalidIdError, ResonateError
+from resonate_base.error import ConnectorError, ResonateError
 
 
 def test_everything_here_derives_from_the_root() -> None:
@@ -20,7 +20,6 @@ def test_everything_here_derives_from_the_root() -> None:
     releasing the task.
     """
     assert issubclass(ConnectorError, ResonateError)
-    assert issubclass(InvalidIdError, ResonateError)
 
 
 def test_connector_error_wraps_and_exposes_its_cause() -> None:
@@ -31,7 +30,7 @@ def test_connector_error_wraps_and_exposes_its_cause() -> None:
 
 
 def test_a_subclass_only_has_to_name_itself() -> None:
-    """The label is the entire extension point.
+    """The name is the entire extension point.
 
     A connector that had to override ``__init__`` would eventually forget to
     forward to ``super().__init__``, breaking pickle arity and silently
@@ -57,10 +56,3 @@ def test_connector_error_survives_a_pickle_round_trip() -> None:
     revived = pickle.loads(pickle.dumps(err))  # noqa: S301
     assert type(revived) is ConnectorError
     assert str(revived) == str(err)
-
-
-def test_invalid_id_error_names_the_offending_value() -> None:
-    err = InvalidIdError("a:b", "contains a colon")
-    assert err.id == "a:b"
-    assert err.reason == "contains a colon"
-    assert str(err) == "invalid id 'a:b': contains a colon"

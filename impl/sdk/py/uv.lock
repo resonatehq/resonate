@@ -1594,10 +1594,14 @@ version = "0.1.0"
 source = { editable = "packages/resonate-testing" }
 dependencies = [
     { name = "msgspec" },
+    { name = "resonate-base" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "msgspec", specifier = ">=0.21.1,<1" }]
+requires-dist = [
+    { name = "msgspec", specifier = ">=0.21.1,<1" },
+    { name = "resonate-base", specifier = ">=0.8.0,<0.9" },
+]
 
 [[package]]
 name = "rich"

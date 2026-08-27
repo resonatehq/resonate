@@ -66,17 +66,8 @@ class StubNetwork:
         self.promises: dict[str, PromiseRecord] = {}
         self.send_count = 0
 
-    def pid(self) -> str:
-        return "test-pid"
-
-    def group(self) -> str:
-        return "test-group"
-
     def unicast(self) -> str:
         return "test-unicast"
-
-    def anycast(self) -> str:
-        return "test-anycast"
 
     async def start(self) -> None: ...
 
@@ -84,10 +75,10 @@ class StubNetwork:
 
     def recv(self, callback: Callable[[str], None]) -> None: ...
 
-    def target_resolver(self, target: str) -> str:
+    def resolve_target(self, target: str) -> str:
         return target
 
-    async def send(self, req: str) -> str:
+    async def send(self, req: str, headers: dict[str, str] | None = None) -> str:
         self.send_count += 1
         req_json = msgspec.json.decode(req)
 

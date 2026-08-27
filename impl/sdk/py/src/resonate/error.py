@@ -5,14 +5,17 @@ the circuit breaker that skips work after a prior failure, the two control-flow
 signals that must dodge ``except Exception``, and the per-boundary union
 aliases that pin the whole set.
 
-Three names come from :mod:`resonate_base.error` and are re-exported so this
+Two names come from :mod:`resonate_base.error` and are re-exported so this
 module is the single import path for SDK users: :class:`ResonateError` (the
-root), :class:`ConnectorError` (what a transport raises -- see below), and
-:class:`InvalidIdError` (raised by the id and address formats).
+root) and :class:`ConnectorError` (what a transport raises -- see below).
 
 The split is by *who raises it*. A connector -- NATS, or something that does
 not exist yet -- raises :class:`ConnectorError` and needs nothing else, so that
-is all ``resonate-base`` ships. It is also the one open point in the vocabulary:
+is all ``resonate-base`` ships. :class:`InvalidIdError` is defined here rather
+than there because the format that raises it -- the promise id -- belongs to
+whoever defines it, not to the seam: a connector moves opaque strings and names
+its destinations however its substrate does, so no connector raises this about
+an address of its own. It is also the one open point in the vocabulary:
 because it names the category rather than each transport, :data:`SenderError`
 below can stay closed and exhaustively type-checked while the set of connectors
 stays open.
@@ -22,7 +25,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from resonate_base.error import ConnectorError, InvalidIdError, ResonateError
+from resonate_base.error import ConnectorError, ResonateError
 
 __all__ = [
     "AlreadyRegisteredError",
@@ -43,6 +46,24 @@ __all__ = [
     "StoppedError",
     "Suspended",
 ]
+
+
+class InvalidIdError(ResonateError):
+    """A caller-supplied id the server's format cannot carry.
+
+    See :func:`resonate.ids.validate_root_id`. Addresses are *not* in scope:
+    connector address minting is total by design (see
+    :func:`resonate.connections.sse.unicast`), and a malformed one is the
+    server's judgement to make.
+    """
+
+    def __init__(self, id: str, reason: str) -> None:
+        self.id = id
+        self.reason = reason
+        super().__init__(id, reason)
+
+    def __str__(self) -> str:
+        return f"invalid id {self.id!r}: {self.reason}"
 
 
 class FunctionNotFoundError(ResonateError):

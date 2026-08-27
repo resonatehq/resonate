@@ -33,7 +33,7 @@ from resonate.error import ApplicationError, ResonateError
 from resonate.observability import Dropped, Event, noop_observer
 from resonate.registry import Registry
 from resonate.resonate import Resonate
-from resonate.retry import Never, NoBackoff
+from resonate.retry import Never
 from resonate.send import Sender, SuspendResult, TaskAcquireResult
 from resonate.timing import Clock, now_ms
 from resonate.transport import Transport
@@ -487,8 +487,3 @@ def local_resonate(
         autostart=autostart,
         **kwargs,
     )
-
-
-#: A :class:`~resonate.retry.Backoff` that never waits -- re-exported so a test
-#: configuring a connection does not need a second import.
-no_backoff = NoBackoff

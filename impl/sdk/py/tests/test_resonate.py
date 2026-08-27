@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
@@ -48,6 +49,7 @@ from resonate.resonate import (
     Resonate,
 )
 from resonate.retry import Never
+from resonate.types import Value
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -157,6 +159,24 @@ async def add_via_child(ctx: Context, x: int, y: int) -> int:
     return await ctx.run(add, x, y)
 
 
+class _SchemeSource(FakeSource):
+    """A :class:`FakeSource` that mints addresses in a scheme of its own.
+
+    Two sources with distinguishable schemes are what make "which one resolved
+    this target?" an assertable question.
+    """
+
+    def __init__(self, scheme: str) -> None:
+        super().__init__()
+        self._scheme = scheme
+
+    def unicast(self) -> str:
+        return f"{self._scheme}://uni@{self._group}/{self._pid}"
+
+    def resolve_target(self, target: str) -> str:
+        return f"{self._scheme}://any@{target}"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Constructor / configuration
 # ═══════════════════════════════════════════════════════════════════════════
@@ -165,17 +185,26 @@ async def add_via_child(ctx: Context, x: int, y: int) -> int:
 @pytest.mark.asyncio
 async def test_local_constructor_sets_defaults() -> None:
     async with local() as r:
-        assert r._pid == "default"
+        # The pid is minted by the SDK (it is what leases tasks), not read back
+        # off a connection.
+        assert len(r._pid) == len(uuid.uuid4().hex)
+        assert r._group == "default"
         assert r._ttl == DEFAULT_TTL
         assert isinstance(r._network, LocalConnection)
 
 
 @pytest.mark.asyncio
 async def test_config_with_custom_pid_and_group() -> None:
+    """The SDK's identity is passed down into the connections it builds itself.
+
+    Otherwise the address the server pushes to and the pid the task is leased
+    under would name two different processes.
+    """
     async with local(pid="worker-1", group="workers") as r:
         assert r._pid == "worker-1"
-        assert "worker-1" in r._source.unicast()
-        assert "workers" in r._source.unicast()
+        assert r._group == "workers"
+        assert r._source is not None
+        assert r._source.unicast() == "local://uni@workers/worker-1"
 
 
 @pytest.mark.asyncio
@@ -185,18 +214,17 @@ async def test_default_ttl_is_one_minute() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_identity_local_mode() -> None:
+async def test_source_addresses_local_mode() -> None:
     async with local() as r:
-        assert r._source.unicast().startswith("local://uni@")
-        assert r._source.anycast().startswith("local://any@")
-        assert r._source.group() == "default"
-        assert r._source.pid() == "default"
+        assert r._source is not None
+        assert r._source.unicast() == f"local://uni@default/{r._pid}"
 
 
 @pytest.mark.asyncio
 async def test_target_resolver_returns_local_anycast() -> None:
     async with local() as r:
-        assert r._source.target_resolver("my-target") == "local://any@my-target"
+        assert r._source is not None
+        assert r._source.resolve_target("my-target") == "local://any@my-target"
 
 
 @pytest.mark.asyncio
@@ -245,12 +273,12 @@ async def test_explicit_network_and_sources() -> None:
     """``Resonate(network=..., sources=[...])`` wires both halves explicitly."""
     net = SendOnlyNetwork()
     src = FakeSource(pid="worker-9", group="workers")
-    r = Resonate(network=net, sources=[src], env={})
+    r = Resonate(network=net, sources=[src], group="workers", env={})
     try:
         assert r._network is net
         assert r._source is src
-        # Identity comes from the primary source.
-        assert r._pid == "worker-9"
+        # A bare target names this handle's own group, rendered in the
+        # source's scheme.
         assert r._resolve_target(None) == "fake://any@workers"
     finally:
         await r.stop()
@@ -277,27 +305,164 @@ async def test_first_source_is_primary() -> None:
     r = Resonate(network=SendOnlyNetwork(), sources=[a, b], env={})
     try:
         assert r._source is a
-        assert r._pid == "a"
     finally:
         await r.stop()
 
 
 @pytest.mark.asyncio
-async def test_send_only_network_without_sources_raises() -> None:
-    with pytest.raises(ValueError, match="sources"):
-        Resonate(network=SendOnlyNetwork())
+async def test_send_only_network_yields_a_source_less_client() -> None:
+    """No source is not an error: a client that only *sends* is a real shape.
+
+    An HTTP handler or a serverless function creates promises and never
+    listens; inventing a source for it would advertise an address nothing is
+    reading.
+    """
+    net = SendOnlyNetwork()
+    r = Resonate(network=net, env={})
+    try:
+        assert r._source is None
+        assert r._connections == [net]
+    finally:
+        await r.stop()
 
 
 @pytest.mark.asyncio
-async def test_empty_sources_raises() -> None:
-    with pytest.raises(ValueError, match="source"):
-        Resonate(network=FakeNetwork(), sources=[])
+async def test_empty_sources_opts_out_of_a_dual_role_networks_source_half() -> None:
+    """``sources=[]`` says *listen for nothing*, and is not ``sources=None``.
+
+    The network here could serve as its own source; passing an empty list is
+    how a caller declines that.
+    """
+    net = FakeNetwork()
+    r = Resonate(network=net, sources=[], env={})
+    try:
+        assert r._source is None
+    finally:
+        await r.stop()
 
 
 @pytest.mark.asyncio
 async def test_sources_without_network_raises() -> None:
     with pytest.raises(ValueError, match="network"):
         Resonate(sources=[FakeSource()])
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Target resolution
+# ════════════════════════════════════════════════════════════════════
+#
+# Where should the work this process dispatches be delivered? Three rules, in
+# order: an address passes through, a source renders a group name, and failing
+# both there is a fallback -- because a process with nothing to listen on still
+# has to name where *other* processes should pick the work up.
+
+
+@pytest.mark.asyncio
+async def test_an_address_passes_through_untouched() -> None:
+    """A target that already names a scheme is not a group name to render."""
+    async with local() as r:
+        assert r._resolve_target("nats://somewhere.else") == "nats://somewhere.else"
+
+
+@pytest.mark.asyncio
+async def test_a_dual_role_network_resolves_before_an_explicit_source() -> None:
+    """The network comes first when it is itself a source.
+
+    It is the one channel known to carry both halves of the conversation, so
+    its scheme is the safest guess for where dispatched work should land.
+    """
+    net = FakeNetwork(pid="n", group="g")
+    r = Resonate(network=net, sources=[_SchemeSource("other")], env={})
+    try:
+        # The explicit source is still the *primary* one -- that is what
+        # listeners are registered at -- but the network resolves targets.
+        assert isinstance(r._source, _SchemeSource)
+        assert r._resolve_target("workers") == "fake://any@workers"
+    finally:
+        await r.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_send_only_network_resolves_targets_through_poll() -> None:
+    """With no source, targets fall back to the server's own delivery scheme.
+
+    Nothing is listening here, so the address cannot describe this process --
+    it describes whichever worker polls that group.
+    """
+    r = Resonate(network=SendOnlyNetwork(), group="workers", env={})
+    try:
+        assert r._resolve_target(None) == "poll://any@workers"
+        assert r._resolve_target("elsewhere") == "poll://any@elsewhere"
+    finally:
+        await r.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_custom_fallback_replaces_the_poll_default() -> None:
+    """``resolve_target=`` is how a source-less deployment names itself.
+
+    A Lambda, say, routes every child back to its own function URL so a
+    recursive workflow re-invokes it.
+    """
+    r = Resonate(
+        network=SendOnlyNetwork(),
+        resolve_target=lambda target: f"https://fn.example/{target}",
+        env={},
+    )
+    try:
+        assert r._resolve_target("workers") == "https://fn.example/workers"
+    finally:
+        await r.stop()
+
+
+@pytest.mark.asyncio
+async def test_without_a_source_a_handle_settles_by_polling() -> None:
+    """No push channel means no listener to register -- so the SDK asks instead.
+
+    ``promise.register_listener`` hands the server an address to push the
+    settled value to; with no source there is no such address, and registering
+    one would be a lie. The refresh loop re-reads the promise instead, which is
+    the same code path degraded to polling, so a handle still settles.
+    """
+    net = LocalConnection(pid="solo")
+    r = Resonate(
+        network=net,
+        sources=[],
+        retry_policy=Never(),
+        subscription_refresh_secs=1.0,
+        # Collapse the refresh interval: the loop's cadence is not what is
+        # under test, the fact that it settles the handle at all is.
+        sleeper=lambda _: asyncio.sleep(0),
+        env={},
+    )
+    try:
+        handle = r.rpc("solo-poll", "never-runs")
+        record = await wait_for_promise(r, "solo-poll")
+
+        # Nothing was advertised on this process's behalf.
+        assert net.state.promises[record.id].subscribers == set()
+
+        # Something else settles the promise, as a worker elsewhere would.
+        await r.promises.resolve("solo-poll", Value(data=42))
+
+        assert await handle.result() == 42
+    finally:
+        await r.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_source_outranks_the_custom_fallback() -> None:
+    """The fallback is a *fallback*: a source that can resolve still wins."""
+    r = Resonate(
+        network=SendOnlyNetwork(),
+        sources=[FakeSource()],
+        resolve_target=lambda target: f"https://fn.example/{target}",
+        env={},
+    )
+    try:
+        assert r._resolve_target("workers") == "fake://any@workers"
+    finally:
+        await r.stop()
 
 
 @pytest.mark.asyncio

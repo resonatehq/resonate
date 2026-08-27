@@ -5,7 +5,7 @@ description = "Shared test doubles for the Resonate SDK's own test suites"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
-dependencies = ["msgspec>=0.21.1,<1"]
+dependencies = ["msgspec>=0.21.1,<1", "resonate-base>=0.8.0,<0.9"]
 
 [project.urls]
 Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"

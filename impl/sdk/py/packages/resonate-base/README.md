@@ -3,13 +3,14 @@
 The connector seam behind the Resonate Python SDK and every Resonate connector.
 
 `resonate-base` holds what you need to put Resonate on a new substrate, and
-nothing else. Everything that describes *executing durable functions* — codec,
-context, core, retry, timing, the observability stream, the wire records, the
-transport, and the SDK's own error vocabulary — stays in `resonate-sdk`.
+nothing else. A connector's job is to **move opaque strings** and to **decide
+where they go**. Everything else — promise ids, delivery-address conventions,
+codec, context, core, retry, timing, the observability stream, the wire
+records, the transport, and the SDK's own error vocabulary — stays in
+`resonate-sdk`.
 
 It has **no third-party dependencies** and never imports the SDK, so a
-connector built on it is independent of the SDK's release cadence. Both
-properties are asserted in `tests/test_layering.py`.
+connector built on it is independent of the SDK's release cadence.
 
 ## What's in it
 
@@ -17,38 +18,74 @@ properties are asserted in `tests/test_layering.py`.
 |---|---|
 | `resonate_base.connections` | `Network` and `Source` — the two protocols to implement |
 | `resonate_base.error` | `ConnectorError`, the one error a connector raises |
-| `resonate_base.ids` | The `origin:lineage` promise id format you route by |
-| `resonate_base.addresses` | Helpers for the delivery address format the server parses |
 | `resonate_base.PROTOCOL_VERSION` | The wire protocol version |
 
 That is the whole package. There is no framework here and nothing to conform
-to — implement the two protocols however suits your substrate.
+to — implement the protocols however suits your substrate.
 
 ## Building a connector
 
 ```python
-from resonate_base import ConnectorError, origin_of
+from resonate_base import ConnectorError
 
 
 class MyConnection:
     """A Network and Source over some new substrate."""
 
-    def pid(self) -> str: ...
-    def group(self) -> str: ...
-    def unicast(self) -> str: ...
-    def anycast(self) -> str: ...
-    def target_resolver(self, target: str) -> str: ...
-    def recv(self, callback) -> None: ...
-
-    async def start(self) -> None: ...
-    async def stop(self) -> None: ...
-
-    async def send(self, req: str) -> str:
+    # -- Network: request/response ------------------------------------------
+    async def send(self, req: str, origin: str) -> str:
         try:
-            return await self._rpc(origin_of(self._id_of(req)), req)
+            return await self._rpc(self._partition_for(origin), req)
         except OSError as exc:
             raise ConnectorError(exc) from exc
+
+    # -- Source: push -------------------------------------------------------
+    def unicast(self) -> str: ...
+    def resolve_target(self, target: str) -> str: ...
+    def recv(self, callback) -> None: ...
+
+    # -- both ---------------------------------------------------------------
+    async def start(self) -> None: ...
+    async def stop(self) -> None: ...
 ```
+
+Implement `Network`, `Source`, or both — a single connection can serve as both
+halves (`resonate-nats` does).
+
+### Routing a request: `origin`
+
+`send` receives the request **and** the `origin` it routes by: the lineage the
+request acts on, which is what selects the server's origin-state partition. A
+substrate that shards needs it; one that posts everything to a single endpoint
+ignores it.
+
+It arrives as an argument on purpose. Digging it out of the payload would mean
+knowing both the envelope layout and the promise id format — two SDK-internal
+formats free to change under you. The SDK owns both, so the SDK resolves it and
+hands it over. Two things follow: **`req` is opaque**, so you never parse it,
+and **every request has an origin**, so there is no "unrouted" case.
+
+### Addressing: `unicast` and `resolve_target`
+
+A source advertises two things, and it chooses the shape of both:
+
+- `unicast()` — where the server should push messages meant for **this process
+  alone**. Handed to the server verbatim when a listener is registered.
+- `resolve_target(target)` — where the work this process *dispatches* to a
+  named group should be delivered.
+
+The server parses an address with Go's `url.Parse`, dispatches on the scheme,
+and hands the rest straight back to you. So `resonate-nats` advertises
+`nats://resonate.recv.workers.7f3a` — a NATS subject already is an address in
+the NATS namespace, and nesting a second addressing scheme inside it would buy
+nothing.
+
+The one trap: Go lowercases the URL **host**, so an uppercase host does not
+round trip — and nothing raises. The server accepts the address, stores it, and
+the message is simply never delivered.
+
+Sources are optional. A process that only sends (an HTTP handler, a serverless
+function) implements `Network` alone.
 
 ### Errors
 
@@ -60,13 +97,12 @@ Subclassing is optional. Do it when your connector ships as its own
 distribution and its users benefit from a name they can catch specifically:
 
 ```python
-class NatsError(ConnectorError):
-    label = "nats"          # -> "nats error: no responders"
+class NatsError(ConnectorError): ...
 ```
 
-Override `label` and nothing else — the wrapped cause, the `args` tuple (and so
-the pickle round-trip the codec depends on), and the message shape are all
-inherited.
+Add nothing else — the wrapped cause, the `args` tuple (and so the pickle
+round-trip the codec depends on), and the message shape are all inherited, so
+there is no `__init__` to forget to forward.
 
 Either way, application code can handle *any* transport failure without
 importing your package:
@@ -82,29 +118,6 @@ except ConnectorError as exc:
 
 That is what lets the SDK's `SenderError` union stay closed and exhaustively
 type-checked while the set of connectors stays open.
-
-### Addresses
-
-A source advertises where the server should push messages. The server parses
-those with Go's `url.Parse`, so an address is a URL and its scheme selects the
-delivery mechanism. `resonate_base.addresses` mints the form the SDK's own
-sources use:
-
-```python
-addresses.unicast("mysub", "workers", "7f3a")     # mysub://uni@workers/7f3a
-addresses.anycast("mysub", "workers", "7f3a")     # mysub://any@workers/7f3a
-addresses.resolve_target("mysub", "elsewhere")    # mysub://any@elsewhere
-```
-
-Convenience, not a rule — if your destination is already an address in your own
-namespace, say so directly. `resonate-nats` advertises
-`nats://resonate.recv.workers.7f3a` and lets the server hand the subject
-straight back.
-
-The one thing worth knowing: Go lowercases the URL host, so an uppercase group
-or pid does not round trip, and nothing raises — the server accepts the address
-and the message is simply never delivered. These helpers refuse rather than
-silently folding.
 
 ## Installing
 

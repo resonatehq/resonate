@@ -4,10 +4,11 @@ import uuid
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import msgspec
-from resonate_base import PROTOCOL_VERSION
+from resonate_base import ORIGIN_HEADER, PROTOCOL_VERSION
 
 from resonate.codec import dec_hook
 from resonate.error import DecodingError, ServerError
+from resonate.ids import origin_of
 from resonate.observability import Dropped, logging_observer
 from resonate.types import PromiseRecord, ScheduleRecord, TaskRecord, Value
 
@@ -141,6 +142,15 @@ class TaskHeartbeating(Protocol):
     async def task_heartbeat(self, pid: str, tasks: list[TaskRef]) -> None: ...
 
 
+#: ``ORIGIN_HEADER`` and ``DEFAULT_ORIGIN`` are imported from
+#: :mod:`resonate_base` -- the wire owns both. ``ORIGIN_HEADER`` is the envelope
+#: head field the server reads to pick the origin-state partition and the
+#: ``headers`` key the origin rides under into
+#: :meth:`~resonate_base.connections.Network.send`, for a sharding connector's
+#: own routing. ``DEFAULT_ORIGIN`` is where a request that acts on no
+#: particular lineage (a search, a schedule) routes.
+
+
 def default_corr_id() -> str:
     """Mint a fresh correlation id.
 
@@ -186,7 +196,9 @@ class Sender:
         self, id: str, version: int, pid: str, ttl: int
     ) -> TaskAcquireResult:
         data = {"id": id, "version": version, "pid": pid, "ttl": ttl}
-        _, resp = await self._send_envelope("task.acquire", data, allow_409=False)
+        _, resp = await self._send_envelope(
+            "task.acquire", data, allow_409=False, routes_by=id
+        )
         return self._parse_task_acquire(resp)
 
     async def task_fulfill(
@@ -199,7 +211,9 @@ class Sender:
                 kind="promise.settle", head=self._make_head(), data=action
             ),
         }
-        _, resp = await self._send_envelope("task.fulfill", data, allow_409=False)
+        _, resp = await self._send_envelope(
+            "task.fulfill", data, allow_409=False, routes_by=id
+        )
         return parse_promise(resp)
 
     async def task_suspend(
@@ -216,7 +230,9 @@ class Sender:
             for action in actions
         ]
         data = {"id": id, "version": version, "actions": wrapped}
-        status, resp = await self._send_envelope("task.suspend", data, allow_409=False)
+        status, resp = await self._send_envelope(
+            "task.suspend", data, allow_409=False, routes_by=id
+        )
         if status == _REDIRECT_STATUS:
             return Redirect(preload=self._parse_preloaded(resp))
         return "suspended"
@@ -224,7 +240,10 @@ class Sender:
     async def task_release(self, id: str, version: int) -> None:
         """Release a task (give up the lock without fulfilling)."""
         await self._send_envelope(
-            "task.release", {"id": id, "version": version}, allow_409=False
+            "task.release",
+            {"id": id, "version": version},
+            allow_409=False,
+            routes_by=id,
         )
 
     async def task_create(
@@ -274,30 +293,45 @@ class Sender:
             "version": version,
             "action": SubEnvelope(kind=sub_kind, head=self._make_head(), data=action),
         }
-        _, resp = await self._send_envelope("task.fence", data, allow_409=False)
+        _, resp = await self._send_envelope(
+            "task.fence", data, allow_409=False, routes_by=id
+        )
         return self._parse_task_fence(resp)
 
     async def task_heartbeat(self, pid: str, tasks: list[TaskRef]) -> None:
-        """Extend the lease for one or more tasks."""
+        """Extend the lease for one or more tasks.
+
+        A heartbeat can span lineages, so it routes by the first task's origin
+        -- the same choice the server's own client makes.
+        """
         await self._send_envelope(
-            "task.heartbeat", {"pid": pid, "tasks": tasks}, allow_409=False
+            "task.heartbeat",
+            {"pid": pid, "tasks": tasks},
+            allow_409=False,
+            routes_by=tasks[0].id if tasks else None,
         )
 
     # -- promise operations ---------------------------------------------------
 
     async def promise_get(self, id: str) -> PromiseRecord:
         """Get a promise by ID."""
-        _, resp = await self._send_envelope("promise.get", {"id": id}, allow_409=False)
+        _, resp = await self._send_envelope(
+            "promise.get", {"id": id}, allow_409=False, routes_by=id
+        )
         return parse_promise(resp)
 
     async def promise_create(self, req: PromiseCreateReq) -> PromiseRecord:
         """Create a durable promise."""
-        _, resp = await self._send_envelope("promise.create", req, allow_409=False)
+        _, resp = await self._send_envelope(
+            "promise.create", req, allow_409=False, routes_by=req.id
+        )
         return parse_promise(resp)
 
     async def promise_settle(self, req: PromiseSettleReq) -> PromiseRecord:
         """Settle (resolve/reject) a durable promise."""
-        _, resp = await self._send_envelope("promise.settle", req, allow_409=False)
+        _, resp = await self._send_envelope(
+            "promise.settle", req, allow_409=False, routes_by=req.id
+        )
         return parse_promise(resp)
 
     async def promise_register_listener(
@@ -306,7 +340,7 @@ class Sender:
         """Register a listener for a promise."""
         data = {"awaited": awaited, "address": address}
         _, resp = await self._send_envelope(
-            "promise.register_listener", data, allow_409=False
+            "promise.register_listener", data, allow_409=False, routes_by=awaited
         )
         return parse_promise(resp)
 
@@ -375,7 +409,16 @@ class Sender:
     # -- internal helpers -----------------------------------------------------
 
     def _make_head(self) -> Head:
-        return Head(corr_id=self._corr_id(), version=PROTOCOL_VERSION, auth=self.auth)
+        """Build an envelope head; ``origin`` is set on top-level requests only.
+
+        A nested action envelope is routed by the head of the request carrying
+        it, so it leaves ``origin`` unset (and off the wire).
+        """
+        return Head(
+            corr_id=self._corr_id(),
+            version=PROTOCOL_VERSION,
+            auth=self.auth,
+        )
 
     def _decode_lenient[T](self, raw: list[Any], type_: type[T], what: str) -> list[T]:
         """Decode each record, reporting -- not raising on -- the ones that fail.
@@ -431,10 +474,12 @@ class Sender:
                 kind="promise.create", head=self._make_head(), data=action
             ),
         }
-        return await self._send_envelope("task.create", data, allow_409=allow_409)
+        return await self._send_envelope(
+            "task.create", data, allow_409=allow_409, routes_by=action.id
+        )
 
     async def _send_envelope(
-        self, kind: str, data: Any, *, allow_409: bool
+        self, kind: str, data: Any, *, allow_409: bool, routes_by: str | None = None
     ) -> tuple[int, Any]:
         """Serialize an envelope, send it, and return ``(status, data)``.
 
@@ -442,12 +487,22 @@ class Sender:
         :class:`~resonate.transport.Response`, so ``status`` and ``data`` are
         read straight off typed fields. A status >= 400 (other than an allowed
         409) raises a :class:`ServerError`.
+
+        ``routes_by`` is the id whose *origin* selects the server's
+        origin-state partition -- the promise the request acts on, or the
+        promise being awaited. It is resolved to an origin here, once, and then
+        travels two ways: on the head, which is where the server reads it, and
+        in the ``headers`` under :data:`ORIGIN_HEADER`, which is where a
+        sharding connector reads it. Neither the server nor the connector has
+        to know how a promise id is built. A request that acts on no particular
+        lineage (a search, a schedule) routes by :data:`DEFAULT_ORIGIN`.
         """
+        origin = origin_of(routes_by) if routes_by else "default"
         head = self._make_head()
         corr_id = head.corr_id
         envelope = Envelope(kind=kind, head=head, data=data)
         body = msgspec.json.encode(envelope).decode("utf-8")
-        resp = await self.transport.send(kind, corr_id, body)
+        resp = await self.transport.send(kind, corr_id, body, {ORIGIN_HEADER: origin})
 
         status = resp.head.status
         if status >= _ERROR_STATUS and not (allow_409 and status == _CONFLICT_STATUS):
@@ -483,7 +538,10 @@ class Head(
 ):
     """The ``head`` of a protocol envelope.
 
-    ``auth`` is left out of the wire format when ``None``.
+    ``auth`` is left out of the wire format when ``None``. ``origin`` is the
+    lineage origin the request routes by -- see :meth:`Sender._send_envelope`;
+    it is omitted from nested action envelopes, which are routed by the head of
+    the request that carries them.
     """
 
     corr_id: str

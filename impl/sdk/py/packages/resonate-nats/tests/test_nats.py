@@ -7,23 +7,13 @@ fakes and no broker.
 
 from __future__ import annotations
 
-import json
+import base64
 from typing import Any, cast
 
 import pytest
+from resonate_base import ORIGIN_HEADER
 from resonate_base.error import ConnectorError
-from resonate_nats import (
-    NatsConnection,
-    _id_to_origin,
-    _publish_subject,
-    _routing_origin,
-)
-
-
-def origin(id: str) -> str:
-    """Return the origin, per the server's ``origin()``: text before the first ``:``."""
-    return id.split(":", 1)[0]
-
+from resonate_nats import NatsConnection, _publish_subject
 
 # ═══════════════════════════════════════════════════════════════
 #  NATS -- the client seam
@@ -110,45 +100,33 @@ class _FakeNatsClient:
         )
 
 
-# ── ``_routing_origin`` -- pure, one case per request kind ─────────────────
+# ── subject mapping ────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("req", "origin"),
-    [
-        ({"kind": "task.acquire", "data": {"id": "root:1"}}, "root"),
-        ({"kind": "promise.get", "data": {"id": "root:1.2"}}, "root"),
-        (
-            {"kind": "promise.register_listener", "data": {"awaited": "root:1"}},
-            "root",
-        ),
-        (
-            {"kind": "task.create", "data": {"action": {"data": {"id": "root:1"}}}},
-            "root",
-        ),
-        (
-            {"kind": "task.heartbeat", "data": {"tasks": [{"id": "root:1"}]}},
-            "root",
-        ),
-        ({"kind": "something.else", "data": {}}, "default"),
-        ({"kind": "", "data": {}}, "default"),
-    ],
-    ids=lambda v: str(v)[:40],
+    "origin",
+    ["root", "my.app.workflow", "default", "with space", "unicode-\u00e9"],
 )
-def test_routing_origin_covers_every_request_kind(
-    req: dict[str, Any], origin: str
-) -> None:
-    assert _routing_origin(req) == origin
+def test_publish_subject_encodes_any_origin_as_one_subject_token(origin: str) -> None:
+    """A subject token cannot contain a dot; an origin can. Hence base64url."""
+    subject = _publish_subject("resonate.requests", origin)
+    prefix, _, token = subject.rpartition(".")
+    assert prefix == "resonate.requests"
+    assert "." not in token
+    assert "=" not in token
+    padded = token + "=" * (-len(token) % 4)
+    assert base64.urlsafe_b64decode(padded).decode("utf-8") == origin
 
 
-def test_pid_group_and_addresses_derive_from_the_recv_prefix() -> None:
+def test_addresses_derive_from_the_recv_prefix() -> None:
     client = _FakeNatsClient()
     conn = NatsConnection(client, pid="worker-1", group="workers")
-    assert conn.pid() == "worker-1"
-    assert conn.group() == "workers"
     assert conn.unicast() == "nats://resonate.recv.workers.worker-1"
-    assert conn.anycast() == "nats://resonate.recv.workers"
-    assert conn.target_resolver("other") == "nats://resonate.recv.other"
+    assert conn.resolve_target("other") == "nats://resonate.recv.other"
+    # Resolving this connection's own group is its anycast address -- the
+    # subject its group queue-subscribes to.
+    assert conn.resolve_target("workers") == "nats://resonate.recv.workers"
+    assert conn.resolve_target("workers") == f"nats://{conn._any_subject}"
 
 
 @pytest.mark.asyncio
@@ -211,7 +189,8 @@ async def test_send_publishes_the_origin_routed_subject_and_reply_header() -> No
     conn = NatsConnection(client)
     await conn.start()
 
-    resp = await conn.send('{"kind":"task.acquire","data":{"id":"root:1"}}')
+    req = '{"kind":"task.acquire","head":{"resonate:origin":"root"},"data":{"id":"root:1"}}'
+    resp = await conn.send(req, {ORIGIN_HEADER: "root"})
 
     assert resp == '{"kind":"reply"}'
     assert len(client.published) == 1
@@ -220,8 +199,8 @@ async def test_send_publishes_the_origin_routed_subject_and_reply_header() -> No
     assert published["headers"] is not None
     inbox = published["headers"]["Resonate-Reply-To"]
     assert inbox == client.subscribed[0]["subject"]
-    envelope = json.loads(published["payload"])
-    assert envelope["head"]["resonate:origin"] == "root"
+    # Published verbatim: the connector moves the body, it does not read it.
+    assert published["payload"] == req.encode("utf-8")
 
 
 @pytest.mark.asyncio
@@ -231,7 +210,9 @@ async def test_send_before_start_raises_nats_error() -> None:
     conn = NatsConnection(client)
 
     with pytest.raises(ConnectorError):
-        await conn.send('{"kind":"task.acquire","data":{"id":"root"}}')
+        await conn.send(
+            '{"kind":"task.acquire","data":{"id":"root"}}', {ORIGIN_HEADER: "root"}
+        )
     assert client.published == []
 
 
@@ -243,7 +224,9 @@ async def test_send_after_stop_raises_nats_error_without_touching_the_client() -
     await conn.stop()
 
     with pytest.raises(ConnectorError):
-        await conn.send('{"kind":"task.acquire","data":{"id":"root"}}')
+        await conn.send(
+            '{"kind":"task.acquire","data":{"id":"root"}}', {ORIGIN_HEADER: "root"}
+        )
     assert client.published == []
 
 
@@ -256,7 +239,9 @@ async def test_send_wraps_a_publish_failure_in_nats_error() -> None:
     await conn.start()
 
     with pytest.raises(ConnectorError) as excinfo:
-        await conn.send('{"kind":"task.acquire","data":{"id":"root"}}')
+        await conn.send(
+            '{"kind":"task.acquire","data":{"id":"root"}}', {ORIGIN_HEADER: "root"}
+        )
     assert isinstance(excinfo.value.error, OSError)
 
 
@@ -268,7 +253,9 @@ async def test_send_wraps_a_reply_timeout_in_nats_error() -> None:
     await conn.start()
 
     with pytest.raises(ConnectorError) as excinfo:
-        await conn.send('{"kind":"task.acquire","data":{"id":"root"}}')
+        await conn.send(
+            '{"kind":"task.acquire","data":{"id":"root"}}', {ORIGIN_HEADER: "root"}
+        )
     assert isinstance(excinfo.value.error, TimeoutError)
 
 
@@ -300,8 +287,19 @@ async def test_on_msg_drops_a_non_utf8_payload_without_raising() -> None:
     assert received == []
 
 
-def test_nats_routing_origin_splits_on_colon() -> None:
-    # The routing origin picks the server's origin-state partition, so it must
-    # agree with the server's own ``origin()`` for every id shape.
-    for id in ("root", "root:1", "root:1.2", "root:dbeef"):
-        assert _id_to_origin(id) == origin(id)
+@pytest.mark.asyncio
+async def test_send_routes_by_the_origin_it_is_given_not_by_the_payload() -> None:
+    """The argument is the routing key; the body is opaque.
+
+    A connector that re-derived the origin from the payload would be a second
+    copy of the SDK's envelope layout and id format, free to drift from it.
+    """
+    client = _FakeNatsClient()
+    conn = NatsConnection(client)
+    await conn.start()
+
+    await conn.send('{"kind":"promise.search","data":{}}', {ORIGIN_HEADER: "default"})
+
+    assert client.published[0]["subject"] == _publish_subject(
+        "resonate.requests", "default"
+    )

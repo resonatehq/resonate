@@ -47,7 +47,12 @@ class HttpConnection:
         backoff: Backoff | None = None,
         sleeper: Sleeper = sleep,
     ) -> None:
-        # Strip trailing slash(es) from url.
+        # Strip trailing slash(es) from url. Not validated: an address is the
+        # connector's own business, and every other connector
+        # (:class:`~resonate.connections.SSEConnection`,
+        # :class:`resonate_nats.NatsConnection`) is total here too. A malformed
+        # url surfaces as :class:`~resonate_base.error.ConnectorError` on the
+        # first :meth:`send`, which is observable and recoverable.
         self._url = url.rstrip("/")
         self._auth = auth
         self._conn_limit = conn_limit if conn_limit is not None else DEFAULT_CONN_LIMIT
@@ -85,8 +90,16 @@ class HttpConnection:
             await self._session.close()
             self._session = None
 
-    async def send(self, req: str) -> str:
+    async def send(self, req: str, headers: dict[str, str] | None = None) -> str:
         """Send a request to the Resonate server via ``POST /``.
+
+        The lineage origin rides in ``headers`` under ``resonate:origin`` but is
+        unused here: every request goes to the one endpoint, and the server
+        reads the partition off the envelope head. It exists on the seam for
+        substrates that shard, like NATS.
+
+        ``headers`` are optional request headers to send with the POST request.
+        Authentication headers are added automatically if configured.
 
         Transport-level connection failures are retried with exponential
         backoff (``1s → 60s``), so the SDK survives the server being down at
@@ -99,7 +112,10 @@ class HttpConnection:
         by the backoff loop.
         """
         logger.debug("http_connection http_req: %s", req)
-        headers = self._auth_headers({"Content-Type": "application/json"})
+        base_headers = headers or {}
+        if "Content-Type" not in base_headers:
+            base_headers["Content-Type"] = "application/json"
+        headers = self._auth_headers(base_headers)
         attempt = 0
         while True:
             if self._stopped:

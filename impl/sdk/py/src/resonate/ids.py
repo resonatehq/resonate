@@ -14,6 +14,11 @@ an id that does not extend the ``resonate:origin`` / ``resonate:branch`` /
 reads them back with :func:`origin_of`, both of which mirror the server's own
 rules (``src/types.rs``).
 
+This is SDK vocabulary, not connector vocabulary. A connector that routes by
+partition never parses an id: :class:`~resonate.send.Sender` stamps the origin
+onto every request head (:data:`resonate_base.ORIGIN_HEADER`) and the connector
+reads it from there.
+
 A root id is supplied by the caller and becomes the origin of its whole
 lineage, so :func:`validate_root_id` keeps ``:`` out of it, exactly as the
 server does for the origin tag itself. ``.`` is *not* reserved there: it only
@@ -24,7 +29,7 @@ trip intact.
 
 from __future__ import annotations
 
-from resonate_base.error import InvalidIdError
+from resonate.error import InvalidIdError
 
 #: Separates the origin from the lineage below it. A bare root joins its first
 #: lineage segment with this.
@@ -76,7 +81,7 @@ def validate_root_id(id: str) -> str:
         my.app.workflow -> my.app.workflow:1 -> my.app.workflow:1.1
 
     Raises:
-        ~resonate.error.InvalidIdError: caught here, at the call site that named
+        InvalidIdError: caught here, at the call site that named
             the workflow, rather than surfacing later as an opaque 400 from a
             background create.
 

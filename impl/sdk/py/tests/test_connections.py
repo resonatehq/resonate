@@ -211,13 +211,10 @@ def test_task_fence_rejects_wrong_version() -> None:
     asyncio.run(run())
 
 
-def test_local_network_identity() -> None:
+def test_local_network_addresses() -> None:
     net = LocalConnection(pid="mypid", group="mygroup")
-    assert net.pid() == "mypid"
-    assert net.group() == "mygroup"
     assert net.unicast() == "local://uni@mygroup/mypid"
-    assert net.anycast() == "local://any@mygroup/mypid"
-    assert net.target_resolver("target") == "local://any@target"
+    assert net.resolve_target("target") == "local://any@target"
 
 
 def test_promise_create_with_target_creates_task_and_dispatches_execute() -> None:
@@ -501,22 +498,18 @@ async def test_http_session_connector_limit_override() -> None:
 # -- SSEConnection (push-message source) ----------------------------------------
 
 
-def test_sse_connection_identity() -> None:
+def test_sse_connection_addresses() -> None:
     src = SSEConnection("http://localhost:8001", pid="mypid", group="mygroup")
-    assert src.pid() == "mypid"
-    assert src.group() == "mygroup"
     assert src.unicast() == "poll://uni@mygroup/mypid"
-    assert src.anycast() == "poll://any@mygroup/mypid"
 
 
-def test_sse_connection_match_returns_poll_anycast() -> None:
+def test_sse_connection_resolves_a_target_to_a_poll_anycast_address() -> None:
     src = SSEConnection("http://localhost:8001")
-    assert src.target_resolver("my-target") == "poll://any@my-target"
+    assert src.resolve_target("my-target") == "poll://any@my-target"
 
 
 def test_sse_connection_default_group() -> None:
     src = SSEConnection("http://localhost:8001", pid="pid1")
-    assert src.group() == "default"
     assert src.unicast() == "poll://uni@default/pid1"
 
 

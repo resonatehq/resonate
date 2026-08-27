@@ -25,14 +25,15 @@ import contextlib
 import copy
 import logging
 import os
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
 from resonate_base.connections import Network, Source
-from resonate_base.ids import validate_root_id
 
 from resonate.codec import Codec, NoopEncryptor
 from resonate.connections import HttpConnection, LocalConnection, SSEConnection
+from resonate.connections.sse import resolve_target as resolve_poll_target
 from resonate.context import Opts
 from resonate.core import Core
 from resonate.dependencies import DependencyMap
@@ -44,6 +45,7 @@ from resonate.error import (
 )
 from resonate.handle import PromiseResult, ResonateHandle, Subscription
 from resonate.heartbeat import AsyncHeartbeat, NoopHeartbeat
+from resonate.ids import validate_root_id
 from resonate.observability import BackgroundTaskFailed, logging_observer
 from resonate.promises import Promises
 from resonate.registry import Registry
@@ -52,7 +54,15 @@ from resonate.schedules import Schedules
 from resonate.send import Sender
 from resonate.timing import now_ms, sleep
 from resonate.transport import ExecuteMsg, Transport, UnblockMsg
-from resonate.types import Args, PromiseCreateReq, PromiseState, Status, TaskData, Value
+from resonate.types import (
+    Args,
+    PromiseCreateReq,
+    PromiseRecord,
+    PromiseState,
+    Status,
+    TaskData,
+    Value,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
@@ -98,6 +108,26 @@ HEARTBEAT_INTERVAL_DIVISOR = 2
 #: is what an in-process transport (and most tests) want -- there is no
 #: connection to drop.
 DEFAULT_SUBSCRIPTION_REFRESH_SECS = 60.0
+
+#: Group a :class:`Resonate` joins when the caller names none.
+DEFAULT_GROUP = "default"
+
+
+def default_resolve_target(target: str) -> str:
+    """Render a routing target as a ``poll://`` anycast address.
+
+    The fallback used when there is no source to ask. A process that only
+    *sends* -- an HTTP handler, a serverless function, a CLI kicking off a
+    workflow -- still has to tell the server where the work it creates should
+    be delivered. It cannot answer with an address of its own, since nothing
+    here is listening, so it answers with the server's own built-in delivery
+    mechanism (:mod:`resonate.connections.sse`'s scheme) and whichever worker
+    polls that group picks the work up.
+
+    Pass ``Resonate(resolve_target=...)`` to override it -- e.g. a Lambda that
+    routes every child back to its own function URL.
+    """
+    return resolve_poll_target(target)
 
 
 class ResonateSchedule:
@@ -166,14 +196,33 @@ class Resonate:
     :class:`_Runtime` and is visible across every handle.
 
     Server communication is split across two protocols: exactly one
-    :class:`~resonate_base.connections.Network` carries requests, and one or more
-    :class:`~resonate_base.connections.Source` channels deliver push messages
-    (``Resonate(network=network, sources=[source, ...])``). The first source
-    is the *primary* source: its unicast address is advertised for listener
-    registration and its resolver mints ``resonate:target`` addresses. A
+    :class:`~resonate_base.connections.Network` carries requests, and any
+    number of :class:`~resonate_base.connections.Source` channels deliver push
+    messages (``Resonate(network=network, sources=[source, ...])``). A
     connection implementing both protocols (e.g.
     :class:`~resonate_nats.NatsConnection`) passed as ``network`` without
     explicit ``sources`` doubles as the sole source.
+
+    The first source is the *primary* source: its unicast address is what
+    listeners are registered at. Target resolution walks the same set, network
+    first when the network is itself a source, and falls back to
+    :func:`default_resolve_target` (overridable via ``resolve_target=``).
+
+    **Sources are optional.** With none, this is a send-only client: it creates
+    promises and schedules, and handles settle by polling rather than by push
+    (see :meth:`_observe`). That is the shape a serverless worker or a CLI
+    wants -- nothing is listening in this process, so nothing should advertise
+    an address.
+
+    ``pid`` and ``group`` are this process's identity and they belong to the
+    SDK, not to a connector: ``pid`` is what tasks are leased under (and what
+    the heartbeat renews), ``group`` is the routing target a bare ``run``/``rpc``
+    defaults to. Both are passed down into the connections the SDK builds
+    itself, so the addresses they advertise agree with the pid holding the
+    leases. A connection you construct yourself should be told the *same*
+    group -- ``Resonate(group="workers", network=NatsConnection(c,
+    group="workers"))`` -- or this process will dispatch its own work to a
+    group it is not listening on.
 
     Connection selection precedence: ``url`` > ``network`` > ``RESONATE_URL``
     env (with a ``RESONATE_HOST``/``RESONATE_PORT`` fallback) > an in-process
@@ -192,6 +241,7 @@ class Resonate:
         sources: Sequence[Source] | None = None,
         group: str | None = None,
         pid: str | None = None,
+        resolve_target: Callable[[str], str] | None = None,
         ttl: timedelta | None = None,
         token: str | None = None,
         encryptor: Encryptor | None = None,
@@ -215,6 +265,11 @@ class Resonate:
         without touching process-wide state, so tests stay isolated and can run
         in parallel.
 
+        ``resolve_target`` renders a bare routing target (a group name) as a
+        delivery address, and is consulted only when no source can -- either
+        because there are none, or because none of them resolves targets. It
+        defaults to :func:`default_resolve_target` (``poll://any@{target}``).
+
         ``autostart`` controls whether the constructor also opens connections
         and spawns the refresh loop. It defaults to ``True`` (the historical
         behaviour, which requires a running event loop); pass ``False`` to
@@ -237,13 +292,18 @@ class Resonate:
 
         auth = token if token is not None else environ.get("RESONATE_TOKEN")
 
+        # This process's identity, minted here rather than read back off a
+        # connection: it is the SDK that leases tasks under it, and there may
+        # be no connection to ask.
+        resolved_pid = pid if pid is not None else uuid.uuid4().hex
+        resolved_group = group if group is not None else DEFAULT_GROUP
+
         net, srcs = _select_connections(
-            url, network, sources, group, pid, auth, environ
+            url, network, sources, resolved_group, resolved_pid, auth, environ
         )
-        # The primary source: its identity drives the SDK's pid/group and its
-        # addresses are the ones advertised to the server.
-        source = srcs[0]
-        net_pid = source.pid()
+        # The primary source: the one whose unicast address is advertised when
+        # registering listeners. ``None`` when this is a send-only client.
+        source = srcs[0] if srcs else None
 
         transport = Transport(net, srcs, observer)
         codec = Codec(encryptor if encryptor is not None else NoopEncryptor())
@@ -257,7 +317,7 @@ class Resonate:
             hb = NoopHeartbeat()
         else:
             interval_ms = max(safe_ttl // HEARTBEAT_INTERVAL_DIVISOR, 1)
-            hb = AsyncHeartbeat(net_pid, interval_ms, sender, sleeper)
+            hb = AsyncHeartbeat(resolved_pid, interval_ms, sender, sleeper)
 
         core = Core(
             # One ``Sender`` satisfies both narrow ports structurally; they are
@@ -270,7 +330,7 @@ class Resonate:
             # before the wiring is assigned below is safe.
             resolver=self._resolve_target,
             heartbeat=hb,
-            pid=net_pid,
+            pid=resolved_pid,
             ttl=safe_ttl,
             deps=deps,
             retry_policy=resolved_retry_policy,
@@ -284,13 +344,21 @@ class Resonate:
         # reference automatically.
         self._ttl = resolved_ttl
         self._network = net
-        self._source = source
+        self._source: Source | None = source
+        #: What renders a bare routing target as a delivery address: a source
+        #: if there is one, else the fallback.
+        self._resolver = _select_resolver(
+            net,
+            srcs,
+            resolve_target if resolve_target is not None else default_resolve_target,
+        )
         #: Every distinct connection, sources first, then the network -- the
         #: lifecycle (start/stop) order. Deduplicated by identity so a
         #: dual-role connection serving as both network and source is started
         #: and stopped exactly once.
         self._connections: list[Network | Source] = list(dict.fromkeys([*srcs, net]))
-        self._pid = net_pid
+        self._pid = resolved_pid
+        self._group = resolved_group
         self._codec = codec
         self._registry = registry
         self._sender = sender
@@ -701,9 +769,7 @@ class Resonate:
         sub, is_new = self._subscribe(id)
         if is_new:
             try:
-                record = await self._sender.promise_register_listener(
-                    id, self._source.unicast()
-                )
+                record = await self._observe(id)
             except ResonateError:
                 if self._runtime.subs.get(id) is sub and not sub.settled():
                     del self._runtime.subs[id]
@@ -828,19 +894,23 @@ class Resonate:
         return recorded
 
     def _resolve_target(self, target: str | None) -> str:
-        """Resolve a routing target.
+        """Resolve a routing target to the address the server delivers to.
 
-        Empty falls back to the primary source's group; a URL passes through
-        unchanged; a bare name runs through the primary source's resolver.
+        Three rules, in order: no target names this handle's own ``group``; a
+        target that is already an address (it has a scheme) passes through
+        untouched, so a caller can dispatch to any address they can name; a
+        bare group name goes through :attr:`_resolver`.
+
         Doubles as the :class:`~resonate.context.TargetResolver` handed to
-        :class:`Core`.
+        :class:`Core`, so a ``ctx.rpc`` deep inside a workflow resolves exactly
+        as a top-level :meth:`rpc` does.
         """
-        resolved = target if target is not None else self._source.group()
+        resolved = target if target is not None else self._group
 
         if "://" in resolved:
             return resolved
 
-        return self._source.target_resolver(resolved)
+        return self._resolver(resolved)
 
     def _build_root_promise_create_req(
         self,
@@ -935,9 +1005,7 @@ class Resonate:
         :class:`ApplicationError` instead of hanging on the next ``wait``.
         """
         try:
-            record = await self._sender.promise_register_listener(
-                id, self._source.unicast()
-            )
+            record = await self._observe(id)
         except ServerError as exc:
             if exc.code == 404:
                 self._settle_subscription_gone(id, sub, exc.message)
@@ -949,6 +1017,21 @@ class Resonate:
             return
         if record.state != "pending":
             self._settle_and_cleanup(id, sub, record.state, record.value)
+
+    async def _observe(self, id: str) -> PromiseRecord:
+        """Ask the server about ``id``, arranging to be told when it settles.
+
+        With a source, that is ``promise.register_listener``: the server
+        remembers the primary source's unicast address and pushes an
+        ``unblock`` the moment the promise settles. With no source there is
+        nowhere to push to, so this degrades to a plain read -- the refresh
+        loop calls it again on its interval, which turns the same code path
+        into polling. Either way the returned record settles the subscription
+        immediately when the promise is already done.
+        """
+        if self._source is None:
+            return await self._sender.promise_get(id)
+        return await self._sender.promise_register_listener(id, self._source.unicast())
 
     def _settle_subscription_gone(
         self, id: str, sub: Subscription, reason: str
@@ -1053,28 +1136,30 @@ class Resonate:
         task.add_done_callback(_)
 
     async def _run_refresh(self) -> None:
-        """Re-register listeners for pending subscriptions every interval.
+        """Re-observe every pending subscription, once per interval.
 
-        Defends a handle against a dropped SSE connection. Returns when
-        cancelled by :meth:`stop`. A 404 from the server means the promise
-        no longer exists -- settle the subscription with a synthetic rejection
-        (see :meth:`_register_and_settle`) so the awaiting handle is not
-        stranded for the rest of the process lifetime.
+        With a source this re-registers listeners, defending a handle against a
+        dropped SSE connection; with none it *is* how a handle settles at all,
+        since there is no push channel to deliver the ``unblock`` (see
+        :meth:`_observe`). Returns when cancelled by :meth:`stop`. A 404 from
+        the server means the promise no longer exists -- settle the
+        subscription with a synthetic rejection (see
+        :meth:`_register_and_settle`) so the awaiting handle is not stranded
+        for the rest of the process lifetime.
 
         Never started when ``subscription_refresh_secs`` is non-positive (see
-        :meth:`start`).
+        :meth:`start`) -- which, with no source, means nothing settles a handle
+        that was still pending when it was created. That combination is for a
+        client that dispatches and exits without awaiting anything.
         """
         with contextlib.suppress(asyncio.CancelledError):
             while True:
                 await self._sleeper(self._refresh_secs)
-                addr = self._source.unicast()
 
                 for id, sub in list(self._runtime.subs.items()):
                     if not sub.settled():
                         try:
-                            record = await self._sender.promise_register_listener(
-                                id, addr
-                            )
+                            record = await self._observe(id)
                         except ServerError as exc:
                             if exc.code == 404:
                                 self._settle_subscription_gone(id, sub, exc.message)
@@ -1113,16 +1198,7 @@ def _safe_ttl_ms(ttl: timedelta) -> int:
 #: :class:`~resonate_base.connections.Source`).
 _PROTOCOL_METHODS: dict[type, tuple[str, ...]] = {
     Network: ("send", "start", "stop"),
-    Source: (
-        "pid",
-        "group",
-        "unicast",
-        "anycast",
-        "target_resolver",
-        "recv",
-        "start",
-        "stop",
-    ),
+    Source: ("unicast", "resolve_target", "recv", "start", "stop"),
 }
 
 
@@ -1134,16 +1210,38 @@ def _missing_methods(obj: object, proto: type) -> str:
     return ", ".join(missing) if missing else "<none>"
 
 
+def _select_resolver(
+    network: Network,
+    sources: Sequence[Source],
+    fallback: Callable[[str], str],
+) -> Callable[[str], str]:
+    """Pick what renders a bare routing target as a delivery address.
+
+    The first source wins, the network coming first when it is itself a source
+    -- a dual-role connection is the one channel known to carry both halves of
+    the conversation, so its scheme is the safest default for the work this
+    process dispatches.
+
+    With no source at all there is nothing to ask, and this is not an error: a
+    send-only client still has to name where its work should go. It just names
+    it through ``fallback`` (:func:`default_resolve_target` unless the caller
+    passed one), because the address then describes *some other* process's
+    delivery channel, not this one's.
+    """
+    candidates = [network, *sources] if isinstance(network, Source) else [*sources]
+    return candidates[0].resolve_target if candidates else fallback
+
+
 def _select_connections(
     url: str | None,
     network: Network | None,
     sources: Sequence[Source] | None,
-    group: str | None,
-    pid: str | None,
+    group: str,
+    pid: str,
     auth: str | None,
     env: Mapping[str, str],
 ) -> tuple[Network, list[Source]]:
-    """Resolve the network and the (non-empty) list of sources.
+    """Resolve the network and the (possibly empty) list of sources.
 
     Precedence: ``url`` > ``network`` > ``RESONATE_URL`` env > local. A URL
     selects :class:`HttpConnection`, paired with an :class:`SSEConnection`
@@ -1151,7 +1249,11 @@ def _select_connections(
     explicit ``network`` that also implements :class:`Source` (e.g.
     :class:`~resonate_nats.NatsConnection`,
     :class:`~resonate.connections.LocalConnection`) doubles as the sole source
-    when none are given; a send-only network requires explicit ``sources``.
+    when none are given.
+
+    ``sources=[]`` is meaningful and distinct from ``sources=None``: it says
+    *this process listens for nothing*, so no source is invented for it and no
+    address is advertised on its behalf.
 
     A ``network``/``sources`` argument that does not satisfy its protocol is
     rejected up front with :class:`TypeError`. Without the guard the mistake
@@ -1191,8 +1293,10 @@ def _select_connections(
         elif isinstance(network, Source):
             srcs = [network]
         else:
-            msg = "network provides no message source; pass sources=[...] alongside it"
-            raise ValueError(msg)
+            # A send-only network with no sources: nothing pushes work to this
+            # process. Legitimate (a client, a serverless handler), so it is
+            # wired rather than refused.
+            srcs = []
     else:
         if sources is not None:
             msg = "sources requires a network (or url)"
@@ -1201,9 +1305,6 @@ def _select_connections(
         net = local
         srcs = [local]
 
-    if not srcs:
-        msg = "at least one source is required"
-        raise ValueError(msg)
     return net, srcs
 
 

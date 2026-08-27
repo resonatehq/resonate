@@ -10,7 +10,6 @@ from hashlib import blake2b
 from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
 import msgspec
-from resonate_base.ids import join_id
 
 from resonate.chain import Chain, Link
 from resonate.codec import decode_settled
@@ -22,6 +21,7 @@ from resonate.error import (
     SerializationError,
     Suspended,
 )
+from resonate.ids import join_id
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy
 from resonate.timing import Clock, Sleeper, now_ms, sleep

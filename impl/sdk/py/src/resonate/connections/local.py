@@ -5,7 +5,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any, Literal
 
 import msgspec
-from resonate_base import PROTOCOL_VERSION, addresses
+from resonate_base import PROTOCOL_VERSION
 
 from resonate.error import DecodingError, ServerError
 from resonate.timing import Clock, Sleeper, now_ms, sleep
@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 # =============================================================================
 
 #: URL scheme of the delivery addresses this in-process server advertises.
+#: They are only ever read back by this module -- :meth:`_dispatch_messages`
+#: hands every message to every registered receiver, because in one process
+#: there is nothing to route *between*. So the addresses below are minted for
+#: recognisability in a test or a log, and mirror the ``poll://`` connector's
+#: shape for exactly that reason; nothing parses them.
 SCHEME = "local"
 
 PENDING_RETRY_TTL = 30_000
@@ -1154,24 +1159,17 @@ class LocalConnection:
 
         self._pid = pid if pid is not None else "default"
         self._group = group if group is not None else "default"
-        self._unicast = addresses.unicast(SCHEME, self._group, self._pid)
-        self._anycast = addresses.anycast(SCHEME, self._group, self._pid)
+        self._unicast = f"{SCHEME}://uni@{self._group}/{self._pid}"
         self._lock = asyncio.Lock()
         self._subscribers: list[Callable[[str], None]] = []
         self._tick_handle: asyncio.Task[None] | None = None
         self._dispatch_tasks: set[asyncio.Task[None]] = set()
 
-    def pid(self) -> str:
-        return self._pid
-
-    def group(self) -> str:
-        return self._group
-
     def unicast(self) -> str:
         return self._unicast
 
-    def anycast(self) -> str:
-        return self._anycast
+    def resolve_target(self, target: str) -> str:
+        return f"{SCHEME}://any@{target}"
 
     async def start(self) -> None:
         self._tick_handle = asyncio.create_task(self._tick_loop())
@@ -1199,7 +1197,16 @@ class LocalConnection:
                 await handle
         self._subscribers.clear()
 
-    async def send(self, req: str) -> str:
+    async def send(self, req: str, headers: dict[str, str] | None = None) -> str:
+        """Apply a request to the in-process server state.
+
+        The lineage origin rides in ``headers`` under ``resonate:origin`` but is
+        unused: this simulation holds one undivided state, so there is no
+        partition to select.
+
+        ``headers`` are unused in the local simulation but accepted for protocol
+        compatibility.
+        """
         try:
             req_json = msgspec.json.decode(req)
         except msgspec.DecodeError as exc:
@@ -1226,9 +1233,6 @@ class LocalConnection:
 
     def recv(self, callback: Callable[[str], None]) -> None:
         self._subscribers.append(callback)
-
-    def target_resolver(self, target: str) -> str:
-        return addresses.resolve_target(SCHEME, target)
 
     def _dispatch_messages(self, messages: list[OutgoingMessage]) -> None:
         """Dispatch outgoing messages to all subscribers, off the critical path."""

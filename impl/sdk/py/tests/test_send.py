@@ -240,17 +240,8 @@ class CapturingNetwork:
     def __init__(self) -> None:
         self.sent: list[str] = []
 
-    def pid(self) -> str:
-        return "test-pid"
-
-    def group(self) -> str:
-        return "default"
-
     def unicast(self) -> str:
         return "local://uni@default/test-pid"
-
-    def anycast(self) -> str:
-        return "local://any@default/test-pid"
 
     async def start(self) -> None: ...
 
@@ -258,10 +249,10 @@ class CapturingNetwork:
 
     def recv(self, callback: Callable[[str], None]) -> None: ...
 
-    def target_resolver(self, target: str) -> str:
+    def resolve_target(self, target: str) -> str:
         return f"local://any@{target}"
 
-    async def send(self, req: str) -> str:
+    async def send(self, req: str, headers: dict[str, str] | None = None) -> str:
         self.sent.append(req)
         parsed = msgspec.json.decode(req)
         kind = parsed["kind"]

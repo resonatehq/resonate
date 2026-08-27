@@ -20,10 +20,10 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_base.ids import join_id, origin_of, validate_root_id
 
 from resonate.connections import LocalConnection
 from resonate.error import InvalidIdError, ServerError
+from resonate.ids import join_id, origin_of, validate_root_id
 from resonate.resonate import Resonate
 from resonate.retry import Never
 

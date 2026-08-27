@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from resonate_base.error import ConnectorError
-from resonate_base.ids import origin_of
+from resonate_base import ORIGIN_HEADER, ConnectorError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -32,8 +30,8 @@ DEFAULT_REQUEST_TIMEOUT_SECS = 30.0
 DEFAULT_API_PREFIX = "resonate.requests"
 
 #: Subject prefix the SDK subscribes on for execute/unblock messages. The
-#: ``nats://`` delivery addresses advertised via :meth:`unicast` / :meth:`anycast`
-#: round-trip through the server's ``url.Parse(host+path)`` to these subjects.
+#: ``nats://`` delivery addresses this connection advertises round-trip through
+#: the server's ``url.Parse(host+path)`` to these subjects.
 DEFAULT_RECV_PREFIX = "resonate.recv"
 
 #: Header the server reads to learn where to publish its reply. The NATS
@@ -41,40 +39,13 @@ DEFAULT_RECV_PREFIX = "resonate.recv"
 REPLY_HEADER = "Resonate-Reply-To"
 
 
-#: The lineage origin of an id -- see :mod:`resonate_base.ids`. Aliased here because
-#: it is what selects the server's origin-state partition (below).
-_id_to_origin = origin_of
-
-
-def _routing_origin(req: dict[str, Any]) -> str:
-    """Derive the routing origin from a request, mirroring the server's client.
-
-    The origin selects which origin-state partition the server loads, so it
-    must be the lineage root of whatever id the request acts on.
-    """
-    kind = req.get("kind", "")
-    data = req.get("data") or {}
-    if kind in {
-        "promise.get",
-        "promise.create",
-        "promise.settle",
-        "task.acquire",
-        "task.release",
-        "task.suspend",
-        "task.fulfill",
-        "task.fence",
-    }:
-        return _id_to_origin(data.get("id", ""))
-    if kind == "promise.register_listener":
-        return _id_to_origin(data.get("awaited", ""))
-    if kind == "task.create":
-        return _id_to_origin(data["action"]["data"]["id"])
-    if kind == "task.heartbeat":
-        return _id_to_origin(data["tasks"][0]["id"])
-    return "default"
-
-
 def _publish_subject(prefix: str, origin: str) -> str:
+    """Map a routing origin to the subject its partition is subscribed on.
+
+    The origin is base64url-encoded so that *any* origin -- dots, spaces,
+    whatever a caller named their workflow -- becomes a single valid subject
+    token, and so every publisher hashes one origin to one JetStream partition.
+    """
     token = base64.urlsafe_b64encode(origin.encode("utf-8")).rstrip(b"=")
     return f"{prefix}.{token.decode('ascii')}"
 
@@ -154,18 +125,20 @@ class NatsConnection:
     connection's subscriptions and leaves the client for the caller to
     drain/close.
 
-    - Requests are published to ``{api_prefix}.{base64url(origin)}`` with a
-      ``Resonate-Reply-To`` header naming a private inbox; the reply arrives on
-      that inbox (the server ignores the NATS reply subject).
+    - Requests are published to ``{api_prefix}.{base64url(origin)}`` -- the
+      origin the SDK puts in the ``resonate:origin`` header handed to
+      :meth:`send` -- with a ``Resonate-Reply-To``
+      header naming a private inbox; the reply arrives on that inbox (the
+      server ignores the NATS reply subject). The request body itself is never
+      parsed: it is bytes to be moved.
     - Incoming execute/unblock messages arrive on a unicast subject
       (``{recv_prefix}.{group}.{pid}``) and an anycast subject
       (``{recv_prefix}.{group}``) queue-subscribed on ``group`` so exactly one
       group member receives each anycast message.
     - Addresses use the ``nats://`` scheme so the server's ``url.Parse`` maps
-      ``nats://{subject}`` back to ``{subject}``. This is the *substrate form*
-      described in :mod:`resonate_base.addresses`: the destination already is
-      an address in the NATS namespace, so nesting the canonical
-      ``uni@group/pid`` form inside it would buy nothing.
+      ``nats://{subject}`` back to ``{subject}``: the destination already is an
+      address in the NATS namespace, so nesting a second addressing scheme
+      inside it would buy nothing.
 
     Install with ``uv add resonate-nats``; it depends on ``resonate-base`` and
     ``nats-py``, never on ``resonate-sdk``.
@@ -191,7 +164,6 @@ class NatsConnection:
         self._uni_subject = f"{worker_topic}.{self._group}.{self._pid}"
         self._any_subject = f"{worker_topic}.{self._group}"
         self._unicast = f"nats://{self._uni_subject}"
-        self._anycast = f"nats://{self._any_subject}"
         self._recv_prefix = worker_topic
         self._request_timeout = request_timeout
 
@@ -199,17 +171,12 @@ class NatsConnection:
         self._subs: list[NatsSubscription] = []
         self._running = False
 
-    def pid(self) -> str:
-        return self._pid
-
-    def group(self) -> str:
-        return self._group
-
     def unicast(self) -> str:
         return self._unicast
 
-    def anycast(self) -> str:
-        return self._anycast
+    def resolve_target(self, target: str) -> str:
+        """Resolve a target group name to its ``nats://`` anycast address."""
+        return f"nats://{self._recv_prefix}.{target}"
 
     async def start(self) -> None:
         """Subscribe to the unicast and anycast subjects on the shared connection.
@@ -245,21 +212,31 @@ class NatsConnection:
         self._subs.clear()
         self._subscribers.clear()
 
-    async def send(self, req: str) -> str:
-        """Publish a request and await its reply on a private inbox."""
+    async def send(self, req: str, headers: dict[str, str] | None = None) -> str:
+        """Publish a request to its origin's partition, await its reply.
+
+        The routing origin rides in ``headers`` under ``resonate:origin``,
+        already resolved, so this never opens ``req``: the body is published
+        exactly as the SDK serialized it -- no decode, no re-encode, and no
+        second copy of the SDK's envelope layout living here to drift out of
+        step with it.
+
+        ``headers`` are the request headers -- the origin key plus any
+        caller-supplied NATS message headers -- merged alongside the
+        reply-inbox header this method sets on every publish.
+        """
         logger.debug("nats_connection req: %s", req)
         if not self._running:
             raise ConnectorError(RuntimeError("connection has been stopped"))
-        envelope = json.loads(req)
-        origin = _routing_origin(envelope)
-        # The server reads the origin from the head, not the subject; set both.
-        envelope.setdefault("head", {})["resonate:origin"] = origin
+        origin = (headers or {}).get(ORIGIN_HEADER, "default")
         subject = _publish_subject(self._api_prefix, origin)
-        payload = json.dumps(envelope).encode("utf-8")
+        payload = req.encode("utf-8")
         inbox = self._nc.new_inbox()
+        publish_headers = dict(headers) if headers else {}
+        publish_headers[REPLY_HEADER] = inbox
         try:
             sub = await self._nc.subscribe(inbox, max_msgs=1)
-            await self._nc.publish(subject, payload, headers={REPLY_HEADER: inbox})
+            await self._nc.publish(subject, payload, headers=publish_headers)
             msg = await sub.next_msg(timeout=self._request_timeout)
         except Exception as exc:
             raise ConnectorError(exc) from exc
@@ -271,10 +248,6 @@ class NatsConnection:
     def recv(self, callback: Callable[[str], None]) -> None:
         """Register a callback for incoming execute/unblock messages."""
         self._subscribers.append(callback)
-
-    def target_resolver(self, target: str) -> str:
-        """Resolve a target group name to its ``nats://`` anycast address."""
-        return f"nats://{self._recv_prefix}.{target}"
 
     # -- internals ------------------------------------------------------------
 
