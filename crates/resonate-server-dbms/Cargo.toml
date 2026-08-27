@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Resonate server storage over a relational database: the Db contract and its SQLite, PostgreSQL and MySQL implementations."
 
+[features]
+# Extra interleaving assertions in the transaction paths, for stress runs.
+concurrency-stress = []
+
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 serde_json = { workspace = true }

@@ -7,6 +7,55 @@
 /// The address schemes this transport serves.
 pub const SCHEMES: &[&str] = &["http", "https"];
 
+/// Everything under `[transports.http_push]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Enable the http:// and https:// address schemes [default: true]
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+
+    /// Deliveries in flight at once [default: 100]
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+
+    /// Connect timeout in milliseconds [default: 5000]
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout: u64,
+
+    /// Request timeout in milliseconds [default: 30000]
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout: u64,
+
+    /// Outbound auth. Absent means no Authorization header.
+    #[serde(default)]
+    pub auth: Option<AuthConfig>,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+fn default_concurrency() -> usize {
+    100
+}
+fn default_connect_timeout() -> u64 {
+    5_000
+}
+fn default_request_timeout() -> u64 {
+    30_000
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            concurrency: default_concurrency(),
+            connect_timeout: default_connect_timeout(),
+            request_timeout: default_request_timeout(),
+            auth: None,
+        }
+    }
+}
+
 use serde::{Deserialize, Serialize};
 
 /// Outbound auth mode for HTTP push deliveries.
@@ -71,7 +120,7 @@ fn default_auth_header() -> String {
 }
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use reqwest::Client;
@@ -203,37 +252,52 @@ struct DeliveryJob {
 }
 
 pub struct HttpPushTransport {
-    tx: mpsc::Sender<DeliveryJob>,
+    config: Config,
+    /// Set by `init`, cleared by `stop`.
+    tx: std::sync::Mutex<Option<mpsc::Sender<DeliveryJob>>>,
+    task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
+    ///
+    /// Weak: the server holds the router and the router holds this worker, so
+    /// a strong handle back would close a reference cycle.
     #[allow(dead_code)]
-    server: Arc<dyn ResonateServer>,
+    server: Weak<dyn ResonateServer>,
 }
 
 impl HttpPushTransport {
-    pub fn new(
-        server: Arc<dyn ResonateServer>,
-        connect_timeout: Duration,
-        request_timeout: Duration,
-        auth: Auth,
-        concurrency: usize,
-    ) -> Self {
+    /// Start the delivery queue with an already-built [`Auth`].
+    ///
+    /// `init` derives the `Auth` from config; tests supply one directly,
+    /// because a mock token provider cannot be expressed as configuration.
+    async fn start(&self, auth: Auth) -> Result<(), Unavailable> {
         let client = Client::builder()
-            .connect_timeout(connect_timeout)
-            .timeout(request_timeout)
+            .connect_timeout(Duration::from_millis(self.config.connect_timeout))
+            .timeout(Duration::from_millis(self.config.request_timeout))
             .build()
-            .expect("failed to build HTTP client");
-        let auth = Arc::new(auth);
-        let semaphore = Arc::new(Semaphore::new(concurrency));
+            .map_err(|e| Unavailable::new(format!("cannot build HTTP client: {e}")))?;
+        let semaphore = Arc::new(Semaphore::new(self.config.concurrency));
         // Queue capacity is intentionally larger than `concurrency` so short
         // bursts smooth out; full queue + full in-flight pushes back on
-        // `send()`, which in turn pushes back on the claim loop in
-        // processing_messages — the DB is the durable buffer.
-        let (tx, rx) = mpsc::channel::<DeliveryJob>(concurrency);
+        // `send()`, which in turn pushes back on the claim loop that feeds the
+        // router — the DB is the durable buffer.
+        let (tx, rx) = mpsc::channel::<DeliveryJob>(self.config.concurrency);
 
-        tokio::spawn(dispatcher(client, auth, semaphore, rx));
+        let handle = tokio::spawn(dispatcher(client, Arc::new(auth), semaphore, rx));
+        *self.tx.lock().expect("http push tx mutex") = Some(tx);
+        *self.task.lock().expect("http push task mutex") = Some(handle);
+        Ok(())
+    }
 
-        Self { tx, server }
+    /// Builds the value. Nothing is started and nothing can fail — see
+    /// [`ResonateWorker::init`].
+    pub fn new(server: Weak<dyn ResonateServer>, config: Config) -> Self {
+        Self {
+            config,
+            tx: std::sync::Mutex::new(None),
+            task: std::sync::Mutex::new(None),
+            server,
+        }
     }
 
     /// Enqueue a delivery. Returns once the job is on the in-memory queue.
@@ -249,7 +313,13 @@ impl HttpPushTransport {
             address: address.clone(),
             payload: payload.clone(),
         };
-        if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
+        // Clone the sender out before awaiting — the guard must not be held
+        // across the await point.
+        let tx = match self.tx.lock().expect("http push tx mutex").clone() {
+            Some(tx) => tx,
+            None => return Err(Unavailable::new("HTTP push transport not initialised")),
+        };
+        if let Err(mpsc::error::SendError(job)) = tx.send(job).await {
             // Dispatcher task is gone (transport shutting down). Should not
             // happen during normal operation; surface it to the caller, which
             // is what records the outcome.
@@ -264,6 +334,25 @@ impl HttpPushTransport {
 
 #[async_trait]
 impl ResonateWorker for HttpPushTransport {
+    /// Build the HTTP client and start the delivery queue.
+    async fn init(&self) -> Result<(), Unavailable> {
+        let auth = match &self.config.auth {
+            Some(cfg) => Auth::from_config(cfg),
+            None => Auth::None,
+        };
+        self.start(auth).await
+    }
+
+    /// Close the queue and wait for the dispatcher to drain.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        self.tx.lock().expect("http push tx mutex").take();
+        let handle = self.task.lock().expect("http push task mutex").take();
+        if let Some(handle) = handle {
+            let _ = handle.await;
+        }
+        Ok(())
+    }
+
     /// The address is the URL verbatim; the router has already guaranteed the
     /// scheme is `http` or `https`.
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
@@ -345,7 +434,6 @@ mod tests {
     use super::*;
     use axum::{extract::State, routing::post, Router};
     use std::sync::Arc;
-    use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
@@ -426,20 +514,29 @@ mod tests {
         }
     }
 
-    fn make_transport(auth: Auth) -> HttpPushTransport {
-        HttpPushTransport::new(
-            Arc::new(NoopServer),
-            Duration::from_secs(5),
-            Duration::from_secs(5),
-            auth,
-            16,
-        )
+    async fn make_transport(auth: Auth) -> HttpPushTransport {
+        let server: Arc<dyn resonate_core::ResonateServer> = Arc::new(NoopServer);
+        let t = HttpPushTransport::new(
+            Arc::downgrade(&server),
+            Config {
+                connect_timeout: 5_000,
+                request_timeout: 5_000,
+                concurrency: 16,
+                ..Config::default()
+            },
+        );
+        t.start(auth).await.expect("started");
+        // The tests only exercise the transport, so nothing else holds the
+        // server; keep it alive for the duration.
+        std::mem::forget(server);
+        t
     }
 
     #[tokio::test]
     async fn no_auth_omits_authorization_header() {
         let (url, mut rx) = spawn_capture_server().await;
         make_transport(Auth::None)
+            .await
             .send(&HttpAddress { url }, &serde_json::json!({}))
             .await
             .expect("enqueued");
@@ -457,6 +554,7 @@ mod tests {
             header: "Authorization".to_string(),
             value: "Bearer secret-token".to_string(),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -478,6 +576,7 @@ mod tests {
             header: "X-Custom-Auth".to_string(),
             value: "Bearer custom-token".to_string(),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -504,6 +603,7 @@ mod tests {
             fixed_audience: None,
             provider: Box::new(MockTokenProvider::ok("mock-token")),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -528,6 +628,7 @@ mod tests {
             fixed_audience: Some("https://my-audience.example.com".to_string()),
             provider: Box::new(Arc::clone(&mock)),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -551,6 +652,7 @@ mod tests {
             fixed_audience: None,
             provider: Box::new(Arc::clone(&mock)),
         })
+        .await
         .send(&HttpAddress { url: url.clone() }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -571,6 +673,7 @@ mod tests {
             fixed_audience: None,
             provider: Box::new(MockTokenProvider::ok("mock-token")),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");
@@ -600,6 +703,7 @@ mod tests {
             fixed_audience: None,
             provider: Box::new(MockTokenProvider::err("simulated failure")),
         })
+        .await
         .send(&HttpAddress { url }, &serde_json::json!({}))
         .await
         .expect("enqueued");

@@ -246,88 +246,78 @@ async fn run_server(config: Config) -> Result<(), String> {
         "Transport config"
     );
     // Every worker holds a handle to the server: an in-process worker calls it
-    // directly, and a remote worker uses it to report a delivery failure rather
-    // than dropping the message. `Server` never holds the router, so this stays
-    // a DAG.
+    // directly, and a remote worker will use it to report a delivery failure
+    // rather than dropping the message.
+    //
+    // Weak, because the handle points back up the ownership chain: this owns
+    // the server, the server's router owns the workers. A strong handle would
+    // close that ring and nothing in it — server, storage, background tasks —
+    // would ever be dropped.
     let server: Arc<dyn ResonateServer> = state.clone();
+    let server_handle = Arc::downgrade(&server);
 
     let poll_registry = Arc::new(PollRegistry::new(
-        Arc::clone(&server),
-        poll_max_connections,
-        poll_buffer_size,
+        server_handle.clone(),
+        state.config.transports.http_poll.clone(),
     ));
-    let connect_timeout =
-        std::time::Duration::from_millis(state.config.transports.http_push.connect_timeout);
-    let request_timeout =
-        std::time::Duration::from_millis(state.config.transports.http_push.request_timeout);
 
     // Scheme -> worker. A disabled transport is simply not registered, and the
     // router reports its addresses as undeliverable.
     let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
 
     if state.config.transports.http_push.enabled {
-        let outbound_auth = match &state.config.transports.http_push.auth {
-            Some(auth_cfg) => {
-                let mode_label = format!("{:?}", auth_cfg.mode);
-                let auth = resonate_transport_http_push::Auth::from_config(auth_cfg);
-                tracing::info!(mode = %mode_label, "HTTP push outbound auth enabled");
-                auth
-            }
-            None => {
-                tracing::debug!("HTTP push outbound auth: none");
-                resonate_transport_http_push::Auth::None
-            }
-        };
         let worker: Arc<dyn ResonateWorker> =
             Arc::new(resonate_transport_http_push::HttpPushTransport::new(
-                Arc::clone(&server),
-                connect_timeout,
-                request_timeout,
-                outbound_auth,
-                state.config.transports.http_push.concurrency,
+                server_handle.clone(),
+                state.config.transports.http_push.clone(),
             ));
-        workers.insert("http".to_string(), Arc::clone(&worker));
-        workers.insert("https".to_string(), worker);
+        for scheme in resonate_transport_http_push::SCHEMES {
+            workers.insert((*scheme).to_string(), Arc::clone(&worker));
+        }
     } else {
         tracing::info!("HTTP push transport disabled");
     }
 
     if state.config.transports.http_poll.enabled {
-        workers.insert("poll".to_string(), poll_registry.clone());
+        workers.insert(
+            resonate_transport_http_poll::SCHEME.to_string(),
+            poll_registry.clone(),
+        );
     } else {
         tracing::info!("HTTP poll transport disabled");
     }
 
     if state.config.transports.gcps.enabled {
-        tracing::info!(
-            concurrency = state.config.transports.gcps.concurrency,
-            timeout_ms = state.config.transports.gcps.timeout,
-            "GCP Pub/Sub transport enabled"
-        );
         workers.insert(
-            "gcps".to_string(),
+            resonate_transport_gcps::SCHEME.to_string(),
             Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
-                Arc::clone(&server),
-                state.config.transports.gcps.concurrency,
-                std::time::Duration::from_millis(state.config.transports.gcps.timeout),
+                server_handle.clone(),
+                state.config.transports.gcps.clone(),
             )),
         );
     }
 
     if state.config.transports.bash_exec.enabled {
-        tracing::info!("Bash exec transport enabled (local + docker + tensorlake)");
         workers.insert(
-            "bash".to_string(),
+            resonate_worker_bash::SCHEME.to_string(),
             Arc::new(resonate_worker_bash::BashExecTransport::new(
-                Arc::clone(&server),
-                state
-                    .config
-                    .transports
-                    .bash_exec
-                    .resolve_lease_timeout(&state.config.tasks),
+                server_handle.clone(),
+                state.config.transports.bash_exec.clone(),
+                state.config.tasks.lease_timeout,
             )),
         );
     }
+
+    // Start every worker before anything can route to one. A worker that
+    // cannot start is a startup failure, not a message that quietly goes
+    // nowhere later.
+    for (scheme, worker) in &workers {
+        worker
+            .init()
+            .await
+            .map_err(|e| format!("transport '{scheme}' failed to start: {e}"))?;
+    }
+    let started: Vec<Arc<dyn ResonateWorker>> = workers.values().cloned().collect();
 
     let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
 
@@ -451,6 +441,13 @@ async fn run_server(config: Config) -> Result<(), String> {
     let drain = async {
         for handle in handles {
             let _ = handle.await;
+        }
+        // Workers last: the loops that feed them have stopped, so this drains
+        // what is already in flight rather than racing new deliveries.
+        for worker in started {
+            if let Err(e) = worker.stop().await {
+                tracing::warn!(error = %e, "transport did not stop cleanly");
+            }
         }
     };
 

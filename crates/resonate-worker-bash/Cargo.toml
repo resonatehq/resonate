@@ -8,6 +8,7 @@ description = "Resonate worker: runs a task's script locally, in Docker, or in a
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 tokio = { version = "1", features = ["rt", "process", "time", "macros"] }

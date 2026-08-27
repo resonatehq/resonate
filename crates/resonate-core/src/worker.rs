@@ -17,13 +17,45 @@ use super::Unavailable;
 /// **accepted for delivery**, not **executed**; a worker that happens to run
 /// to completion synchronously is a special case, not the contract.
 ///
-/// The address arrives as an unparsed string on purpose. A worker owns the
-/// syntax of its own scheme — what a `poll://` or `gcps://` address means is
-/// the poll or Pub/Sub worker's business, not `core`'s. The
-/// [`ResonateRouter`](super::ResonateRouter) reads only the scheme, so adding
-/// a worker never requires editing `core`.
+/// # Constructing one
+///
+/// Not a trait method — each worker has its own `Config` type, and an
+/// associated type would have to be named in `dyn ResonateWorker`, which would
+/// make `Arc<dyn ResonateWorker>` unusable. It is a convention instead, and
+/// every implementation follows it:
+///
+/// ```ignore
+/// fn new(server: Weak<dyn ResonateServer>, config: Config) -> Self;
+/// ```
+///
+/// The server handle is [`Weak`](std::sync::Weak) deliberately. A router holds
+/// its workers and a server holds its router, so a strong handle back would
+/// close a reference cycle and nothing in it would ever be dropped — not the
+/// server, not its storage, not the background tasks. Upgrade per message; if
+/// the upgrade fails the server is gone and there is no work worth doing.
+///
+/// `new` builds a value and cannot fail. Everything that can fail, and
+/// everything that starts a background task, belongs in [`init`](Self::init).
 #[async_trait]
 pub trait ResonateWorker: Send + Sync {
+    /// Acquire resources and start background work.
+    ///
+    /// Called once before any `send`. Connection pools, delivery queues and
+    /// their dispatcher tasks are set up here rather than in `new`, so that
+    /// failure is reported at startup instead of surfacing later as a message
+    /// that quietly went nowhere.
+    async fn init(&self) -> Result<(), Unavailable> {
+        Ok(())
+    }
+
+    /// Stop background work and release resources.
+    ///
+    /// Called once, after which `send` may fail. Implementations should drain
+    /// what they can and be safe to call when `init` was never called.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        Ok(())
+    }
+
     /// Deliver one message to the worker at `address`.
     ///
     /// The router guarantees only that `address` carries this worker's

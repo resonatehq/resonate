@@ -10,8 +10,46 @@
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "gcps";
 
+/// Everything under `[transports.gcps]`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Config {
+    /// Enable the gcps:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// GCP project, when the address does not carry one.
+    #[serde(default)]
+    pub project: Option<String>,
+
+    /// Concurrent publishes in flight [default: 100]
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+
+    /// Publish timeout in milliseconds [default: 30000]
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+fn default_concurrency() -> usize {
+    100
+}
+fn default_timeout() -> u64 {
+    30_000
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            project: None,
+            concurrency: default_concurrency(),
+            timeout: default_timeout(),
+        }
+    }
+}
+
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use google_cloud_pubsub::client::Publisher;
@@ -53,11 +91,17 @@ impl GcpsAddress {
 /// a dispatcher task that gates spawns on a concurrency semaphore; `send()`
 /// only blocks if the queue is full, never on the publish RPC.
 pub struct GcpsPubSubTransport {
-    tx: mpsc::Sender<PublishJob>,
+    config: Config,
+    /// Set by `init`, cleared by `stop`.
+    tx: std::sync::Mutex<Option<mpsc::Sender<PublishJob>>>,
+    task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
+    ///
+    /// Weak: the server holds the router and the router holds this worker, so
+    /// a strong handle back would close a reference cycle.
     #[allow(dead_code)]
-    server: Arc<dyn ResonateServer>,
+    server: Weak<dyn ResonateServer>,
 }
 
 struct PublishJob {
@@ -66,18 +110,15 @@ struct PublishJob {
 }
 
 impl GcpsPubSubTransport {
-    pub fn new(server: Arc<dyn ResonateServer>, concurrency: usize, timeout: Duration) -> Self {
-        let publishers = Arc::new(Mutex::new(HashMap::<String, Publisher>::new()));
-        let semaphore = Arc::new(Semaphore::new(concurrency));
-        // Queue capacity larger than concurrency so short bursts smooth out;
-        // full queue + full in-flight pushes back on `send()`, which in turn
-        // pushes back on the claim loop in processing_messages — the DB is
-        // the durable buffer.
-        let (tx, rx) = mpsc::channel::<PublishJob>(concurrency);
-
-        tokio::spawn(dispatcher(publishers, semaphore, timeout, rx));
-
-        Self { tx, server }
+    /// Builds the value. Nothing is started and nothing can fail — see
+    /// [`ResonateWorker::init`].
+    pub fn new(server: Weak<dyn ResonateServer>, config: Config) -> Self {
+        Self {
+            config,
+            tx: std::sync::Mutex::new(None),
+            task: std::sync::Mutex::new(None),
+            server,
+        }
     }
 
     /// Enqueue a publish. Returns once the job is on the in-memory queue.
@@ -91,7 +132,13 @@ impl GcpsPubSubTransport {
             address: address.clone(),
             data: serde_json::to_vec(payload).unwrap_or_default(),
         };
-        if let Err(mpsc::error::SendError(job)) = self.tx.send(job).await {
+        // Clone the sender out before awaiting — the guard must not be held
+        // across the await point.
+        let tx = match self.tx.lock().expect("gcps tx mutex").clone() {
+            Some(tx) => tx,
+            None => return Err(Unavailable::new("GCP Pub/Sub transport not initialised")),
+        };
+        if let Err(mpsc::error::SendError(job)) = tx.send(job).await {
             return Err(Unavailable::new(format!(
                 "GCP Pub/Sub dispatcher gone, gcps://{}/{} not enqueued",
                 job.address.project, job.address.topic
@@ -183,6 +230,35 @@ async fn deliver(
 
 #[async_trait::async_trait]
 impl ResonateWorker for GcpsPubSubTransport {
+    /// Build the publisher cache and start the delivery queue.
+    async fn init(&self) -> Result<(), Unavailable> {
+        let publishers = Arc::new(Mutex::new(HashMap::<String, Publisher>::new()));
+        let semaphore = Arc::new(Semaphore::new(self.config.concurrency));
+        // Queue capacity larger than concurrency so short bursts smooth out;
+        // full queue + full in-flight pushes back on `send()`, which in turn
+        // pushes back on the claim loop that feeds the router — the DB is the
+        // durable buffer.
+        let (tx, rx) = mpsc::channel::<PublishJob>(self.config.concurrency);
+        let timeout = Duration::from_millis(self.config.timeout);
+
+        let handle = tokio::spawn(dispatcher(publishers, semaphore, timeout, rx));
+        *self.tx.lock().expect("gcps tx mutex") = Some(tx);
+        *self.task.lock().expect("gcps task mutex") = Some(handle);
+        Ok(())
+    }
+
+    /// Close the queue and wait for the dispatcher to drain.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        // Dropping the sender closes the channel; the dispatcher finishes what
+        // it has and returns.
+        self.tx.lock().expect("gcps tx mutex").take();
+        let handle = self.task.lock().expect("gcps task mutex").take();
+        if let Some(handle) = handle {
+            let _ = handle.await;
+        }
+        Ok(())
+    }
+
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = GcpsAddress::parse(address)?;
         let payload = serde_json::to_value(msg)

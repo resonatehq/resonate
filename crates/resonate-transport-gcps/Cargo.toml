@@ -8,6 +8,7 @@ description = "Resonate transport: deliver messages by publishing to a Google Cl
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }

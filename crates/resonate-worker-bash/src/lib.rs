@@ -12,7 +12,33 @@
 /// The address scheme this worker serves.
 pub const SCHEME: &str = "bash";
 
-use std::sync::Arc;
+/// Everything under `[transports.bash_exec]`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Config {
+    /// Enable the bash:// address scheme [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Lease TTL (ms) this worker requests when acquiring a task, and the
+    /// basis for its heartbeat interval (a third of it).
+    ///
+    /// The lease has to outlast the script: if it expires the task is
+    /// redispatched to another worker while this one is still running.
+    ///
+    /// Unset means "follow `tasks.lease_timeout`" — the server-wide default
+    /// this worker used before it had a setting of its own.
+    #[serde(default)]
+    pub lease_timeout: Option<i64>,
+}
+
+impl Config {
+    /// The lease TTL to request, falling back to the server-wide task default.
+    pub fn resolve_lease_timeout(&self, server_default: i64) -> i64 {
+        self.lease_timeout.unwrap_or(server_default)
+    }
+}
+
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -124,13 +150,15 @@ fn parse_backend(address: &str) -> Result<BackendChoice, String> {
 // ─── Transport ────────────────────────────────────────────────────────────────
 
 pub struct BashExecTransport {
-    /// This worker runs in the server's own process, so it holds the port
-    /// directly instead of reaching it over the wire. Every state change it
-    /// makes goes through `process` — the same path a remote worker's HTTP
-    /// calls take.
-    server: Arc<dyn ResonateServer>,
-    /// Lease TTL for tasks this worker acquires. Configuration of the worker,
-    /// not of the server it talks to.
+    /// This worker runs in the server's own process, so it reaches the port
+    /// directly instead of over the wire. Every state change it makes goes
+    /// through `process` — the same path a remote worker's HTTP calls take.
+    ///
+    /// Weak: the server holds the router, the router holds this worker. A
+    /// strong handle back would close that ring and nothing in it would ever
+    /// be dropped.
+    server: Weak<dyn ResonateServer>,
+    /// The lease TTL already resolved against the server-wide default.
     lease_timeout: i64,
     local: Arc<LocalBackend>,
     docker: Arc<DockerBackend>,
@@ -138,7 +166,12 @@ pub struct BashExecTransport {
 }
 
 impl BashExecTransport {
-    pub fn new(server: Arc<dyn ResonateServer>, lease_timeout: i64) -> Self {
+    pub fn new(
+        server: Weak<dyn ResonateServer>,
+        config: Config,
+        server_lease_default: i64,
+    ) -> Self {
+        let lease_timeout = config.resolve_lease_timeout(server_lease_default);
         Self {
             server,
             lease_timeout,
@@ -170,7 +203,10 @@ impl BashExecTransport {
             }
         };
 
-        let server = Arc::clone(&self.server);
+        // Upgrade or abandon: no server means no work worth doing.
+        let Some(server) = self.server.upgrade() else {
+            return Err(Unavailable::new("bash-exec: server is gone"));
+        };
         let lease_timeout = self.lease_timeout;
         tokio::spawn(async move {
             run_task(

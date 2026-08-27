@@ -15,9 +15,45 @@
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "poll";
 
+/// Everything under `[transports.http_poll]`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Config {
+    /// Enable the poll:// address scheme [default: true]
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+
+    /// Maximum concurrent SSE connections held open [default: 1000]
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+
+    /// Per-connection message buffer [default: 100]
+    #[serde(default = "default_buffer_size")]
+    pub buffer_size: usize,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+fn default_max_connections() -> usize {
+    1000
+}
+fn default_buffer_size() -> usize {
+    100
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            max_connections: default_max_connections(),
+            buffer_size: default_buffer_size(),
+        }
+    }
+}
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, Mutex};
 
 use resonate_core::types::Message;
@@ -77,21 +113,20 @@ pub struct PollRegistry {
     pub buffer_size: usize,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
+    ///
+    /// Weak: the server holds the router and the router holds this worker, so
+    /// a strong handle back would close a reference cycle.
     #[allow(dead_code)]
-    server: Arc<dyn ResonateServer>,
+    server: Weak<dyn ResonateServer>,
 }
 
 impl PollRegistry {
-    pub fn new(
-        server: Arc<dyn ResonateServer>,
-        max_connections: usize,
-        buffer_size: usize,
-    ) -> Self {
+    pub fn new(server: Weak<dyn ResonateServer>, config: Config) -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
             next_conn_id: AtomicU64::new(1),
-            max_connections,
-            buffer_size,
+            max_connections: config.max_connections,
+            buffer_size: config.buffer_size,
             server,
         }
     }

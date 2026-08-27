@@ -8,6 +8,7 @@ description = "Resonate transport: deliver messages to a worker that holds an op
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 tracing = "0.1"

@@ -40,7 +40,8 @@ name = "differential"
 path = "diff/differential.rs"
 
 [features]
-concurrency-stress = []
+# Forwarded: the cfg'd code lives in resonate-server-dbms.
+concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 
 [dependencies]
 resonate-core = { path = "crates/resonate-core" }

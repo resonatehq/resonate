@@ -312,175 +312,19 @@ impl Default for MessagesConfig {
 pub struct TransportsConfig {
     /// HTTP push transport configuration
     #[serde(default)]
-    pub http_push: HttpPushConfig,
+    pub http_push: resonate_transport_http_push::Config,
 
     /// HTTP poll (SSE) transport configuration
     #[serde(default)]
-    pub http_poll: HttpPollConfig,
+    pub http_poll: resonate_transport_http_poll::Config,
 
     /// Google Cloud Pub/Sub transport configuration
     #[serde(default)]
-    pub gcps: GcpsConfig,
+    pub gcps: resonate_transport_gcps::Config,
 
     /// Bash execution transport configuration
     #[serde(default)]
-    pub bash_exec: BashExecConfig,
-}
-
-/// Bash execution transport configuration.
-///
-/// When `enabled`, the bash:// scheme is routable via three backends:
-/// - `bash://`                       → local bash
-/// - `bash://docker/<image>`         → docker run --rm <image> bash -c <script>
-/// - `bash://tensorlake/<image>`     → Tensorlake Sandboxes API (needs TENSORLAKE_API_KEY)
-///
-/// Scripts are always inline (carried in `param.data`); named scripts are not supported.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BashExecConfig {
-    /// Enable the bash:// address scheme [default: false]
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Lease TTL (ms) this worker requests when acquiring a task, and the basis
-    /// for its heartbeat interval (a third of it).
-    ///
-    /// The lease has to outlast the script: if it expires the task is
-    /// redispatched to another worker while this one is still running.
-    ///
-    /// Unset means "follow `tasks.lease_timeout`" — the server-wide default
-    /// this worker used before it had a setting of its own. Set it when scripts
-    /// here run longer than tasks generally do.
-    #[serde(default)]
-    pub lease_timeout: Option<i64>,
-}
-
-impl BashExecConfig {
-    /// The lease TTL to request, falling back to the server-wide task default.
-    pub fn resolve_lease_timeout(&self, tasks: &TasksConfig) -> i64 {
-        self.lease_timeout.unwrap_or(tasks.lease_timeout)
-    }
-}
-
-/// Google Cloud Pub/Sub transport configuration.
-/// Authentication uses Application Default Credentials (ADC).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GcpsConfig {
-    /// Enable the gcps:// address scheme [default: false]
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Default GCP project ID. Used when the address doesn't specify a project.
-    #[serde(default)]
-    pub project: Option<String>,
-
-    /// Max concurrent GCP Pub/Sub deliveries
-    #[serde(default = "default_gcps_concurrency")]
-    pub concurrency: usize,
-
-    /// Per-publish timeout (ms)
-    #[serde(default = "default_gcps_timeout")]
-    pub timeout: u64,
-}
-
-fn default_gcps_concurrency() -> usize {
-    256
-}
-
-fn default_gcps_timeout() -> u64 {
-    10000
-}
-
-impl Default for GcpsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            project: None,
-            concurrency: default_gcps_concurrency(),
-            timeout: default_gcps_timeout(),
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpPushConfig {
-    /// Enable the http:// / https:// address scheme [default: true]
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
-    /// Max concurrent HTTP push deliveries
-    #[serde(default = "default_http_push_concurrency")]
-    pub concurrency: usize,
-
-    /// HTTP connect timeout (ms)
-    #[serde(default = "default_http_push_connect_timeout")]
-    pub connect_timeout: u64,
-
-    /// HTTP request timeout (ms)
-    #[serde(default = "default_http_push_request_timeout")]
-    pub request_timeout: u64,
-
-    /// Outbound auth for HTTP push deliveries.
-    /// Absent (default) = no auth attached to outbound requests.
-    #[serde(default)]
-    pub auth: Option<resonate_transport_http_push::AuthConfig>,
-}
-
-fn default_http_push_concurrency() -> usize {
-    256
-}
-fn default_http_push_connect_timeout() -> u64 {
-    10000
-}
-fn default_http_push_request_timeout() -> u64 {
-    180000
-}
-
-impl Default for HttpPushConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            concurrency: default_http_push_concurrency(),
-            connect_timeout: default_http_push_connect_timeout(),
-            request_timeout: default_http_push_request_timeout(),
-            auth: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpPollConfig {
-    /// Enable the poll:// (SSE) address scheme [default: true]
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
-    /// Maximum number of concurrent poll (SSE) connections
-    #[serde(default = "default_http_poll_max_connections")]
-    pub max_connections: usize,
-
-    /// Channel buffer size for each poll (SSE) connection
-    #[serde(default = "default_http_poll_buffer_size")]
-    pub buffer_size: usize,
-}
-
-fn default_http_poll_max_connections() -> usize {
-    1000
-}
-fn default_http_poll_buffer_size() -> usize {
-    100
-}
-
-impl Default for HttpPollConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_connections: default_http_poll_max_connections(),
-            buffer_size: default_http_poll_buffer_size(),
-        }
-    }
+    pub bash_exec: resonate_worker_bash::Config,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -619,7 +463,7 @@ mod tests {
             config
                 .transports
                 .bash_exec
-                .resolve_lease_timeout(&config.tasks),
+                .resolve_lease_timeout(config.tasks.lease_timeout),
             120_000,
             "unset means follow tasks.lease_timeout, including when that is customised"
         );
@@ -634,7 +478,7 @@ mod tests {
             config
                 .transports
                 .bash_exec
-                .resolve_lease_timeout(&config.tasks),
+                .resolve_lease_timeout(config.tasks.lease_timeout),
             600_000
         );
     }
