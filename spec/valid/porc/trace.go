@@ -268,9 +268,9 @@ func decodeRes(e wireEvent) (Response, error) {
 			if !ok {
 				return res, fmt.Errorf("unknown promise state %q", p.State)
 			}
-			res.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
+			res.Promise = (&Promise{State: st, TimeoutAt: p.TimeoutAt,
 				CreatedAt: p.CreatedAt, SettledAt: p.SettledAt,
-				Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}
+				Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}).Record(p.ID)
 		}
 	}
 	if d.Action != nil {
@@ -285,9 +285,9 @@ func decodeRes(e wireEvent) (Response, error) {
 				if !ok {
 					return res, fmt.Errorf("task.fence action: unknown promise state %q", p.State)
 				}
-				inner.Promise = &Promise{ID: p.ID, State: st, TimeoutAt: p.TimeoutAt,
+				inner.Promise = (&Promise{State: st, TimeoutAt: p.TimeoutAt,
 					CreatedAt: p.CreatedAt, SettledAt: p.SettledAt,
-					Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}
+					Tags: Tags(p.Tags), Param: p.Param, Value: p.Value}).Record(p.ID)
 			}
 		}
 		res.Inner = inner
@@ -299,8 +299,8 @@ func decodeRes(e wireEvent) (Response, error) {
 			if !ok {
 				return res, fmt.Errorf("unknown task state %q", t.State)
 			}
-			res.Task = &Task{ID: t.ID, State: st, Version: t.Version,
-				TTL: t.TTL, PID: t.PID, Resumes: make([]string, t.Resumes)}
+			res.Task = (&Task{State: st, Version: t.Version,
+				TTL: t.TTL, PID: t.PID, Resumes: make([]string, t.Resumes)}).Record(t.ID)
 		}
 	}
 	return project(e.Kind, res), nil

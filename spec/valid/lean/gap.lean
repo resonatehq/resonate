@@ -2,18 +2,18 @@ import «valid».«lean».intervals
 
 /-!  # The gap, measured properly
 
-`valid/instants.lean` asked whether firing a τ off the observation
+`valid/instants.lean` asked whether firing an internal step off the observation
 grid can break the pinned checker, and answered "4112 scripts, 0
 counterexamples". Two things are wrong with that answer as EVIDENCE, and
 this file fixes both before re-running.
 
 ## Defect 1 — the coverage metric measures the wrong thing
 
-`effectiveTaus` counts off-grid τs that CHANGED THE STATE. That is not
-the question. A τ that changes the state identically whether it fires at
+`effectiveInternalSteps` counts off-grid internal steps that CHANGED THE STATE. That is not
+the question. A internal step that changes the state identically whether it fires at
 `n` or at the instant the checker would use is not a test of anything: the
-checker reproduces it exactly. What matters is a τ whose effect DIFFERS
-from firing the same τ, from the same state, at the PINNED instant.
+checker reproduces it exactly. What matters is an internal step whose effect DIFFERS
+from firing the same internal step, from the same state, at the PINNED instant.
 
 `discriminating` below counts those. It is strictly smaller, and the
 difference is the whole worth of the experiment.
@@ -23,14 +23,14 @@ difference is the whole worth of the experiment.
 `Admissible` fires each event's schedule BEFORE that event, at that
 event's instant. So the instant the checker would use for an internal
 step is the instant of the NEXT EXTERNAL STEP IN THE SCRIPT — not the
-next larger grid value. Those differ exactly when a τ fires at an
+next larger grid value. Those differ exactly when an internal step fires at an
 observation's own instant but AFTER it: instant `10` is on the grid, yet
-a τ written after the `@10` request is attributed by the checker to the
+an internal step written after the `@10` request is attributed by the checker to the
 next observation, which may be at `60`.
 
-So `ValidPinned` is not even the "τs at observation instants" fragment of
+So `ValidPinned` is not even the "internal steps at observation instants" fragment of
 `Valid`. It is narrower than that. `pinnedInstant` computes the instant
-the checker would actually have to use, and the sweeps below place τs AT
+the checker would actually have to use, and the sweeps below place internal steps AT
 observation instants as well as strictly between them.
 
 ## What is invisible, and why that is the sharpest metric
@@ -41,9 +41,9 @@ writes plus `guarantee.lean`, which is meta-analysis, not a handler. And
 sites are `processRetryTimeout` and `processLeaseTimeout`. So a difference
 confined to `outbox` and to retry timers cannot reach a `Response`.
 
-`visible` erases exactly that much. A τ that discriminates only under
+`visible` erases exactly that much. A internal step that discriminates only under
 `canon` but not under `visible ∘ canon` is a difference the response
-channel provably cannot see; a τ that discriminates under `visible` is a
+channel provably cannot see; an internal step that discriminates under `visible` is a
 live lead. Counting both is what separates "0 counterexamples because
 nothing was tested" from "0 counterexamples because the machine is
 robust". -/
@@ -53,7 +53,7 @@ namespace TraceCheck.Gap
 open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Intervals
 
 /-- The reduction's reference implementation: every instant in every gap,
-    every enabled τ. `validate` claims to be equivalent to this — that
+    every enabled internal step. `validate` claims to be equivalent to this — that
     claim is R3 — so it lives here, in the harness that checks it, rather
     than in the checker's API. Only usable on toy instants. -/
 def validateBrute (trace : List Observation)
@@ -63,11 +63,14 @@ def validateBrute (trace : List Observation)
 /-! ## Projections -/
 
 /-- The state modulo what no response can project: the outbox, and the
-    RETRY timers (`kind = 0`), which only the retry τ's own guard reads.
+    RETRY timers (`kind = 0`), which only the retry internal step's own guard reads.
     Lease timers (`kind = 1`) are kept — `processLeaseTimeout` writes task
     state, which `taskGet` does project. -/
 def visible (s : ServerState) : ServerState :=
-  { s with outbox := [], tasks  := s.tasks.map fun t => if t.state == .pending then { t with retryAt := none } else t }
+  { s with outbox := [],
+           objects := s.objects.map fun o =>
+                        { o with task := o.task.map fun t =>
+                                   if t.state == .pending then { t with retryAt := none } else t } }
 
 def sameCanon (a b : ServerState) : Bool := canon a == canon b
 def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visible b)
@@ -76,7 +79,7 @@ def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visibl
 
 /-- For every position in a script, the instant `Admissible` would fire it
     at: the instant of the next EXTERNAL step at a later position, or
-    `none` if there is none — a τ after the last observation is not
+    `none` if there is none — an internal step after the last observation is not
     modelled by the checker at all.
 
     Note this is a function of POSITION, not of instant. -/
@@ -93,7 +96,7 @@ def pinnedInstants : List (Step × Nat) → List (Option Nat)
 /-! ## The corrected metric -/
 
 structure Coverage where
-  taus          : Nat := 0   -- internal steps in the script
+  internalSteps          : Nat := 0   -- internal steps in the script
   offPinned     : Nat := 0   -- …fired at an instant ≠ the pinned one
   changed       : Nat := 0   -- …that changed the state at all (old metric)
   discriminating : Nat := 0  -- …whose effect DIFFERS from the pinned firing
@@ -103,7 +106,7 @@ structure Coverage where
 
 instance : Append Coverage where
   append a b :=
-    { taus := a.taus + b.taus, offPinned := a.offPinned + b.offPinned, changed := a.changed + b.changed, discriminating := a.discriminating + b.discriminating, visibleDiscr := a.visibleDiscr + b.visibleDiscr, unmodellable := a.unmodellable + b.unmodellable }
+    { internalSteps := a.internalSteps + b.internalSteps, offPinned := a.offPinned + b.offPinned, changed := a.changed + b.changed, discriminating := a.discriminating + b.discriminating, visibleDiscr := a.visibleDiscr + b.visibleDiscr, unmodellable := a.unmodellable + b.unmodellable }
 
 def coverage (w : List (Step × Nat)) : Coverage :=
   let pins := pinnedInstants w
@@ -115,10 +118,10 @@ def coverage (w : List (Step × Nat)) : Coverage :=
           if rq.isExternal then {}
           else
             match p with
-            | none      => { taus := 1, unmodellable := 1 }
+            | none      => { internalSteps := 1, unmodellable := 1 }
             | some b =>
               let stb := (Abstraction.stepOf true rq b st).2
-              { taus          := 1, offPinned     := if b == n then 0 else 1, changed       := if sameCanon st st' then 0 else 1, discriminating := if sameCanon st' stb then 0 else 1, visibleDiscr  := if sameVisible st' stb then 0 else 1 }
+              { internalSteps          := 1, offPinned     := if b == n then 0 else 1, changed       := if sameCanon st st' then 0 else 1, discriminating := if sameCanon st' stb then 0 else 1, visibleDiscr  := if sameVisible st' stb then 0 else 1 }
         here ++ go rest ps st'
     | _, [], _ => {}
   go w pins ServerState.init
@@ -126,8 +129,8 @@ def coverage (w : List (Step × Nat)) : Coverage :=
 /-! ## Scripts
 
 Every script is sorted by instant — `ValidM` needs `now` monotone, and
-`mergeSort` is stable, so a τ written after a request at the same instant
-STAYS after it. That is how a τ gets placed on an observation instant yet
+`mergeSort` is stable, so an internal step written after a request at the same instant
+STAYS after it. That is how an internal step gets placed on an observation instant yet
 still off the checker's pinned instant. -/
 
 def mono (w : List (Step × Nat)) : List (Step × Nat) :=
@@ -160,10 +163,10 @@ def reductionDisagrees (obs : List Observation) : Bool :=
     the checker was never asked to recover anything and the script tests
     nothing about schedules — which is what the old sweep mostly produced.
 
-    This is the honest version of "the checker had to invent a τ": the old
-    file read it off the witness length, but a witness may carry a τ that
-    a τ-free run would also have explained. -/
-def tauFree (obs : List Observation) : Bool :=
+    This is the honest version of "the checker had to invent a internal step": the old
+    file read it off the witness length, but a witness may carry an internal step that
+    a internal-step-free run would also have explained. -/
+def internalFree (obs : List Observation) : Bool :=
   let rec go : List Observation → ServerState → Bool
     | [],     _ => true
     | o :: r, s =>
@@ -175,8 +178,8 @@ def tauFree (obs : List Observation) : Bool :=
 
 `processRetryTimeout` fires only on a `.pending` task, and its cleanup is
 `delTaskTimeout t.id`, which deletes BOTH kinds. If a pending task could
-ever carry a LEASE timer, the retry τ would silently disarm an observable
-transition, and the "retry τs are invisible" argument would be wrong.
+ever carry a LEASE timer, the retry internal step would silently disarm an observable
+transition, and the "retry internal steps are invisible" argument would be wrong.
 `pendingHasLease` looks for that state; it is checked at every
 intermediate state of every script below. -/
 
@@ -197,14 +200,14 @@ def anyPendingHasLease (w : List (Step × Nat)) : Bool :=
 
 /-! ## A generator that actually exercises the recovery
 
-The old sweep drew 1-in-5 steps from a τ alphabet over two fixed object
+The old sweep drew 1-in-5 steps from an internal step alphabet over two fixed object
 pairs and got 4 scripts out of 4000 in which the checker had to invent a
-single τ. That is a sweep of nothing.
+single internal step. That is a sweep of nothing.
 
 This one builds a suspend/settle/resume workflow — the shape in which a
-hidden τ is FORCED, because `taskGet` after a resume shows a different
+hidden internal step is FORCED, because `taskGet` after a resume shows a different
 task state than `taskGet` without one — and then randomises the instants
-of everything: the promise deadlines, the lease, the τ instants, and the
+of everything: the promise deadlines, the lease, the internal step instants, and the
 observation instants. Deadlines are drawn from the same pool as instants
 so that thresholds land inside gaps rather than far outside them. -/
 
@@ -212,12 +215,12 @@ def lcg (x : Nat) : Nat := (x * 1103515245 + 12345) % 2147483648
 
 def pick {α} (xs : List α) (d : α) (r : Nat) : α := (xs[r % xs.length]?).getD d
 
-/-- Instants are deliberately dense and small so that deadlines, τ
+/-- Instants are deliberately dense and small so that deadlines, internal step
     instants and observation instants collide and straddle each other. -/
 def pool : List Nat := [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,18,20,24,30]
 
 /-- One workflow with every instant and every deadline randomised, and the
-    τs placed at instants that need not be observed. -/
+    internal steps placed at instants that need not be observed. -/
 def workflow (seed : Nat) : List (Step × Nat) :=
   let r1 := lcg seed
   let r2 := lcg r1
@@ -233,9 +236,9 @@ def workflow (seed : Nat) : List (Step × Nat) :=
   let ttl := pick pool 5 r3         -- lease
   let t0 := 0
   let t1 := pick pool 5 r4          -- suspend instant
-  let g1 := pick pool 5 r5          -- τ promise timeout for a
-  let g2 := pick pool 5 r6          -- τ resume
-  let g3 := pick pool 5 r7          -- τ lease timeout
+  let g1 := pick pool 5 r5          -- internal step promise timeout for a
+  let g2 := pick pool 5 r6          -- internal step resume
+  let g3 := pick pool 5 r7          -- internal step lease timeout
   let t2 := pick pool 5 r8          -- observation
   let t3 := pick pool 5 r9          -- observation
   mono
@@ -243,10 +246,10 @@ def workflow (seed : Nat) : List (Step × Nat) :=
   , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), t0)
   , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), t0)
   , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
-  , (.r1 "a", g1)
-  , (.r4 "a" "x", g2)
-  , (.r5 "x", g3)
-  , (.r6 "x", g3)
+  , (.promiseTimeout "a", g1)
+  , (.callback "a" "x", g2)
+  , (.taskLeaseTimeout "x", g3)
+  , (.taskRetryTimeout "x", g3)
   , (.api (.taskGet    { id := "x" }), t2)
   , (.api (.promiseGet { id := "x" }), t2)
   , (.api (.promiseGet { id := "a" }), t3)
@@ -268,7 +271,7 @@ def workflowSettled (seed : Nat) : List (Step × Nat) :=
   let ttl := pick pool 5 r2
   let t1 := pick pool 5 r3
   let ts := pick pool 5 r4          -- settle instant (external, observed)
-  let g2 := pick pool 5 r5          -- τ resume
+  let g2 := pick pool 5 r5          -- internal step resume
   let t2 := pick pool 5 r6
   let t3 := pick pool 5 r7
   mono
@@ -277,13 +280,13 @@ def workflowSettled (seed : Nat) : List (Step × Nat) :=
   , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
   , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
   , (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), ts)
-  , (.r4 "a" "x", g2)
-  , (.r6 "x", g2)
+  , (.callback "a" "x", g2)
+  , (.taskRetryTimeout "x", g2)
   , (.api (.taskGet    { id := "x" }), t2)
   , (.api (.promiseGet { id := "x" }), t2)
   , (.api (.taskGet { id := "x" }), t3) ]
 
-/-- A third shape: a task released back to the pool, so a RETRY τ is the
+/-- A third shape: a task released back to the pool, so a RETRY internal step is the
     only hidden step, and a lease timeout competes with it. This is the
     shape that exercises `delTaskTimeout` deleting a timer of the other
     kind. -/
@@ -304,8 +307,8 @@ def workflowRetry (seed : Nat) : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
   , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
   , (.api (.taskRelease   { id := "x", version := 1 }), tr)
-  , (.r5 "x", g1)
-  , (.r6 "x", g2)
+  , (.taskLeaseTimeout "x", g1)
+  , (.taskRetryTimeout "x", g2)
   , (.api (.taskGet    { id := "x" }), t2)
   , (.api (.promiseGet { id := "x" }), t2) ]
 
@@ -317,7 +320,7 @@ counterexample" mean something: there is no seed that was not tried. -/
 
 def grid : List Nat := [1, 2, 3, 4, 6, 8, 12]
 
-/-- Every assignment of (awaited deadline, awaiter deadline, τ instant,
+/-- Every assignment of (awaited deadline, awaiter deadline, internal step instant,
     observation instant) from `grid`, with the suspend pinned at 1 and a
     second observation late enough to see everything. This is the
     resume-threshold shape, enumerated. -/
@@ -328,8 +331,8 @@ def resumeGrid : List (List (Step × Nat)) :=
     , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
     , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
     , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 1)
-    , (.r1 "a", g)
-    , (.r4 "a" "x", g)
+    , (.promiseTimeout "a", g)
+    , (.callback "a" "x", g)
     , (.api (.taskGet    { id := "x" }), t2)
     , (.api (.promiseGet { id := "x" }), t2)
     , (.api (.promiseGet { id := "a" }), t2)
@@ -337,20 +340,20 @@ def resumeGrid : List (List (Step × Nat)) :=
     , (.api (.promiseGet { id := "x" }), 100) ]
 
 /-- The lease/retry shape, enumerated: lease deadline, promise deadline,
-    both τ instants, observation instant. -/
+    both internal step instants, observation instant. -/
 def leaseGrid : List (List (Step × Nat)) :=
   grid.flatMap fun tx => grid.flatMap fun ttl => grid.flatMap fun g1 => grid.map fun t2 =>
     mono
     [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
     , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
-    , (.r5 "x", g1)
-    , (.r6 "x", g1)
+    , (.taskLeaseTimeout "x", g1)
+    , (.taskRetryTimeout "x", g1)
     , (.api (.taskGet    { id := "x" }), t2)
     , (.api (.promiseGet { id := "x" }), t2)
     , (.api (.taskGet { id := "x" }), 100) ]
 
-/-- Two awaited promises on one awaiter, τs at two independent instants —
-    the chain shape, enumerated over deadlines and both τ instants. -/
+/-- Two awaited promises on one awaiter, internal steps at two independent instants —
+    the chain shape, enumerated over deadlines and both internal step instants. -/
 def chainGrid : List (List (Step × Nat)) :=
   grid.flatMap fun ta => grid.flatMap fun tb => grid.flatMap fun g1 => grid.map fun g2 =>
     mono
@@ -359,10 +362,10 @@ def chainGrid : List (List (Step × Nat)) :=
     , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 0)
     , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
     , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }, { awaited := "b", awaiter := "x" }] }), 1)
-    , (.r1 "a", g1)
-    , (.r4 "a" "x", g1)
-    , (.r1 "b", g2)
-    , (.r4 "b" "x", g2)
+    , (.promiseTimeout "a", g1)
+    , (.callback "a" "x", g1)
+    , (.promiseTimeout "b", g2)
+    , (.callback "b" "x", g2)
     , (.api (.taskGet    { id := "x" }), 20)
     , (.api (.promiseGet { id := "a" }), 20)
     , (.api (.promiseGet { id := "b" }), 20) ]
@@ -376,7 +379,7 @@ def runFamily (name : String) (ws : List (List (Step × Nat))) : IO Nat := do
   let mut shown := 0
   let mut withDiscr := 0
   let mut withVis := 0
-  let mut forcedTau := 0
+  let mut forcedInternalStep := 0
   let mut badInv := 0
   let mut ivBroke := 0
   let mut diverged := 0
@@ -388,7 +391,7 @@ def runFamily (name : String) (ws : List (List (Step × Nat))) : IO Nat := do
     if c.visibleDiscr > 0 then withVis := withVis + 1
     if anyPendingHasLease w then badInv := badInv + 1
     let obs := recordFrom w
-    if !tauFree obs then forcedTau := forcedTau + 1
+    if !internalFree obs then forcedInternalStep := forcedInternalStep + 1
     if reductionDisagrees obs then redDisagree := redDisagree + 1
     if refutesValidRun obs then
       broke := broke + 1
@@ -398,15 +401,15 @@ def runFamily (name : String) (ws : List (List (Step × Nat))) : IO Nat := do
         for (rq, n) in w do IO.eprintln s!"      @{n}  {repr rq}"
   IO.eprintln s!"  {name}"
   IO.eprintln s!"    scripts                                  : {ws.length}"
-  IO.eprintln s!"    internal steps                           : {cov.taus}"
+  IO.eprintln s!"    internal steps                           : {cov.internalSteps}"
   IO.eprintln s!"      …fired off the observation's instant   : {cov.offPinned}"
   IO.eprintln s!"      …that changed state  (old metric)      : {cov.changed}"
   IO.eprintln s!"      …DISCRIMINATING vs firing at it        : {cov.discriminating}"
   IO.eprintln s!"      …discriminating in a VISIBLE component : {cov.visibleDiscr}"
   IO.eprintln s!"      …after the last observation (unmodelled): {cov.unmodellable}"
-  IO.eprintln s!"    scripts with >=1 discriminating τ        : {withDiscr}/{ws.length}"
-  IO.eprintln s!"    scripts with >=1 VISIBLY discriminating τ: {withVis}/{ws.length}"
-  IO.eprintln s!"    recordings NOT explainable τ-free        : {forcedTau}/{ws.length}"
+  IO.eprintln s!"    scripts with >=1 discriminating internal step : {withDiscr}/{ws.length}"
+  IO.eprintln s!"    scripts with >=1 VISIBLY discriminating step  : {withVis}/{ws.length}"
+  IO.eprintln s!"    recordings NOT explainable step-free         : {forcedInternalStep}/{ws.length}"
   IO.eprintln s!"    states with a pending task holding a lease: {badInv}"
   IO.eprintln s!"    valid run REFUTED (soundness bug)        : {broke}"
   IO.eprintln s!"    critical instants ≠ BRUTE FORCE (R3 fails): {redDisagree}"

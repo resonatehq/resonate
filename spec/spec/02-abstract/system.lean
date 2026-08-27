@@ -51,7 +51,7 @@ constructors, so those five were a second, redundant spelling of them.
 `Request` is now exactly the external surface, which makes
 `Step.isExternal` decidable by shape rather than by asking the request.
 
-`Step.r6` no longer carries a next-fire instant. It used to read
+`Step.taskRetryTimeout` no longer carries a next-fire instant. It used to read
 `r6 (id : String) (next : Nat)`, and that `next` was the only value in
 the whole alphabet that the environment wrote into the store rather
 than a name of something to act on. `processRetryTimeout` now computes
@@ -163,21 +163,26 @@ namespace Abstraction
 
 open Equivalence
 
-/-- One step of a run. `api` is a client request; `r1`–`r7` are the
-    steps the server takes on its own initiative; `idle` is the clock
-    moving with nothing else happening.
+/-- One step of a run. `api` is a client request; the six named for what
+    they do are the steps the server takes on its own initiative; `idle`
+    is the clock moving with nothing else happening.
 
-    The numbering has a hole: `r2` was `taskFulfillment` and was
-    deleted. The gap is kept so that `r5` still means the lease
-    timeout in every document, trace and checker that names it. -/
+    They used to be `r1`–`r7`, with a hole at `r2` — that one was
+    `taskFulfillment` and was deleted, and the gap was kept so that `r5`
+    would go on meaning the lease timeout wherever it was named. Names
+    hold that position without needing a hole to do it, and they say at
+    the use site which step is meant. The checker had already reached
+    the same conclusion: `InternalStep` in `valid/lean/validator.lean`
+    has carried exactly these names all along, and `InternalStep.toStep`
+    existed to translate between the two vocabularies. -/
 inductive Step
-  | api (rq : Request)
-  | r1  (id : String)
-  | r3  (id address : String)
-  | r4  (id awaiter : String)
-  | r5  (id : String)
-  | r6  (id : String)
-  | r7  (id : String)
+  | api              (rq : Request)
+  | promiseTimeout   (id : String)
+  | listener         (id address : String)
+  | callback         (id awaiter : String)
+  | taskLeaseTimeout (id : String)
+  | taskRetryTimeout (id : String)
+  | scheduleTimeout  (id : String)
   | idle
   deriving Repr
 
@@ -191,9 +196,10 @@ def Step.isExternal : Step → Bool
     it is the clock moving with nothing happening, which is why this is
     not simply the negation of `isExternal`. -/
 def Step.isInternal : Step → Bool
-  | .r1 _ => true | .r3 _ _ => true | .r4 _ _ => true
-  | .r5 _ => true | .r6 _   => true | .r7 _   => true
-  | _     => false
+  | .promiseTimeout _   => true | .listener _ _       => true
+  | .callback _ _       => true | .taskLeaseTimeout _ => true
+  | .taskRetryTimeout _ => true | .scheduleTimeout _  => true
+  | _                   => false
 
 /-! `PromiseObject` is compared by `promiseEq` below rather than
 structurally, because two of its fields are ledgers. `TaskObject` has no
@@ -209,6 +215,7 @@ does exactly that, and caches the canonical form because recomputing it
 inside a pairwise comparison made dedup quadratic twice over. -/
 
 deriving instance BEq for AbstractModel.PromiseObject
+deriving instance BEq for AbstractModel.Object
 deriving instance BEq for AbstractModel.ServerState
 
 /-! ## The driver
@@ -246,12 +253,12 @@ def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   | .api (.taskHalt req)                => Response.taskHalt <$> AbstractModel.taskHalt req now
   | .api (.taskContinue req)            => Response.taskContinue <$> AbstractModel.taskContinue req now
   | .api (.taskSearch req)              => Response.taskSearch <$> AbstractModel.taskSearch req now
-  | .r1 id      => do AbstractModel.Internal.processPromiseTimeout id now; return .silent
-  | .r3 id a    => do AbstractModel.Internal.processListener id a now; return .silent
-  | .r4 id x    => do AbstractModel.Internal.processCallback id x now; return .silent
-  | .r5 id      => do AbstractModel.Internal.processLeaseTimeout id now; return .silent
-  | .r6 id      => do AbstractModel.Internal.processRetryTimeout id now; return .silent
-  | .r7 id      => do AbstractModel.Internal.processSchedule id now; return .silent
+  | .promiseTimeout id      => do AbstractModel.Internal.processPromiseTimeout id now; return .silent
+  | .listener id a    => do AbstractModel.Internal.processListener id a now; return .silent
+  | .callback id x    => do AbstractModel.Internal.processCallback id x now; return .silent
+  | .taskLeaseTimeout id      => do AbstractModel.Internal.processLeaseTimeout id now; return .silent
+  | .taskRetryTimeout id      => do AbstractModel.Internal.processRetryTimeout id now; return .silent
+  | .scheduleTimeout id      => do AbstractModel.Internal.processSchedule id now; return .silent
   | .idle       => return .silent
 
 def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) :

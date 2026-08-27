@@ -56,8 +56,9 @@ one; the fold rejects it, so `Legal` is not the constant-true
 predicate. -/
 
 def badState : ServerState :=
-  { promises := [{ id := "p", state := .pending, param := {}, tags := [],
-                   timeoutAt := 1, createdAt := 5 }] }
+  { objects := [{ id := "p",
+                  promise := { state := .pending, param := {}, tags := [],
+                               timeoutAt := 1, createdAt := 5 } }] }
 
 theorem legal_body_is_falsifiable :
     (AbstractModel.Properties.catalogue.all fun l =>

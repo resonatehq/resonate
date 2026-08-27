@@ -85,36 +85,92 @@ without touching it. -/
     argument about all three tables rather than three arguments about
     one each. -/
 structure Q where
-  promise  : PromiseObject → Bool
+  /-- KEYED by the row's id. The promise no longer carries one, and the
+      relational tier in `trans.lean` genuinely needs it: its predicate
+      is "relate this row to the row that was at the SAME id before the
+      step", which is a claim about a keyed row, not about a promise.
+      `.setPromise` names the id, so a per-effect obligation can still
+      be stated locally. -/
+  promise  : String → PromiseObject → Bool
   task     : TaskObject → Bool
   schedule : ServerModel.Schedule → Bool
 
+/-- `Q` applied to ONE ROW. The promise face always, the task face if
+    the row has one — which is the whole of what fusing the row changed
+    here: two walks over two lists became one walk over one.
+
+    `Q` itself keeps its three fields. The entries in `entries.lean` are
+    still written against one face at a time, and a fourth field for
+    predicates that read BOTH faces is the follow-up this makes
+    possible, not something this change needs. -/
+def QObj (g : Q) (o : Object) : Bool := g.promise o.id o.promise && o.task.all g.task
+
+theorem QObj_promise {g : Q} {o : Object} (h : QObj g o = true) :
+    g.promise o.id o.promise = true := by
+  simp only [QObj, Bool.and_eq_true] at h; exact h.1
+
+theorem QObj_task {g : Q} {o : Object} {t : TaskObject} (h : QObj g o = true)
+    (ht : o.task = some t) : g.task t = true := by
+  simp only [QObj, Bool.and_eq_true] at h
+  simpa [ht] using h.2
+
+theorem all_filterMap {α β} (q : β → Bool) (m : α → Option β) :
+    ∀ l : List α, (l.filterMap m).all q = l.all (fun a => (m a).all q)
+  | [] => rfl
+  | a :: l => by
+      cases h : m a with
+      | none   => simp [List.filterMap_cons, h, all_filterMap q m l]
+      | some b => simp [List.filterMap_cons, h, List.all_cons, all_filterMap q m l]
+
+theorem all_and {α} (p q : α → Bool) :
+    ∀ l : List α, l.all (fun a => p a && q a) = (l.all p && l.all q)
+  | [] => rfl
+  | a :: l => by
+      simp only [List.all_cons, all_and p q l]
+      cases p a <;> cases q a <;> simp
+
+theorem allObj_split (g : Q) (s : ServerState) :
+    s.objects.all (QObj g)
+      = ((s.objects.all fun o => g.promise o.id o.promise) && s.tasks.all g.task) := by
+  simp only [ServerState.tasks, all_filterMap, ← all_and]
+  rfl
+
 def PerStore (g : Q) (s : ServerState) : Bool :=
-  s.promises.all g.promise && s.tasks.all g.task && s.schedules.all g.schedule
+  s.objects.all (QObj g) && s.schedules.all g.schedule
 
 theorem perStore_promises {g : Q} {s : ServerState} (h : PerStore g s = true) :
-    s.promises.all g.promise = true := by
-  simp only [PerStore, Bool.and_eq_true] at h; exact h.1.1
+    (s.objects.all fun o => g.promise o.id o.promise) = true := by
+  simp only [PerStore, allObj_split, Bool.and_eq_true] at h; exact h.1.1
 
 theorem perStore_tasks {g : Q} {s : ServerState} (h : PerStore g s = true) :
     s.tasks.all g.task = true := by
-  simp only [PerStore, Bool.and_eq_true] at h; exact h.1.2
+  simp only [PerStore, allObj_split, Bool.and_eq_true] at h; exact h.1.2
+
+theorem perStore_objects {g : Q} {s : ServerState} (h : PerStore g s = true) :
+    s.objects.all (QObj g) = true := by
+  simp only [PerStore, Bool.and_eq_true] at h; exact h.1
 
 theorem perStore_schedules {g : Q} {s : ServerState} (h : PerStore g s = true) :
     s.schedules.all g.schedule = true := by
   simp only [PerStore, Bool.and_eq_true] at h; exact h.2
 
 theorem perStore_mk {g : Q} {s : ServerState}
-    (h1 : s.promises.all g.promise = true) (h2 : s.tasks.all g.task = true)
+    (h1 : (s.objects.all fun o => g.promise o.id o.promise) = true)
+    (h2 : s.tasks.all g.task = true)
     (h3 : s.schedules.all g.schedule = true) : PerStore g s = true := by
-  simp [PerStore, h1, h2, h3]
+  simp [PerStore, allObj_split, h1, h2, h3]
+
+theorem perStore_mkObj {g : Q} {s : ServerState}
+    (h1 : s.objects.all (QObj g) = true) (h3 : s.schedules.all g.schedule = true) :
+    PerStore g s = true := by
+  simp [PerStore, h1, h3]
 
 /-- What one effect has to satisfy. `delSchedule` and `setMessage` write
     no row into a table this tier is about, so they are unconstrained —
     the outbox is a different argument. -/
 def GoodEffect (g : Q) : Effect → Prop
-  | .setPromise p   => g.promise p = true
-  | .setTask t      => g.task t = true
+  | .setPromise id p => g.promise id p = true
+  | .setTask _ t    => g.task t = true
   | .setSchedule c  => g.schedule c = true
   | .delSchedule _  => True
   | .setMessage _ _ => True
@@ -131,25 +187,50 @@ theorem all_upsert {α} (q : α → Bool) (x : α) (f : α → Bool) (l : List �
     (hl : l.all q = true) (hx : q x = true) : ((x :: l.filter f).all q) = true := by
   simp [List.all_cons, hx, all_filter q f l hl]
 
+/-- A task write is a `map`, and a map preserves the predicate rowwise.
+    This is where the asymmetry pays: `.setTask` cannot add, remove or
+    reorder a row, so there is nothing here about the shape of the
+    list — only about the one field it touches. -/
+theorem all_map_of {α} (q : α → Bool) (m : α → α)
+    (hm : ∀ a, q a = true → q (m a) = true) :
+    ∀ l : List α, l.all q = true → (l.map m).all q = true
+  | [],     _ => rfl
+  | a :: l, h => by
+      simp only [List.all_cons, Bool.and_eq_true] at h
+      simp [List.map_cons, List.all_cons, hm a h.1, all_map_of q m hm l h.2]
+
 /-- One write preserves the store predicate when the row it writes
     satisfies it. Writes to the other tables cannot touch the rest. -/
 theorem perStore_apply (g : Q) (f : Effect) (s : ServerState)
     (hs : PerStore g s = true) (hf : GoodEffect g f) :
     PerStore g (f.apply s) = true := by
-  have h1 := perStore_promises hs
-  have h2 := perStore_tasks hs
+  have ho := perStore_objects hs
   have h3 := perStore_schedules hs
   cases f with
-  | setPromise p =>
-      exact perStore_mk (all_upsert _ p _ _ h1 hf) h2 h3
-  | setTask t =>
-      exact perStore_mk h1 (all_upsert _ t _ _ h2 hf) h3
+  | setPromise id p =>
+      have hf' : g.promise id p = true := hf
+      refine perStore_mkObj (all_upsert _ _ _ _ ho ?_) h3
+      cases hfind : s.objects.find? (·.id == id) with
+      | none => simpa [Object.withPromise, QObj] using hf'
+      | some o =>
+          have hoid : o.id = id := eq_of_beq (by simpa using List.find?_some hfind)
+          have hq : QObj g o = true :=
+            List.all_eq_true.mp ho o (List.mem_of_find?_eq_some hfind)
+          simp only [QObj, Bool.and_eq_true] at hq ⊢
+          exact ⟨by simpa [Object.withPromise, hoid] using hf',
+                 by simpa [Object.withPromise] using hq.2⟩
+  | setTask id t =>
+      refine perStore_mkObj (all_map_of _ _ (fun o hq => ?_) _ ho) h3
+      by_cases hid : (o.id == id) = true
+      · simp only [QObj, Bool.and_eq_true] at hq ⊢
+        simpa [hid] using ⟨hq.1, hf⟩
+      · simpa [hid] using hq
   | setSchedule c =>
-      exact perStore_mk h1 h2 (all_upsert _ c _ _ h3 hf)
+      exact perStore_mkObj ho (all_upsert _ c _ _ h3 hf)
   | delSchedule i =>
-      exact perStore_mk h1 h2 (all_filter _ _ _ h3)
+      exact perStore_mkObj ho (all_filter _ _ _ h3)
   | setMessage a m =>
-      exact perStore_mk h1 h2 h3
+      exact perStore_mkObj ho h3
 
 theorem perStore_applyAll (g : Q) :
     ∀ (w : List Effect) (s : ServerState), PerStore g s = true →
@@ -181,15 +262,28 @@ theorem all_mono {α} {q r : α → Bool} (h : ∀ x, q x = true → r x = true)
     (l : List α) : l.all q = true → l.all r = true := fun hs =>
   List.all_eq_true.mpr (fun x hx => h x (List.all_eq_true.mp hs x hx))
 
-theorem getPromise_sound {g : Q} {s : ServerState} {id : String} {p : PromiseObject}
+theorem getObject_sound {g : Q} {s : ServerState} {id : String} {o : Object}
     (hs : PerStore g s = true)
-    (h : s.promises.find? (·.id == id) = some p) : g.promise p = true :=
-  List.all_eq_true.mp (perStore_promises hs) p (List.mem_of_find?_eq_some h)
+    (h : s.objects.find? (·.id == id) = some o) : QObj g o = true :=
+  List.all_eq_true.mp (perStore_objects hs) o (List.mem_of_find?_eq_some h)
+
+theorem getPromise_sound {g : Q} {s : ServerState} {id : String} {o : Object}
+    (hs : PerStore g s = true)
+    (h : s.objects.find? (·.id == id) = some o) : g.promise o.id o.promise = true :=
+  QObj_promise (getObject_sound hs h)
 
 theorem getTask_sound {g : Q} {s : ServerState} {id : String} {t : TaskObject}
     (hs : PerStore g s = true)
-    (h : s.tasks.find? (·.id == id) = some t) : g.task t = true :=
-  List.all_eq_true.mp (perStore_tasks hs) t (List.mem_of_find?_eq_some h)
+    (h : s.task? id = some t) : g.task t = true := by
+  unfold ServerState.task? at h
+  cases hfind : s.objects.find? (·.id == id) with
+  | none => rw [hfind] at h; simp at h
+  | some o =>
+      rw [hfind] at h
+      simp only [Option.bind_some] at h
+      have hq := getObject_sound hs hfind
+      simp only [QObj, Bool.and_eq_true] at hq
+      simpa [h] using hq.2
 
 theorem getSchedule_sound {g : Q} {s : ServerState} {id : String}
     {c : ServerModel.Schedule} (hs : PerStore g s = true)
@@ -216,18 +310,18 @@ def WritesGood (g : Q) (e : Env) {α : Type} (act : H α) : Prop :=
 
 /-- The companion: the promise it hands BACK is good. Needed because
     handlers write rows they have just read. -/
-def ReturnsGood (g : Q) (e : Env) (act : H (Option PromiseObject)) : Prop :=
-  ∀ p, (act e).1 = some p → g.promise p = true
+def ReturnsGood (g : Q) (e : Env) (act : H (Option Object)) : Prop :=
+  ∀ o, (act e).1 = some o → QObj g o = true
 
 theorem writesGood_pure {α} (g : Q) (e : Env) (a : α) : WritesGood g e (pure a) := by
   intro f hf; simp [pure] at hf
 
-theorem writesGood_setPromise (g : Q) (e : Env) (p : PromiseObject)
-    (h : g.promise p = true) : WritesGood g e (setPromise p) := by
+theorem writesGood_setPromise (g : Q) (e : Env) (id : String) (p : PromiseObject)
+    (h : g.promise id p = true) : WritesGood g e (setPromise id p) := by
   intro f hf; simp [setPromise, emit] at hf; subst hf; exact h
 
-theorem writesGood_setTask (g : Q) (e : Env) (t : TaskObject)
-    (h : g.task t = true) : WritesGood g e (setTask t) := by
+theorem writesGood_setTask (g : Q) (e : Env) (id : String) (t : TaskObject)
+    (h : g.task t = true) : WritesGood g e (setTask id t) := by
   intro f hf; simp [setTask, emit] at hf; subst hf; exact h
 
 theorem writesGood_setSchedule (g : Q) (e : Env) (c : ServerModel.Schedule)
@@ -245,13 +339,9 @@ theorem writesGood_delSchedule (g : Q) (e : Env) (id : String) :
 theorem writesGood_ask (g : Q) (e : Env) : WritesGood g e ask := by
   intro f hf; simp [ask] at hf
 
-theorem writesGood_getPromise (g : Q) (e : Env) (id : String) :
-    WritesGood g e (getPromise id) := by
-  intro f hf; simp [getPromise, bind, ask, pure] at hf
-
-theorem writesGood_getTask (g : Q) (e : Env) (id : String) :
-    WritesGood g e (getTask id) := by
-  intro f hf; simp [getTask, bind, ask, pure] at hf
+theorem writesGood_getObject (g : Q) (e : Env) (id : String) :
+    WritesGood g e (getObject id) := by
+  intro f hf; simp [getObject, bind, ask, pure] at hf
 
 theorem writesGood_getSchedule (g : Q) (e : Env) (id : String) :
     WritesGood g e (getSchedule id) := by
@@ -268,15 +358,12 @@ theorem writesGood_withMat {α} (g : Q) (e : Env) (b : Bool)
     available — and it is what makes a relational obligation's birth
     case vacuous rather than unprovable: a birth is by construction the
     one write with no row behind it. -/
-def Stored (a : ServerState) (p : PromiseObject) : Prop :=
-  a.promises.find? (·.id == p.id) ≠ none
+def Stored (a : ServerState) (id : String) : Prop :=
+  a.objects.find? (·.id == id) ≠ none
 
-theorem stored_of_find? {a : ServerState} {id : String} {p : PromiseObject}
-    (h : a.promises.find? (·.id == id) = some p) : Stored a p := by
-  have hid : p.id = id := eq_of_beq (by simpa using List.find?_some h)
-  unfold Stored
-  rw [hid, h]
-  simp
+theorem stored_of_find? {a : ServerState} {id : String} {o : Object}
+    (h : a.objects.find? (·.id == id) = some o) : Stored a id := by
+  unfold Stored; rw [h]; simp
 
 /-! ## The obligation set
 
@@ -298,43 +385,43 @@ obligation that fails. -/
 
 structure Hereditary (g : Q) (a : ServerState) : Prop where
   -- promises
-  project      : ∀ (p : PromiseObject) (n : Nat), Stored a p →
-                   g.promise p = true → g.promise (p.project n) = true
-  addCallback  : ∀ (p : PromiseObject) (c : String), Stored a p →
-                   g.promise p = true → g.promise (p.addCallback c) = true
-  addListener  : ∀ (p : PromiseObject) (c : String), Stored a p →
-                   g.promise p = true → g.promise (p.addListener c) = true
-  settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
-                   (v : ServerModel.Value) (t : Nat), Stored a p →
+  project      : ∀ (id : String) (p : PromiseObject) (n : Nat), Stored a id →
+                   g.promise id p = true → g.promise id (p.project n) = true
+  addCallback  : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+                   g.promise id p = true → g.promise id (p.addCallback c) = true
+  addListener  : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+                   g.promise id p = true → g.promise id (p.addListener c) = true
+  settle       : ∀ (id : String) (p : PromiseObject) (st : ServerModel.PromiseState)
+                   (v : ServerModel.Value) (t : Nat), Stored a id →
                    st.settable = true → p.state = .pending → t < p.timeoutAt →
-                   g.promise p = true →
-                   g.promise { p with state := st, value := v, settledAt := some t } = true
-  dropListener : ∀ (p : PromiseObject) (c : String), Stored a p →
-                   p.state ≠ .pending → g.promise p = true →
-                   g.promise { p with listeners := p.listeners.filter (· != c) } = true
-  dropCallback : ∀ (p : PromiseObject) (c : String), Stored a p →
-                   p.state ≠ .pending → g.promise p = true →
-                   g.promise { p with callbacks := p.callbacks.filter (· != c) } = true
+                   g.promise id p = true →
+                   g.promise id { p with state := st, value := v, settledAt := some t } = true
+  dropListener : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+                   p.state ≠ .pending → g.promise id p = true →
+                   g.promise id { p with listeners := p.listeners.filter (· != c) } = true
+  dropCallback : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+                   p.state ≠ .pending → g.promise id p = true →
+                   g.promise id { p with callbacks := p.callbacks.filter (· != c) } = true
   live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
-                   a.promises.find? (·.id == id) = none →
-                   g.promise { id := id, state := .pending, param := param, tags := tags,
-                               timeoutAt := timeoutAt, createdAt := createdAt } = true
+                   a.objects.find? (·.id == id) = none →
+                   g.promise id { state := .pending, param := param, tags := tags,
+                                  timeoutAt := timeoutAt, createdAt := createdAt } = true
   dead         : ∀ (id : String) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
-                   a.promises.find? (·.id == id) = none →
-                   g.promise { id := id, state := st, param := param, tags := tags,
-                               timeoutAt := timeoutAt, createdAt := timeoutAt,
-                               settledAt := some timeoutAt } = true
+                   a.objects.find? (·.id == id) = none →
+                   g.promise id { state := st, param := param, tags := tags,
+                                  timeoutAt := timeoutAt, createdAt := timeoutAt,
+                                  settledAt := some timeoutAt } = true
   -- tasks
   tFulfill     : ∀ (t : TaskObject), g.task t = true → g.task t.fulfill = true
-  tBornPending : ∀ (id : String) (due : Nat),
-                   g.task { id := id, state := .pending, version := 0,
+  tBornPending : ∀ (due : Nat),
+                   g.task { state := .pending, version := 0,
                             retryAt := some due } = true
-  tBornDone    : ∀ (id : String), g.task { id := id, state := .fulfilled, version := 0 } = true
-  tBornHeld    : ∀ (id pid : String) (ttl now : Nat),
-                   g.task { id := id, state := .acquired, version := 1, ttl := some ttl,
+  tBornDone    : g.task { state := .fulfilled, version := 0 } = true
+  tBornHeld    : ∀ (pid : String) (ttl now : Nat),
+                   g.task { state := .acquired, version := 1, ttl := some ttl,
                             pid := some pid, expiresAt := some (now + ttl) } = true
   tAcquire     : ∀ (t : TaskObject) (pid : String) (ttl now : Nat), g.task t = true →
                    g.task { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl), retryAt := none, resumes := [] } = true
@@ -446,11 +533,8 @@ theorem writesGood_iteH {α} (g : Q) (e : Env) (c : Prop) [Decidable c] (x y : H
   · simpa only [if_pos h] using hx h
   · simpa only [if_neg h] using hy h
 
-theorem getPromise_fst (id : String) (e : Env) :
-    (getPromise id e).1 = e.state.promises.find? (·.id == id) := rfl
-
-theorem getTask_fst (id : String) (e : Env) :
-    (getTask id e).1 = e.state.tasks.find? (·.id == id) := rfl
+theorem getObject_fst (id : String) (e : Env) :
+    (getObject id e).1 = e.state.objects.find? (·.id == id) := rfl
 
 theorem getSchedule_fst (id : String) (e : Env) :
     (getSchedule id e).1 = e.state.schedules.find? (·.id == id) := rfl
@@ -461,67 +545,112 @@ theorem ask_fst (e : Env) : (ask e).1 = e := rfl
 
 Each of these is used by many handlers, so each is proved once. The
 shape is always the same: split on what came out of the state, and in
-the `some` branch pull the predicate across with `getPromise_sound` /
-`getTask_sound` and one `Hereditary` field. -/
+the `some` branch pull the predicate across with `getObject_sound` and
+one `Hereditary` field.
+
+There is ONE read here now. `readPromise` and `readTask` were two, and
+`readTask` was the awkward one: it returned a task and MAYBE its
+promise, so every combinator built on it carried a third case for a
+task whose promise was missing, and every handler had to be handed an
+obligation for it. Fusing the row deletes that case at the source —
+`writesGood_afterReadObject` has two branches where
+`writesGood_afterReadTask` had three. -/
 
 section Derived
 
 variable {g : Q}
 
+/-- Fact P and fact T at the row level: projecting an object keeps both
+    faces good. The promise half is `Hereditary.project`, the task half
+    is `Hereditary.tView` — the same two obligations as before, now
+    discharged together because they move together. -/
+theorem QObj_project {a : ServerState} (hq : Hereditary g a) {o : Object}
+    (hst : Stored a o.id) (h : QObj g o = true) (n : Nat) :
+    QObj g (o.project n) = true := by
+  have h1 : g.promise o.id o.promise = true := QObj_promise h
+  simp only [QObj, Bool.and_eq_true]
+  refine ⟨hq.project _ _ n hst h1, ?_⟩
+  show (o.task.map (·.view (o.promise.project n))).all g.task = true
+  cases hto : o.task with
+  | none   => rfl
+  | some t => exact hq.tView t _ (QObj_task h hto)
+
 theorem writesGood_setSettled {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (p : PromiseObject) (h : g.promise p = true) :
-    WritesGood g e (setSettled p) := by
+    (o : Object) (ho : QObj g o = true) (p : PromiseObject) (h : g.promise o.id p = true) :
+    WritesGood g e (setSettled o p) := by
   unfold setSettled
-  refine writesGood_bind' _ _ _ _ (writesGood_setPromise _ _ _ h) ?_
+  refine writesGood_bind' _ _ _ _ (writesGood_setPromise _ _ _ _ h) ?_
   refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-  refine writesGood_bind' _ _ _ _ (writesGood_getTask _ _ _) ?_
-  rw [getTask_fst]
   split
   · rename_i t ht
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-    exact writesGood_setTask _ _ _ (hq.tFulfill t (getTask_sound hs ht))
+    exact writesGood_setTask _ _ _ _ (hq.tFulfill t (QObj_task ho ht))
   · exact writesGood_pure _ _ _
 
-/-- What `readPromise` hands back: the stored promise, projected. Fact P
-    as an equation. -/
-theorem readPromise_fst (id : String) (now : Nat) (e : Env) :
-    (readPromise id now e).1 =
-      (e.state.promises.find? (·.id == id)).map (·.project now) := by
-  unfold readPromise
-  rw [bind_fst, getPromise_fst]
-  cases h : e.state.promises.find? (·.id == id) with
-  | none => rfl
-  | some p => rw [bind_fst]; split <;> rw [bind_fst] <;> rfl
+/-- The only write a read performs. Both faces come from the PROJECTED
+    object, so both are good by `QObj_project` — one obligation where
+    the two reads used to need one each. -/
+theorem writesGood_materialise {e : Env} {o' : Object} (h : QObj g o' = true)
+    (id : String) (hid : o'.id = id) (o : Object) :
+    WritesGood g e (materialise id o o') := by
+  unfold materialise
+  refine writesGood_bind' _ _ _ _ ?_ ?_
+  · exact writesGood_ite _ _ _ _ _
+      (writesGood_setPromise _ _ _ _ (hid ▸ QObj_promise h)) (writesGood_pure _ _ _)
+  · split
+    · rename_i t u _ hu
+      exact writesGood_ite _ _ _ _ _
+        (writesGood_setTask _ _ _ _ (QObj_task h hu)) (writesGood_pure _ _ _)
+    · exact writesGood_pure _ _ _
 
-theorem writesGood_readPromise {e : Env} (hq : Hereditary g e.state)
+/-- What `readObject` hands back: the stored object, projected. Facts P
+    and T as one equation. -/
+theorem readObject_fst (id : String) (now : Nat) (e : Env) :
+    (readObject id now e).1 =
+      (e.state.objects.find? (·.id == id)).map (·.project now) := by
+  unfold readObject
+  rw [bind_fst, getObject_fst]
+  cases h : e.state.objects.find? (·.id == id) with
+  | none => rfl
+  | some o =>
+      rw [bind_fst]
+      split <;> rw [bind_fst] <;> rfl
+
+theorem writesGood_readObject {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
-    WritesGood g e (readPromise id now) := by
-  unfold readPromise
-  refine writesGood_bind' _ _ _ _ (writesGood_getPromise _ _ _) ?_
-  rw [getPromise_fst]
+    WritesGood g e (readObject id now) := by
+  unfold readObject
+  refine writesGood_bind' _ _ _ _ (writesGood_getObject _ _ _) ?_
+  rw [getObject_fst]
   split
   · exact writesGood_pure _ _ _
-  · rename_i p₀ h
-    have hp₀ : g.promise p₀ = true := getPromise_sound hs h
+  · rename_i o h
+    have ho : QObj g o = true := getObject_sound hs h
+    have hst : Stored e.state o.id := by
+      have : o.id = id := eq_of_beq (by simpa using List.find?_some h)
+      rw [this]; exact stored_of_find? h
+    have hpr : QObj g (o.project now) = true := QObj_project hq hst ho now
     refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
     split
-    · exact writesGood_bind' _ _ _ _
-        (writesGood_setSettled hq hs _ (hq.project p₀ now (stored_of_find? h) hp₀))
+    · have hid : (o.project now).id = id :=
+        (Lookup.project_id o now).trans (eq_of_beq (by simpa using List.find?_some h))
+      exact writesGood_bind' _ _ _ _ (writesGood_materialise hpr id hid o)
         (writesGood_pure _ _ _)
     · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
-theorem returnsGood_readPromise {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
-    ReturnsGood g e (readPromise id now) := by
-  intro p hp
-  rw [readPromise_fst] at hp
-  cases h : e.state.promises.find? (fun x => x.id == id) with
-  | none => rw [h] at hp; simp at hp
-  | some p₀ =>
-      rw [h] at hp
-      simp only [Option.map_some] at hp
-      obtain rfl := Option.some.inj hp
-      exact hq.project p₀ now (stored_of_find? h) (getPromise_sound hs h)
+theorem returnsGood_readObject {e : Env} (hq : Hereditary g e.state)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat) (o : Object)
+    (h : (readObject id now e).1 = some o) : QObj g o = true := by
+  rw [readObject_fst] at h
+  cases hf : e.state.objects.find? (fun x => x.id == id) with
+  | none => rw [hf] at h; simp at h
+  | some o₀ =>
+      rw [hf] at h
+      simp only [Option.map_some] at h
+      obtain rfl := Option.some.inj h
+      have hoid : o₀.id = id := eq_of_beq (by simpa using List.find?_some hf)
+      exact QObj_project hq (by rw [hoid]; exact stored_of_find? hf)
+        (getObject_sound hs hf) now
 
 /-- Fact P, in the form the handlers can use: a promise that reads
     pending is not yet due. Every settle in the machine happens behind a
@@ -532,183 +661,178 @@ theorem returnsGood_readPromise {e : Env} (hq : Hereditary g e.state)
 def NotDue (now : Nat) (p : PromiseObject) : Prop :=
   (p.state == ServerModel.PromiseState.pending) = true → now < p.timeoutAt
 
-theorem readPromise_notDue (id : String) (now : Nat) (e : Env) (p : PromiseObject)
-    (h : (readPromise id now e).1 = some p) : NotDue now p := by
+theorem readObject_notDue (id : String) (now : Nat) (e : Env) (o : Object)
+    (h : (readObject id now e).1 = some o) : NotDue now o.promise := by
   intro hst
-  rw [readPromise_fst] at h
-  cases hf : e.state.promises.find? (fun x => x.id == id) with
+  rw [readObject_fst] at h
+  cases hf : e.state.objects.find? (fun x => x.id == id) with
   | none => rw [hf] at h; simp at h
-  | some p₀ =>
+  | some o₀ =>
       rw [hf] at h
       simp only [Option.map_some] at h
       obtain rfl := Option.some.inj h
       exact Lookup.project_pending_not_due hst
 
-theorem readPromise_stored (id : String) (now : Nat) (e : Env) (p : PromiseObject)
-    (h : (readPromise id now e).1 = some p) : Stored e.state p := by
-  rw [readPromise_fst] at h
-  cases hf : e.state.promises.find? (fun x => x.id == id) with
+/-- The id the read was made at is the id of the row it returned —
+    projection cannot move a row. So the caller gets `Stored` at the
+    OBJECT's id, which is the form every `Hereditary` obligation wants. -/
+theorem readObject_id (id : String) (now : Nat) (e : Env) (o : Object)
+    (h : (readObject id now e).1 = some o) : o.id = id := by
+  rw [readObject_fst] at h
+  cases hf : e.state.objects.find? (fun x => x.id == id) with
   | none => rw [hf] at h; simp at h
-  | some p₀ =>
+  | some o₀ =>
       rw [hf] at h
       simp only [Option.map_some] at h
       obtain rfl := Option.some.inj h
-      have hid : p₀.id = id := eq_of_beq (by simpa using List.find?_some hf)
-      unfold Stored
-      simp only [Lookup.project_id, hid, hf]
-      simp
+      exact (Lookup.project_id o₀ now).trans
+        (eq_of_beq (by simpa using List.find?_some hf))
 
-/-- The combinator the handlers are written against: after a read,
-    either there was nothing, or there was a promise AND it is good AND
-    it is not yet due. This is where the reader discipline pays —
-    `writesGood_bind'` keeps the continuation pinned to the value the
-    read produced, so both facts survive the `←`. -/
-theorem writesGood_afterReadPromise {α} {e : Env} (hq : Hereditary g e.state)
+theorem readObject_stored (id : String) (now : Nat) (e : Env) (o : Object)
+    (h : (readObject id now e).1 = some o) : Stored e.state o.id := by
+  rw [readObject_id id now e o h]
+  rw [readObject_fst] at h
+  cases hf : e.state.objects.find? (fun x => x.id == id) with
+  | none => rw [hf] at h; simp at h
+  | some o₀ => exact stored_of_find? hf
+
+/-- The combinator every handler is written against: after a read,
+    either there was nothing, or there was an object AND both its faces
+    are good AND its promise is not yet due. This is where the reader
+    discipline pays — `writesGood_bind'` keeps the continuation pinned
+    to the value the read produced, so the facts survive the `←`.
+
+    Two branches, not three. The missing one is the task whose promise
+    was gone, and it is missing because the state can no longer hold
+    it. -/
+theorem writesGood_afterReadObject {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
-    (f : Option PromiseObject → H α)
-    (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
-    (hsome : ∀ p, g.promise p = true → NotDue now p → Stored e.state p →
-               WritesGood g e (f (some p))) :
-    WritesGood g e (readPromise id now >>= f) := by
-  refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs id now) ?_
-  cases h : (readPromise id now e).1 with
+    (f : Option Object → H α)
+    (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (readObject id now >>= f) := by
+  refine writesGood_bind' _ _ _ _ (writesGood_readObject hq hs id now) ?_
+  cases h : (readObject id now e).1 with
   | none =>
       refine hnone ?_
-      rw [readPromise_fst] at h
-      cases hf : e.state.promises.find? (·.id == id) with
+      rw [readObject_fst] at h
+      cases hf : e.state.objects.find? (·.id == id) with
       | none => rfl
-      | some p₀ => rw [hf] at h; simp at h
-  | some p =>
-      exact hsome p (returnsGood_readPromise hq hs id now p h)
-        (readPromise_notDue id now e p h) (readPromise_stored id now e p h)
+      | some o₀ => rw [hf] at h; simp at h
+  | some o =>
+      exact hsome o (returnsGood_readObject hq hs id now o h)
+        (readObject_notDue id now e o h) (readObject_stored id now e o h)
 
-/-- Same, through `withMat` — which is how the internal steps read.
-    `touchPromise` is `withMat true`, `viewPromise` is `withMat false`. -/
-theorem writesGood_afterMatReadPromise {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
+/-- The promise-only face of the combinator, for the handlers that
+    never look at the task. Same read, weaker hypothesis. -/
+theorem writesGood_afterReadObjectP {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
-    (f : Option PromiseObject → H α)
-    (hnone : e.state.promises.find? (·.id == id) = none → WritesGood g e (f none))
-    (hsome : ∀ p, g.promise p = true → NotDue now p → Stored e.state p →
-               WritesGood g e (f (some p))) :
-    WritesGood g e (withMat b (readPromise id now) >>= f) := by
-  refine writesGood_bind' _ _ _ _
-    (writesGood_readPromise (e := { e with mat := b }) hq hs id now) ?_
-  show WritesGood g e (f ((readPromise id now { e with mat := b }).1))
-  cases h : (readPromise id now { e with mat := b }).1 with
-  | none =>
-      refine hnone ?_
-      rw [readPromise_fst] at h
-      cases hf : e.state.promises.find? (·.id == id) with
-      | none => rfl
-      | some p₀ => rw [hf] at h; simp at h
-  | some p =>
-      exact hsome p
-        (returnsGood_readPromise (e := { e with mat := b }) hq hs id now p h)
-        (readPromise_notDue id now { e with mat := b } p h)
-        (readPromise_stored id now { e with mat := b } p h)
+    (f : Option Object → H α)
+    (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
+    (hsome : ∀ o, g.promise o.id o.promise = true → NotDue now o.promise →
+               Stored e.state o.id → WritesGood g e (f (some o))) :
+    WritesGood g e (readObject id now >>= f) :=
+  writesGood_afterReadObject hq hs id now f hnone
+    (fun o ho => hsome o (QObj_promise ho))
 
-theorem writesGood_readTask {e : Env} (hq : Hereditary g e.state)
+/-- What the task read hands back is what `readObject` would have, when
+    it hands back anything at all. -/
+theorem readTaskObject_fst_some {id : String} {now : Nat} {e : Env} {u : Object}
+    (h : (readTaskObject id now e).1 = some u) : (readObject id now e).1 = some u := by
+  revert h
+  unfold readTaskObject
+  rw [bind_fst, getObject_fst]
+  cases hf : e.state.objects.find? (·.id == id) with
+  | none => intro hh; simp [pure] at hh
+  | some o =>
+      show ((if o.task.isSome then readObject id now else pure none) e).1 = _ → _
+      by_cases hto : o.task.isSome = true
+      · rw [if_pos hto]; exact fun hh => hh
+      · rw [if_neg hto]; intro hh; simp [pure] at hh
+
+theorem writesGood_readTaskObject {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat) :
-    WritesGood g e (readTask id now) := by
-  unfold readTask
-  refine writesGood_bind' _ _ _ _ (writesGood_getTask _ _ _) ?_
-  rw [getTask_fst]
+    WritesGood g e (readTaskObject id now) := by
+  unfold readTaskObject
+  refine writesGood_bind' _ _ _ _ (writesGood_getObject _ _ _) ?_
+  rw [getObject_fst]
   split
   · exact writesGood_pure _ _ _
-  · rename_i t ht
-    refine writesGood_bind' _ _ _ _ (writesGood_readPromise hq hs _ _) ?_
-    split
-    · exact writesGood_pure _ _ _
-    · rename_i p _
-      refine writesGood_bind' _ _ _ _ (writesGood_ask _ _) ?_
-      refine writesGood_ite _ _ _ _ _ ?_ ?_
-      · exact writesGood_bind' _ _ _ _
-          (writesGood_setTask _ _ _ (hq.tView t p (getTask_sound hs ht)))
-          (writesGood_pure _ _ _)
-      · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
+  · exact writesGood_ite _ _ _ _ _ (writesGood_readObject hq hs id now)
+      (writesGood_pure _ _ _)
 
-/-- What `readTask` hands back, in the two forms the handlers use. The
-    task is `t.view p` for a `t` that was in the store; the promise is
-    one `readPromise` handed back. Both inherit their facts rather than
-    needing their own argument. -/
-theorem readTask_good {e : Env} (hq : Hereditary g e.state) (hs : PerStore g e.state = true)
-    (id : String) (now : Nat) (t : TaskObject) (po : Option PromiseObject)
-    (h : (readTask id now e).1 = some (t, po)) :
-    g.task t = true ∧
-      ∀ p, po = some p → g.promise p = true ∧ NotDue now p ∧ Stored e.state p := by
-  revert h
-  unfold readTask
-  rw [bind_fst, getTask_fst]
-  cases ht : e.state.tasks.find? (·.id == id) with
-  | none => intro hh; simp [pure] at hh
-  | some t₀ =>
-      have hgt₀ : g.task t₀ = true := getTask_sound hs ht
-      rw [bind_fst]
-      cases hr : (readPromise t₀.id now e).1 with
-      | none =>
-          intro hh
-          simp only [pure_fst, Option.some.injEq, Prod.mk.injEq] at hh
-          obtain ⟨rfl, rfl⟩ := hh
-          exact ⟨hgt₀, fun p hp => by simp at hp⟩
-      | some p₀ =>
-          have hgp₀ : g.promise p₀ = true := returnsGood_readPromise hq hs t₀.id now p₀ hr
-          have hnd : NotDue now p₀ := readPromise_notDue t₀.id now e p₀ hr
-          have hsto : Stored e.state p₀ := readPromise_stored t₀.id now e p₀ hr
-          rw [bind_fst]
-          intro hh
-          revert hh
-          split <;>
-          · rw [bind_fst]
-            intro hh
-            simp only [pure_fst, Option.some.injEq, Prod.mk.injEq] at hh
-            obtain ⟨rfl, rfl⟩ := hh
-            refine ⟨hq.tView t₀ p₀ hgt₀, fun p hp => ?_⟩
-            simp only [Option.some.injEq] at hp
-            subst hp
-            exact ⟨hgp₀, hnd, hsto⟩
-
-theorem writesGood_afterReadTask {α} {e : Env} (hq : Hereditary g e.state)
+/-- The task read's combinator. The guard writes nothing, so this is
+    `writesGood_afterReadObject` behind a test — and its `none` branch now
+    covers two ways of getting there, no row and no task, which is why
+    that hypothesis is unconditional. -/
+theorem writesGood_afterReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
     (hs : PerStore g e.state = true) (id : String) (now : Nat)
-    (f : Option (TaskObject × Option PromiseObject) → H α)
+    (f : Option Object → H α)
     (hnone : WritesGood g e (f none))
-    (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
-    (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
-               Stored e.state p → WritesGood g e (f (some (t, some p)))) :
-    WritesGood g e (readTask id now >>= f) := by
-  refine writesGood_bind' _ _ _ _ (writesGood_readTask hq hs id now) ?_
-  cases h : (readTask id now e).1 with
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (readTaskObject id now >>= f) := by
+  refine writesGood_bind' _ _ _ _ (writesGood_readTaskObject hq hs id now) ?_
+  cases h : (readTaskObject id now e).1 with
   | none => exact hnone
-  | some tp =>
-      obtain ⟨t, po⟩ := tp
-      obtain ⟨hgt, hgp⟩ := readTask_good hq hs id now t po h
-      cases po with
-      | none => exact hbare t hgt
-      | some p =>
-          obtain ⟨h1, h2, h3⟩ := hgp p rfl
-          exact hsome t p hgt h1 h2 h3
+  | some u =>
+      have h' := readTaskObject_fst_some h
+      exact hsome u (returnsGood_readObject hq hs id now u h')
+        (readObject_notDue id now e u h') (readObject_stored id now e u h')
 
-theorem writesGood_afterTouchTask {α} {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
-    (f : Option (TaskObject × Option PromiseObject) → H α)
+theorem writesGood_afterMatReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
+    (b : Bool) (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (f : Option Object → H α)
     (hnone : WritesGood g e (f none))
-    (hbare : ∀ t, g.task t = true → WritesGood g e (f (some (t, none))))
-    (hsome : ∀ t p, g.task t = true → g.promise p = true → NotDue now p →
-               Stored e.state p → WritesGood g e (f (some (t, some p)))) :
-    WritesGood g e (withMat true (readTask id now) >>= f) := by
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (withMat b (readTaskObject id now) >>= f) := by
   refine writesGood_bind' _ _ _ _
-    (writesGood_readTask (e := { e with mat := true }) hq hs id now) ?_
-  show WritesGood g e (f ((readTask id now { e with mat := true }).1))
-  cases h : (readTask id now { e with mat := true }).1 with
+    (writesGood_readTaskObject (e := { e with mat := b }) hq hs id now) ?_
+  show WritesGood g e (f ((readTaskObject id now { e with mat := b }).1))
+  cases h : (readTaskObject id now { e with mat := b }).1 with
   | none => exact hnone
-  | some tp =>
-      obtain ⟨t, po⟩ := tp
-      obtain ⟨hgt, hgp⟩ :=
-        readTask_good (e := { e with mat := true }) hq hs id now t po h
-      cases po with
-      | none => exact hbare t hgt
-      | some p =>
-          obtain ⟨h1, h2, h3⟩ := hgp p rfl
-          exact hsome t p hgt h1 h2 h3
+  | some u =>
+      have h' := readTaskObject_fst_some h
+      exact hsome u (returnsGood_readObject (e := { e with mat := b }) hq hs id now u h')
+        (readObject_notDue id now { e with mat := b } u h')
+        (readObject_stored id now { e with mat := b } u h')
+
+/-- Same, through `withMat` — which is how the internal steps read.
+    `touchObject` is `withMat true`, `viewObject` is `withMat false`. -/
+theorem writesGood_afterMatReadObject {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (f : Option Object → H α)
+    (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
+    (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
+               WritesGood g e (f (some o))) :
+    WritesGood g e (withMat b (readObject id now) >>= f) := by
+  refine writesGood_bind' _ _ _ _
+    (writesGood_readObject (e := { e with mat := b }) hq hs id now) ?_
+  show WritesGood g e (f ((readObject id now { e with mat := b }).1))
+  cases h : (readObject id now { e with mat := b }).1 with
+  | none =>
+      refine hnone ?_
+      rw [readObject_fst] at h
+      cases hf : e.state.objects.find? (·.id == id) with
+      | none => rfl
+      | some o₀ => rw [hf] at h; simp at h
+  | some o =>
+      exact hsome o
+        (returnsGood_readObject (e := { e with mat := b }) hq hs id now o h)
+        (readObject_notDue id now { e with mat := b } o h)
+        (readObject_stored id now { e with mat := b } o h)
+
+theorem writesGood_afterMatReadObjectP {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
+    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (f : Option Object → H α)
+    (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
+    (hsome : ∀ o, g.promise o.id o.promise = true → NotDue now o.promise →
+               Stored e.state o.id → WritesGood g e (f (some o))) :
+    WritesGood g e (withMat b (readObject id now) >>= f) :=
+  writesGood_afterMatReadObject hq b hs id now f hnone
+    (fun o ho => hsome o (QObj_promise ho))
 
 end Derived
 

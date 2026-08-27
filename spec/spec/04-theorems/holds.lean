@@ -33,7 +33,7 @@ finding which entries need it was the informative part of the work.
 
 ## What this is not
 
-It is not `valid_implies_legal`. That theorem needs ALL 95 entries; the
+It is not `valid_implies_legal`. That theorem needs ALL 94 entries; the
 count below is what is currently proved. The remainder are still backed
 only by the 1 464-script sweep, which `bounded.lean` shows is the same
 statement with both quantifiers made finite. -/
@@ -220,13 +220,9 @@ theorem store_nodup : ∀ n, StoreNodup (tr n).state := by
   | zero => rw [h0]; exact storeNodup_init
   | succ k ih => rw [(hv k).2.1]; exact storeNodup_step mat _ _ _ ih
 
-theorem promise_ids_unique :
-    ∀ n, well_formed_store_promise_ids_unique (tr n).now (tr n).state = true :=
-  fun n => promise_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
-
-theorem task_ids_unique :
-    ∀ n, well_formed_store_task_ids_unique (tr n).now (tr n).state = true :=
-  fun n => task_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
+theorem object_ids_unique :
+    ∀ n, well_formed_store_object_ids_unique (tr n).now (tr n).state = true :=
+  fun n => object_ids_unique_of_nodup _ _ (store_nodup mat tr hv h0 n)
 
 theorem schedule_ids_unique :
     ∀ n, well_formed_store_schedule_ids_unique (tr n).now (tr n).state = true :=
@@ -253,7 +249,7 @@ theorem monotone_task_set_grows :
     ∀ n, Properties.monotone_task_set_grows (tr n).now (tr n).state (tr (n + 1)).state = true := by
   intro n
   rw [(hv n).2.1]
-  exact Frame.monotone_task_set_grows_step mat _ _ _ _
+  exact Frame.monotone_task_set_grows_step mat _ _ _ _ (store_nodup mat tr hv h0 n)
 
 theorem preserved_promise_birth_fields_immutable :
     ∀ n, Properties.preserved_promise_birth_fields_immutable
@@ -352,9 +348,10 @@ section NotInductiveAlone
 open AbstractModel
 
 def sneaky : ServerState :=
-  { promises := [{ id := "p", state := .pending, param := {},
-                   value := { data := some "x", headers := [] },
-                   tags := [], timeoutAt := 10, createdAt := 0 }] }
+  { objects := [{ id := "p",
+                  promise := { state := .pending, param := {},
+                               value := { data := some "x", headers := [] },
+                               tags := [], timeoutAt := 10, createdAt := 0 } }] }
 
 theorem sneaky_satisfies_the_entry :
     Properties.well_formed_promise_deadline_settlement_has_no_value 0 sneaky = true := by
@@ -362,7 +359,7 @@ theorem sneaky_satisfies_the_entry :
 
 theorem one_step_breaks_it :
     Properties.well_formed_promise_deadline_settlement_has_no_value 20
-      (stepOf true (.r1 "p") 20 sneaky).2 = false := by
+      (stepOf true (.promiseTimeout "p") 20 sneaky).2 = false := by
   decide
 
 /-- And the reason `sneaky` never arises: it violates a different

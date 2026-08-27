@@ -68,25 +68,25 @@ func taskFacetOf(t *Task) taskFacet {
 func observableWrites(s *ServerState, fire func(*ServerState)) []string {
 	before := map[string]promiseFacet{}
 	beforeT := map[string]taskFacet{}
-	for _, p := range s.Promises {
-		before[p.ID] = facetOf(p)
-	}
-	for _, t := range s.Tasks {
-		beforeT[t.ID] = taskFacetOf(t)
+	for _, o := range s.Objects {
+		before[o.ID] = facetOf(o.Promise)
+		if o.Task != nil {
+			beforeT[o.ID] = taskFacetOf(o.Task)
+		}
 	}
 
 	u := s.clone()
 	fire(u)
 
 	moved := map[string]bool{}
-	for _, p := range u.Promises {
-		if f, ok := before[p.ID]; !ok || f != facetOf(p) {
-			moved[p.ID] = true
+	for _, o := range u.Objects {
+		if f, ok := before[o.ID]; !ok || f != facetOf(o.Promise) {
+			moved[o.ID] = true
 		}
-	}
-	for _, t := range u.Tasks {
-		if f, ok := beforeT[t.ID]; !ok || f != taskFacetOf(t) {
-			moved[t.ID] = true
+		if o.Task != nil {
+			if f, ok := beforeT[o.ID]; !ok || f != taskFacetOf(o.Task) {
+				moved[o.ID] = true
+			}
 		}
 	}
 	out := make([]string, 0, len(moved))
@@ -154,23 +154,23 @@ func AffectsSound(s *ServerState, now uint64) string {
 func reachableWrites(s *ServerState, now uint64, first func(*ServerState), cap int) (out []string, complete bool) {
 	base := map[string]promiseFacet{}
 	baseT := map[string]taskFacet{}
-	for _, p := range s.Promises {
-		base[p.ID] = facetOf(p)
-	}
-	for _, t := range s.Tasks {
-		baseT[t.ID] = taskFacetOf(t)
+	for _, o := range s.Objects {
+		base[o.ID] = facetOf(o.Promise)
+		if o.Task != nil {
+			baseT[o.ID] = taskFacetOf(o.Task)
+		}
 	}
 
 	moved := map[string]bool{}
 	note := func(u *ServerState) {
-		for _, p := range u.Promises {
-			if f, ok := base[p.ID]; !ok || f != facetOf(p) {
-				moved[p.ID] = true
+		for _, o := range u.Objects {
+			if f, ok := base[o.ID]; !ok || f != facetOf(o.Promise) {
+				moved[o.ID] = true
 			}
-		}
-		for _, t := range u.Tasks {
-			if f, ok := baseT[t.ID]; !ok || f != taskFacetOf(t) {
-				moved[t.ID] = true
+			if o.Task != nil {
+				if f, ok := baseT[o.ID]; !ok || f != taskFacetOf(o.Task) {
+					moved[o.ID] = true
+				}
 			}
 		}
 	}

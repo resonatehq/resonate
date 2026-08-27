@@ -43,7 +43,7 @@ type Gen struct {
 	now    uint64
 	script []step
 	// Jumpy allows large clock jumps. They are what make R1/R5
-	// reachable — but a jump longer than the retry cadence lets a τ arm a
+	// reachable — but a jump longer than the retry cadence lets an internal step arm a
 	// deadline mid-gap, which the Lean checker declines to reason about
 	// (`noNewInGapDeadline`). So jumpy corpora reach more code and compare
 	// less: about 60% of them come back DECLINE, and a decline agrees with
@@ -52,11 +52,11 @@ type Gen struct {
 }
 
 type step struct {
-	op   *Op    // external, or nil for an internal step
+	op       *Op    // external, or nil for an internal step
 	internal string // internal-step name when op == nil
-	arg  string // internal-step target
-	arg2 string // internal step's second parameter (awaiter / listener address)
-	now  uint64
+	arg      string // internal-step target
+	arg2     string // internal step's second parameter (awaiter / listener address)
+	now      uint64
 }
 
 func NewGen(seed int64, origin string) *Gen {
@@ -260,19 +260,19 @@ func (g *Gen) randomInternalStep(ids []string, now uint64) step {
 	other := ids[g.r.Intn(len(ids))]
 	switch g.r.Intn(5) {
 	case 0:
-		return step{internal: "R1", arg: id, now: now}
+		return step{internal: "promiseTimeout", arg: id, now: now}
 	case 1:
-		return step{internal: "R3", arg: id, arg2: "poll://any@w1", now: now}
+		return step{internal: "listener", arg: id, arg2: "poll://any@w1", now: now}
 	case 2:
-		return step{internal: "R4", arg: id, arg2: other, now: now}
+		return step{internal: "callback", arg: id, arg2: other, now: now}
 	case 3:
-		return step{internal: "R5", arg: id, now: now}
+		return step{internal: "taskLeaseTimeout", arg: id, now: now}
 	default:
-		return step{internal: "R6", arg: id, now: now}
+		return step{internal: "taskRetryTimeout", arg: id, now: now}
 	}
 }
 
-// Run executes a script and returns the external events only — the τs are
+// Run executes a script and returns the external events only — the internal steps are
 // discarded, which is the point: the checkers must rediscover a schedule
 // that explains what is left.
 //
@@ -302,15 +302,15 @@ func States(d Discipline, script []step) []Snapshot {
 			continue
 		}
 		switch st.internal {
-		case "R1":
+		case "promiseTimeout":
 			s.ProcessPromiseTimeout(st.arg, st.now)
-		case "R3":
+		case "listener":
 			s.ProcessListener(st.arg, st.arg2, st.now)
-		case "R4":
+		case "callback":
 			s.ProcessCallback(st.arg, st.arg2, st.now)
-		case "R5":
+		case "taskLeaseTimeout":
 			s.ProcessLeaseTimeout(st.arg, st.now)
-		case "R6":
+		case "taskRetryTimeout":
 			s.ProcessRetryTimeout(st.arg, st.now, st.now)
 		}
 	}
@@ -328,15 +328,15 @@ func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[str
 		}
 		before := s.Key()
 		switch st.internal {
-		case "R1":
+		case "promiseTimeout":
 			s.ProcessPromiseTimeout(st.arg, st.now)
-		case "R3":
+		case "listener":
 			s.ProcessListener(st.arg, st.arg2, st.now)
-		case "R4":
+		case "callback":
 			s.ProcessCallback(st.arg, st.arg2, st.now)
-		case "R5":
+		case "taskLeaseTimeout":
 			s.ProcessLeaseTimeout(st.arg, st.now)
-		case "R6":
+		case "taskRetryTimeout":
 			s.ProcessRetryTimeout(st.arg, st.now, st.now)
 		}
 		if s.Key() != before {

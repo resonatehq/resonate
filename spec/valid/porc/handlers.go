@@ -29,24 +29,24 @@ import (
 // could see. Records it is.
 type Response struct {
 	Status  int
-	Promise *Promise
-	Task    *Task
+	Promise *PromiseRecord
+	Task    *TaskRecord
 	// Inner is the nested response a `task.fence` carries. A fence that
 	// succeeds around a create that 404s is 200 outside and 404 inside,
 	// and both are compared.
 	Inner *InnerResponse
 }
 
-func promiseRes(status int, p *Promise) Response { return Response{Status: status, Promise: p} }
+func promiseRes(status int, p *PromiseRecord) Response { return Response{Status: status, Promise: p} }
 
 // ------------------------------------------------------------------ promises
 
 func (s *ServerState) PromiseGet(d Discipline, id string, now uint64) Response {
-	p := s.readPromise(d, id, now)
-	if p == nil {
+	o := s.readObject(d, id, now)
+	if o == nil {
 		return Response{Status: 404}
 	}
-	return Response{Status: 200, Promise: p}
+	return Response{Status: 200, Promise: o.Promise.Record(o.ID)}
 }
 
 type PromiseCreateReq struct {
@@ -60,13 +60,13 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 	if req.Tags.TimerTargeted() {
 		return Response{Status: 400}
 	}
-	if p := s.readPromise(d, req.ID, now); p != nil {
-		return Response{Status: 200, Promise: p}
+	if o := s.readObject(d, req.ID, now); o != nil {
+		return Response{Status: 200, Promise: o.Promise.Record(o.ID)}
 	}
 	if req.TimeoutAt > now {
-		p := &Promise{ID: req.ID, State: Pending, Tags: req.Tags,
+		p := &Promise{State: Pending, Tags: req.Tags,
 			TimeoutAt: req.TimeoutAt, CreatedAt: now, Param: req.Param}
-		s.SetPromise(p)
+		s.SetPromise(req.ID, p)
 		if p.Tags.Has("resonate:target") {
 			// The delay tag seeds `retryAt`: the first dispatch is due at
 			// the delay if it is still ahead, immediately otherwise.
@@ -76,9 +76,9 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 					due = n
 				}
 			}
-			s.SetTask(&Task{ID: p.ID, State: TaskPending, Version: 0, RetryAt: u64p(due)})
+			s.SetTask(req.ID, &Task{State: TaskPending, Version: 0, RetryAt: u64p(due)})
 		}
-		return Response{Status: 200, Promise: p}
+		return Response{Status: 200, Promise: p.Record(req.ID)}
 	}
 	// Born past its deadline: fact P holds at birth, so the promise is
 	// written settled and its task (if targeted) fulfilled.
@@ -86,80 +86,79 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 	if req.Tags.IsTimer() {
 		st = Resolved
 	}
-	p := &Promise{ID: req.ID, State: st, Tags: req.Tags, TimeoutAt: req.TimeoutAt,
+	p := &Promise{State: st, Tags: req.Tags, TimeoutAt: req.TimeoutAt,
 		CreatedAt: req.TimeoutAt, SettledAt: u64p(req.TimeoutAt), Param: req.Param}
-	s.SetPromise(p)
+	s.SetPromise(req.ID, p)
 	if p.Tags.Has("resonate:target") {
-		s.SetTask(&Task{ID: p.ID, State: TaskFulfilled, Version: 0})
+		s.SetTask(req.ID, &Task{State: TaskFulfilled, Version: 0})
 	}
-	return Response{Status: 200, Promise: p}
+	return Response{Status: 200, Promise: p.Record(req.ID)}
 }
 
 func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, val json.RawMessage, now uint64) Response {
 	if !st.Settable() {
 		return Response{Status: 400}
 	}
-	p := s.readPromise(d, id, now)
-	if p == nil {
+	o := s.readObject(d, id, now)
+	if o == nil {
 		return Response{Status: 404}
 	}
-	if p.State == Pending {
-		q := p.clone()
+	if o.Promise.State == Pending {
+		q := o.Promise.clone()
 		q.State = st
 		q.SettledAt = u64p(now)
 		q.Value = val
-		// The promise and its task pair, coupled. The awaiters and
-		// listeners stay on the promise for the batch internal steps — that is
-		// what makes the model nondeterministic.
-		s.SetSettled(q)
-		return Response{Status: 200, Promise: q}
+		// The promise and its task pair, coupled — and the task is the one
+		// in the row we already read, not one looked up again. The awaiters
+		// and listeners stay on the promise for the batch internal steps —
+		// that is what makes the model nondeterministic.
+		s.SetSettled(o, q)
+		return Response{Status: 200, Promise: q.Record(o.ID)}
 	}
-	return Response{Status: 200, Promise: p}
+	return Response{Status: 200, Promise: o.Promise.Record(o.ID)}
 }
 
 func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter string, now uint64) Response {
 	if awaited == awaiter {
 		return Response{Status: 400}
 	}
-	pa := s.readPromise(d, awaited, now)
-	if pa == nil {
+	oa := s.readObject(d, awaited, now)
+	if oa == nil {
 		return Response{Status: 404}
 	}
-	pw := s.readPromise(d, awaiter, now)
-	if pw == nil {
+	ow := s.readObject(d, awaiter, now)
+	if ow == nil {
 		return Response{Status: 422}
 	}
-	if !pw.Tags.Has("resonate:target") {
+	if !ow.Promise.Tags.Has("resonate:target") {
 		return Response{Status: 422}
 	}
-	if !pa.External() {
+	if !oa.Promise.External() {
 		return Response{Status: 422}
 	}
-	if pa.State == Pending && pw.State == Pending {
-		s.SetPromise(pa.AddCallback(awaiter))
+	if oa.Promise.State == Pending && ow.Promise.State == Pending {
+		s.SetPromise(oa.ID, oa.Promise.AddCallback(awaiter))
 	}
-	return Response{Status: 200, Promise: pa}
+	return Response{Status: 200, Promise: oa.Promise.Record(oa.ID)}
 }
 
 // ---------------------------------------------------------------------- tasks
 
 func (s *ServerState) TaskGet(d Discipline, id string, now uint64) Response {
-	t, p := s.readTask(d, id, now)
-	if t == nil || p == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
-	return Response{Status: 200, Task: t}
+	return Response{Status: 200, Task: o.Task.Record(o.ID)}
 }
 
 func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid string, ttl uint64, now uint64) Response {
-	t, p := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
-	if p == nil {
-		return Response{Status: 409}
-	}
-	if t.State != TaskPending || p.State != Pending || t.Version != version {
+	t := o.Task
+	if t.State != TaskPending || o.Promise.State != Pending || t.Version != version {
 		return Response{Status: 409}
 	}
 	u := t.clone()
@@ -168,11 +167,11 @@ func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid s
 	u.TTL, u.PID = u64p(ttl), strp(pid)
 	u.ExpiresAt = u64p(now + ttl)
 	u.RetryAt, u.Resumes = nil, nil
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 	// `taskAcquire` returns BOTH records in the Lean —
-	// `{ status, task := some t.toRecord, promise := some p.toRecord }` —
+	// `{ status, task := some (t.toRecord o.id), promise := some (p.toRecord o.id) }` —
 	// and the capture carries both, so both are compared.
-	return Response{Status: 200, Task: u, Promise: p}
+	return Response{Status: 200, Task: u.Record(o.ID), Promise: o.Promise.Record(o.ID)}
 }
 
 // TaskSuspend parks an acquired task on awaited promises. `300` if any
@@ -189,44 +188,42 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 		}
 		seen[a] = true
 	}
-	t, tp := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
-	if tp == nil {
-		return Response{Status: 409}
-	}
-	if t.State != TaskAcquired || tp.State != Pending || t.Version != version {
+	t := o.Task
+	if t.State != TaskAcquired || o.Promise.State != Pending || t.Version != version {
 		return Response{Status: 409}
 	}
 	// Pass 1: stop at the first undischargeable waiter.
 	anySettled := false
 	for _, a := range awaited {
-		pa := s.readPromise(d, a, now)
-		if pa == nil || !pa.External() {
+		oa := s.readObject(d, a, now)
+		if oa == nil || !oa.Promise.External() {
 			return Response{Status: 422}
 		}
-		if pa.State != Pending {
+		if oa.Promise.State != Pending {
 			anySettled = true
 		}
 	}
 	if anySettled {
 		u := t.clone()
 		u.Resumes = nil
-		s.SetTask(u)
+		s.SetTask(o.ID, u)
 		return Response{Status: 300}
 	}
 	// Pass 2: park the awaiter on every awaited promise.
 	for _, a := range awaited {
-		if pa := s.readPromise(d, a, now); pa != nil {
-			s.SetPromise(pa.AddCallback(id))
+		if oa := s.readObject(d, a, now); oa != nil {
+			s.SetPromise(oa.ID, oa.Promise.AddCallback(id))
 		}
 	}
 	u := t.clone()
 	u.State = TaskSuspended
 	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
 	u.Resumes = nil
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
 
@@ -234,42 +231,38 @@ func (s *ServerState) TaskFulfill(d Discipline, id string, version uint64, st Pr
 	if !st.Settable() {
 		return Response{Status: 400}
 	}
-	t, p := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
-	if p == nil {
+	if o.Task.State != TaskAcquired || o.Promise.State != Pending ||
+		o.Task.Version != version {
 		return Response{Status: 409}
 	}
-	if t.State != TaskAcquired || p.State != Pending || t.Version != version {
-		return Response{Status: 409}
-	}
-	q := p.clone()
+	q := o.Promise.clone()
 	q.State = st
 	q.SettledAt = u64p(now)
 	q.Value = val
 	// The promise and its own task, coupled: this settle fulfils the task
-	// it was issued against, in the same step.
-	s.SetSettled(q)
-	return Response{Status: 200, Promise: q}
+	// it was issued against, in the same step — and they are one row.
+	s.SetSettled(o, q)
+	return Response{Status: 200, Promise: q.Record(o.ID)}
 }
 
 func (s *ServerState) TaskRelease(d Discipline, id string, version uint64, now uint64) Response {
-	t, p := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
-	if p == nil {
-		return Response{Status: 409}
-	}
-	if t.State != TaskAcquired || p.State != Pending || t.Version != version {
+	t := o.Task
+	if t.State != TaskAcquired || o.Promise.State != Pending || t.Version != version {
 		return Response{Status: 409}
 	}
 	u := t.clone()
 	u.State = TaskPending
 	u.PID, u.TTL, u.ExpiresAt = nil, nil, nil
 	u.RetryAt = u64p(now)
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
 
@@ -294,19 +287,20 @@ type TaskRef struct {
 // runs the specification forbids.
 func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
 	for _, ref := range refs {
-		t, p := s.readTask(d, ref.ID, now)
-		if t == nil || p == nil {
+		o := s.readTaskObject(d, ref.ID, now)
+		if o == nil || o.Task == nil {
 			continue
 		}
+		t := o.Task
 		if t.State == TaskAcquired && t.Version == ref.Version &&
-			t.PID != nil && *t.PID == pid && p.State == Pending {
+			t.PID != nil && *t.PID == pid && o.Promise.State == Pending {
 			u := t.clone()
 			ttl := uint64(0)
 			if t.TTL != nil {
 				ttl = *t.TTL
 			}
 			u.ExpiresAt = u64p(now + ttl)
-			s.SetTask(u)
+			s.SetTask(o.ID, u)
 		}
 	}
 	return Response{Status: 200}
@@ -337,17 +331,17 @@ func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address str
 	if !addressValid(address) {
 		return Response{Status: 400}
 	}
-	pa := s.readPromise(d, awaited, now)
-	if pa == nil {
+	oa := s.readObject(d, awaited, now)
+	if oa == nil {
 		return Response{Status: 404}
 	}
-	if !pa.External() {
+	if !oa.Promise.External() {
 		return Response{Status: 422}
 	}
-	if pa.State == Pending {
-		s.SetPromise(pa.AddListener(address))
+	if oa.Promise.State == Pending {
+		s.SetPromise(oa.ID, oa.Promise.AddListener(address))
 	}
-	return Response{Status: 200, Promise: pa}
+	return Response{Status: 200, Promise: oa.Promise.Record(oa.ID)}
 }
 
 // addressValid is `ServerModel.addressValid`.
@@ -357,10 +351,11 @@ func addressValid(a string) bool {
 }
 
 func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
-	t, p := s.readTask(d, id, now)
-	if t == nil || p == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
+	t := o.Task
 	if t.State == TaskFulfilled {
 		return Response{Status: 409}
 	}
@@ -370,28 +365,26 @@ func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
 	u := t.clone()
 	u.State = TaskHalted
 	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
 
 func (s *ServerState) TaskContinue(d Discipline, id string, now uint64) Response {
-	t, p := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}
 	}
+	t := o.Task
 	if t.State != TaskHalted {
 		return Response{Status: 409}
 	}
-	if p == nil {
-		return Response{Status: 404}
-	}
-	if p.State != Pending {
+	if o.Promise.State != Pending {
 		return Response{Status: 409}
 	}
 	u := t.clone()
 	u.State = TaskPending
 	u.RetryAt = u64p(now)
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
 
@@ -414,7 +407,7 @@ func (a FenceAction) TargetID() string { return a.ID }
 type InnerResponse struct {
 	Kind    string
 	Status  int
-	Promise *Promise
+	Promise *PromiseRecord
 }
 
 // TaskFence is T-04, transcribed from `taskFence` in
@@ -434,14 +427,12 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 	if act.TargetID() == id {
 		return Response{Status: 400}, nil
 	}
-	t, p := s.readTask(d, id, now)
-	if t == nil {
+	o := s.readTaskObject(d, id, now)
+	if o == nil || o.Task == nil {
 		return Response{Status: 404}, nil
 	}
-	if p == nil {
-		return Response{Status: 409}, nil
-	}
-	if t.State != TaskAcquired || p.State != Pending || t.Version != version {
+	if o.Task.State != TaskAcquired || o.Promise.State != Pending ||
+		o.Task.Version != version {
 		return Response{Status: 409}, nil
 	}
 	switch act.Kind {
@@ -470,36 +461,36 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 	if !act.Tags.Has("resonate:target") || act.Tags.TimerTargeted() {
 		return Response{Status: 400}
 	}
-	p := s.readPromise(d, act.ID, now)
-	if p == nil {
+	o := s.readObject(d, act.ID, now)
+	if o == nil {
 		if act.TimeoutAt > now {
-			np := &Promise{ID: act.ID, State: Pending, Tags: act.Tags,
+			np := &Promise{State: Pending, Tags: act.Tags,
 				TimeoutAt: act.TimeoutAt, CreatedAt: now, Param: act.Param}
-			s.SetPromise(np)
-			nt := &Task{ID: np.ID, State: TaskAcquired, Version: 1,
+			s.SetPromise(act.ID, np)
+			nt := &Task{State: TaskAcquired, Version: 1,
 				TTL: u64p(ttl), PID: strp(pid), ExpiresAt: u64p(now + ttl)}
-			s.SetTask(nt)
-			return Response{Status: 200, Task: nt, Promise: np}
+			s.SetTask(act.ID, nt)
+			return Response{Status: 200, Task: nt.Record(act.ID), Promise: np.Record(act.ID)}
 		}
 		// Born past its deadline: fact P holds at birth. Targeted,
 		// therefore not a timer, so this is the only verdict here.
-		np := &Promise{ID: act.ID, State: RejectedTimedout, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
+		np := &Promise{State: RejectedTimedout, Tags: act.Tags, TimeoutAt: act.TimeoutAt,
 			CreatedAt: act.TimeoutAt, SettledAt: u64p(act.TimeoutAt), Param: act.Param}
-		s.SetPromise(np)
-		nt := &Task{ID: np.ID, State: TaskFulfilled, Version: 0}
-		s.SetTask(nt)
-		return Response{Status: 200, Task: nt, Promise: np}
+		s.SetPromise(act.ID, np)
+		nt := &Task{State: TaskFulfilled, Version: 0}
+		s.SetTask(act.ID, nt)
+		return Response{Status: 200, Task: nt.Record(act.ID), Promise: np.Record(act.ID)}
 	}
-	if !p.Tags.Has("resonate:target") {
+	if !o.Promise.Tags.Has("resonate:target") {
 		return Response{Status: 422}
 	}
-	t, tp := s.readTask(d, p.ID, now)
-	if t == nil || tp == nil {
+	t := o.Task
+	if t == nil {
 		return Response{Status: 409}
 	}
 	switch t.State {
 	case TaskFulfilled:
-		return Response{Status: 200, Task: t, Promise: tp}
+		return Response{Status: 200, Task: t.Record(o.ID), Promise: o.Promise.Record(o.ID)}
 	case TaskPending:
 		u := t.clone()
 		u.State = TaskAcquired
@@ -507,8 +498,8 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 		u.TTL, u.PID = u64p(ttl), strp(pid)
 		u.ExpiresAt = u64p(now + ttl)
 		u.RetryAt, u.Resumes = nil, nil
-		s.SetTask(u)
-		return Response{Status: 200, Task: u, Promise: tp}
+		s.SetTask(o.ID, u)
+		return Response{Status: 200, Task: u.Record(o.ID), Promise: o.Promise.Record(o.ID)}
 	default:
 		return Response{Status: 409}
 	}

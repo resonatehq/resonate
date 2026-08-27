@@ -11,7 +11,7 @@ and wraps it.
 An implementation is observed. You see its EXTERNAL events — a request,
 the response it gave, and when. You do NOT see its internal steps:
 when a timeout fired, when a resume drained. The specification does not
-fix those either; the τ schedule is deliberately unspecified, which is
+fix those either; the internal step schedule is deliberately unspecified, which is
 exactly what `Env.mat` is: the read discipline as a parameter.
 
 So "does the specification reproduce this trace" is the wrong question —
@@ -29,23 +29,23 @@ select the witness.
 
 Carry a SET of candidate states rather than one — subset construction,
 the standard way to run a nondeterministic machine against a word. At
-each observed event: close each candidate under enabled τs, apply the
+each observed event: close each candidate under enabled internal steps, apply the
 observed request, and keep only those whose response matches what was
 observed. Empty set means no schedule explains the trace.
 
 Three things make this tractable here, and none is an accident:
 
 * handlers are total deterministic functions of `(req, now, state)`, so
-  the τ schedule is the ONLY nondeterminism;
-* τ enabledness is explicit in the state — the obligation records ARE
+  the internal step schedule is the ONLY nondeterminism;
+* internal step enabledness is explicit in the state — the obligation records ARE
   the enabledness, which the trace framework calls being
   "OBLIGATION-GUARDED";
-* every τ discharges its obligation or is a silent no-op, so closures
+* every internal step discharges its obligation or is a silent no-op, so closures
   terminate rather than cycling.
 
 ## Canonical form
 
-Without it this does not work at all. Two τs on disjoint objects commute
+Without it this does not work at all. Two internal steps on disjoint objects commute
 but leave the component lists in different orders, and `BEq ServerState`
 is list equality — so the candidate set would double on every pair of
 independent obligations instead of collapsing. `canon` sorts every
@@ -73,11 +73,13 @@ private def pad (n : Nat) : String :=
 
 def canon (s : ServerState) : ServerState :=
   { s with
-      promises         := sortBy (·.id) s.promises |>.map fun p =>
-                            { p with callbacks := sortBy id p.callbacks
-                                     listeners := sortBy id p.listeners }
-      tasks            := sortBy (·.id) s.tasks |>.map fun t =>
-                            { t with resumes := sortBy id t.resumes }
+      objects          := sortBy (·.id) s.objects |>.map fun o =>
+                            { o with
+                                promise := { o.promise with
+                                             callbacks := sortBy id o.promise.callbacks
+                                             listeners := sortBy id o.promise.listeners }
+                                task := o.task.map fun t =>
+                                          { t with resumes := sortBy id t.resumes } }
       schedules        := sortBy (·.id) s.schedules
       outbox           := sortBy (·.key) s.outbox }
 
@@ -87,14 +89,14 @@ def canon (s : ServerState) : ServerState :=
 schedule may only contain the latter, and saying so with a side-condition
 (`∀ t ∈ σ, t.isExternal = false`) leaves the invariant to be re-checked
 everywhere it matters — and leaves `affects` with a catch-all case that a
-new τ would fall into silently. That catch-all is how the cone went
+new internal step would fall into silently. That catch-all is how the cone went
 unsound.
 
-`Tau` makes it structural: a schedule is a `List Tau`, the side-condition
-disappears, and every function over τs is an exhaustive match. Adding a
+`InternalStep` makes it structural: a schedule is a `List InternalStep`, the side-condition
+disappears, and every function over internal steps is an exhaustive match. Adding a
 constructor here breaks `affects` until someone says what it reaches. -/
 
-inductive Tau
+inductive InternalStep
   | promiseTimeout   (id : String)
   | listener         (id address : String)
   | callback         (id awaiter : String)
@@ -109,31 +111,42 @@ inductive Tau
     a listener at all. The abstract machine drains both explicitly, one
     obligation at a time, so both are steps an observer's explanation
     may have to include — and each names the obligation it discharges
-    rather than a queue entry. -/
-def Tau.toStep : Tau → Step
-  | .promiseTimeout id   => .r1 id
-  | .listener id addr    => .r3 id addr
-  | .callback id awaiter => .r4 id awaiter
-  | .taskLeaseTimeout id => .r5 id
-  | .taskRetryTimeout id => .r6 id
-  | .scheduleTimeout id  => .r7 id
+    rather than a queue entry.
 
-/-- A witness is meant to be read, so it prints as the step rather than
-    as its constructor. -/
-def Tau.pretty : Tau → String
-  | .promiseTimeout id   => s!"τ promise.timeout {id}"
-  | .listener id addr    => s!"τ listener {id} → {addr}"
-  | .callback id awaiter => s!"τ callback {id} → {awaiter}"
-  | .taskLeaseTimeout id => s!"τ task.lease {id}"
-  | .taskRetryTimeout id => s!"τ task.retry {id}"
-  | .scheduleTimeout id  => s!"τ schedule.timeout {id}"
+    This is a coercion now, not a translation. `Step` used to call these
+    `r1`–`r7` and this function existed to bridge the two vocabularies;
+    `Step` took these names, so what is left is the injection of the
+    internal steps into all of them. `InternalStep` still earns its place by
+    being exactly the internal half — a schedule may contain nothing
+    else, and `DecidableEq` on it is what the cone's dedup needs. -/
+def InternalStep.toStep : InternalStep → Step
+  | .promiseTimeout id   => .promiseTimeout id
+  | .listener id addr    => .listener id addr
+  | .callback id awaiter => .callback id awaiter
+  | .taskLeaseTimeout id => .taskLeaseTimeout id
+  | .taskRetryTimeout id => .taskRetryTimeout id
+  | .scheduleTimeout id  => .scheduleTimeout id
 
-instance : ToString Tau := ⟨Tau.pretty⟩
+/-- A witness is meant to be read, so it names its CONSTRUCTOR: what a
+    refutation prints can be grepped straight back to the step that
+    produced it. The marker these lines used to carry went with the rest
+    of the vocabulary, and it was redundant anyway — the only place they
+    are printed is under a heading that already says these are the
+    internal steps. The Go checker prints the same six strings. -/
+def InternalStep.pretty : InternalStep → String
+  | .promiseTimeout id   => s!"promiseTimeout {id}"
+  | .listener id addr    => s!"listener {id} → {addr}"
+  | .callback id awaiter => s!"callback {id} → {awaiter}"
+  | .taskLeaseTimeout id => s!"taskLeaseTimeout {id}"
+  | .taskRetryTimeout id => s!"taskRetryTimeout {id}"
+  | .scheduleTimeout id  => s!"scheduleTimeout {id}"
 
-/-- Firing a τ is firing its step. Materialised (`mat := true`); the
+instance : ToString InternalStep := ⟨InternalStep.pretty⟩
+
+/-- Firing an internal step is firing its step. Materialised (`mat := true`); the
     abstract twins agree on responses, so the discipline is not
     observable through the channel this checker compares. -/
-def Tau.step (t : Tau) (now : Nat) (s : ServerState) : ServerState :=
+def InternalStep.step (t : InternalStep) (now : Nat) (s : ServerState) : ServerState :=
   (Abstraction.stepOf true t.toStep now s).2
 
 /-! ## Enabled internal steps
@@ -143,40 +156,44 @@ so this was a filter over four indexes; the abstract machine carries the
 deadline on the object it belongs to, so the same question is asked of
 the promise and task lists directly.
 
-This must be an over-approximation, never an under-one. A τ the machine
-would refuse costs a candidate that dies at its own guard; a τ omitted
+This must be an over-approximation, never an under-one. A internal step the machine
+would refuse costs a candidate that dies at its own guard; an internal step omitted
 here costs a WITNESS, and the checker reports REFUTED for a trace that
 conforms. Where the machine's guard is subtler than the shape — the
 lease timeout also requires the promise to be live — the extra
 conjunct is left out on purpose. -/
 
-def enabledTaus (s : ServerState) (now : Nat) : List Tau :=
+def enabledInternalSteps (s : ServerState) (now : Nat) : List InternalStep :=
   -- r1: a pending promise whose deadline has passed
-  (s.promises.filter (fun p => p.state == .pending && p.timeoutAt ≤ now)).map
-      (fun p => .promiseTimeout p.id)
+  (s.objects.filter (fun o => o.promise.state == .pending && o.promise.timeoutAt ≤ now)).map
+      (fun o => .promiseTimeout o.id)
   -- r3/r4: obligations on a promise that READS settled, which is Fact P
   -- and why this consults `project` rather than the stored state
-  ++ s.promises.flatMap (fun p =>
-       if (p.project now).state != .pending then p.listeners.map (Tau.listener p.id) else [])
-  ++ s.promises.flatMap (fun p =>
-       if (p.project now).state != .pending then p.callbacks.map (Tau.callback p.id) else [])
+  ++ s.objects.flatMap (fun o =>
+       if (o.promise.project now).state != .pending then
+         o.promise.listeners.map (InternalStep.listener o.id) else [])
+  ++ s.objects.flatMap (fun o =>
+       if (o.promise.project now).state != .pending then
+         o.promise.callbacks.map (InternalStep.callback o.id) else [])
   -- r5: an acquired task whose lease has lapsed
-  ++ (s.tasks.filter (fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
-       (fun t => .taskLeaseTimeout t.id)
+  ++ (s.objects.filter (fun o =>
+        o.task.any fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
+       (fun o => .taskLeaseTimeout o.id)
   -- r6: a pending task whose dispatch clock is due
-  ++ (s.tasks.filter (fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
-       (fun t => .taskRetryTimeout t.id)
+  ++ (s.objects.filter (fun o =>
+        o.task.any fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
+       (fun o => .taskRetryTimeout o.id)
   -- r7: a schedule due to fire
   ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout c.id)
 
 /-! ## Cone of influence
 
-The closure above explores every subset of the enabled τs, which is
+The closure above explores every subset of the enabled internal steps, which is
 `2^n` and is the only thing that actually limits this checker. Most of
 those subsets are irrelevant: a timeout on promise `a5` cannot change
 the response to `promiseGet a0`.
 
-So: at each observed event, fire only the τs whose objects the event's
+So: at each observed event, fire only the internal steps whose objects the event's
 request also touches. The rest are not discarded — they stay armed in
 the state, because ENABLEDNESS LIVES IN THE STATE, not in the closure.
 They will be explored at the first later event that names them. That is
@@ -184,7 +201,7 @@ partial-order reduction: independent steps commute, so firing them later
 is a canonical choice rather than a lost one.
 
 **Soundness, precisely.** This is sound for the RESPONSE channel, which
-is what `validate` compares. Deferring a τ can change components no
+is what `validate` compares. Deferring an internal step can change components no
 response projects — `taskTimeouts` instants, `outbox` contents — because
 a deferred retry may later find its promise settled and become a no-op
 where firing it earlier would have emitted an execute. If a snapshot
@@ -214,9 +231,9 @@ def touches : Request → List String
   | .taskContinue r            => [r.id]
   | .taskSearch _              => []
 
-/-- What firing this τ can AFFECT, which is not the same as the object it
+/-- What firing this internal step can AFFECT, which is not the same as the object it
     names — and getting that wrong is how the reduction went unsound the
-    first time. `τPromiseTimeout a` names `a`, but settling `a` defers a
+    first time. `promiseTimeout a` names `a`, but settling `a` defers a
     resume for every awaiter registered on it, and those are different
     ids; a cone keyed on the name alone refuses to fire it when the
     observed request reads the awaiter, and then reports a conforming
@@ -226,23 +243,23 @@ def touches : Request → List String
     there is no cheap bound on what they reach: they are marked `"*"` and
     treated as always relevant. Conservative, and schedules are rare in a
     trace. -/
-def affects (s : ServerState) : Tau → List String
+def affects (s : ServerState) : InternalStep → List String
   | .promiseTimeout id =>
-      id :: ((s.promises.filter (·.id == id)).flatMap (·.callbacks))
+      id :: ((s.objects.filter (·.id == id)).flatMap (·.promise.callbacks))
   | .listener id _         => [id]
   | .callback id awaiter   => [id, awaiter]
   | .taskLeaseTimeout id   => [id]
   | .taskRetryTimeout id   => [id]
   | .scheduleTimeout _     => ["*"]
 
-/-- The τs that could bear on this request — the CONE, closed
+/-- The internal steps that could bear on this request — the CONE, closed
     transitively. Start from what the request reads; repeatedly pull in
-    any enabled τ whose affected set meets it, and grow the set by what
-    that τ affects. A chain like `τPromiseTimeout a` → defers `(a,x)` →
-    `τResume` wakes `x` is only caught because the first step's affected
+    any enabled internal step whose affected set meets it, and grow the set by what
+    that internal step affects. A chain like `promiseTimeout a` → defers `(a,x)` →
+    `callback` wakes `x` is only caught because the first step's affected
     set already mentions `x`. -/
-partial def relevantTaus (req : Request) (s : ServerState) (now : Nat) : List Tau :=
-  let enabled := enabledTaus s now
+partial def relevantInternalSteps (req : Request) (s : ServerState) (now : Nat) : List InternalStep :=
+  let enabled := enabledInternalSteps s now
   let rec grow (fuel : Nat) (want : List String) : List String :=
     match fuel with
     | 0 => want
@@ -266,22 +283,22 @@ partial def relevantTaus (req : Request) (s : ServerState) (now : Nat) : List Ta
     quadratic in objects. -/
 structure Cand where
   state    : ServerState
-  schedule : List (Tau × Nat)
+  schedule : List (InternalStep × Nat)
   key      : ServerState
 
-def mkCand (state : ServerState) (schedule : List (Tau × Nat)) : Cand :=
+def mkCand (state : ServerState) (schedule : List (InternalStep × Nat)) : Cand :=
   { state, schedule, key := canon state }
 
 def dedup (cs : List Cand) : List Cand :=
   cs.foldl (init := []) fun acc c =>
     if acc.any (fun d => d.key == c.key) then acc else acc ++ [c]
 
-/-- Every state reachable from `cs` by firing zero or more enabled τs at
-    `now`. Fuelled: the closure does terminate — each τ discharges its
+/-- Every state reachable from `cs` by firing zero or more enabled internal steps at
+    `now`. Fuelled: the closure does terminate — each internal step discharges its
     own obligation, and a re-armed retry lands strictly in the future —
     but the bound turns a surprise into an INCONCLUSIVE verdict instead
     of a hang. -/
-partial def tauClosureBy (pick : ServerState → List Tau)
+partial def internalClosureBy (pick : ServerState → List InternalStep)
     (now : Nat) (fuel : Nat) (cs : List Cand) : List Cand × Bool :=
   let rec go (fuel : Nat) (seen : List Cand) (frontier : List Cand) : List Cand × Bool :=
     match fuel with
@@ -314,7 +331,7 @@ stopped early" as an answer distinct from "I found nothing", or a
 refutation could rest on a closure that was merely cut short. -/
 
 inductive Verdict
-  | admissible   (witness : List (Tau × Nat)) (maxFanout : Nat) (steps : Nat)
+  | admissible   (witness : List (InternalStep × Nat)) (maxFanout : Nat) (steps : Nat)
   | refuted      (atEvent : Nat) (survivorsBefore : Nat)
   | inconclusive (atEvent : Nat) (reason : String)
   deriving Repr
@@ -322,7 +339,7 @@ inductive Verdict
 /-! ## Producing traces
 
 Run a script — internal steps included — through the specification and
-keep only what an observer outside the server could have seen. The τs
+keep only what an observer outside the server could have seen. The internal steps
 are DISCARDED, which is the point: the validator has to rediscover a
 schedule that explains the external events. -/
 
@@ -348,7 +365,7 @@ def verdictKind : Verdict → String
   | .inconclusive i _  => s!"INCONCLUSIVE/{i}"
 
 def verdictLine : Verdict → String
-  | .admissible w f n   => s!"ADMISSIBLE   events={n} maxFanout={f} witnessTaus={w.length}"
+  | .admissible w f n   => s!"ADMISSIBLE   events={n} maxFanout={f} internalSteps={w.length}"
   | .refuted i n        => s!"REFUTED      at event {i} (survivors before: {n})"
   | .inconclusive i r   => s!"INCONCLUSIVE at event {i}: {r}"
 

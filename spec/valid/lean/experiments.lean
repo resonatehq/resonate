@@ -3,7 +3,7 @@ import «valid».«lean».intervals
 /-!  # How far does it go?
 
 Traces are built by running a script — internal steps included — through
-the specification and keeping only what an outside observer sees. The τs
+the specification and keeping only what an outside observer sees. The internal steps
 are thrown away. The validator has to rediscover a schedule that explains
 the external events, which is exactly the job it would have against a
 real implementation.
@@ -14,11 +14,11 @@ Two axes, because they behave completely differently:
 * **fanout** — more obligations armed AT ONCE.
 
 The second is the one that bites, and the reason is structural.
-Canonicalisation collapses ORDERINGS: firing two independent τs in
+Canonicalisation collapses ORDERINGS: firing two independent internal steps in
 either order lands in the same state, so `n!` becomes 1. It does not
 collapse SUBSETS: with `n` independent obligations due, "fired none",
 "fired a", "fired b", "fired both" are four genuinely different states.
-So the closure is `2^n` in the number of SIMULTANEOUSLY ENABLED τs,
+So the closure is `2^n` in the number of SIMULTANEOUSLY ENABLED internal steps,
 regardless of how long the trace is. -/
 
 namespace TraceCheck.Experiments
@@ -30,7 +30,7 @@ def tgt : Tags := [("resonate:target", "w1")]
 
 /-- One full workflow on a fresh object pair: create the awaited and the
     targeted promise, acquire, suspend, settle, resume, re-acquire,
-    fulfil. The `τResume` is the hidden step the validator must recover. -/
+    fulfil. The `callback` is the hidden step the validator must recover. -/
 def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   let a := s!"a{i}"
   let x := s!"x{i}"
@@ -39,7 +39,7 @@ def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   , (.api (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
   , (.api (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
   , (.api (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
-  , (.r4 a x, t1)          -- hidden
+  , (.callback a x, t1)          -- hidden
   , (.api (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
   , (.api (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
 
@@ -61,23 +61,23 @@ def fanoutScript (n : Nat) : List (Step × Nat) :=
 def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
       (.api (.promiseCreate { id := s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
-  ++ (List.range n).map (fun i => (.r1 s!"a{i}", 500))
+  ++ (List.range n).map (fun i => (.promiseTimeout s!"a{i}", 500))
   ++ [ (.api (.promiseGet { id := "a0" }), 500) ]
 
 /-- **Regression.** `a` expires on its own; that expiry defers a resume
     for `x`, which wakes it. The first cone keyed relevance on the object
-    a τ NAMES — `touches (τPromiseTimeout "a") = ["a"]` — so it refused to
+    an internal step NAMES — `touches (promiseTimeout "a") = ["a"]` — so it refused to
     fire the timeout when the observed request read `x`, and reported this
     conforming trace REFUTED. `affects` plus a transitive closure fixed
-    it. Kept because nothing else in the suite has a τ whose consequences
+    it. Kept because nothing else in the suite has an internal step whose consequences
     land on a different object. -/
 def crossObjectScript : List (Step × Nat) :=
   [ (.api (.promiseCreate { id := "a", timeoutAt := 30, param := {}, tags := ext }), 10)
   , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
   , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 50 }), 10)
   , (.api (.taskSuspend   { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 12)
-  , (.r1 "a", 40)                            -- hidden
-  , (.r4 "a" "x", 40)      -- hidden
+  , (.promiseTimeout "a", 40)                            -- hidden
+  , (.callback "a" "x", 40)      -- hidden
   , (.api (.taskGet { id := "x" }), 50) ]
 
 /-! ## Running -/

@@ -15,7 +15,7 @@ already stored in the state, and every write it performs is stamped with
 a stored number rather than with `now`. `touchPromise` is the clearest
 case: a promise past its deadline is settled `at p.timeoutAt`, not at
 `now` — "born settled, exactly as if it had been created on time". So the
-instant at which the τ fired leaves no trace in the state.
+instant at which the internal step fired leaves no trace in the state.
 
 `processSchedule` breaks that discipline, in one line:
 
@@ -101,7 +101,7 @@ that the calendar can tell two instants apart. -/
 
 structure CronDiscriminates where
   cron : String
-  /-- when the schedule is created, when the τ really fires, and when the
+  /-- when the schedule is created, when the internal step really fires, and when the
       client next looks. -/
   t0 : Nat
   tg : Nat
@@ -122,7 +122,7 @@ structure CronDiscriminates where
 /-! ## The counterexample
 
 Three steps: create the schedule, let its timeout fire IN THE GAP, then
-read the schedule back. Recording it keeps the two external events; the τ
+read the schedule back. Recording it keeps the two external events; the internal step
 is thrown away, and the checker has to put it back. It cannot put it back
 at `g`, because `Explains` fires everything at the observation's own
 instant, and at `t1` the calendar has moved on. -/
@@ -132,7 +132,7 @@ def sid : String := "s"
 def script (H : CronDiscriminates) : List (Step × Nat) :=
   [ (.api (.scheduleCreate { id := sid, cron := H.cron, promiseId := "p",
                              promiseTimeout := 1000, promiseParam := {}, promiseTags := [] }), H.t0)
-  , (.r7 sid, H.tg)
+  , (.scheduleTimeout sid, H.tg)
   , (.api (.scheduleGet { id := sid }), H.t1) ]
 
 def obs (H : CronDiscriminates) : List Observation := recordFrom (script H)
@@ -140,24 +140,24 @@ def obs (H : CronDiscriminates) : List Observation := recordFrom (script H)
 /-! ## Firing anything at `init` is a no-op
 
 Needed to rule out the checker doing something clever before the first
-observation, and true for a structural reason: every τ is
+observation, and true for a structural reason: every internal step is
 OBLIGATION-GUARDED, and `init` carries no obligations. -/
 
-theorem tau_step_init (t : Tau) (n : Nat) :
+theorem internal_step_init (t : InternalStep) (n : Nat) :
     t.step n ServerState.init = ServerState.init := by
   cases t <;> rfl
 
-theorem fireAll_init (σ : List Tau) (n : Nat) :
+theorem fireAll_init (σ : List InternalStep) (n : Nat) :
     fireAll σ n ServerState.init = ServerState.init := by
   induction σ with
   | nil => rfl
-  | cons hd tl ih => simpa [fireAll, tau_step_init hd n] using ih
+  | cons hd tl ih => simpa [fireAll, internal_step_init hd n] using ih
 
-theorem fireAllAt_init (σ : List (Tau × Nat)) :
+theorem fireAllAt_init (σ : List (InternalStep × Nat)) :
     fireAllAt σ ServerState.init = ServerState.init := by
   induction σ with
   | nil => rfl
-  | cons hd tl ih => simpa [fireAllAt, tau_step_init hd.1 hd.2] using ih
+  | cons hd tl ih => simpa [fireAllAt, internal_step_init hd.1 hd.2] using ih
 
 /-! ## The two halves -/
 
@@ -175,8 +175,8 @@ theorem obs_valid (H : CronDiscriminates) : Valid (obs H) := by
     that firing AT `t1` produces; `hdiff` says the recorded `lastRunAt` is
     neither.
 
-    The remaining work is an invariant over an arbitrary `σ : List Tau`:
-    no τ other than `scheduleTimeout sid` writes `schedules` at all, and
+    The remaining work is an invariant over an arbitrary `σ : List InternalStep`:
+    no internal step other than `scheduleTimeout sid` writes `schedules` at all, and
     `scheduleTimeout sid` is idempotent at `t1` by `hstop`. -/
 theorem obs_not_pinned (H : CronDiscriminates) : ¬ ValidPinned (obs H) := by
   sorry

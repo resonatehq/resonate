@@ -21,7 +21,7 @@ def main (args : List String) : IO UInt32 := do
   if args.contains "-h" || args.contains "--help" then
     IO.println usage; return 0
   let cap  := (args[0]?.bind (·.toNat?)).getD 20000
-  -- Fuel is an argument because generated traces reach deeper τ chains
+  -- Fuel is an argument because generated traces reach deeper internal step chains
   -- than recorded ones: the differential fuzzer routinely needs more than
   -- the 16 that suffices for real traffic, and a DECLINE there would make
   -- the comparison pass vacuously.

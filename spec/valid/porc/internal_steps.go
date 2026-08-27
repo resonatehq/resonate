@@ -22,41 +22,42 @@ import "context"
 
 // R1 processPromiseTimeout — materialize fact P.
 func (s *ServerState) ProcessPromiseTimeout(id string, now uint64) {
-	s.readPromise(Materialized, id, now)
+	s.readObject(Materialized, id, now)
 }
 
 // R3 processListener — deliver a chosen listener of a settled promise its unblock.
 func (s *ServerState) ProcessListener(id, address string, now uint64) {
-	p := s.readPromise(Materialized, id, now)
-	if p == nil || p.State == Pending || !contains(p.Listeners, address) {
+	o := s.readObject(Materialized, id, now)
+	if o == nil || o.Promise.State == Pending || !contains(o.Promise.Listeners, address) {
 		return
 	}
-	q := p.clone()
+	q := o.Promise.clone()
 	q.Listeners = remove(q.Listeners, address)
-	s.SetPromise(q)
-	s.SetMessage(Message{Address: address, Kind: "unblock", Promise: p.ID})
+	s.SetPromise(o.ID, q)
+	s.SetMessage(Message{Address: address, Kind: "unblock", Promise: o.ID})
 }
 
 // resumeOne wakes one awaiter. The touch materializes the awaiter's OWN
 // deadline first, so TIMEOUT ALWAYS WINS falls out with no explicit guard:
 // an awaiter past its own deadline reads `.fulfilled` and is dropped.
 func (s *ServerState) resumeOne(awaited, awaiter string, now uint64) {
-	t, p := s.readTask(Materialized, awaiter, now)
-	if t == nil || p == nil {
+	o := s.readTaskObject(Materialized, awaiter, now)
+	if o == nil || o.Task == nil {
 		return
 	}
+	t := o.Task
 	switch t.State {
 	case TaskSuspended:
 		u := t.clone()
 		u.State = TaskPending
 		u.Resumes = []string{awaited}
 		u.RetryAt = u64p(now)
-		s.SetTask(u)
+		s.SetTask(o.ID, u)
 	case TaskPending, TaskAcquired, TaskHalted:
 		if !contains(t.Resumes, awaited) {
 			u := t.clone()
 			u.Resumes = append(u.Resumes, awaited)
-			s.SetTask(u)
+			s.SetTask(o.ID, u)
 		}
 	case TaskFulfilled:
 	}
@@ -69,59 +70,62 @@ func (s *ServerState) resumeOne(awaited, awaiter string, now uint64) {
 // stays recorded on it until this internal step fires. Nothing an observer can see
 // says whether it has fired yet, so the model must carry both answers.
 func (s *ServerState) ProcessCallback(id, awaiter string, now uint64) {
-	p := s.readPromise(Materialized, id, now)
-	if p == nil || p.State == Pending || !contains(p.Callbacks, awaiter) {
+	o := s.readObject(Materialized, id, now)
+	if o == nil || o.Promise.State == Pending || !contains(o.Promise.Callbacks, awaiter) {
 		return
 	}
-	q := p.clone()
+	q := o.Promise.clone()
 	q.Callbacks = remove(q.Callbacks, awaiter)
-	s.SetPromise(q)
-	s.resumeOne(p.ID, awaiter, now)
+	s.SetPromise(o.ID, q)
+	s.resumeOne(o.ID, awaiter, now)
 }
 
 // R5 processLeaseTimeout — an acquired task past its lease returns to pending.
-// The TASK is read raw (expiry is a choice, not a fact, and must never be
-// forced by observation) but the DECISION consults the promise through the
-// view: no internal step creates new work for a logically dead task.
+// The row is read through the PROJECTED discipline: expiry is a choice,
+// not a fact, and must never be forced by observation, while the decision
+// still consults the promise through the view — no internal step creates
+// new work for a logically dead task. Reading the object rather than the
+// task alone changes nothing: the view only fulfils a task whose promise
+// is settled, and a settled promise fails the guard below anyway.
 func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
-	t := s.GetTask(id)
-	if t == nil || t.ExpiresAt == nil {
+	o := s.readTaskObject(Projected, id, now)
+	if o == nil || o.Task == nil {
 		return
 	}
-	if t.State != TaskAcquired || *t.ExpiresAt > now {
+	t := o.Task
+	if t.ExpiresAt == nil || t.State != TaskAcquired || *t.ExpiresAt > now {
 		return
 	}
-	p := s.readPromise(Projected, t.ID, now)
-	if p == nil || p.State != Pending {
+	if o.Promise.State != Pending {
 		return
 	}
 	u := t.clone()
 	u.State = TaskPending
 	u.PID, u.TTL, u.ExpiresAt = nil, nil, nil
 	u.RetryAt = u64p(now)
-	s.SetTask(u)
+	s.SetTask(o.ID, u)
 }
 
 // R6 processRetryTimeout — emit the execute for a pending task whose dispatch is due,
 // re-arming `retryAt` at a chosen instant. Repeatable: the outbox's keyed
 // upsert makes re-emission idempotent, so any `next` is sound.
 func (s *ServerState) ProcessRetryTimeout(id string, next, now uint64) {
-	t := s.GetTask(id)
-	if t == nil || t.RetryAt == nil {
+	o := s.readTaskObject(Projected, id, now)
+	if o == nil || o.Task == nil {
 		return
 	}
-	if t.State != TaskPending || *t.RetryAt > now {
+	t := o.Task
+	if t.RetryAt == nil || t.State != TaskPending || *t.RetryAt > now {
 		return
 	}
-	p := s.readPromise(Projected, t.ID, now)
-	if p == nil || p.State != Pending {
+	if o.Promise.State != Pending {
 		return
 	}
 	u := t.clone()
 	u.RetryAt = u64p(next)
-	s.SetTask(u)
-	addr, _ := p.Tags.Get("resonate:target")
-	s.SetMessage(Message{Address: addr, Kind: "execute", TaskID: t.ID, Version: t.Version})
+	s.SetTask(o.ID, u)
+	addr, _ := o.Promise.Tags.Get("resonate:target")
+	s.SetMessage(Message{Address: addr, Kind: "execute", TaskID: o.ID, Version: t.Version})
 }
 
 // ------------------------------------------------------------- the closure
@@ -150,41 +154,44 @@ type internalStep struct {
 // choice: it never removes a firing a larger `next` would have allowed.
 func enabledInternalSteps(s *ServerState, now uint64) []internalStep {
 	var rs []internalStep
-	for _, p := range s.Promises {
-		p := p
+	for _, o := range s.Objects {
+		o := o
+		p := o.Promise
 		if p.State == Pending && p.TimeoutAt <= now {
-			rs = append(rs, internalStep{"R1 processPromiseTimeout " + p.ID,
-				func(t *ServerState) { t.ProcessPromiseTimeout(p.ID, now) }})
+			rs = append(rs, internalStep{"promiseTimeout " + o.ID,
+				func(t *ServerState) { t.ProcessPromiseTimeout(o.ID, now) }})
 			continue // its callbacks cannot drain until it is settled
 		}
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				rs = append(rs, internalStep{"R4 processCallback " + p.ID + " -> " + a,
-					func(t *ServerState) { t.ProcessCallback(p.ID, a, now) }})
+				rs = append(rs, internalStep{"callback " + o.ID + " → " + a,
+					func(t *ServerState) { t.ProcessCallback(o.ID, a, now) }})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				rs = append(rs, internalStep{"R3 processListener " + p.ID + " -> " + l,
-					func(t *ServerState) { t.ProcessListener(p.ID, l, now) }})
+				rs = append(rs, internalStep{"listener " + o.ID + " → " + l,
+					func(t *ServerState) { t.ProcessListener(o.ID, l, now) }})
 			}
 		}
 	}
-	for _, t := range s.Tasks {
-		t := t
+	for _, o := range s.Objects {
+		o := o
+		t := o.Task
 		// No new work for the dead — and nothing to fulfil by an internal step: a
 		// settled promise fulfils its task in the same write, and a
-		// fact-lagged one is R1's to settle, task included.
-		if p := s.GetPromise(t.ID); p == nil || p.Project(now).State != Pending {
+		// fact-lagged one is R1's to settle, task included. The promise is
+		// the one in the row now, not a lookup that could come back empty.
+		if t == nil || o.Promise.Project(now).State != Pending {
 			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			rs = append(rs, internalStep{"R5 processLeaseTimeout " + t.ID,
-				func(u *ServerState) { u.ProcessLeaseTimeout(t.ID, now) }})
+			rs = append(rs, internalStep{"taskLeaseTimeout " + o.ID,
+				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			rs = append(rs, internalStep{"R6 processRetryTimeout " + t.ID,
-				func(u *ServerState) { u.ProcessRetryTimeout(t.ID, now, now) }})
+			rs = append(rs, internalStep{"taskRetryTimeout " + o.ID,
+				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }})
 		}
 	}
 	return rs
@@ -267,42 +274,44 @@ type firing struct {
 // enabledFirings is enabledInternalSteps with each internal step's affected set attached.
 func enabledFirings(s *ServerState, now uint64) []firing {
 	var fs []firing
-	for _, p := range s.Promises {
-		p := p
+	for _, o := range s.Objects {
+		o := o
+		p := o.Promise
 		if p.State == Pending && p.TimeoutAt <= now {
-			fs = append(fs, firing{internalStep{"R1 processPromiseTimeout " + p.ID,
-				func(t *ServerState) { t.ProcessPromiseTimeout(p.ID, now) }},
-				append(append([]string{}, p.Callbacks...), p.ID)})
+			fs = append(fs, firing{internalStep{"promiseTimeout " + o.ID,
+				func(t *ServerState) { t.ProcessPromiseTimeout(o.ID, now) }},
+				append(append([]string{}, p.Callbacks...), o.ID)})
 			continue
 		}
 		if p.State != Pending {
 			for _, a := range p.Callbacks {
 				a := a
-				fs = append(fs, firing{internalStep{"R4 processCallback " + p.ID + " -> " + a,
-					func(t *ServerState) { t.ProcessCallback(p.ID, a, now) }},
-					[]string{p.ID, a}})
+				fs = append(fs, firing{internalStep{"callback " + o.ID + " → " + a,
+					func(t *ServerState) { t.ProcessCallback(o.ID, a, now) }},
+					[]string{o.ID, a}})
 			}
 			for _, l := range p.Listeners {
 				l := l
-				fs = append(fs, firing{internalStep{"R3 processListener " + p.ID + " -> " + l,
-					func(t *ServerState) { t.ProcessListener(p.ID, l, now) }},
+				fs = append(fs, firing{internalStep{"listener " + o.ID + " → " + l,
+					func(t *ServerState) { t.ProcessListener(o.ID, l, now) }},
 					nil})
 			}
 		}
 	}
-	for _, t := range s.Tasks {
-		t := t
-		if p := s.GetPromise(t.ID); p == nil || p.Project(now).State != Pending {
+	for _, o := range s.Objects {
+		o := o
+		t := o.Task
+		if t == nil || o.Promise.Project(now).State != Pending {
 			continue
 		}
 		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
-			fs = append(fs, firing{internalStep{"R5 processLeaseTimeout " + t.ID,
-				func(u *ServerState) { u.ProcessLeaseTimeout(t.ID, now) }},
-				[]string{t.ID}})
+			fs = append(fs, firing{internalStep{"taskLeaseTimeout " + o.ID,
+				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }},
+				[]string{o.ID}})
 		}
 		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
-			fs = append(fs, firing{internalStep{"R6 processRetryTimeout " + t.ID,
-				func(u *ServerState) { u.ProcessRetryTimeout(t.ID, now, now) }},
+			fs = append(fs, firing{internalStep{"taskRetryTimeout " + o.ID,
+				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }},
 				nil})
 		}
 	}
