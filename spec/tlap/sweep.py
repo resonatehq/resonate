@@ -1,11 +1,13 @@
 # Run TLC on a Check module repeatedly; each violated guarantee is recorded
 # and dropped from the cfg, until the run is clean or the cap says the rest
 # survived to whatever depth the cap allowed.
-import re, subprocess, sys, time
+import os, re, subprocess, sys, tempfile, time
 
 mod, cap = sys.argv[1], int(sys.argv[2])
-jar = '/tmp/claude-0/-home-user/6d699f02-a2f6-53ea-8a6a-b3d76a365187/scratchpad/tla2tools.jar'
-md  = f'/tmp/claude-0/-home-user/6d699f02-a2f6-53ea-8a6a-b3d76a365187/scratchpad/sw_{mod}'
+# Same convention as check.sh: TLA_TOOLS points at the jar, defaulting to one
+# next to this script. The metadir is scratch -- TLC recreates it per run.
+jar = os.environ.get('TLA_TOOLS', 'tla2tools.jar')
+md  = os.path.join(tempfile.gettempdir(), f'sw_{mod}')
 failed = []
 
 while True:
