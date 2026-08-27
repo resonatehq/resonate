@@ -40,9 +40,11 @@ use resonate_server_dbms::{
     engine_port::ResonateEngine,
     oracle::{Oracle, SharedOracle},
     persistence_mysql::MysqlStorage,
+    persistence_mysql_single::MysqlSingleStorage,
     persistence_postgres::PostgresStorage,
     persistence_postgres_single::PostgresSingleStorage,
     persistence_sqlite::SqliteStorage,
+    persistence_sqlite_single::SqliteSingleStorage,
     Storage,
 };
 use serde_json::{json, Value};
@@ -113,6 +115,23 @@ async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> Respon
     backend.process(envelope, now).await
 }
 
+/// Point a MySQL URL at the single-table database: same server, same
+/// credentials, `<db>_single` instead of `<db>`. Query string preserved.
+fn single_table_db_url(url: &str) -> String {
+    let (base, query) = match url.split_once('?') {
+        Some((b, q)) => (b, Some(q)),
+        None => (url, None),
+    };
+    let base = match base.rsplit_once('/') {
+        Some((prefix, db)) if !db.is_empty() => format!("{prefix}/{db}_single"),
+        _ => format!("{base}/resonate_single"),
+    };
+    match query {
+        Some(q) => format!("{base}?{q}"),
+        None => base,
+    }
+}
+
 fn engine_backend(storage: Storage) -> Backend {
     Arc::new(Engine::new(Arc::new(storage), true))
 }
@@ -135,6 +154,10 @@ async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
     let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
+    // The same collapse in SQLite. Its own :memory: connection, so the two
+    // SQLite backends share nothing but the operation sequence.
+    let sqlite_single =
+        SqliteSingleStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite-single open");
     let oracle = Arc::new(SharedOracle::new());
 
     // Postgres and MySQL are opt-in via env vars.
@@ -194,6 +217,7 @@ async fn differential_random() {
         (None, _) => None,
     };
 
+    let my_url_single = my_url.clone();
     let my_backend: Option<Backend> = match my_url {
         Some(url) => {
             let my = MysqlStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
@@ -208,8 +232,35 @@ async fn differential_random() {
         }
     };
 
+    // MySQL's schema is its database, so the single-table backend cannot share
+    // one with the multi-table backend the way `resonate` and `public` let the
+    // two Postgres backends share theirs — they would share `promises` and the
+    // differential would be comparing a backend against itself. Point it at a
+    // second database: TEST_MYSQL_SINGLE_URL, or `resonate_single` on the same
+    // server by default. Skip with TEST_MYSQL_SINGLE=0.
+    let my_single_backend: Option<Backend> = match (
+        std::env::var("TEST_MYSQL_SINGLE_URL")
+            .ok()
+            .or_else(|| my_url_single.as_deref().map(single_table_db_url)),
+        std::env::var("TEST_MYSQL_SINGLE").as_deref(),
+    ) {
+        (_, Ok("0")) => None,
+        (Some(url), _) => {
+            let my = MysqlSingleStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
+                .await
+                .expect("mysql (single-table) connect — does the database exist? see diff/mysql-init.sql");
+            my.init().await.expect("mysql (single-table) schema init");
+            Some(engine_backend(Storage::MysqlSingle(my)))
+        }
+        (None, _) => None,
+    };
+
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), engine_backend(Storage::Sqlite(sqlite))),
+        (
+            "sqlite-single".into(),
+            engine_backend(Storage::SqliteSingle(sqlite_single)),
+        ),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
     if let Some(pg) = pg_backend {
@@ -220,6 +271,9 @@ async fn differential_random() {
     }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
+    }
+    if let Some(my) = my_single_backend {
+        backends.push(("mysql-single".into(), my));
     }
 
     // Iterating on one backend does not need all of them, and a full run is
@@ -253,7 +307,26 @@ async fn differential_random() {
     let names: Vec<&str> = backends.iter().map(|(n, _)| n.as_str()).collect();
     eprintln!("[diff] backends: {}", names.join(", "));
 
+    // The oracle is not only a backend to compare against, it is what
+    // `build_envelope` plans from: a task.acquire needs a pending task's
+    // current version, and only a model of the state knows it. So when
+    // TEST_BACKENDS drops the oracle from the comparison, keep driving it
+    // anyway — otherwise the generator plans against an empty world and
+    // whole operations never reach a 2xx.
+    let generator: Option<Backend> = if backends.iter().any(|(n, _)| n == "oracle") {
+        None
+    } else {
+        Some(Arc::clone(&oracle) as Backend)
+    };
+
     setup_all(&backends, T0).await;
+    if let Some(g) = &generator {
+        setup_all(
+            std::slice::from_ref(&("oracle".to_string(), Arc::clone(g))),
+            T0,
+        )
+        .await;
+    }
 
     const MAX_STEPS: usize = 200_000;
     const BATCH_SIZE: usize = 200;
@@ -269,6 +342,13 @@ async fn differential_random() {
 
     'outer: loop {
         reset_all(&backends, now).await;
+        if let Some(g) = &generator {
+            reset_all(
+                std::slice::from_ref(&("oracle".to_string(), Arc::clone(g))),
+                now,
+            )
+            .await;
+        }
         now = T0;
 
         let sigs_before = seen_sigs.len();
@@ -308,6 +388,11 @@ async fn differential_random() {
             );
 
             let mut results = send_all(&backends, &envelope, now, &mut timings).await;
+            if let Some(g) = &generator {
+                // Keep the model in step with the backends; its response is
+                // not compared, only its state is read by the generator.
+                let _ = send(g, &envelope, now).await;
+            }
             for (_, _, data) in &mut results {
                 normalize_resp(data);
             }
