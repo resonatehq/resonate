@@ -11,7 +11,7 @@ import "testing"
 // accept is the one direction a checker must never fail in.
 func TestHeartbeatIsPartitionedWithItsTasks(t *testing.T) {
 	hb := Op{Kind: "task.heartbeat", PID: "w1",
-		Refs: []TaskRef{{ID: "o1.x", Version: 1}, {ID: "o1.y", Version: 1}}}
+		Refs: []TaskRef{{ID: "o1:x", Version: 1}, {ID: "o1:y", Version: 1}}}
 	if got := partitionKey(hb); got != "o1" {
 		t.Errorf("heartbeat filed under %q, want %q — its tasks live there", got, "o1")
 	}
@@ -25,7 +25,7 @@ func TestHeartbeatIsPartitionedWithItsTasks(t *testing.T) {
 // extension for the tasks in the other, so the split must be refused.
 func TestCrossOriginHeartbeatIsNotPartitionable(t *testing.T) {
 	hb := Op{Kind: "task.heartbeat", PID: "w1",
-		Refs: []TaskRef{{ID: "o1.x", Version: 1}, {ID: "o2.y", Version: 1}}}
+		Refs: []TaskRef{{ID: "o1:x", Version: 1}, {ID: "o2:y", Version: 1}}}
 	if err := CheckPartitionable([]Op{hb}); err == nil {
 		t.Fatal("cross-origin heartbeat accepted; partitioning would be unsound")
 	}

@@ -1,5 +1,30 @@
 namespace ServerModel
 
+/-- An identifier: an origin and a suffix within it.
+
+    On the wire this is one string, `origin:suffix`, with exactly one
+    colon; the suffix may be empty, and an id whose suffix is empty
+    renders as the bare origin. None of that is the specification's
+    business -- parsing and rendering happen at the edge, in the trace
+    codec and in the server. In here an id is a pair, and the only
+    question ever asked of its halves is whether two ids share an
+    origin.
+
+    `DecidableEq` rather than `deriving BEq`: the lookup and frame
+    proofs are stated over `[BEq α] [LawfulBEq α]`, and the instance
+    derived from decidable equality is the lawful one. -/
+structure Ident where
+  origin : String
+  suffix : String
+  deriving Repr, DecidableEq, Inhabited
+
+instance : BEq Ident := instBEqOfDecidableEq
+
+/-- Two ids in one origin. The doors that refuse cross-origin work --
+    callback registration, suspension, fencing -- are exactly this
+    comparison, which is why they cost no read. -/
+def Ident.sameOrigin (a b : Ident) : Bool := a.origin == b.origin
+
 abbrev Tags := List (String × String)
 
 structure Value where
@@ -20,7 +45,7 @@ inductive TaskState
   deriving Repr, DecidableEq
 
 structure PromiseRecord where
-  id        : String
+  id        : Ident
   state     : PromiseState
   param     : Value
   value     : Value       := {}
@@ -31,7 +56,7 @@ structure PromiseRecord where
   deriving Repr
 
 structure TaskRecord where
-  id      : String
+  id      : Ident
   state   : TaskState
   version : Nat
   resumes : Nat
@@ -40,9 +65,9 @@ structure TaskRecord where
   deriving Repr
 
 structure Schedule where
-  id             : String
+  id             : Ident
   cron           : String
-  promiseId      : String
+  promiseId      : Ident
   promiseTimeout : Nat
   promiseParam   : Value
   promiseTags    : Tags
@@ -52,7 +77,7 @@ structure Schedule where
   deriving Repr
 
 structure PromiseGetReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure PromiseGetRes where
@@ -61,7 +86,7 @@ structure PromiseGetRes where
   deriving Repr
 
 structure PromiseCreateReq where
-  id        : String
+  id        : Ident
   timeoutAt : Nat
   param     : Value
   tags      : Tags
@@ -73,7 +98,7 @@ structure PromiseCreateRes where
   deriving Repr
 
 structure PromiseSettleReq where
-  id    : String
+  id    : Ident
   state : PromiseState
   value : Value
   deriving Repr
@@ -84,8 +109,8 @@ structure PromiseSettleRes where
   deriving Repr
 
 structure PromiseRegisterCallbackReq where
-  awaited : String
-  awaiter : String
+  awaited : Ident
+  awaiter : Ident
   deriving Repr
 
 structure PromiseRegisterCallbackRes where
@@ -94,7 +119,7 @@ structure PromiseRegisterCallbackRes where
   deriving Repr
 
 structure PromiseRegisterListenerReq where
-  awaited : String
+  awaited : Ident
   address : String
   deriving Repr
 
@@ -117,7 +142,7 @@ structure PromiseSearchRes where
   deriving Repr
 
 structure ScheduleGetReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure ScheduleGetRes where
@@ -126,9 +151,9 @@ structure ScheduleGetRes where
   deriving Repr
 
 structure ScheduleCreateReq where
-  id             : String
+  id             : Ident
   cron           : String
-  promiseId      : String
+  promiseId      : Ident
   promiseTimeout : Nat
   promiseParam   : Value
   promiseTags    : Tags
@@ -140,7 +165,7 @@ structure ScheduleCreateRes where
   deriving Repr
 
 structure ScheduleDeleteReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure ScheduleDeleteRes where
@@ -159,7 +184,7 @@ structure ScheduleSearchRes where
   deriving Repr
 
 structure TaskGetReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure TaskGetRes where
@@ -181,7 +206,7 @@ structure TaskCreateRes where
   deriving Repr
 
 structure TaskAcquireReq where
-  id      : String
+  id      : Ident
   version : Nat
   pid     : String
   ttl     : Nat
@@ -205,7 +230,7 @@ inductive TaskFenceInnerRes
   deriving Repr
 
 structure TaskFenceReq where
-  id      : String
+  id      : Ident
   version : Nat
   action  : TaskFenceAction
   deriving Repr
@@ -217,7 +242,7 @@ structure TaskFenceRes where
   deriving Repr
 
 structure TaskRef where
-  id      : String
+  id      : Ident
   version : Nat
   deriving Repr
 
@@ -231,7 +256,7 @@ structure TaskHeartbeatRes where
   deriving Repr
 
 structure TaskSuspendReq where
-  id      : String
+  id      : Ident
   version : Nat
   actions : List PromiseRegisterCallbackReq
   deriving Repr
@@ -242,7 +267,7 @@ structure TaskSuspendRes where
   deriving Repr
 
 structure TaskFulfillReq where
-  id      : String
+  id      : Ident
   version : Nat
   action  : PromiseSettleReq
   deriving Repr
@@ -253,7 +278,7 @@ structure TaskFulfillRes where
   deriving Repr
 
 structure TaskReleaseReq where
-  id      : String
+  id      : Ident
   version : Nat
   deriving Repr
 
@@ -262,7 +287,7 @@ structure TaskReleaseRes where
   deriving Repr
 
 structure TaskHaltReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure TaskHaltRes where
@@ -270,7 +295,7 @@ structure TaskHaltRes where
   deriving Repr
 
 structure TaskContinueReq where
-  id : String
+  id : Ident
   deriving Repr
 
 structure TaskContinueRes where

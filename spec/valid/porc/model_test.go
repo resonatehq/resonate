@@ -152,7 +152,7 @@ func TestPartitionableIsChecked(t *testing.T) {
 	if err := CheckPartitionable(ops); err != nil {
 		t.Fatalf("capture should be partitionable: %v", err)
 	}
-	bad := []Op{{Kind: "task.suspend", ID: "o0.x", Awaited: []string{"o1.a"}}}
+	bad := []Op{{Kind: "task.suspend", ID: "o0:x", Awaited: []string{"o1:a"}}}
 	if err := CheckPartitionable(bad); err == nil {
 		t.Error("a cross-origin suspend must be rejected, not silently partitioned")
 	}

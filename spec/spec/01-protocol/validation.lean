@@ -50,7 +50,7 @@ def PromiseState.settable : PromiseState → Bool
   | _ => false
 
 /-- The promise id a fenced action operates on. -/
-def TaskFenceAction.targetId : TaskFenceAction → String
+def TaskFenceAction.targetId : TaskFenceAction → Ident
   | .create r => r.id
   | .settle r => r.id
 
@@ -84,7 +84,7 @@ where
     | c :: cs, acc => go cs (acc * 10 + (c.toNat - '0'.toNat))
 
 inductive Message
-  | execute (taskId : String) (version : Nat)
+  | execute (taskId : Ident) (version : Nat)
   | unblock (promise : PromiseRecord)
   deriving Repr
 
@@ -93,9 +93,26 @@ structure OutboxEntry where
   message : Message
   deriving Repr
 
-def OutboxEntry.key : OutboxEntry → String
-  | { message := .execute taskId _,  .. } => taskId
-  | { address, message := .unblock p }    => s!"{p.id}:notify:{address}"
+/-- What makes two outbox entries the same entry.
+
+    Structured rather than a rendered string: the key used to be
+    `taskId` for an execute and `"{id}:notify:{address}"` for an
+    unblock, and with `origin:suffix` ids that separator now appears
+    inside one of its own fields. Nothing collided -- an id carries one
+    colon, so no task id can spell `{promise}:notify:{address}` -- but
+    the uniqueness `well_formed_store_outbox_keys_unique` states was
+    resting on that arithmetic rather than on the data. As a sum there
+    is no separator to overload. -/
+inductive OutboxKey
+  | execute (taskId : Ident)
+  | notify  (promise : Ident) (address : String)
+  deriving Repr, DecidableEq
+
+instance : BEq OutboxKey := instBEqOfDecidableEq
+
+def OutboxEntry.key : OutboxEntry → OutboxKey
+  | { message := .execute taskId _,  .. } => .execute taskId
+  | { address, message := .unblock p }    => .notify p.id address
 
 /-- Next cron fire time strictly after the given instant. -/
 opaque nextCron : (cron : String) → (after : Nat) → Nat
@@ -111,7 +128,7 @@ opaque nextCron : (cron : String) → (after : Nat) → Nat
 opaque occurrences : (cron : String) → (since now : Nat) → List Nat
 
 /-- Expand a schedule's promise-id template against one occurrence. -/
-opaque expand : (template id : String) → (timestamp : Nat) → String
+opaque expand : (template id : Ident) → (timestamp : Nat) → Ident
 
 /-! ### What these three must satisfy, and do not yet
 
@@ -127,7 +144,7 @@ Two things follow that are easy to get wrong:
     rule, exactly like `opaque`.
   * `#eval` is worse than useless here. The opaque constants return
     `Inhabited.default`, so `nextCron c t = 0`, `occurrences … = []`,
-    `expand … = ""`. The schedule step becomes a silent no-op and
+    `expand … = ⟨"", ""⟩`. The schedule step becomes a silent no-op and
     `nextCron` returns an instant BEFORE its argument, violating the
     machine's own `well_formed_schedule_created_at_lte_next_run_at`.
     Anyone who reaches for `#eval` or `native_decide` to "test

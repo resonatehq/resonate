@@ -36,10 +36,10 @@ enabled is the identity — that is `preserved_state_under_disabled_*` —
 so enabledness is not needed for safety; it is needed to say that
 something is *owed*. -/
 
-def promiseAt (s : ServerState) (id : String) : Option PromiseObject :=
+def promiseAt (s : ServerState) (id : ServerModel.Ident) : Option PromiseObject :=
   s.promise? id
 
-def taskAt (s : ServerState) (id : String) : Option TaskObject :=
+def taskAt (s : ServerState) (id : ServerModel.Ident) : Option TaskObject :=
   s.task? id
 
 def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
@@ -108,7 +108,7 @@ the clock AND fairness on that step. -/
 
 def EventuallyEveryPromiseSettles : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
-    ∀ (t : Nat) (id : String),
+    ∀ (t : Nat) (id : ServerModel.Ident),
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ p, promiseAt (tr u).state id = some p → p.state ≠ .pending
@@ -124,7 +124,7 @@ would be exactly the redundancy the catalogue refuses. -/
 
 def EventuallyEveryTaskFulfils : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
-    ∀ (t : Nat) (id : String),
+    ∀ (t : Nat) (id : ServerModel.Ident),
       (taskAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ w, taskAt (tr u).state id = some w → w.state = .fulfilled
@@ -161,7 +161,7 @@ timeout must fire too; hence both families in the hypothesis. -/
 def EventuallyAwaiterResumed : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isCallbackStep →
-    ∀ (t : Nat) (a x : String),
+    ∀ (t : Nat) (a x : ServerModel.Ident),
       (∃ p, promiseAt (tr t).state a = some p ∧
               p.state ≠ .pending ∧ p.callbacks.contains x = true) →
       ∃ u : Nat, t ≤ u ∧
@@ -176,7 +176,7 @@ def EventuallyAwaiterResumed : Prop :=
 def EventuallyListenerNotified : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr →
     WeaklyFairOn tr isSettlementStep → WeaklyFairOn tr isListenerStep →
-    ∀ (t : Nat) (a addr : String),
+    ∀ (t : Nat) (a : ServerModel.Ident) (addr : String),
       (∃ p, promiseAt (tr t).state a = some p ∧
               p.state ≠ .pending ∧ p.listeners.contains addr = true) →
       ∃ u : Nat, t ≤ u ∧
@@ -240,10 +240,10 @@ set_option maxHeartbeats 4000000
 /-- The wake, end to end: a suspended awaiter, a settled awaited, and
     nothing but internal steps between them. -/
 def wWake : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
-    (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200) ]
+  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
 
 example : wakeMaterializes wWake 300 := by decide
 example : resumeRecorded wWake 300 := by decide
@@ -252,10 +252,10 @@ example : resumeRecorded wWake 300 := by decide
     The obligation is still discharged, and the escape clause is the one
     that fires — the task reads fulfilled, not resumed. -/
 def wWakeTimedOut : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 120),
-    (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200) ]
+  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
 
 example : wakeMaterializes wWakeTimedOut 300 := by decide
 example : resumeRecorded wWakeTimedOut 300 := by decide
@@ -266,7 +266,7 @@ example : resumeRecorded wWakeTimedOut 300 := by decide
     counterexample that makes `WeaklyFairOn` a hypothesis rather than a
     formality. -/
 theorem wake_requires_fairness :
-    ((runFin true wWake AbstractModel.ServerState.init).2.promises.any (fun p => p.callbacks.contains "x")
+    ((runFin true wWake AbstractModel.ServerState.init).2.promises.any (fun p => p.callbacks.contains (oid "x"))
       && (runFin true wWake AbstractModel.ServerState.init).2.tasks.any (fun t => t.state == .suspended)) = true := by
   decide
 

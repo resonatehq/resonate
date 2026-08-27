@@ -118,13 +118,21 @@ But partitioning by object is **not sound in general** in this
 machine: `task.suspend x awaiting a` links two objects, and settling `a`
 wakes `x`.
 
-What rescues it is a rule of resonate's, not of the specification's — an
-awaiter and its awaited must share `resonate:origin`, enforced with
-`400 "Awaiter and awaited must belong to the same origin"`. Ids are
-`origin.suffix`, so partitioning on the prefix keeps every awaits-edge
-inside one partition.
+What rescues it is that an awaiter and its awaited must share
+`resonate:origin`. That used to be a rule of resonate's rather than of
+the specification's; it is the specification's now —
+`promiseRegisterCallback` and `taskSuspend` answer `400` to a
+cross-origin registration, `taskFence` to a cross-origin target, and
+`well_formed_promise_callbacks_same_origin` says no reachable state
+holds such an edge however it got there. Ids are `origin:suffix`, so
+partitioning on the origin keeps every awaits-edge inside one partition.
 
-That is a hypothesis about the input, so it is **checked, not assumed**:
+The door is lexical — comparing two origins reads nothing — so the
+refusal costs no lookup, which is what lets a backend answer before the
+request reaches its store.
+
+That is still a hypothesis about the INPUT, and a trace is input, so it
+remains **checked, not assumed**:
 
 ```go
 if err := model.CheckPartitionable(ops); err != nil {

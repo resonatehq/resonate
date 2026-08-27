@@ -301,7 +301,7 @@ why it took an empirical hunt to even guess at its truth. -/
 /-- **R1 · Retry internal steps are invisible.** `processRetryTimeout` writes only
     `taskTimeouts` and `outbox`, so it changes nothing `Visible` keeps —
     given that its `delTaskTimeout` cannot take a lease timer with it. -/
-theorem retry_invisible {s : ServerState} {id : String} {n : Nat}
+theorem retry_invisible {s : ServerState} {id : ServerModel.Ident} {n : Nat}
     (hinv : PendingHasNoLease s) :
     Visible ((InternalStep.taskRetryTimeout id).step n s) = Visible s := by
   sorry

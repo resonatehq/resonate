@@ -17,7 +17,7 @@ hold one. -/
 
 namespace AbstractModel
 
-open ServerModel (PromiseState
+open ServerModel (Ident PromiseState
                   PromiseGetReq PromiseGetRes
                   PromiseCreateReq PromiseCreateRes
                   PromiseSettleReq PromiseSettleRes
@@ -60,6 +60,8 @@ def promiseSettle (req : PromiseSettleReq) (now : Nat) : H PromiseSettleRes := d
 def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
     H PromiseRegisterCallbackRes := do
   if req.awaited == req.awaiter then
+    return { status := 400 }
+  if !req.awaited.sameOrigin req.awaiter then
     return { status := 400 }
   match ← readObject req.awaited now with
   | none =>
@@ -199,6 +201,8 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
 def taskFence (req : TaskFenceReq) (now : Nat) : H TaskFenceRes := do
   if req.action.targetId == req.id then
     return { status := 400 }
+  if !req.action.targetId.sameOrigin req.id then
+    return { status := 400 }
   match ← readTaskObject req.id now with
   | none =>
       return { status := 404 }
@@ -257,7 +261,7 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → H (Option Boo
             | none => return none
             | some settled => return some (settled || oa.promise.state != .pending)
 
-def registerAwaited (awaiter : String) (now : Nat) :
+def registerAwaited (awaiter : Ident) (now : Nat) :
     List PromiseRegisterCallbackReq → H Unit
   | [] => pure ()
   | action :: rest => do
@@ -270,6 +274,8 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
   if req.actions.isEmpty then
     return { status := 400 }
   if req.actions.any (·.awaited == req.id) then
+    return { status := 400 }
+  if req.actions.any (fun a => !a.awaited.sameOrigin req.id) then
     return { status := 400 }
   let awaitedIds := req.actions.map (·.awaited)
   if awaitedIds.eraseDups.length != awaitedIds.length then

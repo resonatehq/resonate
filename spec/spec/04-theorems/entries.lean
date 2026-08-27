@@ -114,7 +114,7 @@ theorem perStore_onlySchedule {f : ServerModel.Schedule → Bool} {s : ServerSta
 
 structure HPromise (f : PromiseObject → Bool) : Prop where
   project      : ∀ (p : PromiseObject) (n : Nat), f p = true → f (p.project n) = true
-  addCallback  : ∀ (p : PromiseObject) (a : String), f p = true → f (p.addCallback a) = true
+  addCallback  : ∀ (p : PromiseObject) (a : ServerModel.Ident), f p = true → f (p.addCallback a) = true
   addListener  : ∀ (p : PromiseObject) (a : String), f p = true → f (p.addListener a) = true
   settle       : ∀ (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat),
@@ -122,13 +122,13 @@ structure HPromise (f : PromiseObject → Bool) : Prop where
                    f { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ (p : PromiseObject) (a : String), f p = true →
                    f { p with listeners := p.listeners.filter (· != a) } = true
-  dropCallback : ∀ (p : PromiseObject) (a : String), f p = true →
+  dropCallback : ∀ (p : PromiseObject) (a : ServerModel.Ident), f p = true →
                    f { p with callbacks := p.callbacks.filter (· != a) } = true
-  live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
+  live         : ∀ (id : ServerModel.Ident) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
                    f { state := .pending, param := param, tags := tags,
                        timeoutAt := timeoutAt, createdAt := createdAt } = true
-  dead         : ∀ (id : String) (st : ServerModel.PromiseState)
+  dead         : ∀ (id : ServerModel.Ident) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
                    f { state := st, param := param, tags := tags,
@@ -192,9 +192,9 @@ structure HTask (f : TaskObject → Bool) : Prop where
                  f { t with state := .halted, pid := none, ttl := none, expiresAt := none, retryAt := none } = true
   cont       : ∀ (t : TaskObject) (n : Nat), (t.state == .halted) = true → f t = true →
                  f { t with state := .pending, retryAt := some n } = true
-  resume     : ∀ (t : TaskObject) (a : String) (n : Nat), t.state = .suspended → f t = true →
+  resume     : ∀ (t : TaskObject) (a : ServerModel.Ident) (n : Nat), t.state = .suspended → f t = true →
                  f { t with state := .pending, resumes := [a], retryAt := some n } = true
-  addResume  : ∀ (t : TaskObject) (a : String), t.state ≠ .suspended → t.state ≠ .fulfilled →
+  addResume  : ∀ (t : TaskObject) (a : ServerModel.Ident), t.state ≠ .suspended → t.state ≠ .fulfilled →
                  (t.resumes.contains a) = false → f t = true →
                  f { t with resumes := t.resumes ++ [a] } = true
   rearm      : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true → f t = true →
@@ -238,7 +238,7 @@ theorem task_step {f : TaskObject → Bool} (h : HTask f)
 /-! ## The schedule obligations, and the step law they buy -/
 
 structure HSchedule (f : ServerModel.Schedule → Bool) : Prop where
-  born    : ∀ (id cron promiseId : String) (promiseTimeout : Nat)
+  born    : ∀ (id : ServerModel.Ident) (cron : String) (promiseId : ServerModel.Ident) (promiseTimeout : Nat)
               (promiseParam : ServerModel.Value) (promiseTags : ServerModel.Tags)
               (now : Nat), promiseTags.timerTargeted = false →
               f { id := id, cron := cron, promiseId := promiseId,

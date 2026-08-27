@@ -55,7 +55,7 @@ open AbstractModel
 
 /-! ## A row is what its own id looks up -/
 
-theorem find?_self_of_nodup {α} (key : α → String) :
+theorem find?_self_of_nodup {α κ} [BEq κ] [LawfulBEq κ] (key : α → κ) :
     ∀ (l : List α), (l.map key).Nodup → ∀ (x : α), x ∈ l →
       l.find? (fun y => key y == key x) = some x
   | [],     _,   x, hx => absurd hx (by simp)
@@ -79,7 +79,7 @@ theorem find?_self_of_nodup {α} (key : α → String) :
 
 /-! ## Nothing is deleted -/
 
-theorem any_id_upsert {α} (idOf : α → String) (x : α) (l : List α) (id : String)
+theorem any_id_upsert {α κ} [BEq κ] [LawfulBEq κ] (idOf : α → κ) (x : α) (l : List α) (id : κ)
     (h : l.any (fun y => idOf y == id) = true) :
     (x :: l.filter (fun y => idOf y != idOf x)).any (fun y => idOf y == id) = true := by
   obtain ⟨y, hy, hyid⟩ := List.any_eq_true.mp h
@@ -97,7 +97,7 @@ theorem any_id_upsert {α} (idOf : α → String) (x : α) (l : List α) (id : S
     is untouched, definitionally, and only the promise side of the
     effect algebra has anything to prove here. -/
 
-theorem any_id_map (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id : String) :
+theorem any_id_map (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id : ServerModel.Ident) :
     ∀ l : List Object, l.any (·.id == id) = true → (l.map m).any (·.id == id) = true
   | [],     h => h
   | a :: l, h => by
@@ -106,7 +106,7 @@ theorem any_id_map (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id : S
       | true  => simp [hb]
       | false => simp only [hb, Bool.false_or] at *; exact any_id_map m hm id l h
 
-theorem find?_map_id (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id : String) :
+theorem find?_map_id (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id : ServerModel.Ident) :
     ∀ l : List Object,
       (l.map m).find? (·.id == id) = (l.find? (·.id == id)).map m
   | []     => rfl
@@ -116,36 +116,36 @@ theorem find?_map_id (m : Object → Object) (hm : ∀ o, (m o).id = o.id) (id :
       | true  => simp [hb]
       | false => simp [hb, find?_map_id m hm id l]
 
-theorem setTask_id (i : String) (t : TaskObject) (o : Object) :
+theorem setTask_id (i : ServerModel.Ident) (t : TaskObject) (o : Object) :
     (if o.id == i then { o with task := some t } else o).id = o.id := by
   split <;> rfl
 
-theorem setTask_promise (i : String) (t : TaskObject) (o : Object) :
+theorem setTask_promise (i : ServerModel.Ident) (t : TaskObject) (o : Object) :
     (if o.id == i then { o with task := some t } else o).promise = o.promise := by
   split <;> rfl
 
 /-- The row `.setPromise` writes sits at the id it names — which is what
     lets the generic upsert lemmas, keyed on the WRITTEN row's id, apply
     to a filter keyed on the effect's id. -/
-theorem withPromise_find?_id (s : ServerState) (i : String) (p : PromiseObject) :
+theorem withPromise_find?_id (s : ServerState) (i : ServerModel.Ident) (p : PromiseObject) :
     (Object.withPromise i p (s.objects.find? (·.id == i))).id = i := by
   unfold Object.withPromise
   cases h : s.objects.find? (·.id == i) with
   | none   => rfl
   | some o => exact eq_of_beq (by simpa using List.find?_some h)
 
-theorem any_id_upsert' (x : Object) (k : String) (hk : x.id = k) (l : List Object)
-    (id : String) (h : l.any (·.id == id) = true) :
+theorem any_id_upsert' (x : Object) (k : ServerModel.Ident) (hk : x.id = k) (l : List Object)
+    (id : ServerModel.Ident) (h : l.any (·.id == id) = true) :
     ((x :: l.filter (fun y => y.id != k)).any (·.id == id)) = true := by
   subst hk; exact any_id_upsert (·.id) x l id h
 
-theorem find?_upsert' (x : Object) (k : String) (hk : x.id = k) (l : List Object)
-    (id : String) :
+theorem find?_upsert' (x : Object) (k : ServerModel.Ident) (hk : x.id = k) (l : List Object)
+    (id : ServerModel.Ident) :
     (x :: l.filter (fun y => y.id != k)).find? (·.id == id)
       = if (x.id == id) = true then some x else l.find? (·.id == id) := by
   subst hk; exact Lookup.find?_upsert (·.id) x l id
 
-theorem object_id_apply (f : Effect) (s : ServerState) (id : String)
+theorem object_id_apply (f : Effect) (s : ServerState) (id : ServerModel.Ident)
     (h : s.objects.any (·.id == id) = true) :
     (f.apply s).objects.any (·.id == id) = true := by
   cases f with
@@ -156,7 +156,7 @@ theorem object_id_apply (f : Effect) (s : ServerState) (id : String)
       simpa [Effect.apply] using h
 
 theorem object_id_applyAll :
-    ∀ (w : List Effect) (s : ServerState) (id : String),
+    ∀ (w : List Effect) (s : ServerState) (id : ServerModel.Ident),
       s.objects.any (·.id == id) = true → (applyAll s w).objects.any (·.id == id) = true
   | [],      _, _,  h => h
   | f :: fs, s, id, h => object_id_applyAll fs (f.apply s) id (object_id_apply f s id h)
@@ -172,7 +172,7 @@ rows in the write list, which is what `WritesGood` already talks about. -/
     second is the whole point: a task write leaves EVERY promise lookup
     alone, because `.setTask` maps over the rows and rewrites a field
     this lookup does not read. -/
-theorem promise?_setPromise (s : ServerState) (i : String) (p : PromiseObject) (id : String) :
+theorem promise?_setPromise (s : ServerState) (i : ServerModel.Ident) (p : PromiseObject) (id : ServerModel.Ident) :
     (Effect.apply s (Effect.setPromise i p)).promise? id
       = if (i == id) = true then some p else s.promise? id := by
   have hw := withPromise_find?_id s i p
@@ -185,7 +185,7 @@ theorem promise?_setPromise (s : ServerState) (i : String) (p : PromiseObject) (
     cases s.objects.find? (·.id == i) <;> rfl
   · rw [if_neg hy, if_neg hy]; rfl
 
-theorem promise?_setTask (s : ServerState) (i : String) (t : TaskObject) (id : String) :
+theorem promise?_setTask (s : ServerState) (i : ServerModel.Ident) (t : TaskObject) (id : ServerModel.Ident) :
     (Effect.apply s (Effect.setTask i t)).promise? id = s.promise? id := by
   show ((s.objects.map (fun o => if o.id == i then { o with task := some t } else o)).find?
           (·.id == id)).map (·.promise)
@@ -201,7 +201,7 @@ theorem promise?_setTask (s : ServerState) (i : String) (t : TaskObject) (id : S
     this one. The old two-store version needed the same lemma twice; the
     asymmetry of the effect algebra buys the task half outright. -/
 theorem find?_applyAll_promise :
-    ∀ (w : List Effect) (s : ServerState) (id : String),
+    ∀ (w : List Effect) (s : ServerState) (id : ServerModel.Ident),
       (applyAll s w).promise? id = s.promise? id
       ∨ ∃ p, Effect.setPromise id p ∈ w ∧ (applyAll s w).promise? id = some p
   | [],      _, _  => Or.inl rfl
@@ -260,7 +260,7 @@ theorem eraseDups_length_of_nodup {α} [BEq α] [LawfulBEq α] (l : List α) (h 
 /-- Every write in the machine is `x :: filter (key ≠ key x)`. That
     shape preserves key-uniqueness whatever `x` is, which is why no
     handler appears in this argument. -/
-theorem nodup_upsert {α} (key : α → String) (x : α) (l : List α)
+theorem nodup_upsert {α κ} [BEq κ] [LawfulBEq κ] (key : α → κ) (x : α) (l : List α)
     (h : (l.map key).Nodup) :
     (((x :: l.filter (fun y => key y != key x)).map key).Nodup) := by
   simp only [List.map_cons]
@@ -272,12 +272,12 @@ theorem nodup_upsert {α} (key : α → String) (x : α) (l : List α)
     exact hne hyid
   · exact List.Nodup.sublist (List.Sublist.map key List.filter_sublist) h
 
-theorem nodup_upsert' (x : Object) (k : String) (hk : x.id = k) (l : List Object)
+theorem nodup_upsert' (x : Object) (k : ServerModel.Ident) (hk : x.id = k) (l : List Object)
     (h : (l.map (·.id)).Nodup) :
     (((x :: l.filter (fun y => y.id != k)).map (·.id)).Nodup) := by
   subst hk; exact nodup_upsert (·.id) x l h
 
-theorem nodup_filter {α} (key : α → String) (p : α → Bool) (l : List α)
+theorem nodup_filter {α κ} (key : α → κ) (p : α → Bool) (l : List α)
     (h : (l.map key).Nodup) : ((l.filter p).map key).Nodup :=
   List.Nodup.sublist (List.Sublist.map key List.filter_sublist) h
 
@@ -332,7 +332,7 @@ The fused counterpart of "rows are never deleted", one level down.
 `Object.withPromise` is for — and `.setTask` writes a `some`. So a row
 that has a task keeps one, whatever the step was. -/
 
-theorem task?_setPromise (s : ServerState) (i : String) (p : PromiseObject) (id : String) :
+theorem task?_setPromise (s : ServerState) (i : ServerModel.Ident) (p : PromiseObject) (id : ServerModel.Ident) :
     (Effect.apply s (Effect.setPromise i p)).task? id = s.task? id := by
   have hw := withPromise_find?_id s i p
   show ((Object.withPromise i p (s.objects.find? (·.id == i))
@@ -345,7 +345,7 @@ theorem task?_setPromise (s : ServerState) (i : String) (p : PromiseObject) (id 
     cases s.objects.find? (·.id == i) <;> rfl
   · rw [if_neg hi]
 
-theorem task?_setTask_isSome (s : ServerState) (i : String) (t : TaskObject) (id : String)
+theorem task?_setTask_isSome (s : ServerState) (i : ServerModel.Ident) (t : TaskObject) (id : ServerModel.Ident)
     (h : (s.task? id).isSome = true) :
     ((Effect.apply s (Effect.setTask i t)).task? id).isSome = true := by
   show (((s.objects.map (fun o => if o.id == i then { o with task := some t } else o)).find?
@@ -361,7 +361,7 @@ theorem task?_setTask_isSome (s : ServerState) (i : String) (t : TaskObject) (id
       · simp
       · exact h
 
-theorem hasTask_apply (f : Effect) (s : ServerState) (id : String)
+theorem hasTask_apply (f : Effect) (s : ServerState) (id : ServerModel.Ident)
     (h : s.hasTask id = true) : (f.apply s).hasTask id = true := by
   unfold ServerState.hasTask at *
   cases f with
@@ -370,7 +370,7 @@ theorem hasTask_apply (f : Effect) (s : ServerState) (id : String)
   | setSchedule _ | delSchedule _ | setMessage _ _ => exact h
 
 theorem hasTask_applyAll :
-    ∀ (w : List Effect) (s : ServerState) (id : String),
+    ∀ (w : List Effect) (s : ServerState) (id : ServerModel.Ident),
       s.hasTask id = true → (applyAll s w).hasTask id = true
   | [],      _, _,  h => h
   | f :: fs, s, id, h => hasTask_applyAll fs (f.apply s) id (hasTask_apply f s id h)

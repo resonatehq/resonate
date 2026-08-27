@@ -15,16 +15,18 @@ import (
 // independent in general: `task.suspend x awaiting a` links `a` and `x`,
 // and a settle on `a` wakes `x`.
 //
-// What makes partitioning sound here is an internal step of resonate's, not of the
-// specification's: an awaiter and its awaited must share
-// `resonate:origin`, enforced with
+// What makes partitioning sound here is that an awaiter and its awaited
+// must share `resonate:origin`, enforced with
 //
 //	400 "Awaiter and awaited must belong to the same origin"
 //
-// (found while capturing traces — it is one of two places resonate is
-// stricter than `01-protocol/validation.lean`). Ids are `origin.suffix`,
-// so partitioning on the origin prefix keeps every awaits-edge inside one
-// partition.
+// This was found while capturing traces, as one of two places resonate
+// was stricter than `01-protocol/validation.lean`. It is no longer one
+// of them: the specification carries the door now, in
+// promiseRegisterCallback, taskSuspend and taskFence, and states the
+// consequence as `well_formed_promise_callbacks_same_origin`. Ids are
+// `origin:suffix` with exactly one colon, so partitioning on the origin
+// prefix keeps every awaits-edge inside one partition.
 //
 // That argument is a hypothesis about the input, so it is CHECKED rather
 // than assumed: `CheckPartitionable` rejects a trace with a cross-origin
@@ -32,10 +34,16 @@ import (
 // whose soundness rests on an unverified property of its input is not a
 // checker.
 
-// originOf is the partition key: everything before the first '.', which
+// originOf is the partition key: everything before the first ':', which
 // is `resonate:origin` for ids resonate accepts.
+//
+// The separator is ':', not '.'. Both halves may contain dots -- an id
+// reads `foo.1:1.1` -- so splitting on the first dot returned neither
+// the origin nor anything stable, and two ids in one origin could come
+// back with different keys. An id with no ':' is its own origin, which
+// is what `ServerModel.Ident.parse` does on the Lean side.
 func originOf(id string) string {
-	if i := strings.IndexByte(id, '.'); i >= 0 {
+	if i := strings.IndexByte(id, ':'); i >= 0 {
 		return id[:i]
 	}
 	return id

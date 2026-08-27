@@ -266,6 +266,25 @@ def well_formed_promise_awaiter_is_not_self (_now : Nat) (s : ServerState) : Boo
     let p := o.promise
     !p.callbacks.contains o.id
 
+/-- Every registered awaiter shares its awaited promise's origin.
+
+    The door is in `promiseRegisterCallback` and `taskSuspend`, and it is
+    lexical -- comparing two origins reads nothing -- so a cross-origin
+    registration is refused before any lookup. That is what lets an
+    implementation shard on the origin: an awaits-edge never leaves the
+    partition it started in, so settling a promise wakes only awaiters
+    the same shard already holds.
+
+    Stated over the store rather than over the door because the door is
+    not the claim: what must hold is that no reachable state CONTAINS
+    such an edge, however it got there. `taskFence` has no entry of its
+    own -- it creates or settles and is gone, leaving no edge for a
+    state predicate to catch -- so its door is checked by the scripts
+    that exercise it, not here. -/
+def well_formed_promise_callbacks_same_origin (_now : Nat) (s : ServerState) : Bool :=
+  s.objects.all fun o =>
+    o.promise.callbacks.all (·.sameOrigin o.id)
+
 def well_formed_promise_created_at_lte_now (now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     p.createdAt ≤ now
@@ -546,7 +565,9 @@ promise pending before and settled after loses one. -/
     as a step count: an implementation may register or drain a whole
     ledger in one transaction, and doing so is not a violation. What is
     forbidden is movement in the wrong DIRECTION. -/
-def subsetOf (xs ys : List String) : Bool := xs.all ys.contains
+-- Generic over the element: callbacks and resumes are ids, listeners
+-- are addresses, and the containment argument is the same for both.
+def subsetOf {α} [BEq α] (xs ys : List α) : Bool := xs.all ys.contains
 
 def preserved_promise_state_frozen_once_settled (_now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o =>
@@ -1118,6 +1139,8 @@ def catalogue : List Named :=
       , property := .state well_formed_promise_obligations_require_external },
     { name := "well_formed_promise_awaiter_is_not_self"
       , property := .state well_formed_promise_awaiter_is_not_self },
+    { name := "well_formed_promise_callbacks_same_origin"
+      , property := .state well_formed_promise_callbacks_same_origin },
     { name := "well_formed_promise_created_at_lte_now"
       , property := .state well_formed_promise_created_at_lte_now },
     { name := "well_formed_promise_settled_at_lte_now"
@@ -1406,23 +1429,23 @@ they are the strongest form of "unobservable" the type system can give:
 change the hidden field, get the same record. -/
 
 theorem well_formed_promise_record_hides_callbacks
-    (p : PromiseObject) (a id : String) :
+    (p : PromiseObject) (a id : Ident) :
     (p.addCallback a).toRecord id = p.toRecord id := by
   unfold PromiseObject.addCallback
   split <;> rfl
 
 theorem well_formed_promise_record_hides_listeners
-    (p : PromiseObject) (a id : String) :
+    (p : PromiseObject) (a : String) (id : Ident) :
     (p.addListener a).toRecord id = p.toRecord id := by
   unfold PromiseObject.addListener
   split <;> rfl
 
 theorem well_formed_task_record_hides_deadlines
-    (t : TaskObject) (e r : Option Nat) (id : String) :
+    (t : TaskObject) (e r : Option Nat) (id : Ident) :
     ({ t with expiresAt := e, retryAt := r } : TaskObject).toRecord id
       = t.toRecord id := rfl
 
-theorem well_formed_task_record_resumes_is_a_count (t : TaskObject) (id : String) :
+theorem well_formed_task_record_resumes_is_a_count (t : TaskObject) (id : Ident) :
     (t.toRecord id).resumes = t.resumes.length := rfl
 
 end Properties

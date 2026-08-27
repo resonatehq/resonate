@@ -32,6 +32,12 @@ abbrev D := Except String
 private def obj? (j : Json) (k : String) : D Json := j.getObjVal? k
 
 private def str (j : Json) (k : String) : D String := do (← obj? j k).getStr?
+
+/-- An id field. This is the only place a wire string becomes an
+    `Ident`: the specification carries the pair, the trace carries
+    `origin:suffix`, and `Ident.parse` is the seam. -/
+private def ident (j : Json) (k : String) : D ServerModel.Ident := do
+  return ServerModel.Ident.parse (← str j k)
 private def nat (j : Json) (k : String) : D Nat := do (← obj? j k).getNat?
 
 private def strOpt (j : Json) (k : String) : Option String :=
@@ -76,7 +82,7 @@ def taskState : String → TaskState
   | _           => .pending
 
 def promiseOf (j : Json) : D PromiseRecord := do
-  return { id        := ← str j "id",
+  return { id        := ← ident j "id",
            state     := promiseState (← str j "state"),
            param     := valueAt j "param",
            value     := valueAt j "value",
@@ -86,7 +92,7 @@ def promiseOf (j : Json) : D PromiseRecord := do
            settledAt := natOpt j "settledAt" }
 
 def taskOf (j : Json) : D TaskRecord := do
-  return { id      := ← str j "id",
+  return { id      := ← ident j "id",
            state   := taskState (← str j "state"),
            version := ← nat j "version",
            resumes := (natOpt j "resumes").getD 0,
@@ -111,11 +117,11 @@ private def sub? {α} (dec : Json → D α) (j : Json) (k : String) : Option α 
 def fenceAction (kind : String) (ad : Json) : D TaskFenceAction :=
   match kind with
   | "promise.create" => do
-      let pid ← str ad "id"; let t ← nat ad "timeoutAt"
+      let pid ← ident ad "id"; let t ← nat ad "timeoutAt"
       pure <| TaskFenceAction.create
         { id := pid, timeoutAt := t, param := valueAt ad "param", tags := tagsAt ad "tags" }
   | "promise.settle" => do
-      let pid ← str ad "id"; let st ← str ad "state"
+      let pid ← ident ad "id"; let st ← str ad "state"
       pure <| TaskFenceAction.settle
         { id := pid, state := promiseState st, value := valueAt ad "value" }
   | k => throw s!"task.fence: unsupported action kind: {k}"
@@ -123,37 +129,37 @@ def fenceAction (kind : String) (ad : Json) : D TaskFenceAction :=
 def decodeRequest (kind : String) (d : Json) : D Request := do
   match kind with
   | "promise.get" => do
-      let id ← str d "id"
+      let id ← ident d "id"
       return Request.promiseGet { id := id }
   | "promise.create" => do
-      let id ← str d "id"; let t ← nat d "timeoutAt"
+      let id ← ident d "id"; let t ← nat d "timeoutAt"
       return Request.promiseCreate
         { id := id, timeoutAt := t, param := valueAt d "param", tags := tagsAt d "tags" }
   | "promise.settle" => do
-      let id ← str d "id"; let st ← str d "state"
+      let id ← ident d "id"; let st ← str d "state"
       return Request.promiseSettle
         { id := id, state := promiseState st, value := valueAt d "value" }
   | "promise.register_callback" => do
-      let aw ← str d "awaited"; let ar ← str d "awaiter"
+      let aw ← ident d "awaited"; let ar ← ident d "awaiter"
       return Request.promiseRegisterCallback { awaited := aw, awaiter := ar }
   | "promise.register_listener" => do
-      let aw ← str d "awaited"; let ad ← str d "address"
+      let aw ← ident d "awaited"; let ad ← str d "address"
       return Request.promiseRegisterListener { awaited := aw, address := ad }
   | "task.get" => do
-      let id ← str d "id"
+      let id ← ident d "id"
       return Request.taskGet { id := id }
   | "task.acquire" => do
-      let id ← str d "id"; let v ← nat d "version"
+      let id ← ident d "id"; let v ← nat d "version"
       let pid ← str d "pid"; let ttl ← nat d "ttl"
       return Request.taskAcquire { id := id, version := v, pid := pid, ttl := ttl }
   | "task.release" => do
-      let id ← str d "id"; let v ← nat d "version"
+      let id ← ident d "id"; let v ← nat d "version"
       return Request.taskRelease { id := id, version := v }
   | "task.halt" => do
-      let id ← str d "id"
+      let id ← ident d "id"
       return Request.taskHalt { id := id }
   | "task.continue" => do
-      let id ← str d "id"
+      let id ← ident d "id"
       return Request.taskContinue { id := id }
   | "task.create" => do
       -- The action is a `{kind, head, data}` envelope, like every other
@@ -162,7 +168,7 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
       -- trace: no hand-written capture ever sent a task.create.
       let a ← obj? (← obj? d "action") "data"
       let pid ← str d "pid"; let ttl ← nat d "ttl"
-      let aid ← str a "id"; let ato ← nat a "timeoutAt"
+      let aid ← ident a "id"; let ato ← nat a "timeoutAt"
       let act : PromiseCreateReq :=
         { id := aid, timeoutAt := ato, param := valueAt a "param", tags := tagsAt a "tags" }
       return Request.taskCreate { pid := pid, ttl := ttl, action := act }
@@ -172,14 +178,14 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
       let mut out : List PromiseRegisterCallbackReq := []
       for a in acts do
         let ad ← obj? a "data"
-        let aw ← str ad "awaited"; let ar ← str ad "awaiter"
+        let aw ← ident ad "awaited"; let ar ← ident ad "awaiter"
         out := out ++ [{ awaited := aw, awaiter := ar }]
-      let id ← str d "id"; let v ← nat d "version"
+      let id ← ident d "id"; let v ← nat d "version"
       return Request.taskSuspend { id := id, version := v, actions := out }
   | "task.fulfill" => do
       let ad ← obj? (← obj? d "action") "data"
-      let id ← str d "id"; let v ← nat d "version"
-      let pid ← str ad "id"; let st ← str ad "state"
+      let id ← ident d "id"; let v ← nat d "version"
+      let pid ← ident ad "id"; let st ← str ad "state"
       let act : PromiseSettleReq :=
         { id := pid, state := promiseState st, value := valueAt ad "value" }
       return Request.taskFulfill { id := id, version := v, action := act }
@@ -190,14 +196,14 @@ def decodeRequest (kind : String) (d : Json) : D Request := do
       let a  ← obj? d "action"
       let ak ← str a "kind"
       let ad ← obj? a "data"
-      let id ← str d "id"; let v ← nat d "version"
+      let id ← ident d "id"; let v ← nat d "version"
       let act ← fenceAction ak ad
       return Request.taskFence { id := id, version := v, action := act }
   | "task.heartbeat" => do
       let ts ← (← obj? d "tasks").getArr?
       let mut out : List TaskRef := []
       for t in ts do
-        let tid ← str t "id"; let tv ← nat t "version"
+        let tid ← ident t "id"; let tv ← nat t "version"
         out := out ++ [{ id := tid, version := tv }]
       let pid ← str d "pid"
       return Request.taskHeartbeat { pid := pid, tasks := out }

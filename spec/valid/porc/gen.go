@@ -63,7 +63,7 @@ func NewGen(seed int64, origin string) *Gen {
 	return &Gen{r: rand.New(rand.NewSource(seed)), origin: origin, now: 1000, Jumpy: true}
 }
 
-func (g *Gen) id(suffix string) string { return g.origin + "." + suffix }
+func (g *Gen) id(suffix string) string { return g.origin + ":" + suffix }
 
 // tick advances the clock. Sometimes by a lot, so deadlines are crossed
 // and R1/R5 become enabled — a generator that never lets time pass
