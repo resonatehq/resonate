@@ -17,7 +17,6 @@ use crate::auth;
 use crate::config::Config;
 use crate::metrics;
 use crate::processing::processing_timeouts;
-use crate::util;
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
@@ -30,6 +29,7 @@ use resonate_core::types::{
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
     TaskSuspendData, TaskSuspendPreloadData, SUPPORTED_VERSIONS,
 };
+use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use resonate_server_dbms::{
     PromiseCreateParams, PromiseSettleParams, ScheduleCreateParams, Storage, StorageError,

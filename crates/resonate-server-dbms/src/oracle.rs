@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::util;
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
@@ -18,6 +17,7 @@ use resonate_core::types::{
     TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData,
     TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
+use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use std::sync::Mutex;
 

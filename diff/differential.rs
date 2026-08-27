@@ -33,16 +33,15 @@ fn db_lock() -> &'static Mutex<()> {
     DB_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-use resonate::{
-    config::Config,
-    oracle::{Oracle, SharedOracle},
-    server::Server,
-};
+use resonate::{config::Config, server::Server};
 use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::ResonateServer;
 use resonate_server_dbms::{
-    persistence_mysql::MysqlStorage, persistence_postgres::PostgresStorage,
-    persistence_sqlite::SqliteStorage, Storage,
+    oracle::{Oracle, SharedOracle},
+    persistence_mysql::MysqlStorage,
+    persistence_postgres::PostgresStorage,
+    persistence_sqlite::SqliteStorage,
+    Storage,
 };
 use serde_json::{json, Value};
 

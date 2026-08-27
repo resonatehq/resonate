@@ -11,7 +11,10 @@ concurrency-stress = []
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tracing = "0.1"
 rusqlite = { version = "0.31", features = ["bundled"] }

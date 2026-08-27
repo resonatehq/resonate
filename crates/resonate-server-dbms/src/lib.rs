@@ -8,6 +8,7 @@
 //! This is where `ResonateEngine` will be defined, and where the shared server
 //! built on top of it will live. Today it is the storage layer alone.
 
+pub mod oracle;
 pub mod persistence_mysql;
 pub mod persistence_postgres;
 pub mod persistence_sqlite;

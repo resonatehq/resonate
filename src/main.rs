@@ -6,7 +6,6 @@ mod metrics;
 mod processing;
 mod server;
 mod transport;
-mod util;
 
 use std::sync::Arc;
 

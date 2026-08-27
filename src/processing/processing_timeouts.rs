@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::metrics;
 use crate::server::Server;
-use crate::util;
+use resonate_core::util;
 use resonate_server_dbms::{Db, StorageResult};
 
 /// Background timeout processing loop.

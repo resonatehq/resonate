@@ -2690,8 +2690,11 @@ name = "resonate-core"
 version = "0.9.8"
 dependencies = [
  "async-trait",
+ "chrono",
+ "cron",
  "serde",
  "serde_json",
+ "tracing",
  "url",
  "validator",
 ]
@@ -2700,12 +2703,15 @@ dependencies = [
 name = "resonate-server-dbms"
 version = "0.9.8"
 dependencies = [
+ "async-trait",
  "resonate-core",
  "rusqlite",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",
  "tracing",
+ "validator",
 ]
 
 [[package]]
