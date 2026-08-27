@@ -400,9 +400,19 @@ practice, but it is a real narrowing of the wire format.
 
 `origin_id`, `parent_id` and `external` are in the schema as the starting DDL
 asked, with the recommended index on `origin_id`. Nothing in the server reads
-them yet; `external` is load-bearing only for the constraint in finding 3.
+them yet; `external` is load-bearing only for the constraint in finding 4.
 `origin_id` is `split_part(id, ':', 1)`, which is *not* the same as the
 multi-table backend's unused `origin` column (`tags->>'resonate:origin'`).
+
+`pmessage`, `tmessage`, `func` and `args` are likewise declared and unread —
+plain nullable `TEXT`. They sit **last** in the table deliberately. Postgres
+records a tuple's attribute count in its header and stops storing at the last
+non-NULL attribute, so a run of trailing NULLs occupies no space, and the null
+bitmap covering them stays 4 bytes because 30 columns fit the same word 26 did.
+Measured: a pending promise with all four unset is 131 bytes, byte-for-byte what
+it was before the columns existed. Declared anywhere earlier, every row would
+pay for the slot — which matters more here than in the multi-table layout,
+because a task state transition rewrites the whole promise row.
 
 ### 10. Minor, in the starting DDL
 

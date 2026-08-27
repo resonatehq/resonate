@@ -87,7 +87,23 @@ CREATE TABLE IF NOT EXISTS promises (
   resumes       TEXT[] NOT NULL DEFAULT '{}',  -- ids ready for me    (ready = true)
 
   -- listeners -----------------------------------------------------------------
-  listeners     TEXT[] NOT NULL DEFAULT '{}'
+  listeners     TEXT[] NOT NULL DEFAULT '{}',
+
+  -- ── unconsumed ─────────────────────────────────────────────────────────
+  -- Nothing reads these yet.
+  --
+  -- Declared last on purpose. Postgres records a tuple's attribute count in
+  -- its header and stops storing at the last non-NULL one, so a run of
+  -- trailing NULLs occupies no space; the null bitmap that covers them also
+  -- stays 4 bytes, since 30 columns fit the same word 26 did. Measured: a
+  -- pending promise with all four unset is 131 bytes, exactly what it was
+  -- before these columns existed. Put them anywhere earlier and every row
+  -- pays for the slot -- which matters here, because a task state transition
+  -- rewrites the whole promise row.
+  pmessage      TEXT,
+  tmessage      TEXT,
+  func          TEXT,
+  args          TEXT
 );
 
 -- The promise timeout sweep queue is NOT a column: promise_timeouts membership
