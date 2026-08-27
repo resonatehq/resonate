@@ -1,26 +1,20 @@
 [project]
-name = "resonate-sdk-aws"
+name = "resonate-base"
 version = "0.8.0"
-description = "AWS Lambda support for the Resonate SDK by Resonate HQ, Inc"
+description = "Shared protocol definitions for the Resonate SDK and its connectors, by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
-dependencies = [
-    "msgspec>=0.21.1,<1",
-    "resonate-sdk>=0.8.0,<0.9",
-]
+dependencies = []
 
 [project.urls]
 Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
 Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
 Source = "https://github.com/resonatehq/resonate-sdk-py"
 
-[tool.uv.sources]
-resonate-sdk = { workspace = true }
-
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "resonate_aws"
+module-name = "resonate_base"

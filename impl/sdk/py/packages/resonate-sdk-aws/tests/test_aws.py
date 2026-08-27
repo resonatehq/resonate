@@ -20,8 +20,9 @@ from typing import TYPE_CHECKING, Any, cast
 import msgspec
 import pytest
 from resonate_aws import Resonate, _self_routing_resolver
+from resonate_base.connections import Source
 
-from resonate.connections import HttpConnection, Source
+from resonate.connections import HttpConnection
 from resonate.error import AlreadyRegisteredError, ApplicationError
 
 if TYPE_CHECKING:

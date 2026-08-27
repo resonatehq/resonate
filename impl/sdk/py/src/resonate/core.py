@@ -16,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Literal
 
 import msgspec
+from resonate_base.ids import origin_of
 
 from resonate.codec import Codec
 from resonate.context import Context, TargetResolver
@@ -30,7 +31,6 @@ from resonate.error import (
     Suspended,
 )
 from resonate.heartbeat import Heartbeat, NoopHeartbeat
-from resonate.ids import origin_of
 from resonate.observability import Observer, logging_observer
 from resonate.registry import Registry
 from resonate.retry import Never, RetryPolicy

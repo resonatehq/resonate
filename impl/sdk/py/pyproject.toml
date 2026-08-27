@@ -1,6 +1,6 @@
 [project]
 name = "resonate-sdk"
-version = "0.7.4"
+version = "0.8.0"
 description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
@@ -8,10 +8,15 @@ requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.13.5,<4",
     "msgspec>=0.21.1,<1",
+    "resonate-base>=0.8.0,<0.9",
 ]
 
+# Connectors are NOT extras. An extra would put the connector in this
+# distribution's published dependency metadata, recreating the arrow
+# (resonate-sdk -> resonate-nats -> resonate-base) that the package split
+# exists to remove, and every future connector would want one. Install a
+# connector directly: `pip install resonate-nats`.
 [project.optional-dependencies]
-nats = ["nats-py>=2.6.0,<3"]
 pydantic = ["pydantic>=2.0.0,<3"]
 pydantic-ai = [
     "pydantic-ai-slim>=2.8,<3",
@@ -31,15 +36,13 @@ build-backend = "uv_build"
 module-name = "resonate"
 
 [tool.uv.workspace]
-members = ["packages/*"]
-# ``resonate-testing`` is test-only support shared across every suite in the
-# monorepo. It is excluded from the workspace proper so it never lands in
-# ``uv build --all-packages`` / the release publish step; it is still
-# installed for every ``uv sync`` via the explicit path source below.
-exclude = ["packages/resonate-testing"]
+members = ["packages/resonate-sdk-aws", "packages/resonate-base", "packages/resonate-nats"]
 
 [tool.uv.sources]
+resonate-base = { workspace = true }
+resonate-nats = { workspace = true }
 resonate-testing = { path = "packages/resonate-testing", editable = true }
+resonate-sdk = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -54,10 +57,14 @@ dev = [
     "pydantic-ai-slim[mcp]>=2.8",
     "aws-lambda-typing>=2.20.0",
     "resonate-testing",
+    # Dev-only so the workspace suite can exercise the connector; deliberately
+    # not an extra (see the note above [project.optional-dependencies]).
+    "resonate-nats",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+addopts = "--import-mode=importlib"
 
 [tool.coverage.run]
-source = ["resonate", "resonate_aws"]
+source = ["resonate", "packages/*"]

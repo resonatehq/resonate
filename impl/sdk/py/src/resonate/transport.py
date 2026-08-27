@@ -12,7 +12,8 @@ from resonate.types import PromiseRecord
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from resonate.connections import Network, Source
+    from resonate_base.connections import Network, Source
+
     from resonate.observability import Observer
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class Response(msgspec.Struct, kw_only=True, frozen=True):
     """A parsed protocol response envelope: ``{ kind, head, data }``.
 
     The single parse boundary for everything arriving over the
-    :class:`~resonate.connections.Network`. Below this point the SDK works
+    :class:`~resonate_base.connections.Network`. Below this point the SDK works
     with a typed value and never asks "is this a dict?" again -- the shape
     questions are all answered here, once.
     """

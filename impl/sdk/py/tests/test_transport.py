@@ -7,12 +7,7 @@ import pytest
 from resonate_testing import StubNetwork, envelope
 
 from resonate.error import DecodingError, ServerError
-from resonate.transport import (
-    ExecuteMsg,
-    Message,
-    Transport,
-    UnblockMsg,
-)
+from resonate.transport import ExecuteMsg, Message, Transport, UnblockMsg
 from resonate.types import PromiseRecord, Value
 
 # -- send: envelope validation ------------------------------------------------

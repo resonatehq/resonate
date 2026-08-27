@@ -28,14 +28,11 @@ import os
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
+from resonate_base.connections import Network, Source
+from resonate_base.ids import validate_root_id
+
 from resonate.codec import Codec, NoopEncryptor
-from resonate.connections import (
-    HttpConnection,
-    LocalConnection,
-    Network,
-    Source,
-    SSEConnection,
-)
+from resonate.connections import HttpConnection, LocalConnection, SSEConnection
 from resonate.context import Opts
 from resonate.core import Core
 from resonate.dependencies import DependencyMap
@@ -47,7 +44,6 @@ from resonate.error import (
 )
 from resonate.handle import PromiseResult, ResonateHandle, Subscription
 from resonate.heartbeat import AsyncHeartbeat, NoopHeartbeat
-from resonate.ids import validate_root_id
 from resonate.observability import BackgroundTaskFailed, logging_observer
 from resonate.promises import Promises
 from resonate.registry import Registry
@@ -170,13 +166,13 @@ class Resonate:
     :class:`_Runtime` and is visible across every handle.
 
     Server communication is split across two protocols: exactly one
-    :class:`~resonate.connections.Network` carries requests, and one or more
-    :class:`~resonate.connections.Source` channels deliver push messages
+    :class:`~resonate_base.connections.Network` carries requests, and one or more
+    :class:`~resonate_base.connections.Source` channels deliver push messages
     (``Resonate(network=network, sources=[source, ...])``). The first source
     is the *primary* source: its unicast address is advertised for listener
     registration and its resolver mints ``resonate:target`` addresses. A
     connection implementing both protocols (e.g.
-    :class:`~resonate.connections.NatsConnection`) passed as ``network`` without
+    :class:`~resonate_nats.NatsConnection`) passed as ``network`` without
     explicit ``sources`` doubles as the sole source.
 
     Connection selection precedence: ``url`` > ``network`` > ``RESONATE_URL``
@@ -1113,8 +1109,8 @@ def _safe_ttl_ms(ttl: timedelta) -> int:
 
 #: The methods each protocol requires, for diagnostic messages only -- the
 #: authoritative definitions are the protocols themselves
-#: (:class:`~resonate.connections.Network`,
-#: :class:`~resonate.connections.Source`).
+#: (:class:`~resonate_base.connections.Network`,
+#: :class:`~resonate_base.connections.Source`).
 _PROTOCOL_METHODS: dict[type, tuple[str, ...]] = {
     Network: ("send", "start", "stop"),
     Source: (
@@ -1153,7 +1149,7 @@ def _select_connections(
     selects :class:`HttpConnection`, paired with an :class:`SSEConnection`
     against the same server unless explicit ``sources`` are given. An
     explicit ``network`` that also implements :class:`Source` (e.g.
-    :class:`~resonate.connections.NatsConnection`,
+    :class:`~resonate_nats.NatsConnection`,
     :class:`~resonate.connections.LocalConnection`) doubles as the sole source
     when none are given; a send-only network requires explicit ``sources``.
 

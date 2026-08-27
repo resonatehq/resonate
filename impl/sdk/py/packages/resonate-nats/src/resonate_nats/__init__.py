@@ -7,13 +7,15 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from resonate.error import NatsError
-from resonate.ids import origin_of
+from resonate_base.error import ConnectorError
+from resonate_base.ids import origin_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["NatsConnection"]
 
 # =============================================================================
 # CONSTANTS
@@ -39,7 +41,7 @@ DEFAULT_RECV_PREFIX = "resonate.recv"
 REPLY_HEADER = "Resonate-Reply-To"
 
 
-#: The lineage origin of an id -- see :mod:`resonate.ids`. Aliased here because
+#: The lineage origin of an id -- see :mod:`resonate_base.ids`. Aliased here because
 #: it is what selects the server's origin-state partition (below).
 _id_to_origin = origin_of
 
@@ -140,8 +142,8 @@ class NatsClient(Protocol):
 class NatsConnection:
     """NATS connection to resonate-on-nats.
 
-    Implements **both** protocols: :class:`~resonate.connections.Network` (the
-    request/response ``send`` path) and :class:`~resonate.connections.Source` (the
+    Implements **both** protocols: :class:`~resonate_base.connections.Network` (the
+    request/response ``send`` path) and :class:`~resonate_base.connections.Source` (the
     push-message ``recv`` path). It can therefore serve as the network, as a
     source, or as both at once. When used only as a source, :meth:`send` is
     simply never called; when used only as the network, no receiver is
@@ -160,9 +162,13 @@ class NatsConnection:
       (``{recv_prefix}.{group}``) queue-subscribed on ``group`` so exactly one
       group member receives each anycast message.
     - Addresses use the ``nats://`` scheme so the server's ``url.Parse`` maps
-      ``nats://{subject}`` back to ``{subject}``.
+      ``nats://{subject}`` back to ``{subject}``. This is the *substrate form*
+      described in :mod:`resonate_base.addresses`: the destination already is
+      an address in the NATS namespace, so nesting the canonical
+      ``uni@group/pid`` form inside it would buy nothing.
 
-    Requires the optional ``nats-py`` dependency (``uv add resonate-sdk[nats]``).
+    Install with ``uv add resonate-nats``; it depends on ``resonate-base`` and
+    ``nats-py``, never on ``resonate-sdk``.
     """
 
     def __init__(
@@ -210,7 +216,7 @@ class NatsConnection:
 
         Subscriptions are only opened when a receiver has been registered via
         :meth:`recv` -- i.e. when this connection is used as a
-        :class:`~resonate.connections.Source`. A network-only connection must not
+        :class:`~resonate_base.connections.Source`. A network-only connection must not
         subscribe: it would consume messages off the group's queue
         subscription and drop them, delaying the task until the server
         re-delivers it elsewhere. Register receivers **before** calling
@@ -243,7 +249,7 @@ class NatsConnection:
         """Publish a request and await its reply on a private inbox."""
         logger.debug("nats_connection req: %s", req)
         if not self._running:
-            raise NatsError(RuntimeError("connection has been stopped"))
+            raise ConnectorError(RuntimeError("connection has been stopped"))
         envelope = json.loads(req)
         origin = _routing_origin(envelope)
         # The server reads the origin from the head, not the subject; set both.
@@ -256,7 +262,7 @@ class NatsConnection:
             await self._nc.publish(subject, payload, headers={REPLY_HEADER: inbox})
             msg = await sub.next_msg(timeout=self._request_timeout)
         except Exception as exc:
-            raise NatsError(exc) from exc
+            raise ConnectorError(exc) from exc
 
         resp_str = msg.data.decode("utf-8")
         logger.debug("nats_connection res: %s", resp_str)

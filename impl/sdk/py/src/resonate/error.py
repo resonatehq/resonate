@@ -1,10 +1,48 @@
+"""The SDK's error vocabulary.
+
+Everything here describes *executing durable functions*: the codec's failures,
+the circuit breaker that skips work after a prior failure, the two control-flow
+signals that must dodge ``except Exception``, and the per-boundary union
+aliases that pin the whole set.
+
+Three names come from :mod:`resonate_base.error` and are re-exported so this
+module is the single import path for SDK users: :class:`ResonateError` (the
+root), :class:`ConnectorError` (what a transport raises -- see below), and
+:class:`InvalidIdError` (raised by the id and address formats).
+
+The split is by *who raises it*. A connector -- NATS, or something that does
+not exist yet -- raises :class:`ConnectorError` and needs nothing else, so that
+is all ``resonate-base`` ships. It is also the one open point in the vocabulary:
+because it names the category rather than each transport, :data:`SenderError`
+below can stay closed and exhaustively type-checked while the set of connectors
+stays open.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from resonate_base.error import ConnectorError, InvalidIdError, ResonateError
 
-class ResonateError(Exception):
-    """Top-level error type for the Resonate SDK."""
+__all__ = [
+    "AlreadyRegisteredError",
+    "ApplicationError",
+    "Base64DecodeError",
+    "ConnectorError",
+    "DecodingError",
+    "DispatchError",
+    "DurableOpError",
+    "FunctionNotFoundError",
+    "InvalidIdError",
+    "PlatformError",
+    "ResonateError",
+    "ResonateTimeoutError",
+    "SenderError",
+    "SerializationError",
+    "ServerError",
+    "StoppedError",
+    "Suspended",
+]
 
 
 class FunctionNotFoundError(ResonateError):
@@ -15,21 +53,6 @@ class FunctionNotFoundError(ResonateError):
 
     def __str__(self) -> str:
         return f"function not found: {self.name} (version {self.version})"
-
-
-class InvalidIdError(ResonateError):
-    """A caller-supplied root id the server's id format cannot carry.
-
-    See :func:`resonate.ids.validate_root_id`.
-    """
-
-    def __init__(self, id: str, reason: str) -> None:
-        self.id = id
-        self.reason = reason
-        super().__init__(id, reason)
-
-    def __str__(self) -> str:
-        return f"invalid id {self.id!r}: {self.reason}"
 
 
 class AlreadyRegisteredError(ResonateError):
@@ -81,24 +104,6 @@ class SerializationError(ResonateError):
 
     def __str__(self) -> str:
         return f"serialization error: {self.error}"
-
-
-class HttpError(ResonateError):
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-        super().__init__(error)
-
-    def __str__(self) -> str:
-        return f"http error: {self.error}"
-
-
-class NatsError(ResonateError):
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-        super().__init__(error)
-
-    def __str__(self) -> str:
-        return f"nats error: {self.error}"
 
 
 class Base64DecodeError(ResonateError):
@@ -190,7 +195,12 @@ class ResonateTimeoutError(ResonateError):
 #: What a :class:`~resonate.send.Sender` call can fail with. Every one of these
 #: reaches the caller from the wire: a non-2xx status, an unparseable response,
 #: or the underlying connection giving up.
-type SenderError = ServerError | DecodingError | HttpError | NatsError
+#:
+#: :class:`ConnectorError` stands for *every* transport, present and future --
+#: which is what keeps this union closed while the set of connectors stays
+#: open. Naming each transport here instead would mean a new entry, and a
+#: release, per connector.
+type SenderError = ServerError | DecodingError | ConnectorError
 
 #: What one durable operation (:mod:`resonate.effects`) can fail with -- the
 #: sender's vocabulary plus the codec's, plus the circuit-breaker's
@@ -223,7 +233,7 @@ if TYPE_CHECKING:
         pinning a signature with a ``const`` coercion.
         """
         match sender:
-            case ServerError() | DecodingError() | HttpError() | NatsError():
+            case ServerError() | DecodingError() | ConnectorError():
                 pass
             case _:
                 assert_never(sender)
@@ -232,8 +242,7 @@ if TYPE_CHECKING:
             case (
                 ServerError()
                 | DecodingError()
-                | HttpError()
-                | NatsError()
+                | ConnectorError()
                 | SerializationError()
                 | Base64DecodeError()
                 | StoppedError()
@@ -249,8 +258,7 @@ if TYPE_CHECKING:
                 | InvalidIdError()
                 | ServerError()
                 | DecodingError()
-                | HttpError()
-                | NatsError()
+                | ConnectorError()
             ):
                 pass
             case _:

@@ -20,6 +20,20 @@ The Resonate Python SDK enables developers to build reliable and scalable cloud 
 - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
 - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
 
+## Packages
+
+| Package | Module | What it is |
+|---|---|---|
+| `resonate-sdk` | `resonate` | The SDK: durable functions, context, the HTTP/SSE/local transports. |
+| `resonate-base` | `resonate_base` | Connector seam: the `Network`/`Source` protocols, `ConnectorError`, the delivery address format, and the promise id format. No third-party dependencies. |
+| `resonate-nats` | `resonate_nats` | NATS connector. Install with `pip install resonate-nats`. |
+| `resonate-sdk-aws` | `resonate_aws` | AWS Lambda worker shim. |
+
+Connectors depend on `resonate-base` alone, never on `resonate-sdk` — and they
+are **not** extras of `resonate-sdk`. Installing one is `pip install
+resonate-nats`, so the SDK's dependency metadata never names a connector and
+the arrow only ever points one way.
+
 ## Requirements
 
 - **Python ≥3.12**

@@ -9,11 +9,11 @@ import aiohttp
 import msgspec
 import pytest
 
-from resonate import now_ms
 from resonate.connections import HttpConnection, LocalConnection, SSEConnection
 from resonate.connections.http import DEFAULT_CONN_LIMIT
 from resonate.connections.local import I64_MAX
-from resonate.error import HttpError
+from resonate.error import ConnectorError
+from resonate.timing import now_ms
 
 # -- helpers ------------------------------------------------------------------
 
@@ -541,7 +541,7 @@ async def test_sse_connection_start_opens_listener_and_stop_tears_down() -> None
 # Resilience: HttpConnection.send must survive a server outage and recover.
 # Mirrors the SSE listener's retry-with-backoff -- without it, any
 # task.create / promise.create / task.fulfill / promise.settle in flight when
-# the server died (or before it came up) would propagate HttpError and strand
+# the server died (or before it came up) would propagate ConnectorError and strand
 # the awaiting handle. See resonate.connections.http.HttpConnection.send.
 # ---------------------------------------------------------------------------
 
@@ -596,7 +596,7 @@ async def test_http_send_retries_through_connection_outage(
     """``send`` must retry on ``aiohttp.ClientError`` and recover.
 
     Reproduces ``resonate dev`` not yet running when the client makes a
-    request: without retry, the first ``task.create`` raises ``HttpError``,
+    request: without retry, the first ``task.create`` raises ``ConnectorError``,
     the bg task aborts, and ``handle.result()`` hangs forever.
     """
     net = HttpConnection("http://localhost:8001")
@@ -635,7 +635,7 @@ async def test_http_send_stops_retrying_after_stop(
 
     await net.stop()  # signals _stop_event and flips _running
 
-    with pytest.raises(HttpError):
+    with pytest.raises(ConnectorError):
         await asyncio.wait_for(send_task, timeout=2.0)
 
 
@@ -643,7 +643,7 @@ async def test_http_send_stops_retrying_after_stop(
 async def test_http_send_after_stop_raises_http_error_not_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A ``send`` racing with ``stop`` must surface :class:`HttpError`.
+    """A ``send`` racing with ``stop`` must surface :class:`ConnectorError`.
 
     Reproduces the Ctrl+C shutdown race: ``Resonate.stop`` closes the
     aiohttp session by design *before* joining bg tasks, so an in-flight
@@ -674,7 +674,7 @@ async def test_http_send_after_stop_raises_http_error_not_runtime_error(
     # raises -- that is exactly the shutdown race we want to model.
     net._running = False
 
-    with pytest.raises(HttpError):
+    with pytest.raises(ConnectorError):
         await net.send("{}")
 
 
@@ -692,7 +692,7 @@ async def test_http_send_does_not_open_a_session_after_stop() -> None:
 
     assert net._session is None
 
-    with pytest.raises(HttpError):
+    with pytest.raises(ConnectorError):
         await net.send("{}")
 
     # No session was created during the failed ``send``.
@@ -733,7 +733,7 @@ async def test_http_send_before_start_does_not_raise_stopped_error(
     scheduled via ``asyncio.create_task`` but the event loop has not yielded
     yet when user code calls an API (e.g. ``resonate.schedule()``). Before
     this fix, ``send``'s ``if not self._running`` guard fired immediately,
-    raising a misleading ``HttpError("network has been stopped")`` even though
+    raising a misleading ``ConnectorError("network has been stopped")`` even though
     ``stop()`` was never called. The fix adds a ``_stopped`` flag that is only
     set by ``stop()``, so "not yet started" and "explicitly stopped" are
     distinct states.
@@ -764,7 +764,7 @@ async def test_http_send_before_start_does_not_raise_stopped_error(
 async def test_http_send_after_stop_raises_even_if_never_started(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``send`` must raise ``HttpError`` after ``stop()``, even without a prior ``start()``.
+    """``send`` must raise ``ConnectorError`` after ``stop()``, even without a prior ``start()``.
 
     ``stop()`` sets ``_stopped = True``; the guard in ``send()`` keys on
     ``_stopped``, so an explicitly stopped network is always refused regardless
@@ -778,7 +778,7 @@ async def test_http_send_after_stop_raises_even_if_never_started(
     await net.stop()
     assert net._stopped
 
-    with pytest.raises(HttpError):
+    with pytest.raises(ConnectorError):
         await net.send("{}")
 
 

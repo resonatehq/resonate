@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock, patch
 import msgspec
 import pytest
 
-from resonate import now_ms
 from resonate.codec import Codec, NoopEncryptor, _encode_error
 from resonate.connections import LocalConnection
 from resonate.connections.local import Task
@@ -40,6 +39,7 @@ from resonate.registry import Registry
 from resonate.retry import Constant, Never
 from resonate.send import Sender
 from resonate.testing import cache_of
+from resonate.timing import now_ms
 from resonate.transport import Transport
 from resonate.types import PromiseRecord, TaskData, Value
 

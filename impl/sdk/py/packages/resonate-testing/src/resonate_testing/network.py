@@ -2,8 +2,8 @@
 
 One family of doubles, replacing the four near-identical ones the suite used to
 carry (``StubNetwork`` twice, ``_FakeNetwork``, ``_RecordingNetwork``). All of
-them implement both :class:`~resonate.connections.Network` and
-:class:`~resonate.connections.Source`, because the in-process connection they
+them implement both :class:`~resonate_base.connections.Network` and
+:class:`~resonate_base.connections.Source`, because the in-process connection they
 stand in for does too.
 """
 
@@ -163,7 +163,7 @@ class FailingNetwork(StubNetwork):
 
 
 class FakeSource:
-    """Minimal :class:`~resonate.connections.Source` for construction tests."""
+    """Minimal :class:`~resonate_base.connections.Source` for construction tests."""
 
     def __init__(self, pid: str = "src", group: str = "grp") -> None:
         self._pid = pid
@@ -220,7 +220,7 @@ class FakeNetwork(FakeSource):
 
 
 class SendOnlyNetwork:
-    """A :class:`~resonate.connections.Network` with no source half."""
+    """A :class:`~resonate_base.connections.Network` with no source half."""
 
     def __init__(self) -> None:
         self.sent: list[str] = []

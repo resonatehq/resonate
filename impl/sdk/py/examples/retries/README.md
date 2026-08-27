@@ -7,7 +7,7 @@ Resonate's retry rule:
 A function that never calls `ctx.run` / `ctx.rpc` / `ctx.sleep` / `ctx.promise` /
 `ctx.detached` is a plain **leaf**. It has no durable footprint, so re-running it
 is safe — on failure Resonate retries it per a
-[`RetryPolicy`](../../src/resonate/retry.py) until it succeeds or the policy gives
+[`RetryPolicy`](../../packages/resonate-base/src/resonate_base/retry.py) until it succeeds or the policy gives
 up. A function that *does* perform a durable op is a **workflow**, recovered by
 replay from its durable promises, and is never retried.
 
@@ -37,7 +37,7 @@ For the run-as-root-task paths (`resonate.run`, `resonate.rpc`, `ctx.rpc`), a
 remote dispatch carries no policy on the wire — the executing worker resolves it
 from the registry, which is why registering `charge` with a policy is what makes
 those paths retry. Built-in policies live in
-[`resonate.retry`](../../src/resonate/retry.py): `Exponential`, `Linear`,
+[`resonate.retry`](../../packages/resonate-base/src/resonate_base/retry.py): `Exponential`, `Linear`,
 `Constant`, `Never`.
 
 ## Run it

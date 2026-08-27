@@ -8,11 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import msgspec
 
-from resonate.error import (
-    ApplicationError,
-    Base64DecodeError,
-    SerializationError,
-)
+from resonate.error import ApplicationError, Base64DecodeError, SerializationError
 from resonate.types import PromiseRecord, Value
 
 if TYPE_CHECKING:

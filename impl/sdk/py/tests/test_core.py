@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from resonate import now_ms
 from resonate.codec import Codec, NoopEncryptor
 from resonate.connections import LocalConnection
 from resonate.core import Core, _ExecFulfilled, identity_target_resolver
@@ -41,6 +40,7 @@ from resonate.error import (
 )
 from resonate.registry import Registry
 from resonate.send import Sender
+from resonate.timing import now_ms
 from resonate.transport import Transport
 from resonate.types import PromiseCreateReq, PromiseSettleReq, TaskData
 

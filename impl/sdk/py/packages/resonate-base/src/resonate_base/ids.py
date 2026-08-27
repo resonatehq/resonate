@@ -24,7 +24,7 @@ trip intact.
 
 from __future__ import annotations
 
-from resonate.error import InvalidIdError
+from resonate_base.error import InvalidIdError
 
 #: Separates the origin from the lineage below it. A bare root joins its first
 #: lineage segment with this.

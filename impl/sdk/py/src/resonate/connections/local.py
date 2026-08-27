@@ -5,8 +5,8 @@ import contextlib
 from typing import TYPE_CHECKING, Any, Literal
 
 import msgspec
+from resonate_base import PROTOCOL_VERSION, addresses
 
-from resonate import PROTOCOL_VERSION
 from resonate.error import DecodingError, ServerError
 from resonate.timing import Clock, Sleeper, now_ms, sleep
 from resonate.types import PromiseState
@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 # =============================================================================
 # CONSTANTS
 # =============================================================================
+
+#: URL scheme of the delivery addresses this in-process server advertises.
+SCHEME = "local"
 
 PENDING_RETRY_TTL = 30_000
 I64_MAX = (1 << 63) - 1
@@ -1121,8 +1124,8 @@ class ServerState:
 class LocalConnection:
     """In-process connection backed by a :class:`ServerState` simulation.
 
-    Implements both :class:`~resonate.connections.Network` and
-    :class:`~resonate.connections.Source`, so a single instance serves as network
+    Implements both :class:`~resonate_base.connections.Network` and
+    :class:`~resonate_base.connections.Source`, so a single instance serves as network
     and source at once. Useful for running workflows without a Resonate
     server. A background tick loop advances time once per second; outgoing
     messages are dispatched to callbacks registered via :meth:`recv` as
@@ -1151,8 +1154,8 @@ class LocalConnection:
 
         self._pid = pid if pid is not None else "default"
         self._group = group if group is not None else "default"
-        self._unicast = f"local://uni@{self._group}/{self._pid}"
-        self._anycast = f"local://any@{self._group}/{self._pid}"
+        self._unicast = addresses.unicast(SCHEME, self._group, self._pid)
+        self._anycast = addresses.anycast(SCHEME, self._group, self._pid)
         self._lock = asyncio.Lock()
         self._subscribers: list[Callable[[str], None]] = []
         self._tick_handle: asyncio.Task[None] | None = None
@@ -1225,7 +1228,7 @@ class LocalConnection:
         self._subscribers.append(callback)
 
     def target_resolver(self, target: str) -> str:
-        return f"local://any@{target}"
+        return addresses.resolve_target(SCHEME, target)
 
     def _dispatch_messages(self, messages: list[OutgoingMessage]) -> None:
         """Dispatch outgoing messages to all subscribers, off the critical path."""

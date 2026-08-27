@@ -7,6 +7,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 import aiohttp
+from resonate_base import addresses
 
 from resonate.retry import ExponentialBackoff
 from resonate.timing import sleep
@@ -18,6 +19,10 @@ if TYPE_CHECKING:
     from resonate.timing import Sleeper
 
 logger = logging.getLogger(__name__)
+
+#: URL scheme of the delivery addresses this source advertises. The server
+#: dispatches on it to pick SSE long-polling as the delivery mechanism.
+SCHEME = "poll"
 
 
 # =============================================================================
@@ -68,14 +73,15 @@ def _data_lines(block: str) -> Iterable[str]:
 
 
 class SSEConnection:
-    """:class:`~resonate.connections.Source` implementation over Server-Sent Events.
+    """:class:`~resonate_base.connections.Source` implementation over Server-Sent Events.
 
     Incoming messages (execute/unblock) are received via SSE on
     ``GET /poll/{group}/{pid}`` of a Resonate server. Addresses use the
-    ``poll://`` scheme: ``poll://uni@group/id`` and ``poll://any@group/id``.
+    canonical form described in :mod:`resonate_base.addresses` under the
+    ``poll`` scheme: ``poll://uni@group/pid`` and ``poll://any@group/pid``.
 
     This is the push-message half only; requests to the server are sent
-    through a separate :class:`~resonate.connections.Network` (typically
+    through a separate :class:`~resonate_base.connections.Network` (typically
     :class:`~resonate.connections.HttpConnection` against the same server).
 
     The SSE listener runs as a background asyncio task; callbacks registered
@@ -99,8 +105,8 @@ class SSEConnection:
         self._sleeper = sleeper
         self._pid = pid if pid is not None else uuid.uuid4().hex
         self._group = group if group is not None else "default"
-        self._unicast = f"poll://uni@{self._group}/{self._pid}"
-        self._anycast = f"poll://any@{self._group}/{self._pid}"
+        self._unicast = addresses.unicast(SCHEME, self._group, self._pid)
+        self._anycast = addresses.anycast(SCHEME, self._group, self._pid)
         # Strip trailing slash(es) from url.
         self._url = url.rstrip("/")
         self._auth = auth
@@ -151,7 +157,7 @@ class SSEConnection:
 
     def target_resolver(self, target: str) -> str:
         """Resolve a target name to a ``poll://`` anycast address."""
-        return f"poll://any@{target}"
+        return addresses.resolve_target(SCHEME, target)
 
     # -- internals ------------------------------------------------------------
 

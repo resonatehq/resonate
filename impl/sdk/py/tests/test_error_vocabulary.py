@@ -6,9 +6,10 @@ declares it as a union alias instead (``SenderError``, ``DurableOpError``,
 module walks every variant of every alias, so "the suite knows its own
 contract" is literally true rather than aspirational.
 
-Two variants had *zero* coverage before this module existed --
-:class:`~resonate.error.NatsError` and :class:`~resonate.error.StoppedError`.
-Both now have their construction, message, and boundary role pinned.
+The vocabulary is closed at every point but one:
+:class:`~resonate_base.error.ConnectorError` stands for the substrate giving
+up, whichever substrate that is. That is what lets ``SenderError`` stay closed
+while the set of connectors stays open, so this module walks the *category*.
 """
 
 from __future__ import annotations
@@ -24,13 +25,12 @@ from resonate.error import (
     AlreadyRegisteredError,
     ApplicationError,
     Base64DecodeError,
+    ConnectorError,
     DecodingError,
     DispatchError,
     DurableOpError,
     FunctionNotFoundError,
-    HttpError,
     InvalidIdError,
-    NatsError,
     PlatformError,
     ResonateError,
     ResonateTimeoutError,
@@ -63,8 +63,7 @@ _VARIANTS: list[tuple[ResonateError, str]] = [
     (StoppedError(), "execution stopped"),
     (DecodingError("bad shape"), "decoding error: bad shape"),
     (SerializationError(ValueError("nope")), "serialization error: nope"),
-    (HttpError(OSError("refused")), "http error: refused"),
-    (NatsError(TimeoutError("no reply")), "nats error: no reply"),
+    (ConnectorError(OSError("refused")), "connector error: refused"),
     (Base64DecodeError(ValueError("pad")), "base64 decode error: pad"),
     (ApplicationError("domain failure"), "domain failure"),
     (ResonateTimeoutError(), "timeout"),
@@ -124,12 +123,15 @@ def members(alias: Any) -> set[type]:
 
 
 def test_sender_error_union_members() -> None:
-    """The wire boundary's vocabulary: status, shape, and two transports."""
+    """The wire boundary's vocabulary: a status, a shape, and *any* transport.
+
+    Three members, not one-per-transport-and-counting. Enumerating them here
+    would mean this union has to know every connector that will ever exist.
+    """
     assert members(SenderError) == {
         ServerError,
         DecodingError,
-        HttpError,
-        NatsError,
+        ConnectorError,
     }
 
 
@@ -196,20 +198,14 @@ async def test_stopped_error_is_the_cause_after_a_prior_durable_failure() -> Non
     assert isinstance(third.value.cause, StoppedError)
 
 
-# ── NatsError ──────────────────────────────────────────────────────
+# ── ConnectorError: the one open point ─────────────────────────────
 
 
-def test_nats_error_wraps_and_exposes_its_cause() -> None:
+def test_connector_error_wraps_and_exposes_its_cause() -> None:
     cause = TimeoutError("no responders")
-    err = NatsError(cause)
+    err = ConnectorError(cause)
     assert err.error is cause
-    assert str(err) == "nats error: no responders"
-
-
-def test_nats_error_belongs_to_the_sender_vocabulary() -> None:
-    """A NATS transport failure reaches callers as a sender failure, nothing else."""
-    assert NatsError in members(SenderError)
-    assert NatsError in members(DurableOpError)
+    assert str(err) == "connector error: no responders"
 
 
 # ── The BaseException pair ─────────────────────────────────────────
@@ -229,8 +225,10 @@ def test_platform_error_refuses_an_empty_cause_list() -> None:
 
 
 def test_platform_error_aggregates_and_exposes_a_primary_cause() -> None:
-    a, b = ServerError(500, "a"), HttpError(OSError("b"))
+    a, b = ServerError(500, "a"), ConnectorError(OSError("b"))
     err = PlatformError([a, b])
     assert err.causes == [a, b]
     assert err.cause is a
-    assert str(err) == "platform error: server error (code=500): a; http error: b"
+    assert str(err) == (
+        "platform error: server error (code=500): a; connector error: b"
+    )
