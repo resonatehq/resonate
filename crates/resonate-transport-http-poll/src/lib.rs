@@ -6,11 +6,12 @@
 //!
 //! Unlike the dialled transports this one has an inbound half: the server must
 //! host the endpoint workers connect to. [`PollRegistry`] is that connection
-//! pool, and the server mounts the route.
-
-//! Workers connect via `GET /poll/{group}/{id}` and receive messages as
-//! Server-Sent Events; the server holds the connections open and pushes to
-//! them based on poll:// address routing.
+//! pool, and something has to mount the route that fills it.
+//!
+//! Nothing does, at present. The gateway serves the RPC endpoint and nothing
+//! else, so a worker has no `GET /poll/{group}/{id}` to open an SSE connection
+//! against: the scheme is still registered and still routes, but the registry
+//! it routes to holds no connections until an endpoint is mounted again.
 
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "poll";
