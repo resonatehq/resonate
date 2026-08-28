@@ -30,6 +30,17 @@ use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
 
+/// The transports, handed back out of the wiring closure.
+///
+/// The server owns the router and the router owns the workers, but two things
+/// are still needed here: the poll registry, which the HTTP layer serves
+/// directly, and the workers by scheme, which have to be started before the
+/// listener comes up and stopped after it goes down.
+struct Transports {
+    poll_registry: Arc<PollRegistry>,
+    by_scheme: Vec<(String, Arc<dyn ResonateWorker>)>,
+}
+
 #[derive(Parser)]
 #[command(
     name = "resonate",
@@ -232,95 +243,118 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
     let is_sqlite = config.storage.storage_type == "sqlite";
-    let state = Arc::new(Server::new(config, auth_config, engine));
 
     // Build transports
     tracing::info!(
-        http_push_connect_timeout_ms = state.config.transports.http_push.connect_timeout,
-        http_push_request_timeout_ms = state.config.transports.http_push.request_timeout,
+        http_push_connect_timeout_ms = config.transports.http_push.connect_timeout,
+        http_push_request_timeout_ms = config.transports.http_push.request_timeout,
         http_poll_max_connections = poll_max_connections,
         http_poll_buffer_size = poll_buffer_size,
         "Transport config"
     );
-    // Every worker holds a handle to the server: an in-process worker calls it
-    // directly, and a remote worker will use it to report a delivery failure
-    // rather than dropping the message.
+
+    // What the closure below builds but the server does not own: the poll
+    // registry, which the HTTP layer also needs, and the workers by scheme,
+    // which have to be started and later stopped.
+    let mut transports: Option<Transports> = None;
+
+    // The ring is closed here, in one expression: the server holds the router,
+    // the router holds the workers, and every worker holds the server.
     //
-    // Weak, because the handle points back up the ownership chain: this owns
-    // the server, the server's router owns the workers. A strong handle would
-    // close that ring and nothing in it — server, storage, background tasks —
-    // would ever be dropped.
-    let server: Arc<dyn ResonateServer> = state.clone();
-    let server_handle = Arc::downgrade(&server);
+    // Weak, because that last link points back up the ownership chain — this
+    // owns the server, and a strong handle would mean nothing in the ring,
+    // server or storage or background task, was ever dropped. An in-process
+    // worker calls the server directly through it; a remote worker uses it to
+    // report a delivery failure rather than dropping the message.
+    //
+    // `new_cyclic` hands out that weak handle before the server exists, which
+    // is what lets the router be a constructor argument instead of something
+    // set afterwards. No worker upgrades it during construction — they only
+    // store it — so it is still dangling here and live by the time anything
+    // routes.
+    let state = Arc::new_cyclic(|weak: &std::sync::Weak<Server>| {
+        let server_handle: std::sync::Weak<dyn ResonateServer> = weak.clone();
 
-    let poll_registry = Arc::new(PollRegistry::new(
-        server_handle.clone(),
-        state.config.transports.http_poll.clone(),
-    ));
+        let poll_registry = Arc::new(PollRegistry::new(
+            server_handle.clone(),
+            config.transports.http_poll.clone(),
+        ));
 
-    // Scheme -> worker. A disabled transport is simply not registered, and the
-    // router reports its addresses as undeliverable.
-    let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+        // Scheme -> worker. A disabled transport is simply not registered, and
+        // the router reports its addresses as undeliverable.
+        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
 
-    if state.config.transports.http_push.enabled {
-        let worker: Arc<dyn ResonateWorker> =
-            Arc::new(resonate_transport_http_push::HttpPushTransport::new(
-                server_handle.clone(),
-                state.config.transports.http_push.clone(),
-            ));
-        for scheme in resonate_transport_http_push::SCHEMES {
-            workers.insert((*scheme).to_string(), Arc::clone(&worker));
+        if config.transports.http_push.enabled {
+            let worker: Arc<dyn ResonateWorker> =
+                Arc::new(resonate_transport_http_push::HttpPushTransport::new(
+                    server_handle.clone(),
+                    config.transports.http_push.clone(),
+                ));
+            for scheme in resonate_transport_http_push::SCHEMES {
+                workers.insert((*scheme).to_string(), Arc::clone(&worker));
+            }
+        } else {
+            tracing::info!("HTTP push transport disabled");
         }
-    } else {
-        tracing::info!("HTTP push transport disabled");
-    }
 
-    if state.config.transports.http_poll.enabled {
-        workers.insert(
-            resonate_transport_http_poll::SCHEME.to_string(),
-            poll_registry.clone(),
-        );
-    } else {
-        tracing::info!("HTTP poll transport disabled");
-    }
+        if config.transports.http_poll.enabled {
+            workers.insert(
+                resonate_transport_http_poll::SCHEME.to_string(),
+                poll_registry.clone(),
+            );
+        } else {
+            tracing::info!("HTTP poll transport disabled");
+        }
 
-    if state.config.transports.gcps.enabled {
-        workers.insert(
-            resonate_transport_gcps::SCHEME.to_string(),
-            Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
-                server_handle.clone(),
-                state.config.transports.gcps.clone(),
-            )),
-        );
-    }
+        if config.transports.gcps.enabled {
+            workers.insert(
+                resonate_transport_gcps::SCHEME.to_string(),
+                Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
+                    server_handle.clone(),
+                    config.transports.gcps.clone(),
+                )),
+            );
+        }
 
-    if state.config.transports.bash_exec.enabled {
-        workers.insert(
-            resonate_worker_bash::SCHEME.to_string(),
-            Arc::new(resonate_worker_bash::BashExecTransport::new(
-                server_handle.clone(),
-                state.config.transports.bash_exec.clone(),
-                state.config.tasks.lease_timeout,
-            )),
-        );
-    }
+        if config.transports.bash_exec.enabled {
+            workers.insert(
+                resonate_worker_bash::SCHEME.to_string(),
+                Arc::new(resonate_worker_bash::BashExecTransport::new(
+                    server_handle.clone(),
+                    config.transports.bash_exec.clone(),
+                    config.tasks.lease_timeout,
+                )),
+            );
+        }
+
+        transports = Some(Transports {
+            poll_registry,
+            by_scheme: workers
+                .iter()
+                .map(|(scheme, worker)| (scheme.clone(), Arc::clone(worker)))
+                .collect(),
+        });
+
+        let router: Arc<dyn ResonateRouter> =
+            Arc::new(transport::TransportDispatcher::new(workers));
+        Server::new(config, auth_config, engine, router)
+    });
+
+    let Transports {
+        poll_registry,
+        by_scheme: started,
+    } = transports.expect("the closure above always sets it");
 
     // Start every worker before anything can route to one. A worker that
     // cannot start is a startup failure, not a message that quietly goes
-    // nowhere later.
-    for (scheme, worker) in &workers {
+    // nowhere later. Nothing has routed yet: the listener is not up and the
+    // background loops are not spawned.
+    for (scheme, worker) in &started {
         worker
             .init()
             .await
             .map_err(|e| format!("transport '{scheme}' failed to start: {e}"))?;
     }
-    let started: Vec<Arc<dyn ResonateWorker>> = workers.values().cloned().collect();
-
-    let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
-    // The server emits; it needs somewhere to emit to. This is the last link
-    // of the ring — server holds router, router holds workers, worker holds
-    // server weakly — and it is why the workers' handle is weak.
-    state.set_router(Arc::clone(&router));
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -433,7 +467,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
         // Workers last: the loops that feed them have stopped, so this drains
         // what is already in flight rather than racing new deliveries.
-        for worker in started {
+        for (_, worker) in started {
             if let Err(e) = worker.stop().await {
                 tracing::warn!(error = %e, "transport did not stop cleanly");
             }

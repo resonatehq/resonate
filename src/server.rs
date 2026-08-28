@@ -26,7 +26,6 @@ use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use resonate_server_dbms::engine_port::{Input, Outgoing, Output, ResonateEngine};
 use resonate_transport_http_poll::PollRegistry;
-use std::sync::OnceLock;
 
 /// The running server — owns configuration, the engine, auth, and the router.
 pub struct Server {
@@ -37,12 +36,14 @@ pub struct Server {
     pub engine: Arc<dyn ResonateEngine>,
     /// Where a transition's messages go.
     ///
-    /// Set once, after construction, because the ring has to be broken
-    /// somewhere: this holds the router, the router holds the workers, and a
-    /// worker holds this — weakly, so nothing in the ring leaks. The weak
-    /// handle needs the server to exist first, so the router cannot be a
-    /// constructor argument.
-    router: OnceLock<Arc<dyn ResonateRouter>>,
+    /// A server without one could not deliver anything it produced, so it is
+    /// not optional and not late-bound: `deliver` has a router or the server
+    /// does not exist. The ring — server holds router, router holds workers,
+    /// worker holds server — is closed by `Arc::new_cyclic` at startup, which
+    /// puts the one weak link on the workers' handle, where it belongs: a
+    /// worker outliving its server is a real condition at shutdown, whereas a
+    /// server without a router was only ever an artifact of the wiring order.
+    router: Arc<dyn ResonateRouter>,
 }
 
 impl Server {
@@ -50,19 +51,13 @@ impl Server {
         config: Config,
         auth: Option<auth::AuthConfig>,
         engine: Arc<dyn ResonateEngine>,
+        router: Arc<dyn ResonateRouter>,
     ) -> Self {
         Self {
             engine,
             config,
             auth,
-            router: OnceLock::new(),
-        }
-    }
-
-    /// Hand the server its router. Called once, at startup.
-    pub fn set_router(&self, router: Arc<dyn ResonateRouter>) {
-        if self.router.set(router).is_err() {
-            tracing::error!("Router already set — ignoring");
+            router,
         }
     }
 
@@ -82,13 +77,6 @@ impl Server {
         if messages.is_empty() {
             return;
         }
-        let Some(router) = self.router.get() else {
-            tracing::error!(
-                count = messages.len(),
-                "No router set — dropping emitted messages"
-            );
-            return;
-        };
         let server_url = self.config.server.url.clone().unwrap_or_default();
         for msg in messages {
             let (address, payload) = match msg {
@@ -132,7 +120,7 @@ impl Server {
                     )
                 }
             };
-            if let Err(e) = router.route(&address, &payload).await {
+            if let Err(e) = self.router.route(&address, &payload).await {
                 tracing::warn!(address = %address, error = %e, "Message not delivered");
             }
         }
