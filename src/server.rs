@@ -16,28 +16,125 @@ use crate::auth;
 use crate::config::Config;
 use crate::metrics;
 use async_trait::async_trait;
+use resonate_core::router::ResonateRouter;
+use resonate_core::types::{
+    ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, UnblockMsg, UnblockMsgData,
+    UnblockMsgHead,
+};
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
-use resonate_server_dbms::engine::Engine;
-use resonate_server_dbms::Storage;
+use resonate_server_dbms::engine_port::{Input, Outgoing, Output, ResonateEngine};
 use resonate_transport_http_poll::PollRegistry;
+use std::sync::OnceLock;
 
-/// The running server — owns configuration, storage, and auth.
+/// The running server — owns configuration, the engine, auth, and the router.
 pub struct Server {
     pub config: Config,
     pub auth: Option<auth::AuthConfig>,
     /// Durable state and every transition over it. The server validates,
     /// hands over, and shapes what comes back.
-    pub engine: Engine,
+    pub engine: Arc<dyn ResonateEngine>,
+    /// Where a transition's messages go.
+    ///
+    /// Set once, after construction, because the ring has to be broken
+    /// somewhere: this holds the router, the router holds the workers, and a
+    /// worker holds this — weakly, so nothing in the ring leaks. The weak
+    /// handle needs the server to exist first, so the router cannot be a
+    /// constructor argument.
+    router: OnceLock<Arc<dyn ResonateRouter>>,
 }
 
 impl Server {
-    pub fn new(config: Config, auth: Option<auth::AuthConfig>, storage: Storage) -> Self {
+    pub fn new(
+        config: Config,
+        auth: Option<auth::AuthConfig>,
+        engine: Arc<dyn ResonateEngine>,
+    ) -> Self {
         Self {
-            engine: Engine::new(Arc::new(storage), config.debug),
+            engine,
             config,
             auth,
+            router: OnceLock::new(),
+        }
+    }
+
+    /// Hand the server its router. Called once, at startup.
+    pub fn set_router(&self, router: Arc<dyn ResonateRouter>) {
+        if self.router.set(router).is_err() {
+            tracing::error!("Router already set — ignoring");
+        }
+    }
+
+    /// Deliver what a transition emitted.
+    ///
+    /// This is what the message pump used to do on a 100 ms poll, over rows a
+    /// transition had left in an outbox. There is no queue between the two any
+    /// more: a message goes out as soon as the transaction that produced it has
+    /// committed.
+    ///
+    /// Delivery is best-effort, as it was: a failed route is logged and the
+    /// attempt is lost. An execute message comes back — the task stays pending
+    /// and its retry timeout re-emits it — and an unblock message does not,
+    /// which is the behaviour the outbox had too, since the pump deleted before
+    /// it delivered.
+    pub async fn deliver(&self, messages: Vec<Outgoing>) {
+        if messages.is_empty() {
+            return;
+        }
+        let Some(router) = self.router.get() else {
+            tracing::error!(
+                count = messages.len(),
+                "No router set — dropping emitted messages"
+            );
+            return;
+        };
+        let server_url = self.config.server.url.clone().unwrap_or_default();
+        for msg in messages {
+            let (address, payload) = match msg {
+                Outgoing::Execute {
+                    address,
+                    task_id,
+                    version,
+                } => {
+                    metrics::MESSAGES_TOTAL
+                        .with_label_values(&["execute"])
+                        .inc();
+                    tracing::info!(kind = "execute", task_id = %task_id, version, address = %address, "Dispatching execute message");
+                    (
+                        address,
+                        Message::Execute(ExecuteMsg {
+                            kind: "execute".to_string(),
+                            head: MessageHead {
+                                server_url: server_url.clone(),
+                            },
+                            data: ExecuteMsgData {
+                                task: ExecuteMsgTask {
+                                    id: task_id,
+                                    version,
+                                },
+                            },
+                        }),
+                    )
+                }
+                Outgoing::Unblock { address, promise } => {
+                    metrics::MESSAGES_TOTAL
+                        .with_label_values(&["unblock"])
+                        .inc();
+                    tracing::info!(kind = "unblock", promise_id = %promise.id, promise_state = %promise.state, address = %address, "Dispatching unblock message");
+                    (
+                        address,
+                        Message::Unblock(UnblockMsg {
+                            kind: "unblock".to_string(),
+                            head: UnblockMsgHead {},
+                            data: UnblockMsgData { promise },
+                        }),
+                    )
+                }
+            };
+            if let Err(e) = router.route(&address, &payload).await {
+                tracing::warn!(address = %address, error = %e, "Message not delivered");
+            }
         }
     }
 }
@@ -400,9 +497,15 @@ impl ResonateServer for Server {
         } else {
             None
         };
-        Ok(self
+        let Output {
+            response, messages, ..
+        } = self
             .engine
-            .dispatch(req, util::resolve_time(debug_time))
-            .await)
+            .process(Input::External(req), util::resolve_time(debug_time))
+            .await;
+        // Deliver after the transition has committed, never before: the engine
+        // returns only what its transaction actually wrote.
+        self.deliver(messages).await;
+        Ok(response.expect("invariant: External input always yields a response"))
     }
 }

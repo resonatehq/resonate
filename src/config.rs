@@ -43,10 +43,6 @@ pub struct Config {
     #[serde(default)]
     pub timeouts: TimeoutsConfig,
 
-    /// Message delivery configuration
-    #[serde(default)]
-    pub messages: MessagesConfig,
-
     /// Transport configuration
     #[serde(default)]
     pub transports: TransportsConfig,
@@ -281,33 +277,6 @@ impl Default for TimeoutsConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessagesConfig {
-    /// Background message delivery scan interval (ms)
-    #[serde(default = "default_message_poll_interval")]
-    pub poll_interval: u64,
-
-    /// Max messages to claim per delivery cycle
-    #[serde(default = "default_message_batch_size")]
-    pub batch_size: i64,
-}
-
-fn default_message_poll_interval() -> u64 {
-    100
-}
-fn default_message_batch_size() -> i64 {
-    100
-}
-
-impl Default for MessagesConfig {
-    fn default() -> Self {
-        Self {
-            poll_interval: default_message_poll_interval(),
-            batch_size: default_message_batch_size(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransportsConfig {
     /// HTTP push transport configuration
@@ -364,7 +333,6 @@ impl Default for Config {
             auth: None,
             tasks: TasksConfig::default(),
             timeouts: TimeoutsConfig::default(),
-            messages: MessagesConfig::default(),
             transports: TransportsConfig::default(),
             observability: ObservabilityConfig::default(),
         }

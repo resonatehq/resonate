@@ -13,6 +13,8 @@ use async_trait::async_trait;
 
 use resonate_core::types::{PromiseRecord, RequestEnvelope, ResponseEnvelope};
 
+use crate::StorageResult;
+
 /// One message a transition emitted, and where it goes.
 ///
 /// The engine does not build the wire form: an execute message carries a
@@ -136,11 +138,29 @@ pub trait ResonateEngine: Send + Sync {
     /// several implementations through the same sequence at the same instants.
     async fn process(&self, input: Input<'_>, now: i64) -> Output;
 
+    /// Fire every timeout now due, and return what they emitted.
+    ///
+    /// The bulk form. The design replaces it with [`ResonateEngine::due`]
+    /// listing what is due and `process(Internal(..))` firing them one at a
+    /// time, so a wheel that knows exactly what is due does exactly that much
+    /// work; until that exists this is what the timer loop calls. The count is
+    /// schedules fired, which the caller records.
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)>;
+
+    /// Is the engine paused? `debug.start` sets this, and the background loops
+    /// honour it so a test can drive the clock with `debug.tick` instead of
+    /// racing wall time.
+    fn is_paused(&self) -> bool {
+        false
+    }
+
+    /// Lightweight liveness probe.
+    async fn ping(&self) -> StorageResult<()>;
+
     /// Whether this engine returns what it emitted.
     ///
-    /// False while a backend still writes an outbox row and leaves delivery to
-    /// the pump. Temporary: it exists so the differential knows which engines
-    /// to compare emissions against, and goes away with the last outbox.
+    /// Every engine does now. Kept while the differential still holds the
+    /// oracle, which answers both ways.
     fn returns_messages(&self) -> bool {
         false
     }

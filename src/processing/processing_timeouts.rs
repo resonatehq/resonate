@@ -34,8 +34,13 @@ pub async fn timeout_processing_loop(
         match state.engine.tick(now).await {
             // The engine reports what happened; recording it is the caller's
             // job, the same way the router counts deliveries and the workers
-            // do not.
-            Ok(fired) => metrics::SCHEDULE_PROMISES_TOTAL.inc_by(fired as f64),
+            // do not. The messages the sweep emitted go out here — a
+            // redispatched task and a fired schedule both owe one, and there
+            // is no longer a pump to find them later.
+            Ok((fired, messages)) => {
+                metrics::SCHEDULE_PROMISES_TOTAL.inc_by(fired as f64);
+                state.deliver(messages).await;
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Background timeout processing failed: storage error");
             }

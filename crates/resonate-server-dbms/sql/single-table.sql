@@ -1,16 +1,19 @@
 -- =============================================================================
 -- Single-table Postgres schema
 -- =============================================================================
--- One promise is one row. Beside it sit only `outbox` (a message is not a
--- promise attribute — a settled promise can owe several) and `schedules`
--- (a separate id space and a genuinely different entity).
+-- One promise is one row. Beside it sits only `schedules` — a separate id space
+-- and a genuinely different entity.
 --
 -- Replaces the eight tables of the multi-table backend: promises,
 -- promise_timeouts, tasks, task_timeouts, callbacks, listeners,
 -- outgoing_execute, outgoing_unblock — plus schedule_timeouts, whose
 -- (timeout_at, id) was a verbatim copy of (next_run_at, id).
 --
--- Column names, the schema name and the shape of `outbox` are chosen so that
+-- There is no outbox either. A message is returned by the transition that
+-- emitted it and delivered by the caller, so there is nothing to store and
+-- nothing to drain.
+--
+-- Column names and the schema name are chosen so that
 -- `single-table-constraints.sql` applies to this schema unchanged.
 -- =============================================================================
 
@@ -63,9 +66,9 @@ CREATE TABLE IF NOT EXISTS promises (
                   OR COALESCE(tags->>'resonate:timer', '')    = 'true'
                   OR COALESCE(tags->>'resonate:external', '') = 'true') STORED,
 
-  -- The outbox foreign key needs a TOTAL key to reference, and "the promises
-  -- that are tasks" is a partial set. task_key is the id exactly when the row
-  -- is a task; UNIQUE tolerates the NULLs of the rows that are not.
+  -- Was the target of the outbox foreign key, which needed a TOTAL key to
+  -- reference where "the promises that are tasks" is a partial set. The outbox
+  -- is gone; the catalogue still keys task constraints off it.
   task_key      TEXT    GENERATED ALWAYS AS (
                   CASE WHEN tags ? 'resonate:target' THEN id END) STORED,
 
@@ -132,22 +135,6 @@ CREATE INDEX IF NOT EXISTS idx_promises_task
 CREATE INDEX IF NOT EXISTS idx_promises_callbacks
   ON promises USING GIN (callbacks);
 
--- --- outbox -----------------------------------------------------------------
--- `key` carries the deduplication the two outgoing_* tables got from their
--- primary keys: one pending execute per task (outgoing_execute PK (id)), one
--- pending unblock per (promise, address) (outgoing_unblock PK (promise_id, address)).
-
-CREATE TABLE IF NOT EXISTS outbox (
-  key      TEXT PRIMARY KEY,
-  kind     TEXT NOT NULL CHECK (kind IN ('execute', 'unblock')),
-  address  TEXT NOT NULL,
-  task_id  TEXT,
-  version  INT,
-  promise  JSONB
-);
-
-CREATE INDEX IF NOT EXISTS idx_outbox_kind ON outbox (kind, key);
-
 -- --- schedules --------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -167,10 +154,10 @@ CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at
   ON schedules (next_run_at ASC, id ASC);
 
 -- --- promise → wire JSON -----------------------------------------------------
--- The outbox stores the settled promise with the unblock message rather than
--- joining back at delivery time, so `consistent_outbox_unblock_names_settled_promise`
--- is checkable. Field names and omissions match `PromiseRecord`'s serde:
--- camelCase timestamps, `settledAt`/`headers`/`data` omitted when absent.
+-- An unblock message carries the settled promise, built here so the engine can
+-- return it from the statement that settled it. Field names and omissions match
+-- `PromiseRecord`'s serde: camelCase timestamps, `settledAt`/`headers`/`data`
+-- omitted when absent.
 CREATE OR REPLACE FUNCTION resonate._promise_json(
   id TEXT, state TEXT,
   param_headers JSONB, param_data TEXT,

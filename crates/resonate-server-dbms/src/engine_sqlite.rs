@@ -3822,6 +3822,18 @@ impl ResonateEngine for SqliteEngine {
         }
     }
 
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
+        self.transact(move |db| process_all_timeouts(db, now)).await
+    }
+
+    fn is_paused(&self) -> bool {
+        self.debug_mode.load(Ordering::SeqCst)
+    }
+
+    async fn ping(&self) -> StorageResult<()> {
+        self.query(|db| db.ping()).await
+    }
+
     fn returns_messages(&self) -> bool {
         true
     }

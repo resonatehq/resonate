@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use validator::Validate;
 
 use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
+use crate::StorageResult;
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
@@ -2427,6 +2428,23 @@ impl ResonateEngine for SharedOracle {
             messages: oracle.take_emitted(),
             timeouts: Vec::new(),
         }
+    }
+
+    /// The model is not a server, so nothing calls this for its count — it
+    /// exists to satisfy the port. The sweep is `debug.tick`'s.
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
+        let mut oracle = self.lock();
+        oracle.apply_timeout(
+            &Timeout::ScheduleDue {
+                schedule_id: String::new(),
+            },
+            now,
+        );
+        Ok((0, oracle.take_emitted()))
+    }
+
+    async fn ping(&self) -> StorageResult<()> {
+        Ok(())
     }
 
     fn returns_messages(&self) -> bool {

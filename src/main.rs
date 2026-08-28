@@ -23,7 +23,8 @@ use config::Config;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_server_dbms::{
-    persistence_mysql::MysqlStorage, persistence_sqlite::SqliteStorage, Storage,
+    engine_mysql::MysqlEngine, engine_port::ResonateEngine, engine_postgres::PostgresEngine,
+    engine_sqlite::SqliteEngine,
 };
 use resonate_transport_http_poll::PollRegistry;
 use server::Server;
@@ -131,8 +132,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     tracing::info!(port = config.server.port, "Resonate Server starting");
     tracing::info!(
         timeout_poll_interval_ms = config.timeouts.poll_interval,
-        message_poll_interval_ms = config.messages.poll_interval,
-        message_batch_size = config.messages.batch_size,
         task_retry_timeout_ms = config.tasks.retry_timeout,
         task_lease_timeout_ms = config.tasks.lease_timeout,
         "Operational config"
@@ -186,45 +185,44 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
     };
 
-    // Backend selection
-    let storage = match config.storage.storage_type.as_str() {
+    // Backend selection. Each is a complete engine, not a storage handle
+    // behind a shared one.
+    let engine: Arc<dyn ResonateEngine> = match config.storage.storage_type.as_str() {
         "postgres" => {
             let url = config.storage.postgres.url.as_ref().unwrap();
             let pool_size = config.storage.postgres.pool_size;
             tracing::info!("Using PostgreSQL backend");
             tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg = resonate_server_dbms::persistence_postgres::PostgresStorage::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-            )
-            .await
-            .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
+            let pg =
+                PostgresEngine::connect(url, pool_size, config.tasks.retry_timeout, config.debug)
+                    .await
+                    .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
             pg.init()
                 .await
                 .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
             tracing::info!("PostgreSQL initialized");
-            Storage::Postgres(pg)
+            Arc::new(pg)
         }
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();
             let pool_size = config.storage.mysql.pool_size;
-            let mysql = MysqlStorage::connect(url, pool_size, config.tasks.retry_timeout)
-                .await
-                .map_err(|e| format!("MySQL connection failed: {e}"))?;
+            let mysql =
+                MysqlEngine::connect(url, pool_size, config.tasks.retry_timeout, config.debug)
+                    .await
+                    .map_err(|e| format!("MySQL connection failed: {e}"))?;
             mysql
                 .init()
                 .await
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
-            Storage::Mysql(mysql)
+            Arc::new(mysql)
         }
         _ => {
             let path = &config.storage.sqlite.path;
             tracing::info!(path = %path, "Using SQLite backend");
-            let sqlite = SqliteStorage::open(path, config.tasks.retry_timeout)
+            let sqlite = SqliteEngine::open(path, config.tasks.retry_timeout, config.debug)
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
-            Storage::Sqlite(sqlite)
+            Arc::new(sqlite)
         }
     };
 
@@ -234,7 +232,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
     let is_sqlite = config.storage.storage_type == "sqlite";
-    let state = Arc::new(Server::new(config, auth_config, storage));
+    let state = Arc::new(Server::new(config, auth_config, engine));
 
     // Build transports
     tracing::info!(
@@ -319,6 +317,10 @@ async fn run_server(config: Config) -> Result<(), String> {
     let started: Vec<Arc<dyn ResonateWorker>> = workers.values().cloned().collect();
 
     let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
+    // The server emits; it needs somewhere to emit to. This is the last link
+    // of the ring — server holds router, router holds workers, worker holds
+    // server weakly — and it is why the workers' handle is weak.
+    state.set_router(Arc::clone(&router));
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -329,18 +331,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     handles.push(tokio::spawn(async move {
         processing::processing_timeouts::timeout_processing_loop(timeout_state, timeout_shutdown)
             .await;
-    }));
-
-    let message_state = Arc::clone(&state);
-    let message_shutdown = shutdown_rx.clone();
-    let message_router = Arc::clone(&router);
-    handles.push(tokio::spawn(async move {
-        processing::processing_messages::message_processing_loop(
-            message_state,
-            message_router,
-            message_shutdown,
-        )
-        .await;
     }));
 
     let metrics_port = state.config.observability.metrics_port;

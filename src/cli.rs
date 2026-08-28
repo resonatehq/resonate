@@ -97,13 +97,6 @@ pub struct CommonArgs {
     pub timeouts_poll_interval: Option<u64>,
 
     // --- Messages ---
-    /// Background message delivery scan interval (ms) [default: 100]
-    #[arg(long = "messages-poll-interval", value_name = "MS")]
-    pub messages_poll_interval: Option<u64>,
-
-    /// Max messages to claim per delivery cycle [default: 100]
-    #[arg(long = "messages-batch-size", value_name = "N")]
-    pub messages_batch_size: Option<i64>,
 
     // --- HTTP Push ---
     /// Enable/disable HTTP push transport [default: true]
@@ -265,13 +258,6 @@ impl CommonArgs {
 
         if let Some(v) = self.timeouts_poll_interval {
             config.timeouts.poll_interval = v;
-        }
-
-        if let Some(v) = self.messages_poll_interval {
-            config.messages.poll_interval = v;
-        }
-        if let Some(v) = self.messages_batch_size {
-            config.messages.batch_size = v;
         }
 
         if let Some(v) = self.transports_http_push_enabled {

@@ -12,8 +12,8 @@
 --
 -- Names are the specification's property names verbatim wherever an entry has
 -- one, so a violation reports the same string the Lean catalogue and the trace
--- checker use. Six carry other names: the two enums, the two primary keys that
--- back uniqueness entries, the outbox payload shape, and the id format.
+-- checker use. Five carry other names: the two enums, the two primary keys
+-- that back uniqueness entries, and the id format.
 --
 -- Every statement is DROP IF EXISTS then ADD, so the file is idempotent and
 -- applies to any database already carrying `resonate-single.sql`:
@@ -46,19 +46,14 @@
 
 SET search_path TO resonate, public;
 
--- The outbox foreign key needs a TOTAL key to reference, and "the promises that
--- are tasks" is a partial set. `task_key` is the id exactly when the row is a
--- task; UNIQUE tolerates the NULLs of the rows that are not.
+-- `task_key` is the id exactly when the row is a task; UNIQUE tolerates the
+-- NULLs of the rows that are not. It backed the outbox foreign key, which
+-- needed a TOTAL key to reference where "the promises that are tasks" is a
+-- partial set; the outbox is gone and the uniqueness entry remains.
 -- task_key is declared as a generated column in single-table.sql; kept here as
 -- a comment so this file stays a faithful copy of the generated catalogue.
 -- ALTER TABLE promises ADD COLUMN IF NOT EXISTS task_key TEXT
 --   GENERATED ALWAYS AS (CASE WHEN tags ? 'resonate:target' THEN id END) STORED;
-
--- The outbox foreign key references `promises_task_key_unique`, so on a re-run
--- the unique constraint cannot be dropped while it still stands. It comes off
--- first and is re-added at the end of the file, which is what makes the whole
--- thing re-runnable.
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS consistent_outbox_execute_names_existing_task;
 
 
 -- --- promises: keys --------------------------------------------------------
@@ -250,36 +245,3 @@ ALTER TABLE schedules DROP CONSTRAINT IF EXISTS well_formed_schedule_promise_tag
 ALTER TABLE schedules ADD CONSTRAINT well_formed_schedule_promise_tags_not_timer_targeted
   CHECK ((NOT ((COALESCE((promise_tags ->> 'resonate:timer'::text),
   ''::text) = 'true'::text) AND (promise_tags ? 'resonate:target'::text))));
-
-
--- --- outbox: outbox --------------------------------------------------------
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS outbox_pkey;
-ALTER TABLE outbox ADD CONSTRAINT outbox_pkey
-  PRIMARY KEY (key);
-
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS outbox_kind_check;
-ALTER TABLE outbox ADD CONSTRAINT outbox_kind_check
-  CHECK ((kind = ANY (ARRAY['execute'::text, 'unblock'::text])));
-
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS well_formed_outbox_payload_matches_kind;
-ALTER TABLE outbox ADD CONSTRAINT well_formed_outbox_payload_matches_kind
-  CHECK (
-  CASE kind
-      WHEN 'execute'::text THEN ((task_id IS NOT NULL) AND (version IS NOT NULL) AND (promise IS NULL))
-      WHEN 'unblock'::text THEN ((task_id IS NULL) AND (version IS NULL) AND (promise IS NOT NULL))
-      ELSE NULL::boolean
-  END);
-
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS consistent_outbox_unblock_names_settled_promise;
-ALTER TABLE outbox ADD CONSTRAINT consistent_outbox_unblock_names_settled_promise
-  CHECK (((kind <> 'unblock'::text) OR ((promise ->> 'state'::text) <>
-  'pending'::text)));
-
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS consistent_outbox_unblock_address_deliverable;
-ALTER TABLE outbox ADD CONSTRAINT consistent_outbox_unblock_address_deliverable
-  CHECK (((kind <> 'unblock'::text) OR resonate._addr_valid(address)));
-
-ALTER TABLE outbox DROP CONSTRAINT IF EXISTS consistent_outbox_execute_names_existing_task;
-ALTER TABLE outbox ADD CONSTRAINT consistent_outbox_execute_names_existing_task
-  FOREIGN KEY (task_id) REFERENCES resonate.promises(task_key) ON DELETE
-  CASCADE;
