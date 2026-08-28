@@ -143,9 +143,14 @@ fn sort_by_deadline<T>(batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
 /// assert_eq!(w.len(), 2);
 /// assert_eq!(w.peek().unwrap().value, 3);
 ///
+/// // `next` answers "how long may I sleep?" without disturbing anything.
+/// assert_eq!(w.next(), Some(5));
+/// assert_eq!(w.next(), Some(5));
+///
 /// let due = w.pop_expired(5);
 /// assert_eq!(due.len(), 1);
 /// assert_eq!(w.len(), 1);
+/// assert_eq!(w.next(), Some(10));
 /// ```
 pub struct TimerWheel<T, C: Comparator<T>> {
     cmp: C,
@@ -235,6 +240,9 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
     }
 
     /// The timeout due soonest, without removing it.
+    ///
+    /// [`TimerWheel::next`] returns just its deadline, which is usually what a
+    /// scheduler wants and does not borrow the wheel.
     pub fn peek(&self) -> (r: Option<&Timeout<T>>)
         ensures
             self@.len() == 0 ==> r is None,
@@ -244,6 +252,39 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             None
         } else {
             Some(&self.items[0])
+        }
+    }
+
+    /// The deadline of the timeout due soonest, without removing anything.
+    ///
+    /// This is the question a scheduler asks between ticks: *how long may I
+    /// sleep?* The answer is only meaningful because the third postcondition
+    /// holds — nothing in the wheel is due before what comes back — so a caller
+    /// that waits until this deadline cannot have missed a timer. `None` means
+    /// the wheel is empty and there is nothing to wait for.
+    ///
+    /// Returning the deadline alone rather than the timeout is deliberate: the
+    /// caller does not borrow the wheel and is free to mutate it while the
+    /// answer is in hand. Use [`TimerWheel::peek`] when the payload is wanted
+    /// too, and [`TimerWheel::pop_expired`] to take the due timeouts out.
+    ///
+    /// Despite the name this does **not** advance anything, and `TimerWheel` is
+    /// not an `Iterator`. Repeated calls return the same deadline until the
+    /// wheel is changed.
+    pub fn next(&self) -> (r: Option<u64>)
+        requires
+            self.wf(),
+        ensures
+            r is Some <==> self@.len() > 0,
+            r matches Some(d) ==> d == self@[0].deadline,
+            // Nothing is due sooner. This is what makes it safe to sleep on.
+            r matches Some(d) ==> forall|i: int|
+                0 <= i < self@.len() ==> d <= #[trigger] self@[i].deadline,
+    {
+        if self.items.len() == 0 {
+            None
+        } else {
+            Some(self.items[0].deadline)
         }
     }
 
@@ -504,6 +545,10 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             r@ + final(self)@ == old(self)@,
             forall|i: int| 0 <= i < r@.len() ==> #[trigger] r@[i].deadline <= now,
             forall|i: int| 0 <= i < final(self)@.len() ==> now < #[trigger] final(self)@[i].deadline,
+            // Nothing fires early. This is the other end of `next`: a caller
+            // that slept until the deadline `next` handed back comes here and
+            // gets nothing, so waiting on that answer cannot miss a timeout.
+            (old(self)@.len() > 0 && now < old(self)@[0].deadline) ==> r@.len() == 0,
     {
         let ghost c = self.cmp;
         let ghost s0 = self.items@;
@@ -524,6 +569,11 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 < self.items@[i].deadline by {
                 assert(self.items@[i] == s0[k + i]);
                 assert(s0[k as int].deadline <= s0[k + i].deadline);
+            }
+            // Anything returned would have to start at the wheel's own front,
+            // which by hypothesis is not due yet.
+            if expired@.len() > 0 {
+                assert(expired@[0] == s0[0]);
             }
         }
         expired

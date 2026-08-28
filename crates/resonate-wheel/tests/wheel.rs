@@ -417,6 +417,66 @@ fn an_update_replaces_or_evicts_but_never_leaves_a_stale_entry() {
 }
 
 #[test]
+fn next_reports_the_nearest_deadline_without_removing_it() {
+    let mut w = TimerWheel::new(8, IdComparator);
+    assert_eq!(w.next(), None);
+
+    w.merge(to_timeouts(&[
+        model::Entry { deadline: 30, id: 1 },
+        model::Entry { deadline: 10, id: 2 },
+        model::Entry { deadline: 20, id: 3 },
+    ]));
+
+    // Reading it does not disturb the wheel.
+    assert_eq!(w.next(), Some(10));
+    assert_eq!(w.next(), Some(10));
+    assert_eq!(w.len(), 3);
+
+    // It tracks a deadline that moves nearer, and one that moves away.
+    w.merge(to_timeouts(&[model::Entry { deadline: 5, id: 1 }]));
+    assert_eq!(w.next(), Some(5));
+    w.merge(to_timeouts(&[model::Entry { deadline: 99, id: 1 }]));
+    assert_eq!(w.next(), Some(10));
+
+    assert_eq!(w.pop_expired(10).len(), 1);
+    assert_eq!(w.next(), Some(20));
+}
+
+#[test]
+fn nothing_fires_before_next() {
+    // The guarantee that makes `next` safe to sleep on: at any instant strictly
+    // before the reported deadline, `pop_expired` returns nothing at all.
+    let mut rng = Rng(0x51EE_9000_0BEE_F001);
+
+    for _ in 0..4_000 {
+        let capacity = (1 + rng.below(8)) as usize;
+        let mut wheel = TimerWheel::new(capacity, IdComparator);
+        let batch: Vec<Timeout<u64>> = (0..rng.below(12))
+            .map(|_| Timeout::new(1 + rng.below(50), rng.below(8)))
+            .collect();
+        wheel.merge(batch);
+
+        match wheel.next() {
+            None => assert!(wheel.is_empty()),
+            Some(d) => {
+                // Nothing in the wheel is due sooner.
+                let held = drain(wheel);
+                assert!(held.iter().all(|e| d <= e.deadline));
+                assert_eq!(held[0].deadline, d);
+
+                // And at every instant before it, nothing is due.
+                let mut again = TimerWheel::new(capacity, IdComparator);
+                again.merge(to_timeouts(&held));
+                let now = rng.below(d as u64);
+                assert!(now < d);
+                assert!(again.pop_expired(now).is_empty());
+                assert_eq!(again.next(), Some(d));
+            }
+        }
+    }
+}
+
+#[test]
 fn invariants_hold_under_random_merges() {
     let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
 

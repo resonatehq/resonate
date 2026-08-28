@@ -88,6 +88,14 @@ entry's slot and the wheel does change, however far in the future it is. That
 is intended (a deadline that moved out is still a deadline that moved), and it
 is why the theorem is stated about newcomers.
 
+`next` returns the nearest deadline without removing anything — the question a
+scheduler asks between ticks. Its third postcondition is what makes the answer
+usable: nothing in the wheel is due sooner. `pop_expired` carries the other end
+of that guarantee, `now < next() ==> nothing comes back`, so a caller that
+sleeps until the reported deadline cannot have missed a timer. (Despite the
+name it does not advance anything and `TimerWheel` is not an `Iterator`;
+repeated calls return the same deadline until the wheel changes.)
+
 `pop_expired` is proved to split the wheel exactly: `r@ + self@ ==
 old(self)@`, everything returned is due, nothing retained is. There is no
 third bucket, so no timeout can be silently lost.
@@ -163,10 +171,10 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **86 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 14 passed, plus the doctest.
+`./verify.sh` -> **87 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 16 passed, plus the doctest.
 
-The proofs were mutation-tested rather than taken on trust. Eight semantic
+The proofs were mutation-tested rather than taken on trust. Ten semantic
 changes were each made in isolation and each was caught:
 
 | mutation | what Verus rejected |
@@ -179,6 +187,8 @@ changes were each made in isolation and each was caught:
 | `no_duplicates` stated over all pairs, including `i == j` | unsatisfiable against reflexivity of `same` |
 | the sort's index witness returns 0 instead of tracking the arrival | `lemma_spec_sort_index_of` — the arrival is no longer where it says |
 | the uniqueness hypothesis dropped from `lemma_merge_sets_identity` | the theorem is false without it, and the induction stops closing |
+| `next` returns the last deadline instead of the first | its minimum postcondition, and the tie in `pop_expired` |
+| `pop_expired` cuts at a fixed index rather than by deadline | the split postconditions, and firing before `next` |
 
 The first two are the ones to keep in mind when editing: both read as tidying
 and both change the result.
