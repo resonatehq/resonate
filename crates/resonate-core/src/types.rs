@@ -548,18 +548,80 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
     Ok(())
 }
 
-/// Whether a promise may be awaited — carry a callback or a listener.
+/// Who may be blocked on a promise. Derived from its tags, never stored.
 ///
-/// Something outside the promise's own execution has to be able to settle it,
-/// or the obligation recorded against it can never be discharged: an internal
-/// promise is settled by the very work that is waiting on it. Three tags say
-/// that something outside will: an explicit `resonate:external`, a
-/// `resonate:target` naming who executes it, or `resonate:timer`, which the
-/// deadline sweep settles.
-pub fn is_external(tags: &std::collections::HashMap<String, String>) -> bool {
-    tags.get("resonate:external").map(String::as_str) == Some("true")
+/// `External` if any one of four things is true, and they are alternatives
+/// rather than a hierarchy:
+///
+/// - `resonate:scope = global` — the form the wire actually carries, and what
+///   makes a promise a caller wrote awaitable;
+/// - `resonate:external = true` — the open-ended escape hatch, for a kind
+///   nobody enumerated;
+/// - `resonate:target` present — a dispatch target implies anyone may await
+///   the result;
+/// - `resonate:timer = true` — a sleep, which settles at its deadline, so
+///   there is something to await.
+///
+/// Two things follow, and the second follows from the first: an external
+/// promise may be awaited, and an external promise is armed. The server owes
+/// an observation exactly where someone can be blocked, so this is one rule,
+/// not two. An internal promise is neither awaitable nor armed, and costs
+/// nothing.
+///
+/// Nothing here gates settling, and nothing here decides the verdict a
+/// deadline produces — that is `is_timer` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OType {
+    External,
+    Internal,
+}
+
+/// What causes a promise to run. Derived from its tags, never stored.
+///
+/// `Task` exactly when a dispatch target is present, which is the same
+/// condition as carrying a task — both directions hold, and the storage
+/// invariant `consistent_task_iff_targeted_promise` is the other half of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OKind {
+    Task,
+    Idle,
+}
+
+type Tags = std::collections::HashMap<String, String>;
+
+fn tag_is(tags: &Tags, key: &str, value: &str) -> bool {
+    tags.get(key).map(String::as_str) == Some(value)
+}
+
+/// `resonate:timer = true` — the one tag that decides a timed-out promise's
+/// verdict: resolved for a timer, rejected for everything else.
+pub fn is_timer(tags: &Tags) -> bool {
+    tag_is(tags, "resonate:timer", "true")
+}
+
+pub fn otype(tags: &Tags) -> OType {
+    if tag_is(tags, "resonate:scope", "global")
+        || tag_is(tags, "resonate:external", "true")
         || tags.contains_key("resonate:target")
-        || tags.get("resonate:timer").map(String::as_str) == Some("true")
+        || is_timer(tags)
+    {
+        OType::External
+    } else {
+        OType::Internal
+    }
+}
+
+pub fn okind(tags: &Tags) -> OKind {
+    if tags.contains_key("resonate:target") {
+        OKind::Task
+    } else {
+        OKind::Idle
+    }
+}
+
+/// `otype(tags) == External`, as a predicate — the awaitable-and-armed test.
+pub fn is_external(tags: &Tags) -> bool {
+    otype(tags) == OType::External
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -1078,19 +1140,44 @@ mod tests {
         assert!(err.contains("duplicate_awaited"), "unexpected: {err}");
     }
 
-    #[test]
-    fn a_promise_is_awaitable_when_a_tag_says_something_else_settles_it() {
-        let tag =
-            |k: &str, v: &str| std::collections::HashMap::from([(k.to_string(), v.to_string())]);
-        assert!(is_external(&tag("resonate:external", "true")));
-        assert!(is_external(&tag("resonate:target", "poll://any@w")));
-        assert!(is_external(&tag("resonate:timer", "true")));
+    fn tag(k: &str, v: &str) -> Tags {
+        std::collections::HashMap::from([(k.to_string(), v.to_string())])
+    }
 
-        assert!(!is_external(&std::collections::HashMap::new()));
-        assert!(!is_external(&tag("resonate:external", "false")));
-        assert!(!is_external(&tag("resonate:timer", "false")));
-        // A tag that only looks like one of the three.
-        assert!(!is_external(&tag("resonate:origin", "o")));
+    #[test]
+    fn a_promise_is_external_when_any_of_four_tags_says_something_else_settles_it() {
+        // `scope = global` is the form real SDK traffic carries; the other
+        // three are the escape hatch, a dispatch target, and a sleep.
+        assert_eq!(otype(&tag("resonate:scope", "global")), OType::External);
+        assert_eq!(otype(&tag("resonate:external", "true")), OType::External);
+        assert_eq!(
+            otype(&tag("resonate:target", "poll://any@w")),
+            OType::External
+        );
+        assert_eq!(otype(&tag("resonate:timer", "true")), OType::External);
+
+        assert_eq!(otype(&Tags::new()), OType::Internal);
+        assert_eq!(otype(&tag("resonate:scope", "local")), OType::Internal);
+        assert_eq!(otype(&tag("resonate:external", "false")), OType::Internal);
+        assert_eq!(otype(&tag("resonate:timer", "false")), OType::Internal);
+        // A tag that only looks like one of the four.
+        assert_eq!(otype(&tag("resonate:origin", "o")), OType::Internal);
+    }
+
+    #[test]
+    fn a_promise_runs_as_a_task_exactly_when_it_names_a_target() {
+        assert_eq!(okind(&tag("resonate:target", "poll://any@w")), OKind::Task);
+        assert_eq!(okind(&tag("resonate:scope", "global")), OKind::Idle);
+        assert_eq!(okind(&tag("resonate:timer", "true")), OKind::Idle);
+        assert_eq!(okind(&Tags::new()), OKind::Idle);
+    }
+
+    #[test]
+    fn the_verdict_a_deadline_produces_is_the_timer_tag_alone() {
+        assert!(is_timer(&tag("resonate:timer", "true")));
+        // External by another route, but still rejected on timeout.
+        assert!(!is_timer(&tag("resonate:scope", "global")));
+        assert!(!is_timer(&tag("resonate:external", "true")));
     }
 
     #[test]

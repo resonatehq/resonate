@@ -2459,41 +2459,62 @@ impl Oracle {
 
     // ── Query methods for test generation ────────────────────────────────────
 
+    /// Sorted, like every accessor the generator draws from.
+    ///
+    /// These back the differential's request generator, and `promises` is a
+    /// `HashMap` — whose iteration order Rust randomizes per process. Returning
+    /// it unsorted made the generator pick a different promise on every run, so
+    /// the seeded `fastrand` did not in fact reproduce a trajectory: a failure
+    /// could not be re-run, and a pass said nothing about what a previous pass
+    /// had explored.
     pub fn all_promise_ids(&self) -> Vec<String> {
-        self.promises.keys().cloned().collect()
+        let mut ids: Vec<String> = self.promises.keys().cloned().collect();
+        ids.sort();
+        ids
     }
 
     pub fn pending_promise_ids(&self) -> Vec<String> {
-        self.promises
+        let mut ids: Vec<String> = self
+            .promises
             .iter()
             .filter(|(_, p)| p.state == PromiseState::Pending)
             .map(|(id, _)| id.clone())
-            .collect()
+            .collect();
+        ids.sort();
+        ids
     }
 
     /// Pending promises that may be awaited — see
     /// `resonate_core::types::is_external`. The generator needs these apart
     /// from `pending_promise_ids`, or every callback it plans is refused.
     pub fn external_pending_promise_ids(&self) -> Vec<String> {
-        self.promises
+        let mut ids = self
+            .promises
             .iter()
             .filter(|(_, p)| {
                 p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags)
             })
             .map(|(id, _)| id.clone())
-            .collect()
+            .collect::<Vec<String>>();
+        ids.sort();
+        ids
     }
 
     pub fn tasks_by_state(&self, state: TaskState) -> Vec<(String, i64)> {
-        self.tasks
+        let mut out: Vec<(String, i64)> = self
+            .tasks
             .iter()
             .filter(|(_, t)| t.state == state)
             .map(|(id, t)| (id.clone(), t.version))
-            .collect()
+            .collect();
+        out.sort();
+        out
     }
 
     pub fn schedule_ids(&self) -> Vec<String> {
-        self.schedules.keys().cloned().collect()
+        let mut ids: Vec<String> = self.schedules.keys().cloned().collect();
+        ids.sort();
+        ids
     }
 
     pub fn has_tasks_in_state(&self, state: TaskState) -> bool {

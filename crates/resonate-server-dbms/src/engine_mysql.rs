@@ -3555,8 +3555,9 @@ impl MysqlDb<'_> {
                 .join(", ");
             let sql = format!(
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
-                 AND NOT (target IS NOT NULL OR timer \
-                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true')",
+                 AND NOT (COALESCE(tags->>'$.\"resonate:scope\"', '') = 'global' \
+                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true' \
+                          OR target IS NOT NULL OR timer)",
                 placeholders
             );
             let mut q = sqlx::query(&sql);

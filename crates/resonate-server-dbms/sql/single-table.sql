@@ -61,10 +61,14 @@ CREATE TABLE IF NOT EXISTS promises (
   target        TEXT    GENERATED ALWAYS AS (tags->>'resonate:target') STORED,
   is_timer      BOOLEAN NOT NULL GENERATED ALWAYS AS (
                   COALESCE(tags->>'resonate:timer', '') = 'true') STORED,
+  -- `resonate_core::types::otype`, in SQL: who may be blocked on this. Four
+  -- alternatives, not a hierarchy — `scope = global` is the one the wire
+  -- actually carries, and the one that makes a caller's promise awaitable.
   external      BOOLEAN NOT NULL GENERATED ALWAYS AS (
-                  tags->>'resonate:target' IS NOT NULL
-                  OR COALESCE(tags->>'resonate:timer', '')    = 'true'
-                  OR COALESCE(tags->>'resonate:external', '') = 'true') STORED,
+                  COALESCE(tags->>'resonate:scope', '')       = 'global'
+                  OR COALESCE(tags->>'resonate:external', '') = 'true'
+                  OR tags->>'resonate:target' IS NOT NULL
+                  OR COALESCE(tags->>'resonate:timer', '')    = 'true') STORED,
 
   -- Was the target of the outbox foreign key, which needed a TOTAL key to
   -- reference where "the promises that are tasks" is a partial set. The outbox
