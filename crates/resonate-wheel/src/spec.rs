@@ -82,7 +82,7 @@ pub open spec fn spec_insert<T>(s: Seq<Timeout<T>>, t: Timeout<T>) -> Seq<Timeou
     }
 }
 
-/// One merge step: replace any entry with `t`'s identity, then place `t` by deadline.
+/// One arrival: replace any entry with `t`'s identity, then place `t` by deadline.
 ///
 /// This is the whole of "same timeout, moved deadline — replace, don't add
 /// both": the removal is unconditional, so an update and a fresh arrival take
@@ -95,26 +95,6 @@ pub open spec fn spec_upsert<T, C: Comparator<T>>(
     spec_insert(spec_remove(cmp, s, t.value), t)
 }
 
-/// The first `k` entries of `inc` upserted into `s`, in order.
-///
-/// Order matters when `inc` itself carries two entries with the same identity:
-/// the later one wins, matching the intuition that a batch is a sequence of
-/// updates rather than a set.
-pub open spec fn spec_upsert_all<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    k: nat,
-) -> Seq<Timeout<T>>
-    decreases k,
-{
-    if k == 0 {
-        s
-    } else {
-        spec_upsert(cmp, spec_upsert_all(cmp, s, inc, (k - 1) as nat), inc[k - 1])
-    }
-}
-
 /// `s.take(n)`, but tolerating `n` beyond the end.
 pub open spec fn take_at_most<T>(s: Seq<T>, n: nat) -> Seq<T> {
     if s.len() <= n {
@@ -124,30 +104,101 @@ pub open spec fn take_at_most<T>(s: Seq<T>, n: nat) -> Seq<T> {
     }
 }
 
-/// **The definition of merging.** Upsert every incoming timeout, then keep the
-/// `capacity` nearest deadlines.
+// ---------------------------------------------------------------------------
+// Sorting the batch
+// ---------------------------------------------------------------------------
+
+/// Insertion sort, as a fold of [`spec_insert`] over the first `k` arrivals.
 ///
-/// Capacity is applied *after* the whole batch, not during it, and that is a
-/// deliberate choice rather than an implementation accident. Enforcing capacity
-/// per-item would make the outcome depend on the order the batch happens to
-/// arrive in — an early far-future arrival could claim the last slot and lock
-/// out a nearer timeout later in the same batch. Applying it once at the end
-/// means the surviving set is always *the `capacity` nearest deadlines of the
-/// union*, whatever order the batch came in.
+/// Reusing `spec_insert` rather than writing a second ordering rule is what
+/// makes the sort *stable*: `spec_insert` places an entry after every entry due
+/// no later than it, so equal deadlines keep the order the caller supplied.
+pub open spec fn spec_sort_prefix<T>(inc: Seq<Timeout<T>>, k: nat) -> Seq<Timeout<T>>
+    decreases k,
+{
+    if k == 0 {
+        Seq::empty()
+    } else {
+        spec_insert(spec_sort_prefix(inc, (k - 1) as nat), inc[k - 1])
+    }
+}
+
+/// The batch, in deadline order, nearest first.
 ///
-/// This is also where the drop rule comes from: since the sequence is sorted
-/// before it is cut, the entries that fall off the end are exactly the ones
-/// furthest in the future. Merging a batch whose deadlines all sit beyond the
-/// last surviving entry drops the batch entirely — see
-/// [`TimerWheel::merge`](crate::TimerWheel::merge), whose postconditions state
-/// that consequence directly.
+/// Sorting is load-bearing rather than cosmetic. Capacity is enforced on every
+/// arrival, so without it the outcome would depend on the order the caller
+/// happened to hand the batch over: a far-future arrival seen first could take
+/// the last free slot and evict a nearer one seen later in the same batch.
+/// Sorting first makes the result a function of the batch's *contents*.
+pub open spec fn spec_sort<T>(inc: Seq<Timeout<T>>) -> Seq<Timeout<T>> {
+    spec_sort_prefix(inc, inc.len())
+}
+
+// ---------------------------------------------------------------------------
+// The model of a merge
+// ---------------------------------------------------------------------------
+
+/// One step of a merge: upsert the arrival, then cut back to capacity.
+///
+/// Because the result of [`spec_upsert`] is sorted, the entry that the cut
+/// drops is always the one due farthest in the future — either the arrival
+/// itself, when nothing is due later than it, or the entry that was last.
+pub open spec fn spec_step<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    t: Timeout<T>,
+    capacity: nat,
+) -> Seq<Timeout<T>> {
+    take_at_most(spec_upsert(cmp, s, t), capacity)
+}
+
+/// The first `k` arrivals of an already-sorted batch, stepped in one at a time.
+pub open spec fn spec_merge_prefix<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
+    k: nat,
+    capacity: nat,
+) -> Seq<Timeout<T>>
+    decreases k,
+{
+    if k == 0 {
+        s
+    } else {
+        spec_step(cmp, spec_merge_prefix(cmp, s, inc, (k - 1) as nat, capacity), inc[k - 1], capacity)
+    }
+}
+
+/// **The definition of merging.** Sort the batch nearest-deadline first, then
+/// take the arrivals one at a time, honouring capacity at every step.
+///
+/// The drop rule falls out of the two pieces. Each step leaves the wheel
+/// sorted, and each cut removes from the end, so what a merge can cost you is
+/// only ever the timeouts due farthest in the future — never a near one. With
+/// capacity 1000, a batch of *new* timeouts whose deadlines all sit beyond the
+/// 1000th entry's is dropped whole; that is
+/// [`lemma_merge_ignores_far_future_newcomers`](crate::proof::lemma_merge_ignores_far_future_newcomers),
+/// proved rather than asserted.
+///
+/// # Two consequences worth knowing
+///
+/// **An update is not an addition.** An arrival that shares an identity with an
+/// entry already in the wheel replaces it, so it inherits that entry's slot
+/// however far in the future it is — a full wheel does not reject it. That is
+/// why the far-future theorem is stated about *new* timeouts.
+///
+/// **Within one batch, the farthest deadline wins.** Because the batch is
+/// sorted before it is stepped, two arrivals sharing an identity are applied
+/// nearest-first, so the *later* deadline is the one left standing — not the
+/// one the caller listed last. If a batch is meant to carry a sequence of
+/// updates to the same timeout, deduplicate it before handing it over.
 pub open spec fn spec_merge<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
     inc: Seq<Timeout<T>>,
     capacity: nat,
 ) -> Seq<Timeout<T>> {
-    take_at_most(spec_upsert_all(cmp, s, inc, inc.len()), capacity)
+    spec_merge_prefix(cmp, s, spec_sort(inc), inc.len(), capacity)
 }
 
 } // verus!

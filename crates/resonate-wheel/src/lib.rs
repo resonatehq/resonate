@@ -13,9 +13,10 @@
 //!   [`Comparator`], and merging a timeout whose identity is already present
 //!   *replaces* it. That is the operation a scheduler actually needs — a
 //!   deadline moved, not a second entry for the same thing.
-//! - **Bounded.** The wheel holds at most `capacity` entries. When a merge
-//!   overflows, what falls off is the farthest future: the union is sorted
-//!   before it is cut, so a dropped timeout is never nearer than a kept one.
+//! - **Bounded.** The wheel holds at most `capacity` entries. A merge sorts the
+//!   batch nearest-first and honours capacity on every arrival, so what falls
+//!   off is always the farthest future — a merge can cost you a far timeout,
+//!   never a near one.
 //!
 //! # Layout
 //!
@@ -54,9 +55,9 @@
 //! [`TimerWheel::wf`]. On top of that sit three named theorems in [`proof`]:
 //!
 //! - [`proof::lemma_merge_wf`] — a merge always lands sorted, deduplicated and
-//!   within capacity.
-//! - [`proof::lemma_merge_horizon`] — nothing kept is due later than anything
-//!   dropped.
+//!   within capacity, and never loses a slot the wheel was already using.
+//! - [`proof::lemma_step_drops_the_farthest`] — the entry an arrival displaces
+//!   is the one due farthest in the future.
 //! - [`proof::lemma_merge_ignores_far_future_newcomers`] — merging a batch of
 //!   *new* timeouts whose deadlines all sit beyond the last surviving entry of
 //!   a full wheel changes nothing.

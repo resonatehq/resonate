@@ -9,6 +9,100 @@ use crate::timeout::Timeout;
 
 verus! {
 
+// ---------------------------------------------------------------------------
+// Sorted-vector helpers, shared by the wheel and by the batch sort.
+// ---------------------------------------------------------------------------
+
+/// The index at which a timeout due at `deadline` belongs in a sorted vector:
+/// after every entry due no later than it.
+///
+/// Landing *after* the ties, rather than before, is what makes both the wheel
+/// and the batch sort stable -- an arrival that ties with an entry already
+/// present sorts behind it, so on a full wheel the newcomer is the one dropped,
+/// and a sorted batch keeps the caller's order among equal deadlines.
+fn slot_for<T>(items: &Vec<Timeout<T>>, deadline: u64) -> (r: usize)
+    requires
+        sorted(items@),
+    ensures
+        r <= items@.len(),
+        forall|j: int| 0 <= j < r ==> #[trigger] items@[j].deadline <= deadline,
+        r < items@.len() ==> deadline < items@[r as int].deadline,
+{
+    let mut i: usize = 0;
+    while i < items.len() && items[i].deadline <= deadline
+        invariant
+            i <= items@.len(),
+            forall|j: int| 0 <= j < i ==> #[trigger] items@[j].deadline <= deadline,
+        decreases items@.len() - i,
+    {
+        i = i + 1;
+    }
+    i
+}
+
+/// Place `t` in a sorted vector, keeping it sorted.
+fn place<T>(items: &mut Vec<Timeout<T>>, t: Timeout<T>)
+    requires
+        sorted(old(items)@),
+    ensures
+        final(items)@ == spec_insert(old(items)@, t),
+        sorted(final(items)@),
+        final(items)@.len() == old(items)@.len() + 1,
+{
+    let ghost s0 = items@;
+    let j = slot_for(items, t.deadline);
+    proof {
+        lemma_insert_at_is_spec_insert(s0, t, j as int);
+    }
+    items.insert(j, t);
+    proof {
+        lemma_spec_insert_sorted(s0, t);
+        lemma_spec_insert_len(s0, t);
+    }
+}
+
+/// Sort a batch by deadline, nearest first.
+///
+/// Insertion sort through `place`, which means the ordering rule is written
+/// once and the sort is stable by construction. `O(m^2)` on the batch, matched
+/// to the batch sizes a wheel actually sees; the specification says nothing
+/// about the algorithm, so a merge sort could be dropped in underneath without
+/// the statement of correctness changing.
+fn sort_by_deadline<T>(batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
+    ensures
+        r@ == spec_sort(batch@),
+        sorted(r@),
+        r@.len() == batch@.len(),
+{
+    let ghost inc0 = batch@;
+    let mut src = batch;
+    let mut out: Vec<Timeout<T>> = Vec::new();
+    let n = src.len();
+    let mut k: usize = 0;
+
+    while k < n
+        invariant
+            k <= n,
+            n == inc0.len(),
+            src@ == inc0.skip(k as int),
+            out@ == spec_sort_prefix(inc0, k as nat),
+            sorted(out@),
+        decreases n - k,
+    {
+        assert(src@[0] == inc0[k as int]);
+        let t = src.remove(0);
+        place(&mut out, t);
+        proof {
+            assert(src@ =~= inc0.skip(k as int + 1));
+        }
+        k = k + 1;
+    }
+    proof {
+        lemma_spec_sort_wf(inc0, inc0.len());
+    }
+    out
+}
+
 /// A bounded set of pending [`Timeout`]s, ordered by deadline and deduplicated
 /// by a [`Comparator`].
 ///
@@ -182,34 +276,8 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         i
     }
 
-    /// The index at which a timeout due at `deadline` belongs: after every
-    /// entry due no later than it.
-    ///
-    /// Landing *after* the ties, rather than before, is what makes a full
-    /// wheel stable — an arrival that ties with the last surviving deadline
-    /// sorts behind it and is the one dropped.
-    fn find_slot(&self, deadline: u64) -> (r: usize)
-        requires
-            sorted(self@),
-        ensures
-            r <= self@.len(),
-            forall|j: int| 0 <= j < r ==> #[trigger] self@[j].deadline <= deadline,
-            r < self@.len() ==> deadline < self@[r as int].deadline,
-    {
-        let mut i: usize = 0;
-        while i < self.items.len() && self.items[i].deadline <= deadline
-            invariant
-                i <= self.items@.len(),
-                forall|j: int| 0 <= j < i ==> #[trigger] self.items@[j].deadline <= deadline,
-            decreases self.items@.len() - i,
-        {
-            i = i + 1;
-        }
-        i
-    }
-
     // -----------------------------------------------------------------------
-    // One merge step
+    // One arrival
     // -----------------------------------------------------------------------
 
     /// Replace-then-place, ignoring capacity.
@@ -257,15 +325,9 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
 
         // 2. Place, by deadline.
         let ghost s1 = self.items@;
-        let j = self.find_slot(t.deadline);
+        place(&mut self.items, t);
         proof {
-            lemma_insert_at_is_spec_insert(s1, t, j as int);
-        }
-        self.items.insert(j, t);
-        proof {
-            lemma_spec_insert_sorted(s1, t);
             lemma_spec_insert_distinct(c, s1, t);
-            lemma_spec_insert_len(s1, t);
         }
     }
 
@@ -273,19 +335,22 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
     // Merge
     // -----------------------------------------------------------------------
 
-    /// Fold a batch of timeouts into the wheel.
+    /// Merge a batch of timeouts into the wheel.
     ///
-    /// Each arrival is upserted in order — an arrival whose identity is
-    /// already present replaces it, moving the deadline rather than storing
-    /// the timeout twice — and only then is capacity applied, keeping the
-    /// `capacity` nearest deadlines of the union.
+    /// The batch is sorted nearest-deadline first, then taken one arrival at a
+    /// time: each replaces any entry with its identity, is placed by deadline,
+    /// and the wheel is cut back to capacity. Sorting first is what makes the
+    /// result depend on the batch's contents rather than on the order the
+    /// caller supplied them in.
     ///
-    /// The postconditions say all of that, and the last two say the part worth
-    /// saying out loud: what gets dropped is *only* what is farthest in the
-    /// future. `dropped` names an arrival that did not survive; the wheel is
-    /// then necessarily full, and every timeout it kept is due no later than
-    /// the one it dropped. Merging a batch of new timeouts whose deadlines all
-    /// sit beyond the last surviving entry therefore changes nothing.
+    /// Capacity is enforced on **every** arrival, not once at the end. Hoisting
+    /// the cut out of the loop looks like a harmless optimisation and is not:
+    /// it changes the result whenever an arrival replaces an entry, because a
+    /// replacement frees a slot mid-batch. The loop invariant below is what
+    /// rejects that edit.
+    ///
+    /// See [`spec_merge`] for the two consequences worth knowing: an update is
+    /// not an addition, and within one batch the farthest deadline wins.
     pub fn merge(&mut self, incoming: Vec<Timeout<T>>)
         requires
             old(self).wf(),
@@ -300,28 +365,19 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 incoming@,
                 old(self).capacity_spec(),
             ),
-            // Nothing kept is due later than anything dropped.
-            ({
-                let kept = final(self)@;
-                let full = spec_upsert_all(
-                    old(self).comparator(),
-                    old(self)@,
-                    incoming@,
-                    incoming@.len(),
-                );
-                &&& kept.len() <= full.len()
-                &&& kept.len() < full.len() ==> kept.len() == old(self).capacity_spec()
-                &&& forall|i: int, j: int|
-                    #![trigger kept[i].deadline, full[j].deadline]
-                    0 <= i < kept.len() <= j < full.len() ==> kept[i].deadline <= full[j].deadline
-            }),
+            // A merge never costs the wheel a slot it was already using.
+            old(self)@.len() <= final(self)@.len(),
     {
         let ghost c = self.cmp;
         let ghost cap0 = self.cap;
         let ghost s0 = self.items@;
         let ghost inc0 = incoming@;
 
-        let mut rest = incoming;
+        // Nearest first, so capacity is spent on the nearest deadlines whatever
+        // order the caller handed the batch over in.
+        let mut rest = sort_by_deadline(incoming);
+        let ghost batch = rest@;
+
         let n = rest.len();
         let mut k: usize = 0;
 
@@ -330,32 +386,36 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 self.cmp == c,
                 self.cap == cap0,
                 k <= n,
-                n == inc0.len(),
-                rest@ == inc0.skip(k as int),
+                n == batch.len(),
+                batch == spec_sort(inc0),
+                rest@ == batch.skip(k as int),
                 sorted(self.items@),
                 distinct(c, self.items@),
-                self.items@ == spec_upsert_all(c, s0, inc0, k as nat),
+                self.items@.len() <= cap0,
+                self.items@ == spec_merge_prefix(c, s0, batch, k as nat, cap0 as nat),
             decreases n - k,
         {
-            assert(rest@[0] == inc0[k as int]);
+            assert(rest@[0] == batch[k as int]);
             let t = rest.remove(0);
+            let ghost before = self.items@;
+
             self.upsert_uncapped(t);
+            self.items.truncate(self.cap);
+
             proof {
-                assert(rest@ =~= inc0.skip(k as int + 1));
+                assert(rest@ =~= batch.skip(k as int + 1));
+                let full = spec_upsert(c, before, t);
+                lemma_take_sorted(full, cap0 as nat);
+                lemma_take_distinct(c, full, cap0 as nat);
+                lemma_take_len(full, cap0 as nat);
+                assert(self.items@ =~= take_at_most(full, cap0 as nat));
             }
             k = k + 1;
         }
 
-        // Capacity, applied once, to the whole union.
-        let ghost full = self.items@;
-        self.items.truncate(self.cap);
-
         proof {
-            lemma_take_sorted(full, cap0 as nat);
-            lemma_take_distinct(c, full, cap0 as nat);
-            lemma_take_len(full, cap0 as nat);
-            lemma_merge_horizon(c, s0, inc0, cap0 as nat);
-            assert(self.items@ =~= take_at_most(full, cap0 as nat));
+            lemma_spec_sort_wf(inc0, inc0.len());
+            lemma_merge_wf(c, s0, batch, n as nat, cap0 as nat);
         }
     }
 
@@ -407,7 +467,7 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         let ghost c = self.cmp;
         let ghost s0 = self.items@;
 
-        let k = self.find_slot(now);
+        let k = slot_for(&self.items, now);
 
         // `split_off` twice, rather than `mem::swap`: the tail comes off, then
         // the head, leaving `items` empty for the tail to move back into.

@@ -42,17 +42,30 @@ arithmetic on them, so any monotone encoding works.
 
 ## Two decisions worth knowing about
 
-**Capacity is applied once, after the whole batch — not per arrival.** Enforcing
-it per item would make the result depend on the order the batch happened to
-arrive in: an early far-future arrival could take the last slot and lock out a
-nearer timeout later in the same batch. Applying it once at the end means the
-survivors are always *the `capacity` nearest deadlines of the union*, whatever
-order the batch came in. `spec_merge` is written to say exactly that.
+**The batch is sorted, and capacity is enforced on every arrival.** These two
+go together. Sorting nearest-deadline-first is what makes per-arrival capacity
+well behaved: without it, a far-future arrival seen early could take the last
+free slot and lock out a nearer one later in the same batch, so the result
+would depend on the order the caller happened to supply. Sorted, capacity is
+always spent on the nearest deadlines the batch contains.
+
+Hoisting the cut out of the loop — enforcing capacity once at the end — looks
+like a harmless optimisation and is not. The two rules agree except when an
+arrival *replaces* an entry, which frees a slot mid-batch; see
+`a_replacement_frees_a_slot_mid_batch` in the tests for the worked case. The
+merge loop invariant rejects the edit.
 
 **Ties sort behind, not ahead.** `spec_insert` places an arrival after every
 entry due no later than it. So on a full wheel, an arrival that ties with the
 last surviving deadline is the one dropped, and an entry already waiting keeps
-its slot. This makes tie-breaking deterministic rather than incidental.
+its slot. The batch sort is `spec_insert` folded over the arrivals, so it
+inherits the same rule and is stable for free.
+
+One consequence to know before you rely on it: because the batch is applied
+nearest-first, two arrivals in one batch sharing an identity resolve to the
+**farthest** deadline, not the one listed last. If a batch is meant to carry a
+sequence of updates to the same timeout, deduplicate it before handing it over.
+`within_one_batch_the_farthest_deadline_wins` pins this down.
 
 ## What is proved
 
@@ -61,8 +74,8 @@ its slot. This makes tie-breaking deterministic rather than incidental.
 
 | theorem | statement |
 | --- | --- |
-| `lemma_merge_wf` | a merge always lands sorted, deduplicated, within capacity |
-| `lemma_merge_horizon` | nothing kept is due later than anything dropped |
+| `lemma_merge_wf` | a merge always lands sorted, deduplicated, within capacity — and never loses a slot the wheel was already using |
+| `lemma_step_drops_the_farthest` | the entry an arrival displaces is the one due farthest in the future |
 | `lemma_merge_ignores_far_future_newcomers` | merging *new* timeouts whose deadlines all sit beyond a full wheel's last entry changes nothing |
 
 The third is the headline: with capacity 1000, a batch whose deadlines are all
@@ -111,25 +124,27 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **65 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 10 passed, plus the doctest.
+`./verify.sh` -> **71 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 12 passed, plus the doctest.
 
-The proofs were mutation-tested rather than taken on trust. Three semantic
+The proofs were mutation-tested rather than taken on trust. Four semantic
 changes were each made in isolation and each was caught:
 
 | mutation | what Verus rejected |
 | --- | --- |
-| `find_slot` stops *before* ties instead of after | its own postcondition, at the end of the scan |
-| capacity applied per arrival instead of once per batch | the merge loop invariant against `spec_upsert_all` |
+| capacity hoisted out of the merge loop, cut once at the end | the merge loop invariant against `spec_merge_prefix` |
+| the batch left unsorted | `merge`'s postcondition against `spec_merge` |
+| `slot_for` stops *before* ties instead of after | its own postcondition, at the end of the scan |
 | the dedup scan removed, so arrivals always append | `fresh` in `upsert_uncapped` -- the wheel could hold a duplicate |
 
-That second row is the one worth keeping in mind when editing: moving the
-truncation inside the loop looks like a harmless optimisation and is not.
+The first two are the ones to keep in mind when editing: both read as tidying
+and both change the result.
 
 ## Cost
 
-`merge` is `O((n + m)^2)` for a wheel of `n` taking a batch of `m`: each
-arrival scans for its identity and again for its slot. The wheel is sized for
+`merge` is `O(m^2 + m(n + m))` for a wheel of `n` taking a batch of `m`: an
+insertion sort of the batch, then one identity scan and one slot scan per
+arrival. The wheel is sized for
 the near horizon — thousands of entries, not millions — and a flat `Vec` beats
 a heap or a hash index at that size on the operation that actually runs hot,
 which is walking the front in deadline order. If a profile ever says otherwise,

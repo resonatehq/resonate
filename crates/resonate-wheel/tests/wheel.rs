@@ -24,17 +24,24 @@ mod model {
         pub id: u64,
     }
 
-    /// Upsert every arrival in order, then keep the `capacity` nearest.
+    /// Sort the batch nearest-first, then take one arrival at a time,
+    /// honouring capacity at every step.
     pub fn merge(wheel: &[Entry], incoming: &[Entry], capacity: usize) -> Vec<Entry> {
+        let mut batch: Vec<Entry> = incoming.to_vec();
+        // A *stable* sort keeps the caller's order among equal deadlines,
+        // which is what `spec_insert` placing after equals means.
+        batch.sort_by_key(|e| e.deadline);
+
         let mut all: Vec<Entry> = wheel.to_vec();
-        for t in incoming {
+        for t in batch {
             all.retain(|e| e.id != t.id);
-            all.push(*t);
+            let pos = all
+                .iter()
+                .position(|e| e.deadline > t.deadline)
+                .unwrap_or(all.len());
+            all.insert(pos, t);
+            all.truncate(capacity);
         }
-        // A *stable* sort by deadline reproduces "ties keep their arrival
-        // order", which is what `spec_insert` placing after equals means.
-        all.sort_by_key(|e| e.deadline);
-        all.truncate(capacity);
         all
     }
 }
@@ -132,13 +139,62 @@ fn a_far_future_arrival_that_is_not_new_still_moves_its_deadline() {
 }
 
 #[test]
-fn later_arrival_wins_within_one_batch() {
+fn within_one_batch_the_farthest_deadline_wins() {
+    // Pinning a consequence of sorting the batch, because it is the one that
+    // can surprise: the arrivals are applied NEAREST FIRST, so of two entries
+    // sharing an id the later deadline is the one left standing -- not the one
+    // the caller listed last. A batch meant to carry a sequence of updates to
+    // one timeout should be deduplicated before it is handed over.
     let mut w = TimerWheel::new(4, IdComparator);
     w.merge(to_timeouts(&[
         model::Entry { deadline: 50, id: 7 },
         model::Entry { deadline: 10, id: 7 },
     ]));
-    assert_eq!(drain(w), vec![model::Entry { deadline: 10, id: 7 }]);
+    assert_eq!(drain(w), vec![model::Entry { deadline: 50, id: 7 }]);
+}
+
+#[test]
+fn a_replacement_frees_a_slot_mid_batch() {
+    // THE CASE THAT MAKES CAPACITY PER-ARRIVAL DIFFERENT from cutting once at
+    // the end, and the reason the truncation lives inside the merge loop.
+    //
+    // Capacity 1, wheel holds A at 1. The batch is [B@2, A@3], already sorted.
+    // B is considered first, against a wheel whose only entry is nearer than
+    // it, and loses the slot fairly. A@3 is then a replacement, not an
+    // addition: it frees A's slot and takes it back.
+    //
+    // Cutting once at the end would instead keep B@2, the nearest of the
+    // union. Both are defensible; this is the one where an entry the wheel is
+    // already tracking is not evicted by a newcomer that arrived while it was
+    // full.
+    let mut w = TimerWheel::new(1, IdComparator);
+    w.merge(to_timeouts(&[model::Entry { deadline: 1, id: 1 }]));
+    w.merge(to_timeouts(&[
+        model::Entry { deadline: 2, id: 2 },
+        model::Entry { deadline: 3, id: 1 },
+    ]));
+    assert_eq!(drain(w), vec![model::Entry { deadline: 3, id: 1 }]);
+}
+
+#[test]
+fn the_result_does_not_depend_on_batch_order() {
+    // What sorting the batch buys: capacity is spent on the nearest deadlines
+    // whatever order the caller supplies. Without the sort, the first of these
+    // would keep 9 and the second would not.
+    let batch = [
+        model::Entry { deadline: 9, id: 1 },
+        model::Entry { deadline: 1, id: 2 },
+        model::Entry { deadline: 2, id: 3 },
+    ];
+    let mut forward = TimerWheel::new(2, IdComparator);
+    forward.merge(to_timeouts(&batch));
+
+    let mut reversed: Vec<model::Entry> = batch.to_vec();
+    reversed.reverse();
+    let mut backward = TimerWheel::new(2, IdComparator);
+    backward.merge(to_timeouts(&reversed));
+
+    assert_eq!(drain(forward), drain(backward));
 }
 
 #[test]
