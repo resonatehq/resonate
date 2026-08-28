@@ -2723,14 +2723,12 @@ dependencies = [
 name = "resonate-gateway-http"
 version = "0.9.8"
 dependencies = [
- "async-stream",
  "async-trait",
  "axum",
  "lazy_static",
  "prometheus",
  "resonate-auth",
  "resonate-core",
- "resonate-transport-http-poll",
  "serde",
  "serde_json",
  "tokio",

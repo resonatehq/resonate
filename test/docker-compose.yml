@@ -51,7 +51,7 @@ services:
       - RESONATE_LEVEL=error
       - RESONATE_DEBUG=true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -76,7 +76,7 @@ services:
       - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
       - RESONATE_DEBUG=true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -104,7 +104,7 @@ services:
       - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
       - RESONATE_DEBUG=true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -132,7 +132,7 @@ services:
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -160,7 +160,7 @@ services:
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -191,7 +191,7 @@ services:
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"kind\":\"schedule.search\",\"head\":{\"corrId\":\"healthcheck\",\"version\":\"2026-04-01\"},\"data\":{}}' http://127.0.0.1:8001/ || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s

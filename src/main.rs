@@ -22,15 +22,6 @@ use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
 
-/// The transports, handed back out of the wiring closure.
-///
-/// The server owns the router and the router owns the workers, so their
-/// lifecycle is driven through the router. What is still needed out here is the
-/// poll registry, which the HTTP gateway serves directly.
-struct Transports {
-    poll_registry: Arc<PollRegistry>,
-}
-
 #[derive(Parser)]
 #[command(
     name = "resonate",
@@ -218,11 +209,6 @@ async fn run_server(config: Config) -> Result<(), String> {
         "Transport config"
     );
 
-    // What the closure below builds but the server does not own: the poll
-    // registry, which the HTTP layer also needs, and the workers by scheme,
-    // which have to be started and later stopped.
-    let mut transports: Option<Transports> = None;
-
     // The ring is closed here, in one expression: the server holds the router,
     // the router holds the workers, and every worker holds the server.
     //
@@ -239,11 +225,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     // routes.
     let state = Arc::new_cyclic(|weak: &std::sync::Weak<Server>| {
         let server_handle: std::sync::Weak<dyn ResonateServer> = weak.clone();
-
-        let poll_registry = Arc::new(PollRegistry::new(
-            server_handle.clone(),
-            config.transports.http_poll.clone(),
-        ));
 
         // Scheme -> worker. A disabled transport is simply not registered, and
         // the router reports its addresses as undeliverable.
@@ -265,7 +246,10 @@ async fn run_server(config: Config) -> Result<(), String> {
         if config.transports.http_poll.enabled {
             workers.insert(
                 resonate_transport_http_poll::SCHEME.to_string(),
-                poll_registry.clone(),
+                Arc::new(PollRegistry::new(
+                    server_handle.clone(),
+                    config.transports.http_poll.clone(),
+                )),
             );
         } else {
             tracing::info!("HTTP poll transport disabled");
@@ -292,8 +276,6 @@ async fn run_server(config: Config) -> Result<(), String> {
             );
         }
 
-        transports = Some(Transports { poll_registry });
-
         let router: Arc<dyn ResonateRouter> =
             Arc::new(transport::TransportDispatcher::new(workers));
         // The timer's callbacks point back at the server too, so it is built
@@ -302,8 +284,6 @@ async fn run_server(config: Config) -> Result<(), String> {
         let timer = deadlines::build(&config.timeouts, weak.clone());
         Server::new(config, engine, router, timer)
     });
-
-    let Transports { poll_registry } = transports.expect("the closure above always sets it");
 
     // Start every worker before anything can route to one. A worker that
     // cannot start is a startup failure, not a message that quietly goes
@@ -384,7 +364,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     }
     let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
         Arc::clone(&state) as Arc<dyn ResonateServer>,
-        poll_registry,
         GatewayConfig {
             bind: bind.clone(),
             port,

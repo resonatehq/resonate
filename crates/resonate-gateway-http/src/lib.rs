@@ -22,12 +22,11 @@ use axum::response::IntoResponse;
 use axum::Json;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
-use resonate_transport_http_poll::PollRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-pub use routes::{AppState, PollState};
+pub use routes::AppState;
 
 /// Where to listen, and how to behave once we do.
 ///
@@ -98,8 +97,6 @@ pub struct HttpGateway {
     /// handed to the routes when `init` builds them. Strong, unlike a worker's
     /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
-    /// The poll transport, held until `init` builds the application around it.
-    poll_registry: Arc<PollRegistry>,
     /// The application, built by `init` — which is also the only place a
     /// socket is bound.
     app: Mutex<Option<axum::Router>>,
@@ -110,19 +107,10 @@ pub struct HttpGateway {
 
 impl HttpGateway {
     /// Build the gateway. Nothing is bound and nothing runs until `init`.
-    ///
-    /// `poll_registry` is the poll transport, which needs an endpoint to hand
-    /// its connections out through — see [`routes::AppState`] for why it
-    /// arrives here rather than being something this crate owns.
-    pub fn new(
-        server: Arc<dyn ResonateServer>,
-        poll_registry: Arc<PollRegistry>,
-        config: Config,
-    ) -> Self {
+    pub fn new(server: Arc<dyn ResonateServer>, config: Config) -> Self {
         Self {
             config,
             server,
-            poll_registry,
             app: Mutex::new(None),
             shutdown: Mutex::new(None),
             task: Mutex::new(None),
@@ -134,7 +122,6 @@ impl HttpGateway {
 fn build_app(state: routes::AppState, config: &Config) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
     let mut app = routes::api_routes()
-        .merge(routes::poll_routes())
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
                 let message = if let Some(s) = err.downcast_ref::<&str>() {
@@ -221,7 +208,6 @@ impl ResonateGateway for HttpGateway {
                 routes::AppState {
                     server: Arc::clone(&self.server),
                     auth,
-                    poll_registry: Arc::clone(&self.poll_registry),
                 },
                 &self.config,
             ));
@@ -267,10 +253,8 @@ impl ResonateGateway for HttpGateway {
     /// Close the listener and wait for what is in flight.
     ///
     /// Called last, after every worker has stopped — which is what makes the
-    /// wait finite. A poll transport's SSE streams are long-lived responses
-    /// axum's graceful shutdown would otherwise wait on forever; by now that
-    /// transport has dropped its senders and every one of those streams has
-    /// ended on its own.
+    /// wait finite: every response this serves is a single RPC round trip, so
+    /// there is nothing long-lived left to drain.
     async fn stop(&self) -> Result<(), Unavailable> {
         if let Some(tx) = self.shutdown.lock().await.take() {
             let _ = tx.send(());
