@@ -508,6 +508,47 @@ fn nothing_fires_before_next() {
 }
 
 #[test]
+fn a_merge_never_loses_a_slot() {
+    // `lemma_merge_wf`'s counting conjunct at runtime: an entry the wheel loses
+    // is one the batch mentions, and every mentioned identity has an update
+    // waiting for it, so a merge can only ever leave the wheel as full or
+    // fuller than it found it.
+    let mut rng = Rng(0x5107_5107_1234_9999);
+    let mut grew = 0u32;
+    let mut held = 0u32;
+
+    for _ in 0..5_000 {
+        let capacity = (1 + rng.below(7)) as usize;
+        let mut wheel = TimerWheel::new(capacity, IdComparator);
+        wheel.merge(
+            (0..rng.below(8))
+                .map(|_| Timeout::new(rng.below(40), rng.below(9)))
+                .collect(),
+        );
+
+        for _ in 0..1 + rng.below(5) {
+            let before = wheel.len();
+            wheel.merge(
+                (0..rng.below(10))
+                    .map(|_| Timeout::new(rng.below(40), rng.below(9)))
+                    .collect(),
+            );
+            assert!(
+                wheel.len() >= before,
+                "merge shrank the wheel from {before} to {}",
+                wheel.len()
+            );
+            if wheel.len() > before {
+                grew += 1;
+            } else {
+                held += 1;
+            }
+        }
+    }
+    assert!(grew > 100 && held > 100, "expected both outcomes, saw {grew}/{held}");
+}
+
+#[test]
 fn invariants_hold_under_random_merges() {
     let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
 

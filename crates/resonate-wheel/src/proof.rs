@@ -1285,6 +1285,198 @@ pub proof fn lemma_union_distinct<T, C: Comparator<T>>(
     lemma_concat_distinct(cmp, a, b);
 }
 
+// --- how many entries the union has ---
+//
+// "A merge never loses a slot" needs a counting argument that the previous
+// shape got for free: an entry the wheel loses is one the batch mentions, and
+// every mentioned identity has an update waiting for it, so the losses are paid
+// for one-for-one. `lemma_dropped_are_paid_for` is that argument, done by
+// spending the updates as it walks the wheel rather than by building an
+// injection.
+
+/// Removal shortens a sequence that actually holds a match.
+pub proof fn lemma_spec_remove_len_strict<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T)
+    requires
+        mentions(cmp, s, v),
+    ensures
+        spec_remove(cmp, s, v).len() < s.len(),
+    decreases s.len(),
+{
+    // An empty sequence mentions nothing, so there is a head to look at.
+    assert(s.len() > 0);
+    if cmp.same(s[0].value, v) {
+        // The head goes; whatever the tail loses on top of that only helps.
+        lemma_spec_remove_len(cmp, s.skip(1), v);
+    } else {
+        lemma_mentions_cons(cmp, s, v);
+        lemma_spec_remove_len_strict(cmp, s.skip(1), v);
+    }
+}
+
+/// Removing one identity does not remove a different one.
+pub proof fn lemma_remove_preserves_mentions<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    v: T,
+    w: T,
+)
+    requires
+        mentions(cmp, s, w),
+        !cmp.same(v, w),
+    ensures
+        mentions(cmp, spec_remove(cmp, s, v), w),
+    decreases s.len(),
+{
+    lemma_equivalence::<T, C>(cmp);
+    lemma_mentions_cons(cmp, s, w);
+    if cmp.same(s[0].value, v) {
+        // The head goes, but it was not the match for `w`: if it were, `v` and
+        // `w` would be the same.
+        assert(!cmp.same(s[0].value, w));
+        lemma_remove_preserves_mentions(cmp, s.skip(1), v, w);
+    } else {
+        let tail = spec_remove(cmp, s.skip(1), v);
+        if cmp.same(s[0].value, w) {
+            assert(!fresh(cmp, seq![s[0]] + tail, w)) by {
+                assert((seq![s[0]] + tail)[0] == s[0]);
+            }
+        } else {
+            lemma_remove_preserves_mentions(cmp, s.skip(1), v, w);
+            assert(!fresh(cmp, seq![s[0]] + tail, w)) by {
+                let k = choose|k: int| 0 <= k < tail.len() && cmp.same(tail[k].value, w);
+                assert((seq![s[0]] + tail)[k + 1] == tail[k]);
+            }
+        }
+    }
+}
+
+/// **Every identity the batch mentions has an update waiting for it.**
+///
+/// The updates drop an arrival only when a later one names the same timeout, so
+/// an identity can never be dropped altogether — the last arrival naming it
+/// always survives.
+pub proof fn lemma_updates_keep_mentions<T, C: Comparator<T>>(
+    cmp: C,
+    batch: Seq<Timeout<T>>,
+    v: T,
+)
+    requires
+        mentions(cmp, batch, v),
+    ensures
+        mentions(cmp, spec_updates(cmp, batch), v),
+    decreases batch.len(),
+{
+    lemma_equivalence::<T, C>(cmp);
+    lemma_mentions_cons(cmp, batch, v);
+    let tail = spec_updates(cmp, batch.skip(1));
+
+    if mentions(cmp, batch.skip(1), v) {
+        lemma_updates_keep_mentions(cmp, batch.skip(1), v);
+        if !mentions(cmp, batch.skip(1), batch[0].value) {
+            assert(!fresh(cmp, seq![batch[0]] + tail, v)) by {
+                let k = choose|k: int| 0 <= k < tail.len() && cmp.same(tail[k].value, v);
+                assert((seq![batch[0]] + tail)[k + 1] == tail[k]);
+            }
+        }
+    } else {
+        // Only the head names `v`, so nothing later can override it and the
+        // head is kept.
+        assert(cmp.same(batch[0].value, v));
+        assert(!mentions(cmp, batch.skip(1), batch[0].value)) by {
+            if mentions(cmp, batch.skip(1), batch[0].value) {
+                let k = choose|k: int|
+                    0 <= k < batch.skip(1).len() && cmp.same(
+                        batch.skip(1)[k].value,
+                        batch[0].value,
+                    );
+                assert(cmp.same(batch.skip(1)[k].value, v));
+                assert(!fresh(cmp, batch.skip(1), v));
+                assert(false);
+            }
+        }
+        assert(!fresh(cmp, seq![batch[0]] + tail, v)) by {
+            assert((seq![batch[0]] + tail)[0] == batch[0]);
+        }
+    }
+}
+
+/// **The entries the wheel loses are paid for.**
+///
+/// `u` stands for the updates still unspent. Walking the wheel, an entry the
+/// batch mentions is dropped and one update is spent on it; the wheel's
+/// distinctness is what guarantees the *same* update is never spent twice,
+/// since no two entries of the wheel share an identity.
+pub proof fn lemma_dropped_are_paid_for<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
+    u: Seq<Timeout<T>>,
+)
+    requires
+        distinct(cmp, s),
+        // ... and `u` too, so that spending one update removes exactly one.
+        distinct(cmp, u),
+        forall|i: int|
+            0 <= i < s.len() && mentions(cmp, batch, #[trigger] s[i].value) ==> mentions(
+                cmp,
+                u,
+                s[i].value,
+            ),
+    ensures
+        s.len() <= spec_untouched(cmp, s, batch).len() + u.len(),
+    decreases s.len(),
+{
+    lemma_equivalence::<T, C>(cmp);
+    if s.len() == 0 {
+    } else {
+        lemma_distinct_skip(cmp, s);
+        if mentions(cmp, batch, s[0].value) {
+            // Spend one update on the entry we are about to lose.
+            let spent = spec_remove(cmp, u, s[0].value);
+            lemma_spec_remove_len_strict(cmp, u, s[0].value);
+            lemma_spec_remove_len_lower(cmp, u, s[0].value);
+            lemma_spec_remove_distinct(cmp, u, s[0].value);
+            assert forall|i: int|
+                0 <= i < s.skip(1).len() && mentions(
+                    cmp,
+                    batch,
+                    s.skip(1)[i].value,
+                ) implies mentions(cmp, spent, s.skip(1)[i].value) by {
+                assert(s.skip(1)[i] == s[i + 1]);
+                assert(!cmp.same(s[0].value, s[i + 1].value));
+                lemma_remove_preserves_mentions(cmp, u, s[0].value, s[i + 1].value);
+            }
+            lemma_dropped_are_paid_for(cmp, s.skip(1), batch, spent);
+        } else {
+            lemma_dropped_are_paid_for(cmp, s.skip(1), batch, u);
+        }
+    }
+}
+
+/// **The union is at least as long as the wheel was.**
+pub proof fn lemma_union_len_lower<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
+)
+    requires
+        distinct(cmp, s),
+    ensures
+        s.len() <= (spec_untouched(cmp, s, batch) + spec_updates(cmp, batch)).len(),
+{
+    let u = spec_updates(cmp, batch);
+    lemma_updates_distinct(cmp, batch);
+    assert forall|i: int|
+        0 <= i < s.len() && mentions(cmp, batch, s[i].value) implies mentions(
+            cmp,
+            u,
+            s[i].value,
+        ) by {
+        lemma_updates_keep_mentions(cmp, batch, s[i].value);
+    }
+    lemma_dropped_are_paid_for(cmp, s, batch, u);
+}
+
 // ===========================================================================
 // 6. What the wheel guarantees
 // ===========================================================================
@@ -1293,7 +1485,12 @@ pub proof fn lemma_union_distinct<T, C: Comparator<T>>(
 // sort, cut — and each is stated with the weakest hypothesis it actually needs
 // rather than with the whole wheel invariant, so it is clear what it rests on.
 
-/// **A merge lands well-formed.**
+/// **A merge lands well-formed, and never loses a slot.**
+///
+/// The last conjunct is the counting one: an entry the wheel loses is one the
+/// batch mentions, and every mentioned identity has an update waiting for it,
+/// so the losses are paid for one-for-one. See
+/// [`lemma_dropped_are_paid_for`].
 pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
@@ -1302,10 +1499,12 @@ pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
 )
     requires
         distinct(cmp, s),
+        s.len() <= capacity,
     ensures
         sorted(spec_merge(cmp, s, batch, capacity)),
         distinct(cmp, spec_merge(cmp, s, batch, capacity)),
         spec_merge(cmp, s, batch, capacity).len() <= capacity,
+        s.len() <= spec_merge(cmp, s, batch, capacity).len(),
 {
     let union = spec_untouched(cmp, s, batch) + spec_updates(cmp, batch);
     lemma_union_distinct(cmp, s, batch);
@@ -1314,6 +1513,10 @@ pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
     lemma_take_sorted(spec_sort(union), capacity);
     lemma_take_distinct(cmp, spec_sort(union), capacity);
     lemma_take_len(spec_sort(union), capacity);
+    // Sorting is a rearrangement, so the union's length survives it, and the
+    // cut cannot take the result below `capacity` -- which the wheel was
+    // already within.
+    lemma_union_len_lower(cmp, s, batch);
 }
 
 /// **The drop rule.** Everything the cut dropped is due at or after everything
@@ -1372,8 +1575,11 @@ pub proof fn lemma_merge_preserves_no_duplicates<T, C: Comparator<T>>(
     ensures
         no_duplicates(cmp, spec_merge(cmp, s, batch, capacity)),
 {
+    let union = spec_untouched(cmp, s, batch) + spec_updates(cmp, batch);
     lemma_no_duplicates_iff_distinct(cmp, s);
-    lemma_merge_wf(cmp, s, batch, capacity);
+    lemma_union_distinct(cmp, s, batch);
+    lemma_spec_sort_distinct(cmp, union, union.len());
+    lemma_take_distinct(cmp, spec_sort(union), capacity);
     lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, batch, capacity));
 }
 

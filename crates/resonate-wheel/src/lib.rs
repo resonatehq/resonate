@@ -71,7 +71,7 @@
 //! [`proof`]:
 //!
 //! - [`proof::lemma_merge_wf`] — a merge always lands sorted, deduplicated and
-//!   within capacity.
+//!   within capacity, and never loses a slot the wheel was already using.
 //! - [`proof::lemma_merge_horizon`] — everything the cut dropped is due at or
 //!   after everything it kept.
 //! - [`proof::lemma_merge_ignores_far_future_newcomers`] — merging a batch of

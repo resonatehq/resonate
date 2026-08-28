@@ -462,6 +462,10 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 incoming@,
                 old(self).capacity_spec(),
             ),
+            // A merge never costs the wheel a slot it was already using: an
+            // entry it loses is one the batch mentions, and every mentioned
+            // identity has an update waiting for it.
+            old(self)@.len() <= final(self)@.len(),
             // No duplicates in, no duplicates out -- whatever the batch does.
             no_duplicates(old(self).comparator(), old(self)@)
                 ==> no_duplicates(final(self).comparator(), final(self)@),

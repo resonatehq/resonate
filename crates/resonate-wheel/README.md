@@ -62,6 +62,14 @@ implementation underneath is free to change — a heap, an index, a different sc
 order — without the statement of correctness moving at all. That is the point of
 writing it this way.
 
+"Never loses a slot" is the one guarantee that costs real work under this
+shape. Under a fold it fell out step by step; here it needs a counting
+argument, since an entry only disappears when the batch mentions it, and you
+have to know that a *distinct* update is waiting for each such entry.
+`lemma_dropped_are_paid_for` does it by spending the updates as it walks the
+wheel rather than by building an injection: the wheel's own distinctness is
+what stops the same update being spent twice.
+
 The one subtlety is in **add**. "Add the batch" would be wrong: a batch that
 names one timeout twice would put it in the wheel twice, and the no-duplicates
 invariant would be gone. So the second step adds the batch's *updates* — an
@@ -92,7 +100,7 @@ merely ties with it.
 
 | theorem | statement |
 | --- | --- |
-| `lemma_merge_wf` | a merge always lands sorted, deduplicated and within capacity |
+| `lemma_merge_wf` | a merge always lands sorted, deduplicated and within capacity — and never loses a slot the wheel was already using |
 | `lemma_merge_horizon` | everything the cut dropped is due at or after everything it kept |
 | `lemma_merge_ignores_far_future_newcomers` | merging *new* timeouts whose deadlines all sit beyond a full wheel's last entry changes nothing |
 | `lemma_merge_preserves_no_duplicates` | no duplicates in, no duplicates out — whatever the batch does |
@@ -182,8 +190,8 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **92 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 17 passed, plus the doctest.
+`./verify.sh` -> **97 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 18 passed, plus the doctest.
 
 The proofs were mutation-tested rather than taken on trust. Each line of the
 four-word definition was broken in turn, and each break was caught:
