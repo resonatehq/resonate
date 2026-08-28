@@ -76,3 +76,80 @@ jobs:
       - name: Teardown
         if: always()
         run: make clean
+
+  # The differential compares every available engine against the oracle —
+  # the same envelope to each, then the same narrow timeout firing, with a
+  # snapshot diff after every step. sqlite and the oracle are always
+  # constructed; Postgres and MySQL join only when their URL is exported,
+  # so each leg here is oracle + sqlite + the matrix backend.
+  #
+  # An empty TEST_POSTGRES_URL is NOT the same as an unset one — the test
+  # reads it with `env::var(..).ok()`, so `""` is Some and the connect
+  # panics. That is why the URLs are exported inside the step rather than
+  # through a matrix-interpolated `env:` block, which renders unset matrix
+  # keys as the empty string.
+  differential:
+    name: Differential (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, postgres, mysql]
+
+    # Services cannot be selected per matrix leg, so both start everywhere
+    # and the step below picks the one this leg talks to.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: resonate
+          POSTGRES_PASSWORD: resonate
+          POSTGRES_DB: resonate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: resonate
+          MYSQL_USER: resonate
+          MYSQL_PASSWORD: resonate
+          MYSQL_DATABASE: resonate
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uresonate -presonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      # --release: the run walks to a coverage plateau or 200k steps, which
+      # a debug build turns from minutes into an afternoon.
+      - name: Differential
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          case "$BACKEND" in
+            postgres)
+              export TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate
+              ;;
+            mysql)
+              export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+          esac
+          cargo test --release --test differential --all-features -- --nocapture
