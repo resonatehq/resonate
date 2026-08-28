@@ -345,6 +345,78 @@ fn a_merge_never_introduces_a_duplicate() {
 }
 
 #[test]
+fn an_update_replaces_or_evicts_but_never_leaves_a_stale_entry() {
+    // The runtime face of `lemma_merge_replaces_or_evicts`. For every wheel and
+    // every batch that names one identity exactly once, the old entry must be
+    // gone: either back under the new deadline, or absent entirely. What must
+    // never happen is the old deadline still sitting there.
+    let mut rng = Rng(0xFEED_FACE_5EED_0001);
+    let mut replaced = 0u32;
+    let mut evicted = 0u32;
+
+    for _ in 0..6_000 {
+        let capacity = (1 + rng.below(5)) as usize;
+        let mut wheel = TimerWheel::new(capacity, IdComparator);
+
+        // Seed the wheel.
+        let seed: Vec<Timeout<u64>> = (0..1 + rng.below(8))
+            .map(|_| Timeout::new(rng.below(40), rng.below(6)))
+            .collect();
+        wheel.merge(seed);
+
+        let before: Vec<model::Entry> = wheel
+            .pop_expired(u64::MAX)
+            .into_iter()
+            .map(|t| model::Entry { deadline: t.deadline, id: t.value })
+            .collect();
+        if before.is_empty() {
+            continue;
+        }
+        // Pick a timeout the wheel is holding, and move its deadline.
+        let target = before[(rng.below(before.len() as u64)) as usize];
+        let moved = model::Entry { deadline: rng.below(40), id: target.id };
+        if moved.deadline == target.deadline {
+            continue;
+        }
+
+        let mut wheel = TimerWheel::new(capacity, IdComparator);
+        wheel.merge(to_timeouts(&before));
+
+        // A batch naming the target's id exactly once, plus unrelated noise.
+        let mut batch = vec![moved];
+        for _ in 0..rng.below(5) {
+            let id = rng.below(6);
+            if id != target.id {
+                batch.push(model::Entry { deadline: rng.below(40), id });
+            }
+        }
+        wheel.merge(to_timeouts(&batch));
+
+        let after = drain(wheel);
+        let found: Vec<&model::Entry> = after.iter().filter(|e| e.id == target.id).collect();
+
+        // Never two entries for one timeout, and never the stale deadline.
+        assert!(found.len() <= 1, "the wheel holds {} entries for one id", found.len());
+        assert!(
+            !after.iter().any(|e| *e == target),
+            "the old entry {target:?} survived the update to {moved:?}"
+        );
+        match found.first() {
+            Some(e) => {
+                assert_eq!(e.deadline, moved.deadline, "surviving entry has a stale deadline");
+                replaced += 1;
+            }
+            None => evicted += 1,
+        }
+    }
+
+    // Both outcomes must actually occur, or the test is only exercising one arm.
+    assert!(replaced > 100, "expected replacements, saw {replaced}");
+    assert!(evicted > 100, "expected evictions, saw {evicted}");
+    println!("replaced: {replaced}, pushed out: {evicted}");
+}
+
+#[test]
 fn invariants_hold_under_random_merges() {
     let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
 

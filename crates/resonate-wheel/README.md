@@ -78,6 +78,7 @@ sequence of updates to the same timeout, deduplicate it before handing it over.
 | `lemma_step_drops_the_farthest` | the entry an arrival displaces is the one due farthest in the future |
 | `lemma_merge_ignores_far_future_newcomers` | merging *new* timeouts whose deadlines all sit beyond a full wheel's last entry changes nothing |
 | `lemma_merge_preserves_no_duplicates` | no duplicates in, no duplicates out — whatever the batch does |
+| `lemma_merge_replaces_or_evicts` | a timeout already held, updated by the batch, comes back with the new deadline or is pushed out — never survives stale |
 
 The third is the headline: with capacity 1000, a batch whose deadlines are all
 beyond the 1000th entry's is dropped whole. Its `fresh` hypothesis is
@@ -100,6 +101,26 @@ merging is the only way to put a timeout into a wheel, "the wheel never holds a
 duplicate" is true of every wheel a caller can build. `merge` and `insert`
 restate the conclusion in their own postconditions, so it is visible in the
 signature without unfolding `wf`.
+
+`lemma_merge_replaces_or_evicts` is the other half of that guarantee, and the
+one that makes it load-bearing rather than trivial: a merge really does move
+deadlines, and it moves them *by replacement*. If the wheel holds a timeout and
+the batch carries an update for it, the merge leaves exactly two possibilities
+— the timeout is back under the new deadline, or the wheel no longer holds that
+identity at all, which is what happens when the new deadline lands beyond the
+capacity horizon. The old entry is gone either way; there is no third outcome,
+and no state in which the wheel holds it twice.
+
+Its hypothesis is that the batch names the identity at most once (or always
+with the same deadline). That is not decorative — a batch carrying two genuinely
+different updates for one timeout resolves to the *farther*, since the batch is
+applied nearest-first. Dropping the hypothesis makes the theorem false, and
+Verus says so (mutation H below).
+
+The hinge of the proof is `lemma_spec_sort_index_of`, which returns the position
+an arrival ends up at in the sorted batch. It is what makes the sort a
+*rearrangement* rather than merely some sorted sequence: without it the merge
+might never apply the arrival, and the old entry could sit there untouched.
 
 `no_duplicates` is the reader's form; `distinct` is the proof-friendly form
 that quantifies over ordered pairs only. `lemma_no_duplicates_iff_distinct`
@@ -142,10 +163,10 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **75 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 13 passed, plus the doctest.
+`./verify.sh` -> **86 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 14 passed, plus the doctest.
 
-The proofs were mutation-tested rather than taken on trust. Six semantic
+The proofs were mutation-tested rather than taken on trust. Eight semantic
 changes were each made in isolation and each was caught:
 
 | mutation | what Verus rejected |
@@ -156,6 +177,8 @@ changes were each made in isolation and each was caught:
 | the dedup scan removed, so arrivals always append | `fresh` in `upsert_uncapped` -- the wheel could hold a duplicate |
 | the removal step dropped from the no-duplicate proof | `lemma_step_preserves_distinct` -- freshness no longer follows |
 | `no_duplicates` stated over all pairs, including `i == j` | unsatisfiable against reflexivity of `same` |
+| the sort's index witness returns 0 instead of tracking the arrival | `lemma_spec_sort_index_of` — the arrival is no longer where it says |
+| the uniqueness hypothesis dropped from `lemma_merge_sets_identity` | the theorem is false without it, and the induction stops closing |
 
 The first two are the ones to keep in mind when editing: both read as tidying
 and both change the result.

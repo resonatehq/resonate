@@ -52,6 +52,36 @@ pub open spec fn no_duplicates<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>) 
         0 <= i < s.len() && 0 <= j < s.len() && i != j ==> !cmp.same(s[i].value, s[j].value)
 }
 
+/// Whatever `s` holds under identity `v` is due at `d`.
+///
+/// Vacuously true when `s` holds nothing equivalent to `v` — which is what lets
+/// one predicate carry both halves of "replaced or evicted". After a merge that
+/// carried an arrival for `v`, this holds with `d` set to the arrival's
+/// deadline, so a surviving entry necessarily has the *new* timestamp and the
+/// old one cannot still be there.
+pub open spec fn identity_carries<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    v: T,
+    d: u64,
+) -> bool {
+    forall|k: int|
+        #![trigger cmp.same(s[k].value, v)]
+        0 <= k < s.len() && cmp.same(s[k].value, v) ==> s[k].deadline == d
+}
+
+/// `s` holds an entry under identity `v`, due at `d`.
+pub open spec fn holds_at<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    v: T,
+    d: u64,
+) -> bool {
+    exists|k: int|
+        #![trigger cmp.same(s[k].value, v)]
+        0 <= k < s.len() && cmp.same(s[k].value, v) && s[k].deadline == d
+}
+
 /// `s` holds nothing equivalent to `v` — so `v` may be inserted without
 /// breaking [`distinct`].
 pub open spec fn fresh<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T) -> bool {

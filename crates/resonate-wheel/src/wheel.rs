@@ -374,6 +374,23 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             // neither sortedness nor the capacity bound.
             no_duplicates(old(self).comparator(), old(self)@)
                 ==> no_duplicates(final(self).comparator(), final(self)@),
+            // An arrival REPLACES: whatever the wheel held under that identity,
+            // afterwards nothing under it survives with any other deadline. So
+            // a timeout already in the wheel either comes back with the new
+            // deadline or is pushed out -- never both, never stale. See
+            // `lemma_merge_replaces_or_evicts` for that spelled out.
+            forall|j: int|
+                #![trigger incoming@[j].value]
+                0 <= j < incoming@.len() && (forall|l: int|
+                    0 <= l < incoming@.len() && old(self).comparator().same(
+                        #[trigger] incoming@[l].value,
+                        incoming@[j].value,
+                    ) ==> incoming@[l] == incoming@[j]) ==> identity_carries(
+                    final(self).comparator(),
+                    final(self)@,
+                    incoming@[j].value,
+                    incoming@[j].deadline,
+                ),
     {
         let ghost c = self.cmp;
         let ghost cap0 = self.cap;
@@ -427,6 +444,17 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             // statement, so the antecedent above always holds here.
             lemma_no_duplicates_iff_distinct(c, s0);
             lemma_merge_preserves_no_duplicates(c, s0, inc0, cap0 as nat);
+            assert forall|j: int|
+                0 <= j < inc0.len() && (forall|l: int|
+                    0 <= l < inc0.len() && c.same(#[trigger] inc0[l].value, inc0[j].value)
+                        ==> inc0[l] == inc0[j]) implies identity_carries(
+                c,
+                self.items@,
+                inc0[j].value,
+                inc0[j].deadline,
+            ) by {
+                lemma_merge_sets_identity(c, s0, inc0, j, cap0 as nat);
+            }
         }
     }
 
