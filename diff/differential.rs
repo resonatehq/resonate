@@ -329,15 +329,6 @@ async fn differential_random() {
         Some(Arc::clone(&oracle) as Backend)
     };
 
-    setup_all(&backends, T0).await;
-    if let Some(g) = &generator {
-        setup_all(
-            std::slice::from_ref(&("oracle".to_string(), Arc::clone(g))),
-            T0,
-        )
-        .await;
-    }
-
     const MAX_STEPS: usize = 200_000;
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
@@ -595,15 +586,11 @@ fn percentile(sorted: &[u64], p: f64) -> u64 {
 // Infrastructure
 // ---------------------------------------------------------------------------
 
-async fn setup_all(backends: &[(String, Backend)], now: i64) {
-    for envelope in &[req("debug.start", json!({})), req("debug.reset", json!({}))] {
-        for (name, b) in backends {
-            let resp = send(b, envelope, now).await;
-            assert_eq!(resp.head.status, 200, "{} failed on {name}", envelope.kind);
-        }
-    }
-}
-
+/// Bring every backend to an empty store.
+///
+/// There is nothing to set up beyond that any more. This used to send
+/// `debug.start` first, to put each engine into the paused mode a request could
+/// enter; engines are now built with the debug flag and are simply in it.
 async fn reset_all(backends: &[(String, Backend)], now: i64) {
     let envelope = req("debug.reset", json!({}));
     for (name, b) in backends {
