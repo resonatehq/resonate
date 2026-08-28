@@ -2731,6 +2731,7 @@ dependencies = [
  "resonate-auth",
  "resonate-core",
  "resonate-transport-http-poll",
+ "serde",
  "serde_json",
  "tokio",
  "tower-http",

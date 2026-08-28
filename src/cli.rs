@@ -233,13 +233,11 @@ impl CommonArgs {
         }
 
         if let Some(key) = self.auth_publickey {
-            let auth = config
-                .auth
-                .get_or_insert_with(|| crate::config::AuthConfig {
-                    publickey: String::new(),
-                    iss: None,
-                    aud: None,
-                });
+            let auth = config.auth.get_or_insert_with(|| resonate_auth::Config {
+                publickey: String::new(),
+                iss: None,
+                aud: None,
+            });
             auth.publickey = key;
             if let Some(v) = self.auth_iss {
                 auth.iss = Some(v);

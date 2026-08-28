@@ -32,8 +32,12 @@ pub struct Config {
     pub storage: StorageConfig,
 
     /// Authentication configuration. Absent = auth disabled.
+    ///
+    /// The crate's own type, like every transport's: `resonate-auth` describes
+    /// its configuration, reads its own key material, and this only carries the
+    /// section from the file to it.
     #[serde(default)]
-    pub auth: Option<AuthConfig>,
+    pub auth: Option<resonate_auth::Config>,
 
     /// Task configuration
     #[serde(default)]
@@ -213,22 +217,6 @@ impl Default for StorageConfig {
             mysql: MysqlConfig::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    /// Public key for JWT verification.
-    /// Set to "none" to accept unsigned tokens (debug/testing).
-    /// Set to a file path to verify signatures against a PEM key.
-    pub publickey: String,
-
-    /// Expected issuer (`iss` claim).
-    #[serde(default)]
-    pub iss: Option<String>,
-
-    /// Expected audience (`aud` claim).
-    #[serde(default)]
-    pub aud: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

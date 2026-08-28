@@ -13,7 +13,7 @@ use axum::{routing::get, Router};
 use clap::{Parser, Subcommand};
 use config::Config;
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
-use resonate_gateway_http::{HttpGateway, HttpGatewayConfig};
+use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
 use resonate_server_dbms::{
     engine_mysql::MysqlEngine, engine_port::ResonateEngine, engine_postgres::PostgresEngine,
     engine_sqlite::SqliteEngine,
@@ -158,36 +158,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     if config.transports.http_poll.max_connections == 0 {
         return Err("http_poll.max_connections must be at least 1".into());
     }
-
-    // Load auth configuration
-    let auth_config = match &config.auth {
-        Some(auth_cfg) => {
-            let key = if auth_cfg.publickey == "none" {
-                tracing::warn!("Auth enabled — unsigned mode (no signature verification)");
-                None
-            } else {
-                let vk = resonate_auth::load_public_key(&auth_cfg.publickey)
-                    .map_err(|e| e.to_string())?;
-                tracing::info!(key = %auth_cfg.publickey, "Auth enabled");
-                Some(vk)
-            };
-            if let Some(iss) = &auth_cfg.iss {
-                tracing::info!(issuer = %iss, "Auth issuer configured");
-            }
-            if let Some(aud) = &auth_cfg.aud {
-                tracing::info!(audience = %aud, "Auth audience configured");
-            }
-            Some(Arc::new(resonate_auth::AuthConfig {
-                key,
-                iss: auth_cfg.iss.clone(),
-                aud: auth_cfg.aud.clone(),
-            }))
-        }
-        None => {
-            tracing::info!("Auth disabled — all requests accepted");
-            None
-        }
-    };
 
     // Backend selection. Each is a complete engine, not a storage handle
     // behind a shared one.
@@ -401,19 +371,20 @@ async fn run_server(config: Config) -> Result<(), String> {
     // construction order does not matter; `init` is what opens the socket, and
     // that has to come after the workers and the timer — accepting a request
     // the rest of the process cannot yet serve is worse than not accepting it.
-    let effective_url = state.config.server.url.clone().unwrap_or_default();
     if !state.config.server.cors.allow_origins.is_empty() {
         tracing::info!(origins = ?state.config.server.cors.allow_origins, "CORS enabled");
     }
     let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
         Arc::clone(&state) as Arc<dyn ResonateServer>,
-        auth_config,
         poll_registry,
-        HttpGatewayConfig {
+        GatewayConfig {
             bind: bind.clone(),
             port,
-            url: effective_url.clone(),
+            url: state.config.server.url.clone(),
             cors_allow_origins: state.config.server.cors.allow_origins.clone(),
+            // Carried through, not interpreted: the gateway reads the key in
+            // `init`, and a bad path fails startup there.
+            auth: state.config.auth.clone(),
             // SQLite lives in this process, so a panic mid-transaction can
             // leave state the next request would read.
             abort_on_panic: is_sqlite,

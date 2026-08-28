@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
@@ -32,6 +32,61 @@ pub struct AuthConfig {
 pub struct VerificationKey {
     pub decoding_key: DecodingKey,
     pub algorithms: Vec<Algorithm>,
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+/// Auth as it appears in a config file.
+///
+/// Plain data, like every transport's `Config`: it deserializes and nothing
+/// more. The key material it names is read by [`Config::load`], which is what
+/// the gateway hosting it calls from `init` — where anything that touches the
+/// filesystem and can fail belongs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Public key for JWT verification.
+    /// Set to "none" to accept unsigned tokens (debug/testing).
+    /// Set to a file path to verify signatures against a PEM key.
+    pub publickey: String,
+
+    /// Expected issuer (`iss` claim).
+    #[serde(default)]
+    pub iss: Option<String>,
+
+    /// Expected audience (`aud` claim).
+    #[serde(default)]
+    pub aud: Option<String>,
+}
+
+impl Config {
+    /// Read the key material and produce the runtime form.
+    ///
+    /// Fallible and touches the disk, so a caller runs it at startup: a bad key
+    /// path should stop the process, not surface later as a request that cannot
+    /// be authenticated.
+    pub fn load(&self) -> Result<AuthConfig, String> {
+        let key = if self.publickey == "none" {
+            tracing::warn!("Auth enabled — unsigned mode (no signature verification)");
+            None
+        } else {
+            let vk = load_public_key(&self.publickey)?;
+            tracing::info!(key = %self.publickey, "Auth enabled");
+            Some(vk)
+        };
+        if let Some(iss) = &self.iss {
+            tracing::info!(issuer = %iss, "Auth issuer configured");
+        }
+        if let Some(aud) = &self.aud {
+            tracing::info!(audience = %aud, "Auth audience configured");
+        }
+        Ok(AuthConfig {
+            key,
+            iss: self.iss.clone(),
+            aud: self.aud.clone(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

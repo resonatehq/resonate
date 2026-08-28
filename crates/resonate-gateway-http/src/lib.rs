@@ -20,44 +20,88 @@ use axum::http::{
 };
 use axum::response::IntoResponse;
 use axum::Json;
-use resonate_auth::AuthConfig;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
 use resonate_transport_http_poll::PollRegistry;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 pub use routes::{AppState, PollState};
 
 /// Where to listen, and how to behave once we do.
-#[derive(Debug, Clone)]
-pub struct HttpGatewayConfig {
+///
+/// Plain data, like every transport's `Config`, so it deserializes straight
+/// out of a config file. Nothing here is read from disk or opened; that is
+/// [`HttpGateway::init`]'s.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Address to listen on [default: 0.0.0.0]
+    #[serde(default = "default_bind")]
     pub bind: String,
+
+    /// Port to listen on [default: 8001]
+    #[serde(default = "default_port")]
     pub port: u16,
-    /// The URL clients reach this server on, for logging only.
-    pub url: String,
+
+    /// The URL clients reach this server on. Announced in execute messages,
+    /// so a worker knows where to call back.
+    #[serde(default)]
+    pub url: Option<String>,
+
     /// Origins to allow. Empty disables CORS; `*` is permissive.
+    #[serde(default)]
     pub cors_allow_origins: Vec<String>,
+
+    /// Authentication. Absent means every request is accepted.
+    ///
+    /// The key it names is read by [`HttpGateway::init`] — a bad path is a
+    /// startup failure, not a request that later cannot be authenticated.
+    #[serde(default)]
+    pub auth: Option<resonate_auth::Config>,
+
     /// Abort the process when a handler panics, rather than answering 500.
     ///
     /// For a single-process store — SQLite — a panic mid-transaction can leave
     /// in-memory state the next request would read. Aborting is the safer
     /// failure. A server whose state is in a database elsewhere answers 500 and
     /// carries on.
+    #[serde(default)]
     pub abort_on_panic: bool,
+}
+
+fn default_bind() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_port() -> u16 {
+    8001
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            bind: default_bind(),
+            port: default_port(),
+            url: None,
+            cors_allow_origins: Vec::new(),
+            auth: None,
+            abort_on_panic: false,
+        }
+    }
 }
 
 /// axum, hosting the Resonate protocol over HTTP.
 pub struct HttpGateway {
-    config: HttpGatewayConfig,
-    /// Held so the server outlives every request it can still accept. Strong,
-    /// unlike a worker's handle: nothing points back at a gateway, so there is
-    /// no cycle to break. Unused directly — the routes carry their own handle —
-    /// but the ownership is the point.
-    #[allow(dead_code)]
+    config: Config,
+    /// Held so the server outlives every request it can still accept, and
+    /// handed to the routes when `init` builds them. Strong, unlike a worker's
+    /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
-    /// The application, built in `new` and taken by `init` — which is what
-    /// makes `init` the only place a socket is bound.
+    /// The poll transport, held until `init` builds the application around it.
+    poll_registry: Arc<PollRegistry>,
+    /// The application, built by `init` — which is also the only place a
+    /// socket is bound.
     app: Mutex<Option<axum::Router>>,
     /// Set by `stop` to release the graceful-shutdown future.
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
@@ -67,26 +111,19 @@ pub struct HttpGateway {
 impl HttpGateway {
     /// Build the gateway. Nothing is bound and nothing runs until `init`.
     ///
-    /// `auth` is `None` when authentication is disabled. `poll_registry` is the
-    /// poll transport, which needs an endpoint to hand its connections out
-    /// through — see [`routes::AppState`] for why it arrives here rather than
-    /// being something this crate owns.
+    /// `poll_registry` is the poll transport, which needs an endpoint to hand
+    /// its connections out through — see [`routes::AppState`] for why it
+    /// arrives here rather than being something this crate owns.
     pub fn new(
         server: Arc<dyn ResonateServer>,
-        auth: Option<Arc<AuthConfig>>,
         poll_registry: Arc<PollRegistry>,
-        config: HttpGatewayConfig,
+        config: Config,
     ) -> Self {
-        let state = routes::AppState {
-            server: Arc::clone(&server),
-            auth,
-            poll_registry,
-        };
-        let app = build_app(state, &config);
         Self {
             config,
             server,
-            app: Mutex::new(Some(app)),
+            poll_registry,
+            app: Mutex::new(None),
             shutdown: Mutex::new(None),
             task: Mutex::new(None),
         }
@@ -94,7 +131,7 @@ impl HttpGateway {
 }
 
 /// Routes, state and layers, in the order a request meets them.
-fn build_app(state: routes::AppState, config: &HttpGatewayConfig) -> axum::Router {
+fn build_app(state: routes::AppState, config: &Config) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
     let mut app = routes::api_routes()
         .merge(routes::poll_routes())
@@ -164,9 +201,37 @@ fn cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
 #[async_trait]
 impl ResonateGateway for HttpGateway {
     async fn init(&self) -> Result<(), Unavailable> {
-        let Some(app) = self.app.lock().await.take() else {
-            return Ok(()); // already started
-        };
+        {
+            let mut app = self.app.lock().await;
+            if app.is_some() {
+                return Ok(()); // already started
+            }
+            // Reading the key material is this crate's, not its caller's: it
+            // touches the disk and it can fail, which is what `init` is for. A
+            // bad key path stops the process here rather than surfacing later
+            // as a request nobody can authenticate.
+            let auth = match &self.config.auth {
+                Some(cfg) => Some(Arc::new(cfg.load().map_err(Unavailable::new)?)),
+                None => {
+                    tracing::info!("Auth disabled — all requests accepted");
+                    None
+                }
+            };
+            *app = Some(build_app(
+                routes::AppState {
+                    server: Arc::clone(&self.server),
+                    auth,
+                    poll_registry: Arc::clone(&self.poll_registry),
+                },
+                &self.config,
+            ));
+        }
+        let app = self
+            .app
+            .lock()
+            .await
+            .take()
+            .expect("the block above just set it");
 
         let addr = format!("{}:{}", self.config.bind, self.config.port);
         let listener = tokio::net::TcpListener::bind(&addr)
@@ -179,7 +244,7 @@ impl ResonateGateway for HttpGateway {
         tracing::info!(
             bind = %self.config.bind,
             port = self.config.port,
-            server_url = %self.config.url,
+            server_url = %self.config.url.clone().unwrap_or_default(),
             "Server listening"
         );
 
