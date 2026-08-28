@@ -120,7 +120,7 @@ pub mod wheel;
 
 // Only items that survive ghost erasure can be re-exported by name: the
 // contents of `spec` and `proof` are erased under plain cargo, so they are
-// reached through their modules (`resonate_wheel::spec::spec_merge`) inside
+// reached through their modules (`resonate_timer_wheel::spec::spec_merge`) inside
 // `verus!` blocks rather than lifted to the crate root.
 pub use comparator::{Comparator, HasId, IdComparator};
 pub use timeout::Timeout;

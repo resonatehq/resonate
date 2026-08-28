@@ -2676,10 +2676,10 @@ dependencies = [
  "reqwest 0.12.28",
  "resonate-core",
  "resonate-server-dbms",
+ "resonate-timer-wheel",
  "resonate-transport-gcps",
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
- "resonate-wheel",
  "resonate-worker-bash",
  "serde",
  "serde_json",
@@ -2719,6 +2719,16 @@ dependencies = [
  "tokio",
  "tracing",
  "validator",
+]
+
+[[package]]
+name = "resonate-timer-wheel"
+version = "0.9.8"
+dependencies = [
+ "tokio",
+ "verus_builtin",
+ "verus_builtin_macros",
+ "vstd",
 ]
 
 [[package]]
@@ -2762,16 +2772,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "resonate-wheel"
-version = "0.9.8"
-dependencies = [
- "tokio",
- "verus_builtin",
- "verus_builtin_macros",
- "vstd",
 ]
 
 [[package]]

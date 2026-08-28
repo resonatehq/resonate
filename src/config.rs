@@ -262,10 +262,16 @@ impl Default for TasksConfig {
 pub struct TimeoutsConfig {
     /// Background timeout scan interval (ms)
     ///
-    /// The backstop. The in-memory timer fires a deadline the moment it comes
-    /// due, so this is what catches what the timer cannot see: a deadline
-    /// another instance armed, one lost to a restart, one past the wheel's
-    /// horizon. With the timer running, most of these scans find nothing.
+    /// The last resort, and no longer the mechanism. The in-memory timer fires
+    /// a deadline the moment it comes due, and `wheel_refresh` re-reads the
+    /// durable deadlines more often than this does — so a deadline another
+    /// instance armed is picked up by the refresh, not here. What is left for
+    /// this scan is what neither sees: a deadline past the wheel's horizon on a
+    /// server holding more than `wheel_capacity` of them.
+    ///
+    /// It was 1s when it was the only thing firing timeouts. At a minute it is
+    /// still an order of magnitude tighter than the deadlines it guards, and
+    /// with the timer running most of these scans find nothing at all.
     #[serde(default = "default_timeout_poll_interval")]
     pub poll_interval: u64,
 
@@ -287,7 +293,7 @@ pub struct TimeoutsConfig {
 }
 
 fn default_timeout_poll_interval() -> u64 {
-    1000
+    60_000
 }
 
 fn default_wheel_capacity() -> usize {

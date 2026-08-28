@@ -1,4 +1,4 @@
-# resonate-wheel
+# resonate-timer-wheel
 
 A bounded, deduplicating timer wheel — specified, implemented, and proved to
 agree, in one crate.

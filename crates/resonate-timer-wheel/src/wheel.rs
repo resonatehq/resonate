@@ -235,7 +235,7 @@ fn sort_by_deadline<T>(batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
 /// # Example
 ///
 /// ```
-/// use resonate_wheel::{IdComparator, Timeout, TimerWheel};
+/// use resonate_timer_wheel::{IdComparator, Timeout, TimerWheel};
 ///
 /// let mut w = TimerWheel::new(2, IdComparator);
 /// w.merge(vec![

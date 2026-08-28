@@ -1,12 +1,12 @@
 [package]
-name = "resonate-wheel"
+name = "resonate-timer-wheel"
 description = "A bounded, deduplicating timer wheel, formally verified with Verus."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "resonate_wheel"
+name = "resonate_timer_wheel"
 path = "src/lib.rs"
 
 # The Verus toolchain is *not* required to build or run this crate: `verus_builtin_macros`

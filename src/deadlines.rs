@@ -18,8 +18,8 @@ use std::sync::{Arc, Weak};
 
 use resonate_core::util;
 use resonate_server_dbms::engine_port::{Scheduled, Timeout};
-use resonate_wheel::timer::{BoxFuture, Clock, OnBackfill, OnFire, TimerConfig};
-use resonate_wheel::{Comparator, Timer};
+use resonate_timer_wheel::timer::{BoxFuture, Clock, OnBackfill, OnFire, TimerConfig};
+use resonate_timer_wheel::{Comparator, Timer};
 
 use crate::config::TimeoutsConfig;
 use crate::server::Server;
@@ -99,7 +99,7 @@ pub fn build(config: &TimeoutsConfig, server: Weak<Server>) -> DeadlineTimer {
                     Vec::new()
                 }
             }
-        }) as BoxFuture<Vec<resonate_wheel::Timeout<Timeout>>>
+        }) as BoxFuture<Vec<resonate_timer_wheel::Timeout<Timeout>>>
     });
 
     Timer::new(cfg, TimeoutComparator, clock(), on_fire, on_backfill)
@@ -111,6 +111,6 @@ pub fn build(config: &TimeoutsConfig, server: Weak<Server>) -> DeadlineTimer {
 /// but the wheel's deadline is unsigned, so the clamp says what to do rather
 /// than leaving it to a wrapping cast. Zero is "already due", which is the
 /// right reading of a deadline before the epoch.
-pub fn scheduled_to_entry(s: Scheduled) -> resonate_wheel::Timeout<Timeout> {
-    resonate_wheel::Timeout::new(s.at.max(0) as u64, s.timeout)
+pub fn scheduled_to_entry(s: Scheduled) -> resonate_timer_wheel::Timeout<Timeout> {
+    resonate_timer_wheel::Timeout::new(s.at.max(0) as u64, s.timeout)
 }

@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use resonate_wheel::timer::{Clock, OnBackfill, OnFire, TimerConfig};
-use resonate_wheel::{IdComparator, Timeout, Timer};
+use resonate_timer_wheel::timer::{Clock, OnBackfill, OnFire, TimerConfig};
+use resonate_timer_wheel::{IdComparator, Timeout, Timer};
 
 /// A clock reading milliseconds since the test started, so a deadline of
 /// `now() + 40` is reached by sleeping 40ms.

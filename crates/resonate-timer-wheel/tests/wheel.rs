@@ -19,7 +19,7 @@
 // assertion *about* `is_empty`.
 #![allow(clippy::len_zero, clippy::unnecessary_cast)]
 
-use resonate_wheel::{IdComparator, Timeout, TimerWheel};
+use resonate_timer_wheel::{IdComparator, Timeout, TimerWheel};
 
 /// An independent model of `spec_merge`, written the obvious way.
 mod model {
@@ -53,7 +53,7 @@ mod model {
 }
 
 /// Drain a wheel into a plain vector. Consumes it.
-fn drain<C: resonate_wheel::Comparator<u64>>(mut w: TimerWheel<u64, C>) -> Vec<model::Entry> {
+fn drain<C: resonate_timer_wheel::Comparator<u64>>(mut w: TimerWheel<u64, C>) -> Vec<model::Entry> {
     w.pop_expired(u64::MAX)
         .into_iter()
         .map(|t| model::Entry {
