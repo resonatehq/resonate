@@ -24,7 +24,11 @@ use resonate_core::types::{
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
-use resonate_server_dbms::engine_port::{Input, Outgoing, Output, ResonateEngine};
+use resonate_server_dbms::engine_port::{
+    Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout,
+};
+
+use crate::deadlines::DeadlineTimer;
 use resonate_transport_http_poll::PollRegistry;
 
 /// The running server — owns configuration, the engine, auth, and the router.
@@ -44,6 +48,13 @@ pub struct Server {
     /// worker outliving its server is a real condition at shutdown, whereas a
     /// server without a router was only ever an artifact of the wiring order.
     router: Arc<dyn ResonateRouter>,
+    /// The near future, in memory.
+    ///
+    /// Every deadline a transition arms is merged here, and the timer asks the
+    /// engine for the one it names the moment it comes due. A cache, not a
+    /// record: what it holds is a bounded prefix of what one process has heard
+    /// about, and the sweep in `processing_timeouts` is what covers the rest.
+    timer: DeadlineTimer,
 }
 
 impl Server {
@@ -52,12 +63,75 @@ impl Server {
         auth: Option<auth::AuthConfig>,
         engine: Arc<dyn ResonateEngine>,
         router: Arc<dyn ResonateRouter>,
+        timer: DeadlineTimer,
     ) -> Self {
         Self {
             engine,
             config,
             auth,
             router,
+            timer,
+        }
+    }
+
+    /// Start the timer and wait for it to be seeded.
+    ///
+    /// Separate from construction because seeding reads the database, and
+    /// because the timer's own callbacks point back here: nothing can run until
+    /// the server is behind an `Arc`.
+    pub async fn start_timer(&self) {
+        self.timer.init().await;
+    }
+
+    /// Stop the timer task.
+    pub async fn stop_timer(&self) {
+        self.timer.stop().await;
+    }
+
+    /// Hand the timer the deadlines a transition just armed.
+    ///
+    /// Cheap and lossy on purpose: a send onto a queue, no waiting, and a
+    /// dropped batch costs latency rather than correctness — the durable row
+    /// committed with the transition, and the sweep still finds it. The wheel
+    /// decides what is worth keeping, so everything is offered to it.
+    pub fn arm(&self, timeouts: Vec<Scheduled>) {
+        // A paused engine is on a clock `debug.tick` drives, and the wheel is
+        // on the wall clock. Feeding one to the other would fill it with
+        // deadlines that are due at a fictional instant, and `fire` would
+        // decline every one of them anyway. Backfill re-reads the world when
+        // the engine resumes.
+        if timeouts.is_empty() || self.engine.is_paused() {
+            return;
+        }
+        self.timer.merge(
+            timeouts
+                .into_iter()
+                .map(crate::deadlines::scheduled_to_entry)
+                .collect(),
+        );
+    }
+
+    /// Fire deadlines the timer says have come due.
+    ///
+    /// One `Internal` per deadline, which is the narrow form: the engine acts
+    /// on the row that timeout names and nothing else. Firing is a hint, so
+    /// each of these may find the deadline has moved or the row has settled and
+    /// do nothing — that is `Internal` being idempotent, and it is what lets
+    /// this run alongside a sweep that will fire the same deadlines.
+    ///
+    /// What comes back is treated exactly like a request's output: messages go
+    /// to the router, and a deadline a firing armed goes straight back into the
+    /// timer, which is how a redispatched task keeps its retry deadline live
+    /// without a round trip through the sweep.
+    pub async fn fire(&self, timeouts: Vec<Timeout>) {
+        if self.engine.is_paused() {
+            return;
+        }
+        let now = util::system_time_ms();
+        for timeout in timeouts {
+            let out = self.engine.process(Input::Internal(timeout), now).await;
+            self.deliver(out.messages).await;
+            self.arm(out.timeouts);
         }
     }
 
@@ -486,7 +560,9 @@ impl ResonateServer for Server {
             None
         };
         let Output {
-            response, messages, ..
+            response,
+            messages,
+            timeouts,
         } = self
             .engine
             .process(Input::External(req), util::resolve_time(debug_time))
@@ -494,6 +570,7 @@ impl ResonateServer for Server {
         // Deliver after the transition has committed, never before: the engine
         // returns only what its transaction actually wrote.
         self.deliver(messages).await;
+        self.arm(timeouts);
         Ok(response.expect("invariant: External input always yields a response"))
     }
 }

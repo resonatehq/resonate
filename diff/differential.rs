@@ -346,6 +346,7 @@ async fn differential_random() {
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
+    let mut fired_timeouts = 0usize;
     let mut seen_sigs: HashSet<(String, u16, u8)> = HashSet::new();
     let mut plateau_count = 0usize;
     let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
@@ -454,6 +455,31 @@ async fn differential_random() {
             for ((name, ts), (pre, post)) in armed.iter().zip(pre_snaps.iter().zip(&post_snaps)) {
                 assert_arms_announced(name, &pre.1, &post.1, ts, &format!("ARM {ctx}"));
             }
+
+            // The near future every engine holds must be the same near future.
+            assert_upcoming_agrees(&backends, 16, &format!("UPCOMING {ctx}")).await;
+
+            // Then fire one of those deadlines the narrow way, as a timer
+            // would. Firing one that is already due exercises the path that
+            // does work; firing one that is not exercises the no-op that
+            // idempotency promises, which is just as easy to get wrong.
+            let candidates = {
+                let o = oracle.lock();
+                o.upcoming(8)
+            };
+            if let Some(pick) = pick(&mut rng, &candidates) {
+                let fire_ctx = format!("FIRE {ctx} timeout={:?}", pick.timeout);
+                eprintln!("[diff] {fire_ctx}");
+                fire_all(&backends, &pick.timeout, now, &fire_ctx).await;
+                if let Some(g) = &generator {
+                    let _ = g.process(Input::Internal(pick.timeout.clone()), now).await;
+                }
+                fired_timeouts += 1;
+
+                let (fire_snaps, fire_queued) = snap_all(&backends, now).await;
+                assert_snaps_agree(&fire_snaps, &fire_ctx);
+                assert_agree(&fire_queued, "queued messages", &fire_ctx);
+            }
         }
 
         let (snaps, queued) = snap_all(&backends, now).await;
@@ -504,7 +530,7 @@ async fn differential_random() {
     }
 
     eprintln!(
-        "[diff] PASSED — {total_steps} steps, {} backends, all {} ops covered, {} behavioral signatures",
+        "[diff] PASSED — {total_steps} steps, {fired_timeouts} timeouts fired, {} backends, all {} ops covered, {} behavioral signatures",
         backends.len(),
         ALL_OPS.len(),
         seen_sigs.len(),
@@ -618,6 +644,71 @@ async fn send_all(
         out.push((name.clone(), resp.head.status, resp.data));
     }
     out
+}
+
+/// Fire one timeout on every backend and compare what came back.
+///
+/// This is the check the narrow path needs. `Internal` is where an engine can
+/// most easily diverge without anyone noticing: the sweep would have caught the
+/// row anyway, so a per-timeout path that fires the wrong row, or nothing, or
+/// everything, still converges to the same state a moment later. Comparing the
+/// messages and deadlines of the firing itself is what distinguishes "fired
+/// exactly this" from "fired the whole queue".
+async fn fire_all(backends: &[(String, Backend)], timeout: &Timeout, now: i64, ctx: &str) {
+    let mut emissions: Vec<(String, Value)> = Vec::new();
+    let mut armed: Vec<(String, Value)> = Vec::new();
+
+    for (name, b) in backends {
+        let out = b.process(Input::Internal(timeout.clone()), now).await;
+        assert!(
+            out.response.is_none(),
+            "{ctx}: {name} returned a response for Internal input"
+        );
+        if b.returns_messages() {
+            let mut msgs: Vec<Value> = out
+                .messages
+                .iter()
+                .map(|m| json!({ "address": m.address(), "message": m.to_json() }))
+                .collect();
+            sort_messages(&mut msgs);
+            emissions.push((name.clone(), Value::Array(msgs)));
+        }
+        let mut keys: Vec<Value> = out
+            .timeouts
+            .iter()
+            .map(|t| {
+                let (kind, id, at) = armed_key(t);
+                json!([kind, id, at])
+            })
+            .collect();
+        sort_by_json(&mut keys);
+        armed.push((name.clone(), Value::Array(keys)));
+    }
+
+    assert_agree(&emissions, "emitted messages", ctx);
+    assert_agree(&armed, "armed timeouts", ctx);
+}
+
+/// Every engine must hold the same near future.
+///
+/// `upcoming` is a hint, so the contract permits returning fewer than asked
+/// for — but not a *different* set. Comparing it is what catches a backfill
+/// query whose predicates have drifted from the sweep's, which would otherwise
+/// show up only as a timer that sleeps through a deadline.
+async fn assert_upcoming_agrees(backends: &[(String, Backend)], limit: usize, ctx: &str) {
+    let mut out: Vec<(String, Value)> = Vec::new();
+    for (name, b) in backends {
+        let ups = b.upcoming(limit).await.expect("upcoming");
+        let keys: Vec<Value> = ups
+            .iter()
+            .map(|t| {
+                let (kind, id, at) = armed_key(t);
+                json!([kind, id, at])
+            })
+            .collect();
+        out.push((name.clone(), Value::Array(keys)));
+    }
+    assert_agree(&out, "upcoming deadlines", ctx);
 }
 
 /// Engines that return their emissions must return the same ones.

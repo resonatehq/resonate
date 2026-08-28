@@ -37,9 +37,14 @@ pub async fn timeout_processing_loop(
             // do not. The messages the sweep emitted go out here — a
             // redispatched task and a fired schedule both owe one, and there
             // is no longer a pump to find them later.
-            Ok((fired, messages)) => {
+            Ok((fired, messages, armed)) => {
                 metrics::SCHEDULE_PROMISES_TOTAL.inc_by(fired as f64);
                 state.deliver(messages).await;
+                // A sweep arms too — a redispatched task gets a fresh retry
+                // deadline — and those are the deadlines most likely to come
+                // due soon. Dropping them would leave the timer knowing only
+                // what the request path told it.
+                state.arm(armed);
             }
             Err(e) => {
                 tracing::error!(error = %e, "Background timeout processing failed: storage error");

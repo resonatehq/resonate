@@ -102,6 +102,14 @@ pub struct Oracle {
     /// an outbox, and the emissions, so it compares against ones that return
     /// them.
     emitted: Vec<Outgoing>,
+    /// The one timeout the running sweep is restricted to, if any.
+    ///
+    /// The model's sweep is four filters over three tables, so restricting it
+    /// to one timeout is one more conjunct on each — which is exactly what the
+    /// SQL backends do with `AND id = ?`. Set for the duration of one
+    /// `apply_timeout` and cleared after, so `debug.tick` still sweeps
+    /// everything.
+    tick_only: Option<Timeout>,
 }
 
 impl Default for Oracle {
@@ -122,6 +130,7 @@ impl Oracle {
             outgoing: Vec::new(),
             emitted: Vec::new(),
             armed: Vec::new(),
+            tick_only: None,
         }
     }
 
@@ -137,12 +146,21 @@ impl Oracle {
 
     /// Fire one timeout the system asked of itself.
     ///
-    /// The model has no per-timeout path yet, only the bulk sweep `debug.tick`
-    /// drives, so being asked about one timeout fires every timeout now due —
-    /// the named one among them. Over-processes, never mis-processes, which is
-    /// what `Internal` being idempotent buys. This becomes precise when the
-    /// ported engines define what firing exactly one timeout means.
-    pub fn apply_timeout(&mut self, _timeout: &Timeout, now: i64) {
+    /// Fire exactly the named timeout.
+    ///
+    /// The model runs its own sweep with [`Oracle::tick_only`] set, so the four
+    /// collectors keep only the row that timeout names. Reusing the sweep
+    /// rather than writing a second path is deliberate and is what the SQL
+    /// backends do too: the narrow form must be the bulk form restricted, or
+    /// the two can disagree.
+    pub fn apply_timeout(&mut self, timeout: &Timeout, now: i64) {
+        self.tick_only = Some(timeout.clone());
+        self.sweep(now);
+        self.tick_only = None;
+    }
+
+    /// Fire every timeout now due.
+    pub fn sweep(&mut self, now: i64) {
         let req = RequestEnvelope {
             kind: "debug.tick".to_string(),
             head: RequestHead {
@@ -154,6 +172,79 @@ impl Oracle {
             data: json!({ "time": now }),
         };
         self.apply(&req);
+    }
+
+    /// Does the running sweep keep this row?
+    ///
+    /// Always, unless it was narrowed to one timeout — the same test the SQL
+    /// statements make with `AND id = ?`.
+    fn tick_selects(&self, kind: &str, id: &str) -> bool {
+        match &self.tick_only {
+            None => true,
+            Some(t) => t.kind() == kind && t.id() == id,
+        }
+    }
+
+    /// The `limit` nearest deadlines the model holds, soonest first.
+    ///
+    /// The three timeout tables can outlive the state they describe — a retry
+    /// entry survives its task leaving `pending` — so this applies the same
+    /// liveness tests the sweep applies before acting. Without them the model
+    /// would report deadlines the SQL backends' partial indexes do not hold,
+    /// and the two would disagree over an answer that is only a hint.
+    pub fn upcoming(&self, limit: usize) -> Vec<Scheduled> {
+        let mut out: Vec<Scheduled> = Vec::new();
+
+        for pt in &self.p_timeouts {
+            if self.promises.get(&pt.id).is_some_and(|p| {
+                p.state == PromiseState::Pending && p.tags.contains_key("resonate:target")
+            }) {
+                out.push(Scheduled {
+                    at: pt.timeout,
+                    timeout: Timeout::PromiseTimeout {
+                        promise_id: pt.id.clone(),
+                    },
+                });
+            }
+        }
+
+        for tt in &self.t_timeouts {
+            let Some(task) = self.tasks.get(&tt.id) else {
+                continue;
+            };
+            match tt.kind {
+                TTimeoutKind::Retry if task.state == TaskState::Pending => out.push(Scheduled {
+                    at: tt.timeout,
+                    timeout: Timeout::TaskRetryTimeout {
+                        task_id: tt.id.clone(),
+                    },
+                }),
+                TTimeoutKind::Lease if task.state == TaskState::Acquired => out.push(Scheduled {
+                    at: tt.timeout,
+                    timeout: Timeout::TaskLeaseTimeout {
+                        task_id: tt.id.clone(),
+                        pid: task.pid.clone().unwrap_or_default(),
+                    },
+                }),
+                _ => {}
+            }
+        }
+
+        for st in &self.s_timeouts {
+            out.push(Scheduled {
+                at: st.timeout,
+                timeout: Timeout::ScheduleDue {
+                    schedule_id: st.id.clone(),
+                },
+            });
+        }
+
+        out.sort_by(|a, b| {
+            a.at.cmp(&b.at)
+                .then_with(|| a.timeout.id().cmp(b.timeout.id()))
+        });
+        out.truncate(limit);
+        out
     }
 
     pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
@@ -1807,7 +1898,7 @@ impl Oracle {
         let expired_promise_ids: Vec<String> = self
             .p_timeouts
             .iter()
-            .filter(|pt| time >= pt.timeout)
+            .filter(|pt| time >= pt.timeout && self.tick_selects("promise", &pt.id))
             .map(|pt| pt.id.clone())
             .collect();
 
@@ -1815,7 +1906,11 @@ impl Oracle {
         let expired_leases: Vec<(String, i64)> = self
             .t_timeouts
             .iter()
-            .filter(|tt| time >= tt.timeout && matches!(tt.kind, TTimeoutKind::Lease))
+            .filter(|tt| {
+                time >= tt.timeout
+                    && matches!(tt.kind, TTimeoutKind::Lease)
+                    && self.tick_selects("lease", &tt.id)
+            })
             .filter_map(|tt| {
                 self.tasks
                     .get(&tt.id)
@@ -1828,7 +1923,11 @@ impl Oracle {
         let expired_retries: Vec<String> = self
             .t_timeouts
             .iter()
-            .filter(|tt| time >= tt.timeout && matches!(tt.kind, TTimeoutKind::Retry))
+            .filter(|tt| {
+                time >= tt.timeout
+                    && matches!(tt.kind, TTimeoutKind::Retry)
+                    && self.tick_selects("retry", &tt.id)
+            })
             .filter_map(|tt| {
                 self.tasks
                     .get(&tt.id)
@@ -1907,7 +2006,7 @@ impl Oracle {
         let expired_schedules: Vec<(String, i64)> = self
             .s_timeouts
             .iter()
-            .filter(|st| time >= st.timeout)
+            .filter(|st| time >= st.timeout && self.tick_selects("schedule", &st.id))
             .map(|st| (st.id.clone(), st.timeout))
             .collect();
 
@@ -2476,15 +2575,16 @@ impl ResonateEngine for SharedOracle {
 
     /// The model is not a server, so nothing calls this for its count — it
     /// exists to satisfy the port. The sweep is `debug.tick`'s.
-    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
         let mut oracle = self.lock();
-        oracle.apply_timeout(
-            &Timeout::ScheduleDue {
-                schedule_id: String::new(),
-            },
-            now,
-        );
-        Ok((0, oracle.take_emitted()))
+        oracle.sweep(now);
+        let messages = oracle.take_emitted();
+        let armed = oracle.take_armed();
+        Ok((0, messages, armed))
+    }
+
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        Ok(self.lock().upcoming(limit))
     }
 
     async fn ping(&self) -> StorageResult<()> {

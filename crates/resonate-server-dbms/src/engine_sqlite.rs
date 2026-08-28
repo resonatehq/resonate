@@ -3395,11 +3395,57 @@ impl<'a> SqliteDb<'a> {
         Ok(results)
     }
 
-    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, next_run_at FROM schedules WHERE next_run_at <= ?1")?;
-        let mut rows = stmt.query(params![time])?;
+    /// The nearest deadlines the tables hold, soonest first.
+    ///
+    /// The four queues are four columns, so this is a union of four index
+    /// scans, each with the same predicate its sweep statement uses. It is the
+    /// only read here that goes looking for what is armed — everything else
+    /// reports what it just wrote — and it exists so a timer can fill itself
+    /// after a restart rather than waiting to be told.
+    ///
+    /// Overdue rows are not excluded. They sort first, and a restarting timer
+    /// wants exactly those.
+    fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT deadline, kind, id, pid FROM (
+                 SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
+                   FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                 UNION ALL
+                 SELECT retry_at, 'retry', id, NULL
+                   FROM promises WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                 UNION ALL
+                 SELECT expires_at, 'lease', id, pid
+                   FROM promises WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                 UNION ALL
+                 SELECT next_run_at, 'schedule', id, NULL FROM schedules
+             )
+             ORDER BY deadline ASC, id ASC
+             LIMIT ?1",
+        )?;
+        let mut rows = stmt.query(params![limit as i64])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let at: i64 = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let id: String = row.get(2)?;
+            let pid: Option<String> = row.get(3)?;
+            if let Some(timeout) = Timeout::from_parts(&kind, id, pid) {
+                out.push(Scheduled { at, timeout });
+            }
+        }
+        Ok(out)
+    }
+
+    fn get_expired_schedule_timeouts(
+        &self,
+        time: i64,
+        only: Option<&str>,
+    ) -> StorageResult<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, next_run_at FROM schedules
+             WHERE next_run_at <= ?1 AND (?2 IS NULL OR id = ?2)",
+        )?;
+        let mut rows = stmt.query(params![time, only])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
@@ -3534,24 +3580,46 @@ impl<'a> SqliteDb<'a> {
         Ok(())
     }
 
-    fn process_timeouts(&self, time: i64) -> StorageResult<()> {
+    /// Fire expired timeouts, either all of them or one named.
+    ///
+    /// `only` is what makes the precise form precise. Each statement below
+    /// already selects the rows of one queue past their deadline; naming a
+    /// timeout adds `AND id = ?` to the statement for its own queue and skips
+    /// the other two entirely. Everything downstream — the settle, the
+    /// emissions, the re-arm — is the same code on the same row, so the narrow
+    /// form cannot drift from the sweep: it is the sweep, over one row.
+    ///
+    /// A named timeout whose deadline has moved or whose row has settled
+    /// matches nothing and does nothing, which is the idempotency the port
+    /// promises.
+    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
+        let selected = |kind: &str| match only {
+            None => Some(None),
+            Some(t) if t.kind() == kind => Some(Some(t.id())),
+            Some(_) => None,
+        };
+
         // Statement 1: Process expired promise timeouts.
         //
         // `state = 'pending' AND target IS NOT NULL` is the whole of what
         // `promise_timeouts` held: rows entered on create and left on settle,
         // and only a targeted promise was ever swept eagerly. Untargeted ones
         // still time out lazily, through `try_timeout`.
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM promises
-             WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1",
-        )?;
-        let expired_ids: Vec<String> = {
-            let mut rows = stmt.query(params![time])?;
-            let mut r = Vec::new();
-            while let Some(row) = rows.next()? {
-                r.push(row.get(0)?);
+        let expired_ids: Vec<String> = match selected("promise") {
+            None => Vec::new(),
+            Some(id) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id FROM promises
+                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
+                       AND (?2 IS NULL OR id = ?2)",
+                )?;
+                let mut rows = stmt.query(params![time, id])?;
+                let mut r = Vec::new();
+                while let Some(row) = rows.next()? {
+                    r.push(row.get(0)?);
+                }
+                r
             }
-            r
         };
 
         // Phase 1: Settle all expired promises
@@ -3584,17 +3652,21 @@ impl<'a> SqliteDb<'a> {
 
         // Statement 2: Process expired task retry deadlines — what was
         // `timeout_type = 0`, now a non-NULL `retry_at` on a pending task.
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM promises
-             WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?1",
-        )?;
-        let retry_ids: Vec<String> = {
-            let mut rows = stmt.query(params![time])?;
-            let mut r = Vec::new();
-            while let Some(row) = rows.next()? {
-                r.push(row.get(0)?);
+        let retry_ids: Vec<String> = match selected("retry") {
+            None => Vec::new(),
+            Some(id) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id FROM promises
+                     WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?1
+                       AND (?2 IS NULL OR id = ?2)",
+                )?;
+                let mut rows = stmt.query(params![time, id])?;
+                let mut r = Vec::new();
+                while let Some(row) = rows.next()? {
+                    r.push(row.get(0)?);
+                }
+                r
             }
-            r
         };
 
         for id in &retry_ids {
@@ -3609,17 +3681,21 @@ impl<'a> SqliteDb<'a> {
         // Statement 3: Process expired leases — what was `timeout_type = 1`,
         // now a non-NULL `expires_at` on an acquired task. The holder went
         // away; hand the task back to the retry queue.
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM promises
-             WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?1",
-        )?;
-        let lease_ids: Vec<String> = {
-            let mut rows = stmt.query(params![time])?;
-            let mut r = Vec::new();
-            while let Some(row) = rows.next()? {
-                r.push(row.get(0)?);
+        let lease_ids: Vec<String> = match selected("lease") {
+            None => Vec::new(),
+            Some(id) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id FROM promises
+                     WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?1
+                       AND (?2 IS NULL OR id = ?2)",
+                )?;
+                let mut rows = stmt.query(params![time, id])?;
+                let mut r = Vec::new();
+                while let Some(row) = rows.next()? {
+                    r.push(row.get(0)?);
+                }
+                r
             }
-            r
         };
 
         for id in &lease_ids {
@@ -3856,13 +3932,13 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
 /// schedules. Returns how many schedules fired, for the caller to record.
 fn process_all_timeouts(db: &SqliteDb, time: i64) -> StorageResult<usize> {
     tracing::debug!(time = time, "Processing expired timeouts");
-    db.process_timeouts(time)?;
-    process_schedule_timeouts(db, time)
+    db.process_timeouts(time, None)?;
+    process_schedule_timeouts(db, time, None)
 }
 
 /// Process expired schedule timeouts.
-fn process_schedule_timeouts(db: &SqliteDb, time: i64) -> StorageResult<usize> {
-    let expired = db.get_expired_schedule_timeouts(time)?;
+fn process_schedule_timeouts(db: &SqliteDb, time: i64, only: Option<&str>) -> StorageResult<usize> {
+    let expired = db.get_expired_schedule_timeouts(time, only)?;
     let mut fired = 0usize;
 
     for (schedule_id, fired_at) in &expired {
@@ -3919,10 +3995,12 @@ impl ResonateEngine for SqliteEngine {
         }
     }
 
-    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
-        self.transact(move |db| process_all_timeouts(db, now))
-            .await
-            .map(|(fired, messages, _)| (fired, messages))
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
+        self.transact(move |db| process_all_timeouts(db, now)).await
+    }
+
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        self.query(move |db| db.upcoming(limit)).await
     }
 
     fn is_paused(&self) -> bool {
@@ -3949,13 +4027,14 @@ impl SqliteEngine {
     /// and neither knows about the other.
     async fn fire(&self, timeout: Timeout, now: i64) -> Output {
         let swept = match timeout {
-            Timeout::PromiseTimeout { .. }
-            | Timeout::TaskRetryTimeout { .. }
-            | Timeout::TaskLeaseTimeout { .. } => {
-                self.transact(move |db| db.process_timeouts(now)).await
+            Timeout::ScheduleDue { schedule_id } => {
+                self.transact(move |db| {
+                    process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ())
+                })
+                .await
             }
-            Timeout::ScheduleDue { .. } => {
-                self.transact(move |db| process_schedule_timeouts(db, now).map(|_| ()))
+            other => {
+                self.transact(move |db| db.process_timeouts(now, Some(&other)))
                     .await
             }
         };

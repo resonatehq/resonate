@@ -2679,6 +2679,7 @@ dependencies = [
  "resonate-transport-gcps",
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
+ "resonate-wheel",
  "resonate-worker-bash",
  "serde",
  "serde_json",

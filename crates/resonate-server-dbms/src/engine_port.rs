@@ -81,6 +81,51 @@ pub enum Timeout {
     ScheduleDue { schedule_id: String },
 }
 
+impl Timeout {
+    /// Which queue this timeout belongs to.
+    ///
+    /// The four kinds are four columns, and a sweep restricted to one timeout
+    /// has to know which column to look at. Paired with [`Timeout::id`] this is
+    /// also the timeout's identity: one row can hold a promise deadline and a
+    /// task deadline at once, so the id alone does not distinguish them.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Timeout::PromiseTimeout { .. } => "promise",
+            Timeout::TaskRetryTimeout { .. } => "retry",
+            Timeout::TaskLeaseTimeout { .. } => "lease",
+            Timeout::ScheduleDue { .. } => "schedule",
+        }
+    }
+
+    /// Rebuild a timeout from the columns [`ResonateEngine::upcoming`] selects.
+    ///
+    /// The inverse of [`Timeout::kind`] and [`Timeout::id`], so the four
+    /// backends can share one shape for a query that is otherwise four
+    /// dialects of the same union.
+    pub fn from_parts(kind: &str, id: String, pid: Option<String>) -> Option<Timeout> {
+        match kind {
+            "promise" => Some(Timeout::PromiseTimeout { promise_id: id }),
+            "retry" => Some(Timeout::TaskRetryTimeout { task_id: id }),
+            "lease" => Some(Timeout::TaskLeaseTimeout {
+                task_id: id,
+                pid: pid.unwrap_or_default(),
+            }),
+            "schedule" => Some(Timeout::ScheduleDue { schedule_id: id }),
+            _ => None,
+        }
+    }
+
+    /// The row this timeout is about.
+    pub fn id(&self) -> &str {
+        match self {
+            Timeout::PromiseTimeout { promise_id } => promise_id,
+            Timeout::TaskRetryTimeout { task_id } => task_id,
+            Timeout::TaskLeaseTimeout { task_id, .. } => task_id,
+            Timeout::ScheduleDue { schedule_id } => schedule_id,
+        }
+    }
+}
+
 /// A timeout and when it comes due. A hint for an in-memory wheel — the
 /// durable copy committed with the state change that armed it.
 #[derive(Debug, Clone, PartialEq)]
@@ -104,8 +149,11 @@ pub enum Input<'a> {
 ///
 /// - **`process` is atomic** across state, messages and timeouts. Either all of
 ///   it happened or none of it did.
-/// - **`Internal` is idempotent.** An in-memory wheel and a database sweep will
-///   both fire the same timeout, and neither knows about the other.
+/// - **`Internal` is idempotent, and narrow.** It fires the one timeout it
+///   names and nothing else, so firing it when the deadline has moved or the
+///   row has settled is a no-op rather than a mistake. An in-memory wheel and a
+///   database sweep will both fire the same timeout, and neither knows about
+///   the other.
 /// - **`timeouts` reports arming, not disarming.** A promise settled early
 ///   leaves a stale entry that fires into a no-op, which idempotency covers.
 #[derive(Debug, Default)]
@@ -145,12 +193,29 @@ pub trait ResonateEngine: Send + Sync {
 
     /// Fire every timeout now due, and return what they emitted.
     ///
-    /// The bulk form. The design replaces it with [`ResonateEngine::due`]
-    /// listing what is due and `process(Internal(..))` firing them one at a
-    /// time, so a wheel that knows exactly what is due does exactly that much
-    /// work; until that exists this is what the timer loop calls. The count is
-    /// schedules fired, which the caller records.
-    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)>;
+    /// The bulk form, and the backstop: a timer holds only the near future of
+    /// one process, so this is what finds a deadline armed by another instance
+    /// or lost across a restart. `process(Internal(..))` is the precise form
+    /// and does strictly less work; both are idempotent, and running them
+    /// concurrently is exactly the overlap idempotency is for.
+    ///
+    /// The count is schedules fired, which the caller records. The deadlines
+    /// are the ones this sweep armed — a redispatched task gets a fresh retry
+    /// deadline, and the caller's timer wants to hear about it.
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)>;
+
+    /// The `limit` nearest deadlines the durable state holds, soonest first.
+    ///
+    /// Read-only, and the one place an engine scans for what is armed rather
+    /// than reporting what it just wrote. A timer calls this to fill itself
+    /// after a restart and to pick up what other instances armed; nothing in
+    /// the protocol depends on the answer, so an engine may return fewer than
+    /// asked for.
+    ///
+    /// Overdue deadlines are included and sort first. A caller reading this
+    /// into a wheel wants them: they are what a restart has to catch up on, and
+    /// a wheel that skipped them would wait for the sweep instead.
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>>;
 
     /// Is the engine paused? `debug.start` sets this, and the background loops
     /// honour it so a test can drive the clock with `debug.tick` instead of

@@ -1,6 +1,7 @@
 mod auth;
 mod cli;
 mod config;
+mod deadlines;
 mod mcp;
 mod metrics;
 mod processing;
@@ -337,7 +338,11 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         let router: Arc<dyn ResonateRouter> =
             Arc::new(transport::TransportDispatcher::new(workers));
-        Server::new(config, auth_config, engine, router)
+        // The timer's callbacks point back at the server too, so it is built
+        // from the same weak handle and in the same expression. Nothing runs
+        // until `start_timer` below.
+        let timer = deadlines::build(&config.timeouts, weak.clone());
+        Server::new(config, auth_config, engine, router, timer)
     });
 
     let Transports {
@@ -355,6 +360,17 @@ async fn run_server(config: Config) -> Result<(), String> {
             .await
             .map_err(|e| format!("transport '{scheme}' failed to start: {e}"))?;
     }
+
+    // Seed the timer from the durable deadlines before anything can arm one.
+    // `start_timer` returns only once that first read has landed, so a deadline
+    // that is already due fires immediately rather than waiting for a sweep.
+    state.start_timer().await;
+    tracing::info!(
+        wheel_capacity = state.config.timeouts.wheel_capacity,
+        wheel_refresh_ms = state.config.timeouts.wheel_refresh,
+        sweep_interval_ms = state.config.timeouts.poll_interval,
+        "Timer started"
+    );
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -401,6 +417,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         );
     }
 
+    let app_timer = Arc::clone(&state);
     let app_state = server::AppState {
         server: state,
         poll_registry,
@@ -462,6 +479,10 @@ async fn run_server(config: Config) -> Result<(), String> {
     let _ = shutdown_tx.send(true);
 
     let drain = async {
+        // The timer first: it is the only thing that can still hand the engine
+        // work of its own, and stopping it means nothing new arrives while the
+        // loops below drain.
+        app_timer.stop_timer().await;
         for handle in handles {
             let _ = handle.await;
         }

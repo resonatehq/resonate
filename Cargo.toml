@@ -47,6 +47,7 @@ concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 [dependencies]
 resonate-core = { path = "crates/resonate-core" }
 resonate-server-dbms = { path = "crates/resonate-server-dbms" }
+resonate-wheel = { path = "crates/resonate-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }

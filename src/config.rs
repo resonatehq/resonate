@@ -261,18 +261,49 @@ impl Default for TasksConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutsConfig {
     /// Background timeout scan interval (ms)
+    ///
+    /// The backstop. The in-memory timer fires a deadline the moment it comes
+    /// due, so this is what catches what the timer cannot see: a deadline
+    /// another instance armed, one lost to a restart, one past the wheel's
+    /// horizon. With the timer running, most of these scans find nothing.
     #[serde(default = "default_timeout_poll_interval")]
     pub poll_interval: u64,
+
+    /// How many deadlines the in-memory timer holds.
+    ///
+    /// The horizon is whatever this many nearest deadlines reach; anything
+    /// further out is the sweep's until the wheel drains down to it. Bigger
+    /// costs memory and buys a longer horizon, not correctness.
+    #[serde(default = "default_wheel_capacity")]
+    pub wheel_capacity: usize,
+
+    /// How often the timer re-reads the durable deadlines (ms).
+    ///
+    /// Also the longest it will sleep. This is the staleness bound: a deadline
+    /// armed by another instance is invisible to this one until the next
+    /// refresh, and the sweep is what fires it in the meantime.
+    #[serde(default = "default_wheel_refresh")]
+    pub wheel_refresh: u64,
 }
 
 fn default_timeout_poll_interval() -> u64 {
     1000
 }
 
+fn default_wheel_capacity() -> usize {
+    8192
+}
+
+fn default_wheel_refresh() -> u64 {
+    30_000
+}
+
 impl Default for TimeoutsConfig {
     fn default() -> Self {
         Self {
             poll_interval: default_timeout_poll_interval(),
+            wheel_capacity: default_wheel_capacity(),
+            wheel_refresh: default_wheel_refresh(),
         }
     }
 }

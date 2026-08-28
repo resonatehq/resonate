@@ -3859,11 +3859,62 @@ impl PostgresDb<'_> {
         Ok(rows.iter().map(row_to_schedule).collect())
     }
 
-    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
+    /// The nearest deadlines the tables hold, soonest first.
+    ///
+    /// The four queues are four columns, so this is a union of four index
+    /// scans, each with the same predicate its sweep statement uses. It is the
+    /// only read here that goes looking for what is armed — everything else
+    /// reports what it just wrote — and it exists so a timer can fill itself
+    /// after a restart rather than waiting to be told.
+    ///
+    /// Overdue rows are not excluded. They sort first, and a restarting timer
+    /// wants exactly those.
+    fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
-            sqlx::query("SELECT id, next_run_at FROM schedules WHERE next_run_at <= $1")
-                .bind(time)
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(
+                "SELECT deadline, kind, id, pid FROM (
+                     SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
+                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                     UNION ALL
+                     SELECT retry_at, 'retry', id, NULL
+                       FROM promises WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                     UNION ALL
+                     SELECT expires_at, 'lease', id, pid
+                       FROM promises WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                     UNION ALL
+                     SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                 ) d
+                 ORDER BY deadline ASC, id ASC
+                 LIMIT $1",
+            )
+            .bind(limit as i64)
+            .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let at: i64 = r.get("deadline");
+                let kind: String = r.get("kind");
+                let id: String = r.get("id");
+                let pid: Option<String> = r.get("pid");
+                Timeout::from_parts(&kind, id, pid).map(|timeout| Scheduled { at, timeout })
+            })
+            .collect())
+    }
+
+    fn get_expired_schedule_timeouts(
+        &self,
+        time: i64,
+        only: Option<&str>,
+    ) -> StorageResult<Vec<(String, i64)>> {
+        let rows = rt_block_on(
+            sqlx::query(
+                "SELECT id, next_run_at FROM schedules
+                 WHERE next_run_at <= $1 AND ($2::text IS NULL OR id = $2)",
+            )
+            .bind(time)
+            .bind(only)
+            .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows
             .iter()
@@ -3965,36 +4016,59 @@ impl PostgresDb<'_> {
     // Timeout processing — three sequential statements, as in the multi-table
     // backend. Statement 1 is the same cascade as `try_timeout`, driven by the
     // sweep predicate instead of an explicit id list.
-    fn process_timeouts(&self, time: i64) -> StorageResult<()> {
+    /// Fire expired timeouts, either all of them or one named.
+    ///
+    /// `only` is what makes the precise form precise, and it costs one bound
+    /// parameter: every statement below already selects the rows of one queue
+    /// past their deadline, and `$2` narrows that to a single id. A named
+    /// timeout runs the statement for its own queue and skips the other two,
+    /// so the narrow form is the sweep restricted to one row rather than a
+    /// second implementation of it.
+    ///
+    /// `$2::text IS NULL` is the full sweep. The cast is load-bearing: without
+    /// it Postgres cannot infer the parameter's type in a comparison against
+    /// `NULL`.
+    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
         let trt = self.task_retry_timeout;
+        let selected = |kind: &str| match only {
+            None => Some(None::<String>),
+            Some(t) if t.kind() == kind => Some(Some(t.id().to_string())),
+            Some(_) => None,
+        };
 
         // Statement 1: expired promises.
         //
         // `state = 'pending' AND target IS NOT NULL` is the whole of what
         // promise_timeouts held: rows enter on create and leave on settle, and
         // only targeted promises are ever swept eagerly.
-        let sql = expire_batch_sql(
-            "state = 'pending' AND target IS NOT NULL AND timeout_at <= $1",
-            "$1",
-            trt,
-        );
-        let expired_row = rt_block_on(
-            sqlx::query(&sql)
-                .bind(time)
-                .fetch_optional(self.tx().as_mut()),
-        )?;
-        if let Some(row) = expired_row {
-            self.absorb_and_arm_retries(&row, time + trt);
+        if let Some(id) = selected("promise") {
+            let sql = expire_batch_sql(
+                "state = 'pending' AND target IS NOT NULL AND timeout_at <= $1
+                 AND ($2::text IS NULL OR id = $2)",
+                "$1",
+                trt,
+            );
+            let expired_row = rt_block_on(
+                sqlx::query(&sql)
+                    .bind(time)
+                    .bind(&id)
+                    .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = expired_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
         }
 
         // Statement 2: expired task retry deadlines — re-enqueue the execute
         // message and push the deadline out.
-        let retry_row = rt_block_on(
-            sqlx::query(&format!(
-                "
+        if let Some(id) = selected("retry") {
+            let retry_row = rt_block_on(
+                sqlx::query(&format!(
+                    "
             WITH expired_retry AS (
               SELECT id, task_version, target FROM promises
               WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= $1
+                AND ($2::text IS NULL OR id = $2)
               FOR UPDATE
             ),
             updated_retry AS (
@@ -4009,22 +4083,26 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                messages = emitted_json(&["emit_retry"])
-            ))
-            .bind(time)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        if let Some(row) = retry_row {
-            self.absorb_and_arm_retries(&row, time + trt);
+                    messages = emitted_json(&["emit_retry"])
+                ))
+                .bind(time)
+                .bind(&id)
+                .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = retry_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
         }
 
         // Statement 3: expired leases — the holder went away, hand the task back.
-        let lease_row = rt_block_on(
-            sqlx::query(&format!(
-                "
+        if let Some(id) = selected("lease") {
+            let lease_row = rt_block_on(
+                sqlx::query(&format!(
+                    "
             WITH expired_lease AS (
               SELECT id, task_version, target FROM promises
               WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= $1
+                AND ($2::text IS NULL OR id = $2)
               FOR UPDATE
             ),
             released AS (
@@ -4041,13 +4119,15 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                messages = emitted_json(&["emit_released"])
-            ))
-            .bind(time)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        if let Some(row) = lease_row {
-            self.absorb_and_arm_retries(&row, time + trt);
+                    messages = emitted_json(&["emit_released"])
+                ))
+                .bind(time)
+                .bind(&id)
+                .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = lease_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
         }
 
         Ok(())
@@ -4158,13 +4238,17 @@ impl PostgresDb<'_> {
 /// schedules. Returns how many schedules fired, for the caller to record.
 fn process_all_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize> {
     tracing::debug!(time = time, "Processing expired timeouts");
-    db.process_timeouts(time)?;
-    process_schedule_timeouts(db, time)
+    db.process_timeouts(time, None)?;
+    process_schedule_timeouts(db, time, None)
 }
 
 /// Process expired schedule timeouts.
-fn process_schedule_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize> {
-    let expired = db.get_expired_schedule_timeouts(time)?;
+fn process_schedule_timeouts(
+    db: &PostgresDb,
+    time: i64,
+    only: Option<&str>,
+) -> StorageResult<usize> {
+    let expired = db.get_expired_schedule_timeouts(time, only)?;
     let mut fired = 0usize;
 
     for (schedule_id, fired_at) in &expired {
@@ -4213,10 +4297,13 @@ impl ResonateEngine for PostgresEngine {
         }
     }
 
-    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
         self.transact(move |db| process_all_timeouts(db, now), false)
             .await
-            .map(|(fired, messages, _)| (fired, messages))
+    }
+
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        self.query(move |db| db.upcoming(limit)).await
     }
 
     fn is_paused(&self) -> bool {
@@ -4236,18 +4323,16 @@ impl PostgresEngine {
     /// Fire one timeout the system asked of itself. See `persistence_sqlite.rs`.
     async fn fire(&self, timeout: Timeout, now: i64) -> Output {
         let swept = match timeout {
-            Timeout::PromiseTimeout { .. }
-            | Timeout::TaskRetryTimeout { .. }
-            | Timeout::TaskLeaseTimeout { .. } => {
-                self.transact(move |db| db.process_timeouts(now), false)
-                    .await
-            }
-            Timeout::ScheduleDue { .. } => {
+            Timeout::ScheduleDue { schedule_id } => {
                 self.transact(
-                    move |db| process_schedule_timeouts(db, now).map(|_| ()),
+                    move |db| process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ()),
                     false,
                 )
                 .await
+            }
+            other => {
+                self.transact(move |db| db.process_timeouts(now, Some(&other)), false)
+                    .await
             }
         };
         match swept {

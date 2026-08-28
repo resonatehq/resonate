@@ -3951,11 +3951,78 @@ impl MysqlDb<'_> {
         Ok(rows.iter().map(row_to_schedule).collect())
     }
 
-    fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
+    /// The nearest deadlines the tables hold, soonest first.
+    ///
+    /// The four queues are four columns, so this is a union of four index
+    /// scans, each with the same predicate its sweep statement uses. It is the
+    /// only read here that goes looking for what is armed — everything else
+    /// reports what it just wrote — and it exists so a timer can fill itself
+    /// after a restart rather than waiting to be told.
+    ///
+    /// Overdue rows are not excluded. They sort first, and a restarting timer
+    /// wants exactly those.
+    fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
-            sqlx::query("SELECT id, next_run_at FROM schedules WHERE next_run_at <= ?")
-                .bind(time)
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(
+                // The kind is an integer, not the label the other two backends
+                // select. A string literal in a UNION carries the connection's
+                // collation, the columns carry the table's, and MySQL refuses
+                // to unify them — "Illegal mix of collations". An integer has
+                // no collation, so the discriminant travels as a number and is
+                // named on the Rust side.
+                //
+                // `pid` is a bare NULL for the same reason: `CAST(NULL AS
+                // CHAR)` would introduce a collation of its own, where an
+                // untyped NULL takes the one the third branch supplies.
+                "SELECT deadline, kind, id, pid FROM (
+                     SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
+                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                     UNION ALL
+                     SELECT retry_at, 1, id, NULL
+                       FROM promises WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                     UNION ALL
+                     SELECT expires_at, 2, id, pid
+                       FROM promises WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                     UNION ALL
+                     SELECT next_run_at, 3, id, NULL FROM schedules
+                 ) d
+                 ORDER BY deadline ASC, id ASC
+                 LIMIT ?",
+            )
+            .bind(limit as i64)
+            .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let at: i64 = r.get("deadline");
+                let kind = match r.get::<i64, _>("kind") {
+                    0 => "promise",
+                    1 => "retry",
+                    2 => "lease",
+                    _ => "schedule",
+                };
+                let id: String = r.get("id");
+                let pid: Option<String> = r.get("pid");
+                Timeout::from_parts(kind, id, pid).map(|timeout| Scheduled { at, timeout })
+            })
+            .collect())
+    }
+
+    fn get_expired_schedule_timeouts(
+        &self,
+        time: i64,
+        only: Option<&str>,
+    ) -> StorageResult<Vec<(String, i64)>> {
+        let rows = rt_block_on(
+            sqlx::query(
+                "SELECT id, next_run_at FROM schedules
+                 WHERE next_run_at <= ? AND (? IS NULL OR id = ?)",
+            )
+            .bind(time)
+            .bind(only)
+            .bind(only)
+            .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows
             .iter()
@@ -4104,8 +4171,21 @@ impl MysqlDb<'_> {
         self.schedule_get(schedule_id)
     }
 
-    fn process_timeouts(&self, time: i64) -> StorageResult<()> {
+    /// Fire expired timeouts, either all of them or one named.
+    ///
+    /// `only` is what makes the precise form precise, and it costs one bound
+    /// parameter: every statement below already selects the rows of one queue
+    /// past their deadline, and `? IS NULL OR id = ?` narrows that to a single
+    /// id. A named timeout runs the statement for its own queue and skips the
+    /// other two, so the narrow form is the sweep restricted to one row rather
+    /// than a second implementation of it.
+    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
         let trt = self.task_retry_timeout;
+        let selected = |kind: &str| match only {
+            None => Some(None::<&str>),
+            Some(t) if t.kind() == kind => Some(Some(t.id())),
+            Some(_) => None,
+        };
 
         // Statement 1: Expire all pending promises with timeout_at <= time
         // (with resonate:target).
@@ -4114,14 +4194,20 @@ impl MysqlDb<'_> {
         // `promise_timeouts` held: rows entered on create and left on settle,
         // and only a targeted promise was ever swept eagerly. Untargeted ones
         // still time out lazily, through `try_timeout`.
-        let expired_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises
-                 WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?",
-            )
-            .bind(time)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        let expired_rows = match selected("promise") {
+            None => Vec::new(),
+            Some(id) => rt_block_on(
+                sqlx::query(
+                    "SELECT id FROM promises
+                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?
+                       AND (? IS NULL OR id = ?)",
+                )
+                .bind(time)
+                .bind(id)
+                .bind(id)
+                .fetch_all(self.tx().as_mut()),
+            )?,
+        };
 
         if !expired_rows.is_empty() {
             let expired_ids: Vec<String> = expired_rows
@@ -4151,14 +4237,20 @@ impl MysqlDb<'_> {
 
         // Statement 2: Process expired task retry deadlines — what was
         // `timeout_type = 0`, now a non-NULL `retry_at` on a pending task.
-        let retry_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises
-                 WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?",
-            )
-            .bind(time)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        let retry_rows = match selected("retry") {
+            None => Vec::new(),
+            Some(id) => rt_block_on(
+                sqlx::query(
+                    "SELECT id FROM promises
+                     WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?
+                       AND (? IS NULL OR id = ?)",
+                )
+                .bind(time)
+                .bind(id)
+                .bind(id)
+                .fetch_all(self.tx().as_mut()),
+            )?,
+        };
 
         if !retry_rows.is_empty() {
             let retry_ids: Vec<String> = retry_rows
@@ -4189,14 +4281,20 @@ impl MysqlDb<'_> {
         // Statement 3: Process expired leases — what was `timeout_type = 1`,
         // now a non-NULL `expires_at` on an acquired task. The holder went
         // away; hand the task back to the retry queue.
-        let lease_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises
-                 WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?",
-            )
-            .bind(time)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        let lease_rows = match selected("lease") {
+            None => Vec::new(),
+            Some(id) => rt_block_on(
+                sqlx::query(
+                    "SELECT id FROM promises
+                     WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?
+                       AND (? IS NULL OR id = ?)",
+                )
+                .bind(time)
+                .bind(id)
+                .bind(id)
+                .fetch_all(self.tx().as_mut()),
+            )?,
+        };
 
         if !lease_rows.is_empty() {
             let lease_ids: Vec<String> = lease_rows
@@ -4370,13 +4468,13 @@ impl MysqlDb<'_> {
 /// schedules. Returns how many schedules fired, for the caller to record.
 fn process_all_timeouts(db: &MysqlDb, time: i64) -> StorageResult<usize> {
     tracing::debug!(time = time, "Processing expired timeouts");
-    db.process_timeouts(time)?;
-    process_schedule_timeouts(db, time)
+    db.process_timeouts(time, None)?;
+    process_schedule_timeouts(db, time, None)
 }
 
 /// Process expired schedule timeouts.
-fn process_schedule_timeouts(db: &MysqlDb, time: i64) -> StorageResult<usize> {
-    let expired = db.get_expired_schedule_timeouts(time)?;
+fn process_schedule_timeouts(db: &MysqlDb, time: i64, only: Option<&str>) -> StorageResult<usize> {
+    let expired = db.get_expired_schedule_timeouts(time, only)?;
     let mut fired = 0usize;
 
     for (schedule_id, fired_at) in &expired {
@@ -4425,10 +4523,12 @@ impl ResonateEngine for MysqlEngine {
         }
     }
 
-    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
-        self.transact(move |db| process_all_timeouts(db, now))
-            .await
-            .map(|(fired, messages, _)| (fired, messages))
+    async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
+        self.transact(move |db| process_all_timeouts(db, now)).await
+    }
+
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        self.query(move |db| db.upcoming(limit)).await
     }
 
     fn is_paused(&self) -> bool {
@@ -4448,13 +4548,14 @@ impl MysqlEngine {
     /// Fire one timeout the system asked of itself. See `engine_sqlite.rs`.
     async fn fire(&self, timeout: Timeout, now: i64) -> Output {
         let swept = match timeout {
-            Timeout::PromiseTimeout { .. }
-            | Timeout::TaskRetryTimeout { .. }
-            | Timeout::TaskLeaseTimeout { .. } => {
-                self.transact(move |db| db.process_timeouts(now)).await
+            Timeout::ScheduleDue { schedule_id } => {
+                self.transact(move |db| {
+                    process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ())
+                })
+                .await
             }
-            Timeout::ScheduleDue { .. } => {
-                self.transact(move |db| process_schedule_timeouts(db, now).map(|_| ()))
+            other => {
+                self.transact(move |db| db.process_timeouts(now, Some(&other)))
                     .await
             }
         };
