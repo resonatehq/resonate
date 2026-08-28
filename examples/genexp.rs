@@ -12,11 +12,14 @@
 //!
 //! Three arms, one metric — how much distinct behaviour each reaches:
 //!
-//!   blind      a request built from tape bytes alone. No state read.
-//!   guided     the same generator, plus a corpus: a tape that reaches a new
-//!              behavioural signature is kept and mutated.
+//!   blind      a request built from tape bytes alone. Ids come from a fixed
+//!              pool, versions are guessed; nothing is read about what exists.
 //!   informed   what the differential does today — eligibility and operands
 //!              read out of the model.
+//!
+//! Each is run twice: unguided, where every tape is fresh random bytes, and
+//! guided, where a tape that reached a behavioural signature no tape has
+//! reached before is kept in a corpus and mutated.
 //!
 //! Run: cargo run --release --example genexp
 
@@ -131,38 +134,25 @@ fn any_id(t: &mut Tape) -> String {
     }
 }
 
-/// An id from the echo pool when there is one, otherwise from the fixed pool.
-/// One byte in eight ignores the pool, so ids that have never been seen — the
-/// 404 paths — stay reachable.
-fn echo_id(t: &mut Tape, echo: Option<&Echoed>) -> String {
-    match echo.and_then(|e| e.id(t)) {
-        Some(id) if !t.byte().is_multiple_of(8) => id,
-        _ => any_id(t),
-    }
-}
-
-fn blind(t: &mut Tape, now: i64, echo: Option<&Echoed>) -> (RequestEnvelope, i64) {
+fn blind(t: &mut Tape, now: i64) -> (RequestEnvelope, i64) {
     let op = OPS[t.upto(OPS.len())];
-    let ver = match echo.and_then(|e| e.version(t)) {
-        Some(v) if !t.byte().is_multiple_of(8) => v,
-        _ => t.upto(4) as i64,
-    };
+    let ver = t.upto(4) as i64;
     let settle = ["resolved", "rejected", "rejected_canceled"][t.upto(3)];
     let mut next_now = now;
     let data = match op {
         "promise.create" => json!({
-            "id": echo_id(t, echo), "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
+            "id": any_id(t), "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
             "param": {}, "tags": {}
         }),
-        "promise.get" => json!({ "id": echo_id(t, echo) }),
+        "promise.get" => json!({ "id": any_id(t) }),
         "promise.settle" => {
-            json!({ "id": echo_id(t, echo), "state": settle, "value": {} })
+            json!({ "id": any_id(t), "state": settle, "value": {} })
         }
         "promise.register_callback" => {
-            json!({ "awaited": echo_id(t, echo), "awaiter": echo_id(t, echo) })
+            json!({ "awaited": any_id(t), "awaiter": any_id(t) })
         }
         "promise.register_listener" => {
-            json!({ "awaited": echo_id(t, echo), "address": WORKER_URL })
+            json!({ "awaited": any_id(t), "address": WORKER_URL })
         }
         "promise.search" => match t.upto(3) {
             0 => json!({ "state": "pending", "limit": 10 }),
@@ -177,41 +167,41 @@ fn blind(t: &mut Tape, now: i64, echo: Option<&Echoed>) -> (RequestEnvelope, i64
                 "param": {}, "tags": { "resonate:target": WORKER_URL }
             }}
         }),
-        "task.get" => json!({ "id": echo_id(t, echo) }),
+        "task.get" => json!({ "id": any_id(t) }),
         "task.acquire" => json!({
-            "id": echo_id(t, echo), "version": ver, "pid": PID, "ttl": TTL
+            "id": any_id(t), "version": ver, "pid": PID, "ttl": TTL
         }),
-        "task.release" => json!({ "id": echo_id(t, echo), "version": ver }),
+        "task.release" => json!({ "id": any_id(t), "version": ver }),
         "task.fulfill" => {
-            let id = echo_id(t, echo);
+            let id = any_id(t);
             json!({ "id": id, "version": ver, "action": {
                 "kind": "promise.settle", "head": {},
                 "data": { "id": id, "state": settle, "value": {} } }})
         }
         "task.suspend" => {
-            let id = echo_id(t, echo);
+            let id = any_id(t);
             json!({ "id": id, "version": ver, "actions": [{
                 "kind": "promise.register_callback", "head": {},
-                "data": { "awaited": echo_id(t, echo), "awaiter": id } }]})
+                "data": { "awaited": any_id(t), "awaiter": id } }]})
         }
         "task.fence" => {
-            let id = echo_id(t, echo);
+            let id = any_id(t);
             if t.byte().is_multiple_of(2) {
                 json!({ "id": id, "version": ver, "action": {
                     "kind": "promise.create", "head": {},
-                    "data": { "id": echo_id(t, echo),
+                    "data": { "id": any_id(t),
                               "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
                               "param": {}, "tags": {} } }})
             } else {
                 json!({ "id": id, "version": ver, "action": {
                     "kind": "promise.settle", "head": {},
-                    "data": { "id": echo_id(t, echo), "state": settle, "value": {} } }})
+                    "data": { "id": any_id(t), "state": settle, "value": {} } }})
             }
         }
         "task.heartbeat" => {
             let n = 1 + t.upto(3);
             let tasks: Vec<Value> = (0..n)
-                .map(|_| json!({ "id": echo_id(t, echo), "version": t.upto(4) as i64 }))
+                .map(|_| json!({ "id": any_id(t), "version": t.upto(4) as i64 }))
                 .collect();
             let pid = if t.byte().is_multiple_of(7) {
                 "wrong-pid"
@@ -220,8 +210,8 @@ fn blind(t: &mut Tape, now: i64, echo: Option<&Echoed>) -> (RequestEnvelope, i64
             };
             json!({ "pid": pid, "tasks": tasks })
         }
-        "task.halt" => json!({ "id": echo_id(t, echo) }),
-        "task.continue" => json!({ "id": echo_id(t, echo) }),
+        "task.halt" => json!({ "id": any_id(t) }),
+        "task.continue" => json!({ "id": any_id(t) }),
         "task.search" => match t.upto(5) {
             0 => json!({ "state": "acquired", "limit": 10 }),
             1 => json!({ "state": "pending", "limit": 10 }),
@@ -554,74 +544,7 @@ impl Reach {
 
 enum Arm {
     Blind,
-    /// Blind shapes, but operands drawn from values the program has already
-    /// seen come back in a response.
-    ///
-    /// The middle ground: no eligibility table, no state machine, no query
-    /// against a model — just "reuse an id and a version you have observed".
-    /// The only thing it knows about the protocol is that a field called `id`
-    /// holds an id and one called `version` holds a version, which is a fact
-    /// about JSON rather than about promises.
-    Echo,
     Informed,
-}
-
-/// Values harvested from responses, for [`Arm::Echo`].
-#[derive(Default)]
-struct Echoed {
-    ids: Vec<String>,
-    versions: Vec<i64>,
-}
-
-impl Echoed {
-    /// Walk a response and remember any id and any version in it.
-    fn absorb(&mut self, v: &Value) {
-        match v {
-            Value::Object(m) => {
-                for (k, val) in m {
-                    if k == "id" {
-                        if let Some(s) = val.as_str() {
-                            if !self.ids.iter().any(|x| x == s) {
-                                self.ids.push(s.to_string());
-                                if self.ids.len() > 64 {
-                                    self.ids.remove(0);
-                                }
-                            }
-                        }
-                    }
-                    if k == "version" || k == "counter" {
-                        if let Some(n) = val.as_i64() {
-                            if !self.versions.contains(&n) {
-                                self.versions.push(n);
-                                if self.versions.len() > 16 {
-                                    self.versions.remove(0);
-                                }
-                            }
-                        }
-                    }
-                    self.absorb(val);
-                }
-            }
-            Value::Array(a) => a.iter().for_each(|x| self.absorb(x)),
-            _ => {}
-        }
-    }
-
-    fn id(&self, t: &mut Tape) -> Option<String> {
-        if self.ids.is_empty() {
-            None
-        } else {
-            Some(self.ids[t.upto(self.ids.len())].clone())
-        }
-    }
-
-    fn version(&self, t: &mut Tape) -> Option<i64> {
-        if self.versions.is_empty() {
-            None
-        } else {
-            Some(self.versions[t.upto(self.versions.len())])
-        }
-    }
 }
 
 /// Run one tape against a fresh model. Returns the signatures it reached.
@@ -631,20 +554,15 @@ fn run_program(tape: &[u8], arm: &Arm, r: &mut Reach) -> HashSet<u64> {
     let mut now = T0;
     let prev = 0u64;
     let mut reached = HashSet::new();
-    let mut echoed = Echoed::default();
 
     while !t.done() && reached.len() < PROGRAM {
         let (mut env, next_now) = match arm {
-            Arm::Blind => blind(&mut t, now, None),
-            Arm::Echo => blind(&mut t, now, Some(&echoed)),
+            Arm::Blind => blind(&mut t, now),
             Arm::Informed => informed(&mut t, &o, now),
         };
         env.head.debug_time = Some(now);
         let kind = env.kind.clone();
         let resp = o.apply(&env);
-        if matches!(arm, Arm::Echo) {
-            echoed.absorb(&resp.data);
-        }
         now = next_now.max(now);
 
         let status = resp.head.status;
@@ -770,8 +688,6 @@ fn main() {
     if !only.is_empty() {
         let r = match only.as_str() {
             "blind" => arm_guided("blind, GUIDED", Arm::Blind, seed, budget),
-            "echo" => arm_guided("echo, GUIDED", Arm::Echo, seed, budget),
-            "echo-unguided" => arm_unguided("echo, unguided", Arm::Echo, seed, budget),
             _ => arm_guided("informed, GUIDED", Arm::Informed, seed, budget),
         };
         let covered = OPS.iter().filter(|o| r.ok.contains_key(**o)).count();
@@ -786,8 +702,6 @@ fn main() {
     }
     let blind_random = arm_unguided("blind, unguided", Arm::Blind, 0xfeed_1234, budget);
     let blind_guided = arm_guided("blind, GUIDED", Arm::Blind, 0xfeed_1234, budget);
-    let echo_random = arm_unguided("echo, unguided", Arm::Echo, 0xfeed_1234, budget);
-    let echo_guided = arm_guided("echo, GUIDED", Arm::Echo, 0xfeed_1234, budget);
     let informed_random = arm_unguided("informed, unguided", Arm::Informed, 0xfeed_1234, budget);
     let informed_guided = arm_guided("informed, GUIDED", Arm::Informed, 0xfeed_1234, budget);
 
@@ -799,8 +713,6 @@ fn main() {
     for (name, r) in [
         ("blind, unguided", &blind_random),
         ("blind, guided", &blind_guided),
-        ("echo, unguided", &echo_random),
-        ("echo, guided", &echo_guided),
         ("informed, unguided", &informed_random),
         ("informed, guided", &informed_guided),
     ] {
