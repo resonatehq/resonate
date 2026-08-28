@@ -21,13 +21,21 @@ use super::Unavailable;
 /// metrics, tracing — belongs outside, in the adapter hosting the
 /// implementation.
 ///
-/// **Not yet the full protocol boundary.** Envelope validation — empty `kind`,
-/// non-object `data`, unsupported `head.version` — still lives in the HTTP
-/// adapter, not here. So an in-process caller reaches the operations without
-/// those checks while an HTTP caller gets a 400, and the two are not yet
-/// interchangeable for malformed input. Moving those checks in (and teaching
-/// the reference model to apply them identically, so the differential covers
-/// them) is the remaining work to make this claim true.
+/// **Envelope validation happens before this, not in it.** Whether a message
+/// is a request at all — parses, has a non-empty `kind` and an object `data`,
+/// names a version this build speaks — is
+/// [`parse_and_validate`](super::types::parse_and_validate), and it is the
+/// gateway's to apply. A malformed message is answered at the edge and never
+/// arrives here, which is why `process` has no way to report one.
+///
+/// The trust boundary is therefore the gateway, and that is a claim about what
+/// reaches this trait rather than a gap in it: inside the boundary envelopes
+/// are constructed in code, not parsed, so a worker calling back with an empty
+/// `kind` is a bug in that worker rather than untrusted input.
+///
+/// What an implementation still answers for itself is whether `kind` names an
+/// operation it has, and whether `data` carries what that operation needs. Only
+/// it knows.
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
     /// Apply one request and return its response.

@@ -10,18 +10,17 @@ use axum::{
     routing::{any, get, post},
     Json, Router,
 };
-use serde_json::Value;
 
 use crate::auth;
 use crate::config::Config;
 use crate::metrics;
 use async_trait::async_trait;
 use resonate_core::router::ResonateRouter;
+use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::types::{
     ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, UnblockMsg, UnblockMsgData,
     UnblockMsgHead,
 };
-use resonate_core::types::{RequestEnvelope, ResponseEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use resonate_server_dbms::engine_port::{
@@ -291,94 +290,29 @@ fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<Respon
     (code, Json(resp))
 }
 
-/// Best-effort extraction of `kind` and `corrId` from a raw JSON body for
-/// error responses when full deserialization fails.
-fn extract_error_context(body: &[u8]) -> (String, String) {
-    let kind;
-    let corr_id;
-    if let Ok(raw) = serde_json::from_slice::<Value>(body) {
-        kind = raw
-            .get("kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        corr_id = raw
-            .get("head")
-            .and_then(|h| h.get("corrId"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("0")
-            .to_string();
-    } else {
-        kind = "unknown".to_string();
-        corr_id = "0".to_string();
-    }
-    (kind, corr_id)
-}
-
 async fn handle_api(
     State(api_state): State<ApiState>,
     body: axum::body::Bytes,
 ) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let state = &api_state.server;
     let start = std::time::Instant::now();
-    // Deserialize the envelope using serde. On failure, attempt to extract
-    // kind from the raw JSON so the error response can include it.
-    let req: RequestEnvelope = match serde_json::from_slice(&body) {
-        Ok(r) => r,
-        Err(e) => {
-            let (kind, corr_id) = extract_error_context(&body);
-            tracing::warn!(
-                kind = %kind,
-                error = %e,
-                "Invalid request envelope: deserialization failed"
-            );
-            return into_response(ResponseEnvelope::error(
-                kind,
-                corr_id,
-                400,
-                &format!("Invalid request envelope: {}", e),
-            ));
+
+    // Parse and validate at the edge. A body that is not a request never
+    // reaches the server: `core` decides what the protocol admits and how the
+    // rejection reads, and this renders it — which is the only part that is
+    // HTTP's. `salvage_context` digs out what it can from bytes that would not
+    // parse, so even that answer can be correlated.
+    let req: RequestEnvelope = match types::parse_and_validate(&body) {
+        Ok(req) => req,
+        Err(invalid) => {
+            let (kind, corr_id) = types::salvage_context(&body);
+            tracing::warn!(kind = %kind, corr_id = %corr_id, reason = %invalid, "Invalid request");
+            return into_response(invalid.to_response(kind, corr_id));
         }
     };
 
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
-
-    // Reject empty kind (serde accepts "" as a valid String)
-    if kind.is_empty() {
-        tracing::warn!(corr_id = %corr_id, "Invalid request: empty 'kind' field");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            "Missing or invalid 'kind' field — must be a non-empty string",
-        ));
-    }
-
-    // Reject non-object data (serde deserializes any JSON value into Value)
-    if !req.data.is_object() {
-        tracing::warn!(kind = %kind, corr_id = %corr_id, "Invalid request: 'data' is not an object");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            "Invalid 'data' field — must be an object",
-        ));
-    }
-
-    // Validate protocol version
-    if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
-        tracing::warn!(kind = %kind, corr_id = %corr_id, version = %req.head.version, "Invalid request: unsupported protocol version");
-        return into_response(ResponseEnvelope::error(
-            kind,
-            corr_id,
-            400,
-            &format!(
-                "Unsupported protocol version '{}', supported versions: {:?}",
-                req.head.version, SUPPORTED_VERSIONS
-            ),
-        ));
-    }
 
     // Log incoming request at the application protocol level
     tracing::info!(

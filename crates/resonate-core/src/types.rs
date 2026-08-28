@@ -892,10 +892,220 @@ impl ResponseEnvelope {
     }
 }
 
+// --- Envelope validation ---
+//
+// The gateway's job, not the server's. A message that cannot be parsed, or
+// that parses into something the protocol does not admit, never reaches a
+// server: the gateway turns around on its heel and answers. So this lives
+// beside the types it judges, where every gateway can reach it and none has to
+// write its own.
+//
+// What it does *not* cover is whether `kind` names an operation. That is the
+// server's to answer — it is the only party that knows what it implements, and
+// it must handle an unknown kind regardless.
+
+/// Why an envelope is not a request.
+///
+/// An enum rather than a ready-made [`ResponseEnvelope`], because rendering is
+/// the gateway's. HTTP answers 400 with the envelope below; another transport
+/// may have its own error shape and can match on this instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Invalid {
+    /// The bytes were not a request envelope. Carries the parser's complaint.
+    Unparseable(String),
+    /// `kind` was absent or empty. Serde accepts `""` as a `String`, so this
+    /// cannot be expressed in the type.
+    EmptyKind,
+    /// `data` was not a JSON object. Every operation reads named fields from
+    /// it, so anything else is a request no operation could accept.
+    DataNotObject,
+    /// `head.version` is not one this build speaks.
+    UnsupportedVersion(String),
+}
+
+impl Invalid {
+    /// The message a client sees. Kept here so two gateways cannot word the
+    /// same rejection differently.
+    pub fn message(&self) -> String {
+        match self {
+            Invalid::Unparseable(e) => format!("Invalid request envelope: {e}"),
+            Invalid::EmptyKind => {
+                "Missing or invalid 'kind' field — must be a non-empty string".to_string()
+            }
+            Invalid::DataNotObject => "Invalid 'data' field — must be an object".to_string(),
+            Invalid::UnsupportedVersion(got) => format!(
+                "Unsupported protocol version '{got}', supported versions: {SUPPORTED_VERSIONS:?}"
+            ),
+        }
+    }
+
+    /// The standard rendering: a 400 carrying [`Invalid::message`].
+    ///
+    /// `kind` and `corr_id` are the caller's best guess — from the parsed
+    /// envelope when there is one, and from [`salvage_context`] when the bytes
+    /// would not parse — so a client can still correlate the rejection.
+    pub fn to_response(&self, kind: String, corr_id: String) -> ResponseEnvelope {
+        ResponseEnvelope::error(kind, corr_id, 400, &self.message())
+    }
+}
+
+impl fmt::Display for Invalid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+/// Is this envelope one the protocol admits?
+///
+/// Structure only. Whether `kind` names an operation, and whether `data` holds
+/// the fields that operation needs, are the server's questions.
+pub fn validate_envelope(req: &RequestEnvelope) -> Result<(), Invalid> {
+    if req.kind.is_empty() {
+        return Err(Invalid::EmptyKind);
+    }
+    if !req.data.is_object() {
+        return Err(Invalid::DataNotObject);
+    }
+    if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
+        return Err(Invalid::UnsupportedVersion(req.head.version.clone()));
+    }
+    Ok(())
+}
+
+/// Bytes to a request, or the reason they are not one.
+///
+/// The pairing a gateway should reach for. Parsing and validating are two
+/// failures with one answer — reject at the edge — and offering them together
+/// means there is no ergonomic path that does one and forgets the other.
+pub fn parse_and_validate(body: &[u8]) -> Result<RequestEnvelope, Invalid> {
+    let req: RequestEnvelope =
+        serde_json::from_slice(body).map_err(|e| Invalid::Unparseable(e.to_string()))?;
+    validate_envelope(&req)?;
+    Ok(req)
+}
+
+/// `kind` and `corrId` dug out of bytes that would not parse as an envelope.
+///
+/// Best effort, and only for the error path: a client that sent malformed JSON
+/// still gets a response it can correlate, when the JSON is at least an object
+/// with those fields. Falls back to `("unknown", "0")`.
+pub fn salvage_context(body: &[u8]) -> (String, String) {
+    let Ok(raw) = serde_json::from_slice::<Value>(body) else {
+        return ("unknown".to_string(), "0".to_string());
+    };
+    let kind = raw
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let corr_id = raw
+        .get("head")
+        .and_then(|h| h.get("corrId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("0")
+        .to_string();
+    (kind, corr_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn envelope(kind: &str, version: &str, data: Value) -> Value {
+        json!({
+            "kind": kind,
+            "head": { "corrId": "c1", "version": version },
+            "data": data,
+        })
+    }
+
+    #[test]
+    fn a_well_formed_envelope_is_accepted() {
+        let body = envelope("promise.get", SUPPORTED_VERSIONS[0], json!({ "id": "p" }));
+        let req = parse_and_validate(body.to_string().as_bytes()).expect("should parse");
+        assert_eq!(req.kind, "promise.get");
+        assert_eq!(req.head.corr_id, "c1");
+    }
+
+    #[test]
+    fn bytes_that_are_not_json_are_unparseable() {
+        let err = parse_and_validate(b"not json").unwrap_err();
+        assert!(matches!(err, Invalid::Unparseable(_)));
+        assert!(err.message().starts_with("Invalid request envelope:"));
+    }
+
+    #[test]
+    fn json_missing_the_envelope_shape_is_unparseable() {
+        // Valid JSON, but no `head` — serde cannot build a RequestEnvelope.
+        let err = parse_and_validate(br#"{"kind":"promise.get"}"#).unwrap_err();
+        assert!(matches!(err, Invalid::Unparseable(_)));
+    }
+
+    #[test]
+    fn an_empty_kind_is_rejected() {
+        // Serde accepts "" as a String, so only validation can catch this.
+        let body = envelope("", SUPPORTED_VERSIONS[0], json!({}));
+        let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, Invalid::EmptyKind);
+    }
+
+    #[test]
+    fn data_that_is_not_an_object_is_rejected() {
+        for data in [json!([]), json!("s"), json!(1), json!(null)] {
+            let body = envelope("promise.get", SUPPORTED_VERSIONS[0], data.clone());
+            let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+            assert_eq!(err, Invalid::DataNotObject, "data was {data}");
+        }
+    }
+
+    #[test]
+    fn an_unsupported_version_is_rejected_and_names_what_is_supported() {
+        let body = envelope("promise.get", "1.0", json!({}));
+        let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, Invalid::UnsupportedVersion("1.0".to_string()));
+        assert!(err.message().contains("'1.0'"));
+        assert!(err.message().contains(SUPPORTED_VERSIONS[0]));
+    }
+
+    #[test]
+    fn kind_is_checked_before_data_and_data_before_version() {
+        // One rejection per request, and which one is not arbitrary: the
+        // outermost problem is reported, so a client fixes them in an order
+        // that terminates.
+        let body = envelope("", "1.0", json!([]));
+        assert_eq!(
+            parse_and_validate(body.to_string().as_bytes()).unwrap_err(),
+            Invalid::EmptyKind
+        );
+        let body = envelope("promise.get", "1.0", json!([]));
+        assert_eq!(
+            parse_and_validate(body.to_string().as_bytes()).unwrap_err(),
+            Invalid::DataNotObject
+        );
+    }
+
+    #[test]
+    fn a_rejection_renders_as_a_400_that_can_be_correlated() {
+        let resp = Invalid::EmptyKind.to_response("".to_string(), "c1".to_string());
+        assert_eq!(resp.head.status, 400);
+        assert_eq!(resp.head.corr_id, "c1");
+    }
+
+    #[test]
+    fn salvage_recovers_what_it_can_from_bytes_that_did_not_parse() {
+        // Enough of an object to correlate the rejection.
+        let (kind, corr_id) = salvage_context(br#"{"kind":"promise.get","head":{"corrId":"c9"}}"#);
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("promise.get", "c9"));
+
+        // Nothing to go on.
+        let (kind, corr_id) = salvage_context(b"not json");
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("unknown", "0"));
+
+        // An object without the fields.
+        let (kind, corr_id) = salvage_context(br#"{"a":1}"#);
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("unknown", "0"));
+    }
 
     // `Message` replaced a hand-built `serde_json::json!` for unblock and a
     // `to_value(ExecuteMsg)` for execute. The enum is `untagged` precisely so
