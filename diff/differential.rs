@@ -37,7 +37,7 @@ use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPO
 
 use resonate_server_dbms::{
     engine_mysql::MysqlEngine,
-    engine_port::{Input, Outgoing, ResonateEngine},
+    engine_port::{Input, Outgoing, ResonateEngine, Scheduled, Timeout},
     engine_postgres::PostgresEngine,
     engine_sqlite::SqliteEngine,
     oracle::{Oracle, SharedOracle},
@@ -119,7 +119,7 @@ async fn send_full(
     backend: &Backend,
     envelope: &RequestEnvelope,
     now: i64,
-) -> (ResponseEnvelope, Vec<Outgoing>) {
+) -> (ResponseEnvelope, Vec<Outgoing>, Vec<Scheduled>) {
     let out = backend.process(Input::External(envelope), now).await;
     let resp = out.response.unwrap_or_else(|| {
         panic!(
@@ -127,7 +127,90 @@ async fn send_full(
             envelope.kind
         )
     });
-    (resp, out.messages)
+    (resp, out.messages, out.timeouts)
+}
+
+/// A deadline as (kind, id, when) — the form both a returned `Scheduled` and a
+/// snapshot row can be reduced to.
+///
+/// `pid` is dropped: `SnapshotTaskTimeout` does not carry it, and a lease is
+/// identified by the task it is on.
+fn armed_key(s: &Scheduled) -> (&'static str, String, i64) {
+    match &s.timeout {
+        Timeout::PromiseTimeout { promise_id } => ("promise", promise_id.clone(), s.at),
+        Timeout::TaskRetryTimeout { task_id } => ("retry", task_id.clone(), s.at),
+        Timeout::TaskLeaseTimeout { task_id, .. } => ("lease", task_id.clone(), s.at),
+        Timeout::ScheduleDue { schedule_id } => ("schedule", schedule_id.clone(), s.at),
+    }
+}
+
+/// Every deadline the snapshot says this step armed or moved.
+///
+/// A deadline that is in the after-snapshot and was not in the before-snapshot
+/// at the same instant was either newly armed or pushed to a new time. Either
+/// way the engine wrote it, so it owes an announcement. Disarming is not
+/// included — the contract reports arming only.
+fn snapshot_arms(before: &Value, after: &Value) -> HashSet<(&'static str, String, i64)> {
+    fn collect(snap: &Value) -> HashSet<(&'static str, String, i64)> {
+        let mut out = HashSet::new();
+        if let Some(rows) = snap.get("promiseTimeouts").and_then(|v| v.as_array()) {
+            for r in rows {
+                if let (Some(id), Some(t)) = (
+                    r.get("id").and_then(|v| v.as_str()),
+                    r.get("timeout").and_then(|v| v.as_i64()),
+                ) {
+                    out.insert(("promise", id.to_string(), t));
+                }
+            }
+        }
+        if let Some(rows) = snap.get("taskTimeouts").and_then(|v| v.as_array()) {
+            for r in rows {
+                if let (Some(id), Some(ty), Some(t)) = (
+                    r.get("id").and_then(|v| v.as_str()),
+                    r.get("type").and_then(|v| v.as_i64()),
+                    r.get("timeout").and_then(|v| v.as_i64()),
+                ) {
+                    out.insert((if ty == 1 { "lease" } else { "retry" }, id.to_string(), t));
+                }
+            }
+        }
+        out
+    }
+    let before = collect(before);
+    collect(after).difference(&before).cloned().collect()
+}
+
+/// Every deadline the durable state gained must have been announced.
+///
+/// This is the check the messages could never have: the deadline stays in the
+/// table, so the table itself is the oracle. Cross-engine agreement alone would
+/// not catch it — an engine that forgets to announce a deadline behaves
+/// identically to one that does, because the sweep covers it, so the omission
+/// is invisible except against the row it wrote.
+///
+/// A superset is allowed. Announcing a deadline that did not move costs one
+/// wheel entry that fires into a no-op; failing to announce one costs the
+/// latency the wheel exists to remove.
+fn assert_arms_announced(
+    name: &str,
+    before: &Value,
+    after: &Value,
+    armed: &[Scheduled],
+    ctx: &str,
+) {
+    let expected = snapshot_arms(before, after);
+    if expected.is_empty() {
+        return;
+    }
+    let announced: HashSet<_> = armed.iter().map(armed_key).collect();
+    let missing: Vec<_> = expected.difference(&announced).collect();
+    if !missing.is_empty() {
+        panic!(
+            "{ctx}: {name} armed a deadline it did not announce\n  \
+             missing: {missing:?}\n  announced: {:?}",
+            announced.iter().collect::<Vec<_>>()
+        );
+    }
 }
 
 // Pick a random element from a slice.
@@ -268,6 +351,7 @@ async fn differential_random() {
     let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
     // Reused across steps; `send_all` clears it.
     let mut emissions: Vec<(String, Value)> = Vec::new();
+    let mut armed: Vec<(String, Vec<Scheduled>)> = Vec::new();
 
     'outer: loop {
         reset_all(&backends, now).await;
@@ -316,8 +400,15 @@ async fn differential_random() {
             );
             assert_agree(&pre_queued, "queued messages", &format!("BEFORE {ctx}"));
 
-            let mut results =
-                send_all(&backends, &envelope, now, &mut timings, &mut emissions).await;
+            let mut results = send_all(
+                &backends,
+                &envelope,
+                now,
+                &mut timings,
+                &mut emissions,
+                &mut armed,
+            )
+            .await;
             assert_emissions_agree(&emissions, &format!("EMIT {ctx}"));
             if let Some(g) = &generator {
                 // Keep the model in step with the backends; its response is
@@ -340,8 +431,29 @@ async fn differential_random() {
 
             assert_resps_agree(&results, &ctx);
 
-            let (_, mid_queued) = snap_all(&backends, now).await;
+            let (post_snaps, mid_queued) = snap_all(&backends, now).await;
             assert_agree(&mid_queued, "queued messages", &format!("AFTER {ctx}"));
+
+            // Announced deadlines: compared across engines, and — for the two
+            // kinds the snapshot carries — against what the row actually says.
+            let armed_json: Vec<(String, Value)> = armed
+                .iter()
+                .map(|(n, ts)| {
+                    let mut keys: Vec<Value> = ts
+                        .iter()
+                        .map(|t| {
+                            let (kind, id, at) = armed_key(t);
+                            json!([kind, id, at])
+                        })
+                        .collect();
+                    sort_by_json(&mut keys);
+                    (n.clone(), Value::Array(keys))
+                })
+                .collect();
+            assert_agree(&armed_json, "armed timeouts", &format!("ARM {ctx}"));
+            for ((name, ts), (pre, post)) in armed.iter().zip(pre_snaps.iter().zip(&post_snaps)) {
+                assert_arms_announced(name, &pre.1, &post.1, ts, &format!("ARM {ctx}"));
+            }
         }
 
         let (snaps, queued) = snap_all(&backends, now).await;
@@ -480,13 +592,15 @@ async fn send_all(
     now: i64,
     timings: &mut HashMap<(String, String), Vec<u64>>,
     emissions: &mut Vec<(String, Value)>,
+    armed: &mut Vec<(String, Vec<Scheduled>)>,
 ) -> Vec<(String, i32, Value)> {
     let mut out = Vec::new();
     let kind = envelope.kind.clone();
     emissions.clear();
+    armed.clear();
     for (name, b) in backends {
         let t0 = Instant::now();
-        let (resp, messages) = send_full(b, envelope, now).await;
+        let (resp, messages, timeouts) = send_full(b, envelope, now).await;
         let ns = t0.elapsed().as_nanos() as u64;
         timings
             .entry((name.clone(), kind.clone()))
@@ -500,6 +614,7 @@ async fn send_all(
             sort_messages(&mut msgs);
             emissions.push((name.clone(), Value::Array(msgs)));
         }
+        armed.push((name.clone(), timeouts));
         out.push((name.clone(), resp.head.status, resp.data));
     }
     out
@@ -625,6 +740,12 @@ fn normalize_snap(snap: &mut Value) {
             }
         }
     }
+}
+
+/// Order a list of small JSON arrays deterministically, so two engines that
+/// announce the same deadlines in a different order still compare equal.
+fn sort_by_json(arr: &mut [Value]) {
+    arr.sort_by_key(|v| v.to_string());
 }
 
 fn sort_messages(arr: &mut Vec<Value>) {

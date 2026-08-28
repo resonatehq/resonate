@@ -2,6 +2,7 @@
 members = [
     "crates/resonate-core",
     "crates/resonate-server-dbms",
+    "crates/resonate-wheel",
     "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
     "crates/resonate-transport-http-push",

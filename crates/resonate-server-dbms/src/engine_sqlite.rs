@@ -45,7 +45,7 @@ use resonate_core::types::{
 };
 use resonate_core::util;
 
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
+use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
 use crate::StorageError;
 
 use super::{
@@ -196,7 +196,7 @@ impl SqliteEngine {
     /// at all. An outbox got that for free by being a table; here it is the
     /// `?` on `commit` and the fact that `emitted` never leaves this scope on
     /// the error path.
-    async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>)>
+    async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
         F: FnMut(&SqliteDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
@@ -216,11 +216,13 @@ impl SqliteEngine {
                 conn: &tx,
                 task_retry_timeout,
                 emitted: RefCell::new(Vec::new()),
+                armed: RefCell::new(Vec::new()),
             };
             let result = f(&db)?;
             let emitted = db.emitted.into_inner();
+            let armed = db.armed.into_inner();
             tx.commit()?;
-            Ok((result, emitted))
+            Ok((result, emitted, armed))
         })
     }
 
@@ -234,10 +236,10 @@ impl SqliteEngine {
         F: FnMut(&SqliteDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
     {
         match self.transact(f).await {
-            Ok((response, messages)) => Output {
+            Ok((response, messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(StorageError::InvalidInput(msg)) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -272,6 +274,7 @@ impl SqliteEngine {
                 conn: &conn,
                 task_retry_timeout,
                 emitted: RefCell::new(Vec::new()),
+                armed: RefCell::new(Vec::new()),
             };
             f(&db)
         })
@@ -2164,7 +2167,7 @@ impl SqliteEngine {
 
     async fn op_debug_reset(&self, req: &RequestEnvelope) -> Output {
         Output::response(match self.transact(move |db| db.debug_reset()).await {
-            Ok(((), _)) => {
+            Ok(((), _, _)) => {
                 tracing::warn!("Debug reset: all data cleared");
                 ResponseEnvelope::new(
                     req.kind.clone(),
@@ -2233,7 +2236,7 @@ impl SqliteEngine {
             .transact(move |db| process_all_timeouts(db, time).map(|_| ()))
             .await
         {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: Some(ResponseEnvelope::new(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -2241,7 +2244,7 @@ impl SqliteEngine {
                     Value::Array(vec![]),
                 )),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -2261,6 +2264,14 @@ struct SqliteDb<'a> {
     /// `RefCell` because every operation takes `&SqliteDb` — an emission is a
     /// side effect of a transition, not something its signature should carry.
     emitted: RefCell<Vec<Outgoing>>,
+    /// What deadlines this transition armed or moved.
+    ///
+    /// Unlike `emitted`, this is a hint and nothing more: the deadline is a
+    /// column on the promise row, committed with the state change, and the
+    /// sweep will find it whether or not it is reported here. Missing one
+    /// costs latency, never correctness — which is why only arming is
+    /// reported and disarming is not. A stale entry fires into a no-op.
+    armed: RefCell<Vec<Scheduled>>,
 }
 
 impl SqliteDb<'_> {
@@ -2272,11 +2283,54 @@ impl SqliteDb<'_> {
         self.emitted.borrow_mut().push(message);
     }
 
+    /// Report a deadline this transition just wrote.
+    ///
+    /// Targeted by construction: every call site has the row in hand, so this
+    /// never scans for what is armed — it states what was armed.
+    fn arm(&self, at: i64, timeout: Timeout) {
+        self.armed.borrow_mut().push(Scheduled { at, timeout });
+    }
+
+    /// A promise joins the eager sweep only when it is targeted — the queue is
+    /// `state = 'pending' AND target IS NOT NULL`, so an untargeted promise
+    /// times out lazily through `try_timeout` and has no deadline to announce.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
+        if targeted {
+            self.arm(
+                timeout_at,
+                Timeout::PromiseTimeout {
+                    promise_id: promise_id.to_string(),
+                },
+            );
+        }
+    }
+
+    fn arm_retry(&self, task_id: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskRetryTimeout {
+                task_id: task_id.to_string(),
+            },
+        );
+    }
+
+    fn arm_lease(&self, task_id: &str, pid: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskLeaseTimeout {
+                task_id: task_id.to_string(),
+                pid: pid.to_string(),
+            },
+        );
+    }
+
     /// Emit an execute message for `task_id`, if it has somewhere to go.
     ///
     /// Every redispatch path needs the task's current version and target, and
     /// a task whose promise carries no `resonate:target` has neither an
-    /// address nor anything to send.
+    /// address nor anything to send. The retry deadline is armed separately by
+    /// the caller, because the two do not always coincide: an untargeted task
+    /// is redispatched to nobody but still waits on a deadline.
     fn emit_execute(&self, task_id: &str) -> rusqlite::Result<()> {
         let (version, target): (i64, Option<String>) = self.conn.query_row(
             "SELECT task_version, target FROM promises WHERE id = ?1",
@@ -2368,6 +2422,7 @@ fn resumption_enqueued(
             params![awaiter_id, time + task_retry_timeout],
         )?;
         if updated > 0 {
+            db.arm_retry(awaiter_id, time + task_retry_timeout);
             db.emit_execute(awaiter_id)?;
         }
     }
@@ -2579,6 +2634,7 @@ impl<'a> SqliteDb<'a> {
                     )?;
                 }
             } else if let Some(addr) = address {
+                self.arm_promise_timeout(id, timeout_at, true);
                 // TaskInfraCreated
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_at = ?2
@@ -2586,6 +2642,7 @@ impl<'a> SqliteDb<'a> {
                     params![id, created_at + self.task_retry_timeout],
                 )? > 0;
                 if created {
+                    self.arm_retry(id, created_at + self.task_retry_timeout);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
                         task_id: id.to_string(),
@@ -2659,6 +2716,7 @@ impl<'a> SqliteDb<'a> {
                     params![awaiter_id, time + self.task_retry_timeout],
                 )?;
                 if updated > 0 {
+                    self.arm_retry(awaiter_id, time + self.task_retry_timeout);
                     self.emit_execute(awaiter_id)?;
                 }
 
@@ -2799,6 +2857,14 @@ impl<'a> SqliteDb<'a> {
                 )? > 0
             };
             if inserted {
+                if !already_timedout {
+                    self.arm_promise_timeout(
+                        promise_id,
+                        timeout_at,
+                        promise.tags.contains_key("resonate:target"),
+                    );
+                    self.arm_lease(promise_id, pid, created_at + ttl);
+                }
                 return Ok(TaskCreateResult {
                     promise,
                     task_created: true,
@@ -2850,6 +2916,7 @@ impl<'a> SqliteDb<'a> {
         }
 
         if updated > 0 {
+            self.arm_lease(task_id, pid, time + ttl);
             // Clean up ready callbacks from previous suspension
             self.conn.execute(
                 "DELETE FROM callbacks WHERE awaiter_id = ?1 AND ready = true",
@@ -2970,11 +3037,19 @@ impl<'a> SqliteDb<'a> {
             // TODO: also guard that the promise is still active
             // (`state = 'pending' AND timeout_at > ?1`), so heartbeats on tasks
             // whose promise has already timed out are no-ops.
-            self.conn.execute(
+            // RETURNING, because the new deadline is `?1 + ttl` and `ttl` is
+            // a column: the caller cannot compute what was written without
+            // reading it. The one statement here that needs the row back.
+            let mut stmt = self.conn.prepare(
                 "UPDATE promises SET expires_at = ?1 + ttl
-                 WHERE id = ?2 AND pid = ?3 AND task_version = ?4 AND task_state = 'acquired'",
-                params![time, task_id, pid, version],
+                 WHERE id = ?2 AND pid = ?3 AND task_version = ?4 AND task_state = 'acquired'
+                 RETURNING expires_at",
             )?;
+            let mut rows = stmt.query(params![time, task_id, pid, version])?;
+            if let Some(row) = rows.next()? {
+                let expires_at: i64 = row.get(0)?;
+                self.arm_lease(task_id, pid, expires_at);
+            }
         }
         Ok(())
     }
@@ -3130,6 +3205,7 @@ impl<'a> SqliteDb<'a> {
         )? > 0;
 
         if task_released {
+            self.arm_retry(task_id, time + ttl);
             self.emit_execute(task_id)?;
         }
         let task_exists = self.conn.query_row(
@@ -3177,6 +3253,7 @@ impl<'a> SqliteDb<'a> {
         )? > 0;
 
         if continued {
+            self.arm_retry(task_id, time + self.task_retry_timeout);
             self.emit_execute(task_id)?;
         }
 
@@ -3272,12 +3349,22 @@ impl<'a> SqliteDb<'a> {
             created_at,
             next_run_at,
         } = *params;
-        self.conn.execute(
+        let created = self.conn.execute(
             "INSERT OR IGNORE INTO schedules (id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at],
-        )?;
+        )? > 0;
         // No schedule timeout to insert: `next_run_at` on the row above is it.
+        // Only a create that actually happened arms one — an idempotent
+        // re-create leaves the existing next_run_at where it was.
+        if created {
+            self.arm(
+                next_run_at,
+                Timeout::ScheduleDue {
+                    schedule_id: id.to_string(),
+                },
+            );
+        }
         Ok(self.schedule_get(id)?.unwrap())
     }
 
@@ -3398,12 +3485,14 @@ impl<'a> SqliteDb<'a> {
                 }
             } else if let Some(addr) = &address {
                 // Step 7: Create task infrastructure if resonate:target is set
+                self.arm_promise_timeout(&promise_id, promise_timeout_at, true);
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_at = ?2
                      WHERE id = ?1 AND task_state IS NULL",
                     params![promise_id, time + self.task_retry_timeout],
                 )? > 0;
                 if created {
+                    self.arm_retry(&promise_id, time + self.task_retry_timeout);
                     self.emit(Outgoing::Execute {
                         address: addr.clone(),
                         task_id: promise_id.clone(),
@@ -3413,11 +3502,17 @@ impl<'a> SqliteDb<'a> {
             }
         }
 
-        // Step 8: Advance schedule
+        // Step 8: Advance schedule — which re-arms its own deadline
         self.conn.execute(
             "UPDATE schedules SET last_run_at = ?1, next_run_at = ?2 WHERE id = ?3",
             params![fired_at, next_run_at, schedule_id],
         )?;
+        self.arm(
+            next_run_at,
+            Timeout::ScheduleDue {
+                schedule_id: schedule_id.to_string(),
+            },
+        );
 
         // Step 9 is gone: advancing the schedule above advanced the queue.
 
@@ -3507,6 +3602,7 @@ impl<'a> SqliteDb<'a> {
                 "UPDATE promises SET retry_at = ?1 + ?3, pid = NULL WHERE id = ?2",
                 params![time, id, self.task_retry_timeout],
             )?;
+            self.arm_retry(id, time + self.task_retry_timeout);
             self.emit_execute(id)?;
         }
 
@@ -3533,6 +3629,7 @@ impl<'a> SqliteDb<'a> {
                  WHERE id = ?2",
                 params![time, id, self.task_retry_timeout],
             )?;
+            self.arm_retry(id, time + self.task_retry_timeout);
             self.emit_execute(id)?;
         }
 
@@ -3823,7 +3920,9 @@ impl ResonateEngine for SqliteEngine {
     }
 
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
-        self.transact(move |db| process_all_timeouts(db, now)).await
+        self.transact(move |db| process_all_timeouts(db, now))
+            .await
+            .map(|(fired, messages, _)| (fired, messages))
     }
 
     fn is_paused(&self) -> bool {
@@ -3861,10 +3960,10 @@ impl SqliteEngine {
             }
         };
         match swept {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: None,
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => {
                 tracing::error!(error = %e, "Timeout sweep failed");

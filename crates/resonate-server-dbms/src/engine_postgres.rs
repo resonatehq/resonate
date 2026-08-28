@@ -23,7 +23,7 @@
 //! the collapse is the same, minus `callbacks`/`listeners`/`resumes`, which
 //! are TEXT[] columns here because Postgres has arrays.
 
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
+use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
 use crate::{
     PromiseCreateParams, PromiseCreateResult, PromiseSettleParams, PromiseSettleResult,
     RegisterCallbackResult, ScheduleCreateParams, StorageError, StorageResult, TaskAcquireParams,
@@ -178,7 +178,11 @@ impl PostgresEngine {
     /// empty list, so a message is never emitted twice for one attempt that
     /// did not commit. That is the atomicity the port promises, which an
     /// outbox got for free by being a table.
-    async fn transact<F, T>(&self, f: F, serializable: bool) -> StorageResult<(T, Vec<Outgoing>)>
+    async fn transact<F, T>(
+        &self,
+        f: F,
+        serializable: bool,
+    ) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
         F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
@@ -199,11 +203,12 @@ impl PostgresEngine {
             }
 
             let task_retry_timeout = self.task_retry_timeout;
-            let (result, emitted, tx) = tokio::task::block_in_place(|| {
+            let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
                 let db = PostgresDb {
                     tx: UnsafeCell::new(tx),
                     task_retry_timeout,
                     emitted: RefCell::new(Vec::new()),
+                    armed: RefCell::new(Vec::new()),
                 };
 
                 #[cfg(feature = "concurrency-stress")]
@@ -217,8 +222,9 @@ impl PostgresEngine {
 
                 let result = f(&db);
                 let emitted = db.emitted.into_inner();
+                let armed = db.armed.into_inner();
                 let tx = db.tx.into_inner();
-                (result, emitted, tx)
+                (result, emitted, armed, tx)
             });
 
             let result = match result {
@@ -239,7 +245,7 @@ impl PostgresEngine {
             match tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(tx.commit())
             }) {
-                Ok(_) => return Ok((result, emitted)),
+                Ok(_) => return Ok((result, emitted, armed)),
                 Err(e) => {
                     let pg_err = e
                         .as_database_error()
@@ -267,10 +273,10 @@ impl PostgresEngine {
         F: FnMut(&PostgresDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
     {
         match self.transact(f, false).await {
-            Ok((response, messages)) => Output {
+            Ok((response, messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(StorageError::InvalidInput(msg)) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -299,7 +305,7 @@ impl PostgresEngine {
         F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.transact(f, false).await.map(|(v, _)| v)
+        self.transact(f, false).await.map(|(v, _, _)| v)
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -2190,7 +2196,7 @@ impl PostgresEngine {
     async fn op_debug_reset(&self, req: &RequestEnvelope) -> Output {
         Output::response(
             match self.transact(move |db| db.debug_reset(), false).await {
-                Ok(((), _)) => {
+                Ok(((), _, _)) => {
                     tracing::warn!("Debug reset: all data cleared");
                     ResponseEnvelope::new(
                         req.kind.clone(),
@@ -2260,7 +2266,7 @@ impl PostgresEngine {
             .transact(move |db| process_all_timeouts(db, time).map(|_| ()), false)
             .await
         {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: Some(ResponseEnvelope::new(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -2268,7 +2274,7 @@ impl PostgresEngine {
                     Value::Array(vec![]),
                 )),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -2285,15 +2291,78 @@ impl PostgresEngine {
 struct PostgresDb<'a> {
     tx: UnsafeCell<sqlx::Transaction<'a, sqlx::Postgres>>,
     task_retry_timeout: i64,
-    /// What this transition has emitted so far. See `persistence_sqlite.rs`
+    /// What this transition has emitted so far. See `engine_sqlite.rs`
     /// — same reasoning, and the same reason it is not in a return type.
     emitted: RefCell<Vec<Outgoing>>,
+    /// What deadlines this transition armed or moved. A hint; see
+    /// `engine_sqlite.rs`.
+    armed: RefCell<Vec<Scheduled>>,
 }
 
 impl<'a> PostgresDb<'a> {
     #[allow(clippy::mut_from_ref)]
     fn tx(&self) -> &mut sqlx::Transaction<'a, sqlx::Postgres> {
         unsafe { &mut *self.tx.get() }
+    }
+
+    /// Report a deadline this transition just wrote.
+    fn arm(&self, at: i64, timeout: Timeout) {
+        self.armed.borrow_mut().push(Scheduled { at, timeout });
+    }
+
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
+        if targeted {
+            self.arm(
+                timeout_at,
+                Timeout::PromiseTimeout {
+                    promise_id: promise_id.to_string(),
+                },
+            );
+        }
+    }
+
+    fn arm_retry(&self, task_id: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskRetryTimeout {
+                task_id: task_id.to_string(),
+            },
+        );
+    }
+
+    fn arm_lease(&self, task_id: &str, pid: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskLeaseTimeout {
+                task_id: task_id.to_string(),
+                pid: pid.to_string(),
+            },
+        );
+    }
+
+    /// Absorb a statement's messages, and arm a retry deadline for each task it
+    /// redispatched.
+    ///
+    /// Every execute message this backend emits accompanies a task whose retry
+    /// deadline the same statement just wrote — a resumed awaiter, a released
+    /// task, a redispatched one, a newly created one. So the fan-out case,
+    /// which is the only one where the armed rows are not the rows the
+    /// statement returns, needs no extra SQL: the emission already names them.
+    /// `at` is per statement, because the deadline each one writes differs.
+    fn absorb_and_arm_retries(&self, row: &PgRow, at: i64) -> Vec<String> {
+        let before = self.emitted.borrow().len();
+        self.absorb(row);
+        let armed: Vec<String> = self.emitted.borrow()[before..]
+            .iter()
+            .filter_map(|m| match m {
+                Outgoing::Execute { task_id, .. } => Some(task_id.clone()),
+                Outgoing::Unblock { .. } => None,
+            })
+            .collect();
+        for task_id in &armed {
+            self.arm_retry(task_id, at);
+        }
+        armed
     }
 
     /// Take the `messages` column off a statement's result row.
@@ -2683,7 +2752,7 @@ impl PostgresDb<'_> {
                 .fetch_optional(self.tx().as_mut()),
         )?;
         if let Some(row) = row {
-            self.absorb(&row);
+            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
         }
         Ok(())
     }
@@ -2734,7 +2803,7 @@ impl PostgresDb<'_> {
                 .fetch_optional(self.tx().as_mut()),
         )?;
         if let Some(row) = row {
-            self.absorb(&row);
+            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
         }
         Ok(())
     }
@@ -2804,8 +2873,11 @@ impl PostgresDb<'_> {
             // committed — signal the caller to retry.
             return Err(StorageError::Serialization);
         }
-        self.absorb(&rows[0]);
+        self.absorb_and_arm_retries(&rows[0], created_at + trt);
         let was_created: bool = rows[0].get("was_created");
+        if was_created && !already_timedout {
+            self.arm_promise_timeout(id, timeout_at, address.is_some());
+        }
         Ok(PromiseCreateResult {
             was_created,
             promise: row_to_promise(&rows[0]),
@@ -2874,7 +2946,7 @@ impl PostgresDb<'_> {
             });
         }
         let row = &rows[0];
-        self.absorb(row);
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
         Ok(PromiseSettleResult {
             was_settled: row.get("was_settled"),
             promise: Some(row_to_promise(row)),
@@ -2951,7 +3023,9 @@ impl PostgresDb<'_> {
             .bind(awaited_id).bind(awaiter_id).bind(time)
             .fetch_all(self.tx().as_mut()))?;
 
-        self.absorb_all(&rows);
+        if let Some(row) = rows.first() {
+            self.absorb_and_arm_retries(row, time + trt);
+        }
         let mut awaited = None;
         let mut awaiter = None;
         for row in &rows {
@@ -3093,6 +3167,14 @@ impl PostgresDb<'_> {
         let task_created: bool = row.get("task_created");
 
         if task_created {
+            if !already_timedout {
+                self.arm_promise_timeout(
+                    promise_id,
+                    timeout_at,
+                    promise.tags.contains_key("resonate:target"),
+                );
+                self.arm_lease(promise_id, pid, created_at + ttl);
+            }
             return Ok(TaskCreateResult {
                 promise,
                 task_created: true,
@@ -3158,9 +3240,13 @@ impl PostgresDb<'_> {
         }
         let row = &rows[0];
         let task_state: String = row.get("task_state");
+        let was_acquired: bool = row.get("was_acquired");
+        if was_acquired {
+            self.arm_lease(task_id, pid, time + ttl);
+        }
         Ok(TaskAcquireResult {
             promise: Some(row_to_promise(row)),
-            was_acquired: row.get("was_acquired"),
+            was_acquired,
             task_state: Some(parse_task_state(&task_state)),
             task_version: Some(row.get::<i32, _>("task_version") as i64),
         })
@@ -3232,8 +3318,15 @@ impl PostgresDb<'_> {
             return Err(StorageError::Serialization);
         }
         let row = &rows[0];
-        self.absorb(row);
+        let armed = self.absorb_and_arm_retries(row, created_at + trt);
         let promise_id_val: Option<String> = row.get("id");
+        // A promise joins the eager sweep under exactly the condition its task
+        // gets a retry deadline: newly created, targeted, not already timed
+        // out. So the retries this statement armed name the promises too, and
+        // there is no separate `was_created` to read.
+        for id in &armed {
+            self.arm_promise_timeout(id, timeout_at, true);
+        }
         Ok(TaskFenceResult {
             task_exists: row.get("task_exists"),
             fence_ok: row.get("fence_ok"),
@@ -3312,7 +3405,7 @@ impl PostgresDb<'_> {
             });
         }
         let row = &rows[0];
-        self.absorb(row);
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
         let promise_id_val: Option<String> = row.get("id");
         Ok(TaskFenceResult {
             task_exists: row.get("task_exists"),
@@ -3329,7 +3422,11 @@ impl PostgresDb<'_> {
         let ids: Vec<String> = tasks.iter().map(|(id, _)| id.to_string()).collect();
         let versions: Vec<i32> = tasks.iter().map(|(_, v)| *v as i32).collect();
 
-        rt_block_on(
+        // RETURNING, because the new deadline is `$3 + p.ttl` and `ttl` is a
+        // column: the caller cannot compute what was written without reading
+        // it back. The only statement in this backend that needed new SQL to
+        // announce its deadline.
+        let rows = rt_block_on(
             sqlx::query(
                 "
             WITH task_data AS (
@@ -3342,14 +3439,20 @@ impl PostgresDb<'_> {
             -- TODO (carried over from the multi-table backend): also require the
             -- promise to be live, so a heartbeat on a task whose promise already
             -- timed out is a no-op:  AND p.state = 'pending' AND p.timeout_at > $3
+            RETURNING p.id, p.expires_at
         ",
             )
             .bind(&ids)
             .bind(&versions)
             .bind(time)
             .bind(pid)
-            .execute(self.tx().as_mut()),
+            .fetch_all(self.tx().as_mut()),
         )?;
+        for row in &rows {
+            let id: String = row.get("id");
+            let expires_at: i64 = row.get("expires_at");
+            self.arm_lease(&id, pid, expires_at);
+        }
         Ok(())
     }
 
@@ -3511,7 +3614,7 @@ impl PostgresDb<'_> {
             });
         }
         let row = &rows[0];
-        self.absorb(row);
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
         Ok(TaskFulfillResult {
             task_exists: row
                 .try_get::<Option<bool>, _>("task_exists")
@@ -3561,7 +3664,7 @@ impl PostgresDb<'_> {
             .fetch_one(self.tx().as_mut()),
         )?;
 
-        self.absorb(&row);
+        self.absorb_and_arm_retries(&row, time + ttl);
         Ok(TaskReleaseResult {
             task_released: row.get("task_released"),
             task_exists: row.get("task_exists"),
@@ -3632,7 +3735,7 @@ impl PostgresDb<'_> {
             .fetch_one(self.tx().as_mut()),
         )?;
 
-        self.absorb(&row);
+        self.absorb_and_arm_retries(&row, time + trt);
         Ok(TaskContinueResult {
             task_exists: row.get("task_exists"),
             continued: row.get("continued"),
@@ -3714,7 +3817,8 @@ impl PostgresDb<'_> {
               SELECT * FROM schedules WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_schedule)
             )
             SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
-                   promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
+                   promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at,
+                   EXISTS (SELECT 1 FROM inserted_or_skipped_schedule) AS was_created
             FROM result
         ")
             .bind(id).bind(cron).bind(promise_id).bind(promise_timeout)
@@ -3722,6 +3826,16 @@ impl PostgresDb<'_> {
             .bind(created_at).bind(next_run_at)
             .fetch_one(self.tx().as_mut()))?;
 
+        // Only a create that actually happened arms a deadline — an idempotent
+        // re-create leaves the existing next_run_at where it was.
+        if row.get::<bool, _>("was_created") {
+            self.arm(
+                next_run_at,
+                Timeout::ScheduleDue {
+                    schedule_id: id.to_string(),
+                },
+            );
+        }
         Ok(row_to_schedule(&row))
     }
 
@@ -3825,8 +3939,21 @@ impl PostgresDb<'_> {
         if rows.is_empty() {
             return Ok(None);
         }
-        self.absorb(&rows[0]);
-        Ok(Some(row_to_schedule(&rows[0])))
+        let armed = self.absorb_and_arm_retries(&rows[0], time + trt);
+        // The schedule advanced, so its own deadline moved. The promise this
+        // firing created has one too, if it is still pending and targeted —
+        // which is exactly when a retry deadline was armed for it.
+        let schedule = row_to_schedule(&rows[0]);
+        for id in &armed {
+            self.arm_promise_timeout(id, fired_at + schedule.promise_timeout, true);
+        }
+        self.arm(
+            schedule.next_run_at,
+            Timeout::ScheduleDue {
+                schedule_id: schedule_id.to_string(),
+            },
+        );
+        Ok(Some(schedule))
     }
 
     #[allow(dead_code)] // the liveness probe the server will call
@@ -3864,7 +3991,7 @@ impl PostgresDb<'_> {
                 .fetch_optional(self.tx().as_mut()),
         )?;
         if let Some(row) = expired_row {
-            self.absorb(&row);
+            self.absorb_and_arm_retries(&row, time + trt);
         }
 
         // Statement 2: expired task retry deadlines — re-enqueue the execute
@@ -3895,7 +4022,7 @@ impl PostgresDb<'_> {
             .fetch_optional(self.tx().as_mut()),
         )?;
         if let Some(row) = retry_row {
-            self.absorb(&row);
+            self.absorb_and_arm_retries(&row, time + trt);
         }
 
         // Statement 3: expired leases — the holder went away, hand the task back.
@@ -3927,7 +4054,7 @@ impl PostgresDb<'_> {
             .fetch_optional(self.tx().as_mut()),
         )?;
         if let Some(row) = lease_row {
-            self.absorb(&row);
+            self.absorb_and_arm_retries(&row, time + trt);
         }
 
         Ok(())
@@ -4102,6 +4229,7 @@ impl ResonateEngine for PostgresEngine {
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
         self.transact(move |db| process_all_timeouts(db, now), false)
             .await
+            .map(|(fired, messages, _)| (fired, messages))
     }
 
     fn is_paused(&self) -> bool {
@@ -4136,10 +4264,10 @@ impl PostgresEngine {
             }
         };
         match swept {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: None,
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => {
                 tracing::error!(error = %e, "Timeout sweep failed");

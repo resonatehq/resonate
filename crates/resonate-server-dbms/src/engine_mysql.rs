@@ -43,7 +43,7 @@ use std::cell::{RefCell, UnsafeCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use validator::Validate;
 
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
+use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
 use resonate_core::util;
 
 pub struct MysqlEngine {
@@ -182,7 +182,7 @@ impl MysqlEngine {
     ///
     /// A retried attempt starts with an empty list, so a message is never
     /// emitted for an attempt that did not commit.
-    async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>)>
+    async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
         F: FnMut(&MysqlDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
@@ -199,11 +199,12 @@ impl MysqlEngine {
             let tx = self.pool.begin().await.map_err(StorageError::from)?;
 
             let task_retry_timeout = self.task_retry_timeout;
-            let (result, emitted, tx) = tokio::task::block_in_place(|| {
+            let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
                 let db = MysqlDb {
                     tx: UnsafeCell::new(tx),
                     task_retry_timeout,
                     emitted: RefCell::new(Vec::new()),
+                    armed: RefCell::new(Vec::new()),
                 };
 
                 #[cfg(feature = "concurrency-stress")]
@@ -217,8 +218,9 @@ impl MysqlEngine {
 
                 let result = f(&db);
                 let emitted = db.emitted.into_inner();
+                let armed = db.armed.into_inner();
                 let tx = db.tx.into_inner();
-                (result, emitted, tx)
+                (result, emitted, armed, tx)
             });
 
             // If business logic failed with a serialization error, retry.
@@ -245,7 +247,7 @@ impl MysqlEngine {
             match tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(tx.commit())
             }) {
-                Ok(_) => return Ok((result, emitted)),
+                Ok(_) => return Ok((result, emitted, armed)),
                 Err(e) => {
                     let mysql_err = e
                         .as_database_error()
@@ -282,10 +284,10 @@ impl MysqlEngine {
         F: FnMut(&MysqlDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
     {
         match self.transact(f).await {
-            Ok((response, messages)) => Output {
+            Ok((response, messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(StorageError::InvalidInput(msg)) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -314,7 +316,7 @@ impl MysqlEngine {
         F: FnMut(&MysqlDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.transact(f).await.map(|(v, _)| v)
+        self.transact(f).await.map(|(v, _, _)| v)
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -2204,7 +2206,7 @@ impl MysqlEngine {
 
     async fn op_debug_reset(&self, req: &RequestEnvelope) -> Output {
         Output::response(match self.transact(move |db| db.debug_reset()).await {
-            Ok(((), _)) => {
+            Ok(((), _, _)) => {
                 tracing::warn!("Debug reset: all data cleared");
                 ResponseEnvelope::new(
                     req.kind.clone(),
@@ -2273,7 +2275,7 @@ impl MysqlEngine {
             .transact(move |db| process_all_timeouts(db, time).map(|_| ()))
             .await
         {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: Some(ResponseEnvelope::new(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
@@ -2281,7 +2283,7 @@ impl MysqlEngine {
                     Value::Array(vec![]),
                 )),
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => Output::response(ResponseEnvelope::error(
                 req.kind.clone(),
@@ -2305,6 +2307,9 @@ struct MysqlDb<'a> {
     task_retry_timeout: i64,
     /// What this transition has emitted so far. See `engine_sqlite.rs`.
     emitted: RefCell<Vec<Outgoing>>,
+    /// What deadlines this transition armed or moved. A hint; see
+    /// `engine_sqlite.rs`.
+    armed: RefCell<Vec<Scheduled>>,
 }
 
 impl<'a> MysqlDb<'a> {
@@ -2321,6 +2326,41 @@ impl<'a> MysqlDb<'a> {
     /// Queue a message for the caller of `process`.
     fn emit(&self, message: Outgoing) {
         self.emitted.borrow_mut().push(message);
+    }
+
+    /// Report a deadline this transition just wrote.
+    fn arm(&self, at: i64, timeout: Timeout) {
+        self.armed.borrow_mut().push(Scheduled { at, timeout });
+    }
+
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
+        if targeted {
+            self.arm(
+                timeout_at,
+                Timeout::PromiseTimeout {
+                    promise_id: promise_id.to_string(),
+                },
+            );
+        }
+    }
+
+    fn arm_retry(&self, task_id: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskRetryTimeout {
+                task_id: task_id.to_string(),
+            },
+        );
+    }
+
+    fn arm_lease(&self, task_id: &str, pid: &str, at: i64) {
+        self.arm(
+            at,
+            Timeout::TaskLeaseTimeout {
+                task_id: task_id.to_string(),
+                pid: pid.to_string(),
+            },
+        );
     }
 
     /// Emit an unblock message carrying the promise as it now stands.
@@ -2434,6 +2474,7 @@ impl<'a> MysqlDb<'a> {
                 .execute(self.tx().as_mut()),
             )?;
 
+            self.arm_retry(&task_id, time + trt);
             self.emit_execute(&task_id)?;
         }
         Ok(())
@@ -2533,6 +2574,7 @@ impl<'a> MysqlDb<'a> {
                 .bind(&task_id)
                 .execute(self.tx().as_mut()),
             )?;
+            self.arm_retry(&task_id, time + trt);
             self.emit_execute(&task_id)?;
         }
 
@@ -2824,6 +2866,8 @@ impl MysqlDb<'_> {
                 )?;
 
                 if task_res.rows_affected() > 0 && !already_timedout {
+                    self.arm_promise_timeout(id, timeout_at, true);
+                    self.arm_retry(id, created_at + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
                         task_id: id.to_string(),
@@ -2954,6 +2998,7 @@ impl MysqlDb<'_> {
                 )?;
                 // Only enqueue the execute message if the task was actually transitioned
                 if upd.rows_affected() > 0 {
+                    self.arm_retry(awaiter_id, time + trt);
                     self.emit_execute(awaiter_id)?;
                 }
 
@@ -3133,6 +3178,14 @@ impl MysqlDb<'_> {
             .unwrap_or_else(|| unreachable!("promise missing after insert in task_create"));
 
         if task_created {
+            if !already_timedout {
+                self.arm_promise_timeout(
+                    promise_id,
+                    timeout_at,
+                    promise.tags.contains_key("resonate:target"),
+                );
+                self.arm_lease(promise_id, pid, created_at + ttl);
+            }
             return Ok(TaskCreateResult {
                 promise,
                 task_created: true,
@@ -3186,6 +3239,7 @@ impl MysqlDb<'_> {
         let was_acquired = res.rows_affected() > 0;
 
         if was_acquired {
+            self.arm_lease(task_id, pid, time + ttl);
             rt_block_on(
                 sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ? AND ready = true")
                     .bind(task_id)
@@ -3284,6 +3338,8 @@ impl MysqlDb<'_> {
                         .execute(self.tx().as_mut()),
                     )?;
                     if task_res.rows_affected() > 0 && !already_timedout {
+                        self.arm_promise_timeout(promise_id, timeout_at, true);
+                        self.arm_retry(promise_id, created_at + trt);
                         self.emit(Outgoing::Execute {
                             address: addr.to_string(),
                             task_id: promise_id.to_string(),
@@ -3364,7 +3420,7 @@ impl MysqlDb<'_> {
         for (task_id, version) in tasks {
             // The three-table join collapses: the lease, the task and the
             // promise it guards are all this one row.
-            rt_block_on(
+            let res = rt_block_on(
                 sqlx::query(
                     "UPDATE promises SET expires_at = ? + ttl
                      WHERE id = ? AND task_version = ? AND task_state = 'acquired' AND pid = ?
@@ -3377,6 +3433,22 @@ impl MysqlDb<'_> {
                 .bind(time)
                 .execute(self.tx().as_mut()),
             )?;
+            // The new deadline is `? + ttl` and `ttl` is a column, so it has to
+            // be read back. MySQL has no RETURNING, so this is a second
+            // statement — taken only when the heartbeat actually landed, which
+            // keeps the no-op case (the common one on a stale task) free.
+            if res.rows_affected() > 0 {
+                let row = rt_block_on(
+                    sqlx::query("SELECT expires_at FROM promises WHERE id = ?")
+                        .bind(task_id)
+                        .fetch_optional(self.tx().as_mut()),
+                )?;
+                if let Some(row) = row {
+                    if let Some(at) = row.get::<Option<i64>, _>("expires_at") {
+                        self.arm_lease(task_id, pid, at);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -3632,6 +3704,7 @@ impl MysqlDb<'_> {
         let task_released = res.rows_affected() > 0;
 
         if task_released {
+            self.arm_retry(task_id, time + ttl);
             self.emit_execute(task_id)?;
         }
         let task_exists = rt_block_on(
@@ -3704,6 +3777,7 @@ impl MysqlDb<'_> {
         let continued = res.rows_affected() > 0;
 
         if continued {
+            self.arm_retry(task_id, time + trt);
             self.emit_execute(task_id)?;
         }
 
@@ -3827,6 +3901,16 @@ impl MysqlDb<'_> {
             .bind(next_run_at)
             .execute(self.tx().as_mut()),
         )?;
+        // Only a create that actually happened arms a deadline — an idempotent
+        // re-create leaves the existing next_run_at where it was.
+        if res.rows_affected() > 0 {
+            self.arm(
+                next_run_at,
+                Timeout::ScheduleDue {
+                    schedule_id: id.to_string(),
+                },
+            );
+        }
 
         // No schedule timeout to insert: `next_run_at` on the row above is it.
         let _ = res;
@@ -3988,6 +4072,8 @@ impl MysqlDb<'_> {
                     .execute(self.tx().as_mut()),
                 )?;
                 if task_res.rows_affected() > 0 {
+                    self.arm_promise_timeout(&computed_promise_id, computed_timeout_at, true);
+                    self.arm_retry(&computed_promise_id, time + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
                         task_id: computed_promise_id.clone(),
@@ -4005,6 +4091,12 @@ impl MysqlDb<'_> {
                 .bind(schedule_id)
                 .execute(self.tx().as_mut()),
         )?;
+        self.arm(
+            next_run_at,
+            Timeout::ScheduleDue {
+                schedule_id: schedule_id.to_string(),
+            },
+        );
 
         // 8 is gone: advancing the schedule above advanced the queue.
 
@@ -4089,6 +4181,7 @@ impl MysqlDb<'_> {
             }
 
             for id in &retry_ids {
+                self.arm_retry(id, time + trt);
                 self.emit_execute(id)?;
             }
         }
@@ -4130,6 +4223,7 @@ impl MysqlDb<'_> {
             }
 
             for id in &lease_ids {
+                self.arm_retry(id, time + trt);
                 self.emit_execute(id)?;
             }
         }
@@ -4332,7 +4426,9 @@ impl ResonateEngine for MysqlEngine {
     }
 
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>)> {
-        self.transact(move |db| process_all_timeouts(db, now)).await
+        self.transact(move |db| process_all_timeouts(db, now))
+            .await
+            .map(|(fired, messages, _)| (fired, messages))
     }
 
     fn is_paused(&self) -> bool {
@@ -4363,10 +4459,10 @@ impl MysqlEngine {
             }
         };
         match swept {
-            Ok(((), messages)) => Output {
+            Ok(((), messages, timeouts)) => Output {
                 response: None,
                 messages,
-                timeouts: Vec::new(),
+                timeouts,
             },
             Err(e) => {
                 tracing::error!(error = %e, "Timeout sweep failed");

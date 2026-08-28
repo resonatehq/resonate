@@ -1,0 +1,26 @@
+[package]
+name = "resonate-wheel"
+description = "A bounded, deduplicating timer wheel, formally verified with Verus."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "resonate_wheel"
+path = "src/lib.rs"
+
+# The Verus toolchain is *not* required to build or run this crate: `verus_builtin_macros`
+# erases all ghost code (specs, proofs, requires/ensures) when compiled by an ordinary
+# rustc, leaving only the executable code behind. Verification is a separate step,
+# driven by `verify.sh`.
+[dependencies]
+# The timer, and only the timer. Verus never compiles that module — it is
+# gated on `verus_keep_ghost` — so this dependency is invisible to
+# verification and the proved core stays dependency-free.
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+vstd = "=0.0.0-2026-08-23-0033"
+verus_builtin = "=0.0.0-2026-08-09-0044"
+verus_builtin_macros = "=0.0.0-2026-08-23-0033"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

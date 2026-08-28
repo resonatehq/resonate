@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
+use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
 use crate::StorageResult;
 use async_trait::async_trait;
 use resonate_core::types::{
@@ -87,6 +87,12 @@ pub struct Oracle {
     t_timeouts: Vec<TTimeout>,
     s_timeouts: Vec<STimeout>,
     outgoing: Vec<(String, Value)>,
+    /// What the operation currently being applied armed.
+    ///
+    /// The model keeps its timeout tables explicitly, so every arm in the whole
+    /// model goes through one of the three `set_*_timeout` setters — which
+    /// makes them the one place this has to be recorded.
+    armed: Vec<Scheduled>,
     /// What the operation currently being applied emitted.
     ///
     /// `outgoing` is the queue — an execute message upserts into it, so what a
@@ -115,12 +121,18 @@ impl Oracle {
             s_timeouts: Vec::new(),
             outgoing: Vec::new(),
             emitted: Vec::new(),
+            armed: Vec::new(),
         }
     }
 
     /// Take what the last applied operation emitted.
     pub fn take_emitted(&mut self) -> Vec<Outgoing> {
         std::mem::take(&mut self.emitted)
+    }
+
+    /// Take the deadlines the last applied operation armed or moved.
+    pub fn take_armed(&mut self) -> Vec<Scheduled> {
+        std::mem::take(&mut self.armed)
     }
 
     /// Fire one timeout the system asked of itself.
@@ -146,6 +158,7 @@ impl Oracle {
 
     pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
         self.emitted.clear();
+        self.armed.clear();
         let now = util::resolve_time(req.head.debug_time);
         match req.kind.as_str() {
             "promise.get" => self.op_promise_get(req, now),
@@ -1666,6 +1679,7 @@ impl Oracle {
         self.s_timeouts.clear();
         self.outgoing.clear();
         self.emitted.clear();
+        self.armed.clear();
         ResponseEnvelope::new(
             req.kind.clone(),
             req.head.corr_id.clone(),
@@ -2254,6 +2268,12 @@ impl Oracle {
     // ─── Timeout list helpers ──────────────────────────────────────────────────
 
     fn set_p_timeout(&mut self, id: &str, timeout: i64) {
+        self.armed.push(Scheduled {
+            at: timeout,
+            timeout: Timeout::PromiseTimeout {
+                promise_id: id.to_string(),
+            },
+        });
         for e in &mut self.p_timeouts {
             if e.id == id {
                 e.timeout = timeout;
@@ -2271,6 +2291,22 @@ impl Oracle {
     }
 
     fn set_t_timeout(&mut self, id: &str, kind: TTimeoutKind, timeout: i64) {
+        self.armed.push(Scheduled {
+            at: timeout,
+            timeout: match kind {
+                TTimeoutKind::Retry => Timeout::TaskRetryTimeout {
+                    task_id: id.to_string(),
+                },
+                TTimeoutKind::Lease => Timeout::TaskLeaseTimeout {
+                    task_id: id.to_string(),
+                    pid: self
+                        .tasks
+                        .get(id)
+                        .and_then(|t| t.pid.clone())
+                        .unwrap_or_default(),
+                },
+            },
+        });
         for e in &mut self.t_timeouts {
             if e.id == id {
                 e.kind = kind;
@@ -2290,6 +2326,12 @@ impl Oracle {
     }
 
     fn set_s_timeout(&mut self, id: &str, timeout: i64) {
+        self.armed.push(Scheduled {
+            at: timeout,
+            timeout: Timeout::ScheduleDue {
+                schedule_id: id.to_string(),
+            },
+        });
         for e in &mut self.s_timeouts {
             if e.id == id {
                 e.timeout = timeout;
@@ -2423,10 +2465,12 @@ impl ResonateEngine for SharedOracle {
                 None
             }
         };
+        let messages = oracle.take_emitted();
+        let timeouts = oracle.take_armed();
         Output {
             response,
-            messages: oracle.take_emitted(),
-            timeouts: Vec::new(),
+            messages,
+            timeouts,
         }
     }
 
