@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "crates/resonate-auth",
     "crates/resonate-core",
+    "crates/resonate-gateway-http",
     "crates/resonate-server-dbms",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
@@ -45,7 +47,9 @@ path = "diff/differential.rs"
 concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 
 [dependencies]
+resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
+resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-server-dbms = { path = "crates/resonate-server-dbms" }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }

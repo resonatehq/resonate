@@ -1,10 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use lazy_static::lazy_static;
-use prometheus::{
-    register_counter, register_counter_vec, register_histogram_vec, Counter, CounterVec,
-    HistogramVec,
-};
+use prometheus::{register_counter, register_counter_vec, Counter, CounterVec};
 
 /// Serve Prometheus metrics in text exposition format.
 pub async fn metrics_handler() -> Response {
@@ -25,18 +22,10 @@ pub async fn metrics_handler() -> Response {
 }
 
 lazy_static! {
-    pub static ref REQUEST_TOTAL: CounterVec = register_counter_vec!(
-        "resonate_request_total",
-        "Total number of requests by kind and status",
-        &["kind", "status"]
-    )
-    .unwrap();
-    pub static ref REQUEST_DURATION: HistogramVec = register_histogram_vec!(
-        "resonate_request_duration_seconds",
-        "Request duration in seconds by kind",
-        &["kind"]
-    )
-    .unwrap();
+    // `resonate_request_total` and `resonate_request_duration_seconds` are
+    // declared by `resonate-gateway-http`, which is the only thing that records
+    // them. They still appear below: `register_*!` writes into prometheus'
+    // global default registry, and `gather` reads the same one.
     pub static ref MESSAGES_TOTAL: CounterVec = register_counter_vec!(
         "resonate_messages_total",
         "Total number of messages delivered by kind",

@@ -44,4 +44,16 @@ pub trait ResonateServer: Send + Sync {
     /// with the status in `ResponseHead::status`. `Err` is reserved for "there
     /// is no answer" — see [`Unavailable`] for the retry contract.
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+
+    /// Can this server serve requests right now?
+    ///
+    /// What a readiness probe asks, and the reason it is here rather than on
+    /// the thing behind the server: a gateway has to answer `/ready` without
+    /// knowing whether there is a database behind it, a model, or a socket to
+    /// somewhere else. Each implementation knows what "ready" means for itself.
+    ///
+    /// Defaulted to `true` for implementations with nothing to check.
+    async fn ready(&self) -> bool {
+        true
+    }
 }

@@ -2674,7 +2674,9 @@ dependencies = [
  "lazy_static",
  "prometheus",
  "reqwest 0.12.28",
+ "resonate-auth",
  "resonate-core",
+ "resonate-gateway-http",
  "resonate-server-dbms",
  "resonate-timer-wheel",
  "resonate-transport-gcps",
@@ -2693,6 +2695,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "resonate-auth"
+version = "0.9.8"
+dependencies = [
+ "jsonwebtoken 9.3.1",
+ "resonate-core",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "resonate-core"
 version = "0.9.8"
 dependencies = [
@@ -2704,6 +2717,24 @@ dependencies = [
  "tracing",
  "url",
  "validator",
+]
+
+[[package]]
+name = "resonate-gateway-http"
+version = "0.9.8"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "lazy_static",
+ "prometheus",
+ "resonate-auth",
+ "resonate-core",
+ "resonate-transport-http-poll",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
 ]
 
 [[package]]

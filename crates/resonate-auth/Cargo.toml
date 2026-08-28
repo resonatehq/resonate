@@ -1,0 +1,17 @@
+[package]
+name = "resonate-auth"
+description = "Bearer-token authentication and per-operation authorization for the Resonate protocol."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "resonate_auth"
+path = "src/lib.rs"
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+jsonwebtoken = "9"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"

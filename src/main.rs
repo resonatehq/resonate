@@ -1,8 +1,6 @@
-mod auth;
 mod cli;
 mod config;
 mod deadlines;
-mod gateway;
 mod mcp;
 mod metrics;
 mod processing;
@@ -11,19 +9,11 @@ mod transport;
 
 use std::sync::Arc;
 
-use axum::{
-    http::{
-        header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
-        HeaderValue, Method, StatusCode,
-    },
-    response::IntoResponse,
-    routing::get,
-    Json, Router,
-};
+use axum::{routing::get, Router};
 use clap::{Parser, Subcommand};
 use config::Config;
-use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
+use resonate_gateway_http::{HttpGateway, HttpGatewayConfig};
 use resonate_server_dbms::{
     engine_mysql::MysqlEngine, engine_port::ResonateEngine, engine_postgres::PostgresEngine,
     engine_sqlite::SqliteEngine,
@@ -176,7 +166,8 @@ async fn run_server(config: Config) -> Result<(), String> {
                 tracing::warn!("Auth enabled — unsigned mode (no signature verification)");
                 None
             } else {
-                let vk = auth::load_public_key(&auth_cfg.publickey).map_err(|e| e.to_string())?;
+                let vk = resonate_auth::load_public_key(&auth_cfg.publickey)
+                    .map_err(|e| e.to_string())?;
                 tracing::info!(key = %auth_cfg.publickey, "Auth enabled");
                 Some(vk)
             };
@@ -186,11 +177,11 @@ async fn run_server(config: Config) -> Result<(), String> {
             if let Some(aud) = &auth_cfg.aud {
                 tracing::info!(audience = %aud, "Auth audience configured");
             }
-            Some(auth::AuthConfig {
+            Some(Arc::new(resonate_auth::AuthConfig {
                 key,
                 iss: auth_cfg.iss.clone(),
                 aud: auth_cfg.aud.clone(),
-            })
+            }))
         }
         None => {
             tracing::info!("Auth disabled — all requests accepted");
@@ -343,7 +334,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         // from the same weak handle and in the same expression. Nothing runs
         // until `start_timer` below.
         let timer = deadlines::build(&config.timeouts, weak.clone());
-        Server::new(config, auth_config, engine, router, timer)
+        Server::new(config, engine, router, timer)
     });
 
     let Transports {
@@ -406,71 +397,27 @@ async fn run_server(config: Config) -> Result<(), String> {
         }));
     }
 
-    // Build HTTP router
-    let effective_url = state.config.server.url.clone().unwrap_or_default();
-
-    let cors_layer = build_cors_layer(&state.config.server.cors.allow_origins);
-    if !state.config.server.cors.allow_origins.is_empty() {
-        tracing::info!(
-            origins = ?state.config.server.cors.allow_origins,
-            "CORS enabled"
-        );
-    }
-
-    let app_state = server::AppState {
-        server: Arc::clone(&state),
-        poll_registry,
-    };
-    let mut app = server::api_routes()
-        .merge(server::poll_routes())
-        .layer(tower_http::catch_panic::CatchPanicLayer::custom(
-            move |err: Box<dyn std::any::Any + Send + 'static>| {
-                let message = if let Some(s) = err.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = err.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "internal server error".to_string()
-                };
-                tracing::error!(message = %message, "panic in request handler");
-                if is_sqlite {
-                    std::process::abort();
-                }
-                let body =
-                    ResponseEnvelope::error("unknown".to_string(), "0".to_string(), 500, &message);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
-            },
-        ))
-        .layer(
-            tower_http::trace::TraceLayer::new_for_http()
-                .make_span_with(
-                    tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
-                )
-                .on_response(
-                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
-                )
-                .on_failure(
-                    tower_http::trace::DefaultOnFailure::new().level(tracing::Level::ERROR),
-                ),
-        )
-        .with_state(app_state);
-    if let Some(layer) = cors_layer {
-        app = app.layer(layer);
-    }
-    let app = app;
-
     // The gateway is built here and listens below. `new` binds nothing, so
     // construction order does not matter; `init` is what opens the socket, and
     // that has to come after the workers and the timer — accepting a request
     // the rest of the process cannot yet serve is worse than not accepting it.
-    let gateway: Arc<dyn ResonateGateway> = Arc::new(gateway::HttpGateway::new(
+    let effective_url = state.config.server.url.clone().unwrap_or_default();
+    if !state.config.server.cors.allow_origins.is_empty() {
+        tracing::info!(origins = ?state.config.server.cors.allow_origins, "CORS enabled");
+    }
+    let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
         Arc::clone(&state) as Arc<dyn ResonateServer>,
-        gateway::HttpGatewayConfig {
+        auth_config,
+        poll_registry,
+        HttpGatewayConfig {
             bind: bind.clone(),
             port,
             url: effective_url.clone(),
+            cors_allow_origins: state.config.server.cors.allow_origins.clone(),
+            // SQLite lives in this process, so a panic mid-transaction can
+            // leave state the next request would read.
+            abort_on_panic: is_sqlite,
         },
-        app,
     ));
     gateway
         .init()
@@ -517,32 +464,6 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     tracing::info!("Resonate Server stopped");
     Ok(())
-}
-
-fn build_cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
-    if allow_origins.is_empty() {
-        return None;
-    }
-    let layer = if allow_origins.iter().any(|o| o == "*") {
-        tower_http::cors::CorsLayer::permissive()
-    } else {
-        let origins: Vec<HeaderValue> = allow_origins
-            .iter()
-            .filter_map(|o| o.parse().ok())
-            .collect();
-        tower_http::cors::CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::PATCH,
-                Method::DELETE,
-                Method::OPTIONS,
-            ])
-            .allow_headers([ORIGIN, CONTENT_LENGTH, CONTENT_TYPE, AUTHORIZATION])
-    };
-    Some(layer)
 }
 
 /// Wait for SIGINT or SIGTERM to initiate graceful shutdown.

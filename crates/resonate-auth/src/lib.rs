@@ -1,3 +1,11 @@
+//! Authentication and authorization for the Resonate protocol.
+//!
+//! Envelope-based rather than transport-based: [`auth_check`] reads
+//! `head.auth`, so an HTTP gateway, a NATS gateway and an in-process caller
+//! all authorize identically. What it needs beyond the envelope is an
+//! [`AuthConfig`] — policy, not protocol, which is why this is its own crate
+//! rather than part of `core`.
+
 use std::collections::HashSet;
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
