@@ -2,6 +2,7 @@ mod auth;
 mod cli;
 mod config;
 mod deadlines;
+mod gateway;
 mod mcp;
 mod metrics;
 mod processing;
@@ -22,7 +23,7 @@ use axum::{
 use clap::{Parser, Subcommand};
 use config::Config;
 use resonate_core::types::ResponseEnvelope;
-use resonate_core::{ResonateRouter, ResonateServer, ResonateWorker};
+use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_server_dbms::{
     engine_mysql::MysqlEngine, engine_port::ResonateEngine, engine_postgres::PostgresEngine,
     engine_sqlite::SqliteEngine,
@@ -407,7 +408,6 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     // Build HTTP router
     let effective_url = state.config.server.url.clone().unwrap_or_default();
-    let (sse_shutdown_tx, sse_shutdown_rx) = tokio::sync::watch::channel(false);
 
     let cors_layer = build_cors_layer(&state.config.server.cors.allow_origins);
     if !state.config.server.cors.allow_origins.is_empty() {
@@ -417,11 +417,9 @@ async fn run_server(config: Config) -> Result<(), String> {
         );
     }
 
-    let app_timer = Arc::clone(&state);
     let app_state = server::AppState {
-        server: state,
+        server: Arc::clone(&state),
         poll_registry,
-        sse_shutdown_rx,
     };
     let mut app = server::api_routes()
         .merge(server::poll_routes())
@@ -460,38 +458,56 @@ async fn run_server(config: Config) -> Result<(), String> {
         app = app.layer(layer);
     }
     let app = app;
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind, port))
+
+    // The gateway is built here and listens below. `new` binds nothing, so
+    // construction order does not matter; `init` is what opens the socket, and
+    // that has to come after the workers and the timer — accepting a request
+    // the rest of the process cannot yet serve is worse than not accepting it.
+    let gateway: Arc<dyn ResonateGateway> = Arc::new(gateway::HttpGateway::new(
+        Arc::clone(&state) as Arc<dyn ResonateServer>,
+        gateway::HttpGatewayConfig {
+            bind: bind.clone(),
+            port,
+            url: effective_url.clone(),
+        },
+        app,
+    ));
+    gateway
+        .init()
         .await
-        .map_err(|e| format!("Failed to bind to {}:{}: {e}", bind, port))?;
+        .map_err(|e| format!("HTTP gateway failed to start: {e}"))?;
 
-    tracing::info!(bind = %bind, port = port, server_url = %effective_url, "Server listening");
+    shutdown_signal().await;
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown_signal().await;
-            let _ = sse_shutdown_tx.send(true);
-        })
-        .await
-        .map_err(|e| format!("Server error: {e}"))?;
-
-    // Shutdown
-    tracing::info!("HTTP server stopped, draining background tasks...");
+    // Shutdown, in the reverse of the order things became able to do work —
+    // with one exception, at the end.
+    tracing::info!("Shutting down, draining background tasks...");
     let _ = shutdown_tx.send(true);
 
     let drain = async {
         // The timer first: it is the only thing that can still hand the engine
         // work of its own, and stopping it means nothing new arrives while the
         // loops below drain.
-        app_timer.stop_timer().await;
+        state.stop_timer().await;
         for handle in handles {
             let _ = handle.await;
         }
-        // Workers last: the loops that feed them have stopped, so this drains
-        // what is already in flight rather than racing new deliveries.
+        // Then the workers: the loops that feed them have stopped, so this
+        // drains what is already in flight rather than racing new deliveries.
+        // This is also what ends the poll transport's SSE streams, by dropping
+        // the senders they read from.
         for (_, worker) in started {
             if let Err(e) = worker.stop().await {
                 tracing::warn!(error = %e, "transport did not stop cleanly");
             }
+        }
+        // The gateway last, not first. Refusing connections while in-flight
+        // work is still draining would give clients a closed socket where a
+        // 503 would do — and stopping it first would deadlock, because its
+        // graceful shutdown waits on the very SSE streams only the step above
+        // can release.
+        if let Err(e) = gateway.stop().await {
+            tracing::warn!(error = %e, "HTTP gateway did not stop cleanly");
         }
     };
 

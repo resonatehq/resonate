@@ -131,13 +131,16 @@ impl PollRegistry {
         }
     }
 
-    /// Register a new connection. Returns the receiver end of the message channel.
-    /// Returns None if max connections exceeded.
-    pub async fn register(
-        &self,
-        group: &str,
-        id: &str,
-    ) -> Option<(Arc<PollConnection>, mpsc::Receiver<String>)> {
+    /// Register a new connection. Returns its id and the receiving end of the
+    /// message channel. Returns None if max connections exceeded.
+    ///
+    /// The id rather than the connection itself, deliberately: the registry is
+    /// the sole owner of every [`PollConnection`], and therefore of every
+    /// sender. That is what makes [`stop`](ResonateWorker::stop) able to end
+    /// the streams by clearing the map — a caller holding an `Arc` of its own
+    /// would keep its sender alive and the stream would never see the channel
+    /// close. The id is all a caller needs, to deregister on disconnect.
+    pub async fn register(&self, group: &str, id: &str) -> Option<(u64, mpsc::Receiver<String>)> {
         let mut conns = self.connections.lock().await;
 
         // Check total connection count
@@ -154,10 +157,7 @@ impl PollRegistry {
             tx,
         });
 
-        conns
-            .entry(group.to_string())
-            .or_default()
-            .push(conn.clone());
+        conns.entry(group.to_string()).or_default().push(conn);
 
         tracing::info!(
             group = %group,
@@ -167,7 +167,7 @@ impl PollRegistry {
             "Poll connection registered"
         );
 
-        Some((conn, rx))
+        Some((conn_id, rx))
     }
 
     /// Deregister a specific connection by its unique connection ID.
@@ -256,6 +256,24 @@ impl PollRegistry {
 
 #[async_trait::async_trait]
 impl ResonateWorker for PollRegistry {
+    /// Drop every connection, which is what ends the SSE streams.
+    ///
+    /// Each registered connection owns the sending half of its stream's
+    /// channel. Clearing the map drops them all, the handler's `recv` returns
+    /// `None`, and the stream finishes on its own — so the transport tears down
+    /// its own connections and nothing outside it needs a say. That is also
+    /// what lets the HTTP gateway stop *after* this: by the time it drains,
+    /// there are no long-lived responses left for it to wait on.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        let mut conns = self.connections.lock().await;
+        let n: usize = conns.values().map(|v| v.len()).sum();
+        conns.clear();
+        if n > 0 {
+            tracing::info!(connections = n, "Poll connections closed");
+        }
+        Ok(())
+    }
+
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = PollAddress::parse(address)?;
         // Serialize via `Value` rather than straight from the struct. serde_json

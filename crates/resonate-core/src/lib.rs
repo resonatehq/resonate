@@ -7,6 +7,7 @@
 //! below this module.
 
 pub mod address;
+pub mod gateway;
 pub mod router;
 pub mod server;
 pub mod types;
@@ -14,6 +15,7 @@ pub mod util;
 pub mod worker;
 
 pub use address::{is_valid_address, scheme_of};
+pub use gateway::ResonateGateway;
 pub use router::ResonateRouter;
 pub use server::ResonateServer;
 pub use worker::ResonateWorker;
