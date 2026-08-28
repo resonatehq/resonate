@@ -12,11 +12,8 @@ pub mod engine;
 pub mod engine_port;
 pub mod oracle;
 pub mod persistence_mysql;
-pub mod persistence_mysql_single;
 pub mod persistence_postgres;
-pub mod persistence_postgres_single;
 pub mod persistence_sqlite;
-pub mod persistence_sqlite_single;
 
 use std::collections::HashMap;
 
@@ -370,13 +367,7 @@ pub trait Db {
 pub enum Storage {
     Sqlite(persistence_sqlite::SqliteStorage),
     Postgres(persistence_postgres::PostgresStorage),
-    /// Ten tables collapsed into three, behind the same contract.
-    PostgresSingle(persistence_postgres_single::PostgresSingleStorage),
     Mysql(persistence_mysql::MysqlStorage),
-    /// The same collapse, in SQLite: ten tables become six.
-    SqliteSingle(persistence_sqlite_single::SqliteSingleStorage),
-    /// And in MySQL. Needs its own database — see the module docs.
-    MysqlSingle(persistence_mysql_single::MysqlSingleStorage),
 }
 
 impl Storage {
@@ -388,10 +379,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.transact(f).await,
             Storage::Postgres(p) => p.transact(f, false).await,
-            Storage::PostgresSingle(p) => p.transact(f, false).await,
             Storage::Mysql(m) => m.transact(f).await,
-            Storage::SqliteSingle(s) => s.transact(f).await,
-            Storage::MysqlSingle(m) => m.transact(f).await,
         }
     }
 
@@ -403,10 +391,7 @@ impl Storage {
         match self {
             Storage::Sqlite(s) => s.query(f).await,
             Storage::Postgres(p) => p.query(f).await,
-            Storage::PostgresSingle(p) => p.query(f).await,
             Storage::Mysql(m) => m.query(f).await,
-            Storage::SqliteSingle(s) => s.query(f).await,
-            Storage::MysqlSingle(m) => m.query(f).await,
         }
     }
 }

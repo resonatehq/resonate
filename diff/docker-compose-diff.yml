@@ -6,7 +6,6 @@ services:
     environment:
       TEST_POSTGRES_URL: postgres://resonate:resonate@postgres:5432/resonate
       TEST_MYSQL_URL: mysql://resonate:resonate@mysql:3306/resonate
-      TEST_MYSQL_SINGLE_URL: mysql://resonate:resonate@mysql:3306/resonate_single
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,9 +35,6 @@ services:
       MYSQL_USER: resonate
       MYSQL_PASSWORD: resonate
       MYSQL_DATABASE: resonate
-    volumes:
-      # Creates the second database the single-table backend needs.
-      - ./mysql-init.sql:/docker-entrypoint-initdb.d/mysql-init.sql:ro
     healthcheck:
       test:
         [

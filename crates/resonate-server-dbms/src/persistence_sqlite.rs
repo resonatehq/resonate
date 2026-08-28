@@ -1,3 +1,42 @@
+//! The SQLite backend.
+//!
+//! A promise is one row. A task is columns on that row, and the timeout queues
+//! are derived from it rather than stored beside it. The table on the left is
+//! the relational shape this replaced — worth keeping, because every predicate
+//! below is a membership rule one of those tables used to carry:
+//!
+//! | was                                 | is                                                  |
+//! |-------------------------------------|-----------------------------------------------------|
+//! | `promises`                          | `id, state, param_*, value_*, tags, *_at`           |
+//! | `promise_timeouts(timeout_at, id)`  | *derived*: `state = 'pending' AND target IS NOT NULL`|
+//! | `tasks(id, state, version)`         | `task_state` (NULL ⟺ no task), `task_version`       |
+//! | `task_timeouts` type 0 (retry)      | `retry_at`   (live ⟺ `task_state = 'pending'`)      |
+//! | `task_timeouts` type 1 (lease)      | `expires_at` (live ⟺ `task_state = 'acquired'`), `ttl`, `pid` |
+//! | `schedule_timeouts(timeout_at, id)` | `schedules.next_run_at`                             |
+//!
+//! Ten tables became six. `callbacks` and `listeners` stay relational, and so
+//! do the two outgoing tables: Postgres folds the first two into TEXT[] columns
+//! and the last two into an `outbox`, but SQLite has no array type — 43 array
+//! operations have no equivalent here that is not a worse JSON one — and with
+//! the arrays gone there is nothing for one outbox table to simplify.
+//!
+//! # What a derived queue costs
+//!
+//! A row leaves a queue by no longer matching its predicate, not by being
+//! deleted, so a stale deadline can outlive the state that owned it. The
+//! predicates above are written to make that harmless: `retry_at` left over
+//! from a task that has since been acquired is invisible, because the retry
+//! sweep also demands `task_state = 'pending'`. Writers clear the column
+//! anyway on every transition, so the two agree even when only one is
+//! consulted.
+//!
+//! One case the derivation does not reproduce exactly, shared with Postgres and
+//! MySQL: `task.create` used to put every promise it created on the eager
+//! sweep, targeted or not, while `state = 'pending' AND target IS NOT NULL`
+//! admits only targeted ones. An untargeted `task.create` promise therefore
+//! times out lazily, through `try_timeout` — the way an untargeted
+//! `promise.create` always has — rather than through `process_timeouts`.
+
 use rusqlite::{params, Connection};
 use std::sync::{Arc, Mutex};
 
@@ -56,17 +95,31 @@ fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
           timer BOOLEAN NOT NULL GENERATED ALWAYS AS (COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
           timeout_at BIGINT NOT NULL,
           created_at BIGINT NOT NULL,
-          settled_at BIGINT
+          settled_at BIGINT,
+
+          -- was the `tasks` table. NULL task_state means this promise has no
+          -- task, which is what `LEFT JOIN tasks` used to express.
+          task_state TEXT
+            CHECK (task_state IS NULL OR task_state IN ('pending', 'acquired', 'suspended', 'halted', 'fulfilled')),
+          task_version INT NOT NULL DEFAULT 0,
+
+          -- was `task_timeouts`, whose timeout_type discriminated two queues.
+          -- Two nullable columns say the same thing without the row.
+          retry_at   BIGINT,   -- type 0: redispatch a pending task
+          expires_at BIGINT,   -- type 1: an acquired task's lease
+          ttl        BIGINT,
+          pid        TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_promises_timeout_at ON promises (timeout_at) WHERE state = 'pending';
         CREATE INDEX IF NOT EXISTS idx_promises_target ON promises (target) WHERE target IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_promises_branch ON promises (branch) WHERE branch IS NOT NULL;
 
-        CREATE TABLE IF NOT EXISTS promise_timeouts (
-          timeout_at BIGINT NOT NULL,
-          id TEXT PRIMARY KEY REFERENCES promises(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_promise_timeouts_timeout_at_id ON promise_timeouts (timeout_at ASC, id ASC);
+        -- `promise_timeouts` is gone: a pending promise past its timeout_at is
+        -- exactly the queue, and the partial index above is the same index the
+        -- table carried.
+        CREATE INDEX IF NOT EXISTS idx_promises_retry_at ON promises (retry_at ASC, id ASC) WHERE retry_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_promises_expires_at ON promises (expires_at ASC, id ASC) WHERE expires_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_promises_pid ON promises (pid) WHERE pid IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS callbacks (
           awaited_id TEXT NOT NULL REFERENCES promises(id) ON DELETE CASCADE,
@@ -83,26 +136,8 @@ fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
           PRIMARY KEY (promise_id, address)
         );
 
-        CREATE TABLE IF NOT EXISTS tasks (
-          id TEXT PRIMARY KEY REFERENCES promises(id) ON DELETE CASCADE,
-          state TEXT NOT NULL DEFAULT 'pending'
-            CHECK (state IN ('pending', 'acquired', 'suspended', 'halted', 'fulfilled')),
-          version INT NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS task_timeouts (
-          timeout_at BIGINT NOT NULL,
-          id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-          timeout_type SMALLINT NOT NULL DEFAULT 0,
-          process_id TEXT,
-          ttl BIGINT NOT NULL DEFAULT 30000
-        );
-        CREATE INDEX IF NOT EXISTS idx_task_timeouts_timeout_at_id ON task_timeouts (timeout_at ASC, id ASC);
-        CREATE INDEX IF NOT EXISTS idx_task_timeouts_process_id ON task_timeouts (process_id) WHERE process_id IS NOT NULL;
-        CREATE INDEX IF NOT EXISTS idx_task_timeouts_timeout_type ON task_timeouts (timeout_type, timeout_at ASC);
-
         CREATE TABLE IF NOT EXISTS outgoing_execute (
-          id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+          id TEXT PRIMARY KEY REFERENCES promises(id) ON DELETE CASCADE,
           version INT NOT NULL,
           address TEXT NOT NULL
         );
@@ -125,12 +160,8 @@ fn create_schema(conn: &Connection) -> rusqlite::Result<()> {
           next_run_at BIGINT NOT NULL,
           last_run_at BIGINT
         );
-
-        CREATE TABLE IF NOT EXISTS schedule_timeouts (
-          timeout_at BIGINT NOT NULL,
-          id TEXT PRIMARY KEY REFERENCES schedules(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_schedule_timeouts_timeout_at_id ON schedule_timeouts (timeout_at ASC, id ASC);
+        -- `schedule_timeouts` is gone: next_run_at already is the queue.
+        CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at ON schedules (next_run_at ASC, id ASC);
         ",
     )?;
     Ok(())
@@ -206,17 +237,20 @@ struct SqliteDb<'a> {
 
 // === Settlement chain helpers (multi-statement within the transaction) ===
 
-/// SettlementEnqueued: fulfill task, delete task timeout, delete callbacks by awaiter
+/// SettlementEnqueued: fulfill task, drop its timeout, delete callbacks by awaiter.
+///
+/// Fulfilling and dropping the timeout were two statements against two tables;
+/// they are one row now, so they are one `SET`. Clearing `retry_at`/`expires_at`
+/// is what deleting the `task_timeouts` row used to be, and `ttl`/`pid` go with
+/// the lease that just ended.
 fn settlement_enqueued(tx: &rusqlite::Connection, promise_id: &str) -> rusqlite::Result<bool> {
     let fulfilled = tx.execute(
-        "UPDATE tasks SET state = 'fulfilled' WHERE id = ?1 AND state != 'fulfilled'",
+        "UPDATE promises SET task_state = 'fulfilled',
+                             retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+         WHERE id = ?1 AND task_state IS NOT NULL AND task_state != 'fulfilled'",
         params![promise_id],
     )? > 0;
     if fulfilled {
-        tx.execute(
-            "DELETE FROM task_timeouts WHERE id = ?1",
-            params![promise_id],
-        )?;
         tx.execute(
             "DELETE FROM callbacks WHERE awaiter_id = ?1",
             params![promise_id],
@@ -239,11 +273,13 @@ fn resumption_enqueued(
         params![awaited_id],
     )?;
 
-    // Find awaiter IDs that need resuming (suspended tasks whose callbacks just became ready)
+    // Find awaiter IDs that need resuming (suspended tasks whose callbacks just
+    // became ready). The task is on the promise row now, so the join is to
+    // `promises` and reads `task_state`.
     let mut stmt = tx.prepare(
         "SELECT DISTINCT c.awaiter_id FROM callbacks c
-         JOIN tasks t ON t.id = c.awaiter_id
-         WHERE c.awaited_id = ?1 AND c.ready = true AND t.state = 'suspended'",
+         JOIN promises p ON p.id = c.awaiter_id
+         WHERE c.awaited_id = ?1 AND c.ready = true AND p.task_state = 'suspended'",
     )?;
     let awaiter_ids: Vec<String> = {
         let mut rows = stmt.query(params![awaited_id])?;
@@ -262,32 +298,22 @@ fn resumption_enqueued(
 
     for awaiter_id in &awaiter_ids {
         // Resume: set to pending (version unchanged — only claim bumps version)
+        // and move the task onto the retry queue. Writing `retry_at` and
+        // clearing `expires_at` is the whole of what switching the timeout row
+        // from type 1 to type 0 used to be.
         let updated = tx.execute(
-            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'suspended'",
-            params![awaiter_id],
+            "UPDATE promises SET task_state = 'pending', retry_at = ?2,
+                                 expires_at = NULL, ttl = NULL, pid = NULL
+             WHERE id = ?1 AND task_state = 'suspended'",
+            params![awaiter_id, time + task_retry_timeout],
         )?;
         if updated > 0 {
-            // Get current version
-            let version: i64 = tx.query_row(
-                "SELECT version FROM tasks WHERE id = ?1",
-                params![awaiter_id],
-                |r| r.get(0),
-            )?;
-            // Insert/update task timeout (retry type 0)
-            tx.execute(
-                "INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)
-                 ON CONFLICT (id) DO UPDATE SET timeout_at = ?1, timeout_type = 0, process_id = NULL, ttl = ?3",
-                params![time + task_retry_timeout, awaiter_id, task_retry_timeout],
-            )?;
             // Insert/update outgoing execute
-            let target: Option<String> = tx
-                .query_row(
-                    "SELECT target FROM promises WHERE id = ?1",
-                    params![awaiter_id],
-                    |r| r.get(0),
-                )
-                .ok()
-                .flatten();
+            let (version, target): (i64, Option<String>) = tx.query_row(
+                "SELECT task_version, target FROM promises WHERE id = ?1",
+                params![awaiter_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
             if let Some(target) = target {
                 tx.execute(
                     "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -335,7 +361,8 @@ fn settle_promise(
         return Ok(false);
     }
 
-    tx.execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
+    // No promise timeout to delete: the queue is `state = 'pending'`, and the
+    // UPDATE above just took this row out of it.
     settlement_enqueued(tx, id)?;
     resumption_enqueued(tx, id, time, task_retry_timeout, None)?;
     listener_unblocked(tx, id)?;
@@ -354,7 +381,7 @@ impl<'a> Db for SqliteDb<'a> {
             |r| r.get::<_, i64>(0),
         )? > 0;
         let task_exists = self.conn.query_row(
-            "SELECT COUNT(*) FROM tasks WHERE id = ?1",
+            "SELECT COUNT(*) FROM promises WHERE id = ?1 AND task_state IS NOT NULL",
             params![id],
             |r| r.get::<_, i64>(0),
         )? > 0;
@@ -401,8 +428,6 @@ impl<'a> Db for SqliteDb<'a> {
                 "UPDATE promises SET state = ?2, settled_at = ?3 WHERE id = ?1 AND state = 'pending'",
                 params![id, new_state, timeout_at],
             )?;
-            self.conn
-                .execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
 
             // SettlementEnqueued
             if settlement_enqueued(self.conn, id)? {
@@ -462,39 +487,34 @@ impl<'a> Db for SqliteDb<'a> {
 
         let was_created = inserted > 0;
         if was_created {
+            // Creating a task is now an UPDATE of the row that was just
+            // inserted, and `task_state IS NULL` is the guard that used to be
+            // `INSERT OR IGNORE INTO tasks`: a promise carries at most one task,
+            // and only the first writer gets to install it. No promise timeout
+            // is written either way — `state = 'pending' AND target IS NOT NULL`
+            // is the queue, and the INSERT above already put the row in it.
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'fulfilled')",
+                        "UPDATE promises SET task_state = 'fulfilled', task_version = 0
+                         WHERE id = ?1 AND task_state IS NULL",
                         params![id],
                     )?;
                 }
-            } else {
-                // Promise timeout
-                if address.is_some() {
-                    self.conn.execute(
-                        "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                        params![timeout_at, id],
-                    )?;
-                }
+            } else if let Some(addr) = address {
                 // TaskInfraCreated
-                if let Some(addr) = address {
+                let created = self.conn.execute(
+                    "UPDATE promises SET task_state = 'pending', task_version = 0, retry_at = ?2
+                     WHERE id = ?1 AND task_state IS NULL",
+                    params![id, created_at + self.task_retry_timeout],
+                )? > 0;
+                if created {
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'pending')",
-                        params![id],
+                        "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
+                         ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
+                        params![id, addr],
                     )?;
-                    if self.conn.changes() > 0 {
-                        self.conn.execute(
-                            "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
-                            params![created_at + self.task_retry_timeout, id, self.task_retry_timeout],
-                        )?;
-                        self.conn.execute(
-                            "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
-                             ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
-                            params![id, addr],
-                        )?;
-                    }
                 }
             }
         }
@@ -557,29 +577,17 @@ impl<'a> Db for SqliteDb<'a> {
             if pa.state != PromiseState::Pending {
                 // Resume awaiter if suspended (version unchanged — only claim bumps version)
                 let updated = self.conn.execute(
-                    "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'suspended'",
-                    params![awaiter_id],
+                    "UPDATE promises SET task_state = 'pending', retry_at = ?2,
+                                         expires_at = NULL, ttl = NULL, pid = NULL
+                     WHERE id = ?1 AND task_state = 'suspended'",
+                    params![awaiter_id, time + self.task_retry_timeout],
                 )?;
                 if updated > 0 {
-                    let version: i64 = self.conn.query_row(
-                        "SELECT version FROM tasks WHERE id = ?1",
+                    let (version, target): (i64, Option<String>) = self.conn.query_row(
+                        "SELECT task_version, target FROM promises WHERE id = ?1",
                         params![awaiter_id],
-                        |r| r.get(0),
+                        |r| Ok((r.get(0)?, r.get(1)?)),
                     )?;
-                    self.conn.execute(
-                        "INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)
-                         ON CONFLICT (id) DO UPDATE SET timeout_at = ?1, timeout_type = 0, process_id = NULL, ttl = ?3",
-                        params![time + self.task_retry_timeout, awaiter_id, self.task_retry_timeout],
-                    )?;
-                    let target: Option<String> = self
-                        .conn
-                        .query_row(
-                            "SELECT target FROM promises WHERE id = ?1",
-                            params![awaiter_id],
-                            |r| r.get(0),
-                        )
-                        .ok()
-                        .flatten();
                     if let Some(target) = target {
                         self.conn.execute(
                             "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -594,7 +602,7 @@ impl<'a> Db for SqliteDb<'a> {
                     "INSERT OR IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
                      SELECT ?1, ?2, true
                      WHERE EXISTS (
-                       SELECT 1 FROM tasks WHERE id = ?2 AND state IN ('pending', 'acquired')
+                       SELECT 1 FROM promises WHERE id = ?2 AND task_state IN ('pending', 'acquired')
                      )",
                     params![awaited_id, awaiter_id],
                 )?;
@@ -647,12 +655,15 @@ impl<'a> Db for SqliteDb<'a> {
     }
 
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
+        // `task_state IS NOT NULL` is the row's membership in what was the
+        // `tasks` table; `ttl`/`pid` belong to the lease, so they read as NULL
+        // for anything but an acquired task — which is what the old
+        // `timeout_type = 1` guard said.
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
-             FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
-             WHERE t.id = ?1",
+            "SELECT id, task_state, task_version,
+                    CASE WHEN task_state = 'acquired' THEN ttl ELSE NULL END,
+                    CASE WHEN task_state = 'acquired' THEN pid ELSE NULL END
+             FROM promises WHERE id = ?1 AND task_state IS NOT NULL",
         )?;
         let mut rows = stmt.query(params![id])?;
         match rows.next()? {
@@ -699,29 +710,30 @@ impl<'a> Db for SqliteDb<'a> {
             .unwrap_or_else(|| unreachable!("promise missing after insert in task_create"));
 
         if promise_inserted {
-            if !already_timedout {
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                    params![timeout_at, promise_id],
-                )?;
-            }
+            // task.create claims the task at birth, so the lease columns are
+            // written with the state that owns them: `expires_at`/`ttl`/`pid`
+            // are the type-1 timeout row, and only an acquired task has one.
             let task_state = if already_timedout {
                 "fulfilled"
             } else {
                 "acquired"
             };
             let task_version: i64 = if task_state == "acquired" { 1 } else { 0 };
-            let inserted = self.conn.execute(
-                "INSERT OR IGNORE INTO tasks (id, state, version) VALUES (?1, ?2, ?3)",
-                params![promise_id, task_state, task_version],
-            )? > 0;
+            let inserted = if already_timedout {
+                self.conn.execute(
+                    "UPDATE promises SET task_state = 'fulfilled', task_version = 0
+                     WHERE id = ?1 AND task_state IS NULL",
+                    params![promise_id],
+                )? > 0
+            } else {
+                self.conn.execute(
+                    "UPDATE promises SET task_state = 'acquired', task_version = 1,
+                                         expires_at = ?2, ttl = ?3, pid = ?4
+                     WHERE id = ?1 AND task_state IS NULL",
+                    params![promise_id, created_at + ttl, ttl, pid],
+                )? > 0
+            };
             if inserted {
-                if !already_timedout {
-                    self.conn.execute(
-                        "INSERT OR REPLACE INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl) VALUES (?1, ?2, 1, ?3, ?4)",
-                        params![created_at + ttl, promise_id, pid, ttl],
-                    )?;
-                }
                 return Ok(TaskCreateResult {
                     promise,
                     task_created: true,
@@ -751,9 +763,14 @@ impl<'a> Db for SqliteDb<'a> {
             ttl,
             pid,
         } = *params;
+        // Claiming the task and taking the lease are one write now: the
+        // type-0 row becomes a type-1 row by clearing `retry_at` and setting
+        // `expires_at`, `ttl` and `pid`.
         let updated = self.conn.execute(
-            "UPDATE tasks SET state = 'acquired', version = version + 1 WHERE id = ?1 AND version = ?2 AND state = 'pending'",
-            params![task_id, version],
+            "UPDATE promises SET task_state = 'acquired', task_version = task_version + 1,
+                                 retry_at = NULL, expires_at = ?3, ttl = ?4, pid = ?5
+             WHERE id = ?1 AND task_version = ?2 AND task_state = 'pending'",
+            params![task_id, version, time + ttl, ttl, pid],
         )?;
 
         let promise = self.promise_get(task_id)?;
@@ -768,12 +785,6 @@ impl<'a> Db for SqliteDb<'a> {
         }
 
         if updated > 0 {
-            // Insert/update lease timeout
-            self.conn.execute(
-                "INSERT INTO task_timeouts (timeout_at, id, timeout_type, process_id, ttl) VALUES (?1, ?2, 1, ?3, ?4)
-                 ON CONFLICT (id) DO UPDATE SET timeout_at = ?1, timeout_type = 1, process_id = ?3, ttl = ?4",
-                params![time + ttl, task_id, pid, ttl],
-            )?;
             // Clean up ready callbacks from previous suspension
             self.conn.execute(
                 "DELETE FROM callbacks WHERE awaiter_id = ?1 AND ready = true",
@@ -888,17 +899,15 @@ impl<'a> Db for SqliteDb<'a> {
                 continue;
             }
 
-            // Update timeout only if task is acquired at right version by right pid
-            // TODO: also guard that the promise is still active (state = 'pending' AND timeout_at > time),
-            // so heartbeats on tasks whose promise has already timed out are no-ops. Replace the query with:
-            //   "UPDATE task_timeouts SET timeout_at = ?1 + ttl
-            //    WHERE id = ?2 AND process_id = ?3
-            //      AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = ?2 AND t.version = ?4 AND t.state = 'acquired')
-            //      AND EXISTS (SELECT 1 FROM promises p WHERE p.id = ?2 AND p.state = 'pending' AND p.timeout_at > ?1)"
+            // Push the lease out only if the task is acquired at the right
+            // version by the right pid. The two EXISTS subqueries against
+            // `tasks` are now three predicates on the row being updated.
+            // TODO: also guard that the promise is still active
+            // (`state = 'pending' AND timeout_at > ?1`), so heartbeats on tasks
+            // whose promise has already timed out are no-ops.
             self.conn.execute(
-                "UPDATE task_timeouts SET timeout_at = ?1 + ttl
-                 WHERE id = ?2 AND process_id = ?3
-                   AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = ?2 AND t.version = ?4 AND t.state = 'acquired')",
+                "UPDATE promises SET expires_at = ?1 + ttl
+                 WHERE id = ?2 AND pid = ?3 AND task_version = ?4 AND task_state = 'acquired'",
                 params![time, task_id, pid, version],
             )?;
         }
@@ -955,13 +964,14 @@ impl<'a> Db for SqliteDb<'a> {
                 )?;
             }
 
-            // Suspend the task
+            // Suspend the task. A suspended task is on neither timeout queue,
+            // which is what deleting its `task_timeouts` row used to say.
             self.conn.execute(
-                "UPDATE tasks SET state = 'suspended' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
+                "UPDATE promises SET task_state = 'suspended',
+                                     retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                 WHERE id = ?1 AND task_version = ?2 AND task_state = 'acquired'",
                 params![task_id, version],
             )?;
-            self.conn
-                .execute("DELETE FROM task_timeouts WHERE id = ?1", params![task_id])?;
 
             Ok(TaskSuspendResult {
                 task_matched: true,
@@ -998,16 +1008,15 @@ impl<'a> Db for SqliteDb<'a> {
             value_data,
             settled_at,
         } = *params;
-        // Fulfill the task
+        // Fulfill the task, and with it drop the lease.
         let task_fulfilled = self.conn.execute(
-            "UPDATE tasks SET state = 'fulfilled' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
+            "UPDATE promises SET task_state = 'fulfilled',
+                                 retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+             WHERE id = ?1 AND task_version = ?2 AND task_state = 'acquired'",
             params![task_id, version],
         )? > 0;
 
         if task_fulfilled {
-            self.conn
-                .execute("DELETE FROM task_timeouts WHERE id = ?1", params![task_id])?;
-
             // Settle the promise
             settle_promise(
                 self.conn,
@@ -1028,7 +1037,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
 
         let task_exists = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM promises WHERE id = ?1 AND task_state IS NOT NULL)",
             params![task_id],
             |r| r.get::<_, bool>(0),
         )?;
@@ -1046,31 +1055,22 @@ impl<'a> Db for SqliteDb<'a> {
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
+        // Handing the task back moves it from the lease queue to the retry
+        // queue: `expires_at` out, `retry_at` in.
         let task_released = self.conn.execute(
-            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND version = ?2 AND state = 'acquired'",
-            params![task_id, version],
+            "UPDATE promises SET task_state = 'pending', retry_at = ?3,
+                                 expires_at = NULL, ttl = NULL, pid = NULL
+             WHERE id = ?1 AND task_version = ?2 AND task_state = 'acquired'",
+            params![task_id, version, time + ttl],
         )? > 0;
 
         if task_released {
-            self.conn.execute(
-                "UPDATE task_timeouts SET timeout_type = 0, timeout_at = ?1, process_id = NULL WHERE id = ?2",
-                params![time + ttl, task_id],
-            )?;
             // Insert outgoing execute
-            let new_version: i64 = self.conn.query_row(
-                "SELECT version FROM tasks WHERE id = ?1",
+            let (new_version, target): (i64, Option<String>) = self.conn.query_row(
+                "SELECT task_version, target FROM promises WHERE id = ?1",
                 params![task_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            let target: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT target FROM promises WHERE id = ?1",
-                    params![task_id],
-                    |r| r.get(0),
-                )
-                .ok()
-                .flatten();
             if let Some(target) = target {
                 self.conn.execute(
                     "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -1080,7 +1080,7 @@ impl<'a> Db for SqliteDb<'a> {
             }
         }
         let task_exists = self.conn.query_row(
-            "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?1)",
+            "SELECT EXISTS (SELECT 1 FROM promises WHERE id = ?1 AND task_state IS NOT NULL)",
             params![task_id],
             |r| r.get(0),
         )?;
@@ -1091,18 +1091,20 @@ impl<'a> Db for SqliteDb<'a> {
     }
 
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {
+        // Halting and dropping the timeout were two statements; they are one
+        // row now. The separate DELETE was guarded on the task ending up
+        // halted, which is exactly this UPDATE's own WHERE clause.
         self.conn.execute(
-            "UPDATE tasks SET state = 'halted' WHERE id = ?1 AND state NOT IN ('fulfilled', 'halted')",
-            params![task_id],
-        )?;
-        self.conn.execute(
-            "DELETE FROM task_timeouts WHERE id = ?1 AND EXISTS (SELECT 1 FROM tasks WHERE id = ?1 AND state = 'halted')",
+            "UPDATE promises SET task_state = 'halted',
+                                 retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+             WHERE id = ?1 AND task_state IS NOT NULL
+               AND task_state NOT IN ('fulfilled', 'halted')",
             params![task_id],
         )?;
         let row = self.conn.query_row(
             "SELECT
-               EXISTS (SELECT 1 FROM tasks WHERE id = ?1) AS task_exists,
-               EXISTS (SELECT 1 FROM tasks WHERE id = ?1 AND state = 'fulfilled') AS task_fulfilled",
+               EXISTS (SELECT 1 FROM promises WHERE id = ?1 AND task_state IS NOT NULL) AS task_exists,
+               EXISTS (SELECT 1 FROM promises WHERE id = ?1 AND task_state = 'fulfilled') AS task_fulfilled",
             params![task_id],
             |r| Ok(TaskHaltResult {
                 task_exists: r.get(0)?,
@@ -1113,30 +1115,20 @@ impl<'a> Db for SqliteDb<'a> {
     }
 
     fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
+        // A halted task carries no timeout, so putting it back on the retry
+        // queue is the same write that makes it pending again.
         let continued = self.conn.execute(
-            "UPDATE tasks SET state = 'pending' WHERE id = ?1 AND state = 'halted'",
-            params![task_id],
+            "UPDATE promises SET task_state = 'pending', retry_at = ?2
+             WHERE id = ?1 AND task_state = 'halted'",
+            params![task_id, time + self.task_retry_timeout],
         )? > 0;
 
         if continued {
-            self.conn.execute(
-                "INSERT INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3) ON CONFLICT (id) DO NOTHING",
-                params![time + self.task_retry_timeout, task_id, self.task_retry_timeout],
-            )?;
-            let version: i64 = self.conn.query_row(
-                "SELECT version FROM tasks WHERE id = ?1",
+            let (version, target): (i64, Option<String>) = self.conn.query_row(
+                "SELECT task_version, target FROM promises WHERE id = ?1",
                 params![task_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            let target: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT target FROM promises WHERE id = ?1",
-                    params![task_id],
-                    |r| r.get(0),
-                )
-                .ok()
-                .flatten();
             if let Some(target) = target {
                 self.conn.execute(
                     "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -1147,7 +1139,7 @@ impl<'a> Db for SqliteDb<'a> {
         }
 
         let task_exists: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM promises WHERE id = ?1 AND task_state IS NOT NULL)",
             params![task_id],
             |r| r.get(0),
         )?;
@@ -1164,13 +1156,14 @@ impl<'a> Db for SqliteDb<'a> {
         limit: i64,
     ) -> StorageResult<Vec<TaskRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END,
-                    COALESCE((SELECT COUNT(*) FROM callbacks c WHERE c.awaiter_id = t.id AND c.ready = true), 0) AS resumes
-             FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id
-             WHERE (?1 IS NULL OR t.state = ?1) AND (?2 IS NULL OR t.id > ?2)
-             ORDER BY t.id ASC LIMIT ?3",
+            "SELECT p.id, p.task_state, p.task_version,
+                    CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END,
+                    CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END,
+                    COALESCE((SELECT COUNT(*) FROM callbacks c WHERE c.awaiter_id = p.id AND c.ready = true), 0) AS resumes
+             FROM promises p
+             WHERE p.task_state IS NOT NULL
+               AND (?1 IS NULL OR p.task_state = ?1) AND (?2 IS NULL OR p.id > ?2)
+             ORDER BY p.id ASC LIMIT ?3",
         )?;
         let mut rows = stmt.query(params![state, cursor, limit])?;
         let mut results = Vec::new();
@@ -1242,10 +1235,7 @@ impl<'a> Db for SqliteDb<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at],
         )?;
-        self.conn.execute(
-            "INSERT OR IGNORE INTO schedule_timeouts (timeout_at, id) VALUES (?1, ?2)",
-            params![next_run_at, id],
-        )?;
+        // No schedule timeout to insert: `next_run_at` on the row above is it.
         Ok(self.schedule_get(id)?.unwrap())
     }
 
@@ -1279,7 +1269,7 @@ impl<'a> Db for SqliteDb<'a> {
     fn get_expired_schedule_timeouts(&self, time: i64) -> StorageResult<Vec<(String, i64)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, timeout_at FROM schedule_timeouts WHERE timeout_at <= ?1")?;
+            .prepare("SELECT id, next_run_at FROM schedules WHERE next_run_at <= ?1")?;
         let mut rows = stmt.query(params![time])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
@@ -1298,9 +1288,11 @@ impl<'a> Db for SqliteDb<'a> {
         time: i64,
         promise_tags: &std::collections::HashMap<String, String>,
     ) -> StorageResult<Option<ScheduleRecord>> {
-        // Step 1: Guard check — idempotency
+        // Step 1: Guard check — idempotency. `next_run_at` is the queue, so
+        // the guard reads the schedule row rather than a timeout row: a second
+        // caller for the same `fired_at` finds it already advanced.
         let guard_exists: bool = self.conn.query_row(
-            "SELECT COUNT(*) FROM schedule_timeouts WHERE id = ?1 AND timeout_at = ?2",
+            "SELECT COUNT(*) FROM schedules WHERE id = ?1 AND next_run_at = ?2",
             params![schedule_id, fired_at],
             |row| row.get::<_, i64>(0),
         )? > 0;
@@ -1351,40 +1343,30 @@ impl<'a> Db for SqliteDb<'a> {
         let promise_inserted = self.conn.changes() > 0;
 
         if promise_inserted {
+            // Step 6 is gone with `promise_timeouts`; the INSERT above already
+            // put a pending, targeted promise on the queue.
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'fulfilled')",
+                        "UPDATE promises SET task_state = 'fulfilled', task_version = 0
+                         WHERE id = ?1 AND task_state IS NULL",
                         params![promise_id],
                     )?;
                 }
-            } else {
-                // Step 6: Create promise_timeout (only for promises with resonate:target)
-                if address.is_some() {
-                    self.conn.execute(
-                        "INSERT OR IGNORE INTO promise_timeouts (timeout_at, id) VALUES (?1, ?2)",
-                        params![promise_timeout_at, promise_id],
-                    )?;
-                }
-
+            } else if let Some(addr) = &address {
                 // Step 7: Create task infrastructure if resonate:target is set
-                if let Some(addr) = &address {
+                let created = self.conn.execute(
+                    "UPDATE promises SET task_state = 'pending', task_version = 0, retry_at = ?2
+                     WHERE id = ?1 AND task_state IS NULL",
+                    params![promise_id, time + self.task_retry_timeout],
+                )? > 0;
+                if created {
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO tasks (id, state) VALUES (?1, 'pending')",
-                        params![promise_id],
+                        "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
+                         ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
+                        params![promise_id, addr],
                     )?;
-                    if self.conn.changes() > 0 {
-                        self.conn.execute(
-                            "INSERT OR IGNORE INTO task_timeouts (timeout_at, id, timeout_type, ttl) VALUES (?1, ?2, 0, ?3)",
-                            params![time + self.task_retry_timeout, promise_id, self.task_retry_timeout],
-                        )?;
-                        self.conn.execute(
-                            "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, 0, ?2)
-                             ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version, address = EXCLUDED.address",
-                            params![promise_id, addr],
-                        )?;
-                    }
                 }
             }
         }
@@ -1395,11 +1377,7 @@ impl<'a> Db for SqliteDb<'a> {
             params![fired_at, next_run_at, schedule_id],
         )?;
 
-        // Step 9: Advance schedule_timeout
-        self.conn.execute(
-            "UPDATE schedule_timeouts SET timeout_at = ?1 WHERE id = ?2",
-            params![next_run_at, schedule_id],
-        )?;
+        // Step 9 is gone: advancing the schedule above advanced the queue.
 
         // Step 10: Return updated schedule
         self.schedule_get(schedule_id)
@@ -1413,18 +1391,23 @@ impl<'a> Db for SqliteDb<'a> {
     fn debug_reset(&self) -> StorageResult<()> {
         self.conn.execute_batch(
             "DELETE FROM outgoing_unblock; DELETE FROM outgoing_execute;
-             DELETE FROM task_timeouts; DELETE FROM listeners; DELETE FROM callbacks;
-             DELETE FROM promise_timeouts; DELETE FROM tasks; DELETE FROM promises;
-             DELETE FROM schedule_timeouts; DELETE FROM schedules;",
+             DELETE FROM listeners; DELETE FROM callbacks;
+             DELETE FROM promises; DELETE FROM schedules;",
         )?;
         Ok(())
     }
 
     fn process_timeouts(&self, time: i64) -> StorageResult<()> {
-        // Statement 1: Process expired promise timeouts
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM promise_timeouts WHERE timeout_at <= ?1")?;
+        // Statement 1: Process expired promise timeouts.
+        //
+        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // `promise_timeouts` held: rows entered on create and left on settle,
+        // and only a targeted promise was ever swept eagerly. Untargeted ones
+        // still time out lazily, through `try_timeout`.
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM promises
+             WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1",
+        )?;
         let expired_ids: Vec<String> = {
             let mut rows = stmt.query(params![time])?;
             let mut r = Vec::new();
@@ -1441,8 +1424,6 @@ impl<'a> Db for SqliteDb<'a> {
                 "UPDATE promises SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END, settled_at = timeout_at WHERE id = ?1 AND state = 'pending'",
                 params![id],
             )?;
-            self.conn
-                .execute("DELETE FROM promise_timeouts WHERE id = ?1", params![id])?;
         }
 
         // Phase 2: SettlementEnqueued for all
@@ -1464,10 +1445,11 @@ impl<'a> Db for SqliteDb<'a> {
             listener_unblocked(self.conn, id)?;
         }
 
-        // Statement 2: Process expired task retry timeouts (type 0)
+        // Statement 2: Process expired task retry deadlines — what was
+        // `timeout_type = 0`, now a non-NULL `retry_at` on a pending task.
         let mut stmt = self.conn.prepare(
-            "SELECT tt.id FROM task_timeouts tt JOIN tasks t ON t.id = tt.id
-             WHERE tt.timeout_type = 0 AND tt.timeout_at <= ?1 AND t.state = 'pending'",
+            "SELECT id FROM promises
+             WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?1",
         )?;
         let retry_ids: Vec<String> = {
             let mut rows = stmt.query(params![time])?;
@@ -1480,26 +1462,17 @@ impl<'a> Db for SqliteDb<'a> {
 
         for id in &retry_ids {
             self.conn.execute(
-                "UPDATE task_timeouts SET timeout_at = ?1 + ?3, process_id = NULL WHERE id = ?2",
+                "UPDATE promises SET retry_at = ?1 + ?3, pid = NULL WHERE id = ?2",
                 params![time, id, self.task_retry_timeout],
             )?;
-            let version: i64 = self
+            let (version, target): (i64, Option<String>) = self
                 .conn
                 .query_row(
-                    "SELECT version FROM tasks WHERE id = ?1",
+                    "SELECT task_version, target FROM promises WHERE id = ?1",
                     params![id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
-                .unwrap_or(0);
-            let target: Option<String> = self
-                .conn
-                .query_row(
-                    "SELECT target FROM promises WHERE id = ?1",
-                    params![id],
-                    |r| r.get(0),
-                )
-                .ok()
-                .flatten();
+                .unwrap_or((0, None));
             if let Some(target) = target {
                 self.conn.execute(
                     "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -1509,10 +1482,12 @@ impl<'a> Db for SqliteDb<'a> {
             }
         }
 
-        // Statement 3: Process expired task lease timeouts (type 1)
+        // Statement 3: Process expired leases — what was `timeout_type = 1`,
+        // now a non-NULL `expires_at` on an acquired task. The holder went
+        // away; hand the task back to the retry queue.
         let mut stmt = self.conn.prepare(
-            "SELECT tt.id FROM task_timeouts tt JOIN tasks t ON t.id = tt.id
-             WHERE tt.timeout_type = 1 AND tt.timeout_at <= ?1 AND t.state = 'acquired'",
+            "SELECT id FROM promises
+             WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?1",
         )?;
         let lease_ids: Vec<String> = {
             let mut rows = stmt.query(params![time])?;
@@ -1525,30 +1500,19 @@ impl<'a> Db for SqliteDb<'a> {
 
         for id in &lease_ids {
             self.conn.execute(
-                "UPDATE tasks SET state = 'pending' WHERE id = ?1",
-                params![id],
-            )?;
-            let version: i64 = self
-                .conn
-                .query_row(
-                    "SELECT version FROM tasks WHERE id = ?1",
-                    params![id],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
-            self.conn.execute(
-                "UPDATE task_timeouts SET timeout_at = ?1 + ?3, timeout_type = 0, process_id = NULL, ttl = ?3 WHERE id = ?2",
+                "UPDATE promises SET task_state = 'pending', retry_at = ?1 + ?3,
+                                     expires_at = NULL, ttl = NULL, pid = NULL
+                 WHERE id = ?2",
                 params![time, id, self.task_retry_timeout],
             )?;
-            let target: Option<String> = self
+            let (version, target): (i64, Option<String>) = self
                 .conn
                 .query_row(
-                    "SELECT target FROM promises WHERE id = ?1",
+                    "SELECT task_version, target FROM promises WHERE id = ?1",
                     params![id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
-                .ok()
-                .flatten();
+                .unwrap_or((0, None));
             if let Some(target) = target {
                 self.conn.execute(
                     "INSERT INTO outgoing_execute (id, version, address) VALUES (?1, ?2, ?3)
@@ -1574,7 +1538,12 @@ impl<'a> Db for SqliteDb<'a> {
             r
         };
 
-        let mut stmt = conn.prepare("SELECT id, timeout_at FROM promise_timeouts ORDER BY id")?;
+        // Every section below is a projection of the one table now. The
+        // predicates are the membership rules the deleted tables carried.
+        let mut stmt = conn.prepare(
+            "SELECT id, timeout_at FROM promises
+             WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+        )?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = {
             let mut rows = stmt.query([])?;
             let mut r = Vec::new();
@@ -1615,10 +1584,10 @@ impl<'a> Db for SqliteDb<'a> {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT t.id, t.state, t.version,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.ttl ELSE NULL END,
-                    CASE WHEN tt.timeout_type = 1 THEN tt.process_id ELSE NULL END
-             FROM tasks t LEFT JOIN task_timeouts tt ON tt.id = t.id ORDER BY t.id",
+            "SELECT id, task_state, task_version,
+                    CASE WHEN task_state = 'acquired' THEN ttl ELSE NULL END,
+                    CASE WHEN task_state = 'acquired' THEN pid ELSE NULL END
+             FROM promises WHERE task_state IS NOT NULL ORDER BY id",
         )?;
         let tasks: Vec<TaskRecord> = {
             let mut rows = stmt.query([])?;
@@ -1639,8 +1608,16 @@ impl<'a> Db for SqliteDb<'a> {
             r
         };
 
-        let mut stmt =
-            conn.prepare("SELECT id, timeout_type, timeout_at FROM task_timeouts ORDER BY id")?;
+        // One row per task at most, as before: the two deadlines are mutually
+        // exclusive because each is live only in the state that owns it.
+        let mut stmt = conn.prepare(
+            "SELECT id, 0 AS timeout_type, retry_at AS timeout_at FROM promises
+               WHERE task_state = 'pending' AND retry_at IS NOT NULL
+             UNION ALL
+             SELECT id, 1 AS timeout_type, expires_at AS timeout_at FROM promises
+               WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+             ORDER BY id",
+        )?;
         let task_timeouts: Vec<SnapshotTaskTimeout> = {
             let mut rows = stmt.query([])?;
             let mut r = Vec::new();
@@ -1804,3 +1781,33 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
         last_run_at: row.get(9)?,
     })
 }
+
+// ---------------------------------------------------------------------------
+// How the four collapsed tables map onto statements here
+// ---------------------------------------------------------------------------
+//
+//   tasks             INSERT INTO tasks (id, state) VALUES (?, 'pending')
+//                       -> UPDATE promises SET task_state = 'pending' WHERE id = ?
+//                     JOIN tasks t ON t.id = p.id     -> same row, drop the join
+//                     t.state / t.version             -> task_state / task_version
+//                     a promise with no task          -> task_state IS NULL
+//
+//   task_timeouts     timeout_type = 0 -> retry_at, timeout_type = 1 -> expires_at.
+//                     Two nullable columns, so "which queue" is which column is
+//                     non-null rather than a discriminator value. process_id and
+//                     ttl became pid and ttl on the promise. Every statement that
+//                     deleted the row now nulls the pair, and every statement
+//                     that flipped timeout_type now writes one and clears the
+//                     other — which is why fulfilling a task, dropping its
+//                     timeout and clearing its lease are one UPDATE here.
+//
+//   promise_timeouts  Gone. The queue is `state = 'pending' AND target IS NOT
+//                     NULL`, which is what rows entering on create and leaving
+//                     on settle amounted to; idx_promises_timeout_at is the
+//                     index the table carried. Untargeted promises were never
+//                     swept eagerly and still are not — they time out lazily,
+//                     through try_timeout.
+//
+//   schedule_timeouts Gone: `next_run_at` already is the queue, and
+//                     process_schedule_timeout's idempotency guard reads the
+//                     schedule row it is about to advance.
