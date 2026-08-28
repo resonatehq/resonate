@@ -19,6 +19,84 @@ def Tags.has (t : Tags) (k : String) : Bool :=
 def Tags.isTimer (t : Tags) : Bool :=
   t.get? "resonate:timer" == some "true"
 
+/-! ### The two axes a promise is classified on
+
+    Three tags — `resonate:external`, `resonate:target`, `resonate:timer`
+    — but only two decisions are ever taken from them, and reading one
+    decision off the other's tag is where implementations go wrong.
+
+    `otype` answers WHO MAY BE BLOCKED ON THIS. An external promise is
+    one a client can await: it may carry callbacks and listeners, and
+    the machine therefore owes it an observation of its own deadline.
+    `okind` answers WHAT CAUSES IT TO RUN — a `.task` promise names a
+    worker that must be handed the execution.
+
+    The axes are NOT independent, and the dead cell is stated rather
+    than left for a reader to find: `okind_task_implies_external` below.
+    `resonate:target` is a disjunct of `otype`, so `internal + task` is
+    unrepresentable. Both stay DERIVED — read off the tags, never
+    stored, never settable apart — which is what keeps that implication
+    true by construction rather than by an invariant somebody has to
+    enforce at every write.
+
+    What is deliberately NOT an axis here is the deadline verdict. A
+    timer resolves at its deadline; everything else is rejected there.
+    `isTimer` is read for that verdict alone, at sites that select a
+    VALUE rather than gate a branch: `otype` gates, `isTimer` values. A
+    third consumer that BRANCHES on `isTimer` would be the signal that
+    it is an axis after all — until then it is one expression in one
+    role, and wrapping it would be symmetry for its own sake. -/
+inductive OType
+  | external
+  | internal
+  deriving Repr, DecidableEq
+
+inductive OKind
+  | task
+  | idle
+  deriving Repr, DecidableEq
+
+/-- Awaitable. The disjunction is the definition, and this is the only
+    place it may be written: no site re-derives it inline.
+
+    `resonate:scope = global` is the form the wire actually carries —
+    `work/ts/README.md` reads it back off a live server, where a remote
+    child gets `scope: global` alongside its target and a local child
+    gets `scope: local` and no target. It is a disjunct in its own
+    right, NOT a synonym for the target tag, and the promise that
+    proves it is the human-in-the-loop one: created global so that
+    anyone may await it, with no target, because nothing executes it —
+    a person does. Key this on the target tag and every HITL promise
+    reads internal, its awaiters are refused at the door, and its
+    deadline is never armed.
+
+    `resonate:external` is kept as the open-ended escape hatch: a way
+    for a client to say "awaitable" for a kind nobody has enumerated.
+    It appears nowhere in observed server traffic. -/
+def Tags.otype (t : Tags) : OType :=
+  if t.get? "resonate:scope" == some "global"
+      || t.get? "resonate:external" == some "true"
+      || t.has "resonate:target" || t.isTimer then
+    .external
+  else
+    .internal
+
+/-- Executed by a worker — which is exactly what carries a task. -/
+def Tags.okind (t : Tags) : OKind :=
+  if t.has "resonate:target" then .task else .idle
+
+/-- THE DEAD CELL, stated. Because `target` is a disjunct of `otype`, a
+    promise that carries a task is external by construction, and the
+    2x2 is really a chain: internal, external-idle, external-task. A
+    `match` on the pair that writes an arm for `internal + task` is
+    writing for a state no tag list can produce. -/
+theorem okind_task_implies_external (t : Tags) :
+    t.okind = .task → t.otype = .external := by
+  intro h
+  cases ht : t.has "resonate:target" with
+  | true  => simp [Tags.otype, ht]
+  | false => simp [Tags.okind, ht] at h
+
 /-- A TIMER IS NEVER TARGETED. The two tags name incompatible things:
     `resonate:target` says a worker owns this promise's execution, and
     the machine gives it a task to carry that execution; `resonate:timer`

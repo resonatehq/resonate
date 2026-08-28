@@ -134,7 +134,10 @@ func (p *Promise) IsTimer() bool { return p.Tags.IsTimer() }
 
 // External is `PromiseObject.external`.
 func (p *Promise) External() bool {
-	return p.Tags["resonate:external"] == "true" || p.Tags.Has("resonate:target") || p.IsTimer()
+	// Mirrors `Tags.otype` in spec/01-protocol/validation.lean. `scope`
+	// is the form the wire carries; `external` is the escape hatch.
+	return p.Tags["resonate:scope"] == "global" ||
+		p.Tags["resonate:external"] == "true" || p.Tags.Has("resonate:target") || p.IsTimer()
 }
 
 func (p *Promise) AddCallback(awaiter string) *Promise {

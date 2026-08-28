@@ -38,9 +38,9 @@ the promise/task joins in the catalogue into predicates on ONE row,
 which is the only shape `PerStore` can reach.
 
 What it does NOT delete is the catalogue's right to name the shape.
-`consistent_task_iff_targeted_promise` survives, because the OTHER half
-of it — a targeted promise must HAVE a task — is still a claim an
-implementation with two tables can get wrong. The type stops the
+`consistent_task_iff_kind_task` survives, because the OTHER half
+of it — an `okind = .task` promise must HAVE a task — is still a claim
+an implementation with two tables can get wrong. The type stops the
 machine from writing the illegal row; the entry stops a server from
 being believed when it does.
 
@@ -68,7 +68,8 @@ first, which is what makes the no-op unreachable. -/
 namespace AbstractModel
 
 open ServerModel (Tags Value PromiseState TaskState PromiseRecord
-                  TaskRecord Schedule Message OutboxEntry PromiseCreateReq)
+                  TaskRecord Schedule Message OutboxEntry PromiseCreateReq
+                  OType OKind)
 
 structure PromiseObject where
   state     : PromiseState
@@ -89,12 +90,19 @@ def PromiseObject.toRecord (p : PromiseObject) (id : String) : PromiseRecord :=
 
 def PromiseObject.isTimer (p : PromiseObject) : Bool := p.tags.isTimer
 
-def PromiseObject.external (p : PromiseObject) : Bool :=
-  p.tags.get? "resonate:external" == some "true"
-    || p.tags.has "resonate:target" || p.isTimer
+/-- The two axes, lifted off the tags. Both DERIVED, both delegating to
+    the protocol layer — there is no stored field to disagree with the
+    tags, and no second place the disjunction is written.
 
-def PromiseObject.targeted (p : PromiseObject) : Bool :=
-  p.tags.has "resonate:target"
+    They replace the two booleans that used to live here. `external`
+    and `targeted` were read at eight sites between them, and nothing
+    in either name said which decision it was for; the arming rule and
+    the task rule both read `targeted`, and only one of them was right
+    to. Naming the axis makes the wrong reading a type error rather
+    than a plausible line of code. -/
+def PromiseObject.otype (p : PromiseObject) : OType := p.tags.otype
+
+def PromiseObject.okind (p : PromiseObject) : OKind := p.tags.okind
 
 def PromiseObject.addCallback (p : PromiseObject) (awaiterId : String) : PromiseObject :=
   if p.callbacks.contains awaiterId then
@@ -140,8 +148,8 @@ def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
 
 /-- A promise, its id, and the task that executes it — if it has one.
 
-    The `Option` is not free information: it is `promise.targeted`, and
-    `consistent_task_iff_targeted_promise` is the entry that says so.
+    The `Option` is not free information: it is `promise.okind`, and
+    `consistent_task_iff_kind_task` is the entry that says so.
     Keeping it an `Option` rather than an index on the tag is
     deliberate — the tag arrives from a client, and the catalogue has
     to be able to write down the state where the two disagree. -/
@@ -297,7 +305,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
       { state := .pending, param := req.param, tags := req.tags,
         timeoutAt := req.timeoutAt, createdAt := now }
     setPromise req.id p
-    if p.targeted then
+    if p.okind == .task then
       let due :=
         match p.tags.get? "resonate:delay" with
         | some d => max (ServerModel.parseNat d) now
@@ -315,7 +323,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
         timeoutAt := req.timeoutAt, createdAt := req.timeoutAt,
         settledAt := some req.timeoutAt }
     setPromise req.id p
-    if p.targeted then
+    if p.okind == .task then
       let t : TaskObject := { state := .fulfilled, version := 0 }
       setTask req.id t
       return { id := req.id, promise := p, task := some t }
