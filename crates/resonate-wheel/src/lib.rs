@@ -88,6 +88,18 @@
 
 // `verus_keep_ghost` is set by the Verus driver; plain cargo never sees it.
 #![allow(unexpected_cfgs)]
+// Clippy's idioms and Verus's are not the same language. `i = i + 1` and
+// `len() == 0` are the forms the proofs are written against, and `&Vec<T>` is a
+// parameter type Verus reasons about where `&[T]` is not. Rewriting them to
+// suit the linter would change the text that was verified, so the lints go
+// rather than the code. `dead_code` covers helpers that only ghost code calls.
+#![allow(
+    clippy::assign_op_pattern,
+    clippy::len_zero,
+    clippy::ptr_arg,
+    clippy::vec_init_then_push,
+    dead_code
+)]
 // Under ghost erasure the spec and proof modules compile to nothing, so the
 // imports that name them go unused. Both compilers see the same source.
 #![allow(unused_imports)]
@@ -95,6 +107,7 @@
 pub mod comparator;
 pub mod proof;
 pub mod spec;
+pub mod timeout;
 /// The asynchronous front for the wheel.
 ///
 /// Gated on `verus_keep_ghost` so Verus never compiles it: `verify.sh` drives
@@ -103,7 +116,6 @@ pub mod spec;
 /// always builds it.
 #[cfg(not(verus_keep_ghost))]
 pub mod timer;
-pub mod timeout;
 pub mod wheel;
 
 // Only items that survive ghost erasure can be re-exported by name: the

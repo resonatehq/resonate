@@ -14,6 +14,11 @@
 //! that the specification says what it was meant to say — the one thing a
 //! proof assistant cannot check.
 
+// `len() == 0` is the deliberate counterpart of `len() == capacity` on the line
+// above it, and says what it means more plainly than `is_empty()` would in an
+// assertion *about* `is_empty`.
+#![allow(clippy::len_zero, clippy::unnecessary_cast)]
+
 use resonate_wheel::{IdComparator, Timeout, TimerWheel};
 
 /// An independent model of `spec_merge`, written the obvious way.
@@ -51,7 +56,10 @@ mod model {
 fn drain<C: resonate_wheel::Comparator<u64>>(mut w: TimerWheel<u64, C>) -> Vec<model::Entry> {
     w.pop_expired(u64::MAX)
         .into_iter()
-        .map(|t| model::Entry { deadline: t.deadline, id: t.value })
+        .map(|t| model::Entry {
+            deadline: t.deadline,
+            id: t.value,
+        })
         .collect()
 }
 
@@ -67,16 +75,31 @@ fn to_timeouts(es: &[model::Entry]) -> Vec<Timeout<u64>> {
 fn capacity_keeps_the_nearest_deadlines() {
     let mut w = TimerWheel::new(2, IdComparator);
     w.merge(to_timeouts(&[
-        model::Entry { deadline: 30, id: 1 },
-        model::Entry { deadline: 10, id: 2 },
-        model::Entry { deadline: 20, id: 3 },
+        model::Entry {
+            deadline: 30,
+            id: 1,
+        },
+        model::Entry {
+            deadline: 10,
+            id: 2,
+        },
+        model::Entry {
+            deadline: 20,
+            id: 3,
+        },
     ]));
     assert_eq!(w.len(), 2);
     assert_eq!(
         drain(w),
         vec![
-            model::Entry { deadline: 10, id: 2 },
-            model::Entry { deadline: 20, id: 3 },
+            model::Entry {
+                deadline: 10,
+                id: 2
+            },
+            model::Entry {
+                deadline: 20,
+                id: 3
+            },
         ]
     );
 }
@@ -85,8 +108,14 @@ fn capacity_keeps_the_nearest_deadlines() {
 fn same_timeout_moved_replaces_rather_than_duplicates() {
     let mut w = TimerWheel::new(8, IdComparator);
     w.merge(to_timeouts(&[
-        model::Entry { deadline: 30, id: 1 },
-        model::Entry { deadline: 20, id: 3 },
+        model::Entry {
+            deadline: 30,
+            id: 1,
+        },
+        model::Entry {
+            deadline: 20,
+            id: 3,
+        },
     ]));
     // id 3's deadline moves 20 -> 5. It must not be stored twice.
     w.merge(to_timeouts(&[model::Entry { deadline: 5, id: 3 }]));
@@ -95,7 +124,10 @@ fn same_timeout_moved_replaces_rather_than_duplicates() {
         drain(w),
         vec![
             model::Entry { deadline: 5, id: 3 },
-            model::Entry { deadline: 30, id: 1 },
+            model::Entry {
+                deadline: 30,
+                id: 1
+            },
         ]
     );
 }
@@ -113,9 +145,15 @@ fn a_far_future_batch_of_newcomers_is_dropped_whole() {
     assert!(w.is_full());
 
     w.merge(to_timeouts(&[
-        model::Entry { deadline: 3, id: 9 },   // ties with the last kept entry
-        model::Entry { deadline: 400, id: 10 },
-        model::Entry { deadline: 500, id: 11 },
+        model::Entry { deadline: 3, id: 9 }, // ties with the last kept entry
+        model::Entry {
+            deadline: 400,
+            id: 10,
+        },
+        model::Entry {
+            deadline: 500,
+            id: 11,
+        },
     ]));
     assert_eq!(drain(w), base.to_vec());
 }
@@ -129,12 +167,18 @@ fn a_far_future_arrival_that_is_not_new_still_moves_its_deadline() {
         model::Entry { deadline: 1, id: 1 },
         model::Entry { deadline: 2, id: 2 },
     ]));
-    w.merge(to_timeouts(&[model::Entry { deadline: 900, id: 1 }]));
+    w.merge(to_timeouts(&[model::Entry {
+        deadline: 900,
+        id: 1,
+    }]));
     assert_eq!(
         drain(w),
         vec![
             model::Entry { deadline: 2, id: 2 },
-            model::Entry { deadline: 900, id: 1 },
+            model::Entry {
+                deadline: 900,
+                id: 1
+            },
         ]
     );
 }
@@ -145,10 +189,22 @@ fn within_one_batch_the_last_update_wins() {
     // given, each replacing the one before it, so the last one stands.
     let mut w = TimerWheel::new(4, IdComparator);
     w.merge(to_timeouts(&[
-        model::Entry { deadline: 50, id: 7 },
-        model::Entry { deadline: 10, id: 7 },
+        model::Entry {
+            deadline: 50,
+            id: 7,
+        },
+        model::Entry {
+            deadline: 10,
+            id: 7,
+        },
     ]));
-    assert_eq!(drain(w), vec![model::Entry { deadline: 10, id: 7 }]);
+    assert_eq!(
+        drain(w),
+        vec![model::Entry {
+            deadline: 10,
+            id: 7
+        }]
+    );
 }
 
 #[test]
@@ -179,10 +235,16 @@ fn the_wheel_holds_the_capacity_nearest_of_the_union() {
     for _ in 0..5_000 {
         let capacity = (1 + rng.below(6)) as usize;
         let wheel_entries: Vec<model::Entry> = (0..rng.below(6))
-            .map(|_| model::Entry { deadline: rng.below(30), id: rng.below(9) })
+            .map(|_| model::Entry {
+                deadline: rng.below(30),
+                id: rng.below(9),
+            })
             .collect();
         let batch: Vec<model::Entry> = (0..rng.below(8))
-            .map(|_| model::Entry { deadline: rng.below(30), id: rng.below(9) })
+            .map(|_| model::Entry {
+                deadline: rng.below(30),
+                id: rng.below(9),
+            })
             .collect();
 
         let mut w = TimerWheel::new(capacity, IdComparator);
@@ -233,8 +295,14 @@ fn pop_expired_splits_exactly() {
     let mut w = TimerWheel::new(16, IdComparator);
     w.merge(to_timeouts(&[
         model::Entry { deadline: 5, id: 1 },
-        model::Entry { deadline: 10, id: 2 },
-        model::Entry { deadline: 15, id: 3 },
+        model::Entry {
+            deadline: 10,
+            id: 2,
+        },
+        model::Entry {
+            deadline: 15,
+            id: 3,
+        },
     ]));
     let due = w.pop_expired(10);
     assert_eq!(due.len(), 2);
@@ -325,7 +393,10 @@ fn merge_matches_the_model() {
         let due: Vec<model::Entry> = wheel
             .pop_expired(now)
             .into_iter()
-            .map(|t| model::Entry { deadline: t.deadline, id: t.value })
+            .map(|t| model::Entry {
+                deadline: t.deadline,
+                id: t.value,
+            })
             .collect();
         let (want_due, want_left): (Vec<_>, Vec<_>) =
             expected.iter().partition(|e| e.deadline <= now);
@@ -334,7 +405,10 @@ fn merge_matches_the_model() {
         assert_eq!(drain(wheel), want_left, "case {case}: pop_expired retained");
     }
 
-    assert!(merged > 800_000, "expected a meaningful amount of work, got {merged}");
+    assert!(
+        merged > 800_000,
+        "expected a meaningful amount of work, got {merged}"
+    );
     println!("differential: {merged} timeouts merged across 30,000 wheels");
 }
 
@@ -398,14 +472,20 @@ fn an_update_replaces_or_evicts_but_never_leaves_a_stale_entry() {
         let before: Vec<model::Entry> = wheel
             .pop_expired(u64::MAX)
             .into_iter()
-            .map(|t| model::Entry { deadline: t.deadline, id: t.value })
+            .map(|t| model::Entry {
+                deadline: t.deadline,
+                id: t.value,
+            })
             .collect();
         if before.is_empty() {
             continue;
         }
         // Pick a timeout the wheel is holding, and move its deadline.
         let target = before[(rng.below(before.len() as u64)) as usize];
-        let moved = model::Entry { deadline: rng.below(40), id: target.id };
+        let moved = model::Entry {
+            deadline: rng.below(40),
+            id: target.id,
+        };
         if moved.deadline == target.deadline {
             continue;
         }
@@ -418,7 +498,10 @@ fn an_update_replaces_or_evicts_but_never_leaves_a_stale_entry() {
         for _ in 0..rng.below(5) {
             let id = rng.below(6);
             if id != target.id {
-                batch.push(model::Entry { deadline: rng.below(40), id });
+                batch.push(model::Entry {
+                    deadline: rng.below(40),
+                    id,
+                });
             }
         }
         wheel.merge(to_timeouts(&batch));
@@ -427,14 +510,21 @@ fn an_update_replaces_or_evicts_but_never_leaves_a_stale_entry() {
         let found: Vec<&model::Entry> = after.iter().filter(|e| e.id == target.id).collect();
 
         // Never two entries for one timeout, and never the stale deadline.
-        assert!(found.len() <= 1, "the wheel holds {} entries for one id", found.len());
         assert!(
-            !after.iter().any(|e| *e == target),
+            found.len() <= 1,
+            "the wheel holds {} entries for one id",
+            found.len()
+        );
+        assert!(
+            !after.contains(&target),
             "the old entry {target:?} survived the update to {moved:?}"
         );
         match found.first() {
             Some(e) => {
-                assert_eq!(e.deadline, moved.deadline, "surviving entry has a stale deadline");
+                assert_eq!(
+                    e.deadline, moved.deadline,
+                    "surviving entry has a stale deadline"
+                );
                 replaced += 1;
             }
             None => evicted += 1,
@@ -453,9 +543,18 @@ fn next_reports_the_nearest_deadline_without_removing_it() {
     assert_eq!(w.next(), None);
 
     w.merge(to_timeouts(&[
-        model::Entry { deadline: 30, id: 1 },
-        model::Entry { deadline: 10, id: 2 },
-        model::Entry { deadline: 20, id: 3 },
+        model::Entry {
+            deadline: 30,
+            id: 1,
+        },
+        model::Entry {
+            deadline: 10,
+            id: 2,
+        },
+        model::Entry {
+            deadline: 20,
+            id: 3,
+        },
     ]));
 
     // Reading it does not disturb the wheel.
@@ -466,7 +565,10 @@ fn next_reports_the_nearest_deadline_without_removing_it() {
     // It tracks a deadline that moves nearer, and one that moves away.
     w.merge(to_timeouts(&[model::Entry { deadline: 5, id: 1 }]));
     assert_eq!(w.next(), Some(5));
-    w.merge(to_timeouts(&[model::Entry { deadline: 99, id: 1 }]));
+    w.merge(to_timeouts(&[model::Entry {
+        deadline: 99,
+        id: 1,
+    }]));
     assert_eq!(w.next(), Some(10));
 
     assert_eq!(w.pop_expired(10).len(), 1);
@@ -545,7 +647,10 @@ fn a_merge_never_loses_a_slot() {
             }
         }
     }
-    assert!(grew > 100 && held > 100, "expected both outcomes, saw {grew}/{held}");
+    assert!(
+        grew > 100 && held > 100,
+        "expected both outcomes, saw {grew}/{held}"
+    );
 }
 
 #[test]

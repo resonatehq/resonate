@@ -24,6 +24,11 @@ use crate::StorageResult;
 /// No `PartialEq`: `PromiseRecord` has none, and comparison goes through
 /// [`Outgoing::to_json`] anyway, which is the form the differential already
 /// knows how to diff.
+// An unblock message carries the settled promise and an execute message carries
+// two ids, so the variants are genuinely different sizes. Boxing to even them
+// out would cost an allocation on the hot path — execute — to save one on the
+// rare one.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Outgoing {
     Execute {

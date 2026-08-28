@@ -114,6 +114,9 @@ impl TimerConfig {
     }
 }
 
+/// The un-started driver, held until `init` takes it.
+type Pending<T, C> = Mutex<Option<(Driver<T, C>, oneshot::Receiver<()>)>>;
+
 /// What the driver task is given when it starts.
 struct Driver<T, C> {
     config: TimerConfig,
@@ -138,7 +141,7 @@ pub struct Timer<T, C> {
     /// Taken by `init`. Holding the un-started driver here rather than
     /// spawning in `new` is what makes `init` the moment the first backfill
     /// happens, instead of something racing construction.
-    pending: Mutex<Option<(Driver<T, C>, oneshot::Receiver<()>)>>,
+    pending: Pending<T, C>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -229,7 +232,14 @@ where
     let mut last_backfill: Option<Instant> = None;
 
     // Seed first, then tell `init` it may return.
-    backfill(&mut wheel, &d.config, &d.now, &d.on_backfill, &mut last_backfill).await;
+    backfill(
+        &mut wheel,
+        &d.config,
+        &d.now,
+        &d.on_backfill,
+        &mut last_backfill,
+    )
+    .await;
     let _ = d.seeded.send(());
 
     loop {
@@ -243,12 +253,21 @@ where
         if wheel.len() < d.config.low_watermark
             && last_backfill.is_none_or(|t| t.elapsed() >= d.config.backfill_interval)
         {
-            backfill(&mut wheel, &d.config, &d.now, &d.on_backfill, &mut last_backfill).await;
+            backfill(
+                &mut wheel,
+                &d.config,
+                &d.now,
+                &d.on_backfill,
+                &mut last_backfill,
+            )
+            .await;
         }
 
         let now = (d.now)();
         let wait = match wheel.next() {
-            Some(deadline) => Duration::from_millis(deadline.saturating_sub(now)).min(d.config.idle),
+            Some(deadline) => {
+                Duration::from_millis(deadline.saturating_sub(now)).min(d.config.idle)
+            }
             None => d.config.idle,
         };
 

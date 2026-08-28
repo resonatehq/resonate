@@ -2408,13 +2408,6 @@ impl<'a> PostgresDb<'a> {
             }
         }
     }
-
-    /// `absorb` for a statement whose result may be empty.
-    fn absorb_all(&self, rows: &[PgRow]) {
-        if let Some(row) = rows.first() {
-            self.absorb(row);
-        }
-    }
 }
 
 fn rt_block_on<F: std::future::Future>(f: F) -> F::Output {
@@ -4194,23 +4187,17 @@ fn process_schedule_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize>
         promise_tags.insert("resonate:parent".to_string(), promise_id.clone());
         promise_tags.insert("resonate:prefix".to_string(), promise_id.clone());
 
-        match db.process_schedule_timeout(
-            schedule_id,
-            *fired_at,
-            next_run_at,
-            time,
-            &promise_tags,
-        )? {
-            Some(_) => {
-                tracing::info!(
-                    schedule_id = %schedule_id,
-                    fired_at = fired_at,
-                    next_run_at = next_run_at,
-                    "Schedule fired"
-                );
-                fired += 1;
-            }
-            None => {}
+        if db
+            .process_schedule_timeout(schedule_id, *fired_at, next_run_at, time, &promise_tags)?
+            .is_some()
+        {
+            tracing::info!(
+                schedule_id = %schedule_id,
+                fired_at = fired_at,
+                next_run_at = next_run_at,
+                "Schedule fired"
+            );
+            fired += 1;
         }
     }
 

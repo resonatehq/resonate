@@ -35,7 +35,9 @@ impl Fired {
         Arc::new(move |batch: Vec<Timeout<u64>>| {
             let seen = seen.clone();
             Box::pin(async move {
-                seen.lock().unwrap().extend(batch.into_iter().map(|t| t.value));
+                seen.lock()
+                    .unwrap()
+                    .extend(batch.into_iter().map(|t| t.value));
             })
         })
     }
@@ -135,7 +137,11 @@ async fn a_nearer_deadline_wakes_it_early() {
     timer.merge(vec![Timeout::new(now() + 20, 2u64)]);
 
     tokio::time::sleep(Duration::from_millis(120)).await;
-    assert_eq!(fired.values(), vec![2], "the near deadline should have fired");
+    assert_eq!(
+        fired.values(),
+        vec![2],
+        "the near deadline should have fired"
+    );
     timer.stop().await;
 }
 
@@ -197,7 +203,10 @@ async fn it_refills_when_it_runs_low() {
     // the task woke about twenty times — so this also says the interval, not
     // the wake-up rate, is what governs.
     let n = calls.load(Ordering::SeqCst);
-    assert!((2..=12).contains(&n), "refilled {n} times, expected a handful");
+    assert!(
+        (2..=12).contains(&n),
+        "refilled {n} times, expected a handful"
+    );
 }
 
 #[tokio::test]
