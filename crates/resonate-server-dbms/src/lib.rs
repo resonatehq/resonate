@@ -9,7 +9,9 @@
 //! built on top of it will live. Today it is the storage layer alone.
 
 pub mod engine;
+pub mod engine_mysql;
 pub mod engine_port;
+pub mod engine_postgres;
 pub mod engine_sqlite;
 pub mod oracle;
 pub mod persistence_mysql;

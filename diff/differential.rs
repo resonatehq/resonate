@@ -36,14 +36,11 @@ fn db_lock() -> &'static Mutex<()> {
 use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
 
 use resonate_server_dbms::{
-    engine::Engine,
+    engine_mysql::MysqlEngine,
     engine_port::{Input, Outgoing, ResonateEngine},
+    engine_postgres::PostgresEngine,
     engine_sqlite::SqliteEngine,
     oracle::{Oracle, SharedOracle},
-    persistence_mysql::MysqlStorage,
-    persistence_postgres::PostgresStorage,
-    persistence_sqlite::SqliteStorage,
-    Storage,
 };
 use serde_json::{json, Value};
 
@@ -133,10 +130,6 @@ async fn send_full(
     (resp, out.messages)
 }
 
-fn engine_backend(storage: Storage) -> Backend {
-    Arc::new(Engine::new(Arc::new(storage), true))
-}
-
 // Pick a random element from a slice.
 fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
     if v.is_empty() {
@@ -154,13 +147,9 @@ fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
 async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
-    let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
-    // The ported one: same SQL, no `Db` trait above it and no outbox beneath
-    // it. Its own :memory: connection, so the two share nothing but the
-    // operation sequence.
-    let sqlite_engine = Arc::new(
-        SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, true).expect("sqlite-engine open"),
-    ) as Backend;
+    let sqlite =
+        Arc::new(SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, true).expect("sqlite open"))
+            as Backend;
     let oracle = Arc::new(SharedOracle::new());
 
     // Postgres and MySQL are opt-in via env vars.
@@ -177,11 +166,11 @@ async fn differential_random() {
 
     let pg_backend: Option<Backend> = match pg_url {
         Some(url) => {
-            let pg = PostgresStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
+            let pg = PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, true)
                 .await
                 .expect("postgres connect");
             pg.init().await.expect("postgres schema init");
-            Some(engine_backend(Storage::Postgres(pg)))
+            Some(Arc::new(pg) as Backend)
         }
         None => {
             eprintln!("[diff] TEST_POSTGRES_URL not set — PostgreSQL skipped");
@@ -191,11 +180,11 @@ async fn differential_random() {
 
     let my_backend: Option<Backend> = match my_url {
         Some(url) => {
-            let my = MysqlStorage::connect(&url, 5, TASK_RETRY_TIMEOUT_MS)
+            let my = MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, true)
                 .await
                 .expect("mysql connect");
             my.init().await.expect("mysql schema init");
-            Some(engine_backend(Storage::Mysql(my)))
+            Some(Arc::new(my) as Backend)
         }
         None => {
             eprintln!("[diff] TEST_MYSQL_URL not set — MySQL skipped");
@@ -204,8 +193,7 @@ async fn differential_random() {
     };
 
     let mut backends: Vec<(String, Backend)> = vec![
-        ("sqlite".into(), engine_backend(Storage::Sqlite(sqlite))),
-        ("sqlite-engine".into(), sqlite_engine),
+        ("sqlite".into(), sqlite),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
     if let Some(pg) = pg_backend {
