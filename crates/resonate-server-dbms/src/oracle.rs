@@ -3,20 +3,20 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::engine_port::ResonateEngine;
+use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Timeout};
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
     PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
     PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseState, PromiseValue,
-    RequestEnvelope, ResponseEnvelope, ScheduleCreateData, ScheduleDeleteData, ScheduleGetData,
-    ScheduleRecord, ScheduleResponseData, ScheduleSearchData, ScheduleSearchResponseData,
-    SettleState, Snapshot, SnapshotCallback, SnapshotListener, SnapshotMessage,
-    SnapshotPromiseTimeout, SnapshotTaskTimeout, TaskAcquireData, TaskAcquireResponseData,
-    TaskContinueData, TaskCreateData, TaskCreateResponseData, TaskFenceData, TaskFenceResponseData,
-    TaskFulfillData, TaskFulfillResponseData, TaskGetData, TaskHaltData, TaskHeartbeatData,
-    TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData,
-    TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
+    RequestEnvelope, RequestHead, ResponseEnvelope, ScheduleCreateData, ScheduleDeleteData,
+    ScheduleGetData, ScheduleRecord, ScheduleResponseData, ScheduleSearchData,
+    ScheduleSearchResponseData, SettleState, Snapshot, SnapshotCallback, SnapshotListener,
+    SnapshotMessage, SnapshotPromiseTimeout, SnapshotTaskTimeout, TaskAcquireData,
+    TaskAcquireResponseData, TaskContinueData, TaskCreateData, TaskCreateResponseData,
+    TaskFenceData, TaskFenceResponseData, TaskFulfillData, TaskFulfillResponseData, TaskGetData,
+    TaskHaltData, TaskHeartbeatData, TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData,
+    TaskSearchResponseData, TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
@@ -86,6 +86,15 @@ pub struct Oracle {
     t_timeouts: Vec<TTimeout>,
     s_timeouts: Vec<STimeout>,
     outgoing: Vec<(String, Value)>,
+    /// What the operation currently being applied emitted.
+    ///
+    /// `outgoing` is the queue — an execute message upserts into it, so what a
+    /// transition emitted is not simply its tail. This records emissions as
+    /// they happen, and is cleared at the start of every `apply`. The oracle
+    /// keeps both: the queue, so it still compares against backends that write
+    /// an outbox, and the emissions, so it compares against ones that return
+    /// them.
+    emitted: Vec<Outgoing>,
 }
 
 impl Default for Oracle {
@@ -104,10 +113,38 @@ impl Oracle {
             t_timeouts: Vec::new(),
             s_timeouts: Vec::new(),
             outgoing: Vec::new(),
+            emitted: Vec::new(),
         }
     }
 
+    /// Take what the last applied operation emitted.
+    pub fn take_emitted(&mut self) -> Vec<Outgoing> {
+        std::mem::take(&mut self.emitted)
+    }
+
+    /// Fire one timeout the system asked of itself.
+    ///
+    /// The model has no per-timeout path yet, only the bulk sweep `debug.tick`
+    /// drives, so being asked about one timeout fires every timeout now due —
+    /// the named one among them. Over-processes, never mis-processes, which is
+    /// what `Internal` being idempotent buys. This becomes precise when the
+    /// ported engines define what firing exactly one timeout means.
+    pub fn apply_timeout(&mut self, _timeout: &Timeout, now: i64) {
+        let req = RequestEnvelope {
+            kind: "debug.tick".to_string(),
+            head: RequestHead {
+                corr_id: String::new(),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: Some(now),
+            },
+            data: json!({ "time": now }),
+        };
+        self.apply(&req);
+    }
+
     pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        self.emitted.clear();
         let now = util::resolve_time(req.head.debug_time);
         match req.kind.as_str() {
             "promise.get" => self.op_promise_get(req, now),
@@ -1627,6 +1664,7 @@ impl Oracle {
         self.t_timeouts.clear();
         self.s_timeouts.clear();
         self.outgoing.clear();
+        self.emitted.clear();
         ResponseEnvelope::new(
             req.kind.clone(),
             req.head.corr_id.clone(),
@@ -2064,8 +2102,13 @@ impl Oracle {
             .get(promise_id)
             .map(|p| Self::to_promise_record(now, promise_id, p));
         if let Some(record) = record {
-            let message = json!({ "kind": "unblock", "head": {}, "data": { "promise": record } });
+            let message =
+                json!({ "kind": "unblock", "head": {}, "data": { "promise": record.clone() } });
             for addr in listeners {
+                self.emitted.push(Outgoing::Unblock {
+                    address: addr.clone(),
+                    promise: record.clone(),
+                });
                 self.outgoing.push((addr, message.clone()));
             }
         }
@@ -2089,6 +2132,11 @@ impl Oracle {
     }
 
     fn send_execute(&mut self, address: &str, task_id: &str, version: i64) {
+        self.emitted.push(Outgoing::Execute {
+            address: address.to_string(),
+            task_id: task_id.to_string(),
+            version,
+        });
         let msg = json!({ "kind": "execute", "head": {}, "data": { "task": { "id": task_id, "version": version } } });
         for (addr, existing) in &mut self.outgoing {
             if existing
@@ -2355,10 +2403,33 @@ impl ResonateServer for SharedOracle {
 /// has always provided.
 #[async_trait]
 impl ResonateEngine for SharedOracle {
-    async fn process(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
-        let mut req = req.clone();
-        req.head.debug_time = Some(now);
+    /// The model is the bridge across the transition.
+    ///
+    /// It returns what each transition emitted *and* keeps the queue, so it
+    /// compares against ported engines on their messages and against
+    /// unported ones on their outbox at the same time. When the last outbox
+    /// goes, `outgoing` goes with it.
+    async fn process(&self, input: Input<'_>, now: i64) -> Output {
         let mut oracle = self.lock();
-        oracle.apply(&req)
+        let response = match input {
+            Input::External(req) => {
+                let mut req = req.clone();
+                req.head.debug_time = Some(now);
+                Some(oracle.apply(&req))
+            }
+            Input::Internal(timeout) => {
+                oracle.apply_timeout(&timeout, now);
+                None
+            }
+        };
+        Output {
+            response,
+            messages: oracle.take_emitted(),
+            timeouts: Vec::new(),
+        }
+    }
+
+    fn returns_messages(&self) -> bool {
+        true
     }
 }

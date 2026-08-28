@@ -24,7 +24,7 @@ use resonate_core::types::{
     TaskSuspendData, TaskSuspendPreloadData,
 };
 
-use crate::engine_port::ResonateEngine;
+use crate::engine_port::{Input, Output, ResonateEngine, Timeout};
 use resonate_core::util;
 
 use crate::Db;
@@ -2377,7 +2377,40 @@ fn process_schedule_timeouts(db: &dyn Db, time: i64) -> StorageResult<usize> {
 
 #[async_trait]
 impl ResonateEngine for Engine {
-    async fn process(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
-        self.dispatch(req, now).await
+    /// The shared engine over the `Db` trait, for the backends not yet ported.
+    ///
+    /// It still writes an outbox row and leaves delivery to the pump, so it
+    /// returns no messages — `returns_messages` stays false and the
+    /// differential compares its emissions through `snap` instead.
+    ///
+    /// `Internal` is served by the bulk sweep that already exists: this engine
+    /// has no per-timeout path, so being asked about one timeout processes
+    /// every timeout now due, the named one among them. That over-processes
+    /// but never mis-processes, which is what `Internal` being idempotent
+    /// buys. A ported engine fires exactly the timeout it was handed.
+    async fn process(&self, input: Input<'_>, now: i64) -> Output {
+        match input {
+            Input::External(req) => Output::response(self.dispatch(req, now).await),
+            Input::Internal(timeout) => {
+                let swept = match timeout {
+                    Timeout::PromiseTimeout { .. }
+                    | Timeout::TaskRetryTimeout { .. }
+                    | Timeout::TaskLeaseTimeout { .. } => {
+                        self.storage
+                            .transact(move |db| db.process_timeouts(now))
+                            .await
+                    }
+                    Timeout::ScheduleDue { .. } => {
+                        self.storage
+                            .transact(move |db| process_schedule_timeouts(db, now).map(|_| ()))
+                            .await
+                    }
+                };
+                if let Err(e) = swept {
+                    tracing::error!(error = %e, "Timeout sweep failed");
+                }
+                Output::default()
+            }
+        }
     }
 }

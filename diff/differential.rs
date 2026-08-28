@@ -37,7 +37,8 @@ use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPO
 
 use resonate_server_dbms::{
     engine::Engine,
-    engine_port::ResonateEngine,
+    engine_port::{Input, Outgoing, ResonateEngine},
+    engine_sqlite::SqliteEngine,
     oracle::{Oracle, SharedOracle},
     persistence_mysql::MysqlStorage,
     persistence_postgres::PostgresStorage,
@@ -109,7 +110,27 @@ type Backend = Arc<dyn ResonateEngine>;
 /// effective time from `head.debug_time`, identically for every backend. The
 /// server gates that on `config.debug`, which `debug_config()` enables.
 async fn send(backend: &Backend, envelope: &RequestEnvelope, now: i64) -> ResponseEnvelope {
-    backend.process(envelope, now).await
+    send_full(backend, envelope, now).await.0
+}
+
+/// The response *and* what the transition emitted.
+///
+/// An engine that still writes an outbox row returns no messages; its
+/// emissions are compared through `debug.snap` instead. See
+/// `assert_emissions_agree`.
+async fn send_full(
+    backend: &Backend,
+    envelope: &RequestEnvelope,
+    now: i64,
+) -> (ResponseEnvelope, Vec<Outgoing>) {
+    let out = backend.process(Input::External(envelope), now).await;
+    let resp = out.response.unwrap_or_else(|| {
+        panic!(
+            "engine returned no response for External input ({})",
+            envelope.kind
+        )
+    });
+    (resp, out.messages)
 }
 
 fn engine_backend(storage: Storage) -> Backend {
@@ -134,6 +155,12 @@ async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
     let sqlite = SqliteStorage::open(":memory:", TASK_RETRY_TIMEOUT_MS).expect("sqlite open");
+    // The ported one: same SQL, no `Db` trait above it and no outbox beneath
+    // it. Its own :memory: connection, so the two share nothing but the
+    // operation sequence.
+    let sqlite_engine = Arc::new(
+        SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, true).expect("sqlite-engine open"),
+    ) as Backend;
     let oracle = Arc::new(SharedOracle::new());
 
     // Postgres and MySQL are opt-in via env vars.
@@ -178,6 +205,7 @@ async fn differential_random() {
 
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), engine_backend(Storage::Sqlite(sqlite))),
+        ("sqlite-engine".into(), sqlite_engine),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
     if let Some(pg) = pg_backend {
@@ -250,6 +278,8 @@ async fn differential_random() {
     let mut seen_sigs: HashSet<(String, u16, u8)> = HashSet::new();
     let mut plateau_count = 0usize;
     let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
+    // Reused across steps; `send_all` clears it.
+    let mut emissions: Vec<(String, Value)> = Vec::new();
 
     'outer: loop {
         reset_all(&backends, now).await;
@@ -284,12 +314,11 @@ async fn differential_random() {
             eprintln!("[diff] {ctx} now={now}");
 
             // Verify backends agree before this step.
-            let pre_snaps = snap_all(&backends, now).await;
+            let (pre_snaps, pre_queued) = snap_all(&backends, now).await;
             assert_no_divergence(
                 &pre_snaps,
                 &[
                     "promises",
-                    "messages",
                     "tasks",
                     "callbacks",
                     "taskTimeouts",
@@ -297,8 +326,11 @@ async fn differential_random() {
                 ],
                 &format!("BEFORE {ctx}"),
             );
+            assert_agree(&pre_queued, "queued messages", &format!("BEFORE {ctx}"));
 
-            let mut results = send_all(&backends, &envelope, now, &mut timings).await;
+            let mut results =
+                send_all(&backends, &envelope, now, &mut timings, &mut emissions).await;
+            assert_emissions_agree(&emissions, &format!("EMIT {ctx}"));
             if let Some(g) = &generator {
                 // Keep the model in step with the backends; its response is
                 // not compared, only its state is read by the generator.
@@ -320,12 +352,13 @@ async fn differential_random() {
 
             assert_resps_agree(&results, &ctx);
 
-            let mid_snaps = snap_all(&backends, now).await;
-            assert_no_divergence(&mid_snaps, &["messages"], &format!("AFTER {ctx}"));
+            let (_, mid_queued) = snap_all(&backends, now).await;
+            assert_agree(&mid_queued, "queued messages", &format!("AFTER {ctx}"));
         }
 
-        let snaps = snap_all(&backends, now).await;
+        let (snaps, queued) = snap_all(&backends, now).await;
         assert_snaps_agree(&snaps, &format!("step={total_steps}"));
+        assert_agree(&queued, "queued messages", &format!("step={total_steps}"));
 
         let new_sigs = seen_sigs.len().saturating_sub(sigs_before);
         if covered.len() == ALL_OPS.len() {
@@ -348,8 +381,9 @@ async fn differential_random() {
         }
     }
 
-    let snaps = snap_all(&backends, now).await;
+    let (snaps, queued) = snap_all(&backends, now).await;
     assert_snaps_agree(&snaps, "final");
+    assert_agree(&queued, "queued messages", "final");
 
     eprintln!("[diff] coverage after {total_steps} steps:");
     let mut missing = Vec::new();
@@ -457,33 +491,83 @@ async fn send_all(
     envelope: &RequestEnvelope,
     now: i64,
     timings: &mut HashMap<(String, String), Vec<u64>>,
+    emissions: &mut Vec<(String, Value)>,
 ) -> Vec<(String, i32, Value)> {
     let mut out = Vec::new();
     let kind = envelope.kind.clone();
+    emissions.clear();
     for (name, b) in backends {
         let t0 = Instant::now();
-        let resp = send(b, envelope, now).await;
+        let (resp, messages) = send_full(b, envelope, now).await;
         let ns = t0.elapsed().as_nanos() as u64;
         timings
             .entry((name.clone(), kind.clone()))
             .or_default()
             .push(ns);
+        if b.returns_messages() {
+            let mut msgs: Vec<Value> = messages
+                .iter()
+                .map(|m| json!({ "address": m.address(), "message": m.to_json() }))
+                .collect();
+            sort_messages(&mut msgs);
+            emissions.push((name.clone(), Value::Array(msgs)));
+        }
         out.push((name.clone(), resp.head.status, resp.data));
     }
     out
 }
 
-async fn snap_all(backends: &[(String, Backend)], now: i64) -> Vec<(String, Value)> {
+/// Engines that return their emissions must return the same ones.
+///
+/// This is the check that replaces comparing `snap().messages` once a backend
+/// stops queueing, and it is strictly stronger: an accumulated queue only says
+/// a message was emitted at some point, this says which operation emitted it.
+fn assert_emissions_agree(emissions: &[(String, Value)], ctx: &str) {
+    assert_agree(emissions, "emitted messages", ctx);
+}
+
+/// State, and separately the queue.
+///
+/// `messages` is split out because it is the one section that is *meant* to
+/// differ: an engine that returns what it emitted has nothing queued, so its
+/// `messages` is empty by construction. The rest of the snapshot must still
+/// agree everywhere, and the queue must still agree among the backends that
+/// have one. Emissions are compared where they are produced, in `send_all`.
+async fn snap_all(
+    backends: &[(String, Backend)],
+    now: i64,
+) -> (Vec<(String, Value)>, Vec<(String, Value)>) {
     let envelope = req("debug.snap", json!({}));
-    let mut out = Vec::new();
+    let mut state = Vec::new();
+    let mut queued = Vec::new();
     for (name, b) in backends {
         let resp = send(b, &envelope, now).await;
         assert_eq!(resp.head.status, 200, "debug.snap failed on {name}");
         let mut data = resp.data;
         normalize_snap(&mut data);
-        out.push((name.clone(), data));
+        let messages = data
+            .as_object_mut()
+            .and_then(|o| o.remove("messages"))
+            .unwrap_or(Value::Null);
+        if !b.returns_messages() {
+            queued.push((name.clone(), messages));
+        }
+        state.push((name.clone(), data));
     }
-    out
+    (state, queued)
+}
+
+/// Every entry must be the same value.
+fn assert_agree(vals: &[(String, Value)], what: &str, ctx: &str) {
+    let all: Vec<(&str, &Value)> = vals.iter().map(|(n, v)| (n.as_str(), v)).collect();
+    if !all.windows(2).all(|w| w[0].1 == w[1].1) {
+        let detail: String = all
+            .iter()
+            .map(|(n, v)| format!("  {n}:\n{v:#}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!("{ctx}: {what} diverged\n{detail}");
+    }
 }
 
 fn assert_resps_agree(results: &[(String, i32, Value)], ctx: &str) {

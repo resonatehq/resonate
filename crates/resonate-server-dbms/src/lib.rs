@@ -10,6 +10,7 @@
 
 pub mod engine;
 pub mod engine_port;
+pub mod engine_sqlite;
 pub mod oracle;
 pub mod persistence_mysql;
 pub mod persistence_postgres;
