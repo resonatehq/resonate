@@ -321,30 +321,27 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
     // One arrival
     // -----------------------------------------------------------------------
 
-    /// Replace-then-place, ignoring capacity.
+    /// Replace, then add: drop whatever the wheel held under this identity, and
+    /// put the arrival on the end.
     ///
-    /// Capacity is deliberately *not* enforced here: `merge` applies it once,
-    /// after the whole batch, so the outcome does not depend on the order the
-    /// batch arrived in. See [`spec_merge`] for why that matters. This is the
-    /// only method that may leave the wheel over capacity, which is why it is
-    /// private and why its postcondition bounds the overshoot at one.
-    fn upsert_uncapped(&mut self, t: Timeout<T>)
+    /// The removal is unconditional, so a replacement and a fresh addition take
+    /// exactly the same path. Note what this does *not* do: it does not place
+    /// the arrival in deadline order and it does not look at capacity. A merge
+    /// applies its whole batch this way and only then sorts and cuts, which is
+    /// why the wheel is deliberately out of order in between — `wf` does not
+    /// hold across this call, which is why it is private.
+    fn apply(&mut self, t: Timeout<T>)
         requires
-            sorted(old(self)@),
             distinct(old(self).comparator(), old(self)@),
         ensures
             final(self).comparator() == old(self).comparator(),
             final(self).capacity_spec() == old(self).capacity_spec(),
-            final(self)@ == spec_upsert(old(self).comparator(), old(self)@, t),
-            sorted(final(self)@),
+            final(self)@ == spec_apply(old(self).comparator(), old(self)@, t),
             distinct(final(self).comparator(), final(self)@),
-            final(self)@.len() <= old(self)@.len() + 1,
     {
         let ghost c = self.cmp;
         let ghost s0 = self.items@;
 
-        // 1. Replace. If the wheel already holds this logical timeout, it goes
-        //    -- whatever its old deadline was.
         let i = self.find_same(&t.value);
         if i < self.items.len() {
             proof {
@@ -357,18 +354,9 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 lemma_fresh_spec_remove_id(c, s0, t.value);
             }
         }
+        self.items.push(t);
         proof {
-            lemma_spec_remove_sorted(c, s0, t.value);
-            lemma_spec_remove_distinct(c, s0, t.value);
-            lemma_spec_remove_fresh(c, s0, t.value);
-            lemma_spec_remove_len(c, s0, t.value);
-        }
-
-        // 2. Place, by deadline.
-        let ghost s1 = self.items@;
-        place(&mut self.items, t);
-        proof {
-            lemma_spec_insert_distinct(c, s1, t);
+            lemma_spec_apply_distinct(c, s0, t);
         }
     }
 
@@ -376,22 +364,24 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
     // Merge
     // -----------------------------------------------------------------------
 
-    /// Merge a batch of timeouts into the wheel.
+    /// Fold a batch of timeouts into the wheel.
     ///
-    /// The batch is sorted nearest-deadline first, then taken one arrival at a
-    /// time: each replaces any entry with its identity, is placed by deadline,
-    /// and the wheel is cut back to capacity. Sorting first is what makes the
-    /// result depend on the batch's contents rather than on the order the
-    /// caller supplied them in.
+    /// Three steps, and they are the three lines of [`spec_merge`]:
     ///
-    /// Capacity is enforced on **every** arrival, not once at the end. Hoisting
-    /// the cut out of the loop looks like a harmless optimisation and is not:
-    /// it changes the result whenever an arrival replaces an entry, because a
-    /// replacement frees a slot mid-batch. The loop invariant below is what
-    /// rejects that edit.
+    /// 1. **replace, then add** — every arrival drops whatever the wheel held
+    ///    under its identity and takes its place; an arrival for a timeout the
+    ///    wheel did not have is simply added;
+    /// 2. **sort** by deadline, nearest first;
+    /// 3. **cut** to capacity.
     ///
-    /// See [`spec_merge`] for the two consequences worth knowing: an update is
-    /// not an addition, and within one batch the farthest deadline wins.
+    /// The wheel is deliberately out of order between steps 1 and 2. Capacity
+    /// is applied once, to the finished union, which is what makes the result a
+    /// function of the batch's contents rather than of the order it arrived in.
+    ///
+    /// The postcondition names `spec_merge` directly, so this method is *proved
+    /// equal* to those three lines. Nothing below the equality is promised: the
+    /// scan, the insertion sort and the truncation are an implementation, and
+    /// can be replaced by anything faster without the guarantee moving.
     pub fn merge(&mut self, incoming: Vec<Timeout<T>>)
         requires
             old(self).wf(),
@@ -409,10 +399,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             // A merge never costs the wheel a slot it was already using.
             old(self)@.len() <= final(self)@.len(),
             // No duplicates in, no duplicates out -- whatever the batch does.
-            // `wf` carries this too, but state it plainly: it is the guarantee
-            // callers reach for, and it holds under far weaker conditions than
-            // `wf` -- see `lemma_merge_preserves_no_duplicates`, which assumes
-            // neither sortedness nor the capacity bound.
             no_duplicates(old(self).comparator(), old(self)@)
                 ==> no_duplicates(final(self).comparator(), final(self)@),
             // An arrival REPLACES: whatever the wheel held under that identity,
@@ -423,10 +409,10 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             forall|j: int|
                 #![trigger incoming@[j].value]
                 0 <= j < incoming@.len() && (forall|l: int|
-                    0 <= l < incoming@.len() && old(self).comparator().same(
+                    j < l < incoming@.len() ==> !old(self).comparator().same(
                         #[trigger] incoming@[l].value,
                         incoming@[j].value,
-                    ) ==> incoming@[l] == incoming@[j]) ==> identity_carries(
+                    )) ==> identity_carries(
                     final(self).comparator(),
                     final(self)@,
                     incoming@[j].value,
@@ -438,11 +424,8 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         let ghost s0 = self.items@;
         let ghost inc0 = incoming@;
 
-        // Nearest first, so capacity is spent on the nearest deadlines whatever
-        // order the caller handed the batch over in.
-        let mut rest = sort_by_deadline(incoming);
-        let ghost batch = rest@;
-
+        // 1. Replace, then add.
+        let mut rest = incoming;
         let n = rest.len();
         let mut k: usize = 0;
 
@@ -451,49 +434,46 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 self.cmp == c,
                 self.cap == cap0,
                 k <= n,
-                n == batch.len(),
-                batch == spec_sort(inc0),
-                rest@ == batch.skip(k as int),
-                sorted(self.items@),
+                n == inc0.len(),
+                rest@ == inc0.skip(k as int),
                 distinct(c, self.items@),
-                self.items@.len() <= cap0,
-                self.items@ == spec_merge_prefix(c, s0, batch, k as nat, cap0 as nat),
+                self.items@ == spec_apply_all(c, s0, inc0, k as nat),
             decreases n - k,
         {
-            assert(rest@[0] == batch[k as int]);
+            assert(rest@[0] == inc0[k as int]);
             let t = rest.remove(0);
-            let ghost before = self.items@;
-
-            self.upsert_uncapped(t);
-            self.items.truncate(self.cap);
-
+            self.apply(t);
             proof {
-                assert(rest@ =~= batch.skip(k as int + 1));
-                let full = spec_upsert(c, before, t);
-                lemma_take_sorted(full, cap0 as nat);
-                lemma_take_distinct(c, full, cap0 as nat);
-                lemma_take_len(full, cap0 as nat);
-                assert(self.items@ =~= take_at_most(full, cap0 as nat));
+                assert(rest@ =~= inc0.skip(k as int + 1));
             }
             k = k + 1;
         }
 
+        // 2. Order by deadline.
+        let ghost union = self.items@;
+        let unsorted = self.items.split_off(0);
         proof {
-            lemma_spec_sort_wf(inc0, inc0.len());
-            lemma_merge_wf(c, s0, batch, n as nat, cap0 as nat);
-            // `wf` gave us `distinct` on the way in; the two forms are the same
-            // statement, so the antecedent above always holds here.
+            // `split_off(0)` hands back `subrange(0, len)`, which is the whole
+            // sequence but not syntactically the same term.
+            assert(unsorted@ =~= union);
+        }
+        self.items = sort_by_deadline(unsorted);
+
+        // 3. Cut to capacity.
+        let ghost ordered = self.items@;
+        self.items.truncate(self.cap);
+
+        proof {
+            assert(union == spec_apply_all(c, s0, inc0, inc0.len()));
+            assert(ordered == spec_sort(union));
+            assert(self.items@ =~= take_at_most(ordered, cap0 as nat));
+            lemma_merge_wf(c, s0, inc0, cap0 as nat);
             lemma_no_duplicates_iff_distinct(c, s0);
             lemma_merge_preserves_no_duplicates(c, s0, inc0, cap0 as nat);
             assert forall|j: int|
                 0 <= j < inc0.len() && (forall|l: int|
-                    0 <= l < inc0.len() && c.same(#[trigger] inc0[l].value, inc0[j].value)
-                        ==> inc0[l] == inc0[j]) implies identity_carries(
-                c,
-                self.items@,
-                inc0[j].value,
-                inc0[j].deadline,
-            ) by {
+                    j < l < inc0.len() ==> !c.same(#[trigger] inc0[l].value, inc0[j].value))
+                    implies identity_carries(c, self.items@, inc0[j].value, inc0[j].deadline) by {
                 lemma_merge_sets_identity(c, s0, inc0, j, cap0 as nat);
             }
         }

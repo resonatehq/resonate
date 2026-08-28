@@ -24,25 +24,25 @@ mod model {
         pub id: u64,
     }
 
-    /// Sort the batch nearest-first, then take one arrival at a time,
-    /// honouring capacity at every step.
+    /// The specification, transcribed: replace then add, sort, cut.
+    ///
+    /// Written out this way it is three statements, and that is the whole point
+    /// of the spec's shape -- an independent reader can check this against
+    /// `spec_merge` by eye. What it deliberately does not share with the
+    /// implementation is *how*: this concatenates and stably sorts where the
+    /// wheel scans and splices.
     pub fn merge(wheel: &[Entry], incoming: &[Entry], capacity: usize) -> Vec<Entry> {
-        let mut batch: Vec<Entry> = incoming.to_vec();
-        // A *stable* sort keeps the caller's order among equal deadlines,
-        // which is what `spec_insert` placing after equals means.
-        batch.sort_by_key(|e| e.deadline);
-
-        let mut all: Vec<Entry> = wheel.to_vec();
-        for t in batch {
-            all.retain(|e| e.id != t.id);
-            let pos = all
-                .iter()
-                .position(|e| e.deadline > t.deadline)
-                .unwrap_or(all.len());
-            all.insert(pos, t);
-            all.truncate(capacity);
+        // 1. Replace, then add.
+        let mut u: Vec<Entry> = wheel.to_vec();
+        for t in incoming {
+            u.retain(|e| e.id != t.id);
+            u.push(*t);
         }
-        all
+        // 2. Sort by deadline, nearest first. Stable, so ties keep their order.
+        u.sort_by_key(|e| e.deadline);
+        // 3. Cut to capacity.
+        u.truncate(capacity);
+        u
     }
 }
 
@@ -139,48 +139,78 @@ fn a_far_future_arrival_that_is_not_new_still_moves_its_deadline() {
 }
 
 #[test]
-fn within_one_batch_the_farthest_deadline_wins() {
-    // Pinning a consequence of sorting the batch, because it is the one that
-    // can surprise: the arrivals are applied NEAREST FIRST, so of two entries
-    // sharing an id the later deadline is the one left standing -- not the one
-    // the caller listed last. A batch meant to carry a sequence of updates to
-    // one timeout should be deduplicated before it is handed over.
+fn within_one_batch_the_last_update_wins() {
+    // A batch reads as a sequence of updates: arrivals are applied in the order
+    // given, each replacing the one before it, so the last one stands.
     let mut w = TimerWheel::new(4, IdComparator);
     w.merge(to_timeouts(&[
         model::Entry { deadline: 50, id: 7 },
         model::Entry { deadline: 10, id: 7 },
     ]));
-    assert_eq!(drain(w), vec![model::Entry { deadline: 50, id: 7 }]);
+    assert_eq!(drain(w), vec![model::Entry { deadline: 10, id: 7 }]);
 }
 
 #[test]
-fn a_replacement_frees_a_slot_mid_batch() {
-    // THE CASE THAT MAKES CAPACITY PER-ARRIVAL DIFFERENT from cutting once at
-    // the end, and the reason the truncation lives inside the merge loop.
+fn an_update_competes_for_its_slot_on_the_new_deadline() {
+    // Capacity 1, wheel holds A at 1, batch moves A out to 3 and adds B at 2.
+    // The union is {A@3, B@2}; its nearest is B, so B is what survives.
     //
-    // Capacity 1, wheel holds A at 1. The batch is [B@2, A@3], already sorted.
-    // B is considered first, against a wheel whose only entry is nearer than
-    // it, and loses the slot fairly. A@3 is then a replacement, not an
-    // addition: it frees A's slot and takes it back.
-    //
-    // Cutting once at the end would instead keep B@2, the nearest of the
-    // union. Both are defensible; this is the one where an entry the wheel is
-    // already tracking is not evicted by a newcomer that arrived while it was
-    // full.
+    // The point: an update is not a lease on a slot. A@3 inherits nothing from
+    // A@1 -- it competes on its new deadline like anything else, and loses to a
+    // nearer newcomer. That is what "sort the union, then cut" means, and it is
+    // why moving a deadline outward can cost you the timeout.
     let mut w = TimerWheel::new(1, IdComparator);
     w.merge(to_timeouts(&[model::Entry { deadline: 1, id: 1 }]));
     w.merge(to_timeouts(&[
         model::Entry { deadline: 2, id: 2 },
         model::Entry { deadline: 3, id: 1 },
     ]));
-    assert_eq!(drain(w), vec![model::Entry { deadline: 3, id: 1 }]);
+    assert_eq!(drain(w), vec![model::Entry { deadline: 2, id: 2 }]);
+}
+
+#[test]
+fn the_wheel_holds_the_capacity_nearest_of_the_union() {
+    // The one-sentence reading of the spec, checked directly: whatever the
+    // wheel had (with moved deadlines moved) plus whatever the batch added,
+    // ordered by deadline, first `capacity`.
+    let mut rng = Rng(0xC0FF_EE00_1234_ABCD);
+
+    for _ in 0..5_000 {
+        let capacity = (1 + rng.below(6)) as usize;
+        let wheel_entries: Vec<model::Entry> = (0..rng.below(6))
+            .map(|_| model::Entry { deadline: rng.below(30), id: rng.below(9) })
+            .collect();
+        let batch: Vec<model::Entry> = (0..rng.below(8))
+            .map(|_| model::Entry { deadline: rng.below(30), id: rng.below(9) })
+            .collect();
+
+        let mut w = TimerWheel::new(capacity, IdComparator);
+        w.merge(to_timeouts(&wheel_entries));
+        let seeded = drain(w);
+
+        let mut w = TimerWheel::new(capacity, IdComparator);
+        w.merge(to_timeouts(&seeded));
+        w.merge(to_timeouts(&batch));
+
+        // Build the union by hand and take its nearest `capacity`.
+        let mut union = seeded.clone();
+        for t in &batch {
+            union.retain(|e| e.id != t.id);
+            union.push(*t);
+        }
+        union.sort_by_key(|e| e.deadline);
+        union.truncate(capacity);
+
+        assert_eq!(drain(w), union);
+    }
 }
 
 #[test]
 fn the_result_does_not_depend_on_batch_order() {
-    // What sorting the batch buys: capacity is spent on the nearest deadlines
-    // whatever order the caller supplies. Without the sort, the first of these
-    // would keep 9 and the second would not.
+    // Cutting once, at the end, is what buys this: capacity is spent on the
+    // nearest deadlines of the finished union, whatever order the caller
+    // supplied them in. (Batches naming one identity twice are the exception,
+    // and deliberately so -- there the order is the update sequence.)
     let batch = [
         model::Entry { deadline: 9, id: 1 },
         model::Entry { deadline: 1, id: 2 },

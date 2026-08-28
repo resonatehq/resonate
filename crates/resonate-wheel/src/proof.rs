@@ -487,7 +487,7 @@ pub proof fn lemma_spec_insert_distinct<T, C: Comparator<T>>(
     }
 }
 
-// --- spec_upsert ---
+// --- how far removal can shorten a sequence ---
 
 /// Removal drops at most one entry, when there is at most one to drop.
 pub proof fn lemma_spec_remove_len_lower<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T)
@@ -515,28 +515,6 @@ pub proof fn lemma_spec_remove_len_lower<T, C: Comparator<T>>(cmp: C, s: Seq<Tim
         lemma_distinct_skip(cmp, s);
         lemma_spec_remove_len_lower(cmp, s.skip(1), v);
     }
-}
-
-/// One arrival keeps both invariants, adds at most one entry, and loses none.
-pub proof fn lemma_spec_upsert_wf<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, t: Timeout<T>)
-    requires
-        sorted(s),
-        distinct(cmp, s),
-    ensures
-        sorted(spec_upsert(cmp, s, t)),
-        distinct(cmp, spec_upsert(cmp, s, t)),
-        spec_upsert(cmp, s, t).len() <= s.len() + 1,
-        s.len() <= spec_upsert(cmp, s, t).len(),
-{
-    lemma_spec_remove_len_lower(cmp, s, t.value);
-    let removed = spec_remove(cmp, s, t.value);
-    lemma_spec_remove_sorted(cmp, s, t.value);
-    lemma_spec_remove_distinct(cmp, s, t.value);
-    lemma_spec_remove_fresh(cmp, s, t.value);
-    lemma_spec_remove_len(cmp, s, t.value);
-    lemma_spec_insert_sorted(removed, t);
-    lemma_spec_insert_distinct(cmp, removed, t);
-    lemma_spec_insert_len(removed, t);
 }
 
 // ===========================================================================
@@ -748,21 +726,25 @@ pub proof fn lemma_suffix_distinct<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T
     }
 }
 
+
 // ===========================================================================
-// Sorting the batch
+// 4. Sorting
 // ===========================================================================
+//
+// A merge sorts once, at the end, over the union it has built. So the sort has
+// to carry everything the wheel cares about: order, no duplicates, and the
+// deadline an identity ended up with. The first is what a sort is for; the
+// other two are carried by the observation that sorting is a *rearrangement*,
+// so any property holding of every entry still holds of every entry afterwards.
+// `all_sat` states that once, over an arbitrary predicate, instead of proving
+// it separately for each.
 
 /// Every entry of `s` satisfies `p`.
-///
-/// Sorting is a rearrangement, so any property that holds of every arrival in
-/// a batch still holds of every arrival in the sorted batch. Stating that once,
-/// over an arbitrary predicate, saves proving it separately for the two
-/// hypotheses the far-future theorem needs -- freshness and a deadline bound.
 pub open spec fn all_sat<T>(s: Seq<Timeout<T>>, p: spec_fn(Timeout<T>) -> bool) -> bool {
     forall|i: int| 0 <= i < s.len() ==> #[trigger] p(s[i])
 }
 
-/// Insertion carries a universal property through.
+/// Placing an entry carries a universal property through.
 pub proof fn lemma_spec_insert_all_sat<T>(
     s: Seq<Timeout<T>>,
     t: Timeout<T>,
@@ -800,143 +782,213 @@ pub proof fn lemma_spec_insert_all_sat<T>(
     }
 }
 
-/// Sorting carries a universal property through.
-pub proof fn lemma_spec_sort_all_sat<T>(inc: Seq<Timeout<T>>, p: spec_fn(Timeout<T>) -> bool, k: nat)
+/// **Sorting carries a universal property through.** Only the first `k` entries
+/// need satisfy it, since only those are sorted.
+pub proof fn lemma_spec_sort_all_sat<T>(
+    u: Seq<Timeout<T>>,
+    p: spec_fn(Timeout<T>) -> bool,
+    k: nat,
+)
     requires
-        all_sat(inc, p),
-        k <= inc.len(),
+        k <= u.len(),
+        forall|l: int| 0 <= l < k ==> #[trigger] p(u[l]),
     ensures
-        all_sat(spec_sort_prefix(inc, k), p),
+        all_sat(spec_sort_prefix(u, k), p),
     decreases k,
 {
     if k == 0 {
         assert(all_sat(Seq::<Timeout<T>>::empty(), p));
     } else {
-        lemma_spec_sort_all_sat(inc, p, (k - 1) as nat);
-        lemma_spec_insert_all_sat(spec_sort_prefix(inc, (k - 1) as nat), inc[k - 1], p);
+        lemma_spec_sort_all_sat(u, p, (k - 1) as nat);
+        lemma_spec_insert_all_sat(spec_sort_prefix(u, (k - 1) as nat), u[k - 1], p);
     }
 }
 
 /// Sorting produces a sorted sequence of the same length.
-pub proof fn lemma_spec_sort_wf<T>(inc: Seq<Timeout<T>>, k: nat)
+pub proof fn lemma_spec_sort_wf<T>(u: Seq<Timeout<T>>, k: nat)
     requires
-        k <= inc.len(),
+        k <= u.len(),
     ensures
-        sorted(spec_sort_prefix(inc, k)),
-        spec_sort_prefix(inc, k).len() == k,
+        sorted(spec_sort_prefix(u, k)),
+        spec_sort_prefix(u, k).len() == k,
     decreases k,
 {
     if k == 0 {
     } else {
-        lemma_spec_sort_wf(inc, (k - 1) as nat);
-        lemma_spec_insert_sorted(spec_sort_prefix(inc, (k - 1) as nat), inc[k - 1]);
-        lemma_spec_insert_len(spec_sort_prefix(inc, (k - 1) as nat), inc[k - 1]);
+        lemma_spec_sort_wf(u, (k - 1) as nat);
+        lemma_spec_insert_sorted(spec_sort_prefix(u, (k - 1) as nat), u[k - 1]);
+        lemma_spec_insert_len(spec_sort_prefix(u, (k - 1) as nat), u[k - 1]);
+    }
+}
+
+/// **Sorting cannot create a duplicate.**
+///
+/// The entry about to be placed is not equivalent to any of the entries already
+/// placed, because those are exactly the entries before it in `u` and `u` has
+/// no duplicates. `all_sat` is what turns "the entries already placed are the
+/// earlier ones" into something usable without reasoning about permutations.
+pub proof fn lemma_spec_sort_distinct<T, C: Comparator<T>>(cmp: C, u: Seq<Timeout<T>>, k: nat)
+    requires
+        distinct(cmp, u),
+        k <= u.len(),
+    ensures
+        distinct(cmp, spec_sort_prefix(u, k)),
+    decreases k,
+{
+    if k == 0 {
+    } else {
+        lemma_spec_sort_distinct(cmp, u, (k - 1) as nat);
+        let w = spec_sort_prefix(u, (k - 1) as nat);
+        let unequal = |x: Timeout<T>| !cmp.same(x.value, u[k - 1].value);
+        assert forall|l: int| 0 <= l < k - 1 implies unequal(u[l]) by {
+        }
+        lemma_spec_sort_all_sat(u, unequal, (k - 1) as nat);
+        assert(fresh(cmp, w, u[k - 1].value)) by {
+            assert forall|i: int| 0 <= i < w.len() implies !cmp.same(w[i].value, u[k - 1].value)
+                by {
+                assert(unequal(w[i]));
+            }
+        }
+        lemma_spec_insert_distinct(cmp, w, u[k - 1]);
+    }
+}
+
+/// Sorting keeps the deadline an identity is carrying.
+pub proof fn lemma_spec_sort_keeps_identity<T, C: Comparator<T>>(
+    cmp: C,
+    u: Seq<Timeout<T>>,
+    v: T,
+    d: u64,
+)
+    requires
+        identity_carries(cmp, u, v, d),
+    ensures
+        identity_carries(cmp, spec_sort(u), v, d),
+{
+    let carries = |x: Timeout<T>| cmp.same(x.value, v) ==> x.deadline == d;
+    assert forall|l: int| 0 <= l < u.len() implies carries(u[l]) by {
+    }
+    lemma_spec_sort_all_sat(u, carries, u.len());
+    assert forall|i: int|
+        0 <= i < spec_sort(u).len() && cmp.same(spec_sort(u)[i].value, v) implies spec_sort(
+        u,
+    )[i].deadline == d by {
+        assert(carries(spec_sort(u)[i]));
     }
 }
 
 // ===========================================================================
-// Corollaries: the wheel's user-visible guarantees
+// 5. Applying the batch
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// No duplicates in, no duplicates out
-// ---------------------------------------------------------------------------
-
-/// One arrival cannot introduce a duplicate.
+/// Applying an arrival keeps the wheel free of duplicates.
 ///
-/// Worth noticing what this does *not* assume: neither `sorted` nor the
-/// capacity bound appears. Deduplication is independent of the wheel's other
-/// two invariants -- it rests only on the comparator's laws -- so it survives
-/// even a step taken on a wheel that is unsorted or over capacity.
-///
-/// The reason is structural. A step is `spec_remove` then `spec_insert` then a
-/// cut. The removal strips *every* entry equivalent to the arrival, so the
-/// arrival is fresh against what remains no matter what order that sequence was
-/// in; the insertion is then the only entry with that identity; and the cut
-/// only drops entries.
-pub proof fn lemma_step_preserves_distinct<T, C: Comparator<T>>(
+/// Note the hypotheses: `distinct` and nothing else. Not sortedness — the wheel
+/// is deliberately unsorted while a merge is applying its batch, and only put
+/// back in order at the end — and not the capacity bound either.
+pub proof fn lemma_spec_apply_distinct<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
     t: Timeout<T>,
-    capacity: nat,
 )
     requires
         distinct(cmp, s),
     ensures
-        distinct(cmp, spec_step(cmp, s, t, capacity)),
+        distinct(cmp, spec_apply(cmp, s, t)),
+        s.len() <= spec_apply(cmp, s, t).len(),
+        spec_apply(cmp, s, t).len() <= s.len() + 1,
 {
     let removed = spec_remove(cmp, s, t.value);
     lemma_spec_remove_distinct(cmp, s, t.value);
     lemma_spec_remove_fresh(cmp, s, t.value);
-    lemma_spec_insert_distinct(cmp, removed, t);
-    lemma_take_distinct(cmp, spec_upsert(cmp, s, t), capacity);
+    lemma_spec_remove_len(cmp, s, t.value);
+    lemma_spec_remove_len_lower(cmp, s, t.value);
+    lemma_equivalence::<T, C>(cmp);
+    assert forall|i: int, j: int| 0 <= i < j < removed.push(t).len() implies !cmp.same(
+        removed.push(t)[i].value,
+        removed.push(t)[j].value,
+    ) by {
+        if j < removed.len() {
+            assert(removed.push(t)[i] == removed[i]);
+            assert(removed.push(t)[j] == removed[j]);
+        } else {
+            assert(removed.push(t)[i] == removed[i]);
+            assert(!cmp.same(removed[i].value, t.value));
+        }
+    }
 }
 
-/// A batch of arrivals cannot introduce a duplicate.
-pub proof fn lemma_merge_prefix_preserves_distinct<T, C: Comparator<T>>(
+/// Applying a whole batch keeps the wheel free of duplicates, and never
+/// shortens it.
+pub proof fn lemma_spec_apply_all_distinct<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
     inc: Seq<Timeout<T>>,
     k: nat,
-    capacity: nat,
 )
     requires
         distinct(cmp, s),
     ensures
-        distinct(cmp, spec_merge_prefix(cmp, s, inc, k, capacity)),
+        distinct(cmp, spec_apply_all(cmp, s, inc, k)),
+        s.len() <= spec_apply_all(cmp, s, inc, k).len(),
     decreases k,
 {
     if k == 0 {
     } else {
-        lemma_merge_prefix_preserves_distinct(cmp, s, inc, (k - 1) as nat, capacity);
-        lemma_step_preserves_distinct(
-            cmp,
-            spec_merge_prefix(cmp, s, inc, (k - 1) as nat, capacity),
-            inc[k - 1],
-            capacity,
-        );
+        lemma_spec_apply_all_distinct(cmp, s, inc, (k - 1) as nat);
+        lemma_spec_apply_distinct(cmp, spec_apply_all(cmp, s, inc, (k - 1) as nat), inc[k - 1]);
     }
 }
 
-/// **If the wheel held no duplicate before a merge, it holds none after.**
+/// **An arrival sets its identity's deadline.** Whatever the wheel held under
+/// that identity, afterwards there is one entry for it and it is the arrival.
 ///
-/// The hypothesis is the whole hypothesis: no sortedness, no capacity bound, no
-/// condition at all on the incoming batch. The batch may repeat an identity as
-/// many times as it likes, and may collide with anything already in the wheel;
-/// what comes out still holds each logical timeout at most once. Merging is the
-/// only way to put a timeout into a wheel, so this is what makes "the wheel
-/// never holds a duplicate" true of every wheel a caller can construct, and not
-/// merely of the ones this crate happens to build.
-///
-/// [`TimerWheel::merge`](crate::TimerWheel::merge) states the conclusion in its
-/// own postcondition, so a caller reading the signature sees it without
-/// unfolding [`TimerWheel::wf`](crate::TimerWheel::wf).
-pub proof fn lemma_merge_preserves_no_duplicates<T, C: Comparator<T>>(
+/// No hypothesis at all: the removal strips *every* equivalent entry, so this
+/// holds even on a wheel that is unsorted, over capacity, or already carrying
+/// duplicates.
+pub proof fn lemma_spec_apply_sets_identity<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    capacity: nat,
+    t: Timeout<T>,
 )
-    requires
-        no_duplicates(cmp, s),
     ensures
-        no_duplicates(cmp, spec_merge(cmp, s, inc, capacity)),
+        identity_carries(cmp, spec_apply(cmp, s, t), t.value, t.deadline),
 {
-    lemma_no_duplicates_iff_distinct(cmp, s);
-    lemma_merge_prefix_preserves_distinct(cmp, s, spec_sort(inc), inc.len(), capacity);
-    lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, inc, capacity));
+    let removed = spec_remove(cmp, s, t.value);
+    lemma_spec_remove_fresh(cmp, s, t.value);
+    assert forall|i: int|
+        0 <= i < removed.push(t).len() && cmp.same(removed.push(t)[i].value, t.value) implies
+        removed.push(t)[i].deadline == t.deadline by {
+        if i < removed.len() {
+            assert(removed.push(t)[i] == removed[i]);
+        }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Replaced, or pushed out
-// ---------------------------------------------------------------------------
-//
-// The claim: once a merge has carried an arrival for some identity, nothing
-// under that identity survives with any *other* deadline. Everything below
-// builds to that. The three preservation lemmas say the later steps of a merge
-// cannot undo it; the three index lemmas say the arrival really does get
-// applied, which is the half that needs the sort to be a rearrangement rather
-// than an arbitrary sequence.
+/// An arrival for a *different* identity leaves this one's deadline alone.
+pub proof fn lemma_spec_apply_keeps_identity<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    t: Timeout<T>,
+    v: T,
+    d: u64,
+)
+    requires
+        identity_carries(cmp, s, v, d),
+        !cmp.same(t.value, v),
+    ensures
+        identity_carries(cmp, spec_apply(cmp, s, t), v, d),
+{
+    let removed = spec_remove(cmp, s, t.value);
+    lemma_spec_remove_keeps_identity(cmp, s, t.value, v, d);
+    assert forall|i: int|
+        0 <= i < removed.push(t).len() && cmp.same(removed.push(t)[i].value, v) implies
+        removed.push(t)[i].deadline == d by {
+        if i < removed.len() {
+            assert(removed.push(t)[i] == removed[i]);
+        }
+    }
+}
 
 /// Removal only ever drops entries, so it cannot break an identity's deadline.
 pub proof fn lemma_spec_remove_keeps_identity<T, C: Comparator<T>>(
@@ -978,54 +1030,6 @@ pub proof fn lemma_spec_remove_keeps_identity<T, C: Comparator<T>>(
     }
 }
 
-/// Placing an entry keeps an identity's deadline, provided the newcomer either
-/// is not that identity or already carries that deadline.
-pub proof fn lemma_spec_insert_keeps_identity<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-    v: T,
-    d: u64,
-)
-    requires
-        identity_carries(cmp, s, v, d),
-        cmp.same(t.value, v) ==> t.deadline == d,
-    ensures
-        identity_carries(cmp, spec_insert(s, t), v, d),
-    decreases s.len(),
-{
-    if s.len() == 0 {
-    } else if t.deadline < s[0].deadline {
-        assert forall|k: int|
-            0 <= k < (seq![t] + s).len() && cmp.same((seq![t] + s)[k].value, v) implies (seq![t]
-            + s)[k].deadline == d by {
-            if k > 0 {
-                assert((seq![t] + s)[k] == s[k - 1]);
-            }
-        }
-    } else {
-        assert(identity_carries(cmp, s.skip(1), v, d)) by {
-            assert forall|k: int|
-                0 <= k < s.skip(1).len() && cmp.same(s.skip(1)[k].value, v) implies s.skip(
-                1,
-            )[k].deadline == d by {
-                assert(s.skip(1)[k] == s[k + 1]);
-            }
-        }
-        lemma_spec_insert_keeps_identity(cmp, s.skip(1), t, v, d);
-        let rest = spec_insert(s.skip(1), t);
-        assert forall|k: int|
-            0 <= k < (seq![s[0]] + rest).len() && cmp.same(
-                (seq![s[0]] + rest)[k].value,
-                v,
-            ) implies (seq![s[0]] + rest)[k].deadline == d by {
-            if k > 0 {
-                assert((seq![s[0]] + rest)[k] == rest[k - 1]);
-            }
-        }
-    }
-}
-
 /// Cutting to capacity only ever drops entries.
 pub proof fn lemma_take_keeps_identity<T, C: Comparator<T>>(
     cmp: C,
@@ -1049,183 +1053,139 @@ pub proof fn lemma_take_keeps_identity<T, C: Comparator<T>>(
     }
 }
 
-/// **An arrival sets its identity's deadline.** Whatever the wheel held under
-/// that identity before, afterwards there is exactly one entry for it and it is
-/// the arrival.
-///
-/// No hypothesis at all: the removal inside an upsert strips *every* equivalent
-/// entry, so this holds even on a wheel that is unsorted, over capacity, or
-/// already carrying duplicates.
-pub proof fn lemma_upsert_sets_identity<T, C: Comparator<T>>(
-    cmp: C,
-    u: Seq<Timeout<T>>,
-    t: Timeout<T>,
-)
-    ensures
-        identity_carries(cmp, spec_upsert(cmp, u, t), t.value, t.deadline),
-{
-    let removed = spec_remove(cmp, u, t.value);
-    lemma_spec_remove_fresh(cmp, u, t.value);
-    assert(identity_carries(cmp, removed, t.value, t.deadline));
-    lemma_spec_insert_keeps_identity(cmp, removed, t, t.value, t.deadline);
-}
-
-/// An arrival for a *different* identity leaves this one's deadline alone.
-pub proof fn lemma_upsert_keeps_identity<T, C: Comparator<T>>(
-    cmp: C,
-    u: Seq<Timeout<T>>,
-    t: Timeout<T>,
-    v: T,
-    d: u64,
-)
-    requires
-        identity_carries(cmp, u, v, d),
-        !cmp.same(t.value, v),
-    ensures
-        identity_carries(cmp, spec_upsert(cmp, u, t), v, d),
-{
-    lemma_spec_remove_keeps_identity(cmp, u, t.value, v, d);
-    lemma_spec_insert_keeps_identity(cmp, spec_remove(cmp, u, t.value), t, v, d);
-}
-
-// --- the arrival really is applied: index witnesses through the sort ---
-
-/// Placing `t` puts it somewhere. Returns where.
-pub proof fn lemma_spec_insert_index_of<T>(s: Seq<Timeout<T>>, t: Timeout<T>) -> (m: int)
-    ensures
-        0 <= m < spec_insert(s, t).len(),
-        spec_insert(s, t)[m] == t,
-    decreases s.len(),
-{
-    if s.len() == 0 {
-        assert(spec_insert(s, t)[0] == t);
-        0
-    } else if t.deadline < s[0].deadline {
-        assert((seq![t] + s)[0] == t);
-        0
-    } else {
-        let inner = spec_insert(s.skip(1), t);
-        let m1 = lemma_spec_insert_index_of(s.skip(1), t);
-        assert((seq![s[0]] + inner)[m1 + 1] == inner[m1]);
-        m1 + 1
-    }
-}
-
-/// Placing an entry does not displace the ones already there. Returns where
-/// `s[i]` ended up.
-pub proof fn lemma_spec_insert_keeps_index<T>(s: Seq<Timeout<T>>, t: Timeout<T>, i: int) -> (m: int)
-    requires
-        0 <= i < s.len(),
-    ensures
-        0 <= m < spec_insert(s, t).len(),
-        spec_insert(s, t)[m] == s[i],
-    decreases s.len(),
-{
-    if t.deadline < s[0].deadline {
-        assert((seq![t] + s)[i + 1] == s[i]);
-        i + 1
-    } else if i == 0 {
-        let inner = spec_insert(s.skip(1), t);
-        assert((seq![s[0]] + inner)[0] == s[0]);
-        0
-    } else {
-        let inner = spec_insert(s.skip(1), t);
-        assert(s.skip(1)[i - 1] == s[i]);
-        let m1 = lemma_spec_insert_keeps_index(s.skip(1), t, i - 1);
-        assert((seq![s[0]] + inner)[m1 + 1] == inner[m1]);
-        m1 + 1
-    }
-}
-
-/// **Sorting keeps every arrival.** Returns where `inc[j]` ended up in the
-/// sorted batch.
-///
-/// This is what makes the sort a rearrangement rather than just some sorted
-/// sequence, and it is the hinge of the replacement theorem: without it, the
-/// merge might never apply the arrival at all, and the old entry could sit
-/// there untouched.
-pub proof fn lemma_spec_sort_index_of<T>(inc: Seq<Timeout<T>>, k: nat, j: int) -> (m: int)
-    requires
-        0 <= j < k <= inc.len(),
-    ensures
-        0 <= m < spec_sort_prefix(inc, k).len(),
-        spec_sort_prefix(inc, k)[m] == inc[j],
-    decreases k,
-{
-    let w = spec_sort_prefix(inc, (k - 1) as nat);
-    if j == k - 1 {
-        lemma_spec_insert_index_of(w, inc[j])
-    } else {
-        let m0 = lemma_spec_sort_index_of(inc, (k - 1) as nat, j);
-        lemma_spec_insert_keeps_index(w, inc[k - 1], m0)
-    }
-}
-
-// --- the induction ---
-
-/// Once the batch has reached index `m`, every later step preserves what the
-/// arrival at `m` set.
-pub proof fn lemma_merge_prefix_sets_identity<T, C: Comparator<T>>(
+/// Once the batch has applied the arrival at `j`, every later arrival preserves
+/// the deadline it set.
+pub proof fn lemma_spec_apply_all_sets_identity<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    batch: Seq<Timeout<T>>,
-    m: int,
+    inc: Seq<Timeout<T>>,
+    j: int,
     k: nat,
+)
+    requires
+        0 <= j < inc.len(),
+        j < k <= inc.len(),
+        forall|l: int|
+            j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
+    ensures
+        identity_carries(cmp, spec_apply_all(cmp, s, inc, k), inc[j].value, inc[j].deadline),
+    decreases k,
+{
+    let u = spec_apply_all(cmp, s, inc, (k - 1) as nat);
+    if k == j + 1 {
+        lemma_spec_apply_sets_identity(cmp, u, inc[k - 1]);
+    } else {
+        lemma_spec_apply_all_sets_identity(cmp, s, inc, j, (k - 1) as nat);
+        lemma_spec_apply_keeps_identity(cmp, u, inc[k - 1], inc[j].value, inc[j].deadline);
+    }
+}
+
+// ===========================================================================
+// 6. What the wheel guarantees
+// ===========================================================================
+//
+// Each of these is a consequence of the three lines of `spec_merge`, and each
+// is stated with the weakest hypothesis it actually needs rather than with the
+// whole wheel invariant, so it is clear what each one rests on.
+
+/// **A merge lands well-formed, and never loses a slot.**
+pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
     capacity: nat,
 )
     requires
-        0 <= m < batch.len(),
-        m < k <= batch.len(),
-        forall|l: int|
-            0 <= l < batch.len() && cmp.same(#[trigger] batch[l].value, batch[m].value)
-                ==> batch[l] == batch[m],
+        distinct(cmp, s),
+        s.len() <= capacity,
     ensures
-        identity_carries(
-            cmp,
-            spec_merge_prefix(cmp, s, batch, k, capacity),
-            batch[m].value,
-            batch[m].deadline,
-        ),
-    decreases k,
+        sorted(spec_merge(cmp, s, inc, capacity)),
+        distinct(cmp, spec_merge(cmp, s, inc, capacity)),
+        spec_merge(cmp, s, inc, capacity).len() <= capacity,
+        s.len() <= spec_merge(cmp, s, inc, capacity).len(),
 {
-    let u = spec_merge_prefix(cmp, s, batch, (k - 1) as nat, capacity);
-    let t = batch[k - 1];
+    let union = spec_apply_all(cmp, s, inc, inc.len());
+    let ordered = spec_sort(union);
+    lemma_spec_apply_all_distinct(cmp, s, inc, inc.len());
+    lemma_spec_sort_wf(union, union.len());
+    lemma_spec_sort_distinct(cmp, union, union.len());
+    lemma_take_sorted(ordered, capacity);
+    lemma_take_distinct(cmp, ordered, capacity);
+    lemma_take_len(ordered, capacity);
+}
 
-    if cmp.same(t.value, batch[m].value) {
-        // Either this *is* the arrival at `m`, or the batch repeats it exactly;
-        // uniqueness makes those the same case, and both re-set the deadline.
-        assert(t == batch[m]);
-        lemma_upsert_sets_identity(cmp, u, t);
-    } else {
-        // A different identity. Reflexivity makes `batch[m]` equivalent to
-        // itself, so this step cannot be the one at `m`: `m` is strictly behind
-        // us, and the induction hypothesis applies.
-        cmp.lemma_reflexive(batch[m].value);
-        assert(k - 1 != m);
-        lemma_merge_prefix_sets_identity(cmp, s, batch, m, (k - 1) as nat, capacity);
-        lemma_upsert_keeps_identity(cmp, u, t, batch[m].value, batch[m].deadline);
+/// **The drop rule.** Everything the cut dropped is due at or after everything
+/// it kept.
+///
+/// This is the whole of "sort, then cut": the survivors are a prefix of a
+/// deadline-ordered sequence, so a merge can cost you a far timeout and never a
+/// near one. With capacity 1000, whatever falls off is by construction among
+/// the farthest-future entries of the union.
+pub proof fn lemma_merge_horizon<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
+    capacity: nat,
+)
+    ensures
+        ({
+            let union = spec_apply_all(cmp, s, inc, inc.len());
+            let ordered = spec_sort(union);
+            let kept = spec_merge(cmp, s, inc, capacity);
+            &&& sorted(ordered)
+            &&& kept.len() <= ordered.len()
+            &&& kept.len() < ordered.len() ==> kept.len() == capacity
+            &&& forall|i: int, j: int|
+                #![trigger kept[i].deadline, ordered[j].deadline]
+                0 <= i < kept.len() <= j < ordered.len() ==> kept[i].deadline
+                    <= ordered[j].deadline
+        }),
+{
+    let union = spec_apply_all(cmp, s, inc, inc.len());
+    let ordered = spec_sort(union);
+    let kept = spec_merge(cmp, s, inc, capacity);
+    lemma_spec_sort_wf(union, union.len());
+    lemma_take_len(ordered, capacity);
+    assert forall|i: int, j: int| 0 <= i < kept.len() <= j < ordered.len() implies kept[i].deadline
+        <= ordered[j].deadline by {
+        assert(kept[i] == ordered[i]);
     }
-    lemma_take_keeps_identity(
-        cmp,
-        spec_upsert(cmp, u, t),
-        capacity,
-        batch[m].value,
-        batch[m].deadline,
-    );
+}
+
+/// **If the wheel held no duplicate before a merge, it holds none after.**
+///
+/// The hypothesis is the whole hypothesis: no sortedness, no capacity bound, no
+/// condition at all on the incoming batch. The batch may repeat an identity as
+/// often as it likes and collide with anything already held; what comes out
+/// still carries each logical timeout at most once. Merging is the only way to
+/// put a timeout into a wheel, so this makes "the wheel never holds a
+/// duplicate" true of every wheel a caller can build.
+pub proof fn lemma_merge_preserves_no_duplicates<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
+    capacity: nat,
+)
+    requires
+        no_duplicates(cmp, s),
+    ensures
+        no_duplicates(cmp, spec_merge(cmp, s, inc, capacity)),
+{
+    let union = spec_apply_all(cmp, s, inc, inc.len());
+    lemma_no_duplicates_iff_distinct(cmp, s);
+    lemma_spec_apply_all_distinct(cmp, s, inc, inc.len());
+    lemma_spec_sort_distinct(cmp, union, union.len());
+    lemma_take_distinct(cmp, spec_sort(union), capacity);
+    lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, inc, capacity));
 }
 
 /// **A merge that carries an arrival for an identity sets that identity's
 /// deadline.** Nothing under it survives with any other.
 ///
-/// The hypothesis on the batch is that it names this identity at most once —
-/// or, if more than once, always with the same deadline. A batch that carries
-/// two genuinely different updates for one timeout resolves to the farther of
-/// them (the batch is applied nearest-first), which is a different statement;
-/// deduplicate such a batch before handing it over.
-///
-/// Like [`lemma_upsert_sets_identity`], this assumes nothing whatever about the
-/// wheel — not sortedness, not capacity, not even that it was free of
-/// duplicates.
+/// The condition on the batch is that no *later* arrival names the same
+/// identity — the last update is the one that stands. Like
+/// [`lemma_spec_apply_sets_identity`], this assumes nothing whatever about the
+/// wheel: not sortedness, not capacity, not even freedom from duplicates.
 pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
@@ -1235,9 +1195,7 @@ pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
 )
     requires
         0 <= j < inc.len(),
-        forall|l: int|
-            0 <= l < inc.len() && cmp.same(#[trigger] inc[l].value, inc[j].value) ==> inc[l]
-                == inc[j],
+        forall|l: int| j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
     ensures
         identity_carries(
             cmp,
@@ -1246,25 +1204,10 @@ pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
             inc[j].deadline,
         ),
 {
-    let batch = spec_sort(inc);
-    lemma_spec_sort_wf(inc, inc.len());
-
-    // Where the arrival ended up after sorting ...
-    let m = lemma_spec_sort_index_of(inc, inc.len(), j);
-    assert(batch[m] == inc[j]);
-
-    // ... and the fact that sorting is a rearrangement, so "named at most once"
-    // still holds of the sorted batch.
-    let names_it_once = |x: Timeout<T>| cmp.same(x.value, inc[j].value) ==> x == inc[j];
-    assert(all_sat(inc, names_it_once));
-    lemma_spec_sort_all_sat(inc, names_it_once, inc.len());
-    assert forall|l: int|
-        0 <= l < batch.len() && cmp.same(batch[l].value, batch[m].value) implies batch[l]
-        == batch[m] by {
-        assert(names_it_once(batch[l]));
-    }
-
-    lemma_merge_prefix_sets_identity(cmp, s, batch, m, inc.len(), capacity);
+    let union = spec_apply_all(cmp, s, inc, inc.len());
+    lemma_spec_apply_all_sets_identity(cmp, s, inc, j, inc.len());
+    lemma_spec_sort_keeps_identity(cmp, union, inc[j].value, inc[j].deadline);
+    lemma_take_keeps_identity(cmp, spec_sort(union), capacity, inc[j].value, inc[j].deadline);
 }
 
 /// **If a timeout is already in the wheel and the batch carries an update for
@@ -1273,15 +1216,14 @@ pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
 ///
 /// The two conclusions are the whole of it. The first says the entry is not
 /// still sitting there at its old deadline — anywhere, at any position. The
-/// second says what happened to it instead: either it is back under the new
-/// deadline, or the wheel no longer holds that identity at all, which is what
-/// happens when the new deadline lands beyond the capacity horizon.
+/// second says what happened instead: either it is back under the new deadline,
+/// or the wheel no longer holds that identity at all, which is what happens
+/// when the new deadline lands beyond the capacity horizon.
 ///
-/// There is no third outcome, and in particular the wheel never ends up holding
-/// the timeout twice — that is
-/// [`lemma_merge_preserves_no_duplicates`], and this theorem is what makes it
-/// load-bearing rather than trivial: a merge really does move deadlines, and it
-/// moves them by replacement.
+/// There is no third outcome, and the wheel never ends up holding the timeout
+/// twice — that is [`lemma_merge_preserves_no_duplicates`], and this theorem is
+/// what makes it load-bearing rather than trivial. On its own, "never holds a
+/// duplicate" would also be satisfied by a merge that quietly ignored updates.
 pub proof fn lemma_merge_replaces_or_evicts<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
@@ -1297,28 +1239,21 @@ pub proof fn lemma_merge_replaces_or_evicts<T, C: Comparator<T>>(
         cmp.same(s[i].value, inc[j].value),
         // ... and the batch moves its deadline
         s[i].deadline != inc[j].deadline,
-        forall|l: int|
-            0 <= l < inc.len() && cmp.same(#[trigger] inc[l].value, inc[j].value) ==> inc[l]
-                == inc[j],
+        // ... and no later arrival overrides this one
+        forall|l: int| j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
     ensures
         ({
             let r = spec_merge(cmp, s, inc, capacity);
             // The old entry is gone -- not at its old deadline, nowhere.
             &&& !holds_at(cmp, r, inc[j].value, s[i].deadline)
             // Either it is back with the new deadline, or it is out entirely.
-            &&& holds_at(cmp, r, inc[j].value, inc[j].deadline) || fresh(
-                cmp,
-                r,
-                inc[j].value,
-            )
+            &&& holds_at(cmp, r, inc[j].value, inc[j].deadline) || fresh(cmp, r, inc[j].value)
         }),
 {
     let r = spec_merge(cmp, s, inc, capacity);
     let v = inc[j].value;
     lemma_merge_sets_identity(cmp, s, inc, j, capacity);
 
-    // Anything left under this identity carries the new deadline, so nothing
-    // left under it carries the old one.
     assert(!holds_at(cmp, r, v, s[i].deadline)) by {
         if holds_at(cmp, r, v, s[i].deadline) {
             let k = choose|k: int|
@@ -1331,173 +1266,6 @@ pub proof fn lemma_merge_replaces_or_evicts<T, C: Comparator<T>>(
         let k = choose|k: int| 0 <= k < r.len() && cmp.same(r[k].value, v);
         assert(r[k].deadline == inc[j].deadline);
         assert(holds_at(cmp, r, v, inc[j].deadline));
-    }
-}
-
-/// **Every step lands well-formed, and never loses a slot.**
-pub proof fn lemma_step_wf<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-    capacity: nat,
-)
-    requires
-        sorted(s),
-        distinct(cmp, s),
-        s.len() <= capacity,
-    ensures
-        sorted(spec_step(cmp, s, t, capacity)),
-        distinct(cmp, spec_step(cmp, s, t, capacity)),
-        spec_step(cmp, s, t, capacity).len() <= capacity,
-        s.len() <= spec_step(cmp, s, t, capacity).len(),
-{
-    let full = spec_upsert(cmp, s, t);
-    lemma_spec_upsert_wf(cmp, s, t);
-    lemma_take_sorted(full, capacity);
-    lemma_take_distinct(cmp, full, capacity);
-    // `spec_upsert` removes at most one entry and adds exactly one, so the
-    // sequence being cut is at least as long as `s` was, and cutting it to
-    // `capacity` cannot take it below `s.len()`.
-    lemma_take_len(full, capacity);
-}
-
-/// **The drop rule, per step.** The entry a step drops is the one due farthest
-/// in the future — a merge can cost you a far timeout, never a near one.
-pub proof fn lemma_step_drops_the_farthest<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-    capacity: nat,
-)
-    requires
-        sorted(s),
-        distinct(cmp, s),
-    ensures
-        ({
-            let full = spec_upsert(cmp, s, t);
-            let kept = spec_step(cmp, s, t, capacity);
-            &&& sorted(full)
-            &&& kept.len() <= full.len()
-            &&& kept.len() < full.len() ==> kept.len() == capacity
-            &&& forall|i: int, j: int|
-                #![trigger kept[i].deadline, full[j].deadline]
-                0 <= i < kept.len() <= j < full.len() ==> kept[i].deadline <= full[j].deadline
-        }),
-{
-    let full = spec_upsert(cmp, s, t);
-    let kept = spec_step(cmp, s, t, capacity);
-    lemma_spec_upsert_wf(cmp, s, t);
-    lemma_take_len(full, capacity);
-    assert forall|i: int, j: int| 0 <= i < kept.len() <= j < full.len() implies kept[i].deadline
-        <= full[j].deadline by {
-        assert(kept[i] == full[i]);
-    }
-}
-
-/// A merge lands on a well-formed wheel and never loses a slot.
-pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    k: nat,
-    capacity: nat,
-)
-    requires
-        sorted(s),
-        distinct(cmp, s),
-        s.len() <= capacity,
-    ensures
-        sorted(spec_merge_prefix(cmp, s, inc, k, capacity)),
-        distinct(cmp, spec_merge_prefix(cmp, s, inc, k, capacity)),
-        spec_merge_prefix(cmp, s, inc, k, capacity).len() <= capacity,
-        s.len() <= spec_merge_prefix(cmp, s, inc, k, capacity).len(),
-    decreases k,
-{
-    if k == 0 {
-    } else {
-        lemma_merge_wf(cmp, s, inc, (k - 1) as nat, capacity);
-        lemma_step_wf(cmp, spec_merge_prefix(cmp, s, inc, (k - 1) as nat, capacity), inc[k - 1], capacity);
-    }
-}
-
-/// Placing an entry nothing is due after appends it.
-pub proof fn lemma_spec_insert_appends<T>(s: Seq<Timeout<T>>, t: Timeout<T>)
-    requires
-        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].deadline <= t.deadline,
-    ensures
-        spec_insert(s, t) == s + seq![t],
-    decreases s.len(),
-{
-    if s.len() == 0 {
-        assert(spec_insert(s, t) =~= s + seq![t]);
-    } else {
-        assert(s[0].deadline <= t.deadline);
-        assert forall|i: int| 0 <= i < s.skip(1).len() implies s.skip(1)[i].deadline
-            <= t.deadline by {
-            assert(s.skip(1)[i] == s[i + 1]);
-        }
-        lemma_spec_insert_appends(s.skip(1), t);
-        assert(seq![s[0]] + (s.skip(1) + seq![t]) =~= s + seq![t]);
-    }
-}
-
-/// **A batch of new, far-future timeouts merged into a full wheel changes
-/// nothing.**
-///
-/// This is the user-facing shape of the drop rule: with capacity 1000, merging
-/// a batch whose deadlines all sit at or beyond the 1000th entry's drops the
-/// batch entirely.
-///
-/// The `fresh` hypothesis is load-bearing and easy to forget. The arrivals must
-/// be *new*. An arrival that shares an identity with a timeout already in the
-/// wheel is not an addition, it is a move: it replaces that entry and inherits
-/// its slot, so the wheel does change, however far in the future the arrival
-/// is. That is the intended behaviour -- a deadline that moved out is still a
-/// deadline that moved -- but it is why "far-future arrivals are ignored" is
-/// only true of genuinely new ones.
-pub proof fn lemma_merge_ignores_far_future_newcomers<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    k: nat,
-    capacity: nat,
-)
-    requires
-        sorted(s),
-        distinct(cmp, s),
-        s.len() == capacity,
-        k <= inc.len(),
-        forall|j: int| 0 <= j < inc.len() ==> fresh(cmp, s, #[trigger] inc[j].value),
-        forall|i: int, j: int|
-            #![trigger s[i].deadline, inc[j].deadline]
-            0 <= i < s.len() && 0 <= j < inc.len() ==> s[i].deadline <= inc[j].deadline,
-    ensures
-        spec_merge_prefix(cmp, s, spec_sort(inc), k, capacity) == s,
-    decreases k,
-{
-    // Both hypotheses are properties of every arrival, so both survive sorting.
-    let is_fresh = |x: Timeout<T>| fresh(cmp, s, x.value);
-    let is_far = |x: Timeout<T>| forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].deadline <= x.deadline;
-    assert(all_sat(inc, is_fresh));
-    assert(all_sat(inc, is_far));
-    lemma_spec_sort_all_sat(inc, is_fresh, inc.len());
-    lemma_spec_sort_all_sat(inc, is_far, inc.len());
-    lemma_spec_sort_wf(inc, inc.len());
-
-    if k == 0 {
-    } else {
-        lemma_merge_ignores_far_future_newcomers(cmp, s, inc, (k - 1) as nat, capacity);
-        let t = spec_sort(inc)[k - 1];
-        assert(is_fresh(t));
-        assert(is_far(t));
-
-        // Nothing to replace, so the upsert is a plain append ...
-        lemma_fresh_spec_remove_id(cmp, s, t.value);
-        lemma_spec_insert_appends(s, t);
-        // ... which overflows a full wheel by exactly one, and the cut takes
-        // back the entry that is now last.
-        assert((s + seq![t]).len() == capacity + 1);
-        assert((s + seq![t]).take(capacity as int) =~= s);
     }
 }
 
