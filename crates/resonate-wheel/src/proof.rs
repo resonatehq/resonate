@@ -877,160 +877,8 @@ pub proof fn lemma_spec_sort_keeps_identity<T, C: Comparator<T>>(
     }
 }
 
-// ===========================================================================
-// 5. Applying the batch
-// ===========================================================================
-
-/// Applying an arrival keeps the wheel free of duplicates.
-///
-/// Note the hypotheses: `distinct` and nothing else. Not sortedness — the wheel
-/// is deliberately unsorted while a merge is applying its batch, and only put
-/// back in order at the end — and not the capacity bound either.
-pub proof fn lemma_spec_apply_distinct<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-)
-    requires
-        distinct(cmp, s),
-    ensures
-        distinct(cmp, spec_apply(cmp, s, t)),
-        s.len() <= spec_apply(cmp, s, t).len(),
-        spec_apply(cmp, s, t).len() <= s.len() + 1,
-{
-    let removed = spec_remove(cmp, s, t.value);
-    lemma_spec_remove_distinct(cmp, s, t.value);
-    lemma_spec_remove_fresh(cmp, s, t.value);
-    lemma_spec_remove_len(cmp, s, t.value);
-    lemma_spec_remove_len_lower(cmp, s, t.value);
-    lemma_equivalence::<T, C>(cmp);
-    assert forall|i: int, j: int| 0 <= i < j < removed.push(t).len() implies !cmp.same(
-        removed.push(t)[i].value,
-        removed.push(t)[j].value,
-    ) by {
-        if j < removed.len() {
-            assert(removed.push(t)[i] == removed[i]);
-            assert(removed.push(t)[j] == removed[j]);
-        } else {
-            assert(removed.push(t)[i] == removed[i]);
-            assert(!cmp.same(removed[i].value, t.value));
-        }
-    }
-}
-
-/// Applying a whole batch keeps the wheel free of duplicates, and never
-/// shortens it.
-pub proof fn lemma_spec_apply_all_distinct<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    k: nat,
-)
-    requires
-        distinct(cmp, s),
-    ensures
-        distinct(cmp, spec_apply_all(cmp, s, inc, k)),
-        s.len() <= spec_apply_all(cmp, s, inc, k).len(),
-    decreases k,
-{
-    if k == 0 {
-    } else {
-        lemma_spec_apply_all_distinct(cmp, s, inc, (k - 1) as nat);
-        lemma_spec_apply_distinct(cmp, spec_apply_all(cmp, s, inc, (k - 1) as nat), inc[k - 1]);
-    }
-}
-
-/// **An arrival sets its identity's deadline.** Whatever the wheel held under
-/// that identity, afterwards there is one entry for it and it is the arrival.
-///
-/// No hypothesis at all: the removal strips *every* equivalent entry, so this
-/// holds even on a wheel that is unsorted, over capacity, or already carrying
-/// duplicates.
-pub proof fn lemma_spec_apply_sets_identity<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-)
-    ensures
-        identity_carries(cmp, spec_apply(cmp, s, t), t.value, t.deadline),
-{
-    let removed = spec_remove(cmp, s, t.value);
-    lemma_spec_remove_fresh(cmp, s, t.value);
-    assert forall|i: int|
-        0 <= i < removed.push(t).len() && cmp.same(removed.push(t)[i].value, t.value) implies
-        removed.push(t)[i].deadline == t.deadline by {
-        if i < removed.len() {
-            assert(removed.push(t)[i] == removed[i]);
-        }
-    }
-}
-
-/// An arrival for a *different* identity leaves this one's deadline alone.
-pub proof fn lemma_spec_apply_keeps_identity<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-    v: T,
-    d: u64,
-)
-    requires
-        identity_carries(cmp, s, v, d),
-        !cmp.same(t.value, v),
-    ensures
-        identity_carries(cmp, spec_apply(cmp, s, t), v, d),
-{
-    let removed = spec_remove(cmp, s, t.value);
-    lemma_spec_remove_keeps_identity(cmp, s, t.value, v, d);
-    assert forall|i: int|
-        0 <= i < removed.push(t).len() && cmp.same(removed.push(t)[i].value, v) implies
-        removed.push(t)[i].deadline == d by {
-        if i < removed.len() {
-            assert(removed.push(t)[i] == removed[i]);
-        }
-    }
-}
-
-/// Removal only ever drops entries, so it cannot break an identity's deadline.
-pub proof fn lemma_spec_remove_keeps_identity<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    w: T,
-    v: T,
-    d: u64,
-)
-    requires
-        identity_carries(cmp, s, v, d),
-    ensures
-        identity_carries(cmp, spec_remove(cmp, s, w), v, d),
-    decreases s.len(),
-{
-    if s.len() == 0 {
-    } else {
-        assert(identity_carries(cmp, s.skip(1), v, d)) by {
-            assert forall|k: int|
-                0 <= k < s.skip(1).len() && cmp.same(s.skip(1)[k].value, v) implies s.skip(
-                1,
-            )[k].deadline == d by {
-                assert(s.skip(1)[k] == s[k + 1]);
-            }
-        }
-        lemma_spec_remove_keeps_identity(cmp, s.skip(1), w, v, d);
-        if !cmp.same(s[0].value, w) {
-            let rest = spec_remove(cmp, s.skip(1), w);
-            assert forall|k: int|
-                0 <= k < (seq![s[0]] + rest).len() && cmp.same(
-                    (seq![s[0]] + rest)[k].value,
-                    v,
-                ) implies (seq![s[0]] + rest)[k].deadline == d by {
-                if k > 0 {
-                    assert((seq![s[0]] + rest)[k] == rest[k - 1]);
-                }
-            }
-        }
-    }
-}
-
-/// Cutting to capacity only ever drops entries.
+/// Cutting to capacity only ever drops entries, so it cannot break an
+/// identity's deadline.
 pub proof fn lemma_take_keeps_identity<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
@@ -1053,65 +901,419 @@ pub proof fn lemma_take_keeps_identity<T, C: Comparator<T>>(
     }
 }
 
-/// Once the batch has applied the arrival at `j`, every later arrival preserves
-/// the deadline it set.
-pub proof fn lemma_spec_apply_all_sets_identity<T, C: Comparator<T>>(
+// ===========================================================================
+// 5. Building the union
+// ===========================================================================
+//
+// A merge builds `spec_untouched + spec_updates` and hands it to the sort. Both
+// halves are filters written in the same shape as `spec_remove`, so the proofs
+// below are the same three shapes over and over: a filter drops entries, so it
+// preserves anything of the form "every entry ...", and the two halves cannot
+// collide because one keeps only entries the batch does not mention and the
+// other keeps only entries it does.
+
+/// Mentioning splits at the head, the same way `fresh` does.
+pub proof fn lemma_mentions_cons<T, C: Comparator<T>>(cmp: C, batch: Seq<Timeout<T>>, v: T)
+    requires
+        batch.len() > 0,
+    ensures
+        mentions(cmp, batch, v) <==> (cmp.same(batch[0].value, v) || mentions(
+            cmp,
+            batch.skip(1),
+            v,
+        )),
+{
+    if fresh(cmp, batch, v) {
+        lemma_fresh_skip(cmp, batch, v);
+    }
+    if !cmp.same(batch[0].value, v) && fresh(cmp, batch.skip(1), v) {
+        lemma_fresh_cons(cmp, batch[0], batch.skip(1), v);
+        lemma_cons_head_skip(batch);
+    }
+}
+
+/// A longer batch mentions everything its tail mentions.
+pub proof fn lemma_mentions_skip<T, C: Comparator<T>>(cmp: C, batch: Seq<Timeout<T>>, v: T)
+    requires
+        batch.len() > 0,
+        mentions(cmp, batch.skip(1), v),
+    ensures
+        mentions(cmp, batch, v),
+{
+    lemma_mentions_cons(cmp, batch, v);
+}
+
+// --- spec_untouched ---
+
+/// Everything left untouched is, by construction, unmentioned by the batch.
+pub proof fn lemma_untouched_unmentioned<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    j: int,
-    k: nat,
+    batch: Seq<Timeout<T>>,
+)
+    ensures
+        forall|i: int|
+            0 <= i < spec_untouched(cmp, s, batch).len() ==> !mentions(
+                cmp,
+                batch,
+                #[trigger] spec_untouched(cmp, s, batch)[i].value,
+            ),
+    decreases s.len(),
+{
+    if s.len() == 0 {
+    } else {
+        lemma_untouched_unmentioned(cmp, s.skip(1), batch);
+        if !mentions(cmp, batch, s[0].value) {
+            let rest = spec_untouched(cmp, s.skip(1), batch);
+            assert forall|i: int| 0 <= i < (seq![s[0]] + rest).len() implies !mentions(
+                cmp,
+                batch,
+                (seq![s[0]] + rest)[i].value,
+            ) by {
+                if i > 0 {
+                    assert((seq![s[0]] + rest)[i] == rest[i - 1]);
+                }
+            }
+        }
+    }
+}
+
+/// Dropping entries cannot introduce a duplicate.
+pub proof fn lemma_untouched_distinct<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
 )
     requires
-        0 <= j < inc.len(),
-        j < k <= inc.len(),
-        forall|l: int|
-            j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
+        distinct(cmp, s),
     ensures
-        identity_carries(cmp, spec_apply_all(cmp, s, inc, k), inc[j].value, inc[j].deadline),
-    decreases k,
+        distinct(cmp, spec_untouched(cmp, s, batch)),
+    decreases s.len(),
 {
-    let u = spec_apply_all(cmp, s, inc, (k - 1) as nat);
-    if k == j + 1 {
-        lemma_spec_apply_sets_identity(cmp, u, inc[k - 1]);
+    lemma_equivalence::<T, C>(cmp);
+    if s.len() == 0 {
     } else {
-        lemma_spec_apply_all_sets_identity(cmp, s, inc, j, (k - 1) as nat);
-        lemma_spec_apply_keeps_identity(cmp, u, inc[k - 1], inc[j].value, inc[j].deadline);
+        lemma_distinct_skip(cmp, s);
+        lemma_untouched_distinct(cmp, s.skip(1), batch);
+        if !mentions(cmp, batch, s[0].value) {
+            assert(fresh(cmp, s.skip(1), s[0].value)) by {
+                assert forall|i: int| 0 <= i < s.skip(1).len() implies !cmp.same(
+                    s.skip(1)[i].value,
+                    s[0].value,
+                ) by {
+                    assert(s.skip(1)[i] == s[i + 1]);
+                    assert(!cmp.same(s[0].value, s[i + 1].value));
+                }
+            }
+            lemma_untouched_preserves_fresh(cmp, s.skip(1), batch, s[0].value);
+            lemma_distinct_cons(cmp, s[0], spec_untouched(cmp, s.skip(1), batch));
+        }
     }
+}
+
+/// Dropping entries cannot introduce a match either.
+pub proof fn lemma_untouched_preserves_fresh<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
+    w: T,
+)
+    requires
+        fresh(cmp, s, w),
+    ensures
+        fresh(cmp, spec_untouched(cmp, s, batch), w),
+    decreases s.len(),
+{
+    if s.len() == 0 {
+    } else {
+        lemma_fresh_skip(cmp, s, w);
+        lemma_untouched_preserves_fresh(cmp, s.skip(1), batch, w);
+        if !mentions(cmp, batch, s[0].value) {
+            lemma_fresh_cons(cmp, s[0], spec_untouched(cmp, s.skip(1), batch), w);
+        }
+    }
+}
+
+// --- spec_updates ---
+
+/// Every update kept is one the batch mentions — it came from the batch.
+pub proof fn lemma_updates_mentioned<T, C: Comparator<T>>(cmp: C, batch: Seq<Timeout<T>>)
+    ensures
+        forall|i: int|
+            0 <= i < spec_updates(cmp, batch).len() ==> mentions(
+                cmp,
+                batch,
+                #[trigger] spec_updates(cmp, batch)[i].value,
+            ),
+    decreases batch.len(),
+{
+    lemma_equivalence::<T, C>(cmp);
+    if batch.len() == 0 {
+    } else {
+        lemma_updates_mentioned(cmp, batch.skip(1));
+        let rest = spec_updates(cmp, batch.skip(1));
+        assert forall|i: int| 0 <= i < rest.len() implies mentions(cmp, batch, rest[i].value) by {
+            lemma_mentions_skip(cmp, batch, rest[i].value);
+        }
+        if !mentions(cmp, batch.skip(1), batch[0].value) {
+            assert forall|i: int| 0 <= i < (seq![batch[0]] + rest).len() implies mentions(
+                cmp,
+                batch,
+                (seq![batch[0]] + rest)[i].value,
+            ) by {
+                if i > 0 {
+                    assert((seq![batch[0]] + rest)[i] == rest[i - 1]);
+                } else {
+                    lemma_mentions_cons(cmp, batch, batch[0].value);
+                }
+            }
+        }
+    }
+}
+
+/// Freshness survives, since updates only ever drops arrivals.
+pub proof fn lemma_updates_preserves_fresh<T, C: Comparator<T>>(
+    cmp: C,
+    batch: Seq<Timeout<T>>,
+    w: T,
+)
+    requires
+        fresh(cmp, batch, w),
+    ensures
+        fresh(cmp, spec_updates(cmp, batch), w),
+    decreases batch.len(),
+{
+    if batch.len() == 0 {
+    } else {
+        lemma_fresh_skip(cmp, batch, w);
+        lemma_updates_preserves_fresh(cmp, batch.skip(1), w);
+        if !mentions(cmp, batch.skip(1), batch[0].value) {
+            lemma_fresh_cons(cmp, batch[0], spec_updates(cmp, batch.skip(1)), w);
+        }
+    }
+}
+
+/// **The updates hold each timeout at most once**, whatever the batch does.
+///
+/// No hypothesis on the batch: an arrival is kept only when no later arrival
+/// names the same timeout, so two kept arrivals cannot name the same one.
+pub proof fn lemma_updates_distinct<T, C: Comparator<T>>(cmp: C, batch: Seq<Timeout<T>>)
+    ensures
+        distinct(cmp, spec_updates(cmp, batch)),
+    decreases batch.len(),
+{
+    if batch.len() == 0 {
+    } else {
+        lemma_updates_distinct(cmp, batch.skip(1));
+        if !mentions(cmp, batch.skip(1), batch[0].value) {
+            // The head was kept, so nothing later matches it -- and the kept
+            // tail is drawn from what comes later.
+            lemma_updates_preserves_fresh(cmp, batch.skip(1), batch[0].value);
+            lemma_distinct_cons(cmp, batch[0], spec_updates(cmp, batch.skip(1)));
+        }
+    }
+}
+
+/// **An arrival no later arrival overrides sets its identity's deadline.**
+pub proof fn lemma_updates_set_identity<T, C: Comparator<T>>(
+    cmp: C,
+    batch: Seq<Timeout<T>>,
+    j: int,
+)
+    requires
+        0 <= j < batch.len(),
+        forall|l: int| j < l < batch.len() ==> !cmp.same(#[trigger] batch[l].value, batch[j].value),
+    ensures
+        identity_carries(cmp, spec_updates(cmp, batch), batch[j].value, batch[j].deadline),
+    decreases batch.len(),
+{
+    lemma_equivalence::<T, C>(cmp);
+    let v = batch[j].value;
+    let d = batch[j].deadline;
+
+    if j == 0 {
+        // Nothing later matches the head, so the head is kept and the tail
+        // holds nothing equivalent to it.
+        assert(fresh(cmp, batch.skip(1), v)) by {
+            assert forall|i: int| 0 <= i < batch.skip(1).len() implies !cmp.same(
+                batch.skip(1)[i].value,
+                v,
+            ) by {
+                assert(batch.skip(1)[i] == batch[i + 1]);
+            }
+        }
+        lemma_updates_preserves_fresh(cmp, batch.skip(1), v);
+        let rest = spec_updates(cmp, batch.skip(1));
+        assert forall|i: int|
+            0 <= i < (seq![batch[0]] + rest).len() && cmp.same(
+                (seq![batch[0]] + rest)[i].value,
+                v,
+            ) implies (seq![batch[0]] + rest)[i].deadline == d by {
+            if i > 0 {
+                assert((seq![batch[0]] + rest)[i] == rest[i - 1]);
+            }
+        }
+    } else {
+        assert(batch.skip(1)[j - 1] == batch[j]);
+        assert forall|l: int|
+            #![trigger cmp.same(batch.skip(1)[l].value, batch.skip(1)[j - 1].value)]
+            j - 1 < l < batch.skip(1).len() implies !cmp.same(
+            batch.skip(1)[l].value,
+            batch.skip(1)[j - 1].value,
+        ) by {
+            assert(batch.skip(1)[l] == batch[l + 1]);
+        }
+        lemma_updates_set_identity(cmp, batch.skip(1), j - 1);
+        let rest = spec_updates(cmp, batch.skip(1));
+        if !mentions(cmp, batch.skip(1), batch[0].value) {
+            // The head is kept. It cannot match `batch[j]`: if it did, the tail
+            // would mention it (at `j - 1`) and it would have been dropped.
+            assert(!cmp.same(batch[0].value, v)) by {
+                if cmp.same(batch[0].value, v) {
+                    assert(cmp.same(batch.skip(1)[j - 1].value, batch[0].value));
+                    assert(!fresh(cmp, batch.skip(1), batch[0].value));
+                    assert(false);
+                }
+            }
+            assert forall|i: int|
+                0 <= i < (seq![batch[0]] + rest).len() && cmp.same(
+                    (seq![batch[0]] + rest)[i].value,
+                    v,
+                ) implies (seq![batch[0]] + rest)[i].deadline == d by {
+                if i > 0 {
+                    assert((seq![batch[0]] + rest)[i] == rest[i - 1]);
+                }
+            }
+        }
+    }
+}
+
+// --- putting the two halves together ---
+
+/// Two sequences that cannot collide concatenate without a duplicate.
+pub proof fn lemma_concat_distinct<T, C: Comparator<T>>(
+    cmp: C,
+    a: Seq<Timeout<T>>,
+    b: Seq<Timeout<T>>,
+)
+    requires
+        distinct(cmp, a),
+        distinct(cmp, b),
+        forall|i: int, j: int|
+            0 <= i < a.len() && 0 <= j < b.len() ==> !cmp.same(
+                #[trigger] a[i].value,
+                #[trigger] b[j].value,
+            ),
+    ensures
+        distinct(cmp, a + b),
+{
+    assert forall|i: int, j: int| 0 <= i < j < (a + b).len() implies !cmp.same(
+        (a + b)[i].value,
+        (a + b)[j].value,
+    ) by {
+        if j < a.len() {
+            assert((a + b)[i] == a[i]);
+            assert((a + b)[j] == a[j]);
+        } else if i < a.len() {
+            assert((a + b)[i] == a[i]);
+            assert((a + b)[j] == b[j - a.len()]);
+        } else {
+            assert((a + b)[i] == b[i - a.len()]);
+            assert((a + b)[j] == b[j - a.len()]);
+        }
+    }
+}
+
+/// An identity's deadline survives concatenation when both halves agree on it.
+pub proof fn lemma_concat_identity<T, C: Comparator<T>>(
+    cmp: C,
+    a: Seq<Timeout<T>>,
+    b: Seq<Timeout<T>>,
+    v: T,
+    d: u64,
+)
+    requires
+        identity_carries(cmp, a, v, d),
+        identity_carries(cmp, b, v, d),
+    ensures
+        identity_carries(cmp, a + b, v, d),
+{
+    assert forall|i: int|
+        0 <= i < (a + b).len() && cmp.same((a + b)[i].value, v) implies (a + b)[i].deadline == d
+        by {
+        if i < a.len() {
+            assert((a + b)[i] == a[i]);
+        } else {
+            assert((a + b)[i] == b[i - a.len()]);
+        }
+    }
+}
+
+/// **The union holds each timeout at most once.**
+///
+/// The two halves cannot collide by construction: one keeps only entries the
+/// batch does *not* mention, the other only entries it does.
+pub proof fn lemma_union_distinct<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
+)
+    requires
+        distinct(cmp, s),
+    ensures
+        distinct(cmp, spec_untouched(cmp, s, batch) + spec_updates(cmp, batch)),
+{
+    lemma_equivalence::<T, C>(cmp);
+    let a = spec_untouched(cmp, s, batch);
+    let b = spec_updates(cmp, batch);
+    lemma_untouched_distinct(cmp, s, batch);
+    lemma_updates_distinct(cmp, batch);
+    lemma_untouched_unmentioned(cmp, s, batch);
+    lemma_updates_mentioned(cmp, batch);
+    assert forall|i: int, j: int|
+        0 <= i < a.len() && 0 <= j < b.len() implies !cmp.same(a[i].value, b[j].value) by {
+        if cmp.same(a[i].value, b[j].value) {
+            // `b[j]` is mentioned by the batch and `a[i]` matches it, so the
+            // batch mentions `a[i]` too -- but `a` holds only unmentioned
+            // entries.
+            let k = choose|k: int| 0 <= k < batch.len() && cmp.same(batch[k].value, b[j].value);
+            assert(cmp.same(batch[k].value, a[i].value));
+            assert(!fresh(cmp, batch, a[i].value));
+            assert(false);
+        }
+    }
+    lemma_concat_distinct(cmp, a, b);
 }
 
 // ===========================================================================
 // 6. What the wheel guarantees
 // ===========================================================================
 //
-// Each of these is a consequence of the three lines of `spec_merge`, and each
-// is stated with the weakest hypothesis it actually needs rather than with the
-// whole wheel invariant, so it is clear what each one rests on.
+// Each of these is a consequence of the four words of `spec_merge` — drop, add,
+// sort, cut — and each is stated with the weakest hypothesis it actually needs
+// rather than with the whole wheel invariant, so it is clear what it rests on.
 
-/// **A merge lands well-formed, and never loses a slot.**
+/// **A merge lands well-formed.**
 pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     capacity: nat,
 )
     requires
         distinct(cmp, s),
-        s.len() <= capacity,
     ensures
-        sorted(spec_merge(cmp, s, inc, capacity)),
-        distinct(cmp, spec_merge(cmp, s, inc, capacity)),
-        spec_merge(cmp, s, inc, capacity).len() <= capacity,
-        s.len() <= spec_merge(cmp, s, inc, capacity).len(),
+        sorted(spec_merge(cmp, s, batch, capacity)),
+        distinct(cmp, spec_merge(cmp, s, batch, capacity)),
+        spec_merge(cmp, s, batch, capacity).len() <= capacity,
 {
-    let union = spec_apply_all(cmp, s, inc, inc.len());
-    let ordered = spec_sort(union);
-    lemma_spec_apply_all_distinct(cmp, s, inc, inc.len());
+    let union = spec_untouched(cmp, s, batch) + spec_updates(cmp, batch);
+    lemma_union_distinct(cmp, s, batch);
     lemma_spec_sort_wf(union, union.len());
     lemma_spec_sort_distinct(cmp, union, union.len());
-    lemma_take_sorted(ordered, capacity);
-    lemma_take_distinct(cmp, ordered, capacity);
-    lemma_take_len(ordered, capacity);
+    lemma_take_sorted(spec_sort(union), capacity);
+    lemma_take_distinct(cmp, spec_sort(union), capacity);
+    lemma_take_len(spec_sort(union), capacity);
 }
 
 /// **The drop rule.** Everything the cut dropped is due at or after everything
@@ -1119,19 +1321,18 @@ pub proof fn lemma_merge_wf<T, C: Comparator<T>>(
 ///
 /// This is the whole of "sort, then cut": the survivors are a prefix of a
 /// deadline-ordered sequence, so a merge can cost you a far timeout and never a
-/// near one. With capacity 1000, whatever falls off is by construction among
-/// the farthest-future entries of the union.
+/// near one.
 pub proof fn lemma_merge_horizon<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     capacity: nat,
 )
     ensures
         ({
-            let union = spec_apply_all(cmp, s, inc, inc.len());
+            let union = spec_untouched(cmp, s, batch) + spec_updates(cmp, batch);
             let ordered = spec_sort(union);
-            let kept = spec_merge(cmp, s, inc, capacity);
+            let kept = spec_merge(cmp, s, batch, capacity);
             &&& sorted(ordered)
             &&& kept.len() <= ordered.len()
             &&& kept.len() < ordered.len() ==> kept.len() == capacity
@@ -1141,9 +1342,9 @@ pub proof fn lemma_merge_horizon<T, C: Comparator<T>>(
                     <= ordered[j].deadline
         }),
 {
-    let union = spec_apply_all(cmp, s, inc, inc.len());
+    let union = spec_untouched(cmp, s, batch) + spec_updates(cmp, batch);
     let ordered = spec_sort(union);
-    let kept = spec_merge(cmp, s, inc, capacity);
+    let kept = spec_merge(cmp, s, batch, capacity);
     lemma_spec_sort_wf(union, union.len());
     lemma_take_len(ordered, capacity);
     assert forall|i: int, j: int| 0 <= i < kept.len() <= j < ordered.len() implies kept[i].deadline
@@ -1155,59 +1356,75 @@ pub proof fn lemma_merge_horizon<T, C: Comparator<T>>(
 /// **If the wheel held no duplicate before a merge, it holds none after.**
 ///
 /// The hypothesis is the whole hypothesis: no sortedness, no capacity bound, no
-/// condition at all on the incoming batch. The batch may repeat an identity as
-/// often as it likes and collide with anything already held; what comes out
-/// still carries each logical timeout at most once. Merging is the only way to
-/// put a timeout into a wheel, so this makes "the wheel never holds a
-/// duplicate" true of every wheel a caller can build.
+/// condition at all on the batch. The batch may repeat an identity as often as
+/// it likes and collide with anything already held; what comes out still
+/// carries each logical timeout at most once. Merging is the only way to put a
+/// timeout into a wheel, so this makes "the wheel never holds a duplicate" true
+/// of every wheel a caller can build.
 pub proof fn lemma_merge_preserves_no_duplicates<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     capacity: nat,
 )
     requires
         no_duplicates(cmp, s),
     ensures
-        no_duplicates(cmp, spec_merge(cmp, s, inc, capacity)),
+        no_duplicates(cmp, spec_merge(cmp, s, batch, capacity)),
 {
-    let union = spec_apply_all(cmp, s, inc, inc.len());
     lemma_no_duplicates_iff_distinct(cmp, s);
-    lemma_spec_apply_all_distinct(cmp, s, inc, inc.len());
-    lemma_spec_sort_distinct(cmp, union, union.len());
-    lemma_take_distinct(cmp, spec_sort(union), capacity);
-    lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, inc, capacity));
+    lemma_merge_wf(cmp, s, batch, capacity);
+    lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, batch, capacity));
 }
 
 /// **A merge that carries an arrival for an identity sets that identity's
 /// deadline.** Nothing under it survives with any other.
 ///
 /// The condition on the batch is that no *later* arrival names the same
-/// identity — the last update is the one that stands. Like
-/// [`lemma_spec_apply_sets_identity`], this assumes nothing whatever about the
-/// wheel: not sortedness, not capacity, not even freedom from duplicates.
+/// identity — the last update is the one that stands. This assumes nothing
+/// whatever about the wheel: not sortedness, not capacity, not even freedom
+/// from duplicates.
 pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     j: int,
     capacity: nat,
 )
     requires
-        0 <= j < inc.len(),
-        forall|l: int| j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
+        0 <= j < batch.len(),
+        forall|l: int| j < l < batch.len() ==> !cmp.same(#[trigger] batch[l].value, batch[j].value),
     ensures
         identity_carries(
             cmp,
-            spec_merge(cmp, s, inc, capacity),
-            inc[j].value,
-            inc[j].deadline,
+            spec_merge(cmp, s, batch, capacity),
+            batch[j].value,
+            batch[j].deadline,
         ),
 {
-    let union = spec_apply_all(cmp, s, inc, inc.len());
-    lemma_spec_apply_all_sets_identity(cmp, s, inc, j, inc.len());
-    lemma_spec_sort_keeps_identity(cmp, union, inc[j].value, inc[j].deadline);
-    lemma_take_keeps_identity(cmp, spec_sort(union), capacity, inc[j].value, inc[j].deadline);
+    lemma_equivalence::<T, C>(cmp);
+    let v = batch[j].value;
+    let d = batch[j].deadline;
+    let a = spec_untouched(cmp, s, batch);
+    let b = spec_updates(cmp, batch);
+
+    // The untouched half cannot hold this identity at all: the batch mentions
+    // it, at `j`, and the untouched half keeps only what the batch does not
+    // mention.
+    lemma_untouched_unmentioned(cmp, s, batch);
+    assert(identity_carries(cmp, a, v, d)) by {
+        assert forall|i: int| 0 <= i < a.len() && cmp.same(a[i].value, v) implies a[i].deadline
+            == d by {
+            assert(cmp.same(batch[j].value, a[i].value));
+            assert(!fresh(cmp, batch, a[i].value));
+            assert(false);
+        }
+    }
+
+    lemma_updates_set_identity(cmp, batch, j);
+    lemma_concat_identity(cmp, a, b, v, d);
+    lemma_spec_sort_keeps_identity(cmp, a + b, v, d);
+    lemma_take_keeps_identity(cmp, spec_sort(a + b), capacity, v, d);
 }
 
 /// **If a timeout is already in the wheel and the batch carries an update for
@@ -1227,45 +1444,49 @@ pub proof fn lemma_merge_sets_identity<T, C: Comparator<T>>(
 pub proof fn lemma_merge_replaces_or_evicts<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     i: int,
     j: int,
     capacity: nat,
 )
     requires
         0 <= i < s.len(),
-        0 <= j < inc.len(),
+        0 <= j < batch.len(),
         // the timeout is already in the wheel ...
-        cmp.same(s[i].value, inc[j].value),
+        cmp.same(s[i].value, batch[j].value),
         // ... and the batch moves its deadline
-        s[i].deadline != inc[j].deadline,
+        s[i].deadline != batch[j].deadline,
         // ... and no later arrival overrides this one
-        forall|l: int| j < l < inc.len() ==> !cmp.same(#[trigger] inc[l].value, inc[j].value),
+        forall|l: int| j < l < batch.len() ==> !cmp.same(#[trigger] batch[l].value, batch[j].value),
     ensures
         ({
-            let r = spec_merge(cmp, s, inc, capacity);
+            let r = spec_merge(cmp, s, batch, capacity);
             // The old entry is gone -- not at its old deadline, nowhere.
-            &&& !holds_at(cmp, r, inc[j].value, s[i].deadline)
+            &&& !holds_at(cmp, r, batch[j].value, s[i].deadline)
             // Either it is back with the new deadline, or it is out entirely.
-            &&& holds_at(cmp, r, inc[j].value, inc[j].deadline) || fresh(cmp, r, inc[j].value)
+            &&& holds_at(cmp, r, batch[j].value, batch[j].deadline) || fresh(
+                cmp,
+                r,
+                batch[j].value,
+            )
         }),
 {
-    let r = spec_merge(cmp, s, inc, capacity);
-    let v = inc[j].value;
-    lemma_merge_sets_identity(cmp, s, inc, j, capacity);
+    let r = spec_merge(cmp, s, batch, capacity);
+    let v = batch[j].value;
+    lemma_merge_sets_identity(cmp, s, batch, j, capacity);
 
     assert(!holds_at(cmp, r, v, s[i].deadline)) by {
         if holds_at(cmp, r, v, s[i].deadline) {
             let k = choose|k: int|
                 0 <= k < r.len() && cmp.same(r[k].value, v) && r[k].deadline == s[i].deadline;
-            assert(r[k].deadline == inc[j].deadline);
+            assert(r[k].deadline == batch[j].deadline);
         }
     }
 
     if !fresh(cmp, r, v) {
         let k = choose|k: int| 0 <= k < r.len() && cmp.same(r[k].value, v);
-        assert(r[k].deadline == inc[j].deadline);
-        assert(holds_at(cmp, r, v, inc[j].deadline));
+        assert(r[k].deadline == batch[j].deadline);
+        assert(holds_at(cmp, r, v, batch[j].deadline));
     }
 }
 

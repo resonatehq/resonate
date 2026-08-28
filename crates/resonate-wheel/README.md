@@ -40,45 +40,50 @@ together are `TimerWheel::wf`:
 `deadline` is opaque: the wheel only ever compares deadlines, never does
 arithmetic on them, so any monotone encoding works.
 
-## The specification, in three steps
+## The specification, in four words
 
 `spec_merge` is the whole definition, and it is meant to be read rather than
 traced:
 
 ```
-replace, then add     every arrival drops whatever the wheel held under its
-                      identity and takes its place; an arrival for a timeout
-                      the wheel did not have is simply added
-sort                  by deadline, nearest first
-cut                   keep the first `capacity`
+drop      every entry the batch mentions
+add       the batch's updates -- one per timeout, the last one given
+sort      by deadline, nearest first
+cut       keep the first `capacity`
 ```
 
 One sentence falls out of it: **after a merge the wheel holds the `capacity`
-nearest deadlines of everything it had — with moved deadlines moved — together
-with everything the batch added.**
+nearest deadlines of everything it was already keeping track of that the batch
+did not touch, together with the batch itself.**
 
 Note what the definition does *not* mention: scanning, indices, insertion
-points, loops. `TimerWheel::merge` is proved *equal* to those three lines, so
-the implementation underneath is free to change — a heap, an index, a different
-scan order — without the statement of correctness moving at all. That is the
-point of writing it this way.
+points, loops. `TimerWheel::merge` is proved *equal* to those four words, so the
+implementation underneath is free to change — a heap, an index, a different scan
+order — without the statement of correctness moving at all. That is the point of
+writing it this way.
+
+The one subtlety is in **add**. "Add the batch" would be wrong: a batch that
+names one timeout twice would put it in the wheel twice, and the no-duplicates
+invariant would be gone. So the second step adds the batch's *updates* — an
+arrival is dropped only when a **later** arrival names the same timeout, which
+is also what makes a batch read as a sequence of updates with the last one
+standing. `spec_updates` is four lines and says exactly that.
 
 ### Three consequences worth knowing
 
-**An update is not a lease on a slot.** An arrival naming a timeout the wheel
-already holds replaces it, so it inherits nothing and competes on its new
-deadline like anything else. Capacity 1, wheel holding `A@1`, batch
-`[B@2, A@3]`: the union is `{A@3, B@2}` and `B` is nearer, so `B` survives and
-`A` is gone. Moving a deadline outward can cost you the timeout.
+**An update is not a lease on a slot.** The old entry is dropped in step 1, so
+an arrival naming a timeout the wheel already holds inherits nothing — it
+competes on its new deadline like anything else. Capacity 1, wheel holding
+`A@1`, batch `[B@2, A@3]`: the union is `{A@3, B@2}`, `B` is nearer, so `B`
+survives and `A` is gone. Moving a deadline outward can cost you the timeout.
 
-**Within one batch, the last update wins.** Arrivals are applied in the order
-given, each replacing the one before, so a batch reads as a sequence of updates.
+**Within one batch, the last update wins.** See **add**, above.
 
 **Ties sort behind, not ahead.** `spec_insert` places an entry after every entry
 due no later than it, and the sort is that rule folded over the union — so it is
-stable by construction. Since surviving entries come before arrivals in the
-union, an entry the wheel was already holding keeps its place over an arrival
-that merely ties with it.
+stable by construction. Untouched entries come before arrivals in the union, so
+an entry the wheel was already holding keeps its place over an arrival that
+merely ties with it.
 
 ## What is proved
 
@@ -87,7 +92,7 @@ that merely ties with it.
 
 | theorem | statement |
 | --- | --- |
-| `lemma_merge_wf` | a merge always lands sorted, deduplicated, within capacity — and never loses a slot the wheel was already using |
+| `lemma_merge_wf` | a merge always lands sorted, deduplicated and within capacity |
 | `lemma_merge_horizon` | everything the cut dropped is due at or after everything it kept |
 | `lemma_merge_ignores_far_future_newcomers` | merging *new* timeouts whose deadlines all sit beyond a full wheel's last entry changes nothing |
 | `lemma_merge_preserves_no_duplicates` | no duplicates in, no duplicates out — whatever the batch does |
@@ -177,26 +182,29 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **81 verified, 0 errors**, with no `assume`, no `admit`, and
+`./verify.sh` -> **92 verified, 0 errors**, with no `assume`, no `admit`, and
 no `external_body` anywhere in `src/`. `cargo test` -> 17 passed, plus the doctest.
 
 The proofs were mutation-tested rather than taken on trust. Each line of the
-three-step definition was broken in turn, and each break was caught:
+four-word definition was broken in turn, and each break was caught:
 
 | mutation | what Verus rejected |
 | --- | --- |
-| **cut** applied per arrival instead of once at the end | `merge`'s postcondition against `spec_merge` |
-| **sort** step handed an emptied union | the same |
-| **replace** dropped, so arrivals only append | `spec_apply` — the wheel could hold a duplicate |
-| **cut** at `capacity + 1` | the capacity bound in `wf` |
+| **drop** skipped, so old entries stay beside their updates | `merge`'s postcondition against `spec_merge` |
+| **add** adds the whole batch instead of its last updates | the same — and this is the hole in the shorter phrasing |
+| **add** keeps the *first* update per timeout instead of the last | the same |
+| **sort** skipped | the same |
+| **cut** skipped | the capacity bound in `wf` |
 | `slot_for` stops *before* ties instead of after | its own postcondition, at the end of the scan |
 | `no_duplicates` stated over all pairs, including `i == j` | unsatisfiable against reflexivity of `same` |
 | the uniqueness hypothesis dropped from `lemma_merge_sets_identity` | the theorem is false without it |
 | `next` returns the last deadline instead of the first | its minimum postcondition, and the tie in `pop_expired` |
 | `pop_expired` cuts at a fixed index rather than by deadline | the split postconditions, and firing before `next` |
 
-The first two are the ones to keep in mind when editing: both read as tidying
-and both change the result.
+The second row is the one worth dwelling on. "Drop what the batch mentions, add
+the batch, sort, cut" is the sentence everybody reaches for, and it is *almost*
+right — it goes wrong only when a batch names one timeout twice, and then it
+puts a duplicate in the wheel. That is why the spec says *the batch's updates*.
 
 ## Cost
 

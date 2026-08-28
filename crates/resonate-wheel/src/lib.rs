@@ -17,21 +17,20 @@
 //!   union it has built and cuts from the end, so what falls off is always the
 //!   farthest future — a merge can cost you a far timeout, never a near one.
 //!
-//! # The specification, in three steps
+//! # The specification, in four words
 //!
 //! ```text
-//! replace, then add     every arrival drops whatever the wheel held under its
-//!                       identity and takes its place; an arrival for a timeout
-//!                       the wheel did not have is simply added
-//! sort                  by deadline, nearest first
-//! cut                   keep the first `capacity`
+//! drop      every entry the batch mentions
+//! add       the batch's updates -- one per timeout, the last one given
+//! sort      by deadline, nearest first
+//! cut       keep the first `capacity`
 //! ```
 //!
 //! That is [`spec::spec_merge`] in full, and [`TimerWheel::merge`] is proved
 //! *equal* to it. One sentence falls out: after a merge the wheel holds the
-//! `capacity` nearest deadlines of everything it had — with moved deadlines
-//! moved — together with everything the batch added. Nothing below that
-//! equality is promised, so the implementation can be replaced by anything
+//! `capacity` nearest deadlines of everything it was already keeping track of
+//! that the batch did not touch, together with the batch itself. Nothing below
+//! that equality is promised, so the implementation can be replaced by anything
 //! faster without the guarantee moving.
 //!
 //! # Layout
@@ -41,13 +40,13 @@
 //! comparator.rs   Comparator<T>: which payloads are the same logical timeout.
 //!                 The equivalence laws are proof obligations on implementors,
 //!                 not documentation. IdComparator covers the u64-keyed case.
-//! spec.rs         THE SPECIFICATION, ghost throughout. `spec_merge` is three
-//!                 lines -- replace-then-add, sort, cut -- and is the whole
+//! spec.rs         THE SPECIFICATION, ghost throughout. `spec_merge` is four
+//!                 words -- drop, add, sort, cut -- and is the whole
 //!                 definition; `sorted` and `distinct` are the wheel invariant.
 //! proof.rs        THE PROOFS, in layers: sequence plumbing, the spec
 //!                 preserving the invariants, the bridge to the exec code's
-//!                 single indexed Vec::remove/insert, then sorting and the
-//!                 batch. Ends with the user-visible corollaries.
+//!                 single indexed Vec::remove/insert, sorting, then the two
+//!                 halves of the union. Ends with the user-visible corollaries.
 //! wheel.rs        THE IMPLEMENTATION, over a flat Vec. Every method's
 //!                 `ensures` names `spec_merge` and friends directly, so the
 //!                 spec -- not the loops -- is the definition of the behaviour.
@@ -72,7 +71,7 @@
 //! [`proof`]:
 //!
 //! - [`proof::lemma_merge_wf`] — a merge always lands sorted, deduplicated and
-//!   within capacity, and never loses a slot the wheel was already using.
+//!   within capacity.
 //! - [`proof::lemma_merge_horizon`] — everything the cut dropped is due at or
 //!   after everything it kept.
 //! - [`proof::lemma_merge_ignores_far_future_newcomers`] — merging a batch of

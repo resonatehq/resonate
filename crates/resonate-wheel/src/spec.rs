@@ -91,7 +91,7 @@ pub open spec fn fresh<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T) ->
 }
 
 // ---------------------------------------------------------------------------
-// The model of a merge
+// Primitives the definition is built from
 // ---------------------------------------------------------------------------
 
 /// Drops *every* entry of `s` equivalent to `v`.
@@ -100,7 +100,7 @@ pub open spec fn fresh<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T) ->
 /// the entry with this identity, if present". It is defined as a filter rather
 /// than as a single removal because a filter needs no side condition, which
 /// makes it much easier to reason about; [`crate::proof::lemma_remove_index_is_spec_remove`]
-/// bridges the two views.
+/// bridges the two views. It is what the *drop* step of a merge is built on.
 pub open spec fn spec_remove<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T) -> Seq<
     Timeout<T>,
 >
@@ -173,57 +173,64 @@ pub open spec fn spec_sort<T>(u: Seq<Timeout<T>>) -> Seq<Timeout<T>> {
 // The model of a merge
 // ---------------------------------------------------------------------------
 
-/// One arrival: drop whatever the wheel held under that identity, then add it.
-///
-/// The removal is unconditional, which is the whole of "same timeout, moved
-/// deadline — replace, don't add both". When the wheel held nothing under that
-/// identity the removal does nothing and this is simply an addition, so a
-/// *replace* and an *add* are the same operation and need no case split.
-pub open spec fn spec_apply<T, C: Comparator<T>>(
-    cmp: C,
-    s: Seq<Timeout<T>>,
-    t: Timeout<T>,
-) -> Seq<Timeout<T>> {
-    spec_remove(cmp, s, t.value).push(t)
+/// Does `batch` name a timeout with this identity?
+pub open spec fn mentions<T, C: Comparator<T>>(cmp: C, batch: Seq<Timeout<T>>, v: T) -> bool {
+    !fresh(cmp, batch, v)
 }
 
-/// The first `k` arrivals applied, in the order the caller supplied them.
-///
-/// Order matters only when the batch names one identity twice: the later
-/// arrival replaces the earlier, so a batch reads as a sequence of updates and
-/// the last one wins.
-pub open spec fn spec_apply_all<T, C: Comparator<T>>(
+/// The wheel's entries the batch says nothing about. They stay exactly as they
+/// are; everything else the wheel held is dropped, to be re-added by the batch.
+pub open spec fn spec_untouched<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
-    k: nat,
+    batch: Seq<Timeout<T>>,
 ) -> Seq<Timeout<T>>
-    decreases k,
+    decreases s.len(),
 {
-    if k == 0 {
-        s
+    if s.len() == 0 {
+        Seq::empty()
+    } else if mentions(cmp, batch, s[0].value) {
+        spec_untouched(cmp, s.skip(1), batch)
     } else {
-        spec_apply(cmp, spec_apply_all(cmp, s, inc, (k - 1) as nat), inc[k - 1])
+        seq![s[0]] + spec_untouched(cmp, s.skip(1), batch)
     }
 }
 
-/// **The definition of merging, in three steps.**
+/// The batch's updates: one per timeout, the last one the caller gave.
+///
+/// An arrival is dropped only when a *later* arrival names the same timeout, so
+/// a batch reads as a sequence of updates and the last one stands.
+pub open spec fn spec_updates<T, C: Comparator<T>>(
+    cmp: C,
+    batch: Seq<Timeout<T>>,
+) -> Seq<Timeout<T>>
+    decreases batch.len(),
+{
+    if batch.len() == 0 {
+        Seq::empty()
+    } else if mentions(cmp, batch.skip(1), batch[0].value) {
+        spec_updates(cmp, batch.skip(1))
+    } else {
+        seq![batch[0]] + spec_updates(cmp, batch.skip(1))
+    }
+}
+
+/// **The definition of merging, in one line.**
 ///
 /// ```text
-///   replace, then add     every arrival drops whatever the wheel held under
-///                         its identity and takes its place; an arrival for a
-///                         timeout the wheel did not have is simply added
-///   sort                  by deadline, nearest first
-///   cut                   keep the first `capacity`
+///   drop      every entry the batch mentions
+///   add       the batch's updates
+///   sort      by deadline, nearest first
+///   cut       keep the first `capacity`
 /// ```
 ///
 /// That is the whole specification, and it is meant to be read rather than
-/// traced. Everything the wheel guarantees is a consequence of these three
-/// lines, and a one-sentence summary falls out of them:
+/// traced. Everything the wheel guarantees is a consequence of those four
+/// words, and a one-sentence summary falls out of them:
 ///
 /// > after a merge, the wheel holds the `capacity` nearest deadlines of
-/// > everything it had — with moved deadlines moved — together with everything
-/// > the batch added.
+/// > everything it was already keeping track of that the batch did not touch,
+/// > together with the batch itself.
 ///
 /// Note what the definition does *not* say: nothing about scanning, indices,
 /// insertion points or loops. [`TimerWheel::merge`](crate::TimerWheel::merge)
@@ -233,10 +240,10 @@ pub open spec fn spec_apply_all<T, C: Comparator<T>>(
 ///
 /// # Two consequences worth knowing
 ///
-/// **An update is not an addition.** An arrival that names a timeout the wheel
-/// already holds replaces it, so it inherits nothing and competes for a slot on
-/// its new deadline alone. If that new deadline is beyond the horizon, the
-/// timeout is dropped — moving a deadline out can cost you the timeout.
+/// **An update is not a lease on a slot.** An arrival naming a timeout the
+/// wheel already holds does not inherit its place: the old entry is dropped in
+/// the first step and the arrival competes on its new deadline like anything
+/// else. Moving a deadline outward can cost you the timeout.
 ///
 /// **Cutting happens once, at the end.** Capacity is applied to the finished
 /// union, not to each arrival as it lands, which is what makes the result a
@@ -244,10 +251,13 @@ pub open spec fn spec_apply_all<T, C: Comparator<T>>(
 pub open spec fn spec_merge<T, C: Comparator<T>>(
     cmp: C,
     s: Seq<Timeout<T>>,
-    inc: Seq<Timeout<T>>,
+    batch: Seq<Timeout<T>>,
     capacity: nat,
 ) -> Seq<Timeout<T>> {
-    take_at_most(spec_sort(spec_apply_all(cmp, s, inc, inc.len())), capacity)
+    take_at_most(
+        spec_sort(spec_untouched(cmp, s, batch) + spec_updates(cmp, batch)),
+        capacity,
+    )
 }
 
 } // verus!

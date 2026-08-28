@@ -24,13 +24,14 @@ mod model {
         pub id: u64,
     }
 
-    /// The specification, transcribed: replace then add, sort, cut.
+    /// An independent model, written the *other* way round.
     ///
-    /// Written out this way it is three statements, and that is the whole point
-    /// of the spec's shape -- an independent reader can check this against
-    /// `spec_merge` by eye. What it deliberately does not share with the
-    /// implementation is *how*: this concatenates and stably sorts where the
-    /// wheel scans and splices.
+    /// The specification says: drop everything the batch mentions, add the
+    /// batch's last updates, sort, cut. This applies the batch one arrival at a
+    /// time instead -- each removing whatever matches it and appending itself.
+    /// The two are the same function, which is not obvious by inspection, so
+    /// driving both over pseudorandom batches is a real check rather than a
+    /// restatement.
     pub fn merge(wheel: &[Entry], incoming: &[Entry], capacity: usize) -> Vec<Entry> {
         // 1. Replace, then add.
         let mut u: Vec<Entry> = wheel.to_vec();

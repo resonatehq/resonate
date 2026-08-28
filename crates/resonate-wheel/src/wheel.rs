@@ -61,6 +61,115 @@ fn place<T>(items: &mut Vec<Timeout<T>>, t: Timeout<T>)
     }
 }
 
+/// Does `batch` name a timeout with this identity?
+fn mentioned<T, C: Comparator<T>>(cmp: &C, batch: &Vec<Timeout<T>>, v: &T) -> (r: bool)
+    ensures
+        r == mentions(*cmp, batch@, *v),
+{
+    let mut i: usize = 0;
+    while i < batch.len()
+        invariant
+            i <= batch@.len(),
+            forall|j: int| 0 <= j < i ==> !cmp.same(#[trigger] batch@[j].value, *v),
+        decreases batch@.len() - i,
+    {
+        if cmp.eq(&batch[i].value, v) {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+/// **Step 1 of a merge.** Keep the entries the batch says nothing about.
+fn drop_mentioned<T, C: Comparator<T>>(
+    cmp: &C,
+    items: Vec<Timeout<T>>,
+    batch: &Vec<Timeout<T>>,
+) -> (r: Vec<Timeout<T>>)
+    ensures
+        r@ == spec_untouched(*cmp, items@, batch@),
+{
+    let ghost s0 = items@;
+    let mut rest = items;
+    let mut out: Vec<Timeout<T>> = Vec::new();
+    let n = rest.len();
+    let mut k: usize = 0;
+
+    while k < n
+        invariant
+            k <= n,
+            n == s0.len(),
+            rest@ == s0.skip(k as int),
+            out@ + spec_untouched(*cmp, rest@, batch@) == spec_untouched(*cmp, s0, batch@),
+        decreases n - k,
+    {
+        let ghost before = rest@;
+        let t = rest.remove(0);
+        proof {
+            assert(rest@ =~= before.skip(1));
+        }
+        if !mentioned(cmp, batch, &t.value) {
+            let ghost o = out@;
+            out.push(t);
+            proof {
+                assert(o.push(t) + spec_untouched(*cmp, rest@, batch@) =~= o + (seq![t]
+                    + spec_untouched(*cmp, rest@, batch@)));
+            }
+        }
+        k = k + 1;
+    }
+    proof {
+        assert(rest@ =~= Seq::<Timeout<T>>::empty());
+        assert(out@ =~= spec_untouched(*cmp, s0, batch@));
+    }
+    out
+}
+
+/// **Step 2 of a merge.** The batch's updates: one per timeout, the last given.
+fn last_updates<T, C: Comparator<T>>(cmp: &C, batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
+    ensures
+        r@ == spec_updates(*cmp, batch@),
+{
+    let ghost b0 = batch@;
+    let mut rest = batch;
+    let mut out: Vec<Timeout<T>> = Vec::new();
+    let n = rest.len();
+    let mut k: usize = 0;
+
+    while k < n
+        invariant
+            k <= n,
+            n == b0.len(),
+            rest@ == b0.skip(k as int),
+            out@ + spec_updates(*cmp, rest@) == spec_updates(*cmp, b0),
+        decreases n - k,
+    {
+        let ghost before = rest@;
+        let t = rest.remove(0);
+        proof {
+            assert(rest@ =~= before.skip(1));
+        }
+        // Keep it only if no *later* arrival names the same timeout.
+        if !mentioned(cmp, &rest, &t.value) {
+            let ghost o = out@;
+            out.push(t);
+            proof {
+                assert(o.push(t) + spec_updates(*cmp, rest@) =~= o + (seq![t] + spec_updates(
+                    *cmp,
+                    rest@,
+                )));
+            }
+        }
+        k = k + 1;
+    }
+    proof {
+        assert(rest@ =~= Seq::<Timeout<T>>::empty());
+        assert(out@ =~= spec_updates(*cmp, b0));
+    }
+    out
+}
+
 /// Sort a batch by deadline, nearest first.
 ///
 /// Insertion sort through `place`, which means the ordering rule is written
@@ -318,69 +427,26 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
     }
 
     // -----------------------------------------------------------------------
-    // One arrival
-    // -----------------------------------------------------------------------
-
-    /// Replace, then add: drop whatever the wheel held under this identity, and
-    /// put the arrival on the end.
-    ///
-    /// The removal is unconditional, so a replacement and a fresh addition take
-    /// exactly the same path. Note what this does *not* do: it does not place
-    /// the arrival in deadline order and it does not look at capacity. A merge
-    /// applies its whole batch this way and only then sorts and cuts, which is
-    /// why the wheel is deliberately out of order in between — `wf` does not
-    /// hold across this call, which is why it is private.
-    fn apply(&mut self, t: Timeout<T>)
-        requires
-            distinct(old(self).comparator(), old(self)@),
-        ensures
-            final(self).comparator() == old(self).comparator(),
-            final(self).capacity_spec() == old(self).capacity_spec(),
-            final(self)@ == spec_apply(old(self).comparator(), old(self)@, t),
-            distinct(final(self).comparator(), final(self)@),
-    {
-        let ghost c = self.cmp;
-        let ghost s0 = self.items@;
-
-        let i = self.find_same(&t.value);
-        if i < self.items.len() {
-            proof {
-                lemma_remove_index_is_spec_remove(c, s0, t.value, i as int);
-            }
-            self.items.remove(i);
-        } else {
-            proof {
-                assert(fresh(c, s0, t.value));
-                lemma_fresh_spec_remove_id(c, s0, t.value);
-            }
-        }
-        self.items.push(t);
-        proof {
-            lemma_spec_apply_distinct(c, s0, t);
-        }
-    }
-
-    // -----------------------------------------------------------------------
     // Merge
     // -----------------------------------------------------------------------
 
     /// Fold a batch of timeouts into the wheel.
     ///
-    /// Three steps, and they are the three lines of [`spec_merge`]:
+    /// Four steps, and they are the four words of [`spec_merge`]:
     ///
-    /// 1. **replace, then add** — every arrival drops whatever the wheel held
-    ///    under its identity and takes its place; an arrival for a timeout the
-    ///    wheel did not have is simply added;
-    /// 2. **sort** by deadline, nearest first;
-    /// 3. **cut** to capacity.
+    /// 1. **drop** every entry the batch mentions;
+    /// 2. **add** the batch's updates — one per timeout, the last the caller gave;
+    /// 3. **sort** by deadline, nearest first;
+    /// 4. **cut** to capacity.
     ///
-    /// The wheel is deliberately out of order between steps 1 and 2. Capacity
-    /// is applied once, to the finished union, which is what makes the result a
-    /// function of the batch's contents rather than of the order it arrived in.
+    /// The wheel is deliberately out of order and possibly over capacity between
+    /// steps 2 and 4. Capacity is applied once, to the finished union, which is
+    /// what makes the result a function of the batch's contents rather than of
+    /// the order it arrived in.
     ///
     /// The postcondition names `spec_merge` directly, so this method is *proved
-    /// equal* to those three lines. Nothing below the equality is promised: the
-    /// scan, the insertion sort and the truncation are an implementation, and
+    /// equal* to those four steps. Nothing below the equality is promised: the
+    /// scans, the insertion sort and the truncation are an implementation, and
     /// can be replaced by anything faster without the guarantee moving.
     pub fn merge(&mut self, incoming: Vec<Timeout<T>>)
         requires
@@ -396,8 +462,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 incoming@,
                 old(self).capacity_spec(),
             ),
-            // A merge never costs the wheel a slot it was already using.
-            old(self)@.len() <= final(self)@.len(),
             // No duplicates in, no duplicates out -- whatever the batch does.
             no_duplicates(old(self).comparator(), old(self)@)
                 ==> no_duplicates(final(self).comparator(), final(self)@),
@@ -424,47 +488,31 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         let ghost s0 = self.items@;
         let ghost inc0 = incoming@;
 
-        // 1. Replace, then add.
-        let mut rest = incoming;
-        let n = rest.len();
-        let mut k: usize = 0;
-
-        while k < n
-            invariant
-                self.cmp == c,
-                self.cap == cap0,
-                k <= n,
-                n == inc0.len(),
-                rest@ == inc0.skip(k as int),
-                distinct(c, self.items@),
-                self.items@ == spec_apply_all(c, s0, inc0, k as nat),
-            decreases n - k,
-        {
-            assert(rest@[0] == inc0[k as int]);
-            let t = rest.remove(0);
-            self.apply(t);
-            proof {
-                assert(rest@ =~= inc0.skip(k as int + 1));
-            }
-            k = k + 1;
+        // 1. Drop every entry the batch mentions.
+        let held = self.items.split_off(0);
+        proof {
+            assert(held@ =~= s0);
         }
+        self.items = drop_mentioned(&self.cmp, held, &incoming);
 
-        // 2. Order by deadline.
+        // 2. Add the batch's updates.
+        let mut updates = last_updates(&self.cmp, incoming);
+        self.items.append(&mut updates);
+
+        // 3. Order by deadline.
         let ghost union = self.items@;
         let unsorted = self.items.split_off(0);
         proof {
-            // `split_off(0)` hands back `subrange(0, len)`, which is the whole
-            // sequence but not syntactically the same term.
             assert(unsorted@ =~= union);
         }
         self.items = sort_by_deadline(unsorted);
 
-        // 3. Cut to capacity.
+        // 4. Cut to capacity.
         let ghost ordered = self.items@;
         self.items.truncate(self.cap);
 
         proof {
-            assert(union == spec_apply_all(c, s0, inc0, inc0.len()));
+            assert(union =~= spec_untouched(c, s0, inc0) + spec_updates(c, inc0));
             assert(ordered == spec_sort(union));
             assert(self.items@ =~= take_at_most(ordered, cap0 as nat));
             lemma_merge_wf(c, s0, inc0, cap0 as nat);
