@@ -31,17 +31,27 @@ verus! {
 ///
 /// # Example
 ///
-/// ```ignore
-/// let mut w = TimerWheel::new(2, IdComparator);
-/// let mut batch = Vec::new();
-/// batch.push(Timeout::new(30, 1u64));
-/// batch.push(Timeout::new(10, 2u64));
-/// batch.push(Timeout::new(20, 3u64));
-/// w.merge(batch);            // capacity 2 keeps deadlines 10 and 20
+/// ```
+/// use resonate_wheel::{IdComparator, Timeout, TimerWheel};
 ///
-/// let mut moved = Vec::new();
-/// moved.push(Timeout::new(5, 3u64));
-/// w.merge(moved);            // id 3 moves 20 -> 5; it is not stored twice
+/// let mut w = TimerWheel::new(2, IdComparator);
+/// w.merge(vec![
+///     Timeout::new(30, 1u64),
+///     Timeout::new(10, 2u64),
+///     Timeout::new(20, 3u64),
+/// ]);
+/// // Capacity 2 keeps the two nearest deadlines; id 1 at 30 is dropped.
+/// assert_eq!(w.len(), 2);
+/// assert_eq!(w.peek().unwrap().deadline, 10);
+///
+/// // id 3's deadline moves 20 -> 5. It is replaced, not stored twice.
+/// w.merge(vec![Timeout::new(5, 3u64)]);
+/// assert_eq!(w.len(), 2);
+/// assert_eq!(w.peek().unwrap().value, 3);
+///
+/// let due = w.pop_expired(5);
+/// assert_eq!(due.len(), 1);
+/// assert_eq!(w.len(), 1);
 /// ```
 pub struct TimerWheel<T, C: Comparator<T>> {
     cmp: C,
@@ -214,12 +224,12 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             sorted(old(self)@),
             distinct(old(self).comparator(), old(self)@),
         ensures
-            self.comparator() == old(self).comparator(),
-            self.capacity_spec() == old(self).capacity_spec(),
-            self@ == spec_upsert(old(self).comparator(), old(self)@, t),
-            sorted(self@),
-            distinct(self.comparator(), self@),
-            self@.len() <= old(self)@.len() + 1,
+            final(self).comparator() == old(self).comparator(),
+            final(self).capacity_spec() == old(self).capacity_spec(),
+            final(self)@ == spec_upsert(old(self).comparator(), old(self)@, t),
+            sorted(final(self)@),
+            distinct(final(self).comparator(), final(self)@),
+            final(self)@.len() <= old(self)@.len() + 1,
     {
         let ghost c = self.cmp;
         let ghost s0 = self.items@;
@@ -280,11 +290,11 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         requires
             old(self).wf(),
         ensures
-            self.wf(),
-            self.comparator() == old(self).comparator(),
-            self.capacity_spec() == old(self).capacity_spec(),
+            final(self).wf(),
+            final(self).comparator() == old(self).comparator(),
+            final(self).capacity_spec() == old(self).capacity_spec(),
             // The functional specification: this *is* what merge means.
-            self@ == spec_merge(
+            final(self)@ == spec_merge(
                 old(self).comparator(),
                 old(self)@,
                 incoming@,
@@ -292,17 +302,18 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             ),
             // Nothing kept is due later than anything dropped.
             ({
+                let kept = final(self)@;
                 let full = spec_upsert_all(
                     old(self).comparator(),
                     old(self)@,
                     incoming@,
                     incoming@.len(),
                 );
-                &&& self@.len() <= full.len()
-                &&& self@.len() < full.len() ==> self@.len() == self.capacity_spec()
+                &&& kept.len() <= full.len()
+                &&& kept.len() < full.len() ==> kept.len() == old(self).capacity_spec()
                 &&& forall|i: int, j: int|
-                    0 <= i < self@.len() <= j < full.len() ==> #[trigger] self@[i].deadline
-                        <= #[trigger] full[j].deadline
+                    #![trigger kept[i].deadline, full[j].deadline]
+                    0 <= i < kept.len() <= j < full.len() ==> kept[i].deadline <= full[j].deadline
             }),
     {
         let ghost c = self.cmp;
@@ -355,10 +366,10 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         requires
             old(self).wf(),
         ensures
-            self.wf(),
-            self.comparator() == old(self).comparator(),
-            self.capacity_spec() == old(self).capacity_spec(),
-            self@ == spec_merge(
+            final(self).wf(),
+            final(self).comparator() == old(self).comparator(),
+            final(self).capacity_spec() == old(self).capacity_spec(),
+            final(self)@ == spec_merge(
                 old(self).comparator(),
                 old(self)@,
                 seq![t],
@@ -386,12 +397,12 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         requires
             old(self).wf(),
         ensures
-            self.wf(),
-            self.comparator() == old(self).comparator(),
-            self.capacity_spec() == old(self).capacity_spec(),
-            r@ + self@ == old(self)@,
+            final(self).wf(),
+            final(self).comparator() == old(self).comparator(),
+            final(self).capacity_spec() == old(self).capacity_spec(),
+            r@ + final(self)@ == old(self)@,
             forall|i: int| 0 <= i < r@.len() ==> #[trigger] r@[i].deadline <= now,
-            forall|i: int| 0 <= i < self@.len() ==> now < #[trigger] self@[i].deadline,
+            forall|i: int| 0 <= i < final(self)@.len() ==> now < #[trigger] final(self)@[i].deadline,
     {
         let ghost c = self.cmp;
         let ghost s0 = self.items@;

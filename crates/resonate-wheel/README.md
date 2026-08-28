@@ -100,7 +100,31 @@ be named by a `use` outside a `verus!` block, because under cargo they do not
 exist. Import their modules with a glob, as `src/proof.rs` does.
 
 `verify.sh` looks for Verus at `$HOME/verus-build/verus/source/target-verus/release/verus`,
-matching the convention in `resonatehq/resonate-verus`; override with `$VERUS`.
+matching the convention in `resonatehq/resonate-verus`; override with `$VERUS`. Verus
+pins its solver, so the build needs z3 4.16.0 on `PATH` (`pip install
+z3-solver==4.16.0.0` is the shortest route).
+
+Note the deliberate version skew. `verify.sh` checks the proofs against the
+vstd that ships inside the Verus build; `Cargo.toml` pins the equivalent
+crates.io releases for the erased build, so `cargo` never needs a Verus
+toolchain. Keep the two in step when bumping either.
+
+## Where things stand
+
+`./verify.sh` -> **65 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 10 passed, plus the doctest.
+
+The proofs were mutation-tested rather than taken on trust. Three semantic
+changes were each made in isolation and each was caught:
+
+| mutation | what Verus rejected |
+| --- | --- |
+| `find_slot` stops *before* ties instead of after | its own postcondition, at the end of the scan |
+| capacity applied per arrival instead of once per batch | the merge loop invariant against `spec_upsert_all` |
+| the dedup scan removed, so arrivals always append | `fresh` in `upsert_uncapped` -- the wheel could hold a duplicate |
+
+That second row is the one worth keeping in mind when editing: moving the
+truncation inside the loop looks like a harmless optimisation and is not.
 
 ## Cost
 

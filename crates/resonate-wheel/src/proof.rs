@@ -529,7 +529,9 @@ pub proof fn lemma_at_most_one_match<T, C: Comparator<T>>(
         0 <= i < s.len(),
         cmp.same(s[i].value, v),
     ensures
-        forall|j: int| 0 <= j < s.len() && j != i ==> !cmp.same(#[trigger] s[j].value, v),
+        forall|j: int|
+            #![trigger cmp.same(s[j].value, v)]
+            0 <= j < s.len() && j != i ==> !cmp.same(s[j].value, v),
 {
     lemma_equivalence::<T, C>(cmp);
     assert forall|j: int| 0 <= j < s.len() && j != i implies !cmp.same(s[j].value, v) by {
@@ -798,8 +800,8 @@ pub proof fn lemma_upsert_all_keeps_prefix<T, C: Comparator<T>>(
         k <= inc.len(),
         forall|j: int| 0 <= j < inc.len() ==> fresh(cmp, s, #[trigger] inc[j].value),
         forall|i: int, j: int|
-            0 <= i < s.len() && 0 <= j < inc.len() ==> #[trigger] s[i].deadline
-                <= #[trigger] inc[j].deadline,
+            #![trigger s[i].deadline, inc[j].deadline]
+            0 <= i < s.len() && 0 <= j < inc.len() ==> s[i].deadline <= inc[j].deadline,
     ensures
         s.len() <= spec_upsert_all(cmp, s, inc, k).len(),
         spec_upsert_all(cmp, s, inc, k).take(s.len() as int) == s,
@@ -860,8 +862,8 @@ pub proof fn lemma_merge_ignores_far_future_newcomers<T, C: Comparator<T>>(
         s.len() == capacity,
         forall|j: int| 0 <= j < inc.len() ==> fresh(cmp, s, #[trigger] inc[j].value),
         forall|i: int, j: int|
-            0 <= i < s.len() && 0 <= j < inc.len() ==> #[trigger] s[i].deadline
-                <= #[trigger] inc[j].deadline,
+            #![trigger s[i].deadline, inc[j].deadline]
+            0 <= i < s.len() && 0 <= j < inc.len() ==> s[i].deadline <= inc[j].deadline,
     ensures
         spec_merge(cmp, s, inc, capacity) == s,
 {
@@ -923,8 +925,8 @@ pub proof fn lemma_merge_horizon<T, C: Comparator<T>>(
             &&& sorted(full)
             &&& kept.len() <= full.len()
             &&& forall|i: int, j: int|
-                0 <= i < kept.len() <= j < full.len() ==> #[trigger] kept[i].deadline
-                    <= #[trigger] full[j].deadline
+                #![trigger kept[i].deadline, full[j].deadline]
+                0 <= i < kept.len() <= j < full.len() ==> kept[i].deadline <= full[j].deadline
         }),
 {
     let full = spec_upsert_all(cmp, s, inc, inc.len());
