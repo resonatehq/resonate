@@ -77,6 +77,7 @@ sequence of updates to the same timeout, deduplicate it before handing it over.
 | `lemma_merge_wf` | a merge always lands sorted, deduplicated, within capacity — and never loses a slot the wheel was already using |
 | `lemma_step_drops_the_farthest` | the entry an arrival displaces is the one due farthest in the future |
 | `lemma_merge_ignores_far_future_newcomers` | merging *new* timeouts whose deadlines all sit beyond a full wheel's last entry changes nothing |
+| `lemma_merge_preserves_no_duplicates` | no duplicates in, no duplicates out — whatever the batch does |
 
 The third is the headline: with capacity 1000, a batch whose deadlines are all
 beyond the 1000th entry's is dropped whole. Its `fresh` hypothesis is
@@ -89,6 +90,23 @@ is why the theorem is stated about newcomers.
 `pop_expired` is proved to split the wheel exactly: `r@ + self@ ==
 old(self)@`, everything returned is due, nothing retained is. There is no
 third bucket, so no timeout can be silently lost.
+
+`lemma_merge_preserves_no_duplicates` is stated with a deliberately minimal
+hypothesis: `no_duplicates(cmp, s)` and nothing else. No sortedness, no
+capacity bound, and no condition at all on the incoming batch — it may repeat
+an identity as often as it likes and collide with anything already held. So
+deduplication does not depend on the wheel's other two invariants, and since
+merging is the only way to put a timeout into a wheel, "the wheel never holds a
+duplicate" is true of every wheel a caller can build. `merge` and `insert`
+restate the conclusion in their own postconditions, so it is visible in the
+signature without unfolding `wf`.
+
+`no_duplicates` is the reader's form; `distinct` is the proof-friendly form
+that quantifies over ordered pairs only. `lemma_no_duplicates_iff_distinct`
+bridges them, and that bridge is exactly one use of the symmetry law. Note that
+both are statements about distinct *positions*: `same` is reflexive, so a
+version allowing `i == j` would be unsatisfiable for any non-empty wheel —
+`cargo`-invisible, but Verus rejects it (mutation F below).
 
 The comparator's three equivalence laws are what make dedup stable. Without
 transitivity, "remove the entry we found" would not be the same as "remove
@@ -124,10 +142,10 @@ toolchain. Keep the two in step when bumping either.
 
 ## Where things stand
 
-`./verify.sh` -> **71 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 12 passed, plus the doctest.
+`./verify.sh` -> **75 verified, 0 errors**, with no `assume`, no `admit`, and
+no `external_body` anywhere in `src/`. `cargo test` -> 13 passed, plus the doctest.
 
-The proofs were mutation-tested rather than taken on trust. Four semantic
+The proofs were mutation-tested rather than taken on trust. Six semantic
 changes were each made in isolation and each was caught:
 
 | mutation | what Verus rejected |
@@ -136,6 +154,8 @@ changes were each made in isolation and each was caught:
 | the batch left unsorted | `merge`'s postcondition against `spec_merge` |
 | `slot_for` stops *before* ties instead of after | its own postcondition, at the end of the scan |
 | the dedup scan removed, so arrivals always append | `fresh` in `upsert_uncapped` -- the wheel could hold a duplicate |
+| the removal step dropped from the no-duplicate proof | `lemma_step_preserves_distinct` -- freshness no longer follows |
+| `no_duplicates` stated over all pairs, including `i == j` | unsatisfiable against reflexivity of `same` |
 
 The first two are the ones to keep in mind when editing: both read as tidying
 and both change the result.

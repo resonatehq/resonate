@@ -84,6 +84,29 @@ pub proof fn lemma_distinct_skip<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>
     }
 }
 
+/// The reader's form of "no duplicates" and the proof-friendly form agree.
+///
+/// [`distinct`] quantifies over ordered pairs `i < j`; [`no_duplicates`]
+/// quantifies over every pair of distinct positions. Getting from the first to
+/// the second means turning `!same(s[j], s[i])` into `!same(s[i], s[j])`, which
+/// is precisely -- and only -- the comparator's symmetry law. An implementor
+/// who could not discharge that obligation would leave the wheel able to hold
+/// two entries each of which is a duplicate of the other in one direction only.
+pub proof fn lemma_no_duplicates_iff_distinct<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>)
+    ensures
+        no_duplicates(cmp, s) <==> distinct(cmp, s),
+{
+    lemma_symmetric_all::<T, C>(cmp);
+    if distinct(cmp, s) {
+        assert forall|i: int, j: int| 0 <= i < s.len() && 0 <= j < s.len() && i != j implies
+            !cmp.same(s[i].value, s[j].value) by {
+            if j < i {
+                assert(!cmp.same(s[j].value, s[i].value));
+            }
+        }
+    }
+}
+
 /// `fresh` survives dropping the head.
 pub proof fn lemma_fresh_skip<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T)
     requires
@@ -814,6 +837,95 @@ pub proof fn lemma_spec_sort_wf<T>(inc: Seq<Timeout<T>>, k: nat)
 // ===========================================================================
 // Corollaries: the wheel's user-visible guarantees
 // ===========================================================================
+
+// ---------------------------------------------------------------------------
+// No duplicates in, no duplicates out
+// ---------------------------------------------------------------------------
+
+/// One arrival cannot introduce a duplicate.
+///
+/// Worth noticing what this does *not* assume: neither `sorted` nor the
+/// capacity bound appears. Deduplication is independent of the wheel's other
+/// two invariants -- it rests only on the comparator's laws -- so it survives
+/// even a step taken on a wheel that is unsorted or over capacity.
+///
+/// The reason is structural. A step is `spec_remove` then `spec_insert` then a
+/// cut. The removal strips *every* entry equivalent to the arrival, so the
+/// arrival is fresh against what remains no matter what order that sequence was
+/// in; the insertion is then the only entry with that identity; and the cut
+/// only drops entries.
+pub proof fn lemma_step_preserves_distinct<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    t: Timeout<T>,
+    capacity: nat,
+)
+    requires
+        distinct(cmp, s),
+    ensures
+        distinct(cmp, spec_step(cmp, s, t, capacity)),
+{
+    let removed = spec_remove(cmp, s, t.value);
+    lemma_spec_remove_distinct(cmp, s, t.value);
+    lemma_spec_remove_fresh(cmp, s, t.value);
+    lemma_spec_insert_distinct(cmp, removed, t);
+    lemma_take_distinct(cmp, spec_upsert(cmp, s, t), capacity);
+}
+
+/// A batch of arrivals cannot introduce a duplicate.
+pub proof fn lemma_merge_prefix_preserves_distinct<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
+    k: nat,
+    capacity: nat,
+)
+    requires
+        distinct(cmp, s),
+    ensures
+        distinct(cmp, spec_merge_prefix(cmp, s, inc, k, capacity)),
+    decreases k,
+{
+    if k == 0 {
+    } else {
+        lemma_merge_prefix_preserves_distinct(cmp, s, inc, (k - 1) as nat, capacity);
+        lemma_step_preserves_distinct(
+            cmp,
+            spec_merge_prefix(cmp, s, inc, (k - 1) as nat, capacity),
+            inc[k - 1],
+            capacity,
+        );
+    }
+}
+
+/// **If the wheel held no duplicate before a merge, it holds none after.**
+///
+/// The hypothesis is the whole hypothesis: no sortedness, no capacity bound, no
+/// condition at all on the incoming batch. The batch may repeat an identity as
+/// many times as it likes, and may collide with anything already in the wheel;
+/// what comes out still holds each logical timeout at most once. Merging is the
+/// only way to put a timeout into a wheel, so this is what makes "the wheel
+/// never holds a duplicate" true of every wheel a caller can construct, and not
+/// merely of the ones this crate happens to build.
+///
+/// [`TimerWheel::merge`](crate::TimerWheel::merge) states the conclusion in its
+/// own postcondition, so a caller reading the signature sees it without
+/// unfolding [`TimerWheel::wf`](crate::TimerWheel::wf).
+pub proof fn lemma_merge_preserves_no_duplicates<T, C: Comparator<T>>(
+    cmp: C,
+    s: Seq<Timeout<T>>,
+    inc: Seq<Timeout<T>>,
+    capacity: nat,
+)
+    requires
+        no_duplicates(cmp, s),
+    ensures
+        no_duplicates(cmp, spec_merge(cmp, s, inc, capacity)),
+{
+    lemma_no_duplicates_iff_distinct(cmp, s);
+    lemma_merge_prefix_preserves_distinct(cmp, s, spec_sort(inc), inc.len(), capacity);
+    lemma_no_duplicates_iff_distinct(cmp, spec_merge(cmp, s, inc, capacity));
+}
 
 /// **Every step lands well-formed, and never loses a slot.**
 pub proof fn lemma_step_wf<T, C: Comparator<T>>(

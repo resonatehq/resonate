@@ -308,6 +308,43 @@ fn merge_matches_the_model() {
 }
 
 #[test]
+fn a_merge_never_introduces_a_duplicate() {
+    // The runtime face of `lemma_merge_preserves_no_duplicates`. The batches
+    // here are built to collide as hard as possible: four ids across up to
+    // sixteen arrivals, so nearly every batch repeats an identity several
+    // times over AND collides with what the wheel already holds. The theorem
+    // puts no condition at all on the batch, so neither does this.
+    let mut rng = Rng(0x0BAD_F00D_1234_5678);
+
+    for _ in 0..4_000 {
+        let capacity = (1 + rng.below(6)) as usize;
+        let mut wheel = TimerWheel::new(capacity, IdComparator);
+
+        for _ in 0..1 + rng.below(8) {
+            let batch: Vec<Timeout<u64>> = (0..rng.below(16))
+                .map(|_| Timeout::new(rng.below(8), rng.below(4)))
+                .collect();
+            wheel.merge(batch);
+
+            // Read the wheel out and put it straight back, so the check runs
+            // against every intermediate state rather than only the last.
+            let held: Vec<Timeout<u64>> = wheel.pop_expired(u64::MAX);
+            for i in 0..held.len() {
+                for j in 0..held.len() {
+                    if i != j {
+                        assert_ne!(
+                            held[i].value, held[j].value,
+                            "positions {i} and {j} hold the same logical timeout"
+                        );
+                    }
+                }
+            }
+            wheel.merge(held);
+        }
+    }
+}
+
+#[test]
 fn invariants_hold_under_random_merges() {
     let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
 

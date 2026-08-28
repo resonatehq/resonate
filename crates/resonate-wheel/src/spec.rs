@@ -31,6 +31,27 @@ pub open spec fn distinct<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>) -> bo
         0 <= i < j < s.len() ==> !cmp.same(s[i].value, s[j].value)
 }
 
+/// **No two entries are the same logical timeout.** The reader's form of
+/// [`distinct`].
+///
+/// The two say the same thing and [`lemma_no_duplicates_iff_distinct`] proves
+/// it. They are kept apart because they are convenient for different jobs:
+/// `distinct` quantifies over ordered pairs `i < j`, which halves the work in
+/// an induction, while `no_duplicates` quantifies over every pair of distinct
+/// positions, which is what someone asking "can the wheel hold a duplicate?"
+/// actually means. Bridging them is exactly one use of the comparator's
+/// symmetry law.
+///
+/// Note that this is a statement about distinct *positions*, not distinct
+/// values. It has to be: `same` is reflexive, so every entry is trivially the
+/// same logical timeout as itself, and a version of this predicate that let
+/// `i` equal `j` would be unsatisfiable for any non-empty wheel.
+pub open spec fn no_duplicates<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>) -> bool {
+    forall|i: int, j: int|
+        #![trigger cmp.same(s[i].value, s[j].value)]
+        0 <= i < s.len() && 0 <= j < s.len() && i != j ==> !cmp.same(s[i].value, s[j].value)
+}
+
 /// `s` holds nothing equivalent to `v` — so `v` may be inserted without
 /// breaking [`distinct`].
 pub open spec fn fresh<T, C: Comparator<T>>(cmp: C, s: Seq<Timeout<T>>, v: T) -> bool {

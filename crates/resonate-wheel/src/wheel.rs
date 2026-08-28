@@ -367,6 +367,13 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             ),
             // A merge never costs the wheel a slot it was already using.
             old(self)@.len() <= final(self)@.len(),
+            // No duplicates in, no duplicates out -- whatever the batch does.
+            // `wf` carries this too, but state it plainly: it is the guarantee
+            // callers reach for, and it holds under far weaker conditions than
+            // `wf` -- see `lemma_merge_preserves_no_duplicates`, which assumes
+            // neither sortedness nor the capacity bound.
+            no_duplicates(old(self).comparator(), old(self)@)
+                ==> no_duplicates(final(self).comparator(), final(self)@),
     {
         let ghost c = self.cmp;
         let ghost cap0 = self.cap;
@@ -416,6 +423,10 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         proof {
             lemma_spec_sort_wf(inc0, inc0.len());
             lemma_merge_wf(c, s0, batch, n as nat, cap0 as nat);
+            // `wf` gave us `distinct` on the way in; the two forms are the same
+            // statement, so the antecedent above always holds here.
+            lemma_no_duplicates_iff_distinct(c, s0);
+            lemma_merge_preserves_no_duplicates(c, s0, inc0, cap0 as nat);
         }
     }
 
@@ -435,6 +446,8 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 seq![t],
                 old(self).capacity_spec(),
             ),
+            no_duplicates(old(self).comparator(), old(self)@)
+                ==> no_duplicates(final(self).comparator(), final(self)@),
     {
         let mut batch = Vec::new();
         batch.push(t);
