@@ -131,10 +131,17 @@ the clock AND fairness on that step.
 EXTERNAL, because that is the arming rule stated as a property. The
 step is enabled only on external promises, so a fair scheduler owes a
 write only there, and asking for more would be asking for a write no
-implementation makes. An internal promise past its deadline is settled
-through every read and pending in the store forever; the catalogue
-tolerates that precisely because nothing can be waiting to hear about
-it. -/
+implementation makes.
+
+WHAT IS NOT NARROWED is the observation, and the two must not be
+confused. `promiseAt` is the STORED row — `(objects.find? _).map
+(·.promise)`, no projection — so this says a write happens. The claim
+that every promise, internal ones included, eventually READS settled is
+a different statement, and it is stated separately below because it
+survives the guard untouched. An internal promise past its deadline is
+settled through every view and pending in the store forever; the
+catalogue tolerates that precisely because nothing can be waiting to
+hear about it. -/
 
 def EventuallyEveryExternalPromiseSettles : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
@@ -143,6 +150,32 @@ def EventuallyEveryExternalPromiseSettles : Prop :=
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ p, promiseAt (tr u).state id = some p → p.state ≠ .pending
+
+/-- ### 1b. Every promise eventually READS settled
+
+Every promise, with no externality hypothesis and — the point — with no
+fairness hypothesis either. `project` settles a pending promise the
+instant the clock passes its deadline, so this follows from
+`ClockAdvances` alone.
+
+That is why it is a separate statement rather than a replacement for
+the one above. Weaker in what it asks of the environment and stronger
+in what it covers, it is the half of "every promise settles" that no
+arming rule can take away: gate the settlement STEP however you like
+and this still holds, because it never depended on a step firing. The
+one above is the half that costs a write, and a write is owed only
+where someone can be waiting for it.
+
+Read them together and they say the thing the arming rule is for: an
+internal promise is never observed to be pending past its deadline, and
+never costs the server a timer to make that true. -/
+def EventuallyEveryPromiseReadsSettled : Prop :=
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr →
+    ∀ (t : Nat) (id : String),
+      (promiseAt (tr t).state id).isSome →
+      ∃ u : Nat, t ≤ u ∧
+        ∀ p, promiseAt (tr u).state id = some p →
+          (p.project (tr u).now).state ≠ .pending
 
 /-! ### 2. Every task eventually fulfils
 
