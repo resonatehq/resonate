@@ -200,7 +200,7 @@ fn cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
 
 #[async_trait]
 impl ResonateGateway for HttpGateway {
-    async fn init(&self) -> Result<(), Unavailable> {
+    async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
         {
             let mut app = self.app.lock().await;
             if app.is_some() {

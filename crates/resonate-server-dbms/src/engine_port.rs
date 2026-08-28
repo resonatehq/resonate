@@ -217,13 +217,6 @@ pub trait ResonateEngine: Send + Sync {
     /// a wheel that skipped them would wait for the sweep instead.
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>>;
 
-    /// Is the engine paused? `debug.start` sets this, and the background loops
-    /// honour it so a test can drive the clock with `debug.tick` instead of
-    /// racing wall time.
-    fn is_paused(&self) -> bool {
-        false
-    }
-
     /// Lightweight liveness probe.
     async fn ping(&self) -> StorageResult<()>;
 

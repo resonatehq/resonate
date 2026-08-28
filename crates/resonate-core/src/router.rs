@@ -13,6 +13,21 @@ use super::Unavailable;
 /// scheme is a registration, never a change to `core`.
 #[async_trait]
 pub trait ResonateRouter: Send + Sync {
+    /// Start whatever the router owns, and hand each worker the debug flag.
+    ///
+    /// The router holds the workers, so it is the natural place for their
+    /// `init` to be driven from — and the one place that knows every scheme,
+    /// which is what a startup failure needs to name.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        let _ = debug;
+        Ok(())
+    }
+
+    /// Stop whatever the router owns, and stop each worker.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        Ok(())
+    }
+
     /// Route and deliver one message.
     ///
     /// Returns `Err(Unavailable)` when the message could not be handed off:

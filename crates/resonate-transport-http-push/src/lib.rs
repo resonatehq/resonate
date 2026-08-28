@@ -335,7 +335,10 @@ impl HttpPushTransport {
 #[async_trait]
 impl ResonateWorker for HttpPushTransport {
     /// Build the HTTP client and start the delivery queue.
-    async fn init(&self) -> Result<(), Unavailable> {
+    /// Nothing here runs on wall time — the dispatcher is driven by the queue,
+    /// and a request timeout is scoped to a request — so the debug flag changes
+    /// nothing for this transport.
+    async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
         let auth = match &self.config.auth {
             Some(cfg) => Auth::from_config(cfg),
             None => Auth::None,

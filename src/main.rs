@@ -24,13 +24,11 @@ use std::collections::HashMap;
 
 /// The transports, handed back out of the wiring closure.
 ///
-/// The server owns the router and the router owns the workers, but two things
-/// are still needed here: the poll registry, which the HTTP layer serves
-/// directly, and the workers by scheme, which have to be started before the
-/// listener comes up and stopped after it goes down.
+/// The server owns the router and the router owns the workers, so their
+/// lifecycle is driven through the router. What is still needed out here is the
+/// poll registry, which the HTTP gateway serves directly.
 struct Transports {
     poll_registry: Arc<PollRegistry>,
-    by_scheme: Vec<(String, Arc<dyn ResonateWorker>)>,
 }
 
 #[derive(Parser)]
@@ -140,7 +138,10 @@ async fn run_server(config: Config) -> Result<(), String> {
         "Operational config"
     );
     if config.debug {
-        tracing::info!("Debug mode enabled — debug operations allowed, background loops paused");
+        tracing::info!(
+            "Debug mode enabled — the clock belongs to the caller: debug.* is \
+             answered, head.debug_time is honoured, and nothing runs on wall time"
+        );
     }
 
     // Validate storage config
@@ -206,6 +207,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
     let is_sqlite = config.storage.storage_type == "sqlite";
+    let config_debug = config.debug;
 
     // Build transports
     tracing::info!(
@@ -290,13 +292,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             );
         }
 
-        transports = Some(Transports {
-            poll_registry,
-            by_scheme: workers
-                .iter()
-                .map(|(scheme, worker)| (scheme.clone(), Arc::clone(worker)))
-                .collect(),
-        });
+        transports = Some(Transports { poll_registry });
 
         let router: Arc<dyn ResonateRouter> =
             Arc::new(transport::TransportDispatcher::new(workers));
@@ -307,43 +303,55 @@ async fn run_server(config: Config) -> Result<(), String> {
         Server::new(config, engine, router, timer)
     });
 
-    let Transports {
-        poll_registry,
-        by_scheme: started,
-    } = transports.expect("the closure above always sets it");
+    let Transports { poll_registry } = transports.expect("the closure above always sets it");
 
     // Start every worker before anything can route to one. A worker that
     // cannot start is a startup failure, not a message that quietly goes
     // nowhere later. Nothing has routed yet: the listener is not up and the
     // background loops are not spawned.
-    for (scheme, worker) in &started {
-        worker
-            .init()
-            .await
-            .map_err(|e| format!("transport '{scheme}' failed to start: {e}"))?;
-    }
+    let debug = config_debug;
+    state
+        .router()
+        .init(debug)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Seed the timer from the durable deadlines before anything can arm one.
     // `start_timer` returns only once that first read has landed, so a deadline
     // that is already due fires immediately rather than waiting for a sweep.
     state.start_timer().await;
-    tracing::info!(
-        wheel_capacity = state.config.timeouts.wheel_capacity,
-        wheel_refresh_ms = state.config.timeouts.wheel_refresh,
-        sweep_interval_ms = state.config.timeouts.poll_interval,
-        "Timer started"
-    );
+    if !debug {
+        tracing::info!(
+            wheel_capacity = state.config.timeouts.wheel_capacity,
+            wheel_refresh_ms = state.config.timeouts.wheel_refresh,
+            sweep_interval_ms = state.config.timeouts.poll_interval,
+            "Timer started"
+        );
+    }
 
     // Spawn background loops
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut handles = Vec::new();
 
-    let timeout_state = Arc::clone(&state);
-    let timeout_shutdown = shutdown_rx.clone();
-    handles.push(tokio::spawn(async move {
-        processing::processing_timeouts::timeout_processing_loop(timeout_state, timeout_shutdown)
+    // Not under the debug flag: the sweep runs on wall time, and under debug
+    // the clock is the caller's. `debug.tick` is how time moves instead, and it
+    // sweeps as part of moving.
+    if debug {
+        tracing::warn!(
+            "Debug mode — no timeout sweep and no timer. Time advances only \
+             through debug.tick, and debug.* operations are answered."
+        );
+    } else {
+        let timeout_state = Arc::clone(&state);
+        let timeout_shutdown = shutdown_rx.clone();
+        handles.push(tokio::spawn(async move {
+            processing::processing_timeouts::timeout_processing_loop(
+                timeout_state,
+                timeout_shutdown,
+            )
             .await;
-    }));
+        }));
+    }
 
     let metrics_port = state.config.observability.metrics_port;
     if metrics_port > 0 {
@@ -391,7 +399,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         },
     ));
     gateway
-        .init()
+        .init(debug)
         .await
         .map_err(|e| format!("HTTP gateway failed to start: {e}"))?;
 
@@ -410,15 +418,11 @@ async fn run_server(config: Config) -> Result<(), String> {
         for handle in handles {
             let _ = handle.await;
         }
-        // Then the workers: the loops that feed them have stopped, so this
-        // drains what is already in flight rather than racing new deliveries.
-        // This is also what ends the poll transport's SSE streams, by dropping
-        // the senders they read from.
-        for (_, worker) in started {
-            if let Err(e) = worker.stop().await {
-                tracing::warn!(error = %e, "transport did not stop cleanly");
-            }
-        }
+        // Then the workers, through the router that holds them: the loops that
+        // feed them have stopped, so this drains what is already in flight
+        // rather than racing new deliveries. It is also what ends the poll
+        // transport's SSE streams, by dropping the senders they read from.
+        let _ = state.router().stop().await;
         // The gateway last, not first. Refusing connections while in-flight
         // work is still draining would give clients a closed socket where a
         // 503 would do — and stopping it first would deadlock, because its

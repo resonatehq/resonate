@@ -40,7 +40,6 @@ use serde_json::Value;
 use sqlx::mysql::MySqlRow;
 use sqlx::{MySqlPool, Row};
 use std::cell::{RefCell, UnsafeCell};
-use std::sync::atomic::{AtomicBool, Ordering};
 use validator::Validate;
 
 use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
@@ -51,8 +50,6 @@ pub struct MysqlEngine {
     task_retry_timeout: i64,
     /// Whether `debug.*` operations are permitted at all.
     debug: bool,
-    /// Set by `debug.start` / `debug.stop`; pauses the background loops.
-    debug_mode: AtomicBool,
 }
 
 const CREATE_SCHEMA_SQL: &str = r#"
@@ -159,13 +156,7 @@ impl MysqlEngine {
             pool,
             task_retry_timeout,
             debug,
-            debug_mode: AtomicBool::new(false),
         })
-    }
-
-    /// Is the engine paused? `debug.start` sets this.
-    pub fn is_paused(&self) -> bool {
-        self.debug_mode.load(Ordering::SeqCst)
     }
 
     pub async fn init(&self) -> Result<(), sqlx::Error> {
@@ -351,34 +342,12 @@ impl MysqlEngine {
             "schedule.search" => self.op_schedule_search(req).await,
 
             // === Debug operations ===
-            "debug.start" | "debug.stop" | "debug.reset" | "debug.snap" | "debug.tick"
-                if !self.debug =>
-            {
+            "debug.reset" | "debug.snap" | "debug.tick" if !self.debug => {
                 Output::response(ResponseEnvelope::error(
                     req.kind.clone(),
                     req.head.corr_id.clone(),
                     403,
                     "Debug operations are disabled",
-                ))
-            }
-            "debug.start" => {
-                self.debug_mode.store(true, Ordering::SeqCst);
-                tracing::info!("Debug mode started — background loops paused");
-                Output::response(ResponseEnvelope::new(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    200,
-                    Value::Object(serde_json::Map::new()),
-                ))
-            }
-            "debug.stop" => {
-                self.debug_mode.store(false, Ordering::SeqCst);
-                tracing::info!("Debug mode stopped — background loops resumed");
-                Output::response(ResponseEnvelope::new(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    200,
-                    Value::Object(serde_json::Map::new()),
                 ))
             }
             "debug.reset" => self.op_debug_reset(req).await,
@@ -4529,10 +4498,6 @@ impl ResonateEngine for MysqlEngine {
 
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         self.query(move |db| db.upcoming(limit)).await
-    }
-
-    fn is_paused(&self) -> bool {
-        self.debug_mode.load(Ordering::SeqCst)
     }
 
     async fn ping(&self) -> StorageResult<()> {

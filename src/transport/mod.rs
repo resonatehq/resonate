@@ -39,6 +39,36 @@ impl TransportDispatcher {
 
 #[async_trait]
 impl ResonateRouter for TransportDispatcher {
+    /// Start every worker, and hand each the debug flag.
+    ///
+    /// Driven from here rather than from the composition root because this is
+    /// what holds the workers, and because it is the only place that knows a
+    /// worker's scheme — which is what a startup failure has to name. One
+    /// worker may be registered under several schemes; each gets its own
+    /// `init`, which is the behaviour that was here before this moved.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        for (scheme, worker) in &self.workers {
+            worker.init(debug).await.map_err(|e| {
+                Unavailable::new(format!("transport '{scheme}' failed to start: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Stop every worker, and keep going when one of them will not.
+    ///
+    /// Unlike `init`, a failure here is not fatal: the process is on its way
+    /// down, and one transport refusing to drain is no reason to leave the
+    /// others running.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        for (scheme, worker) in &self.workers {
+            if let Err(e) = worker.stop().await {
+                tracing::warn!(scheme = %scheme, error = %e, "transport did not stop cleanly");
+            }
+        }
+        Ok(())
+    }
+
     async fn route(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         // Delivery outcomes are recorded here rather than in the workers: the
         // router is the one place that sees every message, so a worker needs no

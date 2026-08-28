@@ -38,6 +38,7 @@ impl Config {
     }
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -163,6 +164,13 @@ pub struct BashExecTransport {
     local: Arc<LocalBackend>,
     docker: Arc<DockerBackend>,
     tensorlake: Arc<TensorlakeBackend>,
+    /// The process-wide debug flag, taken in `init`.
+    ///
+    /// This is the one worker with work on a clock — the lease heartbeat — and
+    /// under debug the clock is the caller's. Beating against wall time while a
+    /// test drives `debug.tick` would renew a lease the test is trying to let
+    /// expire, so the beat does not start.
+    debug: AtomicBool,
 }
 
 impl BashExecTransport {
@@ -178,6 +186,7 @@ impl BashExecTransport {
             local: Arc::new(LocalBackend),
             docker: Arc::new(DockerBackend),
             tensorlake: Arc::new(TensorlakeBackend::from_env()),
+            debug: AtomicBool::new(false),
         }
     }
 
@@ -208,10 +217,12 @@ impl BashExecTransport {
             return Err(Unavailable::new("bash-exec: server is gone"));
         };
         let lease_timeout = self.lease_timeout;
+        let debug = self.debug.load(Ordering::SeqCst);
         tokio::spawn(async move {
             run_task(
                 server,
                 lease_timeout,
+                debug,
                 task_id,
                 task_version,
                 backend,
@@ -225,6 +236,12 @@ impl BashExecTransport {
 
 #[async_trait]
 impl ResonateWorker for BashExecTransport {
+    /// Remember the debug flag, for the lease heartbeat in `run_task`.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        self.debug.store(debug, Ordering::SeqCst);
+        Ok(())
+    }
+
     async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         BashExecTransport::send(self, address, msg).await
     }
@@ -297,6 +314,7 @@ async fn settle_task(
 async fn run_task(
     server: Arc<dyn ResonateServer>,
     lease_timeout: i64,
+    debug: bool,
     task_id: String,
     task_version: i64,
     backend: Arc<dyn ExecBackend>,
@@ -364,28 +382,34 @@ async fn run_task(
         }
     };
 
-    // 3. Heartbeat — refreshes the lease while the backend runs.
-    let heartbeat = {
-        let server = Arc::clone(&server);
-        let task_id = task_id.clone();
-        let pid = pid.clone();
-        let version = acquired_version;
-        tokio::spawn(async move {
-            let beat_ms = (lease_timeout / 3).max(1000) as u64;
-            let mut interval = tokio::time::interval(Duration::from_millis(beat_ms));
-            interval.tick().await;
-            loop {
+    // 3. Heartbeat — refreshes the lease while the backend runs. Not under the
+    // debug flag: it runs on wall time, and a test that is trying to let this
+    // lease expire would find it renewed underneath.
+    let heartbeat = if debug {
+        None
+    } else {
+        Some({
+            let server = Arc::clone(&server);
+            let task_id = task_id.clone();
+            let pid = pid.clone();
+            let version = acquired_version;
+            tokio::spawn(async move {
+                let beat_ms = (lease_timeout / 3).max(1000) as u64;
+                let mut interval = tokio::time::interval(Duration::from_millis(beat_ms));
                 interval.tick().await;
-                let _ = request(
-                    server.as_ref(),
-                    "task.heartbeat",
-                    json!({
-                        "pid": pid,
-                        "tasks": [{ "id": task_id, "version": version }]
-                    }),
-                )
-                .await;
-            }
+                loop {
+                    interval.tick().await;
+                    let _ = request(
+                        server.as_ref(),
+                        "task.heartbeat",
+                        json!({
+                            "pid": pid,
+                            "tasks": [{ "id": task_id, "version": version }]
+                        }),
+                    )
+                    .await;
+                }
+            })
         })
     };
 
@@ -400,7 +424,9 @@ async fn run_task(
             timeout_at: promise.timeout_at,
         })
         .await;
-    heartbeat.abort();
+    if let Some(h) = heartbeat {
+        h.abort();
+    }
 
     // 5. Fulfill, reject, or drop-for-reschedule.
     match outcome.result {

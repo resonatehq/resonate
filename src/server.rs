@@ -33,6 +33,15 @@ pub struct Server {
     /// worker outliving its server is a real condition at shutdown, whereas a
     /// server without a router was only ever an artifact of the wiring order.
     router: Arc<dyn ResonateRouter>,
+    /// The process-wide debug flag.
+    ///
+    /// One flag, set at startup, rather than a mode a request can enter. It
+    /// says the clock belongs to the caller: `head.debug_time` is honoured,
+    /// the `debug.*` operations are answered, and nothing in this process runs
+    /// on wall time — no sweep, no timer. A server that could be put into that
+    /// state by a request had to be asked, at every step, whether it was in it;
+    /// a server that is told once at startup does not.
+    pub debug: bool,
     /// The near future, in memory.
     ///
     /// Every deadline a transition arms is merged here, and the timer asks the
@@ -50,11 +59,17 @@ impl Server {
         timer: DeadlineTimer,
     ) -> Self {
         Self {
+            debug: config.debug,
             engine,
             config,
             router,
             timer,
         }
+    }
+
+    /// The router, for driving the workers' lifecycle at startup and shutdown.
+    pub fn router(&self) -> &Arc<dyn ResonateRouter> {
+        &self.router
     }
 
     /// Start the timer and wait for it to be seeded.
@@ -63,6 +78,12 @@ impl Server {
     /// because the timer's own callbacks point back here: nothing can run until
     /// the server is behind an `Arc`.
     pub async fn start_timer(&self) {
+        // Under the debug flag nothing runs on wall time. The timer is the
+        // clock, so it is the first thing that must not start.
+        if self.debug {
+            tracing::info!("Debug mode — the timer is not started");
+            return;
+        }
         self.timer.init().await;
     }
 
@@ -78,12 +99,9 @@ impl Server {
     /// committed with the transition, and the sweep still finds it. The wheel
     /// decides what is worth keeping, so everything is offered to it.
     pub fn arm(&self, timeouts: Vec<Scheduled>) {
-        // A paused engine is on a clock `debug.tick` drives, and the wheel is
-        // on the wall clock. Feeding one to the other would fill it with
-        // deadlines that are due at a fictional instant, and `fire` would
-        // decline every one of them anyway. Backfill re-reads the world when
-        // the engine resumes.
-        if timeouts.is_empty() || self.engine.is_paused() {
+        // Under the debug flag there is no timer to arm — it was never
+        // started, because the clock belongs to the caller.
+        if timeouts.is_empty() || self.debug {
             return;
         }
         self.timer.merge(
@@ -107,9 +125,6 @@ impl Server {
     /// timer, which is how a redispatched task keeps its retry deadline live
     /// without a round trip through the sweep.
     pub async fn fire(&self, timeouts: Vec<Timeout>) {
-        if self.engine.is_paused() {
-            return;
-        }
         let now = util::system_time_ms();
         for timeout in timeouts {
             let out = self.engine.process(Input::Internal(timeout), now).await;

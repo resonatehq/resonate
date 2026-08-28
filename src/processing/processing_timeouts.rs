@@ -26,10 +26,6 @@ pub async fn timeout_processing_loop(
             }
         }
 
-        if state.engine.is_paused() {
-            continue;
-        }
-
         let now = util::system_time_ms();
         match state.engine.tick(now).await {
             // The engine reports what happened; recording it is the caller's

@@ -67,7 +67,12 @@ pub trait ResonateGateway: Send + Sync {
     /// serving is a background task, so both belong here rather than in `new`:
     /// a failure to listen is a startup failure, not a request that quietly
     /// goes unanswered later.
-    async fn init(&self) -> Result<(), Unavailable> {
+    ///
+    /// `debug` is the process-wide debug flag, carried for symmetry with
+    /// [`ResonateWorker::init`]. A gateway serves requests rather than running
+    /// on a clock, so there is usually nothing for it to do differently.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        let _ = debug;
         Ok(())
     }
 

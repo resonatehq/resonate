@@ -231,7 +231,9 @@ async fn deliver(
 #[async_trait::async_trait]
 impl ResonateWorker for GcpsPubSubTransport {
     /// Build the publisher cache and start the delivery queue.
-    async fn init(&self) -> Result<(), Unavailable> {
+    /// Nothing here runs on wall time — the publisher is driven by the queue —
+    /// so the debug flag changes nothing for this transport.
+    async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
         let publishers = Arc::new(Mutex::new(HashMap::<String, Publisher>::new()));
         let semaphore = Arc::new(Semaphore::new(self.config.concurrency));
         // Queue capacity larger than concurrency so short bursts smooth out;

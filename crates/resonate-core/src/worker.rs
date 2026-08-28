@@ -44,7 +44,14 @@ pub trait ResonateWorker: Send + Sync {
     /// their dispatcher tasks are set up here rather than in `new`, so that
     /// failure is reported at startup instead of surfacing later as a message
     /// that quietly went nowhere.
-    async fn init(&self) -> Result<(), Unavailable> {
+    ///
+    /// `debug` is the process-wide debug flag. Under it the clock belongs to
+    /// the caller — a test drives time with `debug.tick` — so an implementation
+    /// must not start work that runs on wall time. Anything driven by a queue
+    /// or by a request still runs; it is only the timer-shaped work that has to
+    /// stay out of the way of a clock it does not control.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        let _ = debug;
         Ok(())
     }
 

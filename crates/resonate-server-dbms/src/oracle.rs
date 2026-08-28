@@ -273,12 +273,6 @@ impl Oracle {
             "schedule.create" => self.op_schedule_create(req, now),
             "schedule.delete" => self.op_schedule_delete(req),
             "schedule.search" => self.op_schedule_search(req),
-            "debug.start" | "debug.stop" => ResponseEnvelope::new(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                200,
-                Value::Object(serde_json::Map::new()),
-            ),
             "debug.reset" => self.op_debug_reset(req),
             "debug.snap" => self.op_debug_snap(req),
             "debug.tick" => self.op_debug_tick(req),
