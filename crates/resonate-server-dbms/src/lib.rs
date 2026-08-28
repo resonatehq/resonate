@@ -110,6 +110,10 @@ pub struct TaskSuspendResult {
     pub task_matched: bool,
     pub was_suspended: bool,
     pub missing_count: i32,
+    /// Awaited promises that exist but may not be awaited — see
+    /// `resonate_core::types::is_external`. Refused with the same 422 as a
+    /// missing one, and counted apart only so the message can say which.
+    pub non_awaitable_count: i32,
 }
 
 pub struct TaskReleaseResult {

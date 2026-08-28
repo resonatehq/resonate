@@ -645,6 +645,15 @@ impl PostgresEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
+                if !resonate_core::types::is_external(&p_awaited.tags) {
+                    tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
+                    return Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        422,
+                        "Awaited promise is not awaitable",
+                    ));
+                }
                 tracing::info!(
                     awaited = %r.awaited,
                     awaiter = %r.awaiter,
@@ -1368,13 +1377,10 @@ impl PostgresEngine {
             // try_timeout from fulfilling it via promise timeout.
             let (_, task_exists) = db.lock_for_update(&r.id)?;
             db.try_timeout(&timeout_ids, now)?;
-            let mut seen = std::collections::HashSet::new();
-            let unique_awaited: Vec<&str> = awaited_ids
-                .iter()
-                .filter(|id| seen.insert(id.as_str()))
-                .map(|s| s.as_str())
-                .collect();
-            let result = db.task_suspend(&r.id, r.version, &unique_awaited)?;
+            // Duplicates are refused by validation, so the list is already
+            // unique — no deduplication on the way to storage.
+            let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
+            let result = db.task_suspend(&r.id, r.version, &awaited)?;
             if !result.task_matched {
                 // Use lock_for_update result — no separate task_get that
                 // could see a concurrent task creation.
@@ -1411,11 +1417,24 @@ impl PostgresEngine {
                     "Awaited promise not found",
                 ));
             }
+            if result.non_awaitable_count > 0 {
+                tracing::debug!(
+                    task_id = %r.id,
+                    non_awaitable_count = result.non_awaitable_count,
+                    "Task suspend rejected: awaited promise(s) not awaitable"
+                );
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    422,
+                    "Awaited promise is not awaitable",
+                ));
+            }
             if result.was_suspended {
                 tracing::info!(
                     task_id = %r.id,
                     version = r.version,
-                    awaited_count = unique_awaited.len(),
+                    awaited_count = awaited.len(),
                     "Task suspended, waiting on promises"
                 );
                 return Ok(ResponseEnvelope::new(
@@ -2930,11 +2949,19 @@ impl PostgresDb<'_> {
             awaiter AS (
               SELECT * FROM promises WHERE id = $2 FOR UPDATE
             ),
-            -- link: awaited still pending, awaiter targeted and pending
+            -- An awaited that may not be awaited is refused by the caller with
+            -- a 422, so nothing below may write for it: not the link, and not
+            -- the direct resume, which would wake the awaiter for a
+            -- registration that never happened.
+            awaitable AS (
+              SELECT EXISTS (SELECT 1 FROM awaited WHERE external) AS ok
+            ),
+            -- link: awaited still pending and awaitable, awaiter targeted and pending
             linked AS (
               UPDATE promises p SET callbacks = p.callbacks || $2
               WHERE p.id = $1
                 AND NOT (p.callbacks @> ARRAY[$2])
+                AND (SELECT ok FROM awaitable)
                 AND EXISTS (SELECT 1 FROM awaited WHERE state = 'pending')
                 AND EXISTS (SELECT 1 FROM awaiter WHERE target IS NOT NULL AND state = 'pending')
               RETURNING p.id
@@ -2953,6 +2980,7 @@ impl PostgresDb<'_> {
                                   THEN p.resumes || $1 ELSE p.resumes END
               WHERE p.id = $2
                 AND p.task_state IN ('pending', 'acquired', 'suspended')
+                AND (SELECT ok FROM awaitable)
                 AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
               RETURNING p.id, p.task_version, p.target,
                         (SELECT a.task_state FROM awaiter a) AS prev_task_state
@@ -2972,6 +3000,7 @@ impl PostgresDb<'_> {
                      a.task_version::int AS version, NULL::jsonb AS promise
               FROM awaiter a
               WHERE a.task_state = 'suspended' AND a.target IS NOT NULL
+                AND (SELECT ok FROM awaitable)
                 AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
             )
             SELECT 'awaited' AS type, {awaited_cols}, {messages} FROM awaited
@@ -3446,14 +3475,22 @@ impl PostgresDb<'_> {
               SELECT EXISTS (SELECT 1 FROM me WHERE task_version = $2 AND task_state = 'acquired') AS ok
             ),
             awaited AS (
-              SELECT id, state FROM promises WHERE id = ANY($3) AND (SELECT ok FROM matched)
+              SELECT id, state, external
+              FROM promises WHERE id = ANY($3) AND (SELECT ok FROM matched)
             ),
             missing AS (
               SELECT (COALESCE(array_length($3::text[], 1), 0) - COUNT(*)::INT) AS cnt FROM awaited
             ),
+            -- `external` is the generated column of the same three tags as
+            -- `resonate_core::types::is_external`. A promise nothing outside
+            -- its own execution can settle may not be awaited.
+            non_awaitable AS (
+              SELECT COUNT(*)::INT AS cnt FROM awaited WHERE NOT external
+            ),
             can_suspend AS (
               SELECT 1 WHERE (SELECT ok FROM matched)
                 AND (SELECT cnt FROM missing) = 0
+                AND (SELECT cnt FROM non_awaitable) = 0
                 AND NOT EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
             ),
             -- link the awaited rows (other than the task's own, handled below)
@@ -3474,18 +3511,21 @@ impl PostgresDb<'_> {
                 -- deleted_ready_callbacks: fires on a version match even when
                 -- the suspend itself is refused because an awaited promise settled
                 resumes    = CASE WHEN (SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
+                                    AND (SELECT cnt FROM non_awaitable) = 0
                                THEN '{}' ELSE p.resumes END,
                 callbacks   = CASE WHEN $1 = ANY($3) AND EXISTS (SELECT 1 FROM can_suspend)
                                     AND NOT (p.callbacks @> ARRAY[$1])
                                THEN p.callbacks || $1 ELSE p.callbacks END
               WHERE p.id = $1
-                AND ((SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0)
+                AND ((SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
+                     AND (SELECT cnt FROM non_awaitable) = 0)
               RETURNING p.id
             )
             SELECT
               (SELECT ok FROM matched) AS task_matched,
               EXISTS (SELECT 1 FROM can_suspend) AS was_suspended,
-              (SELECT cnt FROM missing) AS missing_count
+              (SELECT cnt FROM missing) AS missing_count,
+              (SELECT cnt FROM non_awaitable) AS non_awaitable_count
         ")
             .bind(task_id).bind(version as i32).bind(&awaited)
             .fetch_one(self.tx().as_mut()))?;
@@ -3494,6 +3534,7 @@ impl PostgresDb<'_> {
             task_matched: rows.get("task_matched"),
             was_suspended: rows.get("was_suspended"),
             missing_count: rows.get("missing_count"),
+            non_awaitable_count: rows.get("non_awaitable_count"),
         })
     }
 

@@ -618,6 +618,15 @@ impl SqliteEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
+                if !resonate_core::types::is_external(&p_awaited.tags) {
+                    tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
+                    return Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        422,
+                        "Awaited promise is not awaitable",
+                    ));
+                }
                 tracing::info!(
                     awaited = %r.awaited,
                     awaiter = %r.awaiter,
@@ -1341,13 +1350,10 @@ impl SqliteEngine {
             // try_timeout from fulfilling it via promise timeout.
             let (_, task_exists) = db.lock_for_update(&r.id)?;
             db.try_timeout(&timeout_ids, now)?;
-            let mut seen = std::collections::HashSet::new();
-            let unique_awaited: Vec<&str> = awaited_ids
-                .iter()
-                .filter(|id| seen.insert(id.as_str()))
-                .map(|s| s.as_str())
-                .collect();
-            let result = db.task_suspend(&r.id, r.version, &unique_awaited)?;
+            // Duplicates are refused by validation, so the list is already
+            // unique — no deduplication on the way to storage.
+            let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
+            let result = db.task_suspend(&r.id, r.version, &awaited)?;
             if !result.task_matched {
                 // Use lock_for_update result — no separate task_get that
                 // could see a concurrent task creation.
@@ -1384,11 +1390,24 @@ impl SqliteEngine {
                     "Awaited promise not found",
                 ));
             }
+            if result.non_awaitable_count > 0 {
+                tracing::debug!(
+                    task_id = %r.id,
+                    non_awaitable_count = result.non_awaitable_count,
+                    "Task suspend rejected: awaited promise(s) not awaitable"
+                );
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    422,
+                    "Awaited promise is not awaitable",
+                ));
+            }
             if result.was_suspended {
                 tracing::info!(
                     task_id = %r.id,
                     version = r.version,
-                    awaited_count = unique_awaited.len(),
+                    awaited_count = awaited.len(),
                     "Task suspended, waiting on promises"
                 );
                 return Ok(ResponseEnvelope::new(
@@ -2662,6 +2681,16 @@ impl<'a> SqliteDb<'a> {
         let awaited = self.promise_get(awaited_id)?;
         let awaiter = self.promise_get(awaiter_id)?;
 
+        // An awaited that may not be awaited is refused by the caller, so
+        // nothing below may write — neither the callback row nor the direct
+        // resume, which would otherwise wake the awaiter for a registration
+        // that never happened.
+        if let Some(ref pa) = awaited {
+            if !resonate_core::types::is_external(&pa.tags) {
+                return Ok(RegisterCallbackResult { awaited, awaiter });
+            }
+        }
+
         // Insert callback only if both pending and awaiter has target
         if let (Some(ref pa), Some(ref pw)) = (&awaited, &awaiter) {
             if pa.state == PromiseState::Pending
@@ -3040,15 +3069,20 @@ impl<'a> SqliteDb<'a> {
                 task_matched: false,
                 was_suspended: false,
                 missing_count: 0,
+                non_awaitable_count: 0,
             });
         }
 
-        // Check each awaited promise — count missing and settled
+        // Check each awaited promise — count missing, non-awaitable, and settled
         let mut found_count = 0;
+        let mut non_awaitable_count = 0;
         let mut has_settled = false;
         for aid in awaited_ids {
             if let Some(p) = self.promise_get(aid)? {
                 found_count += 1;
+                if !resonate_core::types::is_external(&p.tags) {
+                    non_awaitable_count += 1;
+                }
                 if p.state != PromiseState::Pending {
                     has_settled = true;
                 }
@@ -3057,8 +3091,9 @@ impl<'a> SqliteDb<'a> {
 
         let missing_count = awaited_ids.len() as i32 - found_count;
 
-        // Can only suspend if: task matched, no missing, all pending
-        let can_suspend = missing_count == 0 && !has_settled;
+        // Can only suspend if: task matched, every awaited present and
+        // awaitable, all pending
+        let can_suspend = missing_count == 0 && non_awaitable_count == 0 && !has_settled;
 
         if can_suspend {
             // Clear stale ready callbacks from a prior resume before registering new ones
@@ -3087,8 +3122,9 @@ impl<'a> SqliteDb<'a> {
                 task_matched: true,
                 was_suspended: true,
                 missing_count: 0,
+                non_awaitable_count: 0,
             })
-        } else if missing_count == 0 {
+        } else if missing_count == 0 && non_awaitable_count == 0 {
             // Immediate resume — has_settled is true, delete ready callbacks
             self.conn.execute(
                 "DELETE FROM callbacks WHERE awaiter_id = ?1 AND ready = true",
@@ -3098,12 +3134,14 @@ impl<'a> SqliteDb<'a> {
                 task_matched: true,
                 was_suspended: false,
                 missing_count: 0,
+                non_awaitable_count: 0,
             })
         } else {
             Ok(TaskSuspendResult {
                 task_matched: true,
                 was_suspended: false,
                 missing_count,
+                non_awaitable_count,
             })
         }
     }

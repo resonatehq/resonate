@@ -523,6 +523,20 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
             return Err(validator::ValidationError::new("awaited_is_self")
                 .with_message("Action awaited promise must not equal the task ID".into()));
         }
+    }
+    // Whether the same promise is named twice is decided by the request alone,
+    // so it is decided here. Storage used to deduplicate on the way in, which
+    // turned a request the caller did not mean into a silent success — one
+    // suspend awaiting `p` twice and one awaiting `p` once are different
+    // requests, and only the second is well formed.
+    let mut seen = std::collections::HashSet::new();
+    for action in &data.actions {
+        if !seen.insert(action.data.awaited.as_str()) {
+            return Err(validator::ValidationError::new("duplicate_awaited")
+                .with_message("Awaited promise IDs must be unique".into()));
+        }
+    }
+    for action in &data.actions {
         if origin(&action.data.awaited) != origin(&data.id) {
             return Err(
                 validator::ValidationError::new("origin_mismatch").with_message(
@@ -532,6 +546,20 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
         }
     }
     Ok(())
+}
+
+/// Whether a promise may be awaited — carry a callback or a listener.
+///
+/// Something outside the promise's own execution has to be able to settle it,
+/// or the obligation recorded against it can never be discharged: an internal
+/// promise is settled by the very work that is waiting on it. Three tags say
+/// that something outside will: an explicit `resonate:external`, a
+/// `resonate:target` naming who executes it, or `resonate:timer`, which the
+/// deadline sweep settles.
+pub fn is_external(tags: &std::collections::HashMap<String, String>) -> bool {
+    tags.get("resonate:external").map(String::as_str) == Some("true")
+        || tags.contains_key("resonate:target")
+        || tags.get("resonate:timer").map(String::as_str) == Some("true")
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -1018,6 +1046,51 @@ mod tests {
             "head": { "corrId": "c1", "version": version },
             "data": data,
         })
+    }
+
+    fn suspend_action(awaited: &str, awaiter: &str) -> Value {
+        json!({
+            "kind": "promise.register_callback",
+            "head": {},
+            "data": { "awaited": awaited, "awaiter": awaiter },
+        })
+    }
+
+    /// The envelope layer only decides shape; the per-kind rules run when the
+    /// engine deserializes the `data`, which is what this exercises.
+    fn suspend(id: &str, awaited: &[&str]) -> Result<(), String> {
+        let actions: Vec<Value> = awaited.iter().map(|a| suspend_action(a, id)).collect();
+        let data = json!({ "id": id, "version": 0, "actions": actions });
+        let r: TaskSuspendData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn distinct_awaited_ids_are_accepted() {
+        assert!(suspend("o:t", &["o:a", "o:b"]).is_ok());
+    }
+
+    #[test]
+    fn the_same_awaited_id_twice_is_rejected() {
+        // Storage used to deduplicate this into the one-id request, which is
+        // not the request the caller wrote.
+        let err = suspend("o:t", &["o:a", "o:a"]).expect_err("duplicate must be refused");
+        assert!(err.contains("duplicate_awaited"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_promise_is_awaitable_when_a_tag_says_something_else_settles_it() {
+        let tag =
+            |k: &str, v: &str| std::collections::HashMap::from([(k.to_string(), v.to_string())]);
+        assert!(is_external(&tag("resonate:external", "true")));
+        assert!(is_external(&tag("resonate:target", "poll://any@w")));
+        assert!(is_external(&tag("resonate:timer", "true")));
+
+        assert!(!is_external(&std::collections::HashMap::new()));
+        assert!(!is_external(&tag("resonate:external", "false")));
+        assert!(!is_external(&tag("resonate:timer", "false")));
+        // A tag that only looks like one of the three.
+        assert!(!is_external(&tag("resonate:origin", "o")));
     }
 
     #[test]

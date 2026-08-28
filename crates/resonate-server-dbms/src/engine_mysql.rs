@@ -656,6 +656,15 @@ impl MysqlEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
+                if !resonate_core::types::is_external(&p_awaited.tags) {
+                    tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
+                    return Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        422,
+                        "Awaited promise is not awaitable",
+                    ));
+                }
                 tracing::info!(
                     awaited = %r.awaited,
                     awaiter = %r.awaiter,
@@ -1379,13 +1388,10 @@ impl MysqlEngine {
             // try_timeout from fulfilling it via promise timeout.
             let (_, task_exists) = db.lock_for_update(&r.id)?;
             db.try_timeout(&timeout_ids, now)?;
-            let mut seen = std::collections::HashSet::new();
-            let unique_awaited: Vec<&str> = awaited_ids
-                .iter()
-                .filter(|id| seen.insert(id.as_str()))
-                .map(|s| s.as_str())
-                .collect();
-            let result = db.task_suspend(&r.id, r.version, &unique_awaited)?;
+            // Duplicates are refused by validation, so the list is already
+            // unique — no deduplication on the way to storage.
+            let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
+            let result = db.task_suspend(&r.id, r.version, &awaited)?;
             if !result.task_matched {
                 // Use lock_for_update result — no separate task_get that
                 // could see a concurrent task creation.
@@ -1422,11 +1428,24 @@ impl MysqlEngine {
                     "Awaited promise not found",
                 ));
             }
+            if result.non_awaitable_count > 0 {
+                tracing::debug!(
+                    task_id = %r.id,
+                    non_awaitable_count = result.non_awaitable_count,
+                    "Task suspend rejected: awaited promise(s) not awaitable"
+                );
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    422,
+                    "Awaited promise is not awaitable",
+                ));
+            }
             if result.was_suspended {
                 tracing::info!(
                     task_id = %r.id,
                     version = r.version,
-                    awaited_count = unique_awaited.len(),
+                    awaited_count = awaited.len(),
                     "Task suspended, waiting on promises"
                 );
                 return Ok(ResponseEnvelope::new(
@@ -2916,7 +2935,7 @@ impl MysqlDb<'_> {
         // Lock both promises (ORDER BY id for consistent lock ordering to prevent deadlocks)
         let rows = rt_block_on(
             sqlx::query(
-                "SELECT id, state, target FROM promises WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
+                "SELECT id, state, target, tags FROM promises WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
             )
             .bind(awaited_id)
             .bind(awaiter_id)
@@ -2926,6 +2945,7 @@ impl MysqlDb<'_> {
         let mut awaited_state: Option<String> = None;
         let mut awaiter_state: Option<String> = None;
         let mut awaiter_target: Option<String> = None;
+        let mut awaited_awaitable = false;
 
         for row in &rows {
             let rid: String = row.get("id");
@@ -2933,13 +2953,27 @@ impl MysqlDb<'_> {
             let rtarget: Option<String> = row.get("target");
             if rid == awaited_id {
                 awaited_state = Some(rstate);
+                let tags: String = row.get("tags");
+                awaited_awaitable =
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(&tags)
+                        .map(|t| resonate_core::types::is_external(&t))
+                        .unwrap_or(false);
             } else {
                 awaiter_state = Some(rstate);
                 awaiter_target = rtarget;
             }
         }
 
-        match (&awaited_state, &awaiter_state) {
+        // An awaited that may not be awaited is refused by the caller with a
+        // 422, so neither arm below may run: not the link, and not the direct
+        // resume, which would wake the awaiter for a registration that never
+        // happened.
+        let arms = if awaited_awaitable {
+            (awaited_state.clone(), awaiter_state.clone())
+        } else {
+            (None, None)
+        };
+        match (&arms.0, &arms.1) {
             (Some(as_), Some(aw_))
                 if as_ == "pending" && aw_ == "pending" && awaiter_target.is_some() =>
             {
@@ -3474,6 +3508,7 @@ impl MysqlDb<'_> {
                 task_matched: false,
                 was_suspended: false,
                 missing_count: 0,
+                non_awaitable_count: 0,
             });
         }
 
@@ -3503,6 +3538,40 @@ impl MysqlDb<'_> {
                 task_matched: true,
                 was_suspended: false,
                 missing_count,
+                non_awaitable_count: 0,
+            });
+        }
+
+        // 4b. Count awaited promises that may not be awaited — the three tags
+        // of `resonate_core::types::is_external`, two of them already stored
+        // as generated columns.
+        let non_awaitable_count = if awaited_ids.is_empty() {
+            0i32
+        } else {
+            let placeholders = awaited_ids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
+                 AND NOT (target IS NOT NULL OR timer \
+                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true')",
+                placeholders
+            );
+            let mut q = sqlx::query(&sql);
+            for id in &awaited_ids {
+                q = q.bind(id.as_str());
+            }
+            let row = rt_block_on(q.fetch_one(self.tx().as_mut()))?;
+            row.get::<i64, _>("cnt") as i32
+        };
+        if non_awaitable_count > 0 {
+            return Ok(TaskSuspendResult {
+                task_matched: true,
+                was_suspended: false,
+                missing_count: 0,
+                non_awaitable_count,
             });
         }
 
@@ -3560,6 +3629,7 @@ impl MysqlDb<'_> {
                 task_matched: true,
                 was_suspended: true,
                 missing_count: 0,
+                non_awaitable_count: 0,
             })
         } else {
             // 7. Cannot suspend — at least one awaited promise is already settled.
@@ -3573,6 +3643,7 @@ impl MysqlDb<'_> {
                 task_matched: true,
                 was_suspended: false,
                 missing_count: 0,
+                non_awaitable_count: 0,
             })
         }
     }

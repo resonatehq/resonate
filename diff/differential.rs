@@ -1048,10 +1048,39 @@ fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Req
     let all = oracle.all_promise_ids();
     let id = pick(rng, &all).unwrap_or_else(|| random_promise_id(rng));
     let timeout_at = now + rng.i64(30_000..300_000);
+    // Roughly half the pool is awaitable. Create is idempotent by id, so an
+    // id's tags are fixed by its first success and the pool stays split —
+    // which is what keeps both sides of the awaitability rule reachable: a
+    // callback on an external promise is a 200, on a plain one a 422.
+    let tags = if rng.bool() {
+        json!({ "resonate:external": "true" })
+    } else {
+        json!({})
+    };
     req(
         "promise.create",
-        json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": {} }),
+        json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": tags }),
     )
+}
+
+/// An awaited promise for a callback or a suspend.
+///
+/// Mostly awaitable, so the registration paths are actually walked; one time
+/// in four whatever is pending, so the 422 stays covered too.
+fn pick_awaited(rng: &mut fastrand::Rng, oracle: &Oracle, awaiter: &str) -> String {
+    let prefer_external = rng.u32(0..4) != 0;
+    if prefer_external {
+        let external = oracle.external_pending_promise_ids();
+        if let Some(id) = external.iter().find(|p| p.as_str() != awaiter) {
+            return id.clone();
+        }
+    }
+    oracle
+        .pending_promise_ids()
+        .iter()
+        .find(|p| p.as_str() != awaiter)
+        .cloned()
+        .unwrap_or_else(|| promise_id_different_from(rng, awaiter))
 }
 
 fn gen_promise_get(rng: &mut fastrand::Rng, oracle: &Oracle) -> RequestEnvelope {
@@ -1077,12 +1106,7 @@ fn gen_promise_register_callback(rng: &mut fastrand::Rng, oracle: &Oracle) -> Re
         .or_else(|| pick(rng, &pending_t))
         .map(|(id, _)| id)
         .unwrap_or_else(|| random_task_id(rng));
-    let pending_p = oracle.pending_promise_ids();
-    let awaited = pending_p
-        .iter()
-        .find(|p| p.as_str() != awaiter)
-        .cloned()
-        .unwrap_or_else(|| promise_id_different_from(rng, &awaiter));
+    let awaited = pick_awaited(rng, oracle, &awaiter);
     req(
         "promise.register_callback",
         json!({ "awaited": awaited, "awaiter": awaiter }),
@@ -1176,12 +1200,7 @@ fn gen_task_fulfill(rng: &mut fastrand::Rng, oracle: &Oracle) -> RequestEnvelope
 fn gen_task_suspend(rng: &mut fastrand::Rng, oracle: &Oracle) -> RequestEnvelope {
     let acquired = oracle.tasks_by_state(TaskState::Acquired);
     let (task_id, version) = pick(rng, &acquired).unwrap_or_else(|| (random_task_id(rng), 1));
-    let pending_p = oracle.pending_promise_ids();
-    let awaited = pending_p
-        .iter()
-        .find(|p| p.as_str() != task_id)
-        .cloned()
-        .unwrap_or_else(|| promise_id_different_from(rng, &task_id));
+    let awaited = pick_awaited(rng, oracle, &task_id);
     req(
         "task.suspend",
         json!({
