@@ -204,12 +204,14 @@ theorem writesGood_taskCreate (req : ServerModel.TaskCreateReq) (now : Nat) :
   -- `resonate:target` and REFUSES `timerTargeted`, and the two together
   -- leave `isTimer` false. The born-dead branch below needs it.
   have hnotimer : req.action.tags.isTimer = false := by
-    have h1 : ¬ ((!req.action.tags.has "resonate:target") = true) := fun h => hgd (Or.inl h)
+    have h1 : ¬ ((req.action.tags.okind != .task) = true) := fun h => hgd (Or.inl h)
     have h2 : ¬ (req.action.tags.timerTargeted = true) := fun h => hgd (Or.inr h)
-    simp [ServerModel.Tags.timerTargeted] at h1 h2
-    by_cases ht : req.action.tags.isTimer = true
-    · exact absurd (h2 ht) (by simp [h1])
-    · simpa using ht
+    have htgt : req.action.tags.has "resonate:target" = true := by
+      cases ht : req.action.tags.has "resonate:target" with
+      | true  => rfl
+      | false => simp [ServerModel.Tags.okind, ht] at h1
+    simp [ServerModel.Tags.timerTargeted, htgt] at h2
+    exact h2
   refine writesGood_afterReadObject hq hs _ _ _ (fun hfresh => ?_) ?_
   · dsimp only
     refine writesGood_iteH _ _ _ _ _ (fun h => ?_) (fun _ => ?_)

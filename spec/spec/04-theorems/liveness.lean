@@ -34,7 +34,29 @@ third is hard.  -/
 What a scheduler must be able to see. An internal step fired when not
 enabled is the identity — that is `preserved_state_under_disabled_*` —
 so enabledness is not needed for safety; it is needed to say that
-something is *owed*. -/
+something is *owed*.
+
+THE ARMING RULE LIVES HERE, and it is keyed on `otype`. A deadline is
+owed an observation exactly when someone can be blocked on it, and
+"can be blocked on it" is `.external` — the same predicate the three
+obligation doors check. That is not two rules agreeing by luck: the
+arming rule FALLS OUT of the obligation rule, which is why no third
+axis is needed to state it.
+
+Gating the step changes nothing about safety — `processPromiseTimeout`
+is untouched, so no transition is removed — and nothing becomes
+unobservable, because a read still projects an internal promise as
+settled past its deadline. What changes is what a fair scheduler is
+obliged to write, and `well_formed_promise_obligations_require_external`
+is what makes the narrowing free: an internal promise carries no
+callbacks and no listeners, so there is nobody to inform.
+
+`otype` OVER-APPROXIMATES the set, and deliberately. The promises that
+strictly need a wheel entry are those with a non-empty obligation set;
+an external promise nobody awaits is armed for no one. Arming on
+`otype` is the cheaper rule that is never wrong in the unsafe
+direction, and narrowing it further would make enabledness depend on
+the ledger. -/
 
 def promiseAt (s : ServerState) (id : ServerModel.Ident) : Option PromiseObject :=
   s.promise? id
@@ -46,7 +68,7 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
   | .promiseTimeout id =>
       match promiseAt s id with
-      | some p => p.state == .pending && p.timeoutAt ≤ now
+      | some p => p.otype == .external && p.state == .pending && p.timeoutAt ≤ now
       | none   => false
   | .listener id addr =>
       match promiseAt s id with
@@ -98,29 +120,75 @@ def isListenerStep : Step → Bool
   | .listener _ _ => true
   | _       => false
 
-/-! ### 1. Every promise eventually settles
+/-! ### 1. Every external promise eventually settles
 
 Not trivial, and not a consequence of time passing alone. A promise
 past its deadline reads as settled through any view, but the STORED
 promise stays pending until something touches it — and in the projected
 discipline nothing touches it except the promise timeout. So this needs
-the clock AND fairness on that step. -/
+the clock AND fairness on that step.
 
-def EventuallyEveryPromiseSettles : Prop :=
+EXTERNAL, because that is the arming rule stated as a property. The
+step is enabled only on external promises, so a fair scheduler owes a
+write only there, and asking for more would be asking for a write no
+implementation makes.
+
+WHAT IS NOT NARROWED is the observation, and the two must not be
+confused. `promiseAt` is the STORED row — `(objects.find? _).map
+(·.promise)`, no projection — so this says a write happens. The claim
+that every promise, internal ones included, eventually READS settled is
+a different statement, and it is stated separately below because it
+survives the guard untouched. An internal promise past its deadline is
+settled through every view and pending in the store forever; the
+catalogue tolerates that precisely because nothing can be waiting to
+hear about it. -/
+
+def EventuallyEveryExternalPromiseSettles : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : ServerModel.Ident),
+      (∀ p, promiseAt (tr t).state id = some p → p.otype = .external) →
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ p, promiseAt (tr u).state id = some p → p.state ≠ .pending
+
+/-- ### 1b. Every promise eventually READS settled
+
+Every promise, with no externality hypothesis and — the point — with no
+fairness hypothesis either. `project` settles a pending promise the
+instant the clock passes its deadline, so this follows from
+`ClockAdvances` alone.
+
+That is why it is a separate statement rather than a replacement for
+the one above. Weaker in what it asks of the environment and stronger
+in what it covers, it is the half of "every promise settles" that no
+arming rule can take away: gate the settlement STEP however you like
+and this still holds, because it never depended on a step firing. The
+one above is the half that costs a write, and a write is owed only
+where someone can be waiting for it.
+
+Read them together and they say the thing the arming rule is for: an
+internal promise is never observed to be pending past its deadline, and
+never costs the server a timer to make that true. -/
+def EventuallyEveryPromiseReadsSettled : Prop :=
+  ∀ tr : Trace, Valid true tr → ClockAdvances tr →
+    ∀ (t : Nat) (id : String),
+      (promiseAt (tr t).state id).isSome →
+      ∃ u : Nat, t ≤ u ∧
+        ∀ p, promiseAt (tr u).state id = some p →
+          (p.project (tr u).now).state ≠ .pending
 
 /-! ### 2. Every task eventually fulfils
 
 A corollary, not a property. `consistent_settlement_fulfils_task` says
 the promise's settlement fulfils its co-keyed task IN THE SAME STEP, and
-`consistent_task_iff_targeted_promise` says every task has one. So (2)
+`consistent_task_iff_kind_task` says every task has one. So (2)
 is (1) composed with the coupled write, and it is recorded here as an
 implication rather than as an axiom of its own — carrying it separately
-would be exactly the redundancy the catalogue refuses. -/
+would be exactly the redundancy the catalogue refuses.
+
+The `otype` guard on the settlement step does not weaken this: a task's
+promise has `okind = .task`, and `okind_task_implies_external` says such
+a promise is external, so the step it depends on is still owed. -/
 
 def EventuallyEveryTaskFulfils : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
@@ -130,7 +198,7 @@ def EventuallyEveryTaskFulfils : Prop :=
         ∀ w, taskAt (tr u).state id = some w → w.state = .fulfilled
 
 theorem taskFulfilment_follows_from_promiseSettlement :
-    EventuallyEveryPromiseSettles → EventuallyEveryTaskFulfils := by
+    EventuallyEveryExternalPromiseSettles → EventuallyEveryTaskFulfils := by
   sorry
 
 /-! ### 3. The central thesis

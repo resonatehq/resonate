@@ -71,9 +71,9 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
   | none =>
       return { status := 422 }
   | some oAwaiter =>
-      if !oAwaiter.promise.targeted then
+      if oAwaiter.promise.okind != .task then
         return { status := 422 }
-      if !oAwaited.promise.external then
+      if oAwaited.promise.otype != .external then
         return { status := 422 }
       if oAwaited.promise.state == .pending then
         if oAwaiter.promise.state == .pending then
@@ -90,7 +90,7 @@ def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
   | none =>
       return { status := 404 }
   | some oAwaited =>
-      if !oAwaited.promise.external then
+      if oAwaited.promise.otype != .external then
         return { status := 422 }
       if oAwaited.promise.state == .pending then
         setPromise oAwaited.id (oAwaited.promise.addListener req.address)
@@ -126,7 +126,7 @@ def taskGet (req : TaskGetReq) (now : Nat) : H TaskGetRes := do
 
 def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
   let a := req.action
-  if !(a.tags.has "resonate:target") ∨ a.tags.timerTargeted then
+  if a.tags.okind != .task ∨ a.tags.timerTargeted then
     return { status := 400 }
   match ← readObject a.id now with
   | none =>
@@ -154,7 +154,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
         return { status := 200, task := some (t.toRecord a.id),
                  promise := some (p.toRecord a.id) }
   | some o =>
-      if !o.promise.targeted then
+      if o.promise.okind != .task then
         return { status := 422 }
       match o.task with
       | none =>
@@ -254,7 +254,7 @@ def checkAwaited (now : Nat) : List PromiseRegisterCallbackReq → H (Option Boo
       match ← readObject action.awaited now with
       | none => return none
       | some oa =>
-          if !oa.promise.external then
+          if oa.promise.otype != .external then
             return none
           else
             match ← checkAwaited now rest with

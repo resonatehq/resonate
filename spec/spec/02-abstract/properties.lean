@@ -90,7 +90,7 @@ Every 400 in the machine, and the property that shadows it:
     promise.settle      state = timedout      well_formed_promise_timedout_is_server_owned
     promise.callback    awaited = awaiter     well_formed_promise_awaiter_is_not_self
     promise.listener    undeliverable addr    consistent_listener_addresses_deliverable
-    task.create         untargeted / timer    consistent_task_iff_targeted_promise
+    task.create         untargeted / timer    consistent_task_iff_kind_task
     task.suspend        no actions            consistent_suspended_task_holds_rung
     task.suspend        self-await            well_formed_promise_awaiter_is_not_self
     task.suspend        duplicate awaited     well_formed_promise_callbacks_unique
@@ -259,7 +259,7 @@ def well_formed_promise_listeners_unique (_now : Nat) (s : ServerState) : Bool :
 
 def well_formed_promise_obligations_require_external (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
-    (p.callbacks.isEmpty && p.listeners.isEmpty) || p.external
+    (p.callbacks.isEmpty && p.listeners.isEmpty) || p.otype == .external
 
 def well_formed_promise_awaiter_is_not_self (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
@@ -373,9 +373,9 @@ def well_formed_store_schedule_ids_unique (_now : Nat) (s : ServerState) : Bool 
 def well_formed_store_outbox_keys_unique (_now : Nat) (s : ServerState) : Bool :=
   (s.outbox.map (·.key)).eraseDups.length == s.outbox.length
 
-def consistent_task_iff_targeted_promise (_now : Nat) (s : ServerState) : Bool :=
+def consistent_task_iff_kind_task (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
-    o.task.isSome == o.promise.targeted
+    o.task.isSome == (o.promise.okind == .task)
 
 def consistent_settled_promise_has_fulfilled_task (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
@@ -384,7 +384,7 @@ def consistent_settled_promise_has_fulfilled_task (_now : Nat) (s : ServerState)
 def consistent_callback_awaiter_is_targeted (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     p.callbacks.all fun a =>
-      s.objects.any (fun q => q.id == a && q.promise.targeted)
+      s.objects.any (fun q => q.id == a && q.promise.okind == .task)
 
 def consistent_listener_addresses_deliverable (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p => p.listeners.all addressValid
@@ -791,7 +791,7 @@ def consistent_task_birth_couples_promise_birth (_now : Nat) (a b : ServerState)
      a.hasTask o.id
        || ((!a.objects.any (·.id == o.id))
             && (let q := o.promise
-                q.targeted
+                q.okind == .task
                   && (if u.state == .fulfilled then q.state != .pending
                       else q.state == .pending))
             && ((u.state == .pending && u.version == 0)
@@ -799,7 +799,7 @@ def consistent_task_birth_couples_promise_birth (_now : Nat) (a b : ServerState)
                 || (u.state == .fulfilled && u.version == 0))))
   && (b.objects.all fun o =>
         a.objects.any (·.id == o.id)
-          || !o.promise.targeted
+          || o.promise.okind != .task
           || o.task.isSome)
 
 /-! ## Stage 3 — the outbox -/
@@ -1179,8 +1179,8 @@ def catalogue : List Named :=
       , property := .state well_formed_store_schedule_ids_unique },
     { name := "well_formed_store_outbox_keys_unique"
       , property := .state well_formed_store_outbox_keys_unique },
-    { name := "consistent_task_iff_targeted_promise"
-      , property := .state consistent_task_iff_targeted_promise },
+    { name := "consistent_task_iff_kind_task"
+      , property := .state consistent_task_iff_kind_task },
     { name := "consistent_settled_promise_has_fulfilled_task"
       , property := .state consistent_settled_promise_has_fulfilled_task },
     { name := "consistent_callback_awaiter_is_targeted"

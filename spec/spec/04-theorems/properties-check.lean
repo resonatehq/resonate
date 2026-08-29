@@ -238,10 +238,10 @@ def mutants : List (String × Bool) :=
     -- the row stopped the MACHINE from writing them; it did not stop the
     -- catalogue from saying they are wrong, which is the whole reason
     -- the entry survived the fusion.
-    ("consistent_task_iff_targeted_promise/task_without_target",
-       consistent_task_iff_targeted_promise 0 (obj P (some T))),
-    ("consistent_task_iff_targeted_promise/target_without_task",
-       consistent_task_iff_targeted_promise 0
+    ("consistent_task_iff_kind_task/task_without_target",
+       consistent_task_iff_kind_task 0 (obj P (some T))),
+    ("consistent_task_iff_kind_task/kind_task_without_task",
+       consistent_task_iff_kind_task 0
          (obj { P with tags := [("resonate:target","w")] } none)),
     ("consistent_settled_promise_has_fulfilled_task",
        consistent_settled_promise_has_fulfilled_task 0
@@ -302,7 +302,16 @@ theorem reaches_timer_promise :
     witnesses battery (fun s => s.promises.any (·.isTimer)) = true := by decide
 
 theorem reaches_internal_promise :
-    witnesses battery (fun s => s.promises.any (fun p => !p.external)) = true := by decide
+    witnesses battery (fun s => s.promises.any (fun p => p.otype != .external)) = true := by decide
+
+/-- The cell the old two-tag reading could not name: external and idle
+    — awaitable, with nothing executing it. That is `sleep` and it is
+    `human`, and before the axes existed the only way to describe it
+    was "not targeted", which is also true of every internal promise. -/
+theorem reaches_idle_external_promise :
+    witnesses battery
+      (fun s => s.promises.any (fun p => p.otype == .external && p.okind == .idle)) = true := by
+  decide
 
 theorem reaches_callbacks :
     witnesses battery (fun s => s.promises.any (fun p => !p.callbacks.isEmpty)) = true := by decide

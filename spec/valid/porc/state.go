@@ -89,7 +89,9 @@ func (p *Promise) clone() *Promise {
 func (p *Promise) IsTimer() bool { return p.Tags.IsTimer() }
 
 func (p *Promise) External() bool {
-	return p.Tags["resonate:external"] == "true" || p.Tags.Has("resonate:target") || p.IsTimer()
+
+	return p.Tags["resonate:scope"] == "global" ||
+		p.Tags["resonate:external"] == "true" || p.Tags.Has("resonate:target") || p.IsTimer()
 }
 
 func (p *Promise) AddCallback(awaiter string) *Promise {
