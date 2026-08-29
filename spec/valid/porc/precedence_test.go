@@ -3,7 +3,7 @@ package model
 import "testing"
 
 func TestValidationOutranksExistence(t *testing.T) {
-	const ghost = "o.ghost"
+	const ghost = "o:ghost"
 
 	cases := []struct {
 		name string
@@ -35,7 +35,7 @@ func TestValidationOutranksExistence(t *testing.T) {
 			}},
 		{"task.suspend with a duplicate awaited",
 			func(s *ServerState, d Discipline) Response {
-				return s.TaskSuspend(d, ghost, 0, []string{"o.a", "o.a"}, 100)
+				return s.TaskSuspend(d, ghost, 0, []string{"o:a", "o:a"}, 100)
 			}},
 		{"task.fulfill to a non-settable state",
 			func(s *ServerState, d Discipline) Response {
@@ -56,7 +56,7 @@ func TestValidationOutranksExistence(t *testing.T) {
 }
 
 func TestWellFormedRequestsStillReport404(t *testing.T) {
-	const ghost = "o.ghost"
+	const ghost = "o:ghost"
 
 	cases := []struct {
 		name string
@@ -76,7 +76,7 @@ func TestWellFormedRequestsStillReport404(t *testing.T) {
 			return s.TaskGet(d, ghost, 100)
 		}, 404},
 		{"task.suspend on a distinct awaited", func(s *ServerState, d Discipline) Response {
-			return s.TaskSuspend(d, ghost, 0, []string{"o.a"}, 100)
+			return s.TaskSuspend(d, ghost, 0, []string{"o:a"}, 100)
 		}, 404},
 		{"task.fulfill to resolved", func(s *ServerState, d Discipline) Response {
 			return s.TaskFulfill(d, ghost, 0, Resolved, nil, 100)

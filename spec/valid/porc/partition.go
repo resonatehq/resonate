@@ -2,17 +2,9 @@ package model
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/anishathalye/porcupine"
 )
-
-func originOf(id string) string {
-	if i := strings.IndexByte(id, '.'); i >= 0 {
-		return id[:i]
-	}
-	return id
-}
 
 func partitionKey(o Op) string {
 	if o.Kind == "task.heartbeat" && len(o.Refs) > 0 {
@@ -23,7 +15,9 @@ func partitionKey(o Op) string {
 
 func CheckPartitionable(ops []Op) error {
 	for i, o := range ops {
-
+		if rejectedBySchema(o) {
+			continue
+		}
 		if o.Kind == "task.heartbeat" {
 			for _, ref := range o.Refs {
 				if originOf(ref.ID) != originOf(o.Refs[0].ID) {

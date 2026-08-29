@@ -28,7 +28,7 @@ func NewGen(seed int64, origin string) *Gen {
 	return &Gen{r: rand.New(rand.NewSource(seed)), origin: origin, now: 1000, Jumpy: true}
 }
 
-func (g *Gen) id(suffix string) string { return g.origin + "." + suffix }
+func (g *Gen) id(suffix string) string { return g.origin + ":" + suffix }
 
 func (g *Gen) tick() uint64 {
 	switch g.r.Intn(10) {
@@ -59,8 +59,8 @@ func (g *Gen) Script(n int) []step {
 	wf := 0
 
 	refill := func(now uint64) {
-		a := fmt.Sprintf("%s.a%d", g.origin, wf)
-		x := fmt.Sprintf("%s.x%d", g.origin, wf)
+		a := fmt.Sprintf("%s:a%d", g.origin, wf)
+		x := fmt.Sprintf("%s:x%d", g.origin, wf)
 		wf++
 		ids = append(ids, a, x)
 		long := now + 30000
@@ -141,8 +141,9 @@ func (g *Gen) Script(n int) []step {
 func (g *Gen) noise(id string, now uint64) *Op {
 	timerTgt := Tags{"resonate:timer": "true", "resonate:target": "poll://any@w1",
 		"resonate:origin": g.origin}
+	foreign := "other" + g.origin
 	var op Op
-	switch g.r.Intn(13) {
+	switch g.r.Intn(18) {
 	case 0:
 		op = Op{Kind: "promise.settle", ID: id, State: Pending}
 	case 1:
@@ -163,19 +164,37 @@ func (g *Gen) noise(id string, now uint64) *Op {
 		op = Op{Kind: "task.halt", ID: id}
 	case 9:
 
-		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tt%d", g.origin, now), TimeoutAt: now + 1000, Tags: timerTgt}
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s:tt%d", g.origin, now), TimeoutAt: now + 1000, Tags: timerTgt}
 	case 10:
 
-		tid := fmt.Sprintf("%s.tx%d", g.origin, now)
+		tid := fmt.Sprintf("%s:tx%d", g.origin, now)
 		op = Op{Kind: "task.create", ID: tid, PID: "p0", TTL: 500,
 			Action: &FenceAction{Kind: "promise.create", ID: tid,
 				TimeoutAt: now + 1000, Tags: timerTgt}}
 	case 11:
 
-		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tm%d", g.origin, now),
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s:tm%d", g.origin, now),
 			TimeoutAt: now - uint64(1+g.r.Intn(50)),
 			Tags: Tags{"resonate:timer": "true", "resonate:external": "true",
 				"resonate:origin": g.origin}}
+	case 13:
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s:bad%d", foreign, now),
+			TimeoutAt: now + 1000,
+			Tags:      Tags{"resonate:origin": g.origin}}
+	case 14:
+		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s:colon%d", g.origin, now),
+			TimeoutAt: now + 1000,
+			Tags:      Tags{"resonate:origin": g.origin + ":sub"}}
+	case 15:
+		op = Op{Kind: "promise.register_callback",
+			ID: fmt.Sprintf("%s:cross%d", foreign, now), Awaiter: id}
+	case 16:
+		op = Op{Kind: "task.suspend", ID: id, Version: 1,
+			Awaited: []string{fmt.Sprintf("%s:cross%d", foreign, now)}}
+	case 17:
+		op = Op{Kind: "task.heartbeat", PID: "px", Refs: []TaskRef{
+			{ID: id, Version: 1},
+			{ID: fmt.Sprintf("%s:cross%d", foreign, now), Version: 1}}}
 	default:
 		op = Op{Kind: "task.continue", ID: id}
 	}

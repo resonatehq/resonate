@@ -138,12 +138,15 @@ func main() {
 func nextOp(r *rand.Rand, cid, i int) (map[string]any, string) {
 	origin := fmt.Sprintf("c%d", cid)
 	wf := i / 6
-	a := fmt.Sprintf("%s.a%d", origin, wf)
-	x := fmt.Sprintf("%s.x%d", origin, wf)
+	a := fmt.Sprintf("%s:a%d", origin, wf)
+	x := fmt.Sprintf("%s:x%d", origin, wf)
 	ext := map[string]string{"resonate:external": "true", "resonate:origin": origin}
 	tgt := map[string]string{"resonate:target": "poll://any@w1", "resonate:origin": origin}
 
-	switch r.Intn(12) {
+	foreign := fmt.Sprintf("f%d", cid)
+	fa := fmt.Sprintf("%s:a%d", foreign, wf)
+
+	switch r.Intn(17) {
 	case 0:
 		return map[string]any{"id": a, "timeoutAt": 900000, "param": map[string]any{}, "tags": ext}, "promise.create"
 	case 1:
@@ -170,6 +173,22 @@ func nextOp(r *rand.Rand, cid, i int) (map[string]any, string) {
 		return map[string]any{"id": id}, "promise.get"
 	case 10:
 		return map[string]any{"id": x, "version": r.Intn(4)}, "task.release"
+	case 12:
+		return map[string]any{"id": fa, "timeoutAt": 900000, "param": map[string]any{},
+			"tags": map[string]string{"resonate:origin": origin}}, "promise.create"
+	case 13:
+		return map[string]any{"id": a, "timeoutAt": 900000, "param": map[string]any{},
+			"tags": map[string]string{"resonate:origin": origin + ":sub"}}, "promise.create"
+	case 14:
+		return map[string]any{"awaited": fa, "awaiter": x}, "promise.register_callback"
+	case 15:
+		return map[string]any{"id": x, "version": r.Intn(3), "actions": []any{
+			map[string]any{"kind": "promise.register_callback", "head": map[string]any{},
+				"data": map[string]any{"awaited": fa, "awaiter": x}}}}, "task.suspend"
+	case 16:
+		return map[string]any{"pid": fmt.Sprintf("p%d", cid), "tasks": []any{
+			map[string]any{"id": x, "version": 1},
+			map[string]any{"id": fmt.Sprintf("%s:x%d", foreign, wf), "version": 1}}}, "task.heartbeat"
 	default:
 		return map[string]any{"awaited": a, "address": "poll://any@w1"}, "promise.register_listener"
 	}

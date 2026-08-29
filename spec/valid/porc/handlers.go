@@ -31,7 +31,7 @@ type PromiseCreateReq struct {
 }
 
 func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint64) Response {
-	if req.Tags.TimerTargeted() {
+	if req.Tags.TimerTargeted() || !originTagOK(req.ID, req.Tags) {
 		return Response{Status: 400}
 	}
 	if o := s.readObject(d, req.ID, now); o != nil {
@@ -88,7 +88,7 @@ func (s *ServerState) PromiseSettle(d Discipline, id string, st PromiseState, va
 }
 
 func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter string, now uint64) Response {
-	if awaited == awaiter {
+	if awaited == awaiter || !sameOrigin(awaited, awaiter) {
 		return Response{Status: 400}
 	}
 	oa := s.readObject(d, awaited, now)
@@ -145,7 +145,7 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 	}
 	seen := map[string]bool{}
 	for _, a := range awaited {
-		if a == id || seen[a] {
+		if a == id || seen[a] || !sameOrigin(a, id) {
 			return Response{Status: 400}
 		}
 		seen[a] = true
@@ -233,6 +233,11 @@ type TaskRef struct {
 }
 
 func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
+	for _, ref := range refs {
+		if !sameOrigin(ref.ID, refs[0].ID) {
+			return Response{Status: 400}
+		}
+	}
 	for _, ref := range refs {
 		o := s.readTaskObject(d, ref.ID, now)
 		if o == nil || o.Task == nil {
@@ -365,7 +370,7 @@ func (s *ServerState) TaskFence(d Discipline, id string, version uint64, act Fen
 }
 
 func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act PromiseCreateReq, now uint64) Response {
-	if !act.Tags.Has("resonate:target") || act.Tags.TimerTargeted() {
+	if !act.Tags.Has("resonate:target") || act.Tags.TimerTargeted() || !originTagOK(act.ID, act.Tags) {
 		return Response{Status: 400}
 	}
 	o := s.readObject(d, act.ID, now)
