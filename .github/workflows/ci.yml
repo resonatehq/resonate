@@ -102,3 +102,123 @@ jobs:
               ;;
           esac
           cargo test --release --test differential --all-features -- --nocapture
+
+  # Porcupine, from the specification repository, against a live server under
+  # real concurrency.
+  #
+  # The checker is upstream's, unmodified. Only the trace producer is ours:
+  # `loadgen` there opens with `debug.start`, which is a startup flag here and
+  # answers 400, and it builds ids like `c0.a0` where this server's origin is
+  # everything before the first ':'.
+  #
+  # `conccheck`, not `lincheck`. `lincheck` asks whether the ONE order the
+  # harness recorded satisfies the model, and on a concurrent run refutes
+  # almost anything, because return order is one legal linearization of many.
+  # `conccheck` reads the real call/return instants and asks whether ANY order
+  # consistent with them works — only its refutation is a claim about the
+  # server.
+  #
+  # `-partition=false` because upstream's `originOf` splits on '.', so it reads
+  # every ':'-id as its own partition. Unpartitioned replays against whole
+  # state, which is the stronger check anyway.
+  linearizability:
+    name: Linearizability (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, postgres, mysql]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: resonate
+          POSTGRES_PASSWORD: resonate
+          POSTGRES_DB: resonate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: resonate
+          MYSQL_USER: resonate
+          MYSQL_PASSWORD: resonate
+          MYSQL_DATABASE: resonate
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uresonate -presonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Checkout resonate-specification
+        uses: actions/checkout@v5
+        with:
+          repository: resonatehq/resonate-specification
+          path: spec
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: spec/valid/porc/go.mod
+
+      - name: Build
+        run: cargo build --release --bin resonate --example conctrace
+
+      # Debug mode is what makes a history checkable: the clock belongs to the
+      # caller, so every request carries the `resonate:debug_time` the model's
+      # non-decreasing clock needs, and no background sweep settles anything
+      # the trace did not ask for.
+      - name: Start server
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          case "$BACKEND" in
+            postgres)
+              export RESONATE_STORAGE__TYPE=postgres
+              export RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@localhost:5432/resonate
+              ;;
+            mysql)
+              export RESONATE_STORAGE__TYPE=mysql
+              export RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            *)
+              export RESONATE_STORAGE__TYPE=sqlite
+              export RESONATE_STORAGE__SQLITE__PATH=/tmp/conccheck.db
+              ;;
+          esac
+          RESONATE_DEBUG=true RESONATE_SERVER__PORT=8021 ./target/release/resonate serve &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null -X POST http://127.0.0.1:8021/ -d '{}' && break
+            sleep 1
+          done
+
+      # The producer exits non-zero on a history with no successes or no
+      # overlap, so a server that refuses everything, or a run that failed to
+      # be concurrent, fails here rather than linearizing vacuously.
+      - name: Record history
+        run: |
+          ./target/release/examples/conctrace \
+            --url http://127.0.0.1:8021/ --out trace --clients 8 --ops 600
+
+      - name: Check
+        working-directory: spec/valid/porc
+        run: go run ./cmd/conccheck -partition=false < "$GITHUB_WORKSPACE/trace.history"
