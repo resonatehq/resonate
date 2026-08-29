@@ -90,34 +90,34 @@ def witnesses (ws : List (List (Step × Nat))) (p : AbstractModel.ServerState �
 /-! ### Closing the alphabet's blind spots -/
 
 def covInternal : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "i", timeoutAt := 1000, param := {}, tags := [] }), 100),
-    (.api (.promiseRegisterListener { awaited := oid "i", address := "https://l" }), 110),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 120),
-    (.api (.promiseRegisterCallback { awaited := oid "i", awaiter := oid "x" }), 130) ]
+  [ (.external (.promiseCreate { id := oid "i", timeoutAt := 1000, param := {}, tags := [] }), 100),
+    (.external (.promiseRegisterListener { awaited := oid "i", address := "https://l" }), 110),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 120),
+    (.external (.promiseRegisterCallback { awaited := oid "i", awaiter := oid "x" }), 130) ]
 
 def covListeners : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
-    (.api (.promiseRegisterListener { awaited := oid "a", address := "https://l1" }), 110),
-    (.api (.promiseRegisterListener { awaited := oid "a", address := "https://l2" }), 120),
-    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
-    (.listener (oid "a") "https://l1", 210),
-    (.listener (oid "a") "https://l2", 220) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
+    (.external (.promiseRegisterListener { awaited := oid "a", address := "https://l1" }), 110),
+    (.external (.promiseRegisterListener { awaited := oid "a", address := "https://l2" }), 120),
+    (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
+    (.internal (.listener (oid "a") "https://l1"), 210),
+    (.internal (.listener (oid "a") "https://l2"), 220) ]
 
 def covTwoTasks : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
-    (.api (.taskRelease { id := oid "x", version := 1 }), 120),
-    (.api (.taskRelease { id := oid "y", version := 1 }), 130),
-    (.taskRetryTimeout (oid "x"), 140),
-    (.taskRetryTimeout (oid "y"), 150) ]
+  [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
+    (.external (.taskRelease { id := oid "x", version := 1 }), 120),
+    (.external (.taskRelease { id := oid "y", version := 1 }), 130),
+    (.internal (.taskRetryTimeout (oid "x")), 140),
+    (.internal (.taskRetryTimeout (oid "y")), 150) ]
 
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
     task is what exercises `well_formed_task_halted_is_cleared`. -/
 def covHalt : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "h", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskHalt { id := oid "h" }), 110),
-    (.api (.taskContinue { id := oid "h" }), 120) ]
+  [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "h", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskHalt { id := oid "h" }), 110),
+    (.external (.taskContinue { id := oid "h" }), 120) ]
 
 def battery : List (List (Step × Nat)) :=
   [wLag, b1, b2, b3, b4, b5, b6, covInternal, covListeners, covTwoTasks, covHalt]
@@ -377,7 +377,7 @@ open AbstractModel.Properties (well_formed_task_ttl_positive
 /-- `ttl = 0` is accepted: the task is acquired with `leaseTimeoutAt = now`,
     a lease already expired at the instant it was granted. -/
 def wGapTtlZero : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
+  [ (.external (.taskCreate { pid := "p", ttl := 0, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
 
 theorem gap_task_ttl_positive_is_violable :
     (trace wGapTtlZero).any (fun (n, s) => !well_formed_task_ttl_positive n s) = true := by decide
@@ -387,8 +387,8 @@ theorem gap_task_ttl_positive_is_violable :
 def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
 def wGapEmptyTarget : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
-    (.taskRetryTimeout (oid "y"), 110) ]
+  [ (.external (.promiseCreate { id := oid "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
+    (.internal (.taskRetryTimeout (oid "y")), 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
     (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide
@@ -409,7 +409,7 @@ theorem gap_empty_target_reaches_the_outbox :
 def lateDelayTags : ServerModel.Tags := [("resonate:target", "w"), ("resonate:delay", "5000")]
 
 def wGapLateDelay : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
+  [ (.external (.promiseCreate { id := oid "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
 
 theorem gap_promise_delay_before_deadline_is_violable :
     (trace wGapLateDelay).any (fun (n, s) => !well_formed_promise_delay_before_deadline n s) = true := by decide

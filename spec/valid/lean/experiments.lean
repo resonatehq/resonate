@@ -34,14 +34,14 @@ def tgt : Tags := [("resonate:target", "w1")]
 def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   let a := oid s!"a{i}"
   let x := oid s!"x{i}"
-  [ (.api (.promiseCreate { id := a, timeoutAt := 100000, param := {}, tags := ext }), t0)
-  , (.api (.promiseCreate { id := x, timeoutAt := 100000, param := {}, tags := tgt }), t0)
-  , (.api (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
-  , (.api (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
-  , (.api (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
-  , (.callback a x, t1)          -- hidden
-  , (.api (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
-  , (.api (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
+  [ (.external (.promiseCreate { id := a, timeoutAt := 100000, param := {}, tags := ext }), t0)
+  , (.external (.promiseCreate { id := x, timeoutAt := 100000, param := {}, tags := tgt }), t0)
+  , (.external (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
+  , (.external (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
+  , (.external (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
+  , (.internal (.callback a x), t1)          -- hidden
+  , (.external (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
+  , (.external (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
 
 /-- `k` workflows back to back — pure length, one object pair live at a
     time, so at most one obligation is ever armed. -/
@@ -53,16 +53,16 @@ def lengthScript (k : Nat) : List (Step × Nat) :=
     nothing has discharged them. This is the fanout axis. -/
 def fanoutScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
-      (.api (.promiseCreate { id := oid s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
-  ++ [ (.api (.promiseGet { id := oid "a0" }), 500) ]
+      (.external (.promiseCreate { id := oid s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
+  ++ [ (.external (.promiseGet { id := oid "a0" }), 500) ]
 
 /-- Fanout with the timeouts actually fired in the hidden part, so the
     validator must find the right SUBSET rather than the empty one. -/
 def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
-      (.api (.promiseCreate { id := oid s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
-  ++ (List.range n).map (fun i => (.promiseTimeout (oid s!"a{i}"), 500))
-  ++ [ (.api (.promiseGet { id := oid "a0" }), 500) ]
+      (.external (.promiseCreate { id := oid s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
+  ++ (List.range n).map (fun i => (.internal (.promiseTimeout (oid s!"a{i}")), 500))
+  ++ [ (.external (.promiseGet { id := oid "a0" }), 500) ]
 
 /-- **Regression.** `a` expires on its own; that expiry defers a resume
     for `x`, which wakes it. The first cone keyed relevance on the object
@@ -72,13 +72,13 @@ def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
     it. Kept because nothing else in the suite has an internal step whose consequences
     land on a different object. -/
 def crossObjectScript : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 30, param := {}, tags := ext }), 10)
-  , (.api (.promiseCreate { id := oid "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
-  , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := 50 }), 10)
-  , (.api (.taskSuspend   { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 12)
-  , (.promiseTimeout (oid "a"), 40)                            -- hidden
-  , (.callback (oid "a") (oid "x"), 40)      -- hidden
-  , (.api (.taskGet { id := oid "x" }), 50) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 30, param := {}, tags := ext }), 10)
+  , (.external (.promiseCreate { id := oid "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
+  , (.external (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := 50 }), 10)
+  , (.external (.taskSuspend   { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 12)
+  , (.internal (.promiseTimeout (oid "a")), 40)                            -- hidden
+  , (.internal (.callback (oid "a") (oid "x")), 40)      -- hidden
+  , (.external (.taskGet { id := oid "x" }), 50) ]
 
 /-! ## Running -/
 

@@ -66,31 +66,31 @@ def taskAt (s : ServerState) (id : ServerModel.Ident) : Option TaskObject :=
 
 def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
-  | .promiseTimeout id =>
+  | .internal (.promiseTimeout id) =>
       match promiseAt s id with
       | some p => p.otype.awaitable && p.state == .pending && p.timeoutAt ≤ now
       | none   => false
-  | .listener id addr =>
+  | .internal (.listener id addr) =>
       match promiseAt s id with
       | some p => (p.project now).state != .pending && p.listeners.contains addr
       | none   => false
-  | .callback id x =>
+  | .internal (.callback id x) =>
       match promiseAt s id with
       | some p => (p.project now).state != .pending && p.callbacks.contains x
       | none   => false
-  | .taskLeaseTimeout id =>
+  | .internal (.taskLeaseTimeout id) =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .acquired && (t.leaseTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .taskRetryTimeout id =>
+  | .internal (.taskRetryTimeout id) =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .pending && (t.retryTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .scheduleTimeout id => (s.schedules.find? (·.id == id)).isSome
+  | .internal (.scheduleTimeout id) => (s.schedules.find? (·.id == id)).isSome
   | _ => false
 
 /-! ### The environment's obligations -/
@@ -109,15 +109,15 @@ def WeaklyFairOn (tr : Trace) (family : Step → Bool) : Prop :=
       ∃ u : Nat, t ≤ u ∧ (tr u).req = st
 
 def isSettlementStep : Step → Bool
-  | .promiseTimeout _ => true
+  | .internal (.promiseTimeout _) => true
   | _     => false
 
 def isCallbackStep : Step → Bool
-  | .callback _ _ => true
+  | .internal (.callback _ _) => true
   | _       => false
 
 def isListenerStep : Step → Bool
-  | .listener _ _ => true
+  | .internal (.listener _ _) => true
   | _       => false
 
 /-! ### 1. Every external promise eventually settles
@@ -268,11 +268,11 @@ this is a real refutation channel rather than decoration. -/
 def enabledSteps (now : Nat) (s : ServerState) : List Step :=
   s.objects.flatMap fun o =>
     let p := o.promise
-    (if enabledInternal (.promiseTimeout o.id) now s then [Step.promiseTimeout o.id] else [])
-      ++ p.listeners.map (fun addr => Step.listener o.id addr)
-      ++ p.callbacks.map (fun x => Step.callback o.id x)
-      ++ (if o.task.isSome ∧ enabledInternal (.taskLeaseTimeout o.id) now s then [Step.taskLeaseTimeout o.id] else [])
-      ++ (if o.task.isSome ∧ enabledInternal (.taskRetryTimeout o.id) now s then [Step.taskRetryTimeout o.id] else [])
+    (if enabledInternal (.internal (.promiseTimeout o.id)) now s then [Step.internal (.promiseTimeout o.id)] else [])
+      ++ p.listeners.map (fun addr => Step.internal (.listener o.id addr))
+      ++ p.callbacks.map (fun x => Step.internal (.callback o.id x))
+      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskLeaseTimeout o.id)) now s then [Step.internal (.taskLeaseTimeout o.id)] else [])
+      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskRetryTimeout o.id)) now s then [Step.internal (.taskRetryTimeout o.id)] else [])
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl
@@ -308,10 +308,10 @@ set_option maxHeartbeats 4000000
 /-- The wake, end to end: a suspended awaiter, a settled awaited, and
     nothing but internal steps between them. -/
 def wWake : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
-    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
 
 example : wakeMaterializes wWake 300 := by decide
 example : resumeRecorded wWake 300 := by decide
@@ -320,10 +320,10 @@ example : resumeRecorded wWake 300 := by decide
     The obligation is still discharged, and the escape clause is the one
     that fires — the task reads fulfilled, not resumed. -/
 def wWakeTimedOut : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
-    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 9000, param := {}, tags := extTags }), 100),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200) ]
 
 example : wakeMaterializes wWakeTimedOut 300 := by decide
 example : resumeRecorded wWakeTimedOut 300 := by decide

@@ -208,7 +208,7 @@ def stepObservedBy (exhaustive : Bool) (coned : Bool) (fuel : Nat) (a : Nat)
   let (closed, deep) := internalClosureIn pick instants fuel cs
   let gapOK := exhaustive || noNewInGapDeadline a o.now instants closed
   (dedup <| closed.filterMap fun c =>
-    let (r, s') := Abstraction.stepOf true (.api o.req) o.now c.state
+    let (r, s') := Abstraction.stepOf true (.external o.req) o.now c.state
     if r == o.res then some (mkCand s' c.schedule) else none, deep, gapOK)
 
 def stepObserved (coned : Bool) (fuel : Nat) (a : Nat) (o : Observation)
@@ -310,15 +310,15 @@ theorem retry_invisible {s : ServerState} {id : ServerModel.Ident} {n : Nat}
     reads lives in the erased part. -/
 theorem visible_response {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    (Abstraction.stepOf true (.api req) now s).1
-      = (Abstraction.stepOf true (.api req) now s').1 := by
+    (Abstraction.stepOf true (.external req) now s).1
+      = (Abstraction.stepOf true (.external req) now s').1 := by
   sorry
 
 /-- **R2b · and for successor states.** -/
 theorem visible_step {s s' : ServerState} (h : Visible s = Visible s')
     (req : Request) (now : Nat) :
-    Visible (Abstraction.stepOf true (.api req) now s).2
-      = Visible (Abstraction.stepOf true (.api req) now s').2 := by
+    Visible (Abstraction.stepOf true (.external req) now s).2
+      = Visible (Abstraction.stepOf true (.external req) now s').2 := by
   sorry
 
 /-- **R3 · THE REDUCTION.** On a schedule-free state, firing an internal step at `n`
@@ -341,7 +341,7 @@ theorem step_at_rep {s : ServerState} {t : InternalStep} {a b n : Nat}
     hypothesis be discharged once, at the top, instead of at every step. -/
 theorem schedules_stay_empty {s : ServerState} {req : Request} {now : Nat}
     (h : s.schedules = []) (hreq : mentionsSchedule req = false) :
-    (Abstraction.stepOf true (.api req) now s).2.schedules = [] := by
+    (Abstraction.stepOf true (.external req) now s).2.schedules = [] := by
   sorry
 
 /-! ## The two theorems -/

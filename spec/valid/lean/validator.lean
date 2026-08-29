@@ -120,49 +120,23 @@ def canon (s : ServerState) : ServerState :=
       schedules        := sortBy (·.id.render) s.schedules
       outbox           := sortBy (ServerModel.OutboxKey.render ·.key) s.outbox }
 
-/-! ## Internal steps, as their own type
+/-! ## Internal steps
 
-`Request` mixes the client-visible actions with the machine's own. A
-schedule may only contain the latter, and saying so with a side-condition
-(`∀ t ∈ σ, t.isExternal = false`) leaves the invariant to be re-checked
-everywhere it matters — and leaves `affects` with a catch-all case that a
-new internal step would fall into silently. That catch-all is how the cone went
-unsound.
+A schedule may contain only the machine's own steps, and saying so with a
+side-condition (`∀ t ∈ σ, t.isExternal = false`) leaves the invariant to be
+re-checked everywhere it matters — and leaves `affects` with a catch-all case
+that a new internal step would fall into silently. That catch-all is how the
+cone went unsound.
 
-`InternalStep` makes it structural: a schedule is a `List InternalStep`, the side-condition
-disappears, and every function over internal steps is an exhaustive match. Adding a
-constructor here breaks `affects` until someone says what it reaches. -/
+`InternalStep` makes it structural: a schedule is a `List InternalStep`, the
+side-condition disappears, and every function over internal steps is an
+exhaustive match. Adding a constructor there breaks `affects` until someone
+says what it reaches.
 
-inductive InternalStep
-  | promiseTimeout   (id : Ident)
-  | listener         (id : Ident) (address : String)
-  | callback         (id awaiter : Ident)
-  | taskLeaseTimeout (id : Ident)
-  | taskRetryTimeout (id : Ident)
-  | scheduleTimeout  (id : Ident)
-  deriving Repr, DecidableEq
-
-/-- Six now, not five, and the shapes changed. The concrete machine
-    drained listeners inline inside a touch and pushed callbacks onto a
-    `deferred` queue, so a schedule named a `ResumeReq` and never named
-    a listener at all. The abstract machine drains both explicitly, one
-    obligation at a time, so both are steps an observer's explanation
-    may have to include — and each names the obligation it discharges
-    rather than a queue entry.
-
-    This is a coercion now, not a translation. `Step` used to call these
-    `r1`–`r7` and this function existed to bridge the two vocabularies;
-    `Step` took these names, so what is left is the injection of the
-    internal steps into all of them. `InternalStep` still earns its place by
-    being exactly the internal half — a schedule may contain nothing
-    else, and `DecidableEq` on it is what the cone's dedup needs. -/
-def InternalStep.toStep : InternalStep → Step
-  | .promiseTimeout id   => .promiseTimeout id
-  | .listener id addr    => .listener id addr
-  | .callback id awaiter => .callback id awaiter
-  | .taskLeaseTimeout id => .taskLeaseTimeout id
-  | .taskRetryTimeout id => .taskRetryTimeout id
-  | .scheduleTimeout id  => .scheduleTimeout id
+The type is the specification's own (`02-abstract/system.lean`), where `Step`
+is the sum of `Request`, `InternalStep` and `idle`. This file used to declare a
+second copy and an identity coercion back into `Step`; the injection is
+`Step.internal` now. -/
 
 /-- A witness is meant to be read, so it names its CONSTRUCTOR: what a
     refutation prints can be grepped straight back to the step that
@@ -170,7 +144,7 @@ def InternalStep.toStep : InternalStep → Step
     of the vocabulary, and it was redundant anyway — the only place they
     are printed is under a heading that already says these are the
     internal steps. The Go checker prints the same six strings. -/
-def InternalStep.pretty : InternalStep → String
+def _root_.Abstraction.InternalStep.pretty : InternalStep → String
   | .promiseTimeout id   => s!"promiseTimeout {id}"
   | .listener id addr    => s!"listener {id} → {addr}"
   | .callback id awaiter => s!"callback {id} → {awaiter}"
@@ -178,13 +152,13 @@ def InternalStep.pretty : InternalStep → String
   | .taskRetryTimeout id => s!"taskRetryTimeout {id}"
   | .scheduleTimeout id  => s!"scheduleTimeout {id}"
 
-instance : ToString InternalStep := ⟨InternalStep.pretty⟩
+instance : ToString InternalStep := ⟨Abstraction.InternalStep.pretty⟩
 
 /-- Firing an internal step is firing its step. Materialised (`mat := true`); the
     abstract twins agree on responses, so the discipline is not
     observable through the channel this checker compares. -/
-def InternalStep.step (t : InternalStep) (now : Nat) (s : ServerState) : ServerState :=
-  (Abstraction.stepOf true t.toStep now s).2
+def _root_.Abstraction.InternalStep.step (t : InternalStep) (now : Nat) (s : ServerState) : ServerState :=
+  (Abstraction.stepOf true (.internal t) now s).2
 
 /-! ## Enabled internal steps
 
@@ -402,7 +376,7 @@ def record : List (Step × Nat) → ServerState → List Observation
   | (st, n) :: rest, s =>
       let (res, s') := Abstraction.stepOf true st n s
       let here := match st with
-        | .api rq => [({ req := rq, res := res, now := n } : Observation)]
+        | .external rq => [({ req := rq, res := res, now := n } : Observation)]
         | _       => []
       here ++ record rest s'
 

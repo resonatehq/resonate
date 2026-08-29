@@ -255,8 +255,8 @@ def sTaskless : AbstractModel.ServerState :=
     deadline. Delete the `o.task.isSome` test in `readTaskObject` and this
     goes red. -/
 theorem taskless_id_task_request_writes_nothing :
-    ((stepOf true (.api (.taskGet { id := oid "a" })) 500 sTaskless).2 == sTaskless
-      && (stepOf true (.api (.taskHalt { id := oid "a" })) 500 sTaskless).2 == sTaskless)
+    ((stepOf true (.external (.taskGet { id := oid "a" })) 500 sTaskless).2 == sTaskless
+      && (stepOf true (.external (.taskHalt { id := oid "a" })) 500 sTaskless).2 == sTaskless)
       = true := by decide
 
 /-- And not because nothing ever materialises here: the same state, the
@@ -264,7 +264,7 @@ theorem taskless_id_task_request_writes_nothing :
     Without this the theorem above would hold of a machine that had
     stopped materialising altogether. -/
 theorem the_same_promise_does_materialise :
-    ((stepOf true (.api (.promiseGet { id := oid "a" })) 500 sTaskless).2 == sTaskless)
+    ((stepOf true (.external (.promiseGet { id := oid "a" })) 500 sTaskless).2 == sTaskless)
       = false := by decide
 
 /-- The correction, machine-checked: a settled promise's RECORD is
@@ -315,7 +315,7 @@ theorem internal_laws_are_strictly_stronger :
 /-! ### The gap that closed
 
 `monotone_task_retry_rearm_advances` used to live in `gaps`, witnessed
-by a script that fired `.taskRetryTimeout (oid "x") 0` — the environment writing a past
+by a script that fired `.internal (.taskRetryTimeout (oid "x")) 0` — the environment writing a past
 instant into the store. There is no such script now: `Step.taskRetryTimeout` names
 only its task, and the next instant comes from
 `Env.config.retryTimeout`, which no step can write. The witness cannot

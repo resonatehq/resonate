@@ -130,10 +130,10 @@ instant, and at `t1` the calendar has moved on. -/
 def sid : ServerModel.Ident := { origin := "o", suffix := "s" }
 
 def script (H : CronDiscriminates) : List (Step × Nat) :=
-  [ (.api (.scheduleCreate { id := sid, cron := H.cron, promiseId := { origin := "o", suffix := "p" },
-                             promiseTimeout := 1000, promiseParam := {}, promiseTags := [] }), H.t0)
-  , (.scheduleTimeout sid, H.tg)
-  , (.api (.scheduleGet { id := sid }), H.t1) ]
+  [ (.external (.scheduleCreate { id := sid, cron := H.cron, promiseId := { origin := "o", suffix := "p" },
+                                  promiseTimeout := 1000, promiseParam := {}, promiseTags := [] }), H.t0)
+  , (.internal (.scheduleTimeout sid), H.tg)
+  , (.external (.scheduleGet { id := sid }), H.t1) ]
 
 def obs (H : CronDiscriminates) : List Observation := recordFrom (script H)
 

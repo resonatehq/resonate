@@ -590,9 +590,19 @@ requests, 6 internal jobs, `idle` — writes only rows satisfying `g`,
 given the obligations and a store that already satisfies `g`
 everywhere. A step added without a case here does not compile. -/
 
+theorem writesGood_handleInternal (st : InternalStep) (now : Nat) :
+    WritesGood g e (handleInternal st now) := by
+  cases st with
+  | promiseTimeout id   => exact writesGood_processPromiseTimeout hq hs id now
+  | listener id a       => exact writesGood_processListener hq hs id a now
+  | callback id x       => exact writesGood_processCallback hq hs id x now
+  | taskLeaseTimeout id => exact writesGood_processLeaseTimeout hq hs id now
+  | taskRetryTimeout id => exact writesGood_processRetryTimeout hq hs id now
+  | scheduleTimeout id  => exact writesGood_processSchedule hq hs id now
+
 theorem writesGood_handle (st : Step) (now : Nat) : WritesGood g e (handle st now) := by
   cases st with
-  | api r =>
+  | external r =>
       cases r with
       | promiseGet r => exact writesGood_map _ _ _ _ (writesGood_promiseGet hq hs r now)
       | promiseCreate r => exact writesGood_map _ _ _ _ (writesGood_promiseCreate hq hs r now)
@@ -617,23 +627,8 @@ theorem writesGood_handle (st : Step) (now : Nat) : WritesGood g e (handle st no
       | taskHalt r => exact writesGood_map _ _ _ _ (writesGood_taskHalt hq hs r now)
       | taskContinue r => exact writesGood_map _ _ _ _ (writesGood_taskContinue hq hs r now)
       | taskSearch r => exact writesGood_map _ _ _ _ (writesGood_taskSearch hq hs r now)
-  | promiseTimeout id =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processPromiseTimeout hq hs id now)
-        (writesGood_pure _ _ _)
-  | listener id a =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processListener hq hs id a now)
-        (writesGood_pure _ _ _)
-  | callback id x =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processCallback hq hs id x now)
-        (writesGood_pure _ _ _)
-  | taskLeaseTimeout id =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processLeaseTimeout hq hs id now)
-        (writesGood_pure _ _ _)
-  | taskRetryTimeout id =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processRetryTimeout hq hs id now)
-        (writesGood_pure _ _ _)
-  | scheduleTimeout id =>
-      exact writesGood_bind' _ _ _ _ (writesGood_processSchedule hq hs id now)
+  | internal a =>
+      exact writesGood_bind' _ _ _ _ (writesGood_handleInternal hq hs a now)
         (writesGood_pure _ _ _)
   | idle => exact writesGood_pure _ _ _
 

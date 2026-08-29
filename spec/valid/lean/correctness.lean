@@ -107,7 +107,7 @@ def ExternalsAre (tr : Trace) (obs : List Observation) : Prop :=
     (∀ i j, i < j → φ i < φ j) ∧
     (∀ i, (h : i < obs.length) →
       (tr (φ i)).req.isExternal = true ∧
-      (tr (φ i)).req = .api (obs[i]'h).req ∧
+      (tr (φ i)).req = .external (obs[i]'h).req ∧
       (tr (φ i)).res = (obs[i]'h).res ∧
       (tr (φ i)).now = (obs[i]'h).now) ∧
     (∀ s, (tr s).req.isExternal = true → ∃ i, i < obs.length ∧ φ i = s)
@@ -139,7 +139,7 @@ def fireAll (σ : List InternalStep) (now : Nat) (s : ServerState) : ServerState
 /-- One observed event explained by a schedule pinned to `o.now`. -/
 def Explains (o : Observation) (s s' : ServerState) : Prop :=
   ∃ σ : List InternalStep,
-    Abstraction.stepOf true (.api o.req) o.now (fireAll σ o.now s) = (o.res, s')
+    Abstraction.stepOf true (.external o.req) o.now (fireAll σ o.now s) = (o.res, s')
 
 inductive Admissible : ServerState → List Observation → Prop
   | nil  {s} : Admissible s []
@@ -192,7 +192,7 @@ place the implementation could be wrong without any test noticing. -/
     reaches them by key. -/
 theorem canon_congruence {s s' : ServerState} (h : canon s = canon s')
     (req : Request) (now : Nat) :
-    (Abstraction.stepOf true (.api req) now s).1 = (Abstraction.stepOf true (.api req) now s').1 := by
+    (Abstraction.stepOf true (.external req) now s).1 = (Abstraction.stepOf true (.external req) now s').1 := by
   sorry
 
 /-- **2 · `canon` is preserved by stepping.**
@@ -202,7 +202,7 @@ theorem canon_congruence {s s' : ServerState} (h : canon s = canon s')
     only correct for one event. -/
 theorem canon_step {s s' : ServerState} (h : canon s = canon s')
     (req : Request) (now : Nat) :
-    canon (Abstraction.stepOf true (.api req) now s).2 = canon (Abstraction.stepOf true (.api req) now s').2 := by
+    canon (Abstraction.stepOf true (.external req) now s).2 = canon (Abstraction.stepOf true (.external req) now s').2 := by
   sorry
 
 /-- **3 · INDEPENDENCE — the cone's whole justification.**
@@ -223,16 +223,16 @@ theorem canon_step {s s' : ServerState} (h : canon s = canon s')
     wrong. -/
 theorem cone_independence {s : ServerState} {now : Nat} {req : Request} {t : InternalStep}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
-    (Abstraction.stepOf true (.api req) now (t.step now s)).1
-      = (Abstraction.stepOf true (.api req) now s).1 := by
+    (Abstraction.stepOf true (.external req) now (t.step now s)).1
+      = (Abstraction.stepOf true (.external req) now s).1 := by
   sorry
 
 /-- **3b · and the states commute**, modulo `canon`, so deferring is a
     reordering rather than a loss. -/
 theorem cone_commute {s : ServerState} {now : Nat} {req : Request} {t : InternalStep}
     (hdisj : ∀ o ∈ affects s t, o ∉ touches req) :
-    canon (t.step now (Abstraction.stepOf true (.api req) now s).2)
-      = canon (Abstraction.stepOf true (.api req) now (t.step now s)).2 := by
+    canon (t.step now (Abstraction.stepOf true (.external req) now s).2)
+      = canon (Abstraction.stepOf true (.external req) now (t.step now s)).2 := by
   sorry
 
 end TraceCheck.Correctness

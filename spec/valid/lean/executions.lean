@@ -69,24 +69,24 @@ namespace TraceCheck.Executions
 
 open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Correctness
 
-/-! ## Internal requests, read back as internal steps
+/-! ## Internal steps, read back off a step
 
-`InternalStep` was introduced so that "a schedule contains only internal steps" is
-a typing fact. Recovering a schedule from a trace needs the other
-direction: every non-external `Request` is either an internal step or `.idle`, and
-`.idle` is a no-op that can be dropped. -/
+`InternalStep` was introduced so that "a schedule contains only internal steps"
+is a typing fact. Recovering a schedule from a trace needs the other direction:
+every non-external step is either an internal step or `.idle`, and `.idle` is a
+no-op that can be dropped.
+
+That used to be an eight-arm partial inverse, a round-trip theorem and a lemma
+ruling out the constructors in between. `Step` names its three cases now, so the
+inverse is the one projection and the two facts are case analyses over three
+constructors with two of them contradicted on sight. -/
 
 def ofStep? : Step → Option InternalStep
-  | .promiseTimeout id      => some (.promiseTimeout id)
-  | .listener id addr => some (.listener id addr)
-  | .callback id x    => some (.callback id x)
-  | .taskLeaseTimeout id      => some (.taskLeaseTimeout id)
-  | .taskRetryTimeout id      => some (.taskRetryTimeout id)
-  | .scheduleTimeout id      => some (.scheduleTimeout id)
+  | .internal t => some t
   | _           => none
 
 theorem toStep_ofStep? {st : Step} {t : InternalStep} (h : ofStep? st = some t) :
-    t.toStep = st := by
+    .internal t = st := by
   cases st <;> simp [ofStep?] at h <;> subst h <;> rfl
 
 /-- The only non-external step that is not an internal step. -/
@@ -138,7 +138,7 @@ inductive AdmissibleAt : Nat → ServerState → List Observation → Prop
   | nil  {a s} : AdmissibleAt a s []
   | cons {a s s' o rest} (σ : List (InternalStep × Nat))
       (htime : Timed a o.now σ)
-      (hstep : Abstraction.stepOf true (.api o.req) o.now (fireAllAt σ s) = (o.res, s'))
+      (hstep : Abstraction.stepOf true (.external o.req) o.now (fireAllAt σ s) = (o.res, s'))
       (hrest : AdmissibleAt o.now s' rest) :
       AdmissibleAt a s (o :: rest)
 
@@ -331,7 +331,7 @@ theorem walk {tr : Trace} (hv : ValidM tr) {φ : Nat → Nat}
       k ≤ φ i → a ≤ (tr k).now →
       (∀ j, k ≤ j → j < φ i → (tr j).req.isExternal = false) →
       (∀ n, (hn : n < rest.length) →
-         (tr (φ (i + n))).req = .api (rest[n]'hn).req ∧
+         (tr (φ (i + n))).req = .external (rest[n]'hn).req ∧
          (tr (φ (i + n))).res = (rest[n]'hn).res ∧
          (tr (φ (i + n))).now = (rest[n]'hn).now) →
       AdmissibleAt a (tr k).state rest := by
@@ -348,7 +348,7 @@ theorem walk {tr : Trace} (hv : ValidM tr) {φ : Nat → Nat}
       -- `o` sits at index `φ i`
       obtain ⟨hreq, hres, hnow⟩ := hmatch 0 (by simp)
       simp only [Nat.add_zero, List.getElem_cons_zero] at hreq hres hnow
-      have hstep : Abstraction.stepOf true (.api o.req) o.now (fireAllAt σ (tr k).state)
+      have hstep : Abstraction.stepOf true (.external o.req) o.now (fireAllAt σ (tr k).state)
           = (o.res, (tr (φ i + 1)).state) := by
         rw [hfire, ← hreq, ← hnow, ← hres, (hv (φ i)).1, (hv (φ i)).2.1]
       refine AdmissibleAt.cons σ (hnow ▸ htime) hstep ?_

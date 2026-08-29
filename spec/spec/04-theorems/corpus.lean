@@ -25,47 +25,47 @@ open Equivalence
 /-! ## The battery -/
 
 def wLag : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskGet { id := oid "x" }), 300),
-    (.taskLeaseTimeout (oid "x"), 300),
-    (.taskRetryTimeout (oid "x"), 300) ]
+  [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskGet { id := oid "x" }), 300),
+    (.internal (.taskLeaseTimeout (oid "x")), 300),
+    (.internal (.taskRetryTimeout (oid "x")), 300) ]
 
 def b1 : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
-    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
-    (.callback (oid "a") (oid "x"), 200),
-    (.api (.taskGet { id := oid "x" }), 210),
-    (.taskRetryTimeout (oid "x"), 210),
-    (.api (.taskAcquire { id := oid "x", version := 1, pid := "p2", ttl := 50 }), 220),
-    (.api (.taskFulfill { id := oid "x", version := 2, action := { id := oid "x", state := .resolved, value := {} } }), 230) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
+    (.internal (.callback (oid "a") (oid "x")), 200),
+    (.external (.taskGet { id := oid "x" }), 210),
+    (.internal (.taskRetryTimeout (oid "x")), 210),
+    (.external (.taskAcquire { id := oid "x", version := 1, pid := "p2", ttl := 50 }), 220),
+    (.external (.taskFulfill { id := oid "x", version := 2, action := { id := oid "x", state := .resolved, value := {} } }), 230) ]
 
 def b2 : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
-    (.api (.taskGet { id := oid "x" }), 500),
-    (.api (.taskHalt { id := oid "x" }), 500) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
+    (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
+    (.external (.taskGet { id := oid "x" }), 500),
+    (.external (.taskHalt { id := oid "x" }), 500) ]
 
 def b3 : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "tm", timeoutAt := 300, param := {}, tags := timerTags }), 100),
-    (.api (.promiseGet { id := oid "tm" }), 500),
-    (.api (.promiseRegisterListener { awaited := oid "tm", address := "https://l" }), 500),
-    (.api (.promiseSettle { id := oid "tm", state := .rejected, value := {} }), 500),
-    (.api (.promiseCreate { id := oid "tm", timeoutAt := 9999, param := {}, tags := [] }), 600) ]
+  [ (.external (.promiseCreate { id := oid "tm", timeoutAt := 300, param := {}, tags := timerTags }), 100),
+    (.external (.promiseGet { id := oid "tm" }), 500),
+    (.external (.promiseRegisterListener { awaited := oid "tm", address := "https://l" }), 500),
+    (.external (.promiseSettle { id := oid "tm", state := .rejected, value := {} }), 500),
+    (.external (.promiseCreate { id := oid "tm", timeoutAt := 9999, param := {}, tags := [] }), 600) ]
 
 def b4 : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskRelease { id := oid "y", version := 1 }), 150),
-    (.api (.taskCreate { pid := "p1", ttl := 100, action := { id := oid "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 500) ]
+  [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskRelease { id := oid "y", version := 1 }), 150),
+    (.external (.taskCreate { pid := "p1", ttl := 100, action := { id := oid "y", timeoutAt := 300, param := {}, tags := tgtTags } }), 500) ]
 
 def b5 : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 1000, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskFence { id := oid "x", version := 1, action := .create { id := oid "c", timeoutAt := 3000, param := {}, tags := extTags } }), 200),
-    (.api (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "c", state := .resolved, value := {} } }), 300),
-    (.api (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "x", state := .resolved, value := {} } }), 400),
-    (.api (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "c", state := .resolved, value := {} } }), 2500) ]
+  [ (.external (.taskCreate { pid := "p0", ttl := 1000, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
+    (.external (.taskFence { id := oid "x", version := 1, action := .create { id := oid "c", timeoutAt := 3000, param := {}, tags := extTags } }), 200),
+    (.external (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "c", state := .resolved, value := {} } }), 300),
+    (.external (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "x", state := .resolved, value := {} } }), 400),
+    (.external (.taskFence { id := oid "x", version := 1, action := .settle { id := oid "c", state := .resolved, value := {} } }), 2500) ]
 
 /-- A task request against an id that holds a promise with NO task. `"a"`
     is external and untargeted, and by 500 it is past its deadline. Both
@@ -78,29 +78,29 @@ def b5 : List (Step × Nat) :=
     task. The Go fuzzer is what noticed, and this is here so the Lean
     harnesses stop needing it to. -/
 def b6 : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 250, param := {}, tags := extTags }), 100),
-    (.api (.taskGet { id := oid "a" }), 500),
-    (.api (.taskHalt { id := oid "a" }), 500),
-    (.api (.promiseGet { id := oid "a" }), 500) ]
+  [ (.external (.promiseCreate { id := oid "a", timeoutAt := 250, param := {}, tags := extTags }), 100),
+    (.external (.taskGet { id := oid "a" }), 500),
+    (.external (.taskHalt { id := oid "a" }), 500),
+    (.external (.promiseGet { id := oid "a" }), 500) ]
 
 /-! ## The alphabet
 
-`.taskRetryTimeout` names only its task now — the next fire instant comes from
+`.internal (.taskRetryTimeout)` names only its task now — the next fire instant comes from
 `Env.config.retryTimeout`, so there is no instant for a script to
-choose. It used to read `.taskRetryTimeout (oid "x") 9000`. -/
+choose. It used to read `.internal (.taskRetryTimeout (oid "x")) 9000`. -/
 
 def kernelsResp : List Step :=
-  [ .api (.promiseCreate { id := oid "a", timeoutAt := 250, param := {}, tags := extTags }),
-    .api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }),
-    .api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }),
-    .api (.promiseSettle { id := oid "a", state := .resolved, value := {} }),
-    .api (.promiseGet { id := oid "a" }),
-    .api (.taskGet { id := oid "x" }),
-    .api (.taskHalt { id := oid "x" }),
-    .promiseTimeout (oid "a"),
-    .callback (oid "a") (oid "x"),
-    .taskLeaseTimeout (oid "x"),
-    .taskRetryTimeout (oid "x") ]
+  [ .external (.promiseCreate { id := oid "a", timeoutAt := 250, param := {}, tags := extTags }),
+    .external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }),
+    .external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }),
+    .external (.promiseSettle { id := oid "a", state := .resolved, value := {} }),
+    .external (.promiseGet { id := oid "a" }),
+    .external (.taskGet { id := oid "x" }),
+    .external (.taskHalt { id := oid "x" }),
+    .internal (.promiseTimeout (oid "a")),
+    .internal (.callback (oid "a") (oid "x")),
+    .internal (.taskLeaseTimeout (oid "x")),
+    .internal (.taskRetryTimeout (oid "x")) ]
 
 def seqsLenA (ks : List Step) : Nat → List (List Step)
   | 0 => [[]]
