@@ -171,7 +171,7 @@ internal promise is never observed to be pending past its deadline, and
 never costs the server a timer to make that true. -/
 def EventuallyEveryPromiseReadsSettled : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr →
-    ∀ (t : Nat) (id : String),
+    ∀ (t : Nat) (id : ServerModel.Ident),
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ p, promiseAt (tr u).state id = some p →
