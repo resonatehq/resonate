@@ -2509,8 +2509,8 @@ fn filter_constraints(sql: &str, skip: &[String]) -> String {
 /// `:FULFILLED` is the predicate "this settlement also fulfils the row's task".
 const SETTLE_SELF: &str = "
     task_state = CASE WHEN :FULFILLED THEN 'fulfilled' ELSE p.task_state END,
-    retry_at   = CASE WHEN :FULFILLED THEN NULL ELSE p.retry_at END,
-    expires_at = CASE WHEN :FULFILLED THEN NULL ELSE p.expires_at END,
+    retry_timeout_at   = CASE WHEN :FULFILLED THEN NULL ELSE p.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN :FULFILLED THEN NULL ELSE p.lease_timeout_at END,
     ttl        = CASE WHEN :FULFILLED THEN NULL ELSE p.ttl END,
     pid        = CASE WHEN :FULFILLED THEN NULL ELSE p.pid END,
     resumes    = CASE WHEN :FULFILLED THEN '{}' ELSE p.resumes END,
@@ -2547,10 +2547,10 @@ fanout AS (
                 THEN q.resumes || :AWAITED ELSE q.resumes END,
     task_state = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
                 THEN 'pending' ELSE q.task_state END,
-    retry_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
-                THEN :TIME + :TRT ELSE q.retry_at END,
-    expires_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
-                THEN NULL ELSE q.expires_at END,
+    retry_timeout_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN :TIME + :TRT ELSE q.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN NULL ELSE q.lease_timeout_at END,
     ttl = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
                 THEN NULL ELSE q.ttl END,
     pid = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
@@ -2676,10 +2676,10 @@ fanout AS (
     resumes = q.resumes || COALESCE((SELECT r.awaited_ids FROM ready_agg r WHERE r.awaiter = q.id), '{}'),
     task_state = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
                    THEN 'pending' ELSE q.task_state END,
-    retry_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
-                   THEN :TIME + :TRT ELSE q.retry_at END,
-    expires_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
-                   THEN NULL ELSE q.expires_at END,
+    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN :TIME + :TRT ELSE q.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN NULL ELSE q.lease_timeout_at END,
     ttl = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
                    THEN NULL ELSE q.ttl END,
     pid = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
@@ -2821,7 +2821,7 @@ impl PostgresDb<'_> {
         let rows = rt_block_on(sqlx::query(&format!("
             WITH inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
-                                    task_state, task_version, retry_at)
+                                    task_state, task_version, retry_timeout_at)
               VALUES ($1, $2, COALESCE($3::jsonb, '{{}}'), $4, $5::jsonb, $6, $7, $8,
                       CASE WHEN $10::text IS NOT NULL
                            THEN (CASE WHEN $9 THEN 'fulfilled' ELSE 'pending' END) END,
@@ -2971,8 +2971,8 @@ impl PostgresDb<'_> {
             resumed AS (
               UPDATE promises p SET
                 task_state = CASE WHEN p.task_state = 'suspended' THEN 'pending' ELSE p.task_state END,
-                retry_at   = CASE WHEN p.task_state = 'suspended' THEN $3 + {trt} ELSE p.retry_at END,
-                expires_at = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.expires_at END,
+                retry_timeout_at   = CASE WHEN p.task_state = 'suspended' THEN $3 + {trt} ELSE p.retry_timeout_at END,
+                lease_timeout_at = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.lease_timeout_at END,
                 ttl        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.ttl END,
                 pid        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.pid END,
                 resumes    = CASE WHEN p.task_state IN ('pending', 'acquired')
@@ -3126,7 +3126,7 @@ impl PostgresDb<'_> {
         let rows = rt_block_on(sqlx::query(&format!("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
-                                    task_state, task_version, expires_at, ttl, pid)
+                                    task_state, task_version, lease_timeout_at, ttl, pid)
               VALUES ($1, $2, COALESCE($3::jsonb, '{{}}'), $4, $5::jsonb, $6, $7, $8,
                       $12, CASE WHEN $12 = 'acquired' THEN 1 ELSE 0 END,
                       CASE WHEN NOT $9 THEN $7 + $10 END,
@@ -3205,7 +3205,7 @@ impl PostgresDb<'_> {
             acquired_task AS (
               UPDATE promises p SET
                 task_state = 'acquired', task_version = p.task_version + 1,
-                expires_at = $3 + $4, ttl = $4, pid = $5, retry_at = NULL,
+                lease_timeout_at = $3 + $4, ttl = $4, pid = $5, retry_timeout_at = NULL,
                 resumes = '{{}}'                    -- deleted_ready_callbacks
               WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'pending'
               RETURNING p.id, p.task_state, p.task_version
@@ -3270,7 +3270,7 @@ impl PostgresDb<'_> {
             ),
             inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
-                                    task_state, task_version, retry_at)
+                                    task_state, task_version, retry_timeout_at)
               SELECT $3, $4, COALESCE($5::jsonb, '{{}}'), $6, $7::jsonb, $8, $9, $10,
                      CASE WHEN $12::text IS NOT NULL
                           THEN (CASE WHEN $11::bool THEN 'fulfilled' ELSE 'pending' END) END,
@@ -3423,14 +3423,14 @@ impl PostgresDb<'_> {
             WITH task_data AS (
               SELECT unnest($1::text[]) AS id, unnest($2::int[]) AS version
             )
-            UPDATE promises p SET expires_at = $3 + p.ttl
+            UPDATE promises p SET lease_timeout_at = $3 + p.ttl
             FROM task_data td
             WHERE p.id = td.id AND p.task_version = td.version
               AND p.task_state = 'acquired' AND p.pid = $4
             -- TODO (carried over from the multi-table backend): also require the
             -- promise to be live, so a heartbeat on a task whose promise already
             -- timed out is a no-op:  AND p.state = 'pending' AND p.timeout_at > $3
-            RETURNING p.id, p.expires_at
+            RETURNING p.id, p.lease_timeout_at
         ",
             )
             .bind(&ids)
@@ -3441,8 +3441,8 @@ impl PostgresDb<'_> {
         )?;
         for row in &rows {
             let id: String = row.get("id");
-            let expires_at: i64 = row.get("expires_at");
-            self.arm_lease(&id, pid, expires_at);
+            let lease_timeout_at: i64 = row.get("lease_timeout_at");
+            self.arm_lease(&id, pid, lease_timeout_at);
         }
         Ok(())
     }
@@ -3504,8 +3504,8 @@ impl PostgresDb<'_> {
             suspended AS (
               UPDATE promises p SET
                 task_state = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN 'suspended' ELSE p.task_state END,
-                retry_at   = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.retry_at END,
-                expires_at = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.expires_at END,
+                retry_timeout_at   = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.retry_timeout_at END,
+                lease_timeout_at = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.lease_timeout_at END,
                 ttl        = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.ttl END,
                 pid        = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.pid END,
                 -- deleted_ready_callbacks: fires on a version match even when
@@ -3642,8 +3642,8 @@ impl PostgresDb<'_> {
                 "
             WITH released_task AS (
               UPDATE promises p SET
-                task_state = 'pending', retry_at = $3 + $4,
-                expires_at = NULL, ttl = NULL, pid = NULL
+                task_state = 'pending', retry_timeout_at = $3 + $4,
+                lease_timeout_at = NULL, ttl = NULL, pid = NULL
               WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'acquired'
               RETURNING p.id, p.task_version, p.target
             ),
@@ -3684,7 +3684,7 @@ impl PostgresDb<'_> {
             ),
             halted_task AS (
               UPDATE promises p SET
-                task_state = 'halted', retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                task_state = 'halted', retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
               WHERE p.id = $1 AND p.task_state IS NOT NULL
                 AND p.task_state NOT IN ('fulfilled', 'halted')
               RETURNING p.id
@@ -3715,7 +3715,7 @@ impl PostgresDb<'_> {
               WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
             ),
             continued_task AS (
-              UPDATE promises p SET task_state = 'pending', retry_at = $2 + {trt}
+              UPDATE promises p SET task_state = 'pending', retry_timeout_at = $2 + {trt}
               WHERE p.id = $1 AND p.task_state = 'halted'
               RETURNING p.id, p.task_version, p.target
             ),
@@ -3886,11 +3886,11 @@ impl PostgresDb<'_> {
                      SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
                        FROM promises WHERE state = 'pending' AND target IS NOT NULL
                      UNION ALL
-                     SELECT retry_at, 'retry', id, NULL
-                       FROM promises WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                     SELECT retry_timeout_at, 'retry', id, NULL
+                       FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT expires_at, 'lease', id, pid
-                       FROM promises WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                     SELECT lease_timeout_at, 'lease', id, pid
+                       FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                      UNION ALL
                      SELECT next_run_at, 'schedule', id, NULL FROM schedules
                  ) d
@@ -3956,7 +3956,7 @@ impl PostgresDb<'_> {
             ),
             inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
-                                    task_state, task_version, retry_at)
+                                    task_state, task_version, retry_timeout_at)
               SELECT s.computed_promise_id,
                 CASE WHEN s.already_timedout
                      THEN (CASE WHEN ($4::jsonb->>'resonate:timer') = 'true' THEN 'resolved' ELSE 'rejected_timedout' END)
@@ -4078,12 +4078,12 @@ impl PostgresDb<'_> {
                     "
             WITH expired_retry AS (
               SELECT id, task_version, target FROM promises
-              WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= $1
+              WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= $1
                 AND ($2::text IS NULL OR id = $2)
               FOR UPDATE
             ),
             updated_retry AS (
-              UPDATE promises SET retry_at = $1 + {trt}, pid = NULL
+              UPDATE promises SET retry_timeout_at = $1 + {trt}, pid = NULL
               WHERE id IN (SELECT id FROM expired_retry)
               RETURNING id
             ),
@@ -4112,14 +4112,14 @@ impl PostgresDb<'_> {
                     "
             WITH expired_lease AS (
               SELECT id, task_version, target FROM promises
-              WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= $1
+              WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= $1
                 AND ($2::text IS NULL OR id = $2)
               FOR UPDATE
             ),
             released AS (
               UPDATE promises SET
-                task_state = 'pending', retry_at = $1 + {trt},
-                expires_at = NULL, ttl = NULL, pid = NULL
+                task_state = 'pending', retry_timeout_at = $1 + {trt},
+                lease_timeout_at = NULL, ttl = NULL, pid = NULL
               WHERE id IN (SELECT id FROM expired_lease)
               RETURNING id
             ),
@@ -4211,11 +4211,11 @@ impl PostgresDb<'_> {
 
         let tt_rows = rt_block_on(
             sqlx::query(
-                "SELECT id, 0 AS timeout_type, retry_at AS timeout_at FROM promises
-                   WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                "SELECT id, 0 AS timeout_type, retry_timeout_at AS timeout_at FROM promises
+                   WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                  UNION ALL
-                 SELECT id, 1 AS timeout_type, expires_at AS timeout_at FROM promises
-                   WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                 SELECT id, 1 AS timeout_type, lease_timeout_at AS timeout_at FROM promises
+                   WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                  ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),

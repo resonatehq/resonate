@@ -62,8 +62,14 @@ CREATE TABLE IF NOT EXISTS promises (
   value_data LONGTEXT,
   tags LONGTEXT NOT NULL,
   target VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:target"') STORED,
-  origin VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:origin"') STORED,
-  branch VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:branch"') STORED,
+  -- Lineage, named as Postgres names it. `origin_id` is a projection of the
+  -- ID, not of the tags: the origin is everything before the first ':', which
+  -- is what `resonate_core::types::origin` computes and what Postgres's
+  -- split_part(id, ':', 1) computes. Reading the tag instead gave a different
+  -- answer whenever the tag was absent.
+  origin_id VARCHAR(255) GENERATED ALWAYS AS (SUBSTRING_INDEX(id, ':', 1)) STORED,
+  parent_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:parent"') STORED,
+  branch_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:branch"') STORED,
   timer BOOLEAN GENERATED ALWAYS AS (COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
@@ -76,20 +82,20 @@ CREATE TABLE IF NOT EXISTS promises (
 
   -- was `task_timeouts`, whose timeout_type discriminated two queues.
   -- Two nullable columns say the same thing without the row.
-  retry_at BIGINT NULL,
-  expires_at BIGINT NULL,
+  retry_timeout_at BIGINT NULL,
+  lease_timeout_at BIGINT NULL,
   ttl BIGINT NULL,
   pid VARCHAR(255) NULL,
 
   PRIMARY KEY (id),
   INDEX idx_promises_timeout_at (timeout_at),
   INDEX idx_promises_target (target),
-  INDEX idx_promises_branch (branch),
+  INDEX idx_promises_branch_id (branch_id),
   -- `promise_timeouts` is gone: a pending, targeted promise past its
   -- timeout_at is exactly the queue, and idx_promises_timeout_at is the index
   -- the table carried.
-  INDEX idx_promises_retry_at (retry_at ASC, id ASC),
-  INDEX idx_promises_expires_at (expires_at ASC, id ASC),
+  INDEX idx_promises_retry_timeout_at (retry_timeout_at ASC, id ASC),
+  INDEX idx_promises_lease_timeout_at (lease_timeout_at ASC, id ASC),
   INDEX idx_promises_pid (pid),
   CONSTRAINT promises_state_check CHECK (state IN ('pending', 'resolved', 'rejected', 'rejected_canceled', 'rejected_timedout')),
   CONSTRAINT promises_task_state_check CHECK (task_state IS NULL OR task_state IN ('pending', 'acquired', 'suspended', 'halted', 'fulfilled'))
@@ -2406,7 +2412,7 @@ impl<'a> MysqlDb<'a> {
                 "UPDATE promises SET
                    task_state = CASE WHEN task_state IS NOT NULL AND task_state != 'fulfilled'
                                 THEN 'fulfilled' ELSE task_state END,
-                   retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                   retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
                  WHERE id = ?",
             )
             .bind(task_id)
@@ -2449,12 +2455,12 @@ impl<'a> MysqlDb<'a> {
             let task_id: String = row.get("id");
 
             // Resuming and re-arming the retry deadline are one write: writing
-            // `retry_at` and clearing `expires_at` is what flipping the
+            // `retry_timeout_at` and clearing `lease_timeout_at` is what flipping the
             // timeout row from type 1 to type 0 used to be.
             rt_block_on(
                 sqlx::query(
-                    "UPDATE promises SET task_state = 'pending', retry_at = ?,
-                                         expires_at = NULL, ttl = NULL, pid = NULL
+                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
+                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
                      WHERE id = ? AND task_state = 'suspended'",
                 )
                 .bind(time + trt)
@@ -2489,7 +2495,7 @@ impl<'a> MysqlDb<'a> {
                 "UPDATE promises SET
                    task_state = CASE WHEN task_state IS NOT NULL AND task_state != 'fulfilled'
                                 THEN 'fulfilled' ELSE task_state END,
-                   retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                   retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
                  WHERE id IN ({})",
                 ph(n)
             );
@@ -2554,8 +2560,8 @@ impl<'a> MysqlDb<'a> {
 
             rt_block_on(
                 sqlx::query(
-                    "UPDATE promises SET task_state = 'pending', retry_at = ?,
-                                         expires_at = NULL, ttl = NULL, pid = NULL
+                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
+                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
                      WHERE id = ? AND task_state = 'suspended'",
                 )
                 .bind(time + trt)
@@ -2843,7 +2849,7 @@ impl MysqlDb<'_> {
                 let task_res = rt_block_on(
                     sqlx::query(
                         "UPDATE promises SET task_state = ?, task_version = 0,
-                                             retry_at = CASE WHEN ? THEN NULL ELSE ? END
+                                             retry_timeout_at = CASE WHEN ? THEN NULL ELSE ? END
                          WHERE id = ? AND task_state IS NULL",
                     )
                     .bind(task_state)
@@ -2991,8 +2997,8 @@ impl MysqlDb<'_> {
                 // Awaited already settled — directly resume the awaiter task if suspended
                 let upd = rt_block_on(
                     sqlx::query(
-                        "UPDATE promises SET task_state = 'pending', retry_at = ?,
-                                             expires_at = NULL, ttl = NULL, pid = NULL
+                        "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
+                                             lease_timeout_at = NULL, ttl = NULL, pid = NULL
                          WHERE id = ? AND task_state = 'suspended'",
                     )
                     .bind(time + trt)
@@ -3157,7 +3163,7 @@ impl MysqlDb<'_> {
             let task_res = rt_block_on(
                 sqlx::query(
                     "UPDATE promises SET task_state = ?, task_version = ?,
-                                         expires_at = CASE WHEN ? THEN NULL ELSE ? END,
+                                         lease_timeout_at = CASE WHEN ? THEN NULL ELSE ? END,
                                          ttl = CASE WHEN ? THEN NULL ELSE ? END,
                                          pid = CASE WHEN ? THEN NULL ELSE ? END
                      WHERE id = ? AND task_state IS NULL",
@@ -3224,12 +3230,12 @@ impl MysqlDb<'_> {
         } = *params;
 
         // Claiming the task and taking the lease are one write now: the type-0
-        // deadline becomes a type-1 one by clearing `retry_at` and setting
-        // `expires_at`, `ttl` and `pid`.
+        // deadline becomes a type-1 one by clearing `retry_timeout_at` and setting
+        // `lease_timeout_at`, `ttl` and `pid`.
         let res = rt_block_on(
             sqlx::query(
                 "UPDATE promises SET task_state = 'acquired', task_version = task_version + 1,
-                                     retry_at = NULL, expires_at = ?, ttl = ?, pid = ?
+                                     retry_timeout_at = NULL, lease_timeout_at = ?, ttl = ?, pid = ?
                  WHERE id = ? AND task_version = ? AND task_state = 'pending'",
             )
             .bind(time + ttl)
@@ -3331,7 +3337,7 @@ impl MysqlDb<'_> {
                     let task_res = rt_block_on(
                         sqlx::query(
                             "UPDATE promises SET task_state = ?, task_version = 0,
-                                                 retry_at = CASE WHEN ? THEN NULL ELSE ? END
+                                                 retry_timeout_at = CASE WHEN ? THEN NULL ELSE ? END
                              WHERE id = ? AND task_state IS NULL",
                         )
                         .bind(task_state)
@@ -3425,7 +3431,7 @@ impl MysqlDb<'_> {
             // promise it guards are all this one row.
             let res = rt_block_on(
                 sqlx::query(
-                    "UPDATE promises SET expires_at = ? + ttl
+                    "UPDATE promises SET lease_timeout_at = ? + ttl
                      WHERE id = ? AND task_version = ? AND task_state = 'acquired' AND pid = ?
                        AND (state != 'pending' OR timeout_at > ?)",
                 )
@@ -3442,12 +3448,12 @@ impl MysqlDb<'_> {
             // keeps the no-op case (the common one on a stale task) free.
             if res.rows_affected() > 0 {
                 let row = rt_block_on(
-                    sqlx::query("SELECT expires_at FROM promises WHERE id = ?")
+                    sqlx::query("SELECT lease_timeout_at FROM promises WHERE id = ?")
                         .bind(task_id)
                         .fetch_optional(self.tx().as_mut()),
                 )?;
                 if let Some(row) = row {
-                    if let Some(at) = row.get::<Option<i64>, _>("expires_at") {
+                    if let Some(at) = row.get::<Option<i64>, _>("lease_timeout_at") {
                         self.arm_lease(task_id, pid, at);
                     }
                 }
@@ -3619,7 +3625,7 @@ impl MysqlDb<'_> {
             rt_block_on(
                 sqlx::query(
                     "UPDATE promises SET task_state = 'suspended',
-                                         retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                                         retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
                      WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
                 )
                 .bind(task_id)
@@ -3679,7 +3685,7 @@ impl MysqlDb<'_> {
         let task_res = rt_block_on(
             sqlx::query(
                 "UPDATE promises SET task_state = 'fulfilled',
-                                     retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                                     retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
                  WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
             )
             .bind(task_id)
@@ -3729,11 +3735,11 @@ impl MysqlDb<'_> {
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
         // Handing the task back moves it from the lease queue to the retry
-        // queue: `expires_at` out, `retry_at` in.
+        // queue: `lease_timeout_at` out, `retry_timeout_at` in.
         let res = rt_block_on(
             sqlx::query(
-                "UPDATE promises SET task_state = 'pending', retry_at = ? + ?,
-                                     expires_at = NULL, ttl = NULL, pid = NULL
+                "UPDATE promises SET task_state = 'pending', retry_timeout_at = ? + ?,
+                                     lease_timeout_at = NULL, ttl = NULL, pid = NULL
                  WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
             )
             .bind(time)
@@ -3778,7 +3784,7 @@ impl MysqlDb<'_> {
             rt_block_on(
                 sqlx::query(
                     "UPDATE promises SET task_state = 'halted',
-                                         retry_at = NULL, expires_at = NULL, ttl = NULL, pid = NULL
+                                         retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
                      WHERE id = ?",
                 )
                 .bind(task_id)
@@ -3808,7 +3814,7 @@ impl MysqlDb<'_> {
         // queue is the same write that makes it pending again.
         let res = rt_block_on(
             sqlx::query(
-                "UPDATE promises SET task_state = 'pending', retry_at = ?
+                "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?
                  WHERE id = ? AND task_state = 'halted'",
             )
             .bind(time + trt)
@@ -3878,11 +3884,11 @@ impl MysqlDb<'_> {
 
     fn compute_preload(&self, promise_id: &str) -> StorageResult<Vec<PromiseRecord>> {
         let branch_row = rt_block_on(
-            sqlx::query("SELECT branch FROM promises WHERE id = ?")
+            sqlx::query("SELECT branch_id FROM promises WHERE id = ?")
                 .bind(promise_id)
                 .fetch_optional(self.tx().as_mut()),
         )?;
-        let branch: Option<String> = branch_row.and_then(|r| r.get("branch"));
+        let branch: Option<String> = branch_row.and_then(|r| r.get("branch_id"));
         let branch = match branch {
             Some(b) => b,
             None => return Ok(Vec::new()),
@@ -3891,7 +3897,7 @@ impl MysqlDb<'_> {
         let rows = rt_block_on(
             sqlx::query(
                 "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
-                 FROM promises WHERE branch = ? AND id != ? ORDER BY id ASC",
+                 FROM promises WHERE branch_id = ? AND id != ? ORDER BY id ASC",
             )
             .bind(&branch)
             .bind(promise_id)
@@ -4019,11 +4025,11 @@ impl MysqlDb<'_> {
                      SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
                        FROM promises WHERE state = 'pending' AND target IS NOT NULL
                      UNION ALL
-                     SELECT retry_at, 1, id, NULL
-                       FROM promises WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                     SELECT retry_timeout_at, 1, id, NULL
+                       FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT expires_at, 2, id, pid
-                       FROM promises WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                     SELECT lease_timeout_at, 2, id, pid
+                       FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                      UNION ALL
                      SELECT next_run_at, 3, id, NULL FROM schedules
                  ) d
@@ -4173,7 +4179,7 @@ impl MysqlDb<'_> {
                 // 6b. Task infrastructure if address is present
                 let task_res = rt_block_on(
                     sqlx::query(
-                        "UPDATE promises SET task_state = 'pending', task_version = 0, retry_at = ?
+                        "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?
                          WHERE id = ? AND task_state IS NULL",
                     )
                     .bind(time + trt)
@@ -4278,13 +4284,13 @@ impl MysqlDb<'_> {
         }
 
         // Statement 2: Process expired task retry deadlines — what was
-        // `timeout_type = 0`, now a non-NULL `retry_at` on a pending task.
+        // `timeout_type = 0`, now a non-NULL `retry_timeout_at` on a pending task.
         let retry_rows = match selected("retry") {
             None => Vec::new(),
             Some(id) => rt_block_on(
                 sqlx::query(
                     "SELECT id FROM promises
-                     WHERE task_state = 'pending' AND retry_at IS NOT NULL AND retry_at <= ?
+                     WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= ?
                        AND (? IS NULL OR id = ?)",
                 )
                 .bind(time)
@@ -4304,7 +4310,7 @@ impl MysqlDb<'_> {
 
             {
                 let sql = format!(
-                    "UPDATE promises SET retry_at = ? + ?, pid = NULL WHERE id IN ({})",
+                    "UPDATE promises SET retry_timeout_at = ? + ?, pid = NULL WHERE id IN ({})",
                     ph(n)
                 );
                 let mut q = sqlx::query(&sql).bind(time).bind(trt);
@@ -4321,14 +4327,14 @@ impl MysqlDb<'_> {
         }
 
         // Statement 3: Process expired leases — what was `timeout_type = 1`,
-        // now a non-NULL `expires_at` on an acquired task. The holder went
+        // now a non-NULL `lease_timeout_at` on an acquired task. The holder went
         // away; hand the task back to the retry queue.
         let lease_rows = match selected("lease") {
             None => Vec::new(),
             Some(id) => rt_block_on(
                 sqlx::query(
                     "SELECT id FROM promises
-                     WHERE task_state = 'acquired' AND expires_at IS NOT NULL AND expires_at <= ?
+                     WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= ?
                        AND (? IS NULL OR id = ?)",
                 )
                 .bind(time)
@@ -4350,8 +4356,8 @@ impl MysqlDb<'_> {
                 // Handing the task back and moving it between queues are the
                 // same row, so the two statements this replaces are one `SET`.
                 let sql = format!(
-                    "UPDATE promises SET task_state = 'pending', retry_at = ? + ?,
-                                         expires_at = NULL, ttl = NULL, pid = NULL
+                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ? + ?,
+                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
                      WHERE id IN ({})",
                     ph(n)
                 );
@@ -4469,11 +4475,11 @@ impl MysqlDb<'_> {
         // exclusive because each is live only in the state that owns it.
         let tt_rows = rt_block_on(
             sqlx::query(
-                "SELECT id, CAST(0 AS SIGNED) AS timeout_type, retry_at AS timeout_at FROM promises
-                   WHERE task_state = 'pending' AND retry_at IS NOT NULL
+                "SELECT id, CAST(0 AS SIGNED) AS timeout_type, retry_timeout_at AS timeout_at FROM promises
+                   WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                  UNION ALL
-                 SELECT id, CAST(1 AS SIGNED) AS timeout_type, expires_at AS timeout_at FROM promises
-                   WHERE task_state = 'acquired' AND expires_at IS NOT NULL
+                 SELECT id, CAST(1 AS SIGNED) AS timeout_type, lease_timeout_at AS timeout_at FROM promises
+                   WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                  ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),

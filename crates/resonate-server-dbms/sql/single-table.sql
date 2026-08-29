@@ -84,8 +84,8 @@ CREATE TABLE IF NOT EXISTS promises (
   -- task deadlines. The multi-table task_timeouts.timeout_type discriminator
   -- collapses into two columns: the retry deadline is live exactly while
   -- task_state='pending', the lease deadline exactly while 'acquired'.
-  retry_at      BIGINT,
-  expires_at    BIGINT,
+  retry_timeout_at      BIGINT,
+  lease_timeout_at    BIGINT,
   ttl           BIGINT,
   pid           TEXT,
 
@@ -127,10 +127,10 @@ CREATE INDEX IF NOT EXISTS idx_promises_branch_id
 CREATE INDEX IF NOT EXISTS idx_promises_target
   ON promises (target) WHERE target IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_task_timeout_retry_at
-  ON promises (retry_at) WHERE task_state = 'pending';
-CREATE INDEX IF NOT EXISTS idx_task_timeout_lease_at
-  ON promises (expires_at) WHERE task_state = 'acquired';
+CREATE INDEX IF NOT EXISTS idx_task_retry_timeout_at
+  ON promises (retry_timeout_at) WHERE task_state = 'pending';
+CREATE INDEX IF NOT EXISTS idx_task_lease_timeout_at
+  ON promises (lease_timeout_at) WHERE task_state = 'acquired';
 CREATE INDEX IF NOT EXISTS idx_promises_task
   ON promises (task_state, id) WHERE task_state IS NOT NULL;
 

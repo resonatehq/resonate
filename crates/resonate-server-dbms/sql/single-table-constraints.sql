@@ -163,31 +163,31 @@ ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_ttl
   CHECK (((task_state IS NULL) OR ((task_state = 'acquired'::text) = (ttl IS
   NOT NULL))));
 
-ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_iff_has_expires_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_expires_at
+ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_iff_has_lease_timeout_at;
+ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_lease_timeout_at
   CHECK (((task_state IS NULL) OR ((task_state = 'acquired'::text) =
-  (expires_at IS NOT NULL))));
+  (lease_timeout_at IS NOT NULL))));
 
-ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_pending_iff_has_retry_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_pending_iff_has_retry_at
+ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_pending_iff_has_retry_timeout_at;
+ALTER TABLE promises ADD CONSTRAINT well_formed_task_pending_iff_has_retry_timeout_at
   CHECK (((task_state IS NULL) OR ((task_state = 'pending'::text) =
-  (retry_at IS NOT NULL))));
+  (retry_timeout_at IS NOT NULL))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_fulfilled_is_cleared;
 ALTER TABLE promises ADD CONSTRAINT well_formed_task_fulfilled_is_cleared
   CHECK (((task_state IS DISTINCT FROM 'fulfilled'::text) OR ((pid IS NULL)
-  AND (ttl IS NULL) AND (expires_at IS NULL) AND (retry_at IS NULL) AND
+  AND (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL) AND
   (resumes = '{}'::text[]))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_suspended_is_cleared;
 ALTER TABLE promises ADD CONSTRAINT well_formed_task_suspended_is_cleared
   CHECK (((task_state IS DISTINCT FROM 'suspended'::text) OR ((pid IS NULL)
-  AND (ttl IS NULL) AND (expires_at IS NULL) AND (retry_at IS NULL))));
+  AND (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_halted_is_cleared;
 ALTER TABLE promises ADD CONSTRAINT well_formed_task_halted_is_cleared
   CHECK (((task_state IS DISTINCT FROM 'halted'::text) OR ((pid IS NULL) AND
-  (ttl IS NULL) AND (expires_at IS NULL) AND (retry_at IS NULL))));
+  (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_suspended_has_no_resumes;
 ALTER TABLE promises ADD CONSTRAINT well_formed_task_suspended_has_no_resumes
