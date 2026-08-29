@@ -91,34 +91,18 @@ namespace Abstraction
 open Equivalence
 open ServerModel (Ident)
 
-structure PromiseTimeoutReq where
-  id : Ident
-  deriving Repr, DecidableEq
-
-structure TaskLeaseTimeoutReq where
-  id : Ident
-  deriving Repr, DecidableEq
-
-structure TaskRetryTimeoutReq where
-  id : Ident
-  deriving Repr, DecidableEq
-
-structure ScheduleTimeoutReq where
-  schedule : Ident
-  deriving Repr, DecidableEq
-
 inductive InternalStep
-  | promiseTimeout   (req : PromiseTimeoutReq)
+  | promiseTimeout   (req : ServerModel.PromiseTimeoutReq)
   | callback         (req : ServerModel.PromiseRegisterCallbackReq)
   | listener         (req : ServerModel.PromiseRegisterListenerReq)
-  | taskLeaseTimeout (req : TaskLeaseTimeoutReq)
-  | taskRetryTimeout (req : TaskRetryTimeoutReq)
-  | scheduleTimeout  (req : ScheduleTimeoutReq)
+  | taskLeaseTimeout (req : ServerModel.TaskLeaseTimeoutReq)
+  | taskRetryTimeout (req : ServerModel.TaskRetryTimeoutReq)
+  | scheduleTimeout  (req : ServerModel.ScheduleTimeoutReq)
   deriving Repr, DecidableEq
 
 inductive Step
   | external (rq : Request)
-  | internal (st : InternalStep)
+  | internal (rq : InternalStep)
   | idle
   deriving Repr
 
@@ -136,40 +120,44 @@ deriving instance BEq for AbstractModel.PromiseObject
 deriving instance BEq for AbstractModel.Object
 deriving instance BEq for AbstractModel.ServerState
 
-def handleInternal (st : InternalStep) (now : Nat) : AbstractModel.H Unit :=
-  match st with
-  | .promiseTimeout r   => AbstractModel.Internal.processPromiseTimeout r.id now
-  | .callback r         => AbstractModel.Internal.processCallback r.awaited r.awaiter now
-  | .listener r         => AbstractModel.Internal.processListener r.awaited r.address now
-  | .taskLeaseTimeout r => AbstractModel.Internal.processLeaseTimeout r.id now
-  | .taskRetryTimeout r => AbstractModel.Internal.processRetryTimeout r.id now
-  | .scheduleTimeout r  => AbstractModel.Internal.processSchedule r.schedule now
+def handleExternal (rq : Request) (now : Nat) : AbstractModel.H Response :=
+  match rq with
+  | .promiseGet              req => Response.promiseGet <$> AbstractModel.promiseGet req now
+  | .promiseCreate           req => Response.promiseCreate <$> AbstractModel.promiseCreate req now
+  | .promiseSettle           req => Response.promiseSettle <$> AbstractModel.promiseSettle req now
+  | .promiseRegisterCallback req => Response.promiseRegisterCallback <$> AbstractModel.promiseRegisterCallback req now
+  | .promiseRegisterListener req => Response.promiseRegisterListener <$> AbstractModel.promiseRegisterListener req now
+  | .promiseSearch           req => Response.promiseSearch <$> AbstractModel.promiseSearch req now
+  | .scheduleGet             req => Response.scheduleGet <$> AbstractModel.scheduleGet req now
+  | .scheduleCreate          req => Response.scheduleCreate <$> AbstractModel.scheduleCreate req now
+  | .scheduleDelete          req => Response.scheduleDelete <$> AbstractModel.scheduleDelete req now
+  | .scheduleSearch          req => Response.scheduleSearch <$> AbstractModel.scheduleSearch req now
+  | .taskGet                 req => Response.taskGet <$> AbstractModel.taskGet req now
+  | .taskCreate              req => Response.taskCreate <$> AbstractModel.taskCreate req now
+  | .taskAcquire             req => Response.taskAcquire <$> AbstractModel.taskAcquire req now
+  | .taskFence               req => Response.taskFence <$> AbstractModel.taskFence req now
+  | .taskHeartbeat           req => Response.taskHeartbeat <$> AbstractModel.taskHeartbeat req now
+  | .taskSuspend             req => Response.taskSuspend <$> AbstractModel.taskSuspend req now
+  | .taskFulfill             req => Response.taskFulfill <$> AbstractModel.taskFulfill req now
+  | .taskRelease             req => Response.taskRelease <$> AbstractModel.taskRelease req now
+  | .taskHalt                req => Response.taskHalt <$> AbstractModel.taskHalt req now
+  | .taskContinue            req => Response.taskContinue <$> AbstractModel.taskContinue req now
+  | .taskSearch              req => Response.taskSearch <$> AbstractModel.taskSearch req now
+
+def handleInternal (rq : InternalStep) (now : Nat) : AbstractModel.H Unit :=
+  match rq with
+  | .promiseTimeout   req => AbstractModel.Internal.processPromiseTimeout req now
+  | .callback         req => AbstractModel.Internal.processCallback req now
+  | .listener         req => AbstractModel.Internal.processListener req now
+  | .taskLeaseTimeout req => AbstractModel.Internal.processLeaseTimeout req now
+  | .taskRetryTimeout req => AbstractModel.Internal.processRetryTimeout req now
+  | .scheduleTimeout  req => AbstractModel.Internal.processSchedule req now
 
 def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   match st with
-  | .external (.promiseGet req)              => Response.promiseGet <$> AbstractModel.promiseGet req now
-  | .external (.promiseCreate req)           => Response.promiseCreate <$> AbstractModel.promiseCreate req now
-  | .external (.promiseSettle req)           => Response.promiseSettle <$> AbstractModel.promiseSettle req now
-  | .external (.promiseRegisterCallback req) => Response.promiseRegisterCallback <$> AbstractModel.promiseRegisterCallback req now
-  | .external (.promiseRegisterListener req) => Response.promiseRegisterListener <$> AbstractModel.promiseRegisterListener req now
-  | .external (.promiseSearch req)           => Response.promiseSearch <$> AbstractModel.promiseSearch req now
-  | .external (.scheduleGet req)             => Response.scheduleGet <$> AbstractModel.scheduleGet req now
-  | .external (.scheduleCreate req)          => Response.scheduleCreate <$> AbstractModel.scheduleCreate req now
-  | .external (.scheduleDelete req)          => Response.scheduleDelete <$> AbstractModel.scheduleDelete req now
-  | .external (.scheduleSearch req)          => Response.scheduleSearch <$> AbstractModel.scheduleSearch req now
-  | .external (.taskGet req)                 => Response.taskGet <$> AbstractModel.taskGet req now
-  | .external (.taskCreate req)              => Response.taskCreate <$> AbstractModel.taskCreate req now
-  | .external (.taskAcquire req)             => Response.taskAcquire <$> AbstractModel.taskAcquire req now
-  | .external (.taskFence req)               => Response.taskFence <$> AbstractModel.taskFence req now
-  | .external (.taskHeartbeat req)           => Response.taskHeartbeat <$> AbstractModel.taskHeartbeat req now
-  | .external (.taskSuspend req)             => Response.taskSuspend <$> AbstractModel.taskSuspend req now
-  | .external (.taskFulfill req)             => Response.taskFulfill <$> AbstractModel.taskFulfill req now
-  | .external (.taskRelease req)             => Response.taskRelease <$> AbstractModel.taskRelease req now
-  | .external (.taskHalt req)                => Response.taskHalt <$> AbstractModel.taskHalt req now
-  | .external (.taskContinue req)            => Response.taskContinue <$> AbstractModel.taskContinue req now
-  | .external (.taskSearch req)              => Response.taskSearch <$> AbstractModel.taskSearch req now
-  | .internal a => do handleInternal a now; return .silent
-  | .idle       => return .silent
+  | .external rq => handleExternal rq now
+  | .internal rq => do handleInternal rq now; return .silent
+  | .idle        => return .silent
 
 def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) :
     Response × AbstractModel.ServerState :=

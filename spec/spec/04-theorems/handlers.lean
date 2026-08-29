@@ -465,8 +465,8 @@ These read through `withMat`, so they take the `withMat` combinators.
 the difference is invisible to this argument — which is the formal
 content of "the read discipline is not a protocol decision". -/
 
-theorem writesGood_processPromiseTimeout (id : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.processPromiseTimeout id now) := by
+theorem writesGood_processPromiseTimeout (req : ServerModel.PromiseTimeoutReq) (now : Nat) :
+    WritesGood g e (Internal.processPromiseTimeout req now) := by
   unfold Internal.processPromiseTimeout touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
@@ -494,8 +494,8 @@ theorem writesGood_resumeOne (awaited awaiter : ServerModel.Ident) (now : Nat) :
            exact writesGood_setTask _ _ _ _
              (hq.tAddResume t _ (by simp [hst]) (by simp [hst]) (by simpa using hc) ht))
 
-theorem writesGood_processCallback (id : ServerModel.Ident) (awaiter : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.processCallback id awaiter now) := by
+theorem writesGood_processCallback (req : ServerModel.PromiseRegisterCallbackReq) (now : Nat) :
+    WritesGood g e (Internal.processCallback req now) := by
   unfold Internal.processCallback touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
@@ -507,8 +507,8 @@ theorem writesGood_processCallback (id : ServerModel.Ident) (awaiter : ServerMod
       (writesGood_setPromise _ _ _ _ (hq.dropCallback _ p.promise _ hsto (by simpa using hns) hp))
       (writesGood_resumeOne hq hs _ _ _)
 
-theorem writesGood_processListener (id : ServerModel.Ident) (address : String) (now : Nat) :
-    WritesGood g e (Internal.processListener id address now) := by
+theorem writesGood_processListener (req : ServerModel.PromiseRegisterListenerReq) (now : Nat) :
+    WritesGood g e (Internal.processListener req now) := by
   unfold Internal.processListener touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
@@ -520,8 +520,8 @@ theorem writesGood_processListener (id : ServerModel.Ident) (address : String) (
       (writesGood_setPromise _ _ _ _ (hq.dropListener _ p.promise _ hsto (by simpa using hns) hp))
       (writesGood_setMessage _ _ _ _)
 
-theorem writesGood_processLeaseTimeout (id : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.processLeaseTimeout id now) := by
+theorem writesGood_processLeaseTimeout (req : ServerModel.TaskLeaseTimeoutReq) (now : Nat) :
+    WritesGood g e (Internal.processLeaseTimeout req now) := by
   unfold Internal.processLeaseTimeout viewTaskObject
   refine writesGood_afterMatReadTaskObject hq false hs _ _ _
     (writesGood_pure _ _ _) ?_
@@ -537,8 +537,8 @@ theorem writesGood_processLeaseTimeout (id : ServerModel.Ident) (now : Nat) :
       refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
       exact writesGood_setTask _ _ _ _ (hq.tRepend t _ hgt)
 
-theorem writesGood_processRetryTimeout (id : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.processRetryTimeout id now) := by
+theorem writesGood_processRetryTimeout (req : ServerModel.TaskRetryTimeoutReq) (now : Nat) :
+    WritesGood g e (Internal.processRetryTimeout req now) := by
   unfold Internal.processRetryTimeout viewTaskObject
   refine writesGood_afterMatReadTaskObject hq false hs _ _ _
     (writesGood_pure _ _ _) ?_
@@ -570,8 +570,8 @@ theorem writesGood_fireAll (c : ServerModel.Schedule) :
       exact writesGood_bind' _ _ _ _ (writesGood_fireOccurrence hq hs c t)
         (writesGood_fireAll c ts)
 
-theorem writesGood_processSchedule (id : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.processSchedule id now) := by
+theorem writesGood_processSchedule (req : ServerModel.ScheduleTimeoutReq) (now : Nat) :
+    WritesGood g e (Internal.processSchedule req now) := by
   unfold Internal.processSchedule
   refine writesGood_bind' _ _ _ _ (writesGood_getSchedule _ _ _) ?_
   rw [getSchedule_fst]
@@ -590,45 +590,46 @@ requests, 6 internal jobs, `idle` — writes only rows satisfying `g`,
 given the obligations and a store that already satisfies `g`
 everywhere. A step added without a case here does not compile. -/
 
-theorem writesGood_handleInternal (st : InternalStep) (now : Nat) :
-    WritesGood g e (handleInternal st now) := by
-  cases st with
-  | promiseTimeout r   => exact writesGood_processPromiseTimeout hq hs r.id now
-  | callback r         => exact writesGood_processCallback hq hs r.awaited r.awaiter now
-  | listener r         => exact writesGood_processListener hq hs r.awaited r.address now
-  | taskLeaseTimeout r => exact writesGood_processLeaseTimeout hq hs r.id now
-  | taskRetryTimeout r => exact writesGood_processRetryTimeout hq hs r.id now
-  | scheduleTimeout r  => exact writesGood_processSchedule hq hs r.schedule now
+theorem writesGood_handleExternal (rq : Equivalence.Request) (now : Nat) :
+    WritesGood g e (handleExternal rq now) := by
+  cases rq with
+  | promiseGet              req => exact writesGood_map _ _ _ _ (writesGood_promiseGet hq hs req now)
+  | promiseCreate           req => exact writesGood_map _ _ _ _ (writesGood_promiseCreate hq hs req now)
+  | promiseSettle           req => exact writesGood_map _ _ _ _ (writesGood_promiseSettle hq hs req now)
+  | promiseRegisterCallback req => exact writesGood_map _ _ _ _ (writesGood_promiseRegisterCallback hq hs req now)
+  | promiseRegisterListener req => exact writesGood_map _ _ _ _ (writesGood_promiseRegisterListener hq hs req now)
+  | promiseSearch           req => exact writesGood_map _ _ _ _ (writesGood_promiseSearch hq hs req now)
+  | scheduleGet             req => exact writesGood_map _ _ _ _ (writesGood_scheduleGet hq hs req now)
+  | scheduleCreate          req => exact writesGood_map _ _ _ _ (writesGood_scheduleCreate hq hs req now)
+  | scheduleDelete          req => exact writesGood_map _ _ _ _ (writesGood_scheduleDelete hq hs req now)
+  | scheduleSearch          req => exact writesGood_map _ _ _ _ (writesGood_scheduleSearch hq hs req now)
+  | taskGet                 req => exact writesGood_map _ _ _ _ (writesGood_taskGet hq hs req now)
+  | taskCreate              req => exact writesGood_map _ _ _ _ (writesGood_taskCreate hq hs req now)
+  | taskAcquire             req => exact writesGood_map _ _ _ _ (writesGood_taskAcquire hq hs req now)
+  | taskFence               req => exact writesGood_map _ _ _ _ (writesGood_taskFence hq hs req now)
+  | taskHeartbeat           req => exact writesGood_map _ _ _ _ (writesGood_taskHeartbeat hq hs req now)
+  | taskSuspend             req => exact writesGood_map _ _ _ _ (writesGood_taskSuspend hq hs req now)
+  | taskFulfill             req => exact writesGood_map _ _ _ _ (writesGood_taskFulfill hq hs req now)
+  | taskRelease             req => exact writesGood_map _ _ _ _ (writesGood_taskRelease hq hs req now)
+  | taskHalt                req => exact writesGood_map _ _ _ _ (writesGood_taskHalt hq hs req now)
+  | taskContinue            req => exact writesGood_map _ _ _ _ (writesGood_taskContinue hq hs req now)
+  | taskSearch              req => exact writesGood_map _ _ _ _ (writesGood_taskSearch hq hs req now)
+
+theorem writesGood_handleInternal (rq : InternalStep) (now : Nat) :
+    WritesGood g e (handleInternal rq now) := by
+  cases rq with
+  | promiseTimeout   req => exact writesGood_processPromiseTimeout hq hs req now
+  | callback         req => exact writesGood_processCallback hq hs req now
+  | listener         req => exact writesGood_processListener hq hs req now
+  | taskLeaseTimeout req => exact writesGood_processLeaseTimeout hq hs req now
+  | taskRetryTimeout req => exact writesGood_processRetryTimeout hq hs req now
+  | scheduleTimeout  req => exact writesGood_processSchedule hq hs req now
 
 theorem writesGood_handle (st : Step) (now : Nat) : WritesGood g e (handle st now) := by
   cases st with
-  | external r =>
-      cases r with
-      | promiseGet r => exact writesGood_map _ _ _ _ (writesGood_promiseGet hq hs r now)
-      | promiseCreate r => exact writesGood_map _ _ _ _ (writesGood_promiseCreate hq hs r now)
-      | promiseSettle r => exact writesGood_map _ _ _ _ (writesGood_promiseSettle hq hs r now)
-      | promiseRegisterCallback r =>
-          exact writesGood_map _ _ _ _ (writesGood_promiseRegisterCallback hq hs r now)
-      | promiseRegisterListener r =>
-          exact writesGood_map _ _ _ _ (writesGood_promiseRegisterListener hq hs r now)
-      | promiseSearch r => exact writesGood_map _ _ _ _ (writesGood_promiseSearch hq hs r now)
-      | scheduleGet r => exact writesGood_map _ _ _ _ (writesGood_scheduleGet hq hs r now)
-      | scheduleCreate r => exact writesGood_map _ _ _ _ (writesGood_scheduleCreate hq hs r now)
-      | scheduleDelete r => exact writesGood_map _ _ _ _ (writesGood_scheduleDelete hq hs r now)
-      | scheduleSearch r => exact writesGood_map _ _ _ _ (writesGood_scheduleSearch hq hs r now)
-      | taskGet r => exact writesGood_map _ _ _ _ (writesGood_taskGet hq hs r now)
-      | taskCreate r => exact writesGood_map _ _ _ _ (writesGood_taskCreate hq hs r now)
-      | taskAcquire r => exact writesGood_map _ _ _ _ (writesGood_taskAcquire hq hs r now)
-      | taskFence r => exact writesGood_map _ _ _ _ (writesGood_taskFence hq hs r now)
-      | taskHeartbeat r => exact writesGood_map _ _ _ _ (writesGood_taskHeartbeat hq hs r now)
-      | taskSuspend r => exact writesGood_map _ _ _ _ (writesGood_taskSuspend hq hs r now)
-      | taskFulfill r => exact writesGood_map _ _ _ _ (writesGood_taskFulfill hq hs r now)
-      | taskRelease r => exact writesGood_map _ _ _ _ (writesGood_taskRelease hq hs r now)
-      | taskHalt r => exact writesGood_map _ _ _ _ (writesGood_taskHalt hq hs r now)
-      | taskContinue r => exact writesGood_map _ _ _ _ (writesGood_taskContinue hq hs r now)
-      | taskSearch r => exact writesGood_map _ _ _ _ (writesGood_taskSearch hq hs r now)
-  | internal a =>
-      exact writesGood_bind' _ _ _ _ (writesGood_handleInternal hq hs a now)
+  | external rq => exact writesGood_handleExternal hq hs rq now
+  | internal rq =>
+      exact writesGood_bind' _ _ _ _ (writesGood_handleInternal hq hs rq now)
         (writesGood_pure _ _ _)
   | idle => exact writesGood_pure _ _ _
 

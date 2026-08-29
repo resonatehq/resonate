@@ -298,6 +298,22 @@ structure TaskSearchRes where
   cursor : Option String := none
   deriving Repr
 
+structure PromiseTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure TaskLeaseTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure TaskRetryTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure ScheduleTimeoutReq where
+  schedule : Ident
+  deriving Repr, DecidableEq
+
 structure ResumeReq where
   awaited : String
   awaiter : String

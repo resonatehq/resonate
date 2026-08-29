@@ -15,10 +15,12 @@ namespace AbstractModel
 namespace Internal
 
 
-open ServerModel (Ident nextCron occurrences expand Schedule)
+open ServerModel (Ident nextCron occurrences expand Schedule
+                  PromiseTimeoutReq PromiseRegisterCallbackReq PromiseRegisterListenerReq
+                  TaskLeaseTimeoutReq TaskRetryTimeoutReq ScheduleTimeoutReq)
 
-def processPromiseTimeout (id : Ident) (now : Nat) : H Unit := do
-  let _ ← touchObject id now
+def processPromiseTimeout (req : PromiseTimeoutReq) (now : Nat) : H Unit := do
+  let _ ← touchObject req.id now
 
 def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
   match ← touchTaskObject awaiter now with
@@ -37,30 +39,30 @@ def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
       | .fulfilled =>
           pure ()
 
-def processCallback (id : Ident) (awaiter : Ident) (now : Nat) : H Unit := do
-  match ← touchObject id now with
+def processCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H Unit := do
+  match ← touchObject req.awaited now with
   | none => pure ()
   | some o =>
       if o.promise.state == .pending then
         pure ()
-      else if o.promise.callbacks.contains awaiter then
+      else if o.promise.callbacks.contains req.awaiter then
         setPromise o.id { o.promise with
-                          callbacks := o.promise.callbacks.filter (· != awaiter) }
-        resumeOne o.id awaiter now
+                          callbacks := o.promise.callbacks.filter (· != req.awaiter) }
+        resumeOne o.id req.awaiter now
 
-def processListener (id : Ident) (address : String) (now : Nat) : H Unit := do
-  match ← touchObject id now with
+def processListener (req : PromiseRegisterListenerReq) (now : Nat) : H Unit := do
+  match ← touchObject req.awaited now with
   | none => pure ()
   | some o =>
       if o.promise.state == .pending then
         pure ()
-      else if o.promise.listeners.contains address then
+      else if o.promise.listeners.contains req.address then
         setPromise o.id { o.promise with
-                          listeners := o.promise.listeners.filter (· != address) }
-        setMessage address (.unblock (o.promise.toRecord o.id))
+                          listeners := o.promise.listeners.filter (· != req.address) }
+        setMessage req.address (.unblock (o.promise.toRecord o.id))
 
-def processLeaseTimeout (id : Ident) (now : Nat) : H Unit := do
-  match ← viewTaskObject id now with
+def processLeaseTimeout (req : TaskLeaseTimeoutReq) (now : Nat) : H Unit := do
+  match ← viewTaskObject req.id now with
   | none => pure ()
   | some o =>
   match o.task with
@@ -97,8 +99,8 @@ def processLeaseTimeout (id : Ident) (now : Nat) : H Unit := do
     reports `ttl` — would be observable. A transcribed production trace
     refuses it: `valid/lean/real.lean` shows `ttl := none` on a task
     acquired with 60000, suspended and resumed. -/
-def processRetryTimeout (id : Ident) (now : Nat) : H Unit := do
-  match ← viewTaskObject id now with
+def processRetryTimeout (req : TaskRetryTimeoutReq) (now : Nat) : H Unit := do
+  match ← viewTaskObject req.id now with
   | none => pure ()
   | some o =>
   match o.task with
@@ -125,8 +127,8 @@ def fireAll (s : Schedule) : List Nat → H Unit
       fireOccurrence s t
       fireAll s ts
 
-def processSchedule (id : Ident) (now : Nat) : H Unit := do
-  match ← getSchedule id with
+def processSchedule (req : ScheduleTimeoutReq) (now : Nat) : H Unit := do
+  match ← getSchedule req.schedule with
   | none => pure ()
   | some s =>
       let ts := (occurrences s.cron s.nextRunAt now).filter (· ≤ now)
