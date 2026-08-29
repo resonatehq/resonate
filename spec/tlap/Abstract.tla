@@ -20,7 +20,7 @@ New(req, t) ==
                         settledAt |-> NoTime,
                         callbacks |-> {}, listeners |-> {} ],
           task    |-> IF req.tags.targeted THEN
-                          [NoTask EXCEPT !.state = "pending", !.retryAt = t]
+                          [NoTask EXCEPT !.state = "pending", !.retryTimeoutAt = t]
                       ELSE
                           NoTask ]
     ELSE
@@ -38,17 +38,17 @@ New(req, t) ==
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
         [ promise |-> [obj.promise EXCEPT
-                          !.state     = IF obj.promise.tags.timer THEN "resolved"
+                          !.state = IF obj.promise.tags.timer THEN "resolved"
                                         ELSE "rejectedTimedout",
                           !.value     = NoValue,
                           !.settledAt = obj.promise.timeoutAt],
           task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
                                                      ELSE "fulfilled",
-                                       !.pid       = NoPid,
-                                       !.ttl       = NoTime,
-                                       !.expiresAt = NoTime,
-                                       !.retryAt   = NoTime,
-                                       !.resumes   = {}] ]
+                                       !.pid            = NoPid,
+                                       !.ttl            = NoTime,
+                                       !.leaseTimeoutAt = NoTime,
+                                       !.retryTimeoutAt = NoTime,
+                                       !.resumes        = {}] ]
     ELSE
         obj
 
@@ -72,13 +72,13 @@ HandlePromiseSettle(req) ==
                                                         !.value     = req.value,
                                                         !.settledAt = now],
                         task    |-> [old.task EXCEPT
-                                        !.state     = IF @ = "none" THEN "none"
+                                        !.state = IF @ = "none" THEN "none"
                                                       ELSE "fulfilled",
-                                        !.pid       = NoPid,
-                                        !.ttl       = NoTime,
-                                        !.expiresAt = NoTime,
-                                        !.retryAt   = NoTime,
-                                        !.resumes   = {}] ])
+                                        !.pid            = NoPid,
+                                        !.ttl            = NoTime,
+                                        !.leaseTimeoutAt = NoTime,
+                                        !.retryTimeoutAt = NoTime,
+                                        !.resumes        = {}] ])
     /\ UNCHANGED <<outbox, now>>
 
 HandlePromiseRegisterCallback(req) ==
@@ -116,12 +116,12 @@ HandleTaskCreate(req) ==
                      Write(objects, req.action.id,
                            IF born.promise.state = "pending" THEN
                              [born EXCEPT !.task.state     = "acquired",
-                                          !.task.version   = @ + 1,
-                                          !.task.ttl       = req.ttl,
-                                          !.task.pid       = req.pid,
-                                          !.task.expiresAt = now + req.ttl,
-                                          !.task.retryAt   = NoTime,
-                                          !.task.resumes   = {}]
+                                          !.task.version        = @ + 1,
+                                          !.task.ttl            = req.ttl,
+                                          !.task.pid            = req.pid,
+                                          !.task.leaseTimeoutAt = now + req.ttl,
+                                          !.task.retryTimeoutAt = NoTime,
+                                          !.task.resumes        = {}]
                          ELSE
                              born)
        \/ /\ req.action.id \in DOMAIN objects
@@ -132,12 +132,12 @@ HandleTaskCreate(req) ==
                  /\ objects' =
                         Write(objects, req.action.id,
                               [old EXCEPT !.task.state     = "acquired",
-                                        !.task.version   = @ + 1,
-                                        !.task.ttl       = req.ttl,
-                                        !.task.pid       = req.pid,
-                                        !.task.expiresAt = now + req.ttl,
-                                        !.task.retryAt   = NoTime,
-                                        !.task.resumes   = {}])
+                                        !.task.version        = @ + 1,
+                                        !.task.ttl            = req.ttl,
+                                        !.task.pid            = req.pid,
+                                        !.task.leaseTimeoutAt = now + req.ttl,
+                                        !.task.retryTimeoutAt = NoTime,
+                                        !.task.resumes        = {}])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskAcquire(req) ==
@@ -150,12 +150,12 @@ HandleTaskAcquire(req) ==
            /\ objects' =
                   Write(objects, req.id,
                         [old EXCEPT !.task.state     = "acquired",
-                                  !.task.version   = @ + 1,
-                                  !.task.ttl       = req.ttl,
-                                  !.task.pid       = req.pid,
-                                  !.task.expiresAt = now + req.ttl,
-                                  !.task.retryAt   = NoTime,
-                                  !.task.resumes   = {}])
+                                  !.task.version        = @ + 1,
+                                  !.task.ttl            = req.ttl,
+                                  !.task.pid            = req.pid,
+                                  !.task.leaseTimeoutAt = now + req.ttl,
+                                  !.task.retryTimeoutAt = NoTime,
+                                  !.task.resumes        = {}])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskFence(i, v) ==
@@ -182,7 +182,7 @@ HandleTaskHeartbeat(req) ==
                [ i \in DOMAIN objects |->
                     IF i \in beat THEN
                         LET old == Project(objects[i], now)
-                        IN  [old EXCEPT !.task.expiresAt = now + old.task.ttl]
+                        IN  [old EXCEPT !.task.leaseTimeoutAt = now + old.task.ttl]
                     ELSE
                         objects[i] ]
         /\ UNCHANGED <<outbox, now>>
@@ -210,11 +210,11 @@ HandleTaskSuspend(req) ==
                           [ i \in DOMAIN objects |->
                                IF i = req.id THEN
                                    [old EXCEPT !.task.state     = "suspended",
-                                               !.task.pid       = NoPid,
-                                               !.task.ttl       = NoTime,
-                                               !.task.expiresAt = NoTime,
-                                               !.task.retryAt   = NoTime,
-                                               !.task.resumes   = {}]
+                                               !.task.pid            = NoPid,
+                                               !.task.ttl            = NoTime,
+                                               !.task.leaseTimeoutAt = NoTime,
+                                               !.task.retryTimeoutAt = NoTime,
+                                               !.task.resumes        = {}]
                                ELSE IF i \in aw THEN
                                    [Project(objects[i], now) EXCEPT
                                         !.promise.callbacks = @ \cup {req.id}]
@@ -236,11 +236,11 @@ HandleTaskFulfill(req) ==
                                         !.value     = req.action.value,
                                         !.settledAt = now],
                         task    |-> [old.task EXCEPT !.state     = "fulfilled",
-                                                     !.pid       = NoPid,
-                                                     !.ttl       = NoTime,
-                                                     !.expiresAt = NoTime,
-                                                     !.retryAt   = NoTime,
-                                                     !.resumes   = {}] ])
+                                                     !.pid            = NoPid,
+                                                     !.ttl            = NoTime,
+                                                     !.leaseTimeoutAt = NoTime,
+                                                     !.retryTimeoutAt = NoTime,
+                                                     !.resumes        = {}] ])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskRelease(req) ==
@@ -253,10 +253,10 @@ HandleTaskRelease(req) ==
            /\ objects' =
                   Write(objects, req.id,
                         [old EXCEPT !.task.state     = "pending",
-                                  !.task.pid       = NoPid,
-                                  !.task.ttl       = NoTime,
-                                  !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now])
+                                  !.task.pid            = NoPid,
+                                  !.task.ttl            = NoTime,
+                                  !.task.leaseTimeoutAt = NoTime,
+                                  !.task.retryTimeoutAt = now])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskHalt(req) ==
@@ -267,10 +267,10 @@ HandleTaskHalt(req) ==
            /\ objects' =
                   Write(objects, req.id,
                         [old EXCEPT !.task.state     = "halted",
-                                  !.task.pid       = NoPid,
-                                  !.task.ttl       = NoTime,
-                                  !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = NoTime])
+                                  !.task.pid            = NoPid,
+                                  !.task.ttl            = NoTime,
+                                  !.task.leaseTimeoutAt = NoTime,
+                                  !.task.retryTimeoutAt = NoTime])
     /\ UNCHANGED <<outbox, now>>
 
 HandleTaskContinue(req) ==
@@ -282,10 +282,10 @@ HandleTaskContinue(req) ==
            /\ objects' =
                   Write(objects, req.id,
                         [old EXCEPT !.task.state     = "pending",
-                                  !.task.pid       = NoPid,
-                                  !.task.ttl       = NoTime,
-                                  !.task.expiresAt = NoTime,
-                                  !.task.retryAt   = now])
+                                  !.task.pid            = NoPid,
+                                  !.task.ttl            = NoTime,
+                                  !.task.leaseTimeoutAt = NoTime,
+                                  !.task.retryTimeoutAt = now])
     /\ UNCHANGED <<outbox, now>>
 
 -----------------------------------------------------------------------------
@@ -302,16 +302,16 @@ ProcessLeaseTimeout ==
         LET old == objects[i]
         IN
             /\ old.task.state = "acquired"
-            /\ old.task.expiresAt /= NoTime
-            /\ old.task.expiresAt <= now
+            /\ old.task.leaseTimeoutAt /= NoTime
+            /\ old.task.leaseTimeoutAt <= now
             /\ Project(old, now).promise.state = "pending"
             /\ objects' =
                    Write(objects, i,
                          [old EXCEPT !.task.state     = "pending",
-                                     !.task.pid       = NoPid,
-                                     !.task.ttl       = NoTime,
-                                     !.task.expiresAt = NoTime,
-                                     !.task.retryAt   = now])
+                                     !.task.pid            = NoPid,
+                                     !.task.ttl            = NoTime,
+                                     !.task.leaseTimeoutAt = NoTime,
+                                     !.task.retryTimeoutAt = now])
             /\ UNCHANGED <<outbox, now>>
 
 ProcessRetryTimeout ==
@@ -322,11 +322,11 @@ ProcessRetryTimeout ==
                                           version |-> objects[i].task.version] ]
         IN
             /\ old.task.state = "pending"
-            /\ old.task.retryAt /= NoTime
-            /\ old.task.retryAt <= now
+            /\ old.task.retryTimeoutAt /= NoTime
+            /\ old.task.retryTimeoutAt <= now
             /\ Project(old, now).promise.state = "pending"
             /\ objects' =
-                   Write(objects, i, [old EXCEPT !.task.retryAt = now + RetryTimeout])
+                   Write(objects, i, [old EXCEPT !.task.retryTimeoutAt = now + RetryTimeout])
             /\ outbox' = { o \in outbox : MsgKey(o) /= MsgKey(msg) } \cup {msg}
             /\ UNCHANGED now
 
@@ -366,12 +366,12 @@ ProcessCallback ==
                                      Write(struck, w,
                                            IF awaiter.task.state = "suspended" THEN
                                              [awaiter EXCEPT
-                                                 !.task.state     = "pending",
-                                                 !.task.pid       = NoPid,
-                                                 !.task.ttl       = NoTime,
-                                                 !.task.expiresAt = NoTime,
-                                                 !.task.retryAt   = now,
-                                                 !.task.resumes   = {i}]
+                                                 !.task.state          = "pending",
+                                                 !.task.pid            = NoPid,
+                                                 !.task.ttl            = NoTime,
+                                                 !.task.leaseTimeoutAt = NoTime,
+                                                 !.task.retryTimeoutAt = now,
+                                                 !.task.resumes        = {i}]
                                          ELSE
                                              [awaiter EXCEPT
                                                  !.task.resumes = @ \cup {i}])
@@ -472,11 +472,11 @@ well_formed_promise_settled_at_lte_timeout_at ==
 
 well_formed_task_pending_iff_has_retry_at ==
     \A i \in DOMAIN objects :
-        objects[i].task.state /= "none" => ((objects[i].task.state = "pending") <=> (objects[i].task.retryAt /= NoTime))
+        objects[i].task.state /= "none" => ((objects[i].task.state = "pending") <=> (objects[i].task.retryTimeoutAt /= NoTime))
 
 well_formed_task_acquired_iff_has_expires_at ==
     \A i \in DOMAIN objects :
-        objects[i].task.state /= "none" => ((objects[i].task.state = "acquired") <=> (objects[i].task.expiresAt /= NoTime))
+        objects[i].task.state /= "none" => ((objects[i].task.state = "acquired") <=> (objects[i].task.leaseTimeoutAt /= NoTime))
 
 consistent_settled_promise_has_fulfilled_task ==
     \A i \in DOMAIN objects :

@@ -164,7 +164,7 @@ def mutants : List (String × Bool) :=
   let P : AbstractModel.PromiseObject :=
     { state := .pending, param := {}, tags := [("resonate:external","true")],
       timeoutAt := 100, createdAt := 10 }
-  let T : AbstractModel.TaskObject := { state := .pending, version := 1, retryAt := some 0 }
+  let T : AbstractModel.TaskObject := { state := .pending, version := 1, retryTimeoutAt := some 0 }
   let obj : AbstractModel.PromiseObject → Option AbstractModel.TaskObject →
               AbstractModel.ServerState :=
     fun p t => { objects := [{ id := "a", promise := p, task := t }] }
@@ -201,13 +201,13 @@ def mutants : List (String × Bool) :=
     ("well_formed_promise_settled_at_lte_now",
        well_formed_promise_settled_at_lte_now 5 (onePromise { P with settledAt := some 20 })),
     ("well_formed_task_acquired_iff_has_pid",
-       well_formed_task_acquired_iff_has_pid 0 (oneTask { T with state := .acquired, ttl := some 1, expiresAt := some 1, retryAt := none })),
+       well_formed_task_acquired_iff_has_pid 0 (oneTask { T with state := .acquired, ttl := some 1, leaseTimeoutAt := some 1, retryTimeoutAt := none })),
     ("well_formed_task_acquired_iff_has_ttl",
-       well_formed_task_acquired_iff_has_ttl 0 (oneTask { T with state := .acquired, pid := some "w", expiresAt := some 1, retryAt := none })),
+       well_formed_task_acquired_iff_has_ttl 0 (oneTask { T with state := .acquired, pid := some "w", leaseTimeoutAt := some 1, retryTimeoutAt := none })),
     ("well_formed_task_acquired_iff_has_expires_at",
-       well_formed_task_acquired_iff_has_expires_at 0 (oneTask { T with state := .acquired, pid := some "w", ttl := some 1, retryAt := none })),
+       well_formed_task_acquired_iff_has_expires_at 0 (oneTask { T with state := .acquired, pid := some "w", ttl := some 1, retryTimeoutAt := none })),
     ("well_formed_task_pending_iff_has_retry_at",
-       well_formed_task_pending_iff_has_retry_at 0 (oneTask { T with retryAt := none })),
+       well_formed_task_pending_iff_has_retry_at 0 (oneTask { T with retryTimeoutAt := none })),
     ("well_formed_task_fulfilled_is_cleared",
        well_formed_task_fulfilled_is_cleared 0 (oneTask { T with state := .fulfilled, pid := some "w" })),
     ("well_formed_task_suspended_is_cleared",
@@ -233,7 +233,7 @@ def mutants : List (String × Bool) :=
     ("well_formed_promise_deadline_settlement_has_no_value",
        well_formed_promise_deadline_settlement_has_no_value 0 (onePromise { P with state := .rejectedTimedout, settledAt := some 100, value := { data := some "boom" } })),
     ("well_formed_task_acquired_version_positive",
-       well_formed_task_acquired_version_positive 0 (oneTask { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none })),
+       well_formed_task_acquired_version_positive 0 (oneTask { T with state := .acquired, version := 0, pid := some "w", ttl := some 1, leaseTimeoutAt := some 1, retryTimeoutAt := none })),
     -- Both halves of the entry still have a violator to name. Fusing
     -- the row stopped the MACHINE from writing them; it did not stop the
     -- catalogue from saying they are wrong, which is the whole reason
@@ -274,10 +274,10 @@ def mutants : List (String × Bool) :=
                               : AbstractModel.PromiseObject).toRecord "a") }] }),
     ("consistent_settled_task_promise_settled",
        consistent_settled_task_promise_settled 0
-         (obj P (some { T with state := .fulfilled, retryAt := none }))),
+         (obj P (some { T with state := .fulfilled, retryTimeoutAt := none }))),
     ("consistent_suspended_task_holds_rung",
        consistent_suspended_task_holds_rung 50
-         (obj P (some { T with state := .suspended, retryAt := none }))),
+         (obj P (some { T with state := .suspended, retryTimeoutAt := none }))),
     ("well_formed_store_object_ids_unique",
        well_formed_store_object_ids_unique 0
          { objects := [{ id := "a", promise := P }, { id := "a", promise := P }] }),
@@ -373,7 +373,7 @@ open AbstractModel.Properties (well_formed_task_ttl_positive
   well_formed_promise_target_is_nonempty
   well_formed_promise_delay_before_deadline)
 
-/-- `ttl = 0` is accepted: the task is acquired with `expiresAt = now`,
+/-- `ttl = 0` is accepted: the task is acquired with `leaseTimeoutAt = now`,
     a lease already expired at the instant it was granted. -/
 def wGapTtlZero : List (Step × Nat) :=
   [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
@@ -403,7 +403,7 @@ theorem gap_empty_target_reaches_the_outbox :
     (trace wGapEmptyTarget).any (fun (_, s) => s.outbox.any (·.address == "")) = true := by decide
 
 /-- A delay past the promise's own deadline: the task is born pending
-    with `retryAt = 5000` on a promise that dies at 200. It is never
+    with `retryTimeoutAt = 5000` on a promise that dies at 200. It is never
     dispatched, and it is not an error. -/
 def lateDelayTags : ServerModel.Tags := [("resonate:target", "w"), ("resonate:delay", "5000")]
 

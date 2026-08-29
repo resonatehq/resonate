@@ -23,7 +23,7 @@ import "sort"
 // changed that a response would carry", and it is deliberately the same
 // projection `matches` compares against a capture: the promise record
 // `samePromiseRecord` reads, and the task fields `matches` reads. A firing
-// that moves only callbacks, listeners, `expiresAt`, `retryAt` or the
+// that moves only callbacks, listeners, `leaseTimeoutAt`, `retryTimeoutAt` or the
 // outbox is invisible on the channel this checker compares — which is
 // exactly what an empty `affects` asserts about R3 and R6.
 

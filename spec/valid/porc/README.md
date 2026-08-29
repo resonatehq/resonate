@@ -283,7 +283,7 @@ reduction: independent steps commute). Two details worth knowing:
   enabled when the cone is computed. This is the same chain that made
   the Lean cone unsound the first time.
 * **R3 (notify) and R6 (dispatch) fall out of the cone entirely**: they
-  mutate only state no response projects (listener lists, `retryAt`,
+  mutate only state no response projects (listener lists, `retryTimeoutAt`,
   the outbox), and those fields feed no rule but themselves. R6 was the
   one rule that discharges no obligation — the closure's documented
   fanout source — so its exclusion is most of the win. The reduction is

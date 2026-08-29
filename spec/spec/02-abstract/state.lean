@@ -118,13 +118,13 @@ def PromiseObject.project (p : PromiseObject) (now : Nat) : PromiseObject :=
     p
 
 structure TaskObject where
-  state     : TaskState
-  version   : Nat
-  ttl       : Option Nat    := none
-  pid       : Option String := none
-  expiresAt : Option Nat    := none
-  retryAt   : Option Nat    := none
-  resumes   : List String   := []
+  state          : TaskState
+  version        : Nat
+  ttl            : Option Nat    := none
+  pid            : Option String := none
+  leaseTimeoutAt : Option Nat    := none
+  retryTimeoutAt : Option Nat    := none
+  resumes        : List String   := []
   deriving Repr
 
 def TaskObject.toRecord (t : TaskObject) (id : String) : TaskRecord :=
@@ -133,7 +133,7 @@ def TaskObject.toRecord (t : TaskObject) (id : String) : TaskRecord :=
 
 def TaskObject.fulfill (t : TaskObject) : TaskObject :=
   { t with state := .fulfilled, pid := none, ttl := none,
-           expiresAt := none, retryAt := none, resumes := [] }
+           leaseTimeoutAt := none, retryTimeoutAt := none, resumes := [] }
 
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
   if p.state != .pending ∧ t.state != .fulfilled then t.fulfill else t
@@ -302,7 +302,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
         match p.tags.get? "resonate:delay" with
         | some d => max (ServerModel.parseNat d) now
         | none => now
-      let t : TaskObject := { state := .pending, version := 0, retryAt := some due }
+      let t : TaskObject := { state := .pending, version := 0, retryTimeoutAt := some due }
       setTask req.id t
       return { id := req.id, promise := p, task := some t }
     else

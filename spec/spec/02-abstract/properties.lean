@@ -286,27 +286,27 @@ def well_formed_task_acquired_iff_has_ttl (_now : Nat) (s : ServerState) : Bool 
 
 def well_formed_task_acquired_iff_has_expires_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
-    (t.state == .acquired) == t.expiresAt.isSome
+    (t.state == .acquired) == t.leaseTimeoutAt.isSome
 
 def well_formed_task_pending_iff_has_retry_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
-    (t.state == .pending) == t.retryAt.isSome
+    (t.state == .pending) == t.retryTimeoutAt.isSome
 
 def well_formed_task_fulfilled_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .fulfilled
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
+      || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone
           && t.resumes.isEmpty)
 
 def well_formed_task_suspended_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .suspended
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone)
 
 def well_formed_task_halted_is_cleared (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     t.state != .halted
-      || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone)
+      || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone)
 
 def well_formed_task_suspended_has_no_resumes (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
@@ -505,7 +505,7 @@ def preserved_fulfilled_task (_now : Nat) (a b : ServerState) : Bool :=
        | none => false
        | some u =>
            u.state == .fulfilled && u.version == t.version && u.resumes.isEmpty
-             && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.retryAt.isNone)
+             && u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone && u.retryTimeoutAt.isNone)
 
 /-- `NoDeadDispatch`, state half: no step puts a task into `pending`
     when its promise's deadline has already passed. A task already
@@ -855,12 +855,12 @@ def preserved_schedule_birth_fields_immutable (_now : Nat) (a b : ServerState) :
 def consistent_task_birth_state (_now : Nat) (a b : ServerState) : Bool :=
   b.objects.all fun o => o.task.all fun u =>
     (a.hasTask o.id)
-    || (u.state == .pending && u.retryAt.isSome
-          && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
-    || (u.state == .fulfilled && u.retryAt.isNone
-          && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.resumes.isEmpty)
-    || (u.state == .acquired && 1 ≤ u.version && u.retryAt.isNone
-          && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome && u.resumes.isEmpty)
+    || (u.state == .pending && u.retryTimeoutAt.isSome
+          && u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone && u.resumes.isEmpty)
+    || (u.state == .fulfilled && u.retryTimeoutAt.isNone
+          && u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone && u.resumes.isEmpty)
+    || (u.state == .acquired && 1 ≤ u.version && u.retryTimeoutAt.isNone
+          && u.pid.isSome && u.ttl.isSome && u.leaseTimeoutAt.isSome && u.resumes.isEmpty)
 
 def consistent_task_lease_released_atomically (_now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
@@ -868,7 +868,7 @@ def consistent_task_lease_released_atomically (_now : Nat) (a b : ServerState) :
     | none => true
     | some u =>
         !(t.state == .acquired && u.state != .acquired)
-        || (u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone && u.version == t.version)
+        || (u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone && u.version == t.version)
 
 def preserved_task_lease_holder_stable (_now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
@@ -883,11 +883,11 @@ def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) 
     match b.task? o.id with
     | none => true
     | some u =>
-        (u.pid == t.pid && u.ttl == t.ttl && u.expiresAt == t.expiresAt)
+        (u.pid == t.pid && u.ttl == t.ttl && u.leaseTimeoutAt == t.leaseTimeoutAt)
         || (t.state != .acquired && u.state == .acquired
-              && u.pid.isSome && u.ttl.isSome && u.expiresAt.isSome)
+              && u.pid.isSome && u.ttl.isSome && u.leaseTimeoutAt.isSome)
         || (t.state == .acquired && u.state != .acquired
-              && u.pid.isNone && u.ttl.isNone && u.expiresAt.isNone)
+              && u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone)
         || (t.state == .acquired && u.state == .acquired
               && u.pid == t.pid && u.ttl == t.ttl)
 
@@ -913,17 +913,17 @@ def consistent_task_acquisition_is_atomic (now : Nat) (a b : ServerState) : Bool
         !(t.state != .acquired && u.state == .acquired)
         || (t.state == .pending && t.version < u.version
               && u.pid.isSome && u.ttl.isSome
-              && u.expiresAt == some (now + u.ttl.getD 0)
-              && u.retryAt.isNone && u.resumes.isEmpty)
+              && u.leaseTimeoutAt == some (now + u.ttl.getD 0)
+              && u.retryTimeoutAt.isNone && u.resumes.isEmpty)
 
 def consistent_task_lease_deadline_is_now_plus_ttl (now : Nat) (a b : ServerState) : Bool :=
   b.objects.all fun o => o.task.all fun u =>
-    match u.expiresAt with
+    match u.leaseTimeoutAt with
     | none => true
     | some d =>
         d == now + u.ttl.getD 0
         || (match a.task? o.id with
-            | some t => t.expiresAt == some d && t.ttl == u.ttl && t.state == u.state
+            | some t => t.leaseTimeoutAt == some d && t.ttl == u.ttl && t.state == u.state
             | none   => false)
 
 def consistent_task_pending_entry_arms_retry (now : Nat) (a b : ServerState) : Bool :=
@@ -931,15 +931,15 @@ def consistent_task_pending_entry_arms_retry (now : Nat) (a b : ServerState) : B
     match b.task? o.id with
     | none => true
     | some u =>
-        !(t.state != .pending && u.state == .pending) || u.retryAt == some now
+        !(t.state != .pending && u.state == .pending) || u.retryTimeoutAt == some now
 
 def consistent_task_retry_rearm_only_when_due (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
     match b.task? o.id with
     | none => true
     | some u =>
-        !(t.state == .pending && u.state == .pending && u.retryAt != t.retryAt)
-        || (match t.retryAt with | some due => decide (due ≤ now) | none => false)
+        !(t.state == .pending && u.state == .pending && u.retryTimeoutAt != t.retryTimeoutAt)
+        || (match t.retryTimeoutAt with | some due => decide (due ≤ now) | none => false)
 
 def consistent_task_wake_records_resume (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
@@ -947,7 +947,7 @@ def consistent_task_wake_records_resume (now : Nat) (a b : ServerState) : Bool :
     | none => true
     | some u =>
         !(t.state == .suspended && u.state == .pending)
-        || (!u.resumes.isEmpty && u.retryAt == some now && u.version == t.version)
+        || (!u.resumes.isEmpty && u.retryTimeoutAt == some now && u.version == t.version)
 
 /-! ## The sweeper properties
 
@@ -1078,8 +1078,8 @@ def monotone_task_retry_rearm_advances (now : Nat) (a b : ServerState) : Bool :=
     t.state != .pending ||
       (match b.task? o.id with
        | none   => true
-       | some u => u.state != .pending || u.retryAt == t.retryAt
-                     || (match u.retryAt with
+       | some u => u.state != .pending || u.retryTimeoutAt == t.retryTimeoutAt
+                     || (match u.retryTimeoutAt with
                          | some d => now < d
                          | none   => false))
 
@@ -1419,7 +1419,7 @@ theorem well_formed_promise_record_hides_listeners
 
 theorem well_formed_task_record_hides_deadlines
     (t : TaskObject) (e r : Option Nat) (id : String) :
-    ({ t with expiresAt := e, retryAt := r } : TaskObject).toRecord id
+    ({ t with leaseTimeoutAt := e, retryTimeoutAt := r } : TaskObject).toRecord id
       = t.toRecord id := rfl
 
 theorem well_formed_task_record_resumes_is_a_count (t : TaskObject) (id : String) :

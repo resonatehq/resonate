@@ -92,16 +92,16 @@ open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Cor
 
 /-- The state modulo what no `Response` projects: the outbox, and the
     dispatch clock. `TaskRecord` carries `id`, `state`, `version`,
-    `resumes` as a count, `ttl` and `pid` — not `retryAt`, and not
-    `expiresAt` — so neither deadline is on the wire. `retryAt` is
+    `resumes` as a count, `ttl` and `pid` — not `retryTimeoutAt`, and not
+    `leaseTimeoutAt` — so neither deadline is on the wire. `retryTimeoutAt` is
     erased here because a retry internal step writes nothing else observable;
-    `expiresAt` is KEPT, because `processLeaseTimeout` moves the task's
+    `leaseTimeoutAt` is KEPT, because `processLeaseTimeout` moves the task's
     state and `task.get` projects that. -/
 def Visible (s : ServerState) : ServerState :=
   { s with outbox := [],
            objects := s.objects.map fun o =>
                         { o with task := o.task.map fun t =>
-                                   if t.state == .pending then { t with retryAt := none } else t } }
+                                   if t.state == .pending then { t with retryTimeoutAt := none } else t } }
 
 /-- The proviso the retry-invisibility argument needed, and no longer
     does. Concrete keyed both timer kinds by task id and `delTaskTimeout`
@@ -110,23 +110,23 @@ def Visible (s : ServerState) : ServerState :=
     EMPIRICALLY over every state of every script in `gap.lean`.
 
     On the abstract machine it is a theorem instead of a hunt.
-    `processRetryTimeout` writes `retryAt` and nothing else, and a
-    pending task has no `expiresAt` at all —
+    `processRetryTimeout` writes `retryTimeoutAt` and nothing else, and a
+    pending task has no `leaseTimeoutAt` at all —
     `well_formed_task_acquired_iff_has_expires_at` is an iff in the
     catalogue. Two deadlines that shared a key now live on the object
     that owns them, and the interference is gone with the sharing. Kept
     as a definition because the theorems below cite it; it is now
     discharged by the catalogue rather than assumed. -/
 def PendingHasNoLease (s : ServerState) : Prop :=
-  ∀ t ∈ s.tasks, t.state = .pending → t.expiresAt = none
+  ∀ t ∈ s.tasks, t.state = .pending → t.leaseTimeoutAt = none
 
 /-! ## Critical instants -/
 
 /-- Every number in the state that a handler compares `now` against. -/
 def deadlines (s : ServerState) : List Nat :=
   s.promises.map (·.timeoutAt)
-  ++ s.tasks.filterMap (·.retryAt)
-  ++ s.tasks.filterMap (·.expiresAt)
+  ++ s.tasks.filterMap (·.retryTimeoutAt)
+  ++ s.tasks.filterMap (·.leaseTimeoutAt)
   ++ s.schedules.map (·.nextRunAt)
 
 private def insertNat (x : Nat) : List Nat → List Nat

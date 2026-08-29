@@ -24,7 +24,7 @@ itself, inside `Commit`, by diffing deadlines across old and new — which put
 wheel machinery in the specification, made a handler unreadable without
 chasing four operators, and produced effects `Apply` then discarded. The Lean
 does none of that: a deadline is a FIELD, `internal.lean` writes
-`setTask { t with retryAt := ... }` and stops, and `02-abstract` has no arm or
+`setTask { t with retryTimeoutAt := ... }` and stops, and `02-abstract` has no arm or
 disarm anywhere. The derivation now lives in `Concrete!Process`, from the
 document before against the objects written — which is where Verus computes
 `sched`, from `w0` and `w2`.
@@ -143,7 +143,7 @@ invented here.
 
 **11 `.trans` properties reference `now`, and are predicted to break.** The
 clearest is `consistent_task_pending_entry_arms_retry`: if a task became
-pending, then `retryAt = now`. But `Process` decides at instant T and the
+pending, then `retryTimeoutAt = now`. But `Process` decides at instant T and the
 `PutObject` lands at T+k, and the property is evaluated where the write lands.
 This is exactly what Verus freezes in `Phase::Perform { at: clamp(now, held) }`
 — the *decision instant*, carried to every effect. Note that is a different

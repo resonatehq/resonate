@@ -51,7 +51,7 @@ func (s *ServerState) resumeOne(awaited, awaiter string, now uint64) {
 		u := t.clone()
 		u.State = TaskPending
 		u.Resumes = []string{awaited}
-		u.RetryAt = u64p(now)
+		u.RetryTimeoutAt = u64p(now)
 		s.SetTask(o.ID, u)
 	case TaskPending, TaskAcquired, TaskHalted:
 		if !contains(t.Resumes, awaited) {
@@ -93,7 +93,7 @@ func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
 		return
 	}
 	t := o.Task
-	if t.ExpiresAt == nil || t.State != TaskAcquired || *t.ExpiresAt > now {
+	if t.LeaseTimeoutAt == nil || t.State != TaskAcquired || *t.LeaseTimeoutAt > now {
 		return
 	}
 	if o.Promise.State != Pending {
@@ -101,13 +101,13 @@ func (s *ServerState) ProcessLeaseTimeout(id string, now uint64) {
 	}
 	u := t.clone()
 	u.State = TaskPending
-	u.PID, u.TTL, u.ExpiresAt = nil, nil, nil
-	u.RetryAt = u64p(now)
+	u.PID, u.TTL, u.LeaseTimeoutAt = nil, nil, nil
+	u.RetryTimeoutAt = u64p(now)
 	s.SetTask(o.ID, u)
 }
 
 // R6 processRetryTimeout — emit the execute for a pending task whose dispatch is due,
-// re-arming `retryAt` at a chosen instant. Repeatable: the outbox's keyed
+// re-arming `retryTimeoutAt` at a chosen instant. Repeatable: the outbox's keyed
 // upsert makes re-emission idempotent, so any `next` is sound.
 func (s *ServerState) ProcessRetryTimeout(id string, next, now uint64) {
 	o := s.readTaskObject(Projected, id, now)
@@ -115,14 +115,14 @@ func (s *ServerState) ProcessRetryTimeout(id string, next, now uint64) {
 		return
 	}
 	t := o.Task
-	if t.RetryAt == nil || t.State != TaskPending || *t.RetryAt > now {
+	if t.RetryTimeoutAt == nil || t.State != TaskPending || *t.RetryTimeoutAt > now {
 		return
 	}
 	if o.Promise.State != Pending {
 		return
 	}
 	u := t.clone()
-	u.RetryAt = u64p(next)
+	u.RetryTimeoutAt = u64p(next)
 	s.SetTask(o.ID, u)
 	addr, _ := o.Promise.Tags.Get("resonate:target")
 	s.SetMessage(Message{Address: addr, Kind: "execute", TaskID: o.ID, Version: t.Version})
@@ -145,9 +145,9 @@ type internalStep struct {
 // R6's `next` is the scheduler's cadence choice, so the specification
 // admits every value of it; ONE representative is fired here, `next =
 // now`. That is sound rather than convenient: `next` is written to
-// `retryAt`, `TaskRecord` is `{id, state, version, resumes, ttl, pid}`
+// `retryTimeoutAt`, `TaskRecord` is `{id, state, version, resumes, ttl, pid}`
 // (`TaskObject.toRecord` in spec/02-abstract/state.lean) and carries no
-// `retryAt`, and no
+// `retryTimeoutAt`, and no
 // handler returns the outbox — so the states a different `next` would
 // reach differ only in fields no response can report. Firing `next = now`
 // also keeps R6 enabled at every later instant, which is the permissive
@@ -185,11 +185,11 @@ func enabledInternalSteps(s *ServerState, now uint64) []internalStep {
 		if t == nil || o.Promise.Project(now).State != Pending {
 			continue
 		}
-		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
+		if t.State == TaskAcquired && t.LeaseTimeoutAt != nil && *t.LeaseTimeoutAt <= now {
 			rs = append(rs, internalStep{"taskLeaseTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }})
 		}
-		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
+		if t.State == TaskPending && t.RetryTimeoutAt != nil && *t.RetryTimeoutAt <= now {
 			rs = append(rs, internalStep{"taskRetryTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }})
 		}
@@ -222,8 +222,8 @@ func enabledInternalSteps(s *ServerState, now uint64) []internalStep {
 //   R3 notify   removes a listener and writes the outbox — listener lists
 //               and outbox appear in no response record, and a listener
 //               feeds no internal step but R3 itself;
-//   R6 dispatch re-arms `retryAt` and writes the outbox — `TaskRecord`
-//               carries no retryAt, and retryAt feeds no internal step but R6.
+//   R6 dispatch re-arms `retryTimeoutAt` and writes the outbox — `TaskRecord`
+//               carries no retryTimeoutAt, and retryTimeoutAt feeds no internal step but R6.
 //
 // R6 was the one internal step that discharges no obligation (the closure's
 // documented fanout source), so excluding it is most of the win. R1's
@@ -304,12 +304,12 @@ func enabledFirings(s *ServerState, now uint64) []firing {
 		if t == nil || o.Promise.Project(now).State != Pending {
 			continue
 		}
-		if t.State == TaskAcquired && t.ExpiresAt != nil && *t.ExpiresAt <= now {
+		if t.State == TaskAcquired && t.LeaseTimeoutAt != nil && *t.LeaseTimeoutAt <= now {
 			fs = append(fs, firing{internalStep{"taskLeaseTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessLeaseTimeout(o.ID, now) }},
 				[]string{o.ID}})
 		}
-		if t.State == TaskPending && t.RetryAt != nil && *t.RetryAt <= now {
+		if t.State == TaskPending && t.RetryTimeoutAt != nil && *t.RetryTimeoutAt <= now {
 			fs = append(fs, firing{internalStep{"taskRetryTimeout " + o.ID,
 				func(u *ServerState) { u.ProcessRetryTimeout(o.ID, now, now) }},
 				nil})

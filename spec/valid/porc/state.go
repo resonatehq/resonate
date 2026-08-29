@@ -175,7 +175,7 @@ func (p *Promise) Project(now uint64) *Promise {
 	return p
 }
 
-// Task is `AbstractModel.TaskObject`. `ExpiresAt` and `RetryAt` are the
+// Task is `AbstractModel.TaskObject`. `LeaseTimeoutAt` and `RetryTimeoutAt` are the
 // deadlines the concrete machine keeps in `taskTimeouts`; here they live
 // on the object, so R5 and R6 guard on the task alone.
 //
@@ -186,8 +186,8 @@ type Task struct {
 	Version   uint64
 	TTL       *uint64
 	PID       *string
-	ExpiresAt *uint64
-	RetryAt   *uint64
+	LeaseTimeoutAt *uint64
+	RetryTimeoutAt   *uint64
 	Resumes   []string
 }
 
@@ -201,7 +201,7 @@ func (t *Task) clone() *Task {
 func (t *Task) Fulfill() *Task {
 	u := t.clone()
 	u.State = TaskFulfilled
-	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
+	u.PID, u.TTL, u.LeaseTimeoutAt, u.RetryTimeoutAt = nil, nil, nil, nil
 	u.Resumes = nil
 	return u
 }
@@ -504,7 +504,7 @@ func (s *ServerState) Key() string {
 		sort.Strings(rs)
 		fmt.Fprintf(&b, "T|%s|%d|%d|%s|%s|%s|%s|%s\n",
 			o.ID, t.State, t.Version, u64s(t.TTL), strs(t.PID),
-			u64s(t.ExpiresAt), u64s(t.RetryAt), strings.Join(rs, ","))
+			u64s(t.LeaseTimeoutAt), u64s(t.RetryTimeoutAt), strings.Join(rs, ","))
 	}
 	ob := make([]string, 0, len(s.Outbox))
 	for _, m := range s.Outbox {

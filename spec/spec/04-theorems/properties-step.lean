@@ -67,8 +67,8 @@ def stepMutants : List (String × Bool) :=
     { state := .pending, param := {}, tags := [("resonate:external","true")],
       timeoutAt := 100, createdAt := 10 }
   let S : PromiseObject := { P with state := .resolved, settledAt := some 20, listeners := ["https://l"] }
-  let T : TaskObject := { state := .pending, version := 3, retryAt := some 0 }
-  let A : TaskObject := { state := .acquired, version := 4, pid := some "w", ttl := some 5, expiresAt := some 9 }
+  let T : TaskObject := { state := .pending, version := 3, retryTimeoutAt := some 0 }
+  let A : TaskObject := { state := .acquired, version := 4, pid := some "w", ttl := some 5, leaseTimeoutAt := some 9 }
   let F : TaskObject := { state := .fulfilled, version := 3 }
   let S0 : PromiseObject := { P with state := .resolved, settledAt := some 20 }
   let PT : PromiseObject := { P with tags := [("resonate:target","w")] }
@@ -124,17 +124,17 @@ def stepMutants : List (String × Bool) :=
     ("consistent_promise_state_edge_admissible",
        consistent_promise_state_edge_admissible 0 { objects := [objOf "a" (S0)] } { objects := [objOf "a" ({ S0 with state := .rejected })] }),
     ("consistent_task_state_edge_admissible",
-       consistent_task_state_edge_admissible 0 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] }),
+       consistent_task_state_edge_admissible 0 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] }),
     ("preserved_task_acquisition_only_from_pending",
-       preserved_task_acquisition_only_from_pending 0 { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] } { objects := [objWith "a" PT (A)] }),
+       preserved_task_acquisition_only_from_pending 0 { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] } { objects := [objWith "a" PT (A)] }),
     ("preserved_task_suspension_only_from_acquired",
-       preserved_task_suspension_only_from_acquired 0 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] }),
+       preserved_task_suspension_only_from_acquired 0 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] }),
     ("preserved_task_halted_only_reenters_via_pending",
-       preserved_task_halted_only_reenters_via_pending 0 { objects := [objWith "a" PT ({ T with state := .halted, retryAt := none })] } { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] }),
+       preserved_task_halted_only_reenters_via_pending 0 { objects := [objWith "a" PT ({ T with state := .halted, retryTimeoutAt := none })] } { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] }),
     ("consistent_settlement_fulfils_task",
        consistent_settlement_fulfils_task 0 { objects := [objWith "a" (PT) (T)] } { objects := [objWith "a" (PTs) (T)] }),
     ("consistent_task_fulfilment_needs_settlement",
-       consistent_task_fulfilment_needs_settlement 0 { objects := [objWith "a" (PT) (T)] } { objects := [objWith "a" (PT) ({ T with state := .fulfilled, retryAt := none })] }),
+       consistent_task_fulfilment_needs_settlement 0 { objects := [objWith "a" (PT) (T)] } { objects := [objWith "a" (PT) ({ T with state := .fulfilled, retryTimeoutAt := none })] }),
     ("consistent_obligation_discharge_requires_settled",
        consistent_obligation_discharge_requires_settled 0 { objects := [objOf "a" ({ P with callbacks := ["z"] })] } { objects := [objOf "a" (P)] }),
     ("consistent_callback_consumption_resumes_awaiter",
@@ -145,10 +145,10 @@ def stepMutants : List (String × Bool) :=
        consistent_listener_consumption_enqueues_unblock 0 { objects := [objOf "a" ({ S0 with listeners := ["https://l"] })] } { objects := [objOf "a" (S0)] }),
     ("consistent_wake_follows_callback_consumption",
        consistent_wake_follows_callback_consumption 0
-         { objects := [objOf "c" ({ P with callbacks := ["a"] }), objWith "a" PT ({ T with state := .suspended, retryAt := none })] }
-         { objects := [objOf "c" ({ P with callbacks := ["a"] }), objWith "a" PT ({ T with state := .pending, retryAt := some 30 })] }),
+         { objects := [objOf "c" ({ P with callbacks := ["a"] }), objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] }
+         { objects := [objOf "c" ({ P with callbacks := ["a"] }), objWith "a" PT ({ T with state := .pending, retryTimeoutAt := some 30 })] }),
     ("consistent_suspension_registers_callback",
-       consistent_suspension_registers_callback 0 { objects := [objWith "a" (P) (A)] } { objects := [objWith "a" (P) ({ A with state := .suspended, pid := none, ttl := none, expiresAt := none })] }),
+       consistent_suspension_registers_callback 0 { objects := [objWith "a" (P) (A)] } { objects := [objWith "a" (P) ({ A with state := .suspended, pid := none, ttl := none, leaseTimeoutAt := none })] }),
     ("consistent_task_birth_couples_promise_birth",
        consistent_task_birth_couples_promise_birth 0 { } { objects := [objWith "a" PT (T)] }),
     ("monotone_outbox_keys_never_disappear",
@@ -174,7 +174,7 @@ def stepMutants : List (String × Bool) :=
     ("consistent_new_promise_born_clean/born_in_the_future",
        consistent_new_promise_born_clean 5 { } { objects := [objOf "a" (P)] }),
     ("consistent_task_birth_state",
-       consistent_task_birth_state 0 { } { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] }),
+       consistent_task_birth_state 0 { } { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] }),
     ("consistent_task_lease_released_atomically",
        consistent_task_lease_released_atomically 0 { objects := [objWith "a" PT (A)] } { objects := [objWith "a" PT ({ T with version := 4, pid := some "w" })] }),
     ("preserved_task_lease_holder_stable",
@@ -188,20 +188,20 @@ def stepMutants : List (String × Bool) :=
     ("consistent_task_acquisition_is_atomic",
        consistent_task_acquisition_is_atomic 40 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT (A)] }),
     ("consistent_task_lease_deadline_is_now_plus_ttl",
-       consistent_task_lease_deadline_is_now_plus_ttl 40 { objects := [objWith "a" PT (A)] } { objects := [objWith "a" PT ({ A with expiresAt := some 999 })] }),
+       consistent_task_lease_deadline_is_now_plus_ttl 40 { objects := [objWith "a" PT (A)] } { objects := [objWith "a" PT ({ A with leaseTimeoutAt := some 999 })] }),
     ("consistent_task_pending_entry_arms_retry",
-       consistent_task_pending_entry_arms_retry 7 { objects := [objWith "a" PT (A)] } { objects := [objWith "a" PT ({ T with version := 4, retryAt := none })] }),
+       consistent_task_pending_entry_arms_retry 7 { objects := [objWith "a" PT (A)] } { objects := [objWith "a" PT ({ T with version := 4, retryTimeoutAt := none })] }),
     ("consistent_task_retry_rearm_only_when_due",
-       consistent_task_retry_rearm_only_when_due 5 { objects := [objWith "a" PT ({ T with retryAt := some 50 })] } { objects := [objWith "a" PT ({ T with retryAt := some 900 })] }),
+       consistent_task_retry_rearm_only_when_due 5 { objects := [objWith "a" PT ({ T with retryTimeoutAt := some 50 })] } { objects := [objWith "a" PT ({ T with retryTimeoutAt := some 900 })] }),
     ("consistent_task_wake_records_resume",
-       consistent_task_wake_records_resume 7 { objects := [objWith "a" PT ({ T with state := .suspended, retryAt := none })] } { objects := [objWith "a" PT ({ T with retryAt := some 7 })] }),
+       consistent_task_wake_records_resume 7 { objects := [objWith "a" PT ({ T with state := .suspended, retryTimeoutAt := none })] } { objects := [objWith "a" PT ({ T with retryTimeoutAt := some 7 })] }),
     ("consistent_task_state_edge_internal_admissible",
        consistent_task_state_edge_internal_admissible 0 { objects := [objWith "a" PT (T)] } { objects := [objWith "a" PT (A)] }),
     ("consistent_promise_state_edge_internal_admissible",
        consistent_promise_state_edge_internal_admissible 0 { objects := [objOf "a" (P)] } { objects := [objOf "a" ({ P with state := .resolved, settledAt := some 20 })] }),
     ("preserved_no_dead_dispatch",
        preserved_no_dead_dispatch 500
-         { objects := [objWith "a" (P) ({ T with state := .acquired, pid := some "w", ttl := some 1, expiresAt := some 1, retryAt := none })] }
+         { objects := [objWith "a" (P) ({ T with state := .acquired, pid := some "w", ttl := some 1, leaseTimeoutAt := some 1, retryTimeoutAt := none })] }
          { objects := [objWith "a" (P) (T)] }),
     ("preserved_execute_only_for_live_task",
        preserved_execute_only_for_live_task 500

@@ -59,13 +59,13 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   | .taskLeaseTimeout id =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
-          t.state == .acquired && (t.expiresAt.getD (now + 1)) ≤ now
+          t.state == .acquired && (t.leaseTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
   | .taskRetryTimeout id =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
-          t.state == .pending && (t.retryAt.getD (now + 1)) ≤ now
+          t.state == .pending && (t.retryTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
   | .scheduleTimeout id => (s.schedules.find? (·.id == id)).isSome

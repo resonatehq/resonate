@@ -70,7 +70,7 @@ def visible (s : ServerState) : ServerState :=
   { s with outbox := [],
            objects := s.objects.map fun o =>
                         { o with task := o.task.map fun t =>
-                                   if t.state == .pending then { t with retryAt := none } else t } }
+                                   if t.state == .pending then { t with retryTimeoutAt := none } else t } }
 
 def sameCanon (a b : ServerState) : Bool := canon a == canon b
 def sameVisible (a b : ServerState) : Bool := canon (visible a) == canon (visible b)
@@ -189,7 +189,7 @@ intermediate state of every script below. -/
     it, and the catalogue makes this an iff. The sweep below should now
     find zero by construction rather than by luck. -/
 def pendingHasLease (s : ServerState) : Bool :=
-  s.tasks.any fun t => t.state == .pending && t.expiresAt.isSome
+  s.tasks.any fun t => t.state == .pending && t.leaseTimeoutAt.isSome
 
 def anyPendingHasLease (w : List (Step × Nat)) : Bool :=
   let rec go : List (Step × Nat) → ServerState → Bool

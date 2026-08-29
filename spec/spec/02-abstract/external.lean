@@ -136,7 +136,7 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
         let t : TaskObject :=
           { state := .acquired, version := 1,
             ttl := some req.ttl, pid := some req.pid,
-            expiresAt := some (now + req.ttl) }
+            leaseTimeoutAt := some (now + req.ttl) }
         setTask a.id t
         return { status := 200, task := some (t.toRecord a.id),
                  promise := some (p.toRecord a.id) }
@@ -165,8 +165,8 @@ def taskCreate (req : TaskCreateReq) (now : Nat) : H TaskCreateRes := do
           else if t.state == .pending then
             let t := { t with state := .acquired, version := t.version + 1,
                               ttl := some req.ttl, pid := some req.pid,
-                              expiresAt := some (now + req.ttl),
-                              retryAt := none, resumes := [] }
+                              leaseTimeoutAt := some (now + req.ttl),
+                              retryTimeoutAt := none, resumes := [] }
             setTask o.id t
             return { status := 200, task := some (t.toRecord o.id),
                      promise := some (o.promise.toRecord o.id) }
@@ -190,8 +190,8 @@ def taskAcquire (req : TaskAcquireReq) (now : Nat) : H TaskAcquireRes := do
         return { status := 409 }
       let t := { t with state := .acquired, version := t.version + 1,
                         ttl := some req.ttl, pid := some req.pid,
-                        expiresAt := some (now + req.ttl),
-                        retryAt := none, resumes := [] }
+                        leaseTimeoutAt := some (now + req.ttl),
+                        retryTimeoutAt := none, resumes := [] }
       setTask o.id t
       return { status := 200, task := some (t.toRecord o.id),
                promise := some (o.promise.toRecord o.id) }
@@ -232,7 +232,7 @@ def heartbeatOne (pid : String) (ref : ServerModel.TaskRef) (now : Nat) : H Unit
   | some t =>
       if t.state == .acquired ∧ t.version == ref.version
           ∧ t.pid == some pid ∧ o.promise.state == .pending then
-        setTask o.id { t with expiresAt := some (now + t.ttl.getD 0) }
+        setTask o.id { t with leaseTimeoutAt := some (now + t.ttl.getD 0) }
 
 def heartbeatAll (pid : String) (now : Nat) : List ServerModel.TaskRef → H Unit
   | [] => pure ()
@@ -297,7 +297,7 @@ def taskSuspend (req : TaskSuspendReq) (now : Nat) : H TaskSuspendRes := do
       | some false =>
           registerAwaited req.id now req.actions
           setTask o.id { t with state := .suspended, pid := none, ttl := none,
-                                expiresAt := none, retryAt := none, resumes := [] }
+                                leaseTimeoutAt := none, retryTimeoutAt := none, resumes := [] }
           return { status := 200 }
 
 def taskFulfill (req : TaskFulfillReq) (now : Nat) : H TaskFulfillRes := do
@@ -338,7 +338,7 @@ def taskRelease (req : TaskReleaseReq) (now : Nat) : H TaskReleaseRes := do
       if t.version != req.version then
         return { status := 409 }
       setTask o.id { t with state := .pending, pid := none, ttl := none,
-                            expiresAt := none, retryAt := some now }
+                            leaseTimeoutAt := none, retryTimeoutAt := some now }
       return { status := 200 }
 
 def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
@@ -355,7 +355,7 @@ def taskHalt (req : TaskHaltReq) (now : Nat) : H TaskHaltRes := do
       if t.state == .halted then
         return { status := 200 }
       setTask o.id { t with state := .halted, pid := none, ttl := none,
-                            expiresAt := none, retryAt := none }
+                            leaseTimeoutAt := none, retryTimeoutAt := none }
       return { status := 200 }
 
 def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
@@ -371,7 +371,7 @@ def taskContinue (req : TaskContinueReq) (now : Nat) : H TaskContinueRes := do
         return { status := 409 }
       if o.promise.state != .pending then
         return { status := 409 }
-      setTask o.id { t with state := .pending, retryAt := some now }
+      setTask o.id { t with state := .pending, retryTimeoutAt := some now }
       return { status := 200 }
 
 def taskSearch (_req : TaskSearchReq) (_now : Nat) : H TaskSearchRes := do

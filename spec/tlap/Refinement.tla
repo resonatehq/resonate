@@ -81,15 +81,15 @@ Leased(doc, t) ==
     { i \in DOMAIN doc :
         /\ doc[i].promise.state = "pending"
         /\ doc[i].task.state = "acquired"
-        /\ doc[i].task.expiresAt /= NoTime
-        /\ doc[i].task.expiresAt <= t }
+        /\ doc[i].task.leaseTimeoutAt /= NoTime
+        /\ doc[i].task.leaseTimeoutAt <= t }
 
 Retrying(doc, t) ==
     { i \in DOMAIN doc :
         /\ doc[i].promise.state = "pending"
         /\ doc[i].task.state = "pending"
-        /\ doc[i].task.retryAt /= NoTime
-        /\ doc[i].task.retryAt <= t }
+        /\ doc[i].task.retryTimeoutAt /= NoTime
+        /\ doc[i].task.retryTimeoutAt <= t }
 
 Items(d0, t0) ==
     LET q1 == SetToSeq(Due(d0, t0))
@@ -120,20 +120,20 @@ ProcessLeaseTimeout(i, doc, t) ==
     ELSE
         LET old == doc[i]
             new == [old EXCEPT !.task.state     = "pending",
-                               !.task.pid       = NoPid,
-                               !.task.ttl       = NoTime,
-                               !.task.expiresAt = NoTime,
-                               !.task.retryAt   = t]
+                               !.task.pid            = NoPid,
+                               !.task.ttl            = NoTime,
+                               !.task.leaseTimeoutAt = NoTime,
+                               !.task.retryTimeoutAt = t]
         IN
             IF \/ old.task.state /= "acquired"
-               \/ old.task.expiresAt = NoTime
-               \/ old.task.expiresAt > t
+               \/ old.task.leaseTimeoutAt = NoTime
+               \/ old.task.leaseTimeoutAt > t
                \/ Project(old, t).promise.state /= "pending" THEN
                 Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, i, new),
                   puts  |-> << [at |-> t, id |-> i, kind |-> "retry"] >>,
-                  dels  |-> << [at |-> old.task.expiresAt, id |-> i, kind |-> "lease"] >>,
+                  dels  |-> << [at |-> old.task.leaseTimeoutAt, id |-> i, kind |-> "lease"] >>,
                   sends |-> << >> ]
 
 ProcessRetryTimeout(i, doc, t) ==
@@ -141,17 +141,17 @@ ProcessRetryTimeout(i, doc, t) ==
         Skip(doc)
     ELSE
         LET old == doc[i]
-            new == [old EXCEPT !.task.retryAt = t + RetryTimeout]
+            new == [old EXCEPT !.task.retryTimeoutAt = t + RetryTimeout]
         IN
             IF \/ old.task.state /= "pending"
-               \/ old.task.retryAt = NoTime
-               \/ old.task.retryAt > t
+               \/ old.task.retryTimeoutAt = NoTime
+               \/ old.task.retryTimeoutAt > t
                \/ Project(old, t).promise.state /= "pending" THEN
                 Skip(doc)
             ELSE
                 [ doc   |-> Write(doc, i, new),
                   puts  |-> << [at |-> t + RetryTimeout, id |-> i, kind |-> "retry"] >>,
-                  dels  |-> << [at |-> old.task.retryAt, id |-> i, kind |-> "retry"] >>,
+                  dels  |-> << [at |-> old.task.retryTimeoutAt, id |-> i, kind |-> "retry"] >>,
                   sends |-> << [ address |-> old.promise.tags.target,
                                  message |-> [tag |-> "Execute", id      |-> i,
                                                        version |-> old.task.version] ] >> ]
@@ -194,11 +194,11 @@ ProcessCallback(req, doc, t) ==
                     awaiter    == Project(struck[req.awaiter], t)
                     newAwaiter == IF awaiter.task.state = "suspended" THEN
                                       [awaiter EXCEPT !.task.state     = "pending",
-                                                      !.task.pid       = NoPid,
-                                                      !.task.ttl       = NoTime,
-                                                      !.task.expiresAt = NoTime,
-                                                      !.task.retryAt   = t,
-                                                      !.task.resumes   = {req.id}]
+                                                      !.task.pid            = NoPid,
+                                                      !.task.ttl            = NoTime,
+                                                      !.task.leaseTimeoutAt = NoTime,
+                                                      !.task.retryTimeoutAt = t,
+                                                      !.task.resumes        = {req.id}]
                                   ELSE
                                       [awaiter EXCEPT !.task.resumes = @ \cup {req.id}]
                 IN
@@ -229,10 +229,10 @@ ProcessPromiseTimeout(req, doc, t) ==
                   puts  |-> << >>,
                   dels  |-> << [at |-> old.promise.timeoutAt, id |-> req.id, kind |-> "promise"] >>
                          \o (IF old.task.state = "acquired" THEN
-                                 << [at |-> old.task.expiresAt, id |-> req.id, kind |-> "lease"] >>
+                                 << [at |-> old.task.leaseTimeoutAt, id |-> req.id, kind |-> "lease"] >>
                              ELSE << >>)
                          \o (IF old.task.state = "pending" THEN
-                                 << [at |-> old.task.retryAt, id |-> req.id, kind |-> "retry"] >>
+                                 << [at |-> old.task.retryTimeoutAt, id |-> req.id, kind |-> "retry"] >>
                              ELSE << >>),
                   sends |-> << >> ]
 

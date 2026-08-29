@@ -22,7 +22,7 @@ model.
 
 The nine task entries are proved as ONE predicate and then weakened,
 rather than nine times over. That is not economy — it is necessary.
-`tContinue` re-pends a HALTED task and only clears `retryAt`; that the
+`tContinue` re-pends a HALTED task and only clears `retryTimeoutAt`; that the
 result has no `pid` is inherited from the halted row, which is a
 different catalogue entry. Several of the nine are inductive only in
 each other's company, so the strengthening is their conjunction and the
@@ -175,30 +175,30 @@ theorem promise_step {f : PromiseObject → Bool} (h : HPromise f)
 structure HTask (f : TaskObject → Bool) : Prop where
   fulfill    : ∀ (t : TaskObject), f t = true → f t.fulfill = true
   bornPending : ∀ (due : Nat),
-                  f { state := .pending, version := 0, retryAt := some due } = true
+                  f { state := .pending, version := 0, retryTimeoutAt := some due } = true
   bornDone   : f { state := .fulfilled, version := 0 } = true
   bornHeld   : ∀ (pid : String) (ttl now : Nat),
-                 f { state := .acquired, version := 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl) } = true
+                 f { state := .acquired, version := 1, ttl := some ttl, pid := some pid, leaseTimeoutAt := some (now + ttl) } = true
   acquire    : ∀ (t : TaskObject) (pid : String) (ttl now : Nat), f t = true →
-                 f { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl), retryAt := none, resumes := [] } = true
+                 f { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, leaseTimeoutAt := some (now + ttl), retryTimeoutAt := none, resumes := [] } = true
   heartbeat  : ∀ (t : TaskObject) (x : Nat), (t.state == .acquired) = true →
-                 f t = true → f { t with expiresAt := some x } = true
+                 f t = true → f { t with leaseTimeoutAt := some x } = true
   clearResumes : ∀ (t : TaskObject), f t = true → f { t with resumes := [] } = true
   suspend    : ∀ (t : TaskObject), f t = true →
-                 f { t with state := .suspended, pid := none, ttl := none, expiresAt := none, retryAt := none, resumes := [] } = true
+                 f { t with state := .suspended, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := none, resumes := [] } = true
   repend     : ∀ (t : TaskObject) (n : Nat), f t = true →
-                 f { t with state := .pending, pid := none, ttl := none, expiresAt := none, retryAt := some n } = true
+                 f { t with state := .pending, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := some n } = true
   halt       : ∀ (t : TaskObject), f t = true →
-                 f { t with state := .halted, pid := none, ttl := none, expiresAt := none, retryAt := none } = true
+                 f { t with state := .halted, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := none } = true
   cont       : ∀ (t : TaskObject) (n : Nat), (t.state == .halted) = true → f t = true →
-                 f { t with state := .pending, retryAt := some n } = true
+                 f { t with state := .pending, retryTimeoutAt := some n } = true
   resume     : ∀ (t : TaskObject) (a : String) (n : Nat), t.state = .suspended → f t = true →
-                 f { t with state := .pending, resumes := [a], retryAt := some n } = true
+                 f { t with state := .pending, resumes := [a], retryTimeoutAt := some n } = true
   addResume  : ∀ (t : TaskObject) (a : String), t.state ≠ .suspended → t.state ≠ .fulfilled →
                  (t.resumes.contains a) = false → f t = true →
                  f { t with resumes := t.resumes ++ [a] } = true
   rearm      : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true → f t = true →
-                 f { t with retryAt := some n } = true
+                 f { t with retryTimeoutAt := some n } = true
 
 theorem hereditary_onlyTask {f : TaskObject → Bool} (h : HTask f)
     (a : ServerState) : Hereditary (onlyTask f) a where
@@ -502,21 +502,21 @@ theorem hp_noValueUnlessSettled : HPromise qNoValueUnlessSettled where
 
 One predicate for all nine, because several are inductive only in each
 other's company. `tContinue` re-pends a HALTED task and clears only
-`retryAt`; that the result carries no `pid` comes from the halted row,
+`retryTimeoutAt`; that the result carries no `pid` comes from the halted row,
 which is a different entry. Prove the conjunction, weaken to each. -/
 
 def qTaskShape (t : TaskObject) : Bool :=
   ((t.state == .acquired) == t.pid.isSome)
     && ((t.state == .acquired) == t.ttl.isSome)
-    && ((t.state == .acquired) == t.expiresAt.isSome)
-    && ((t.state == .pending) == t.retryAt.isSome)
+    && ((t.state == .acquired) == t.leaseTimeoutAt.isSome)
+    && ((t.state == .pending) == t.retryTimeoutAt.isSome)
     && (t.state != .fulfilled
-        || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone
+        || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone
             && t.resumes.isEmpty))
     && (t.state != .suspended
-        || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone))
+        || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone))
     && (t.state != .halted
-        || (t.pid.isNone && t.ttl.isNone && t.expiresAt.isNone && t.retryAt.isNone))
+        || (t.pid.isNone && t.ttl.isNone && t.leaseTimeoutAt.isNone && t.retryTimeoutAt.isNone))
     && (t.state != .suspended || t.resumes.isEmpty)
     && (t.state != .acquired || 1 ≤ t.version)
 

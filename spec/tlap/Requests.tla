@@ -94,7 +94,7 @@ SetToSeq(S) ==
         f[Cardinality(S)]
 
 (* AN INSTANT. Not bounded: a deadline is allowed to point past the horizon --
-   that is what "scheduled for later" means -- and `retryAt = now + RetryTimeout`
+   that is what "scheduled for later" means -- and `retryTimeoutAt = now + RetryTimeout`
    does exactly that. Only membership is ever tested, never enumerated. *)
 Time ==
     Nat
@@ -138,7 +138,7 @@ TaskState ==
 (* @type: $task; *)
 NoTask ==
     [ state |-> "none", version |-> 0, ttl |-> NoTime, pid |-> NoPid,
-      expiresAt |-> NoTime, retryAt |-> NoTime, resumes |-> {} ]
+      leaseTimeoutAt |-> NoTime, retryTimeoutAt |-> NoTime, resumes |-> {} ]
 
 Promise ==
     [ state     : PromiseState,
@@ -156,8 +156,8 @@ Task ==
       version   : Version,               \* the fencing token
       ttl       : Ttl \cup {NoTime},     \* the WORKER's number: lease asked for
       pid       : Pid \cup {NoPid},
-      expiresAt : Time \cup {NoTime},    \* deadline -- armed as "lease"
-      retryAt   : Time \cup {NoTime},    \* deadline -- armed as "retry"
+      leaseTimeoutAt : Time \cup {NoTime},    \* deadline -- armed as "lease"
+      retryTimeoutAt   : Time \cup {NoTime},    \* deadline -- armed as "retry"
       resumes   : SUBSET Id ]            \* triggers buffered while not suspended
 
 Object ==
@@ -192,8 +192,8 @@ Entry ==
 Deadline(obj, kind) ==
     CASE kind = "promise" ->
              IF obj.promise.state = "pending" THEN obj.promise.timeoutAt ELSE NoTime
-      [] kind = "lease" -> obj.task.expiresAt
-      [] OTHER          -> obj.task.retryAt
+      [] kind = "lease" -> obj.task.leaseTimeoutAt
+      [] OTHER          -> obj.task.retryTimeoutAt
 
 -----------------------------------------------------------------------------
 

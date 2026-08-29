@@ -418,34 +418,34 @@ structure Hereditary (g : Q) (a : ServerState) : Prop where
   tFulfill     : ∀ (t : TaskObject), g.task t = true → g.task t.fulfill = true
   tBornPending : ∀ (due : Nat),
                    g.task { state := .pending, version := 0,
-                            retryAt := some due } = true
+                            retryTimeoutAt := some due } = true
   tBornDone    : g.task { state := .fulfilled, version := 0 } = true
   tBornHeld    : ∀ (pid : String) (ttl now : Nat),
                    g.task { state := .acquired, version := 1, ttl := some ttl,
-                            pid := some pid, expiresAt := some (now + ttl) } = true
+                            pid := some pid, leaseTimeoutAt := some (now + ttl) } = true
   tAcquire     : ∀ (t : TaskObject) (pid : String) (ttl now : Nat), g.task t = true →
-                   g.task { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, expiresAt := some (now + ttl), retryAt := none, resumes := [] } = true
+                   g.task { t with state := .acquired, version := t.version + 1, ttl := some ttl, pid := some pid, leaseTimeoutAt := some (now + ttl), retryTimeoutAt := none, resumes := [] } = true
   tHeartbeat   : ∀ (t : TaskObject) (x : Nat), (t.state == .acquired) = true →
-                   g.task t = true → g.task { t with expiresAt := some x } = true
+                   g.task t = true → g.task { t with leaseTimeoutAt := some x } = true
   tClearResumes : ∀ (t : TaskObject), g.task t = true →
                    g.task { t with resumes := [] } = true
   tSuspend     : ∀ (t : TaskObject), g.task t = true →
-                   g.task { t with state := .suspended, pid := none, ttl := none, expiresAt := none, retryAt := none, resumes := [] } = true
+                   g.task { t with state := .suspended, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := none, resumes := [] } = true
   tRepend      : ∀ (t : TaskObject) (n : Nat), g.task t = true →
-                   g.task { t with state := .pending, pid := none, ttl := none, expiresAt := none, retryAt := some n } = true
+                   g.task { t with state := .pending, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := some n } = true
   tHalt        : ∀ (t : TaskObject), g.task t = true →
-                   g.task { t with state := .halted, pid := none, ttl := none, expiresAt := none, retryAt := none } = true
+                   g.task { t with state := .halted, pid := none, ttl := none, leaseTimeoutAt := none, retryTimeoutAt := none } = true
   tContinue    : ∀ (t : TaskObject) (n : Nat), (t.state == .halted) = true →
                    g.task t = true →
-                   g.task { t with state := .pending, retryAt := some n } = true
+                   g.task { t with state := .pending, retryTimeoutAt := some n } = true
   tResume      : ∀ (t : TaskObject) (a : String) (n : Nat), t.state = .suspended →
                    g.task t = true →
-                   g.task { t with state := .pending, resumes := [a], retryAt := some n } = true
+                   g.task { t with state := .pending, resumes := [a], retryTimeoutAt := some n } = true
   tAddResume   : ∀ (t : TaskObject) (a : String), t.state ≠ .suspended →
                    t.state ≠ .fulfilled → (t.resumes.contains a) = false → g.task t = true →
                    g.task { t with resumes := t.resumes ++ [a] } = true
   tRearm       : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true →
-                   g.task t = true → g.task { t with retryAt := some n } = true
+                   g.task t = true → g.task { t with retryTimeoutAt := some n } = true
   -- schedules
   cBorn        : ∀ (id cron promiseId : String) (promiseTimeout : Nat)
                    (promiseParam : ServerModel.Value) (promiseTags : ServerModel.Tags)

@@ -68,7 +68,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 			TimeoutAt: req.TimeoutAt, CreatedAt: now, Param: req.Param}
 		s.SetPromise(req.ID, p)
 		if p.Tags.Has("resonate:target") {
-			// The delay tag seeds `retryAt`: the first dispatch is due at
+			// The delay tag seeds `retryTimeoutAt`: the first dispatch is due at
 			// the delay if it is still ahead, immediately otherwise.
 			due := now
 			if v, ok := p.Tags.Get("resonate:delay"); ok {
@@ -76,7 +76,7 @@ func (s *ServerState) PromiseCreate(d Discipline, req PromiseCreateReq, now uint
 					due = n
 				}
 			}
-			s.SetTask(req.ID, &Task{State: TaskPending, Version: 0, RetryAt: u64p(due)})
+			s.SetTask(req.ID, &Task{State: TaskPending, Version: 0, RetryTimeoutAt: u64p(due)})
 		}
 		return Response{Status: 200, Promise: p.Record(req.ID)}
 	}
@@ -165,8 +165,8 @@ func (s *ServerState) TaskAcquire(d Discipline, id string, version uint64, pid s
 	u.State = TaskAcquired
 	u.Version = t.Version + 1
 	u.TTL, u.PID = u64p(ttl), strp(pid)
-	u.ExpiresAt = u64p(now + ttl)
-	u.RetryAt, u.Resumes = nil, nil
+	u.LeaseTimeoutAt = u64p(now + ttl)
+	u.RetryTimeoutAt, u.Resumes = nil, nil
 	s.SetTask(o.ID, u)
 	// `taskAcquire` returns BOTH records in the Lean —
 	// `{ status, task := some (t.toRecord o.id), promise := some (p.toRecord o.id) }` —
@@ -221,7 +221,7 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 	}
 	u := t.clone()
 	u.State = TaskSuspended
-	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
+	u.PID, u.TTL, u.LeaseTimeoutAt, u.RetryTimeoutAt = nil, nil, nil, nil
 	u.Resumes = nil
 	s.SetTask(o.ID, u)
 	return Response{Status: 200}
@@ -260,8 +260,8 @@ func (s *ServerState) TaskRelease(d Discipline, id string, version uint64, now u
 	}
 	u := t.clone()
 	u.State = TaskPending
-	u.PID, u.TTL, u.ExpiresAt = nil, nil, nil
-	u.RetryAt = u64p(now)
+	u.PID, u.TTL, u.LeaseTimeoutAt = nil, nil, nil
+	u.RetryTimeoutAt = u64p(now)
 	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
@@ -282,7 +282,7 @@ type TaskRef struct {
 // An earlier version here swept every acquired task belonging to the pid
 // and ignored both the request's task list and the version. That is
 // invisible on the response channel, which always answers 200, but it
-// writes `expiresAt` on tasks the request never named — and `expiresAt`
+// writes `leaseTimeoutAt` on tasks the request never named — and `leaseTimeoutAt`
 // is what R5 `leaseExpiry` guards on. A checker built on it would accept
 // runs the specification forbids.
 func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
@@ -299,7 +299,7 @@ func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, no
 			if t.TTL != nil {
 				ttl = *t.TTL
 			}
-			u.ExpiresAt = u64p(now + ttl)
+			u.LeaseTimeoutAt = u64p(now + ttl)
 			s.SetTask(o.ID, u)
 		}
 	}
@@ -364,7 +364,7 @@ func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
 	}
 	u := t.clone()
 	u.State = TaskHalted
-	u.PID, u.TTL, u.ExpiresAt, u.RetryAt = nil, nil, nil, nil
+	u.PID, u.TTL, u.LeaseTimeoutAt, u.RetryTimeoutAt = nil, nil, nil, nil
 	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
@@ -383,7 +383,7 @@ func (s *ServerState) TaskContinue(d Discipline, id string, now uint64) Response
 	}
 	u := t.clone()
 	u.State = TaskPending
-	u.RetryAt = u64p(now)
+	u.RetryTimeoutAt = u64p(now)
 	s.SetTask(o.ID, u)
 	return Response{Status: 200}
 }
@@ -468,7 +468,7 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 				TimeoutAt: act.TimeoutAt, CreatedAt: now, Param: act.Param}
 			s.SetPromise(act.ID, np)
 			nt := &Task{State: TaskAcquired, Version: 1,
-				TTL: u64p(ttl), PID: strp(pid), ExpiresAt: u64p(now + ttl)}
+				TTL: u64p(ttl), PID: strp(pid), LeaseTimeoutAt: u64p(now + ttl)}
 			s.SetTask(act.ID, nt)
 			return Response{Status: 200, Task: nt.Record(act.ID), Promise: np.Record(act.ID)}
 		}
@@ -496,8 +496,8 @@ func (s *ServerState) TaskCreate(d Discipline, pid string, ttl uint64, act Promi
 		u.State = TaskAcquired
 		u.Version = t.Version + 1
 		u.TTL, u.PID = u64p(ttl), strp(pid)
-		u.ExpiresAt = u64p(now + ttl)
-		u.RetryAt, u.Resumes = nil, nil
+		u.LeaseTimeoutAt = u64p(now + ttl)
+		u.RetryTimeoutAt, u.Resumes = nil, nil
 		s.SetTask(o.ID, u)
 		return Response{Status: 200, Task: u.Record(o.ID), Promise: o.Promise.Record(o.ID)}
 	default:

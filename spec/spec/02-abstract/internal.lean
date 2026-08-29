@@ -41,7 +41,7 @@ def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
       match t.state with
       | .suspended =>
           setTask o.id { t with state := .pending, resumes := [awaited],
-                                retryAt := some now }
+                                retryTimeoutAt := some now }
       | .pending | .acquired | .halted =>
           if !(t.resumes.contains awaited) then
             setTask o.id { t with resumes := t.resumes ++ [awaited] }
@@ -66,13 +66,13 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
   match o.task with
   | none => pure ()
   | some t =>
-      match t.expiresAt with
+      match t.leaseTimeoutAt with
       | none => pure ()
       | some deadline =>
           if t.state == .acquired ∧ deadline ≤ now then
             if o.promise.state == .pending then
               setTask o.id { t with state := .pending, pid := none, ttl := none,
-                                    expiresAt := none, retryAt := some now }
+                                    leaseTimeoutAt := none, retryTimeoutAt := some now }
 
 /-- Redispatch a pending task whose dispatch clock is due.
 
@@ -104,13 +104,13 @@ def processRetryTimeout (id : String) (now : Nat) : H Unit := do
   match o.task with
   | none => pure ()
   | some t =>
-      match t.retryAt with
+      match t.retryTimeoutAt with
       | none => pure ()
       | some due =>
           if t.state == .pending ∧ due ≤ now then
             if o.promise.state == .pending then
               setTask o.id { t with
-                             retryAt := some (now + (← ask).config.retryTimeout) }
+                             retryTimeoutAt := some (now + (← ask).config.retryTimeout) }
               setMessage ((o.promise.tags.get? "resonate:target").getD "")
                 (.execute o.id t.version)
 

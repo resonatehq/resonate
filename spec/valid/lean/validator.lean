@@ -177,11 +177,11 @@ def enabledInternalSteps (s : ServerState) (now : Nat) : List InternalStep :=
          o.promise.callbacks.map (InternalStep.callback o.id) else [])
   -- r5: an acquired task whose lease has lapsed
   ++ (s.objects.filter (fun o =>
-        o.task.any fun t => t.state == .acquired && t.expiresAt.getD (now + 1) ≤ now)).map
+        o.task.any fun t => t.state == .acquired && t.leaseTimeoutAt.getD (now + 1) ≤ now)).map
        (fun o => .taskLeaseTimeout o.id)
   -- r6: a pending task whose dispatch clock is due
   ++ (s.objects.filter (fun o =>
-        o.task.any fun t => t.state == .pending && t.retryAt.getD (now + 1) ≤ now)).map
+        o.task.any fun t => t.state == .pending && t.retryTimeoutAt.getD (now + 1) ≤ now)).map
        (fun o => .taskRetryTimeout o.id)
   -- r7: a schedule due to fire
   ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout c.id)

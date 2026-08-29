@@ -34,12 +34,12 @@ func TestAffectsCoversObservableWrites(t *testing.T) {
 		{"taskLeaseTimeout: an acquired task past its lease", 300, &ServerState{
 			Objects: []*Object{
 				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskAcquired, Version: 1, TTL: u64p(100),
-					PID: strp("p0"), ExpiresAt: u64p(200)}},
+					PID: strp("p0"), LeaseTimeoutAt: u64p(200)}},
 			},
 		}},
 		{"taskRetryTimeout: a pending task past its retry deadline", 300, &ServerState{
 			Objects: []*Object{
-				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskPending, Version: 1, RetryAt: u64p(200)}},
+				{ID: "x", Promise: &Promise{State: Pending, Tags: tgt, TimeoutAt: 2000, CreatedAt: 100}, Task: &Task{State: TaskPending, Version: 1, RetryTimeoutAt: u64p(200)}},
 			},
 		}},
 	}

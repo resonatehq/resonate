@@ -114,18 +114,18 @@ well_formed_task_acquired_iff_has_ttl ==
 
 well_formed_task_acquired_iff_has_expires_at ==
     \A i \in DOMAIN objects :
-        (objects[i].task.state = "acquired") <=> (objects[i].task.expiresAt /= NoTime)
+        (objects[i].task.state = "acquired") <=> (objects[i].task.leaseTimeoutAt /= NoTime)
 
 well_formed_task_pending_iff_has_retry_at ==
     \A i \in DOMAIN objects :
-        (objects[i].task.state = "pending") <=> (objects[i].task.retryAt /= NoTime)
+        (objects[i].task.state = "pending") <=> (objects[i].task.retryTimeoutAt /= NoTime)
 
 well_formed_task_fulfilled_is_cleared ==
     \A i \in DOMAIN objects :
         LET t == objects[i].task IN
         t.state = "fulfilled" =>
             /\ t.pid = NoPid /\ t.ttl = NoTime
-            /\ t.expiresAt = NoTime /\ t.retryAt = NoTime
+            /\ t.leaseTimeoutAt = NoTime /\ t.retryTimeoutAt = NoTime
             /\ t.resumes = {}
 
 well_formed_task_suspended_is_cleared ==
@@ -133,14 +133,14 @@ well_formed_task_suspended_is_cleared ==
         LET t == objects[i].task IN
         t.state = "suspended" =>
             /\ t.pid = NoPid /\ t.ttl = NoTime
-            /\ t.expiresAt = NoTime /\ t.retryAt = NoTime
+            /\ t.leaseTimeoutAt = NoTime /\ t.retryTimeoutAt = NoTime
 
 well_formed_task_halted_is_cleared ==
     \A i \in DOMAIN objects :
         LET t == objects[i].task IN
         t.state = "halted" =>
             /\ t.pid = NoPid /\ t.ttl = NoTime
-            /\ t.expiresAt = NoTime /\ t.retryAt = NoTime
+            /\ t.leaseTimeoutAt = NoTime /\ t.retryTimeoutAt = NoTime
 
 well_formed_task_suspended_has_no_resumes ==
     \A i \in DOMAIN objects :
@@ -267,7 +267,7 @@ preserved_fulfilled_task ==
                /\ u.version = objects[i].task.version
                /\ u.resumes = {}
                /\ u.pid = NoPid /\ u.ttl = NoTime
-               /\ u.expiresAt = NoTime /\ u.retryAt = NoTime
+               /\ u.leaseTimeoutAt = NoTime /\ u.retryTimeoutAt = NoTime
 
 preserved_no_dead_dispatch ==
     \A i \in DOMAIN objects' :
@@ -500,15 +500,15 @@ consistent_task_birth_state ==
     \A i \in DOMAIN objects' :
         LET u == objects'[i].task IN
         u.state /= "none" /\ i \notin DOMAIN objects =>
-            \/ /\ u.state = "pending" /\ u.retryAt /= NoTime
+            \/ /\ u.state = "pending" /\ u.retryTimeoutAt /= NoTime
                /\ u.pid = NoPid /\ u.ttl = NoTime
-               /\ u.expiresAt = NoTime /\ u.resumes = {}
-            \/ /\ u.state = "fulfilled" /\ u.retryAt = NoTime
+               /\ u.leaseTimeoutAt = NoTime /\ u.resumes = {}
+            \/ /\ u.state = "fulfilled" /\ u.retryTimeoutAt = NoTime
                /\ u.pid = NoPid /\ u.ttl = NoTime
-               /\ u.expiresAt = NoTime /\ u.resumes = {}
-            \/ /\ u.state = "acquired" /\ 1 <= u.version /\ u.retryAt = NoTime
+               /\ u.leaseTimeoutAt = NoTime /\ u.resumes = {}
+            \/ /\ u.state = "acquired" /\ 1 <= u.version /\ u.retryTimeoutAt = NoTime
                /\ u.pid /= NoPid /\ u.ttl /= NoTime
-               /\ u.expiresAt /= NoTime /\ u.resumes = {}
+               /\ u.leaseTimeoutAt /= NoTime /\ u.resumes = {}
 
 consistent_task_lease_released_atomically ==
     \A i \in DOMAIN objects :
@@ -516,7 +516,7 @@ consistent_task_lease_released_atomically ==
             LET t == objects[i].task
                 u == objects'[i].task
             IN  ( t.state = "acquired" /\ u.state /= "acquired" =>
-                      /\ u.pid = NoPid /\ u.ttl = NoTime /\ u.expiresAt = NoTime
+                      /\ u.pid = NoPid /\ u.ttl = NoTime /\ u.leaseTimeoutAt = NoTime
                       /\ u.version = t.version )
 
 preserved_task_lease_holder_stable ==
@@ -533,11 +533,11 @@ consistent_task_lease_fields_move_together ==
         i \in DOMAIN objects' =>
             LET t == objects[i].task
                 u == objects'[i].task
-            IN  \/ u.pid = t.pid /\ u.ttl = t.ttl /\ u.expiresAt = t.expiresAt
+            IN  \/ u.pid = t.pid /\ u.ttl = t.ttl /\ u.leaseTimeoutAt = t.leaseTimeoutAt
                 \/ /\ t.state /= "acquired" /\ u.state = "acquired"
-                   /\ u.pid /= NoPid /\ u.ttl /= NoTime /\ u.expiresAt /= NoTime
+                   /\ u.pid /= NoPid /\ u.ttl /= NoTime /\ u.leaseTimeoutAt /= NoTime
                 \/ /\ t.state = "acquired" /\ u.state /= "acquired"
-                   /\ u.pid = NoPid /\ u.ttl = NoTime /\ u.expiresAt = NoTime
+                   /\ u.pid = NoPid /\ u.ttl = NoTime /\ u.leaseTimeoutAt = NoTime
                 \/ /\ t.state = "acquired" /\ u.state = "acquired"
                    /\ u.pid = t.pid /\ u.ttl = t.ttl
 
@@ -563,15 +563,15 @@ consistent_task_acquisition_is_atomic ==
                       /\ t.state = "pending"
                       /\ t.version < u.version
                       /\ u.pid /= NoPid /\ u.ttl /= NoTime
-                      /\ u.expiresAt = now + u.ttl
-                      /\ u.retryAt = NoTime /\ u.resumes = {}) 
+                      /\ u.leaseTimeoutAt = now + u.ttl
+                      /\ u.retryTimeoutAt = NoTime /\ u.resumes = {}) 
 
 consistent_task_lease_deadline_is_now_plus_ttl ==
     \A i \in DOMAIN objects' :
-        objects'[i].task.expiresAt /= NoTime =>
-            \/ objects'[i].task.expiresAt = now + objects'[i].task.ttl
+        objects'[i].task.leaseTimeoutAt /= NoTime =>
+            \/ objects'[i].task.leaseTimeoutAt = now + objects'[i].task.ttl
             \/ /\ i \in DOMAIN objects
-               /\ objects[i].task.expiresAt = objects'[i].task.expiresAt
+               /\ objects[i].task.leaseTimeoutAt = objects'[i].task.leaseTimeoutAt
                /\ objects[i].task.ttl = objects'[i].task.ttl
                /\ objects[i].task.state = objects'[i].task.state
 
@@ -580,15 +580,15 @@ consistent_task_pending_entry_arms_retry ==
         i \in DOMAIN objects' =>
             ( /\ objects[i].task.state /= "pending"
               /\ objects'[i].task.state = "pending"
-              => objects'[i].task.retryAt = now )
+              => objects'[i].task.retryTimeoutAt = now )
 
 consistent_task_retry_rearm_only_when_due ==
     \A i \in DOMAIN objects :
         i \in DOMAIN objects' =>
             ( /\ objects[i].task.state = "pending"
               /\ objects'[i].task.state = "pending"
-              /\ objects'[i].task.retryAt /= objects[i].task.retryAt
-              => objects[i].task.retryAt <= now )
+              /\ objects'[i].task.retryTimeoutAt /= objects[i].task.retryTimeoutAt
+              => objects[i].task.retryTimeoutAt <= now )
 
 consistent_task_wake_records_resume ==
     \A i \in DOMAIN objects :
@@ -596,7 +596,7 @@ consistent_task_wake_records_resume ==
             ( /\ objects[i].task.state = "suspended"
               /\ objects'[i].task.state = "pending"
               => /\ objects'[i].task.resumes /= {}
-                 /\ objects'[i].task.retryAt = now
+                 /\ objects'[i].task.retryTimeoutAt = now
                  /\ objects'[i].task.version = objects[i].task.version )
 
 consistent_promise_settlement_stamp ==
@@ -642,7 +642,7 @@ monotone_task_retry_rearm_advances ==
     \A i \in DOMAIN objects :
         objects[i].task.state = "pending" /\ i \in DOMAIN objects' =>
             \/ objects'[i].task.state /= "pending"
-            \/ objects'[i].task.retryAt = objects[i].task.retryAt
-            \/ now < objects'[i].task.retryAt
+            \/ objects'[i].task.retryTimeoutAt = objects[i].task.retryTimeoutAt
+            \/ now < objects'[i].task.retryTimeoutAt
 
 ===============================================================================
