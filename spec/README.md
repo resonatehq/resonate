@@ -54,10 +54,6 @@ entries, 31 are proved outright — true at every instant of every run, no
 bound and no sample. The remaining 63, and the theorem that collects them
 (`valid_implies_legal`), are stated and open.
 
-[`spec/implementation-questions.md`](spec/implementation-questions.md) is the
-companion for implementers: every question an implementation has to answer,
-paired with the property that fires when it is answered wrongly.
-
 ## Build
 
 ```

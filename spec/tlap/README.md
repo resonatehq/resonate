@@ -483,9 +483,8 @@ promiseRegisterCallback(awaited |-> o1/a, awaiter |-> o2/a)
 That is a gap rather than a choice, and it prices more than a status code: an
 await spanning origins is a write whose two ends can be in different
 partitions, which is the difference between an implementation that may shard
-and one that may not. `implementation-questions.md` P1 treats the unit of
-serialisation as open and notes that per-tree keeps "most" operations local;
-this door is what would make it all of them.
+and one that may not. The unit of serialisation is open: per-tree keeps
+"most" operations local; this door is what would make it all of them.
 
 Added here to both machines — `promiseRegisterCallback` and `taskSuspend`,
 which registers the same kind of waiter on every promise in its action list.
