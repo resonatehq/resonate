@@ -26,13 +26,20 @@ def Tags.isTimer (t : Tags) : Bool :=
     decision's tag is where implementations go wrong, so the decision is
     named and the tags are not consulted anywhere else.
 
-    `otype` answers WHO MAY BE BLOCKED ON THIS, and by how much:
+    `otype` answers WHO MAY BE BLOCKED ON THIS, what runs it, and
+    whether its deadline is armed — one judgment, three consequences:
 
-      `internal`  nobody outside its own call graph; nothing runs it
+      `internal`  nobody outside its own call graph; nothing runs it;
+                  NO ARMED TIMEOUT — its deadline is a projection every
+                  read applies, never a write the machine owes
       `external`  anyone may await it; nothing runs it — a person, a
-                  webhook or the clock settles it
+                  webhook or the clock settles it; ARMED TIMEOUT
       `runnable`  anyone may await it, AND a worker is handed the
-                  execution
+                  execution; ARMED TIMEOUT
+
+    The arming follows from the first column rather than sitting beside
+    it: a deadline is owed as a write exactly where someone can be
+    waiting to observe it, which is why `internal` costs no timer.
 
     It was two axes for a while — `otype` crossed with an `okind` of
     task or idle — and the pair carried a proof that `internal + task`
