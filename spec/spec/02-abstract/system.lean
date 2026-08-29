@@ -1,73 +1,8 @@
 import «02-abstract».«internal»
 
-/-!  # The system
-
-What the machine IS, as opposed to what it does. Four things, and the
-order is the order you need them in:
-
-  1. **The alphabet** — the 21 requests a client can send, the
-     responses they get back, and `Step`, the steps a run is a
-     sequence of.
-  2. **The driver** — `handle`, which takes a step to the transition it
-     denotes, and `stepOf`, which runs that transition against a state.
-  3. **The trace** — `StateAction`, one tick's whole situation, and
-     `Trace`, a function from ticks to those.
-  4. **Validity** — which traces are runs OF THIS MACHINE, as opposed
-     to arbitrary sequences of states.
-
-Nothing else in the repository defines the system. The properties
-(`properties.lean`) say what must be true of it; the harnesses in
-`04-theorems` evaluate them; the liveness file quantifies over its
-traces. All of them presuppose this file.
-
-It lives HERE rather than in `04-theorems` because it is part of the
-specification, not a theorem about it. `Valid` is what a run of this
-machine is; a trace checker asking whether a real server's behaviour is
-accounted for is asking about THIS definition, and should not have to
-reach into the theorems layer to find it. `lake build spec` covers it
-for the same reason: change a handler and the dispatcher is rechecked
-in the fast loop.
-
-`Legal` is the other side of that line and stays in `04-theorems`. It
-folds the catalogue, so it depends on `properties.lean` — and what must
-be TRUE of a run is a different kind of statement from what a run IS.
-
-These definitions were spread across `trace.lean`, `alpha.lean` and
-`refinement.lean`, which existed to RELATE two machines. That the
-system's own definition lived inside a refinement was an accident of
-where the driver happened to sit — nothing in `StateAction`, `Trace`
-or validity mentions a second machine. With one machine the relating
-is gone and the system statement is what remains, so it gets a file
-named for what it is.
-
-Two changes came with the move, and both are subtractions.
-
-`Request` carries only the 21 requests a client can send. It used to
-carry five internal-step constructors and an `idle` as well — the
-promise timeout, the task retry and lease timeouts, the schedule, and
-the resume — because the concrete driver dispatched everything through
-one type. `Step` already names the internal steps as its own
-constructors, so those five were a second, redundant spelling of them.
-`Request` is now exactly the external surface, which makes
-`Step.isExternal` decidable by shape rather than by asking the request.
-
-`Step.taskRetryTimeout` no longer carries a next-fire instant. It used to read
-`r6 (id : String) (next : Nat)`, and that `next` was the only value in
-the whole alphabet that the environment wrote into the store rather
-than a name of something to act on. `processRetryTimeout` now computes
-its own next instant from `Env.config.retryTimeout` — the server's
-dial, read from the environment — so the parameter has no reader. Every constructor below names an object and nothing else. -/
-
 namespace Equivalence
 
 open ServerModel
-
-/-! ## Structural equality on the wire types
-
-`01-protocol/types.lean` derives `Repr` but not `BEq`: the protocol
-does not need to compare two responses, only to produce them. Comparing
-is what a HARNESS does, so the instances are declared here rather than
-there. Salvaged from `trace.lean`, minus the concrete ones. -/
 
 deriving instance BEq for ServerModel.Value
 deriving instance BEq for ServerModel.PromiseRecord
@@ -124,14 +59,6 @@ inductive Request
   | taskSearch              (req : TaskSearchReq)
   deriving Repr
 
-/-- Nobody outside is listening to an internal step, and a stutter step
-    does nothing at all, so both answer `silent` — the absence of a
-    client-visible response.
-
-    That it is one constructor rather than two is a limitation, not a
-    design: a declined internal step and a stutter step are currently
-    indistinguishable through this channel. Naming the outcomes of the
-    internal steps is the change that would separate them. -/
 inductive Response
   | promiseGet              (res : PromiseGetRes)
   | promiseCreate           (res : PromiseCreateRes)
@@ -164,18 +91,6 @@ namespace Abstraction
 open Equivalence
 open ServerModel (Ident)
 
-/-- One step of a run. `api` is a client request; the six named for what
-    they do are the steps the server takes on its own initiative; `idle`
-    is the clock moving with nothing else happening.
-
-    They used to be `r1`–`r7`, with a hole at `r2` — that one was
-    `taskFulfillment` and was deleted, and the gap was kept so that `r5`
-    would go on meaning the lease timeout wherever it was named. Names
-    hold that position without needing a hole to do it, and they say at
-    the use site which step is meant. The checker had already reached
-    the same conclusion: `InternalStep` in `valid/lean/validator.lean`
-    has carried exactly these names all along, and `InternalStep.toStep`
-    existed to translate between the two vocabularies. -/
 inductive Step
   | api              (rq : Request)
   | promiseTimeout   (id : Ident)
@@ -187,49 +102,21 @@ inductive Step
   | idle
   deriving Repr
 
-/-- Client-visible steps. Now decidable by shape: with the internal-step
-    constructors gone from `Request`, every `api` step is external. -/
 def Step.isExternal : Step → Bool
   | .api _ => true
   | _      => false
 
-/-- The steps the server takes on its own initiative. `idle` is neither:
-    it is the clock moving with nothing happening, which is why this is
-    not simply the negation of `isExternal`. -/
 def Step.isInternal : Step → Bool
   | .promiseTimeout _   => true | .listener _ _       => true
   | .callback _ _       => true | .taskLeaseTimeout _ => true
   | .taskRetryTimeout _ => true | .scheduleTimeout _  => true
   | _                   => false
 
-/-! `PromiseObject` is compared by `promiseEq` below rather than
-structurally, because two of its fields are ledgers. `TaskObject` has no
-such field, so it compares structurally. -/
-
 deriving instance BEq for AbstractModel.TaskObject
-
-/-! And structural equality on the whole store, for consumers that
-CANONICALISE first — sort every keyed list, then compare. `stateEq`
-below is the order-insensitive relation; this is the cheap one you may
-use once order has been normalised away. The trace checker in `valid/`
-does exactly that, and caches the canonical form because recomputing it
-inside a pairwise comparison made dedup quadratic twice over. -/
 
 deriving instance BEq for AbstractModel.PromiseObject
 deriving instance BEq for AbstractModel.Object
 deriving instance BEq for AbstractModel.ServerState
-
-/-! ## The driver
-
-What a step DENOTES. `handle` takes an `Step` to a transition in the
-machine's monad; `stepOf` runs that transition against a state and
-hands back the response and the state it leaves.
-
-`mat` appears only in `stepOf`, never in `handle`. That is the single
-machine paying off: the read discipline is not a different dispatcher,
-it is an argument to `run`. There used to be `handleA` and `handleAP`,
-two 30-case dispatch tables that differed in which namespace they
-named. -/
 
 def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   match st with
@@ -266,9 +153,6 @@ def stepOf (mat : Bool) (st : Step) (now : Nat) (s : AbstractModel.ServerState) 
     Response × AbstractModel.ServerState :=
   AbstractModel.run mat (handle st now) s
 
-/-- Run a whole script, keeping the responses and the state it ends in.
-    The finite counterpart of `Valid`: where `Valid` says which infinite
-    traces are runs, this computes the one run a script denotes. -/
 def runFin (mat : Bool) :
     List (Step × Nat) → AbstractModel.ServerState →
     List Response × AbstractModel.ServerState
@@ -278,28 +162,6 @@ def runFin (mat : Bool) :
       let (rs, s'') := runFin mat w s'
       (r :: rs, s'')
 
-/-! ## What a run is
-
-A trace is a function from ticks to state-action blocks. Each block
-records the whole situation at one tick: the state the machine was in,
-the step taken, the response it gave, and what the clock read.
-
-`now` lives HERE, in the trace element, and not in `ServerState`. That
-is deliberate and it is the answer to an obvious question — the clock
-is not part of the store, because a server does not own the time; it
-reads it. Two machines at the same state and different instants are at
-the same state.
-
-Validity is stated with the driver, in the file that defines the
-handler, since it needs to say what a step produces. It has three
-conjuncts: the response is the one the step gives, the next state is
-the one the step leaves, and the clock does not run backwards. Note
-what that third one is — a HYPOTHESIS on traces, not a checkable
-property. No walk over states can catch a clock that regresses,
-because a walk only ever sees the instants it is handed. An
-implementation that lets its clock go backwards is outside what any
-property in `02-abstract/properties.lean` can refuse. -/
-
 structure StateAction where
   state : AbstractModel.ServerState
   req   : Step
@@ -307,23 +169,6 @@ structure StateAction where
   now   : Nat
 
 abbrev Trace := Nat → StateAction
-
-
-/-! ## Validity
-
-Which traces are runs of this machine. Three conjuncts: the response is
-the one the step gives, the next state is the one the step leaves, and
-the clock does not run backwards.
-
-The third is a HYPOTHESIS, not a property, and the distinction matters.
-It restricts which traces we are talking about; it is not something an
-implementation can be caught violating, because every walk only sees
-the instants it is handed. A server whose clock regresses is outside
-what anything in `02-abstract/properties.lean` can refuse — and that is
-a real limit on what conformance to this catalogue buys you.
-
-`mat` is a parameter here too, so there is ONE notion of validity with
-a bit in it rather than two notions to keep in step. -/
 
 def Valid (mat : Bool) (tr : Trace) : Prop :=
   ∀ t : Nat,
