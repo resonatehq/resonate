@@ -21,6 +21,20 @@
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 
+/// What to say when the stored schema no longer matches the file.
+///
+/// Pre-release, the initial schema is edited in place rather than followed by
+/// a `0002` — so a database created before an edit holds version 1 under the
+/// old checksum, and no migration exists that would carry it forward. There is
+/// nothing to apply and nothing to reconcile: the database has to go.
+pub fn stale_schema(detail: &str) -> String {
+    format!(
+        "{detail}\n\nThe initial schema is edited in place until release, so \
+         there is no migration from the shape this database already has. Drop \
+         it and let the server create it again."
+    )
+}
+
 /// Apply a [`sqlx::migrate::Migrator`] through a rusqlite connection.
 ///
 /// Mirrors what sqlx's own migrator does: create the bookkeeping table, read
@@ -76,11 +90,10 @@ pub fn run_rusqlite(
             // under a database that already has the old version — which no
             // amount of re-running can reconcile, so it is fatal.
             if checksum != *migration.checksum {
-                return Err(MigrateError(format!(
-                    "migration {version} ({}) was applied with a different checksum — \
-                     the file has changed since it ran",
+                return Err(MigrateError(stale_schema(&format!(
+                    "migration {version} ({}) was applied with a different checksum",
                     migration.description
-                )));
+                ))));
             }
             continue;
         }

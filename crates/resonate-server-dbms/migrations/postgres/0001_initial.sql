@@ -18,6 +18,19 @@
 -- nothing to drain.
 --
 -- =============================================================================
+--
+-- Edited in place, not followed by a 0002.
+--
+-- Until release there is no database anyone needs carried forward, so a schema
+-- change goes into THIS file and the migration set stays at one. Nothing
+-- accumulates, and the schema reads as the shape it is rather than as a shape
+-- plus a history of amendments.
+--
+-- The cost is that a database created before an edit holds version 1 under the
+-- old checksum. The migrator refuses it rather than guessing: drop the
+-- database and let the server create it again. After release this reverses —
+-- 0001 freezes and changes become 0002 onward.
+--
 
 CREATE SCHEMA IF NOT EXISTS resonate;
 SET search_path TO resonate, public;

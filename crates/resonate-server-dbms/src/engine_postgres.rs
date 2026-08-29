@@ -166,10 +166,15 @@ impl PostgresEngine {
             .unwrap_or(0);
         crate::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
             .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
-        migrator
-            .run(&self.pool)
-            .await
-            .map_err(|e| sqlx::Error::Migrate(Box::new(e)))
+        migrator.run(&self.pool).await.map_err(|e| match e {
+            // The initial schema was edited after this database was created.
+            sqlx::migrate::MigrateError::VersionMismatch(v) => sqlx::Error::Configuration(
+                Box::new(crate::migrate::MigrateError(crate::migrate::stale_schema(
+                    &format!("migration {v} was applied with a different checksum"),
+                ))),
+            ),
+            other => sqlx::Error::Migrate(Box::new(other)),
+        })
     }
 
     /// Run one transition, and hand back what it emitted along with its result.
