@@ -60,7 +60,7 @@ pub struct PostgresEngine {
     debug: bool,
 }
 
-pub const CREATE_SCHEMA_SQL: &str = include_str!("../sql/single-table.sql");
+pub const CREATE_SCHEMA_SQL: &str = include_str!("../sql/schema-v0.sql");
 
 /// The promise columns every read projects. `param_headers`/`value_headers` are
 /// `NOT NULL DEFAULT '{}'` here (the catalogue's
@@ -3540,7 +3540,7 @@ impl PostgresDb<'_> {
         } = *params;
         debug_assert_eq!(
             task_id, promise_id,
-            "single-table task.fulfill assumes the task and its promise are one row"
+            "task.fulfill assumes the task and its promise are one row"
         );
 
         // Statement 1: lock preamble.

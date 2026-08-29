@@ -1,6 +1,10 @@
 -- =============================================================================
--- Single-table Postgres schema
+-- Postgres schema, v0
 -- =============================================================================
+-- Constraints included: they are statements in this file, not a catalogue
+-- applied beside it, so a database carrying these tables carries these
+-- invariants.
+--
 -- One promise is one row. Beside it sits only `schedules` — a separate id space
 -- and a genuinely different entity.
 --
@@ -13,8 +17,6 @@
 -- emitted it and delivered by the caller, so there is nothing to store and
 -- nothing to drain.
 --
--- Column names and the schema name are chosen so that
--- `single-table-constraints.sql` applies to this schema unchanged.
 -- =============================================================================
 
 CREATE SCHEMA IF NOT EXISTS resonate;
@@ -135,7 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_promises_task
   ON promises (task_state, id) WHERE task_state IS NOT NULL;
 
 -- Fan-out in the other direction: "which rows list me as an awaiter", the
--- single-table stand-in for `DELETE FROM callbacks WHERE awaiter_id = $1`.
+-- One-row stand-in for `DELETE FROM callbacks WHERE awaiter_id = $1`.
 CREATE INDEX IF NOT EXISTS idx_promises_callbacks
   ON promises USING GIN (callbacks);
 
@@ -203,8 +205,8 @@ SET search_path TO resonate, public;
 -- NULLs of the rows that are not. It backed the outbox foreign key, which
 -- needed a TOTAL key to reference where "the promises that are tasks" is a
 -- partial set; the outbox is gone and the uniqueness entry remains.
--- task_key is declared as a generated column in single-table.sql; kept here as
--- a comment so this file stays a faithful copy of the generated catalogue.
+-- task_key is declared as a generated column above; kept here as a comment so
+-- the constraint section stays a faithful copy of the generated catalogue.
 -- ALTER TABLE promises ADD COLUMN IF NOT EXISTS task_key TEXT
 --   GENERATED ALWAYS AS (CASE WHEN tags ? 'resonate:target' THEN id END) STORED;
 
