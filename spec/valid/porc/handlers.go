@@ -102,7 +102,7 @@ func (s *ServerState) PromiseRegisterCallback(d Discipline, awaited, awaiter str
 	if !ow.Promise.Tags.Has("resonate:target") {
 		return Response{Status: 422}
 	}
-	if !oa.Promise.External() {
+	if !oa.Promise.Awaitable() {
 		return Response{Status: 422}
 	}
 	if oa.Promise.State == Pending && ow.Promise.State == Pending {
@@ -162,7 +162,7 @@ func (s *ServerState) TaskSuspend(d Discipline, id string, version uint64, await
 	anySettled := false
 	for _, a := range awaited {
 		oa := s.readObject(d, a, now)
-		if oa == nil || !oa.Promise.External() {
+		if oa == nil || !oa.Promise.Awaitable() {
 			return Response{Status: 422}
 		}
 		if oa.Promise.State != Pending {
@@ -276,7 +276,7 @@ func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address str
 	if oa == nil {
 		return Response{Status: 404}
 	}
-	if !oa.Promise.External() {
+	if !oa.Promise.Awaitable() {
 		return Response{Status: 422}
 	}
 	if oa.Promise.State == Pending {

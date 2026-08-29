@@ -39,7 +39,7 @@ which is the only shape `PerStore` can reach.
 
 What it does NOT delete is the catalogue's right to name the shape.
 `consistent_task_iff_kind_task` survives, because the OTHER half
-of it — an `okind = .task` promise must HAVE a task — is still a claim
+of it — an `otype = .runnable` promise must HAVE a task — is still a claim
 an implementation with two tables can get wrong. The type stops the
 machine from writing the illegal row; the entry stops a server from
 being believed when it does.
@@ -69,7 +69,7 @@ namespace AbstractModel
 
 open ServerModel (Ident Tags Value PromiseState TaskState PromiseRecord
                   TaskRecord Schedule Message OutboxEntry OutboxKey
-                  PromiseCreateReq OType OKind)
+                  PromiseCreateReq OType)
 
 structure PromiseObject where
   state     : PromiseState
@@ -102,7 +102,6 @@ def PromiseObject.isTimer (p : PromiseObject) : Bool := p.tags.isTimer
     than a plausible line of code. -/
 def PromiseObject.otype (p : PromiseObject) : OType := p.tags.otype
 
-def PromiseObject.okind (p : PromiseObject) : OKind := p.tags.okind
 
 def PromiseObject.addCallback (p : PromiseObject) (awaiterId : Ident) : PromiseObject :=
   if p.callbacks.contains awaiterId then
@@ -148,7 +147,7 @@ def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
 
 /-- A promise, its id, and the task that executes it — if it has one.
 
-    The `Option` is not free information: it is `promise.okind`, and
+    The `Option` is not free information: it is `promise.otype`, and
     `consistent_task_iff_kind_task` is the entry that says so.
     Keeping it an `Option` rather than an index on the tag is
     deliberate — the tag arrives from a client, and the catalogue has
@@ -305,7 +304,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
       { state := .pending, param := req.param, tags := req.tags,
         timeoutAt := req.timeoutAt, createdAt := now }
     setPromise req.id p
-    if p.okind == .task then
+    if p.otype == .runnable then
       let due :=
         match p.tags.get? "resonate:delay" with
         | some d => max (ServerModel.parseNat d) now
@@ -323,7 +322,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
         timeoutAt := req.timeoutAt, createdAt := req.timeoutAt,
         settledAt := some req.timeoutAt }
     setPromise req.id p
-    if p.okind == .task then
+    if p.otype == .runnable then
       let t : TaskObject := { state := .fulfilled, version := 0 }
       setTask req.id t
       return { id := req.id, promise := p, task := some t }

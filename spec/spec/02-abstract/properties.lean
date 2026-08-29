@@ -259,7 +259,7 @@ def well_formed_promise_listeners_unique (_now : Nat) (s : ServerState) : Bool :
 
 def well_formed_promise_obligations_require_external (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
-    (p.callbacks.isEmpty && p.listeners.isEmpty) || p.otype == .external
+    (p.callbacks.isEmpty && p.listeners.isEmpty) || p.otype.awaitable
 
 def well_formed_promise_awaiter_is_not_self (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
@@ -375,7 +375,7 @@ def well_formed_store_outbox_keys_unique (_now : Nat) (s : ServerState) : Bool :
 
 def consistent_task_iff_kind_task (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
-    o.task.isSome == (o.promise.okind == .task)
+    o.task.isSome == (o.promise.otype == .runnable)
 
 def consistent_settled_promise_has_fulfilled_task (_now : Nat) (s : ServerState) : Bool :=
   s.objects.all fun o =>
@@ -384,7 +384,7 @@ def consistent_settled_promise_has_fulfilled_task (_now : Nat) (s : ServerState)
 def consistent_callback_awaiter_is_targeted (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     p.callbacks.all fun a =>
-      s.objects.any (fun q => q.id == a && q.promise.okind == .task)
+      s.objects.any (fun q => q.id == a && q.promise.otype == .runnable)
 
 def consistent_listener_addresses_deliverable (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p => p.listeners.all addressValid
@@ -791,7 +791,7 @@ def consistent_task_birth_couples_promise_birth (_now : Nat) (a b : ServerState)
      a.hasTask o.id
        || ((!a.objects.any (·.id == o.id))
             && (let q := o.promise
-                q.okind == .task
+                q.otype == .runnable
                   && (if u.state == .fulfilled then q.state != .pending
                       else q.state == .pending))
             && ((u.state == .pending && u.version == 0)
@@ -799,7 +799,7 @@ def consistent_task_birth_couples_promise_birth (_now : Nat) (a b : ServerState)
                 || (u.state == .fulfilled && u.version == 0))))
   && (b.objects.all fun o =>
         a.objects.any (·.id == o.id)
-          || o.promise.okind != .task
+          || o.promise.otype != .runnable
           || o.task.isSome)
 
 /-! ## Stage 3 — the outbox -/

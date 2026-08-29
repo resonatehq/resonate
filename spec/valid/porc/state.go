@@ -88,11 +88,29 @@ func (p *Promise) clone() *Promise {
 
 func (p *Promise) IsTimer() bool { return p.Tags.IsTimer() }
 
-func (p *Promise) External() bool {
+type OType int
 
-	return p.Tags["resonate:scope"] == "global" ||
-		p.Tags["resonate:external"] == "true" || p.Tags.Has("resonate:target") || p.IsTimer()
+const (
+	Internal OType = iota
+	External
+	Runnable
+)
+
+func (t OType) Awaitable() bool { return t != Internal }
+
+func (t Tags) OType() OType {
+	if t.Has("resonate:target") {
+		return Runnable
+	}
+	if t["resonate:scope"] == "global" || t["resonate:external"] == "true" || t.IsTimer() {
+		return External
+	}
+	return Internal
 }
+
+func (p *Promise) OType() OType { return p.Tags.OType() }
+
+func (p *Promise) Awaitable() bool { return p.OType().Awaitable() }
 
 func (p *Promise) AddCallback(awaiter string) *Promise {
 	if contains(p.Callbacks, awaiter) {

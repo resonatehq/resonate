@@ -19,25 +19,32 @@ def Tags.has (t : Tags) (k : String) : Bool :=
 def Tags.isTimer (t : Tags) : Bool :=
   t.get? "resonate:timer" == some "true"
 
-/-! ### The two axes a promise is classified on
+/-! ### The one axis a promise is classified on
 
     Three tags — `resonate:external`, `resonate:target`, `resonate:timer`
-    — but only two decisions are ever taken from them, and reading one
-    decision off the other's tag is where implementations go wrong.
+    — and ONE decision taken from them. Reading a decision off another
+    decision's tag is where implementations go wrong, so the decision is
+    named and the tags are not consulted anywhere else.
 
-    `otype` answers WHO MAY BE BLOCKED ON THIS. An external promise is
-    one a client can await: it may carry callbacks and listeners, and
-    the machine therefore owes it an observation of its own deadline.
-    `okind` answers WHAT CAUSES IT TO RUN — a `.task` promise names a
-    worker that must be handed the execution.
+    `otype` answers WHO MAY BE BLOCKED ON THIS, and by how much:
 
-    The axes are NOT independent, and the dead cell is stated rather
-    than left for a reader to find: `okind_task_implies_external` below.
-    `resonate:target` is a disjunct of `otype`, so `internal + task` is
-    unrepresentable. Both stay DERIVED — read off the tags, never
-    stored, never settable apart — which is what keeps that implication
-    true by construction rather than by an invariant somebody has to
-    enforce at every write.
+      `internal`  nobody outside its own call graph; nothing runs it
+      `external`  anyone may await it; nothing runs it — a person, a
+                  webhook or the clock settles it
+      `runnable`  anyone may await it, AND a worker is handed the
+                  execution
+
+    It was two axes for a while — `otype` crossed with an `okind` of
+    task or idle — and the pair carried a proof that `internal + task`
+    is unrepresentable, because `resonate:target` was a disjunct of
+    both. Three values say that instead of proving it: the chain is
+    the type, and the dead cell has nowhere to be written. Awaitability
+    is `otype.awaitable`, which is every value but `internal`.
+
+    It stays DERIVED — read off the tags, never stored, never settable
+    apart — which is what keeps the classification a function of the
+    request rather than an invariant somebody has to enforce at every
+    write.
 
     What is deliberately NOT an axis here is the deadline verdict. A
     timer resolves at its deadline; everything else is rejected there.
@@ -47,14 +54,16 @@ def Tags.isTimer (t : Tags) : Bool :=
     it is an axis after all — until then it is one expression in one
     role, and wrapping it would be symmetry for its own sake. -/
 inductive OType
-  | external
   | internal
+  | external
+  | runnable
   deriving Repr, DecidableEq
 
-inductive OKind
-  | task
-  | idle
-  deriving Repr, DecidableEq
+/-- Awaitable: every value but `internal`. The one place the question is
+    answered, so no site re-derives it by listing constructors. -/
+def OType.awaitable : OType → Bool
+  | .internal => false
+  | _         => true
 
 /-- Awaitable. The disjunction is the definition, and this is the only
     place it may be written: no site re-derives it inline.
@@ -74,28 +83,27 @@ inductive OKind
     for a client to say "awaitable" for a kind nobody has enumerated.
     It appears nowhere in observed server traffic. -/
 def Tags.otype (t : Tags) : OType :=
-  if t.get? "resonate:scope" == some "global"
+  if t.has "resonate:target" then
+    .runnable
+  else if t.get? "resonate:scope" == some "global"
       || t.get? "resonate:external" == some "true"
-      || t.has "resonate:target" || t.isTimer then
+      || t.isTimer then
     .external
   else
     .internal
 
-/-- Executed by a worker — which is exactly what carries a task. -/
-def Tags.okind (t : Tags) : OKind :=
-  if t.has "resonate:target" then .task else .idle
-
-/-- THE DEAD CELL, stated. Because `target` is a disjunct of `otype`, a
-    promise that carries a task is external by construction, and the
-    2x2 is really a chain: internal, external-idle, external-task. A
-    `match` on the pair that writes an arm for `internal + task` is
-    writing for a state no tag list can produce. -/
-theorem okind_task_implies_external (t : Tags) :
-    t.okind = .task → t.otype = .external := by
-  intro h
+/-- A worker is handed the execution exactly when a target names one. -/
+theorem otype_runnable_iff_targeted (t : Tags) :
+    t.otype = .runnable ↔ t.has "resonate:target" = true := by
   cases ht : t.has "resonate:target" with
   | true  => simp [Tags.otype, ht]
-  | false => simp [Tags.okind, ht] at h
+  | false => simp [Tags.otype, ht]; split <;> simp
+
+/-- Anything a target names is awaitable, which used to need a proof
+    about two axes and is now a case split on one. -/
+theorem targeted_implies_awaitable (t : Tags) :
+    t.has "resonate:target" = true → t.otype.awaitable = true := by
+  intro h; simp [Tags.otype, h, OType.awaitable]
 
 /-- A TIMER IS NEVER TARGETED. The two tags name incompatible things:
     `resonate:target` says a worker owns this promise's execution, and

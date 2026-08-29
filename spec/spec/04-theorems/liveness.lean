@@ -68,7 +68,7 @@ def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
   | .promiseTimeout id =>
       match promiseAt s id with
-      | some p => p.otype == .external && p.state == .pending && p.timeoutAt ≤ now
+      | some p => p.otype.awaitable && p.state == .pending && p.timeoutAt ≤ now
       | none   => false
   | .listener id addr =>
       match promiseAt s id with
@@ -146,7 +146,7 @@ hear about it. -/
 def EventuallyEveryExternalPromiseSettles : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →
     ∀ (t : Nat) (id : ServerModel.Ident),
-      (∀ p, promiseAt (tr t).state id = some p → p.otype = .external) →
+      (∀ p, promiseAt (tr t).state id = some p → p.otype.awaitable = true) →
       (promiseAt (tr t).state id).isSome →
       ∃ u : Nat, t ≤ u ∧
         ∀ p, promiseAt (tr u).state id = some p → p.state ≠ .pending
@@ -187,8 +187,8 @@ implication rather than as an axiom of its own — carrying it separately
 would be exactly the redundancy the catalogue refuses.
 
 The `otype` guard on the settlement step does not weaken this: a task's
-promise has `okind = .task`, and `okind_task_implies_external` says such
-a promise is external, so the step it depends on is still owed. -/
+promise is `runnable`, and every value but `internal` is awaitable, so
+the step it depends on is still owed. -/
 
 def EventuallyEveryTaskFulfils : Prop :=
   ∀ tr : Trace, Valid true tr → ClockAdvances tr → WeaklyFairOn tr isSettlementStep →

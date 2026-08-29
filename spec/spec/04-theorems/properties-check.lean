@@ -302,15 +302,17 @@ theorem reaches_timer_promise :
     witnesses battery (fun s => s.promises.any (·.isTimer)) = true := by decide
 
 theorem reaches_internal_promise :
-    witnesses battery (fun s => s.promises.any (fun p => p.otype != .external)) = true := by decide
+    witnesses battery (fun s => s.promises.any (fun p => p.otype == .internal)) = true := by decide
 
 /-- The cell the old two-tag reading could not name: external and idle
     — awaitable, with nothing executing it. That is `sleep` and it is
-    `human`, and before the axes existed the only way to describe it
-    was "not targeted", which is also true of every internal promise. -/
+    `human`, and before the axis existed the only way to describe it
+    was "not targeted", which is also true of every internal promise.
+    One value says it now: `external` is awaitable and unexecuted, with
+    `runnable` the one that carries a worker. -/
 theorem reaches_idle_external_promise :
     witnesses battery
-      (fun s => s.promises.any (fun p => p.otype == .external && p.okind == .idle)) = true := by
+      (fun s => s.promises.any (fun p => p.otype == .external)) = true := by
   decide
 
 theorem reaches_callbacks :
