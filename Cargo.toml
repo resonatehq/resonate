@@ -41,16 +41,23 @@ path = "src/main.rs"
 [[test]]
 name = "differential"
 path = "diff/differential.rs"
+# It compares the engines against each other, so it needs all of them; with any
+# turned off cargo skips the target rather than failing to build it.
+required-features = ["sqlite", "postgres", "mysql"]
 
 [features]
-# Forwarded: the cfg'd code lives in resonate-server-dbms.
+# All forwarded: the cfg'd code lives in resonate-server-dbms.
+default = ["sqlite", "postgres", "mysql"]
+sqlite = ["resonate-server-dbms/sqlite"]
+postgres = ["resonate-server-dbms/postgres"]
+mysql = ["resonate-server-dbms/mysql"]
 concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 
 [dependencies]
 resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
-resonate-server-dbms = { path = "crates/resonate-server-dbms" }
+resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }

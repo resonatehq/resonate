@@ -6,6 +6,15 @@ license.workspace = true
 description = "Resonate server storage over a relational database: the Db contract and its SQLite, PostgreSQL and MySQL implementations."
 
 [features]
+# All three engines by default, because the differential compares them against
+# each other and against the oracle. A deployment that runs one of them can
+# turn the other two off and stop compiling their drivers: `sqlx-postgres`
+# alone is a substantial build a SQLite-only server never executes.
+default = ["sqlite", "postgres", "mysql"]
+sqlite = ["dep:rusqlite"]
+postgres = ["sqlx/postgres"]
+mysql = ["sqlx/mysql"]
+
 # Extra interleaving assertions in the transaction paths, for stress runs.
 concurrency-stress = []
 
@@ -17,5 +26,7 @@ serde_json = { workspace = true }
 validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tracing = "0.1"
-rusqlite = { version = "0.31", features = ["bundled"] }
-sqlx = { version = "0.8", features = ["postgres", "mysql", "runtime-tokio-rustls", "macros", "migrate"] }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+# Not optional even with every engine off: `migrate` carries the `Migrator`
+# type, which the SQLite path also uses — see `crate::migrate`.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }

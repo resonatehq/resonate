@@ -18,6 +18,7 @@
 //! Every path returns an error rather than continuing: a server whose schema
 //! did not migrate must not start.
 
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 
 /// Apply a [`sqlx::migrate::Migrator`] through a rusqlite connection.
@@ -25,6 +26,7 @@ use rusqlite::{params, Connection};
 /// Mirrors what sqlx's own migrator does: create the bookkeeping table, read
 /// which versions are applied, verify the checksum of each one that is, and
 /// apply the rest in order inside a transaction.
+#[cfg(feature = "sqlite")]
 pub fn run_rusqlite(
     conn: &mut Connection,
     migrator: &sqlx::migrate::Migrator,
@@ -101,6 +103,7 @@ impl std::fmt::Display for MigrateError {
 
 impl std::error::Error for MigrateError {}
 
+#[cfg(feature = "sqlite")]
 impl From<MigrateError> for rusqlite::Error {
     fn from(e: MigrateError) -> Self {
         // SqliteFailure carries the message through verbatim. The named

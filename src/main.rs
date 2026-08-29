@@ -12,12 +12,25 @@ use std::sync::Arc;
 use axum::{routing::get, Router};
 use clap::{Parser, Subcommand};
 use config::Config;
+// A server with no storage engine cannot serve, and the alternative is a
+// `match` whose only arm returns an error — which compiles, but reports itself
+// as an unreachable statement and an unused binding rather than as the
+// configuration mistake it is. The library has no such requirement: with every
+// engine off it still carries the oracle.
+#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+compile_error!(
+    "at least one storage engine must be enabled: --features sqlite, postgres, or mysql"
+);
+
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
-use resonate_server_dbms::{
-    engine_mysql::MysqlEngine, engine_port::ResonateEngine, engine_postgres::PostgresEngine,
-    engine_sqlite::SqliteEngine,
-};
+#[cfg(feature = "mysql")]
+use resonate_server_dbms::engine_mysql::MysqlEngine;
+use resonate_server_dbms::engine_port::ResonateEngine;
+#[cfg(feature = "postgres")]
+use resonate_server_dbms::engine_postgres::PostgresEngine;
+#[cfg(feature = "sqlite")]
+use resonate_server_dbms::engine_sqlite::SqliteEngine;
 use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
@@ -163,6 +176,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     // Backend selection. Each is a complete engine, not a storage handle
     // behind a shared one.
     let engine: Arc<dyn ResonateEngine> = match config.storage.storage_type.as_str() {
+        #[cfg(feature = "postgres")]
         "postgres" => {
             let url = config.storage.postgres.url.as_ref().unwrap();
             let pool_size = config.storage.postgres.pool_size;
@@ -178,6 +192,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             tracing::info!("PostgreSQL initialized");
             Arc::new(pg)
         }
+        #[cfg(feature = "mysql")]
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();
             let pool_size = config.storage.mysql.pool_size;
@@ -191,6 +206,7 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
             Arc::new(mysql)
         }
+        #[cfg(feature = "sqlite")]
         _ => {
             let path = &config.storage.sqlite.path;
             tracing::info!(path = %path, "Using SQLite backend");
@@ -198,6 +214,14 @@ async fn run_server(config: Config) -> Result<(), String> {
                 .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
             Arc::new(sqlite)
+        }
+        // Without SQLite there is no catch-all engine, so an unrecognised or
+        // uncompiled backend has to be refused rather than fallen back on.
+        #[cfg(not(feature = "sqlite"))]
+        other => {
+            return Err(format!(
+                "storage backend '{other}' is not compiled into this build"
+            ))
         }
     };
 

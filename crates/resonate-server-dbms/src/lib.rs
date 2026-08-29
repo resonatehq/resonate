@@ -13,9 +13,12 @@
 //! What is left here is what all three genuinely share: the error type, the
 //! parameter structs an operation passes down, and the record types.
 
+#[cfg(feature = "mysql")]
 pub mod engine_mysql;
 pub mod engine_port;
+#[cfg(feature = "postgres")]
 pub mod engine_postgres;
+#[cfg(feature = "sqlite")]
 pub mod engine_sqlite;
 pub mod migrate;
 pub mod oracle;
@@ -47,6 +50,7 @@ impl std::fmt::Display for StorageError {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl From<rusqlite::Error> for StorageError {
     fn from(e: rusqlite::Error) -> Self {
         StorageError::Backend(e.to_string())
