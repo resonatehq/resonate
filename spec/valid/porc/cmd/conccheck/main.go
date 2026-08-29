@@ -1,31 +1,3 @@
-// Command conccheck checks a CONCURRENT history recorded from a real
-// server, against porcupine (which searches for an order) and reports how
-// that compares with the Lean checker's answer on one fixed order.
-//
-//	go run ./cmd/conccheck < run.history
-//	../.lake/build/bin/checktrace < run.ndjson
-//
-// ## The question the two tools answer is not the same
-//
-// The Lean checker's `Valid` is a property of a SEQUENCE of observations:
-// does some schedule of internal steps explain THIS ORDER. A concurrent
-// run has no canonical order — `loadgen` hands it return order, which is
-// a legal linearization candidate but only one of many.
-//
-// Porcupine takes the call/return intervals and searches every order
-// consistent with them. So on a concurrent history:
-//
-//	porcupine LINEARIZABLE + Lean REFUTED   ⇒ the server is fine and the
-//	                                          harness guessed the wrong
-//	                                          order — the interesting case,
-//	                                          and the reason a
-//	                                          linearizability checker earns
-//	                                          its name
-//	porcupine NOT LINEARIZABLE              ⇒ NO order works. That is a
-//	                                          claim about the server.
-//
-// Reporting them as if they were the same check would be a category
-// error, so this prints both and says which is which.
 package main
 
 import (
@@ -70,9 +42,6 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Re-use the NDJSON decoder so the request/response mapping is shared
-	// with lincheck rather than reimplemented — a second decoder is a
-	// second place for the two tools to disagree for uninteresting reasons.
 	ops, resps, err := model.LoadTrace(ndjsonOf(rows))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "conccheck: decode:", err)
@@ -131,7 +100,6 @@ func main() {
 			fmt.Printf("%s TIMEOUT after %v\n", label, el)
 		}
 
-		// And the sequential question, on the order the harness recorded.
 		_, at, ok := model.ReplayPartitioned(d, ops, resps)
 		if ok {
 			fmt.Printf("                   recorded order alone also explains it\n")

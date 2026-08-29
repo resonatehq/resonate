@@ -7,55 +7,20 @@ import (
 	"strings"
 )
 
-// Trace generation, for differential fuzzing.
-//
-// The three recorded captures exercise a narrow slice: 7 handler kinds,
-// status 200 only, and exactly ONE of the six internal steps. Everything else in
-// this package is untested by them. So: generate traces that reach the
-// rest, and require the Lean checker in `valid/` to agree on every one.
-//
-// ## Why generated traces are valid by construction
-//
-// A script is a list of (external request | internal internal step, instant). Run
-// it through the model, keep only the external steps, and the result is a
-// trace SOME execution explains — namely the script. So a checker that
-// refutes it is wrong, and no oracle is needed to know the right answer.
-// That is the same trick `recordFrom` plays in valid/lean/validator.lean.
-//
-// Mutants give the other direction. Corrupt one recorded response and
-// both checkers should refute; if they disagree about WHETHER, one of
-// them is wrong.
-//
-// ## What is deliberately NOT generated
-//
-// Schedules — `occurrences` is opaque, so neither checker judges them.
-// Values and params are always `{}`: the models do not track payloads, so
-// generating them would produce differences neither checker can see.
-
-// Gen builds one random script over a single origin.
-//
-// One origin per trace keeps every awaits-edge inside it, which is what
-// `CheckPartitionable` requires; the fuzzer emits many traces rather than
-// one wide one.
 type Gen struct {
 	r      *rand.Rand
 	origin string
 	now    uint64
 	script []step
-	// Jumpy allows large clock jumps. They are what make R1/R5
-	// reachable — but a jump longer than the retry cadence lets an internal step arm a
-	// deadline mid-gap, which the Lean checker declines to reason about
-	// (`noNewInGapDeadline`). So jumpy corpora reach more code and compare
-	// less: about 60% of them come back DECLINE, and a decline agrees with
-	// anything. Both settings are worth running, for opposite reasons.
+
 	Jumpy bool
 }
 
 type step struct {
-	op       *Op    // external, or nil for an internal step
-	internal string // internal-step name when op == nil
-	arg      string // internal-step target
-	arg2     string // internal step's second parameter (awaiter / listener address)
+	op       *Op
+	internal string
+	arg      string
+	arg2     string
 	now      uint64
 }
 
@@ -65,19 +30,16 @@ func NewGen(seed int64, origin string) *Gen {
 
 func (g *Gen) id(suffix string) string { return g.origin + "." + suffix }
 
-// tick advances the clock. Sometimes by a lot, so deadlines are crossed
-// and R1/R5 become enabled — a generator that never lets time pass
-// cannot reach the timeout internal steps at all.
 func (g *Gen) tick() uint64 {
 	switch g.r.Intn(10) {
 	case 0:
 		if g.Jumpy {
-			g.now += uint64(g.r.Intn(40000)) // jump past deadlines
+			g.now += uint64(g.r.Intn(40000))
 		} else {
 			g.now += uint64(g.r.Intn(400))
 		}
 	case 1:
-		// no advance: two events at the same instant
+
 	default:
 		g.now += uint64(1 + g.r.Intn(50))
 	}
@@ -85,20 +47,8 @@ func (g *Gen) tick() uint64 {
 }
 
 var settleStates = []PromiseState{Resolved, Rejected, RejectedCanceled,
-	Pending /* 400: not settable */, RejectedTimedout /* 400: server-owned */}
+	Pending, RejectedTimedout}
 
-// Script generates `n` steps: a BACKBONE of well-formed workflows with
-// random noise and internal-step firings interleaved.
-//
-// Purely random requests do not work. The first version of this was
-// uniform over the alphabet and produced 50 x 404 and zero state-changing
-// internal-step firings in five traces — nothing existed for an internal step to act on, so
-// the corpus could not reach the code it was written to test. Structure
-// first, perturbation on top.
-//
-// The noise still carries the error paths the captures never reach:
-// wrong versions (409), missing ids (404), unsettable states and
-// duplicate awaited lists (400), internal awaited promises (422).
 func (g *Gen) Script(n int) []step {
 	ext := Tags{"resonate:external": "true", "resonate:origin": g.origin}
 	tgt := Tags{"resonate:target": "poll://any@w1", "resonate:origin": g.origin}
@@ -108,17 +58,13 @@ func (g *Gen) Script(n int) []step {
 	var ids []string
 	wf := 0
 
-	// refill lays down one complete workflow: two promises, acquire,
-	// suspend, settle, re-acquire, fulfil, reads. Deadlines are drawn so
-	// that some workflows outlive the trace and others expire inside it —
-	// the second kind is what makes R1 and R5 reachable.
 	refill := func(now uint64) {
 		a := fmt.Sprintf("%s.a%d", g.origin, wf)
 		x := fmt.Sprintf("%s.x%d", g.origin, wf)
 		wf++
 		ids = append(ids, a, x)
 		long := now + 30000
-		short := now + uint64(50+g.r.Intn(400)) // expires mid-trace
+		short := now + uint64(50+g.r.Intn(400))
 		aTo, xTo := long, long
 		switch g.r.Intn(4) {
 		case 0:
@@ -130,15 +76,11 @@ func (g *Gen) Script(n int) []step {
 		}
 		aTags := ext
 		if g.r.Intn(5) == 0 {
-			aTags = timer // resolves rather than times out
+			aTags = timer
 		}
-		ttl := uint64(100 + g.r.Intn(600)) // short leases make R5 reachable
+		ttl := uint64(100 + g.r.Intn(600))
 		plan = append(plan,
-			// task.create is how the SDK starts every root workflow, and
-			// task.fence how it does every fenced create/settle. Both were
-			// absent from this corpus while they were absent from the
-			// checkers; generating them is what keeps the fuzzer honest
-			// about the traffic that actually exists.
+
 			Op{Kind: "task.create", ID: x, PID: "p0", TTL: 500,
 				Action: &FenceAction{Kind: "promise.create", ID: x, TimeoutAt: now + 30000, Tags: tgt}},
 			Op{Kind: "task.fence", ID: x, Version: 1,
@@ -166,7 +108,7 @@ func (g *Gen) Script(n int) []step {
 			return g.id("nope")
 		}
 		if g.r.Intn(8) == 0 {
-			return g.id("nope") // a 404
+			return g.id("nope")
 		}
 		return ids[g.r.Intn(len(ids))]
 	}
@@ -181,7 +123,7 @@ func (g *Gen) Script(n int) []step {
 			g.script = append(g.script, g.randomInternalStep(ids, now))
 			continue
 		case g.r.Intn(5) == 0:
-			// noise: a deliberately ill-formed or ill-timed request
+
 			g.script = append(g.script, step{op: g.noise(pick(), now), now: now})
 			continue
 		}
@@ -196,51 +138,40 @@ func (g *Gen) Script(n int) []step {
 	return g.script
 }
 
-// noise is one request drawn to land somewhere the structured plan does
-// not go: an error path, or a branch that is legal but rare.
-//
-// The last three cases exist because the plan cannot reach them. The
-// structured workflow never pairs `resonate:timer` with
-// `resonate:target` — the combination is malformed, so nothing that
-// models real traffic would emit it — and never creates a timer whose
-// deadline has already passed, because its deadlines are drawn ahead of
-// the clock. Both are branches of the machine, so the fuzzer has to
-// reach them deliberately or not at all.
 func (g *Gen) noise(id string, now uint64) *Op {
 	timerTgt := Tags{"resonate:timer": "true", "resonate:target": "poll://any@w1",
 		"resonate:origin": g.origin}
 	var op Op
 	switch g.r.Intn(13) {
 	case 0:
-		op = Op{Kind: "promise.settle", ID: id, State: Pending} // 400: not settable
+		op = Op{Kind: "promise.settle", ID: id, State: Pending}
 	case 1:
-		op = Op{Kind: "promise.settle", ID: id, State: RejectedTimedout} // 400: server-owned
+		op = Op{Kind: "promise.settle", ID: id, State: RejectedTimedout}
 	case 2:
 		op = Op{Kind: "task.acquire", ID: id, Version: uint64(g.r.Intn(4)), PID: "px", TTL: 200}
 	case 3:
-		op = Op{Kind: "task.suspend", ID: id, Version: uint64(g.r.Intn(3)), Awaited: []string{id}} // 400: self
+		op = Op{Kind: "task.suspend", ID: id, Version: uint64(g.r.Intn(3)), Awaited: []string{id}}
 	case 4:
-		op = Op{Kind: "task.suspend", ID: id, Version: 1, Awaited: []string{}} // 400: empty
+		op = Op{Kind: "task.suspend", ID: id, Version: 1, Awaited: []string{}}
 	case 5:
 		op = Op{Kind: "task.fulfill", ID: id, Version: uint64(g.r.Intn(4)), State: Resolved}
 	case 6:
 		op = Op{Kind: "task.release", ID: id, Version: uint64(g.r.Intn(4))}
 	case 7:
-		op = Op{Kind: "promise.register_listener", ID: id, PID: "nonsense"} // 400: bad address
+		op = Op{Kind: "promise.register_listener", ID: id, PID: "nonsense"}
 	case 8:
 		op = Op{Kind: "task.halt", ID: id}
 	case 9:
-		// 400: a timer is never targeted
+
 		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tt%d", g.origin, now), TimeoutAt: now + 1000, Tags: timerTgt}
 	case 10:
-		// the same internal step at the other door
+
 		tid := fmt.Sprintf("%s.tx%d", g.origin, now)
 		op = Op{Kind: "task.create", ID: tid, PID: "p0", TTL: 500,
 			Action: &FenceAction{Kind: "promise.create", ID: tid,
 				TimeoutAt: now + 1000, Tags: timerTgt}}
 	case 11:
-		// fact P at birth, timer verdict: born `resolved`, not
-		// `rejectedTimedout`, and untargeted so it carries no task
+
 		op = Op{Kind: "promise.create", ID: fmt.Sprintf("%s.tm%d", g.origin, now),
 			TimeoutAt: now - uint64(1+g.r.Intn(50)),
 			Tags: Tags{"resonate:timer": "true", "resonate:external": "true",
@@ -272,22 +203,11 @@ func (g *Gen) randomInternalStep(ids []string, now uint64) step {
 	}
 }
 
-// Run executes a script and returns the external events only — the internal steps are
-// discarded, which is the point: the checkers must rediscover a schedule
-// that explains what is left.
-//
-// `fired` counts internal-step firings that actually changed the state, so the
-// fuzzer can report whether a corpus reached the internal steps at all rather than
-// merely mentioning them.
-// Snapshot is a state a replay passed through, with the instant it was at.
 type Snapshot struct {
 	S   *ServerState
 	Now uint64
 }
 
-// States replays a script and returns the state BEFORE each step, so a
-// property about enabled firings can be checked at every state the run
-// actually reached rather than only at hand-built fixtures.
 func States(d Discipline, script []step) []Snapshot {
 	s := &ServerState{}
 	out := make([]Snapshot, 0, len(script))
@@ -346,26 +266,16 @@ func Run(d Discipline, script []step) (ops []Op, resps []Response, fired map[str
 	return ops, resps, fired
 }
 
-// ---------------------------------------------------------------- emitting
-
 var promiseWire = map[PromiseState]string{
 	Pending: "pending", Resolved: "resolved", Rejected: "rejected",
 	RejectedCanceled: "rejected_canceled", RejectedTimedout: "rejected_timedout",
 }
 
-// The Lean decoder's task names, from valid/lean/json.lean's `taskState`.
 var taskWire = map[TaskState]string{
 	TaskPending: "pending", TaskAcquired: "acquired", TaskSuspended: "suspended",
 	TaskHalted: "halted", TaskFulfilled: "fulfilled",
 }
 
-// Emit writes the trace as NDJSON in resonate's wire envelope — the same
-// trace shape (`valid/README.md`), so the Lean checker reads it unmodified.
-//
-// Records are emitted in FULL, because `valid/lean/json.lean` decodes full
-// `PromiseRecord`/`TaskRecord` values and compares them. Emitting only a
-// status and a state would make the Lean side compare less than it can,
-// and a differential test that hides differences is worse than none.
 func Emit(ops []Op, resps []Response) string {
 	var b strings.Builder
 	for i, o := range ops {
@@ -432,8 +342,6 @@ func emitReq(o Op) string {
 	return "{" + strings.Join(f, ",") + "}"
 }
 
-// rawOr preserves a payload verbatim, or emits `{}` when the trace was
-// generated rather than recorded.
 func rawOr(r json.RawMessage) string {
 	if len(r) == 0 {
 		return "{}"

@@ -1,24 +1,3 @@
-// Command fuzz is a differential fuzzer between the two trace checkers in
-// this repository: the Lean one in `valid/` (concrete machine, hand-rolled
-// subset construction) and the Go one here (abstract machine, porcupine's
-// power-set construction).
-//
-//	go run ./cmd/fuzz -n 500
-//
-// Nothing is shared between them but the specification and the file
-// format, so a disagreement means one of them is wrong — and prints the
-// trace that proves it.
-//
-// Two properties are checked per generated trace:
-//
-//	VALID    a trace produced by running a script is explainable by
-//	         construction (the script IS the execution), so BOTH checkers
-//	         must accept it.
-//	MUTANT   corrupt one response and both must refute. Agreement on
-//	         WHETHER is what matters; they need not agree on where.
-//
-// The second is what stops a vacuous pass: two checkers that accept
-// everything would sail through the first property forever.
 package main
 
 import (
@@ -71,8 +50,7 @@ func main() {
 		leanBin = "../.lake/build/bin/checktrace"
 	}
 	if *goonly {
-		// A decline agrees with anything and is counted as vacuous, which is
-		// exactly the honest accounting for a checker that never ran.
+
 		leanCheck = func(string, string, int, int) verdict { return decline }
 	} else if _, err := os.Stat(leanBin); err != nil {
 		fmt.Fprintf(os.Stderr, "fuzz: Lean checker not found at %s\n", leanBin)
@@ -94,12 +72,11 @@ func main() {
 		goCount   = map[verdict]int{}
 		mLean     = map[verdict]int{}
 		mGo       = map[verdict]int{}
-		// pending-op properties (Go checker only — the Lean checker does not
-		// know pending ops, by design)
+
 		pendWeaken int
 		pendMask   int
 		pendFail   int
-		// cone-vs-full-closure agreement
+
 		coneChecked int
 		coneFail    int
 		affChecked  int
@@ -127,11 +104,6 @@ func main() {
 			statuses[r.Status]++
 		}
 
-		// property -1 — the tag rules, on the traffic that reaches them.
-		// A timer is never targeted, so both creation doors refuse the
-		// combination; and a timer born past its own deadline takes fact
-		// P's TIMER verdict, `resolved` rather than `rejectedTimedout`,
-		// with no task since it is untargeted.
 		if *tagCheck {
 			for k, o := range ops {
 				r := resps[k]
@@ -150,13 +122,7 @@ func main() {
 					}
 				case o.Kind == "promise.create" && r.Promise != nil &&
 					r.Promise.Tags.IsTimer() && r.Promise.TimeoutAt <= o.Now:
-					// Stated over the RECORD RETURNED, not over the request:
-					// `promise.create` is idempotent, so a create naming an
-					// existing id answers with the stored record rather than
-					// the one asked for. Either way fact P holds of what came
-					// back — a timer past its deadline reads `resolved`,
-					// whether it was just born there or projected on the way
-					// out.
+
 					tagBornDead++
 					if r.Status != 200 || r.Promise.State != model.Resolved {
 						tagFail++
@@ -167,13 +133,6 @@ func main() {
 			}
 		}
 
-		// property 0 — the cone's own obligation, both halves: at every
-		// state the generated run passes through, nothing an enabled firing
-		// can REACH a response-visible write to is missing from its
-		// `affects`. Reaching covers arming: R1 writes only its promise but
-		// reaches the awaiter it wakes by enabling R4. Checked on the -m
-		// replay, the discipline that materialises and so reaches the most
-		// internal step-enabling states.
 		if *affCheck {
 			for _, st := range model.States(model.Materialized, script) {
 				affChecked++
@@ -189,7 +148,6 @@ func main() {
 			}
 		}
 
-		// property 1 — a recorded run is explainable by construction
 		nd := emit(ops, resps)
 		gv := goVerdict(ops, resps)
 		lv := leanCheck(leanBin, nd, *cap_, *fuel)
@@ -201,7 +159,6 @@ func main() {
 			report(*keep, seed, "VALID", nd, gv, lv, ops, resps)
 		}
 
-		// property 2 — a corrupted run must be refused by both
 		if mops, mresps, ok := mutate(seed, ops, resps); ok {
 			mutants++
 			mnd := emit(mops, mresps)
@@ -220,10 +177,7 @@ func main() {
 				affChecked, affFail)
 		}
 		if *coneCheck {
-			// property 5 — the cone is an OPTIMIZATION, not a semantics:
-			// reduced and full closure must reach the same verdict on the
-			// valid trace and on its mutant alike. (gv/mg above were computed
-			// under the default, cone on.)
+
 			coneChecked++
 			if full := verdictWithCone(false, ops, resps); full != gv {
 				coneFail++
@@ -241,11 +195,7 @@ func main() {
 		}
 
 		if *pend {
-			// property 3 — pendingization is EVIDENCE-WEAKENING. Replacing
-			// any response with a 500 turns the op pending; the "applied,
-			// response unobserved" branch subsumes the original evidence, so
-			// a valid trace must stay accepted. A refutation here is a bug
-			// in the pending semantics, never in the trace.
+
 			wresps := pendingize(resps, pickIdxs(seed, len(resps), 1+int(seed%3))...)
 			pendWeaken++
 			if v := goVerdict(ops, wresps); v != accept {
@@ -254,10 +204,6 @@ func main() {
 				report(*keep, seed, "PENDING-WEAKEN", emit(ops, wresps), v, decline, ops, wresps)
 			}
 
-			// property 4 — pendingizing the CORRUPTED response discards the
-			// corruption: the mutation lived entirely in the response channel
-			// the 500 replaces, so the refuted mutant must flip back to
-			// accepted.
 			if mops, mresps, ok := mutate(seed, ops, resps); ok {
 				at := int(seed) % len(mresps)
 				mresps = pendingize(mresps, at)
@@ -310,19 +256,6 @@ func main() {
 	fmt.Println("\n  no disagreements")
 }
 
-// runCorpus applies the differential check to RECORDED traces.
-//
-// Generated traces exercise what the generator thought to write. A capture
-// exercises what the SDK and server actually do — which is how `task.fence`
-// turned out to be 60% of a real trace and absent from both checkers. So
-// the same two properties are run over real traffic:
-//
-//	the trace as recorded    both checkers must agree (and a real capture
-//	                         from a conforming server should be ACCEPTed)
-//	one response corrupted   both must agree, and should REFUTE
-//
-// Every event is mutated in turn rather than one per file, because a
-// capture is a single sample and one mutation would test one handler.
 func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep string) int {
 	disagree := 0
 	for _, path := range paths {
@@ -354,10 +287,6 @@ func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep strin
 			filepath.Base(path), len(ops), gv, lv, base)
 		fmt.Printf("  kinds: %s\n", sortedCounts(kinds))
 
-		// Every event mutated in turn, or a spread sample. Each mutant
-		// costs a Lean subprocess (~2s), so exhausting a 2200-event capture
-		// is an hour; `-mutants 0` does it anyway when that is what you
-		// want.
 		stride := 1
 		if maxMut > 0 && len(resps) > maxMut {
 			stride = (len(resps) + maxMut - 1) / maxMut
@@ -397,8 +326,6 @@ func runCorpus(paths []string, leanBin string, cap, fuel, maxMut int, keep strin
 	return 0
 }
 
-// mutateAt corrupts event i, preferring the record channel over the status
-// channel because records are where the two checkers could differ subtly.
 func mutateAt(i int, ops []model.Op, resps []model.Response) ([]model.Op, []model.Response) {
 	out := append([]model.Response(nil), resps...)
 	r := out[i]
@@ -429,8 +356,6 @@ func mutateAt(i int, ops []model.Op, resps []model.Response) ([]model.Op, []mode
 	return ops, out
 }
 
-// agree treats DECLINE as agreeing with anything: a checker that declined
-// made no claim, so there is nothing to contradict.
 func agree(a, b verdict) bool {
 	if a == broken || b == broken {
 		return false
@@ -441,19 +366,6 @@ func agree(a, b verdict) bool {
 	return a == b
 }
 
-// goVerdict replays the trace against the Go model.
-//
-// Partitioned WHEN THAT IS SOUND, and only then: `CheckPartitionable`
-// scans for any event linking two `resonate:origin`s — a suspend, a
-// callback or a fence reaching across — and the split is used only if it
-// finds none. A recorded run from work/go is a dozen independent
-// workflows interleaved across four clients, and replaying it as one
-// state makes the candidate set the PRODUCT of the per-workflow sets: the
-// first corpus run over four such captures reached 8.7 GB and had still
-// not finished a single file.
-//
-// The verdict is the same either way. That is the point of verifying the
-// split rather than assuming it.
 func goVerdict(ops []model.Op, resps []model.Response) verdict {
 	replay := model.Replay
 	if err := model.CheckPartitionable(ops); err == nil {
@@ -465,8 +377,6 @@ func goVerdict(ops []model.Op, resps []model.Response) verdict {
 	return refute
 }
 
-// leanCheck is the Lean half, replaceable so -goonly can stub it out with
-// a permanent DECLINE instead of threading a flag through every call site.
 var leanCheck = leanVerdict
 
 func leanVerdict(bin, ndjson string, cap, fuel int) verdict {
@@ -490,9 +400,6 @@ func leanVerdict(bin, ndjson string, cap, fuel int) verdict {
 
 func emit(ops []model.Op, resps []model.Response) string { return model.Emit(ops, resps) }
 
-// verdictWithCone runs goVerdict under an explicit cone setting, restoring
-// the default after. The fuzzer is sequential, so flipping the package
-// toggle is race-free.
 func verdictWithCone(cone bool, ops []model.Op, resps []model.Response) verdict {
 	prev := model.Cone
 	model.Cone = cone
@@ -500,10 +407,6 @@ func verdictWithCone(cone bool, ops []model.Op, resps []model.Response) verdict 
 	return goVerdict(ops, resps)
 }
 
-// mutate corrupts exactly one response. Status flips are the coarsest
-// channel and the easiest for both checkers to catch; record flips are
-// the interesting ones, since they test that both compare the records
-// rather than just the code.
 func mutate(seed int64, ops []model.Op, resps []model.Response) ([]model.Op, []model.Response, bool) {
 	out := append([]model.Response(nil), resps...)
 	i := int(seed) % len(out)
@@ -530,9 +433,6 @@ func mutate(seed int64, ops []model.Op, resps []model.Response) ([]model.Op, []m
 	return ops, out, true
 }
 
-// pendingize replaces the responses at the given indices with a bare 500 —
-// the pending op. The op's identity (kind, request, instant) is untouched;
-// only its evidence is discarded.
 func pendingize(resps []model.Response, idxs ...int) []model.Response {
 	out := append([]model.Response(nil), resps...)
 	for _, i := range idxs {
@@ -541,8 +441,6 @@ func pendingize(resps []model.Response, idxs ...int) []model.Response {
 	return out
 }
 
-// pickIdxs derives k distinct indices from the seed — deterministic, so a
-// failure reproduces from its seed alone.
 func pickIdxs(seed int64, n, k int) []int {
 	if k > n {
 		k = n

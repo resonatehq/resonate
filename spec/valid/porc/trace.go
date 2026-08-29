@@ -8,13 +8,6 @@ import (
 	"strings"
 )
 
-// Loading a recorded run.
-//
-// The format is resonate's own wire envelope, one event per line, exactly
-// as a capture proxy tees it (`valid/README.md` states the format) —
-// not a shape invented here. The same files feed the Lean checker, which
-// is the point: two independent implementations, one input.
-
 type wireEvent struct {
 	Kind string          `json:"kind"`
 	Now  uint64          `json:"now"`
@@ -54,10 +47,6 @@ var promiseStates = map[string]PromiseState{
 	"rejected_canceled": RejectedCanceled, "rejected_timedout": RejectedTimedout,
 }
 
-// resonate's wire names for task states. The model's own names differ
-// (`init` is `TaskPending` here, matching the Lean's `.pending`), which is
-// exactly the sort of mismatch that silently passes if you never look — so
-// the mapping is explicit and an unknown name is an error, not a zero.
 var taskStates = map[string]TaskState{
 	"init": TaskPending, "pending": TaskPending,
 	"claimed": TaskAcquired, "acquired": TaskAcquired,
@@ -65,7 +54,6 @@ var taskStates = map[string]TaskState{
 	"completed": TaskFulfilled, "fulfilled": TaskFulfilled,
 }
 
-// LoadTrace reads NDJSON into ops and the responses that were observed.
 func LoadTrace(r io.Reader) ([]Op, []Response, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<24)
@@ -173,22 +161,17 @@ func decodeReq(e wireEvent) (Op, error) {
 			op.Refs = append(op.Refs, TaskRef{ID: t.ID, Version: t.Version})
 		}
 	case "task.create":
-		// Same `{kind, head, data}` envelope as task.fence and task.suspend
-		// carry, so the shared `Action` struct decodes it directly.
+
 		op.Action = &FenceAction{Kind: "promise.create", ID: r.Action.Data.ID,
 			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags),
 			Param: r.Action.Data.Param}
-		// task.create carries no top-level `id`; the object it creates is
-		// the action's. Without this `op.ID` stays empty, `originOf("")`
-		// puts every creation in its own partition, and the promise is
-		// invisible to the partition that then reads it.
+
 		op.ID = r.Action.Data.ID
 		if op.Action.Tags == nil {
 			op.Action.Tags = Tags{}
 		}
 	case "task.fence":
-		// The action envelope is `{kind, head, data}`, like task.suspend's
-		// and task.fulfill's. `State` is only meaningful for a settle.
+
 		fa := &FenceAction{Kind: r.Action.Kind, ID: r.Action.Data.ID,
 			TimeoutAt: r.Action.Data.TimeoutAt, Tags: Tags(r.Action.Data.Tags),
 			Param: r.Action.Data.Param, Value: r.Action.Data.Value}
@@ -204,35 +187,19 @@ func decodeReq(e wireEvent) (Op, error) {
 			}
 			fa.State = st
 		default:
-			// `TaskFenceAction` is a two-constructor inductive: there is no
-			// third action. valid/lean/json.lean throws here, so this must too —
-			// otherwise a corrupt file is a decode error to one checker and
-			// a 400 to the other, and they "disagree" over nothing.
+
 			return op, fmt.Errorf("task.fence: unsupported action kind %q", r.Action.Kind)
 		}
 		op.Action = fa
 	case "promise.register_listener":
-		// The request field is `awaited`, not `id`, and the address is in
-		// `address`. Missing this made every recorded listener decode as
-		// `PromiseRegisterListener("", "")` — 400 for a bad address where
-		// the server had said 404 for a missing promise.
-		//
-		// The differential fuzzer could not see it: there the Go side uses
-		// the generated `Op` values directly and only the LEAN side reads
-		// the file, so a bug in this decoder is invisible by construction.
-		// It took traffic recorded from a real server to surface.
+
 		op.ID, op.PID = r.Awaited, r.Address
 	case "promise.get", "promise.create",
 		"task.get", "task.acquire", "task.release", "task.halt", "task.continue",
 		"promise.search", "task.search", "schedule.search":
-		// decoded entirely from the shared fields above
+
 	default:
-		// valid/lean/json.lean throws `unsupported request kind` here. Without
-		// this the kind falls through to an `Op` whose `apply` returns
-		// status -1, which matches nothing — so the file is REFUTED by
-		// this checker and a decode ERROR to the other. Both reject, but
-		// a differential run would score that as a disagreement, and the
-		// honest report is "neither checker knows this kind".
+
 		return op, fmt.Errorf("unsupported request kind: %s", e.Kind)
 	}
 	return op, nil
@@ -241,7 +208,7 @@ func decodeReq(e wireEvent) (Op, error) {
 func decodeRes(e wireEvent) (Response, error) {
 	res := Response{Status: e.Res.Head.Status}
 	if res.Status/100 != 2 && res.Status != 300 {
-		// a non-2xx carries an error string, not a record
+
 		return res, nil
 	}
 	var d struct {
@@ -259,7 +226,7 @@ func decodeRes(e wireEvent) (Response, error) {
 		return res, nil
 	}
 	if err := json.Unmarshal(e.Res.Data, &d); err != nil {
-		return res, nil // data is not an object (e.g. a bare string)
+		return res, nil
 	}
 	if len(d.Promise) > 0 {
 		var p wirePromise
@@ -306,22 +273,6 @@ func decodeRes(e wireEvent) (Response, error) {
 	return project(e.Kind, res), nil
 }
 
-// project drops response fields the SPECIFICATION's response type for
-// this kind does not carry.
-//
-// Each handler in spec/02-abstract/external-steps-p.lean returns a
-// kind-specific record:
-// `TaskGetRes` has a task and no promise, `TaskSuspendRes` has neither,
-// `TaskFulfillRes` has a promise and no task. valid/lean/json.lean decodes
-// exactly those fields and ignores the rest of the payload.
-//
-// Without this, a server that returns MORE than the specification models
-// — a promise alongside a `task.get`, a task alongside a `task.suspend` —
-// is compared against a model response that cannot carry it, and the Go
-// checker refutes a trace the Lean checker accepts. The two checkers
-// would then disagree about what the EVIDENCE is, which is worse than
-// disagreeing about a verdict: it is not a divergence in the server, only
-// in what the two readers chose to look at.
 func project(kind string, r Response) Response {
 	keep := func(promise, task, inner bool) Response {
 		out := Response{Status: r.Status}
@@ -348,8 +299,7 @@ func project(kind string, r Response) Response {
 	case "task.fence":
 		return keep(false, false, true)
 	default:
-		// task.suspend, task.release, task.halt, task.continue,
-		// task.heartbeat and the three searches are status-only.
+
 		return keep(false, false, false)
 	}
 }

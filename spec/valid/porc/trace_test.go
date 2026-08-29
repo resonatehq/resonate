@@ -5,18 +5,8 @@ import (
 	"testing"
 )
 
-// The two checkers must agree on what the EVIDENCE is before they can
-// agree on a verdict.
-//
-// valid/lean/json.lean decodes each response into the specification's
-// kind-specific record: `TaskGetRes` carries a task and no promise,
-// `TaskSuspendRes` carries neither. A server is free to return more. If
-// this loader kept what the specification drops, the Go checker would
-// compare fields the Lean checker never sees and refute traces Lean
-// accepts — a disagreement about the reading, not about the server.
 func TestResponseProjectionMatchesTheSpecRecords(t *testing.T) {
-	// Every line carries BOTH a promise and a task in `data`, which is
-	// more than any of these kinds models.
+
 	const extra = `"promise":{"id":"p","state":"pending","timeoutAt":10,"createdAt":0},` +
 		`"task":{"id":"p","state":"claimed","version":3}`
 
@@ -59,9 +49,6 @@ func TestResponseProjectionMatchesTheSpecRecords(t *testing.T) {
 	}
 }
 
-// `TaskFenceAction` has exactly two constructors. valid/lean/json.lean throws
-// on anything else; so must this, or a corrupt file is a decode error to
-// one checker and a plain 400 to the other.
 func TestUnknownFenceActionIsADecodeError(t *testing.T) {
 	const line = `{"kind":"task.fence","now":1,` +
 		`"req":{"id":"t","version":1,"action":{"kind":"promise.explode","data":{"id":"q"}}},` +

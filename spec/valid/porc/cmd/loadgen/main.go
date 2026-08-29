@@ -1,34 +1,3 @@
-// Command loadgen drives a real resonate server with CONCURRENT random
-// traffic and records a history both checkers can read.
-//
-//	resonate serve &
-//	go run ./cmd/loadgen -clients 8 -ops 400 -out run
-//
-// It writes two files, and the difference between them is the point:
-//
-//	run.ndjson    the events in RETURN order — one candidate linearization,
-//	              which is what the Lean checker in valid/ can consume,
-//	              because its `Valid` is a SEQUENCE of observations.
-//	run.history   call/return nanosecond intervals per operation, which is
-//	              what porcupine consumes. Overlapping operations are left
-//	              overlapping, so porcupine must SEARCH for an order.
-//
-// ## Why the clock is the hard part
-//
-// The Lean checker requires `(tr t).now ≤ (tr (t+1)).now` — a monotone
-// clock — and a real concurrent run has no single instant per operation.
-// So every request carries an explicit `resonate:debug_time` drawn from a
-// counter that only advances, and concurrent requests within a batch SHARE
-// an instant. Ties are legal: `ValidM` says non-decreasing, not
-// increasing.
-//
-// That still leaves the ORDER within a tie to the harness. Ordering by
-// return time respects the real-time partial order (if A returned before B
-// was called, A precedes B), so it is a legal linearization candidate —
-// but it is only ONE, and the server may have picked another. A refutation
-// from the Lean checker on a concurrent run therefore means "this
-// particular order does not work", not "no order does". Porcupine answers
-// the second question. Comparing them is the experiment.
 package main
 
 import (
@@ -51,7 +20,7 @@ type event struct {
 	Now  uint64          `json:"now"`
 	Req  json.RawMessage `json:"req"`
 	Res  json.RawMessage `json:"res"`
-	// not part of the wire format; used to build the porcupine history
+
 	Call   int64 `json:"-"`
 	Return int64 `json:"-"`
 	Client int   `json:"-"`
@@ -76,8 +45,6 @@ var (
 	batch   = flag.Int("batch", 4, "operations sharing one debug instant")
 )
 
-// clock hands out debug instants. Operations in the same batch share one,
-// which is what makes concurrency expressible under a monotone clock.
 type clock struct {
 	mu  sync.Mutex
 	now uint64
@@ -124,10 +91,7 @@ func main() {
 				if int(i) > *nops {
 					return
 				}
-				// Each client owns its own origin, so awaits-edges stay
-				// inside one partition — the property the checkers'
-				// partitioning depends on, and the reason clients do not
-				// share objects.
+
 				op, kind := nextOp(r, cid, int(i))
 				now := clk.next(*batch)
 				op["__now"] = now
@@ -151,10 +115,6 @@ func main() {
 	}
 	wg.Wait()
 
-	// RETURN order: a legal linearization candidate, because it respects
-	// the real-time partial order. Ties broken by call time, then by the
-	// debug instant, so the sequence the Lean checker sees has a
-	// non-decreasing clock.
 	sort.SliceStable(events, func(i, j int) bool {
 		if events[i].Now != events[j].Now {
 			return events[i].Now < events[j].Now
@@ -175,9 +135,6 @@ func main() {
 	}
 }
 
-// nextOp draws one request. Each client walks its own workflow so the
-// traffic is well-formed often enough to be interesting, with noise on top
-// to reach the error paths.
 func nextOp(r *rand.Rand, cid, i int) (map[string]any, string) {
 	origin := fmt.Sprintf("c%d", cid)
 	wf := i / 6
@@ -268,10 +225,6 @@ func writeHistory(path string, events []event) {
 
 type overlapStats struct{ pairs, max int }
 
-// countOverlaps reports whether the run was ACTUALLY concurrent. A
-// harness that intends to produce overlap and does not is the easiest way
-// to run a concurrency experiment that proves nothing, so it is measured
-// rather than assumed.
 func countOverlaps(events []event) overlapStats {
 	var st overlapStats
 	for i := range events {

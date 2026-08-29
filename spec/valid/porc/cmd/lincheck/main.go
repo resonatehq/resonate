@@ -1,11 +1,3 @@
-// Command lincheck runs a recorded Resonate trace through the porcupine
-// linearizability checker against BOTH read disciplines of the abstract
-// machine — -p (projected) and -m (materialized).
-//
-//	go run ./cmd/lincheck < trace.ndjson
-//
-// Exit 0 both linearize, 1 one or both do not, 2 usage/parse error,
-// 3 inconclusive (an internal step closure hit its fuel bound).
 package main
 
 import (
@@ -53,11 +45,7 @@ func main() {
 	fmt.Printf("loaded %d events   history: %s   partition: %v\n",
 		len(ops), historyDesc(*concurrent), *partition)
 	if pending > 0 {
-		// A pending op (a 500 — the server refusing to guess an ambiguous
-		// write's fate) is unconstrained evidence: it may or may not have
-		// applied. LINEARIZABLE below therefore means "with these N ops
-		// free"; a server answering 500 to everything would pass vacuously,
-		// so the count is part of the verdict.
+
 		fmt.Printf("pending: %d of %d ops answered 500 — each may or may not have applied; the verdict leaves them free\n",
 			pending, len(ops))
 	}
@@ -111,15 +99,6 @@ func historyDesc(c int) string {
 	return fmt.Sprintf("%d-way overlap — porcupine must find an order", c)
 }
 
-// buildHistory turns the recorded events into porcupine operations.
-//
-// A capture is SEQUENTIAL: one call at a time, each with a single
-// instant. With non-overlapping intervals, linearizability degenerates to
-// "the model accepts this sequence" — still the question worth asking of
-// a nondeterministic model, but not a concurrency test. `-concurrent=k`
-// widens the intervals so k consecutive calls overlap, which puts
-// porcupine to work finding an order and is a genuinely harder question
-// than the Lean checker answers.
 func buildHistory(ops []model.Op, resps []model.Response, concurrent int) []porcupine.Operation {
 	if concurrent < 1 {
 		concurrent = 1
@@ -142,7 +121,6 @@ func buildHistory(ops []model.Op, resps []model.Response, concurrent int) []porc
 	return hist
 }
 
-// partitioned mirrors the -partition flag for the witness pass.
 var partitioned = true
 
 func replay(d model.Discipline, ops []model.Op, resps []model.Response, part bool) ([]string, int, bool) {
@@ -172,8 +150,6 @@ func printWitness(d model.Discipline, ops []model.Op, resps []model.Response) {
 	}
 }
 
-// reportFirstFailure replays sequentially to name the event the model
-// cannot explain. porcupine says WHETHER; this says WHERE.
 func reportFirstFailure(d model.Discipline, ops []model.Op, resps []model.Response) {
 	_, at, ok := replay(d, ops, resps, partitioned)
 	if ok {

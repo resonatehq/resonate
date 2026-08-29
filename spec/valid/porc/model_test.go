@@ -52,20 +52,8 @@ func check(t *testing.T, d Discipline, ops []Op, resps []Response, concurrent in
 
 var disciplines = []Discipline{Projected, Materialized}
 
-// A clean capture must linearize against BOTH read disciplines.
-//
-// That they agree is not a coincidence to be observed but a THEOREM:
-// `responseLockstepAbstract` in spec/04-theorems/proof.lean is an
-// unconditional mechanized proof, no sorry, that the two disciplines
-// answer identically on the response channel. So a disagreement here is a
-// bug in this port, and this test is a differential check of the Go
-// against a proven property of the Lean.
 func TestCleanTracesLinearize(t *testing.T) {
-	// The four `resonate-sdk-*` captures come from work/go driving the Go
-	// SDK against a real server, so they exercise the kinds the
-	// hand-written load generators never sent: `task.create`,
-	// `task.fence` and `promise.register_listener`. Two of the four are
-	// suspend/resume runs, which is the only way callback gets reached at all.
+
 	for _, name := range []string{
 		"resonate-sqlite-50wf.ndjson", "resonate-sqlite-200wf-debugstart.ndjson",
 		"resonate-sdk-simple-run.ndjson", "resonate-sdk-simple-rpc.ndjson",
@@ -80,10 +68,6 @@ func TestCleanTracesLinearize(t *testing.T) {
 	}
 }
 
-// The mixed-clock capture must NOT linearize, and both disciplines must
-// stop at the same place. The Lean checker independently refutes this
-// trace at event 886; if the Go port refutes somewhere else, one of the
-// two is wrong.
 func TestBadCaptureRefutedAtSameEvent(t *testing.T) {
 	ops, resps := load(t, "resonate-sqlite-200wf.ndjson")
 	const leanRefutesAt = 886
@@ -101,16 +85,6 @@ func TestBadCaptureRefutedAtSameEvent(t *testing.T) {
 	}
 }
 
-// Partitioning is an optimisation, so it must not change any verdict —
-// in EITHER direction. Turning Illegal into Ok would be unsoundness; the
-// reverse would be a false alarm.
-//
-// Two workflows, because unpartitioned checking is exponential in the
-// history: 11 events 1ms, 22 events 88ms, 33 events 7.4s, 44 events does
-// not finish in 30s. That curve is the reason partitioning exists, and
-// the reason this test is small. An `Unknown` (timeout) on either side is
-// a failed test, not an agreement — comparing two timeouts proves
-// nothing.
 func TestPartitioningAgrees(t *testing.T) {
 	ops, resps := load(t, "resonate-sqlite-50wf.ndjson")
 	ops, resps = ops[:22], resps[:22]
@@ -145,8 +119,6 @@ func TestPartitioningAgrees(t *testing.T) {
 	}
 }
 
-// The precondition partitioning rests on — every awaits-edge inside one
-// origin — holds for the captures, and is detected when it does not.
 func TestPartitionableIsChecked(t *testing.T) {
 	ops, _ := load(t, "resonate-sqlite-50wf.ndjson")
 	if err := CheckPartitionable(ops); err != nil {
@@ -158,9 +130,6 @@ func TestPartitionableIsChecked(t *testing.T) {
 	}
 }
 
-// Discrimination. A checker that accepts everything is worthless, so
-// corrupt a response and require a rejection. Both the status channel and
-// the record channel are tried, because they prune differently.
 func TestTamperedTracesAreRejected(t *testing.T) {
 	ops, resps := load(t, "resonate-sqlite-50wf.ndjson")
 	ops, resps = ops[:55], resps[:55]
@@ -195,9 +164,6 @@ func TestTamperedTracesAreRejected(t *testing.T) {
 	}
 }
 
-// The witness is a certificate: the recorded run needs hidden callback firings
-// to be explainable at all, so an empty witness would mean the trace was
-// never asking the interesting question.
 func TestWitnessRecoversHiddenResumes(t *testing.T) {
 	ops, resps := load(t, "resonate-sqlite-50wf.ndjson")
 	for _, d := range disciplines {
@@ -217,9 +183,6 @@ func TestWitnessRecoversHiddenResumes(t *testing.T) {
 	}
 }
 
-// With overlapping intervals porcupine has to FIND an order rather than
-// verify the recorded one. A capture is sequential, so widening it can
-// only make more histories legal — a clean trace must still pass.
 func TestConcurrentHistoriesStillLinearize(t *testing.T) {
 	ops, resps := load(t, "resonate-sqlite-50wf.ndjson")
 	ops, resps = ops[:55], resps[:55]
@@ -232,8 +195,6 @@ func TestConcurrentHistoriesStillLinearize(t *testing.T) {
 	}
 }
 
-// Schedules are not modelled, and the loader must say so rather than
-// check a trace against an empty calendar.
 func TestScheduleTracesAreRefused(t *testing.T) {
 	const line = `{"kind":"schedule.create","now":1,"req":{"id":"s"},"res":{"head":{"status":200},"data":{}}}`
 	if _, _, err := LoadTrace(strings.NewReader(line)); err == nil {

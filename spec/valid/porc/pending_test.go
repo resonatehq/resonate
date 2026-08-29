@@ -7,14 +7,6 @@ import (
 	"github.com/anishathalye/porcupine"
 )
 
-// A 500 is a PENDING op: the server refusing to guess the fate of an
-// ambiguous write (it may have landed with its acknowledgment lost). The
-// machine has no 500 transition, so the checker constrains such an op only
-// existentially — not applied, or applied once with the response
-// unobserved — and the surrounding observations decide between the
-// branches. These tests pin all three outcomes: both branches accepted,
-// and a history neither branch explains still refuted.
-
 func loadPending(t *testing.T, ndjson string) ([]Op, []Response) {
 	t.Helper()
 	ops, resps, err := LoadTrace(strings.NewReader(strings.TrimSpace(ndjson) + "\n"))
@@ -27,8 +19,6 @@ func loadPending(t *testing.T, ndjson string) ([]Op, []Response) {
 const pendingCreate = `{"kind":"promise.create","now":1000,"req":{"id":"wf","timeoutAt":700000,"param":{},"tags":{"resonate:target":"poll://any@default"}},"res":{"kind":"promise.create","head":{"corrId":"t1","status":200,"version":"v"},"data":{"promise":{"id":"wf","state":"pending","param":{},"value":{},"tags":{"resonate:target":"poll://any@default"},"timeoutAt":700000,"createdAt":1000}}}}
 {"kind":"task.acquire","now":1010,"req":{"id":"wf","version":0,"pid":"pa","ttl":300000},"res":{"kind":"task.acquire","head":{"corrId":"t2","status":500,"version":"v"},"data":"outcome unknowable"}}`
 
-// The write landed: a later read observes the acquire's effect, so only the
-// applied branch survives — and the history linearizes.
 func TestPendingAppliedBranchAccepted(t *testing.T) {
 	ops, resps := loadPending(t, pendingCreate+`
 {"kind":"task.get","now":1020,"req":{"id":"wf"},"res":{"kind":"task.get","head":{"corrId":"t3","status":200,"version":"v"},"data":{"task":{"id":"wf","state":"acquired","version":1,"resumes":0,"pid":"pa","ttl":300000}}}}`)
@@ -46,8 +36,6 @@ func TestPendingAppliedBranchAccepted(t *testing.T) {
 	}
 }
 
-// The write never landed: a later read observes the untouched task, so only
-// the not-applied branch survives — and the history linearizes.
 func TestPendingNotAppliedBranchAccepted(t *testing.T) {
 	ops, resps := loadPending(t, pendingCreate+`
 {"kind":"task.get","now":1020,"req":{"id":"wf"},"res":{"kind":"task.get","head":{"corrId":"t3","status":200,"version":"v"},"data":{"task":{"id":"wf","state":"pending","version":0,"resumes":0}}}}`)
@@ -58,8 +46,6 @@ func TestPendingNotAppliedBranchAccepted(t *testing.T) {
 	}
 }
 
-// A pending op is not a wildcard: an observation NEITHER branch explains —
-// the acquire went to a pid the history never granted — still refutes.
 func TestPendingStillRefutesTheImpossible(t *testing.T) {
 	ops, resps := loadPending(t, pendingCreate+`
 {"kind":"task.get","now":1020,"req":{"id":"wf"},"res":{"kind":"task.get","head":{"corrId":"t3","status":200,"version":"v"},"data":{"task":{"id":"wf","state":"acquired","version":1,"resumes":0,"pid":"px","ttl":300000}}}}`)
@@ -70,9 +56,6 @@ func TestPendingStillRefutesTheImpossible(t *testing.T) {
 	}
 }
 
-// The identity-erasing case that motivates the semantics: a release whose
-// success nulls the pid answers 500, and the state showing the release DID
-// land linearizes through the applied branch.
 func TestPendingRelease(t *testing.T) {
 	ops, resps := loadPending(t, pendingCreate[:strings.Index(pendingCreate, "\n")]+`
 {"kind":"task.acquire","now":1010,"req":{"id":"wf","version":0,"pid":"pa","ttl":300000},"res":{"kind":"task.acquire","head":{"corrId":"t2","status":200,"version":"v"},"data":{"task":{"id":"wf","state":"acquired","version":1,"resumes":0,"pid":"pa","ttl":300000},"promise":{"id":"wf","state":"pending","param":{},"value":{},"tags":{"resonate:target":"poll://any@default"},"timeoutAt":700000,"createdAt":1000}}}}

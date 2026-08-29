@@ -2,21 +2,6 @@ package model
 
 import "testing"
 
-// Validation outranks existence.
-//
-// `spec/01-protocol` states it and `spec/02-abstract/external-steps-p.lean` implements
-// it: in every handler that can return 400, the 400 guard is the FIRST
-// statement, before any `viewPromise`/`viewTask`. So a request that is
-// both malformed AND aimed at an object that does not exist must answer
-// 400, never 404.
-//
-// That ordering is observable — it is the difference between "your request
-// is wrong" and "your object is missing" — so it is part of the protocol,
-// not an implementation detail. This model is meant to follow the Lean to
-// the letter, so the ordering is pinned here rather than left to a reading
-// of the code.
-//
-// Each case below targets `ghost`, which is never created.
 func TestValidationOutranksExistence(t *testing.T) {
 	const ghost = "o.ghost"
 
@@ -70,8 +55,6 @@ func TestValidationOutranksExistence(t *testing.T) {
 	}
 }
 
-// The converse, so the test above cannot pass by a handler that returns
-// 400 for everything: a WELL-FORMED request at a missing object is 404.
 func TestWellFormedRequestsStillReport404(t *testing.T) {
 	const ghost = "o.ghost"
 
