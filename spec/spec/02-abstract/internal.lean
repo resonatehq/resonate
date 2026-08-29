@@ -15,12 +15,12 @@ namespace AbstractModel
 namespace Internal
 
 
-open ServerModel (nextCron occurrences expand Schedule)
+open ServerModel (Ident nextCron occurrences expand Schedule)
 
-def processPromiseTimeout (id : String) (now : Nat) : H Unit := do
+def processPromiseTimeout (id : Ident) (now : Nat) : H Unit := do
   let _ ← touchObject id now
 
-def processListener (id : String) (address : String) (now : Nat) : H Unit := do
+def processListener (id : Ident) (address : String) (now : Nat) : H Unit := do
   match ← touchObject id now with
   | none => pure ()
   | some o =>
@@ -31,7 +31,7 @@ def processListener (id : String) (address : String) (now : Nat) : H Unit := do
                           listeners := o.promise.listeners.filter (· != address) }
         setMessage address (.unblock (o.promise.toRecord o.id))
 
-def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
+def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
   match ← touchTaskObject awaiter now with
   | none => pure ()
   | some o =>
@@ -48,7 +48,7 @@ def resumeOne (awaited awaiter : String) (now : Nat) : H Unit := do
       | .fulfilled =>
           pure ()
 
-def processCallback (id : String) (awaiter : String) (now : Nat) : H Unit := do
+def processCallback (id : Ident) (awaiter : Ident) (now : Nat) : H Unit := do
   match ← touchObject id now with
   | none => pure ()
   | some o =>
@@ -59,7 +59,7 @@ def processCallback (id : String) (awaiter : String) (now : Nat) : H Unit := do
                           callbacks := o.promise.callbacks.filter (· != awaiter) }
         resumeOne o.id awaiter now
 
-def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
+def processLeaseTimeout (id : Ident) (now : Nat) : H Unit := do
   match ← viewTaskObject id now with
   | none => pure ()
   | some o =>
@@ -97,7 +97,7 @@ def processLeaseTimeout (id : String) (now : Nat) : H Unit := do
     reports `ttl` — would be observable. A transcribed production trace
     refuses it: `valid/lean/real.lean` shows `ttl := none` on a task
     acquired with 60000, suspended and resumed. -/
-def processRetryTimeout (id : String) (now : Nat) : H Unit := do
+def processRetryTimeout (id : Ident) (now : Nat) : H Unit := do
   match ← viewTaskObject id now with
   | none => pure ()
   | some o =>
@@ -125,7 +125,7 @@ def fireAll (s : Schedule) : List Nat → H Unit
       fireOccurrence s t
       fireAll s ts
 
-def processSchedule (id : String) (now : Nat) : H Unit := do
+def processSchedule (id : Ident) (now : Nat) : H Unit := do
   match ← getSchedule id with
   | none => pure ()
   | some s =>

@@ -242,18 +242,18 @@ def workflow (seed : Nat) : List (Step × Nat) :=
   let t2 := pick pool 5 r8          -- observation
   let t3 := pick pool 5 r9          -- observation
   mono
-  [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), t0)
-  , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), t0)
-  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), t0)
-  , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
-  , (.promiseTimeout "a", g1)
-  , (.callback "a" "x", g2)
-  , (.taskLeaseTimeout "x", g3)
-  , (.taskRetryTimeout "x", g3)
-  , (.api (.taskGet    { id := "x" }), t2)
-  , (.api (.promiseGet { id := "x" }), t2)
-  , (.api (.promiseGet { id := "a" }), t3)
-  , (.api (.taskGet { id := "x" }), t3) ]
+  [ (.api (.promiseCreate { id := oid "a", timeoutAt := ta, param := {}, tags := ext }), t0)
+  , (.api (.promiseCreate { id := oid "x", timeoutAt := tx, param := {}, tags := tgt }), t0)
+  , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := ttl }), t0)
+  , (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), t1)
+  , (.promiseTimeout (oid "a"), g1)
+  , (.callback (oid "a") (oid "x"), g2)
+  , (.taskLeaseTimeout (oid "x"), g3)
+  , (.taskRetryTimeout (oid "x"), g3)
+  , (.api (.taskGet    { id := oid "x" }), t2)
+  , (.api (.promiseGet { id := oid "x" }), t2)
+  , (.api (.promiseGet { id := oid "a" }), t3)
+  , (.api (.taskGet { id := oid "x" }), t3) ]
 
 /-- A second shape: the awaited promise is SETTLED explicitly rather than
     timing out, so the resume is `.resumed`/`.buffered` rather than being
@@ -275,16 +275,16 @@ def workflowSettled (seed : Nat) : List (Step × Nat) :=
   let t2 := pick pool 5 r6
   let t3 := pick pool 5 r7
   mono
-  [ (.api (.promiseCreate { id := "a", timeoutAt := 100000, param := {}, tags := ext }), 0)
-  , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
-  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
-  , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), t1)
-  , (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), ts)
-  , (.callback "a" "x", g2)
-  , (.taskRetryTimeout "x", g2)
-  , (.api (.taskGet    { id := "x" }), t2)
-  , (.api (.promiseGet { id := "x" }), t2)
-  , (.api (.taskGet { id := "x" }), t3) ]
+  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 100000, param := {}, tags := ext }), 0)
+  , (.api (.promiseCreate { id := oid "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+  , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := ttl }), 0)
+  , (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), t1)
+  , (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), ts)
+  , (.callback (oid "a") (oid "x"), g2)
+  , (.taskRetryTimeout (oid "x"), g2)
+  , (.api (.taskGet    { id := oid "x" }), t2)
+  , (.api (.promiseGet { id := oid "x" }), t2)
+  , (.api (.taskGet { id := oid "x" }), t3) ]
 
 /-- A third shape: a task released back to the pool, so a RETRY internal step is the
     only hidden step, and a lease timeout competes with it. This is the
@@ -304,13 +304,13 @@ def workflowRetry (seed : Nat) : List (Step × Nat) :=
   let g2 := pick pool 5 r5
   let t2 := pick pool 5 r6
   mono
-  [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
-  , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
-  , (.api (.taskRelease   { id := "x", version := 1 }), tr)
-  , (.taskLeaseTimeout "x", g1)
-  , (.taskRetryTimeout "x", g2)
-  , (.api (.taskGet    { id := "x" }), t2)
-  , (.api (.promiseGet { id := "x" }), t2) ]
+  [ (.api (.promiseCreate { id := oid "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+  , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := ttl }), 0)
+  , (.api (.taskRelease   { id := oid "x", version := 1 }), tr)
+  , (.taskLeaseTimeout (oid "x"), g1)
+  , (.taskRetryTimeout (oid "x"), g2)
+  , (.api (.taskGet    { id := oid "x" }), t2)
+  , (.api (.promiseGet { id := oid "x" }), t2) ]
 
 /-! ## Exhaustive, not random
 
@@ -327,48 +327,48 @@ def grid : List Nat := [1, 2, 3, 4, 6, 8, 12]
 def resumeGrid : List (List (Step × Nat)) :=
   grid.flatMap fun ta => grid.flatMap fun tx => grid.flatMap fun g => grid.map fun t2 =>
     mono
-    [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), 0)
-    , (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
-    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
-    , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }] }), 1)
-    , (.promiseTimeout "a", g)
-    , (.callback "a" "x", g)
-    , (.api (.taskGet    { id := "x" }), t2)
-    , (.api (.promiseGet { id := "x" }), t2)
-    , (.api (.promiseGet { id := "a" }), t2)
-    , (.api (.taskGet    { id := "x" }), 100)
-    , (.api (.promiseGet { id := "x" }), 100) ]
+    [ (.api (.promiseCreate { id := oid "a", timeoutAt := ta, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := oid "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := 40 }), 0)
+    , (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 1)
+    , (.promiseTimeout (oid "a"), g)
+    , (.callback (oid "a") (oid "x"), g)
+    , (.api (.taskGet    { id := oid "x" }), t2)
+    , (.api (.promiseGet { id := oid "x" }), t2)
+    , (.api (.promiseGet { id := oid "a" }), t2)
+    , (.api (.taskGet    { id := oid "x" }), 100)
+    , (.api (.promiseGet { id := oid "x" }), 100) ]
 
 /-- The lease/retry shape, enumerated: lease deadline, promise deadline,
     both internal step instants, observation instant. -/
 def leaseGrid : List (List (Step × Nat)) :=
   grid.flatMap fun tx => grid.flatMap fun ttl => grid.flatMap fun g1 => grid.map fun t2 =>
     mono
-    [ (.api (.promiseCreate { id := "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
-    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := ttl }), 0)
-    , (.taskLeaseTimeout "x", g1)
-    , (.taskRetryTimeout "x", g1)
-    , (.api (.taskGet    { id := "x" }), t2)
-    , (.api (.promiseGet { id := "x" }), t2)
-    , (.api (.taskGet { id := "x" }), 100) ]
+    [ (.api (.promiseCreate { id := oid "x", timeoutAt := tx, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := ttl }), 0)
+    , (.taskLeaseTimeout (oid "x"), g1)
+    , (.taskRetryTimeout (oid "x"), g1)
+    , (.api (.taskGet    { id := oid "x" }), t2)
+    , (.api (.promiseGet { id := oid "x" }), t2)
+    , (.api (.taskGet { id := oid "x" }), 100) ]
 
 /-- Two awaited promises on one awaiter, internal steps at two independent instants —
     the chain shape, enumerated over deadlines and both internal step instants. -/
 def chainGrid : List (List (Step × Nat)) :=
   grid.flatMap fun ta => grid.flatMap fun tb => grid.flatMap fun g1 => grid.map fun g2 =>
     mono
-    [ (.api (.promiseCreate { id := "a", timeoutAt := ta, param := {}, tags := ext }), 0)
-    , (.api (.promiseCreate { id := "b", timeoutAt := tb, param := {}, tags := ext }), 0)
-    , (.api (.promiseCreate { id := "x", timeoutAt := 100000, param := {}, tags := tgt }), 0)
-    , (.api (.taskAcquire   { id := "x", version := 0, pid := "p", ttl := 40 }), 0)
-    , (.api (.taskSuspend { id := "x", version := 1, actions := [{ awaited := "a", awaiter := "x" }, { awaited := "b", awaiter := "x" }] }), 1)
-    , (.promiseTimeout "a", g1)
-    , (.callback "a" "x", g1)
-    , (.promiseTimeout "b", g2)
-    , (.callback "b" "x", g2)
-    , (.api (.taskGet    { id := "x" }), 20)
-    , (.api (.promiseGet { id := "a" }), 20)
-    , (.api (.promiseGet { id := "b" }), 20) ]
+    [ (.api (.promiseCreate { id := oid "a", timeoutAt := ta, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := oid "b", timeoutAt := tb, param := {}, tags := ext }), 0)
+    , (.api (.promiseCreate { id := oid "x", timeoutAt := 100000, param := {}, tags := tgt }), 0)
+    , (.api (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := 40 }), 0)
+    , (.api (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }, { awaited := oid "b", awaiter := oid "x" }] }), 1)
+    , (.promiseTimeout (oid "a"), g1)
+    , (.callback (oid "a") (oid "x"), g1)
+    , (.promiseTimeout (oid "b"), g2)
+    , (.callback (oid "b") (oid "x"), g2)
+    , (.api (.taskGet    { id := oid "x" }), 20)
+    , (.api (.promiseGet { id := oid "a" }), 20)
+    , (.api (.promiseGet { id := oid "b" }), 20) ]
 
 end TraceCheck.Gap
 

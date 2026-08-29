@@ -53,37 +53,37 @@ def aTags : Tags := [("resonate:external", "true"), ("resonate:origin", "o1")]
 def xTags : Tags := [("resonate:origin", "o1"), ("resonate:target", "poll://any@w1")]
 
 def pa (settled : Option Nat) (st : PromiseState) : PromiseRecord :=
-  { id := "o1.a", state := st, param := {}, value := {}, tags := aTags, timeoutAt := 900000, createdAt := 1000, settledAt := settled }
+  { id := oid "o1.a", state := st, param := {}, value := {}, tags := aTags, timeoutAt := 900000, createdAt := 1000, settledAt := settled }
 
 def px (settled : Option Nat) (st : PromiseState) : PromiseRecord :=
-  { id := "o1.x", state := st, param := {}, value := {}, tags := xTags, timeoutAt := 900000, createdAt := 1000, settledAt := settled }
+  { id := oid "o1.x", state := st, param := {}, value := {}, tags := xTags, timeoutAt := 900000, createdAt := 1000, settledAt := settled }
 
 /-- The recorded run. `now` is the `resonate:debug_time` sent with each
     call, so the specification is driven by the same clock the server
     used. -/
 def trace : List Observation :=
   [ -- 0
-    { now := 1000, req := .promiseCreate { id := "o1.a", timeoutAt := 900000, param := {}, tags := aTags }, res := .promiseCreate { status := 200, promise := some (pa none .pending) } }
+    { now := 1000, req := .promiseCreate { id := oid "o1.a", timeoutAt := 900000, param := {}, tags := aTags }, res := .promiseCreate { status := 200, promise := some (pa none .pending) } }
     -- 1
-  , { now := 1000, req := .promiseCreate { id := "o1.x", timeoutAt := 900000, param := {}, tags := xTags }, res := .promiseCreate { status := 200, promise := some (px none .pending) } }
+  , { now := 1000, req := .promiseCreate { id := oid "o1.x", timeoutAt := 900000, param := {}, tags := xTags }, res := .promiseCreate { status := 200, promise := some (px none .pending) } }
     -- 2
-  , { now := 1000, req := .taskGet { id := "o1.x" }, res := .taskGet { status := 200, task := some { id := "o1.x", state := .pending, version := 0, resumes := 0, ttl := none, pid := none } } }
+  , { now := 1000, req := .taskGet { id := oid "o1.x" }, res := .taskGet { status := 200, task := some { id := oid "o1.x", state := .pending, version := 0, resumes := 0, ttl := none, pid := none } } }
     -- 3
-  , { now := 1100, req := .taskAcquire { id := "o1.x", version := 0, pid := "p0", ttl := 60000 }, res := .taskAcquire { status := 200, task := some { id := "o1.x", state := .acquired, version := 1, resumes := 0, ttl := some 60000, pid := some "p0" }, promise := some (px none .pending), preload := [] } }
+  , { now := 1100, req := .taskAcquire { id := oid "o1.x", version := 0, pid := "p0", ttl := 60000 }, res := .taskAcquire { status := 200, task := some { id := oid "o1.x", state := .acquired, version := 1, resumes := 0, ttl := some 60000, pid := some "p0" }, promise := some (px none .pending), preload := [] } }
     -- 4
-  , { now := 1200, req := .taskSuspend { id := "o1.x", version := 1, actions := [{ awaited := "o1.a", awaiter := "o1.x" }] }, res := .taskSuspend { status := 200, preload := [] } }
+  , { now := 1200, req := .taskSuspend { id := oid "o1.x", version := 1, actions := [{ awaited := oid "o1.a", awaiter := oid "o1.x" }] }, res := .taskSuspend { status := 200, preload := [] } }
     -- 5 — the resume happens inside this call, invisibly
-  , { now := 2000, req := .promiseSettle { id := "o1.a", state := .resolved, value := {} }, res := .promiseSettle { status := 200, promise := some (pa (some 2000) .resolved) } }
+  , { now := 2000, req := .promiseSettle { id := oid "o1.a", state := .resolved, value := {} }, res := .promiseSettle { status := 200, promise := some (pa (some 2000) .resolved) } }
     -- 6 — pending again, resumes = 1, with no request to explain it
-  , { now := 2100, req := .taskGet { id := "o1.x" }, res := .taskGet { status := 200, task := some { id := "o1.x", state := .pending, version := 1, resumes := 1, ttl := none, pid := none } } }
+  , { now := 2100, req := .taskGet { id := oid "o1.x" }, res := .taskGet { status := 200, task := some { id := oid "o1.x", state := .pending, version := 1, resumes := 1, ttl := none, pid := none } } }
     -- 7
-  , { now := 2200, req := .taskAcquire { id := "o1.x", version := 1, pid := "p1", ttl := 60000 }, res := .taskAcquire { status := 200, task := some { id := "o1.x", state := .acquired, version := 2, resumes := 0, ttl := some 60000, pid := some "p1" }, promise := some (px none .pending), preload := [] } }
+  , { now := 2200, req := .taskAcquire { id := oid "o1.x", version := 1, pid := "p1", ttl := 60000 }, res := .taskAcquire { status := 200, task := some { id := oid "o1.x", state := .acquired, version := 2, resumes := 0, ttl := some 60000, pid := some "p1" }, promise := some (px none .pending), preload := [] } }
     -- 8
-  , { now := 2300, req := .taskFulfill { id := "o1.x", version := 2, action := { id := "o1.x", state := .resolved, value := {} } }, res := .taskFulfill { status := 200, promise := some (px (some 2300) .resolved) } }
+  , { now := 2300, req := .taskFulfill { id := oid "o1.x", version := 2, action := { id := oid "o1.x", state := .resolved, value := {} } }, res := .taskFulfill { status := 200, promise := some (px (some 2300) .resolved) } }
     -- 9
-  , { now := 2400, req := .promiseGet { id := "o1.x" }, res := .promiseGet { status := 200, promise := some (px (some 2300) .resolved) } }
+  , { now := 2400, req := .promiseGet { id := oid "o1.x" }, res := .promiseGet { status := 200, promise := some (px (some 2300) .resolved) } }
     -- 10
-  , { now := 2400, req := .promiseGet { id := "o1.a" }, res := .promiseGet { status := 200, promise := some (pa (some 2000) .resolved) } }
+  , { now := 2400, req := .promiseGet { id := oid "o1.a" }, res := .promiseGet { status := 200, promise := some (pa (some 2000) .resolved) } }
   ]
 
 /-- **Not** a tamper, as it turns out. Reporting the task still
@@ -95,7 +95,7 @@ def trace : List Observation :=
 def lazyVariant : List Observation :=
   trace.mapIdx fun i o =>
     if i == 6 then
-      { o with res := .taskGet { status := 200, task := some { id := "o1.x", state := .suspended, version := 1, resumes := 0, ttl := none, pid := none } } }
+      { o with res := .taskGet { status := 200, task := some { id := oid "o1.x", state := .suspended, version := 1, resumes := 0, ttl := none, pid := none } } }
     else o
 
 /-- A genuine impossibility: `o1.a` was settled at 2000 and nothing can

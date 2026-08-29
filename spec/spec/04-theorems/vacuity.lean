@@ -56,7 +56,7 @@ one; the fold rejects it, so `Legal` is not the constant-true
 predicate. -/
 
 def badState : ServerState :=
-  { objects := [{ id := "p",
+  { objects := [{ id := oid "p",
                   promise := { state := .pending, param := {}, tags := [],
                                timeoutAt := 1, createdAt := 5 } }] }
 
@@ -151,6 +151,46 @@ theorem witness_suspends_a_task :
 
 theorem witness_writes_the_outbox :
     (wit 7).state.outbox.isEmpty = false := by decide
+
+/-! ## The same-origin doors answer, and only when they should
+
+An entry says no reachable state HOLDS a cross-origin awaits-edge. That
+is the claim worth stating, but on its own it is satisfiable by a
+machine that refuses everything, so these fix the other side: the door
+answers `400` to a registration whose ends are in different origins, and
+does not answer it to one whose ends agree. Decided rather than argued —
+each is one handler run against the empty store, and the refusal comes
+before any read, which is what makes it decidable there at all. -/
+
+open AbstractModel in
+theorem cross_origin_callback_is_refused :
+    (run true (promiseRegisterCallback
+        { awaited := { origin := "o1", suffix := "a" },
+          awaiter := { origin := "o2", suffix := "x" } } 100)
+      ServerState.init).1.status = 400 := by decide
+
+open AbstractModel in
+theorem same_origin_callback_passes_the_door :
+    (run true (promiseRegisterCallback
+        { awaited := { origin := "o1", suffix := "a" },
+          awaiter := { origin := "o1", suffix := "x" } } 100)
+      ServerState.init).1.status ≠ 400 := by decide
+
+open AbstractModel in
+theorem cross_origin_fence_is_refused :
+    (run true (taskFence
+        { id := { origin := "o1", suffix := "x" }, version := 1,
+          action := .settle { id := { origin := "o2", suffix := "a" },
+                              state := .resolved, value := {} } } 100)
+      ServerState.init).1.status = 400 := by decide
+
+open AbstractModel in
+theorem cross_origin_suspend_is_refused :
+    (run true (taskSuspend
+        { id := { origin := "o1", suffix := "x" }, version := 1,
+          actions := [{ awaited := { origin := "o2", suffix := "a" },
+                        awaiter := { origin := "o1", suffix := "x" } }] } 100)
+      ServerState.init).1.status = 400 := by decide
 
 /-! ## The conclusion holds along it, for a reason
 

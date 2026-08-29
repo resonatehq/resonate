@@ -498,15 +498,27 @@ reading a document that did not contain the awaiter, which is a stutter and
 therefore a legal refinement. With the door it is COMPLETE — it serves
 everything the protocol admits.
 
-**Two handlers still have no origin door at all**, and neither is an awaiter.
-`taskFence` requires only that its target be a DIFFERENT ID -- `if
+**Two handlers had no origin door at all**, and neither is an awaiter.
+`taskFence` required only that its target be a DIFFERENT ID -- `if
 req.action.targetId == req.id then 400` -- which says nothing about origins;
 a parent fencing a child in the same tree is a different id at the same
-origin, and is presumably the ordinary case. `taskHeartbeat` names a set of
-task refs, and P3 says outright they "need not share a partition". So both
-are multi-object operations whose objects MAY span origins, not operations
-that necessarily do. Whether they get the callback's door is a protocol
-question, not a modelling one.
+origin, and is the ordinary case. `taskHeartbeat` names a set of task refs,
+and P3 says outright they "need not share a partition". Both are
+multi-object operations whose objects MAY span origins, not operations that
+necessarily do, so whether they got the callback's door was a protocol
+question rather than a modelling one.
+
+`taskFence` has since been answered: the Lean spec refuses a cross-origin
+target with a `400`, decided lexically before any read, so a backend can
+answer it without asking its store whether the id exists -- which is what
+makes the refusal implementable where "different origin" and "no such
+promise" are otherwise indistinguishable. `taskHeartbeat` is still open,
+and still contradicts P3 if it closes: `CheckPartitionable` already refuses
+to partition a heartbeat that spans origins, on the grounds that belonging
+to two partitions at once is not representable.
+
+The doors here in `Abstract.tla` are still the two awaiter ones. Carrying
+the fence door across, so TLC checks it too, is the obvious next step.
 
 ### Which checker
 

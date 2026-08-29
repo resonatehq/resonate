@@ -67,8 +67,9 @@ first, which is what makes the no-op unreachable. -/
 
 namespace AbstractModel
 
-open ServerModel (Tags Value PromiseState TaskState PromiseRecord
-                  TaskRecord Schedule Message OutboxEntry PromiseCreateReq)
+open ServerModel (Ident Tags Value PromiseState TaskState PromiseRecord
+                  TaskRecord Schedule Message OutboxEntry OutboxKey
+                  PromiseCreateReq)
 
 structure PromiseObject where
   state     : PromiseState
@@ -78,11 +79,11 @@ structure PromiseObject where
   timeoutAt : Nat
   createdAt : Nat
   settledAt : Option Nat  := none
-  callbacks : List String := []
+  callbacks : List Ident     := []
   listeners : List String := []
   deriving Repr
 
-def PromiseObject.toRecord (p : PromiseObject) (id : String) : PromiseRecord :=
+def PromiseObject.toRecord (p : PromiseObject) (id : Ident) : PromiseRecord :=
   { id := id, state := p.state, param := p.param, value := p.value,
     tags := p.tags, timeoutAt := p.timeoutAt, createdAt := p.createdAt,
     settledAt := p.settledAt }
@@ -96,7 +97,7 @@ def PromiseObject.external (p : PromiseObject) : Bool :=
 def PromiseObject.targeted (p : PromiseObject) : Bool :=
   p.tags.has "resonate:target"
 
-def PromiseObject.addCallback (p : PromiseObject) (awaiterId : String) : PromiseObject :=
+def PromiseObject.addCallback (p : PromiseObject) (awaiterId : Ident) : PromiseObject :=
   if p.callbacks.contains awaiterId then
     p
   else
@@ -124,10 +125,10 @@ structure TaskObject where
   pid            : Option String := none
   leaseTimeoutAt : Option Nat    := none
   retryTimeoutAt : Option Nat    := none
-  resumes        : List String   := []
+  resumes        : List Ident    := []
   deriving Repr
 
-def TaskObject.toRecord (t : TaskObject) (id : String) : TaskRecord :=
+def TaskObject.toRecord (t : TaskObject) (id : Ident) : TaskRecord :=
   { id := id, state := t.state, version := t.version,
     resumes := t.resumes.length, ttl := t.ttl, pid := t.pid }
 
@@ -146,7 +147,7 @@ def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
     deliberate — the tag arrives from a client, and the catalogue has
     to be able to write down the state where the two disagree. -/
 structure Object where
-  id      : String
+  id      : Ident
   promise : PromiseObject
   task    : Option TaskObject := none
   deriving Repr
@@ -185,20 +186,20 @@ def ServerState.tasks (s : ServerState) : List TaskObject :=
     handlers take the whole object. `task?` is `none` for both an id no
     object holds and an object with no task — which is exactly the
     distinction the handlers stopped having to make. -/
-def ServerState.promise? (s : ServerState) (id : String) : Option PromiseObject :=
+def ServerState.promise? (s : ServerState) (id : Ident) : Option PromiseObject :=
   (s.objects.find? (·.id == id)).map (·.promise)
 
-def ServerState.task? (s : ServerState) (id : String) : Option TaskObject :=
+def ServerState.task? (s : ServerState) (id : Ident) : Option TaskObject :=
   (s.objects.find? (·.id == id)).bind (·.task)
 
-def ServerState.hasTask (s : ServerState) (id : String) : Bool :=
+def ServerState.hasTask (s : ServerState) (id : Ident) : Bool :=
   (s.task? id).isSome
 
 inductive Effect
-  | setPromise  (id : String) (p : PromiseObject)
-  | setTask     (id : String) (t : TaskObject)
+  | setPromise  (id : Ident) (p : PromiseObject)
+  | setTask     (id : Ident) (t : TaskObject)
   | setSchedule (s : Schedule)
-  | delSchedule (id : String)
+  | delSchedule (id : Ident)
   | setMessage  (address : String) (msg : Message)
   deriving Repr
 
@@ -206,7 +207,7 @@ inductive Effect
     object already at that id, or a new object with no task. Named
     rather than inlined so the frame and induction tiers have a term to
     reason about instead of an anonymous matcher. -/
-def Object.withPromise (id : String) (p : PromiseObject) : Option Object → Object
+def Object.withPromise (id : Ident) (p : PromiseObject) : Option Object → Object
   | some o => { o with promise := p }
   | none   => { id := id, promise := p }
 
@@ -269,16 +270,16 @@ def runWith (mat : Bool) (config : ServerConfig) (act : H α) (s : ServerState) 
 def run (mat : Bool) (act : H α) (s : ServerState) : α × ServerState :=
   runWith mat {} act s
 
-def getObject (id : String) : H (Option Object) :=
+def getObject (id : Ident) : H (Option Object) :=
   return (← ask).state.objects.find? (·.id == id)
 
-def getSchedule (id : String) : H (Option Schedule) :=
+def getSchedule (id : Ident) : H (Option Schedule) :=
   return (← ask).state.schedules.find? (·.id == id)
 
-def setPromise (id : String) (p : PromiseObject) : H Unit := emit (.setPromise id p)
-def setTask (id : String) (t : TaskObject) : H Unit := emit (.setTask id t)
+def setPromise (id : Ident) (p : PromiseObject) : H Unit := emit (.setPromise id p)
+def setTask (id : Ident) (t : TaskObject) : H Unit := emit (.setTask id t)
 def setSchedule (c : Schedule) : H Unit := emit (.setSchedule c)
-def delSchedule (id : String) : H Unit := emit (.delSchedule id)
+def delSchedule (id : Ident) : H Unit := emit (.delSchedule id)
 def setMessage (a : String) (m : Message) : H Unit := emit (.setMessage a m)
 
 /-- Settle a promise, and fulfil the task executing it. The task no
@@ -326,7 +327,7 @@ def createPromise (req : PromiseCreateReq) (now : Nat) : H Object := do
     `readObject` rather than inlined so that the read stays a single
     statement behind the `mat` test — and so the induction tier has a
     name for the only write a read performs. -/
-def materialise (id : String) (o o' : Object) : H Unit :=
+def materialise (id : Ident) (o o' : Object) : H Unit :=
   (if o'.promise.state != o.promise.state then setPromise id o'.promise else pure ()) >>=
     fun _ =>
       match o.task, o'.task with
@@ -335,7 +336,7 @@ def materialise (id : String) (o o' : Object) : H Unit :=
 
 /-- The one read. Projects the object at `now`, and — when `mat` —
     writes back what the projection moved. -/
-def readObject (id : String) (now : Nat) : H (Option Object) := do
+def readObject (id : Ident) (now : Nat) : H (Option Object) := do
   match ← getObject id with
   | none => return none
   | some o =>
@@ -358,7 +359,7 @@ def readObject (id : String) (now : Nat) : H (Option Object) := do
     so persisting it later writes the same row. `b6` in the battery is the
     script that reaches the shape, and it is there so that this stays
     checked rather than argued. -/
-def readTaskObject (id : String) (now : Nat) : H (Option Object) := do
+def readTaskObject (id : Ident) (now : Nat) : H (Option Object) := do
   match ← getObject id with
   | none   => return none
   | some o => if o.task.isSome then readObject id now else return none
@@ -370,16 +371,16 @@ def createIfAbsent (req : PromiseCreateReq) (now : Nat) : H Unit := do
 
 def withMat (mat : Bool) (act : H α) : H α := fun e => act { e with mat := mat }
 
-def touchObject (id : String) (now : Nat) : H (Option Object) :=
+def touchObject (id : Ident) (now : Nat) : H (Option Object) :=
   withMat true (readObject id now)
 
-def viewObject (id : String) (now : Nat) : H (Option Object) :=
+def viewObject (id : Ident) (now : Nat) : H (Option Object) :=
   withMat false (readObject id now)
 
-def touchTaskObject (id : String) (now : Nat) : H (Option Object) :=
+def touchTaskObject (id : Ident) (now : Nat) : H (Option Object) :=
   withMat true (readTaskObject id now)
 
-def viewTaskObject (id : String) (now : Nat) : H (Option Object) :=
+def viewTaskObject (id : Ident) (now : Nat) : H (Option Object) :=
   withMat false (readTaskObject id now)
 
 end AbstractModel

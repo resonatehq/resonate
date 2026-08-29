@@ -91,7 +91,7 @@ structure Q where
       step", which is a claim about a keyed row, not about a promise.
       `.setPromise` names the id, so a per-effect obligation can still
       be stated locally. -/
-  promise  : String → PromiseObject → Bool
+  promise  : ServerModel.Ident → PromiseObject → Bool
   task     : TaskObject → Bool
   schedule : ServerModel.Schedule → Bool
 
@@ -262,17 +262,17 @@ theorem all_mono {α} {q r : α → Bool} (h : ∀ x, q x = true → r x = true)
     (l : List α) : l.all q = true → l.all r = true := fun hs =>
   List.all_eq_true.mpr (fun x hx => h x (List.all_eq_true.mp hs x hx))
 
-theorem getObject_sound {g : Q} {s : ServerState} {id : String} {o : Object}
+theorem getObject_sound {g : Q} {s : ServerState} {id : ServerModel.Ident} {o : Object}
     (hs : PerStore g s = true)
     (h : s.objects.find? (·.id == id) = some o) : QObj g o = true :=
   List.all_eq_true.mp (perStore_objects hs) o (List.mem_of_find?_eq_some h)
 
-theorem getPromise_sound {g : Q} {s : ServerState} {id : String} {o : Object}
+theorem getPromise_sound {g : Q} {s : ServerState} {id : ServerModel.Ident} {o : Object}
     (hs : PerStore g s = true)
     (h : s.objects.find? (·.id == id) = some o) : g.promise o.id o.promise = true :=
   QObj_promise (getObject_sound hs h)
 
-theorem getTask_sound {g : Q} {s : ServerState} {id : String} {t : TaskObject}
+theorem getTask_sound {g : Q} {s : ServerState} {id : ServerModel.Ident} {t : TaskObject}
     (hs : PerStore g s = true)
     (h : s.task? id = some t) : g.task t = true := by
   unfold ServerState.task? at h
@@ -285,7 +285,7 @@ theorem getTask_sound {g : Q} {s : ServerState} {id : String} {t : TaskObject}
       simp only [QObj, Bool.and_eq_true] at hq
       simpa [h] using hq.2
 
-theorem getSchedule_sound {g : Q} {s : ServerState} {id : String}
+theorem getSchedule_sound {g : Q} {s : ServerState} {id : ServerModel.Ident}
     {c : ServerModel.Schedule} (hs : PerStore g s = true)
     (h : s.schedules.find? (·.id == id) = some c) : g.schedule c = true :=
   List.all_eq_true.mp (perStore_schedules hs) c (List.mem_of_find?_eq_some h)
@@ -316,11 +316,11 @@ def ReturnsGood (g : Q) (e : Env) (act : H (Option Object)) : Prop :=
 theorem writesGood_pure {α} (g : Q) (e : Env) (a : α) : WritesGood g e (pure a) := by
   intro f hf; simp [pure] at hf
 
-theorem writesGood_setPromise (g : Q) (e : Env) (id : String) (p : PromiseObject)
+theorem writesGood_setPromise (g : Q) (e : Env) (id : ServerModel.Ident) (p : PromiseObject)
     (h : g.promise id p = true) : WritesGood g e (setPromise id p) := by
   intro f hf; simp [setPromise, emit] at hf; subst hf; exact h
 
-theorem writesGood_setTask (g : Q) (e : Env) (id : String) (t : TaskObject)
+theorem writesGood_setTask (g : Q) (e : Env) (id : ServerModel.Ident) (t : TaskObject)
     (h : g.task t = true) : WritesGood g e (setTask id t) := by
   intro f hf; simp [setTask, emit] at hf; subst hf; exact h
 
@@ -332,18 +332,18 @@ theorem writesGood_setMessage (g : Q) (e : Env) (a : String) (m : ServerModel.Me
     WritesGood g e (setMessage a m) := by
   intro f hf; simp [setMessage, emit] at hf; subst hf; trivial
 
-theorem writesGood_delSchedule (g : Q) (e : Env) (id : String) :
+theorem writesGood_delSchedule (g : Q) (e : Env) (id : ServerModel.Ident) :
     WritesGood g e (delSchedule id) := by
   intro f hf; simp [delSchedule, emit] at hf; subst hf; trivial
 
 theorem writesGood_ask (g : Q) (e : Env) : WritesGood g e ask := by
   intro f hf; simp [ask] at hf
 
-theorem writesGood_getObject (g : Q) (e : Env) (id : String) :
+theorem writesGood_getObject (g : Q) (e : Env) (id : ServerModel.Ident) :
     WritesGood g e (getObject id) := by
   intro f hf; simp [getObject, bind, ask, pure] at hf
 
-theorem writesGood_getSchedule (g : Q) (e : Env) (id : String) :
+theorem writesGood_getSchedule (g : Q) (e : Env) (id : ServerModel.Ident) :
     WritesGood g e (getSchedule id) := by
   intro f hf; simp [getSchedule, bind, ask, pure] at hf
 
@@ -358,10 +358,10 @@ theorem writesGood_withMat {α} (g : Q) (e : Env) (b : Bool)
     available — and it is what makes a relational obligation's birth
     case vacuous rather than unprovable: a birth is by construction the
     one write with no row behind it. -/
-def Stored (a : ServerState) (id : String) : Prop :=
+def Stored (a : ServerState) (id : ServerModel.Ident) : Prop :=
   a.objects.find? (·.id == id) ≠ none
 
-theorem stored_of_find? {a : ServerState} {id : String} {o : Object}
+theorem stored_of_find? {a : ServerState} {id : ServerModel.Ident} {o : Object}
     (h : a.objects.find? (·.id == id) = some o) : Stored a id := by
   unfold Stored; rw [h]; simp
 
@@ -385,29 +385,29 @@ obligation that fails. -/
 
 structure Hereditary (g : Q) (a : ServerState) : Prop where
   -- promises
-  project      : ∀ (id : String) (p : PromiseObject) (n : Nat), Stored a id →
+  project      : ∀ (id : ServerModel.Ident) (p : PromiseObject) (n : Nat), Stored a id →
                    g.promise id p = true → g.promise id (p.project n) = true
-  addCallback  : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+  addCallback  : ∀ (id : ServerModel.Ident) (p : PromiseObject) (c : ServerModel.Ident), Stored a id →
                    g.promise id p = true → g.promise id (p.addCallback c) = true
-  addListener  : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+  addListener  : ∀ (id : ServerModel.Ident) (p : PromiseObject) (c : String), Stored a id →
                    g.promise id p = true → g.promise id (p.addListener c) = true
-  settle       : ∀ (id : String) (p : PromiseObject) (st : ServerModel.PromiseState)
+  settle       : ∀ (id : ServerModel.Ident) (p : PromiseObject) (st : ServerModel.PromiseState)
                    (v : ServerModel.Value) (t : Nat), Stored a id →
                    st.settable = true → p.state = .pending → t < p.timeoutAt →
                    g.promise id p = true →
                    g.promise id { p with state := st, value := v, settledAt := some t } = true
-  dropListener : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+  dropListener : ∀ (id : ServerModel.Ident) (p : PromiseObject) (c : String), Stored a id →
                    p.state ≠ .pending → g.promise id p = true →
                    g.promise id { p with listeners := p.listeners.filter (· != c) } = true
-  dropCallback : ∀ (id : String) (p : PromiseObject) (c : String), Stored a id →
+  dropCallback : ∀ (id : ServerModel.Ident) (p : PromiseObject) (c : ServerModel.Ident), Stored a id →
                    p.state ≠ .pending → g.promise id p = true →
                    g.promise id { p with callbacks := p.callbacks.filter (· != c) } = true
-  live         : ∀ (id : String) (param : ServerModel.Value) (tags : ServerModel.Tags)
+  live         : ∀ (id : ServerModel.Ident) (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
                    a.objects.find? (·.id == id) = none →
                    g.promise id { state := .pending, param := param, tags := tags,
                                   timeoutAt := timeoutAt, createdAt := createdAt } = true
-  dead         : ∀ (id : String) (st : ServerModel.PromiseState)
+  dead         : ∀ (id : ServerModel.Ident) (st : ServerModel.PromiseState)
                    (param : ServerModel.Value) (tags : ServerModel.Tags) (timeoutAt : Nat),
                    st = (if tags.isTimer then .resolved else .rejectedTimedout) →
                    a.objects.find? (·.id == id) = none →
@@ -438,16 +438,16 @@ structure Hereditary (g : Q) (a : ServerState) : Prop where
   tContinue    : ∀ (t : TaskObject) (n : Nat), (t.state == .halted) = true →
                    g.task t = true →
                    g.task { t with state := .pending, retryTimeoutAt := some n } = true
-  tResume      : ∀ (t : TaskObject) (a : String) (n : Nat), t.state = .suspended →
+  tResume      : ∀ (t : TaskObject) (a : ServerModel.Ident) (n : Nat), t.state = .suspended →
                    g.task t = true →
                    g.task { t with state := .pending, resumes := [a], retryTimeoutAt := some n } = true
-  tAddResume   : ∀ (t : TaskObject) (a : String), t.state ≠ .suspended →
+  tAddResume   : ∀ (t : TaskObject) (a : ServerModel.Ident), t.state ≠ .suspended →
                    t.state ≠ .fulfilled → (t.resumes.contains a) = false → g.task t = true →
                    g.task { t with resumes := t.resumes ++ [a] } = true
   tRearm       : ∀ (t : TaskObject) (n : Nat), (t.state == .pending) = true →
                    g.task t = true → g.task { t with retryTimeoutAt := some n } = true
   -- schedules
-  cBorn        : ∀ (id cron promiseId : String) (promiseTimeout : Nat)
+  cBorn        : ∀ (id : ServerModel.Ident) (cron : String) (promiseId : ServerModel.Ident) (promiseTimeout : Nat)
                    (promiseParam : ServerModel.Value) (promiseTags : ServerModel.Tags)
                    (now : Nat), promiseTags.timerTargeted = false →
                    g.schedule { id := id, cron := cron, promiseId := promiseId,
@@ -533,10 +533,10 @@ theorem writesGood_iteH {α} (g : Q) (e : Env) (c : Prop) [Decidable c] (x y : H
   · simpa only [if_pos h] using hx h
   · simpa only [if_neg h] using hy h
 
-theorem getObject_fst (id : String) (e : Env) :
+theorem getObject_fst (id : ServerModel.Ident) (e : Env) :
     (getObject id e).1 = e.state.objects.find? (·.id == id) := rfl
 
-theorem getSchedule_fst (id : String) (e : Env) :
+theorem getSchedule_fst (id : ServerModel.Ident) (e : Env) :
     (getSchedule id e).1 = e.state.schedules.find? (·.id == id) := rfl
 
 theorem ask_fst (e : Env) : (ask e).1 = e := rfl
@@ -591,7 +591,7 @@ theorem writesGood_setSettled {e : Env} (hq : Hereditary g e.state)
     object, so both are good by `QObj_project` — one obligation where
     the two reads used to need one each. -/
 theorem writesGood_materialise {e : Env} {o' : Object} (h : QObj g o' = true)
-    (id : String) (hid : o'.id = id) (o : Object) :
+    (id : ServerModel.Ident) (hid : o'.id = id) (o : Object) :
     WritesGood g e (materialise id o o') := by
   unfold materialise
   refine writesGood_bind' _ _ _ _ ?_ ?_
@@ -605,7 +605,7 @@ theorem writesGood_materialise {e : Env} {o' : Object} (h : QObj g o' = true)
 
 /-- What `readObject` hands back: the stored object, projected. Facts P
     and T as one equation. -/
-theorem readObject_fst (id : String) (now : Nat) (e : Env) :
+theorem readObject_fst (id : ServerModel.Ident) (now : Nat) (e : Env) :
     (readObject id now e).1 =
       (e.state.objects.find? (·.id == id)).map (·.project now) := by
   unfold readObject
@@ -617,7 +617,7 @@ theorem readObject_fst (id : String) (now : Nat) (e : Env) :
       split <;> rw [bind_fst] <;> rfl
 
 theorem writesGood_readObject {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (readObject id now) := by
   unfold readObject
   refine writesGood_bind' _ _ _ _ (writesGood_getObject _ _ _) ?_
@@ -639,7 +639,7 @@ theorem writesGood_readObject {e : Env} (hq : Hereditary g e.state)
     · exact writesGood_bind' _ _ _ _ (writesGood_pure _ _ _) (writesGood_pure _ _ _)
 
 theorem returnsGood_readObject {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat) (o : Object)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat) (o : Object)
     (h : (readObject id now e).1 = some o) : QObj g o = true := by
   rw [readObject_fst] at h
   cases hf : e.state.objects.find? (fun x => x.id == id) with
@@ -661,7 +661,7 @@ theorem returnsGood_readObject {e : Env} (hq : Hereditary g e.state)
 def NotDue (now : Nat) (p : PromiseObject) : Prop :=
   (p.state == ServerModel.PromiseState.pending) = true → now < p.timeoutAt
 
-theorem readObject_notDue (id : String) (now : Nat) (e : Env) (o : Object)
+theorem readObject_notDue (id : ServerModel.Ident) (now : Nat) (e : Env) (o : Object)
     (h : (readObject id now e).1 = some o) : NotDue now o.promise := by
   intro hst
   rw [readObject_fst] at h
@@ -676,7 +676,7 @@ theorem readObject_notDue (id : String) (now : Nat) (e : Env) (o : Object)
 /-- The id the read was made at is the id of the row it returned —
     projection cannot move a row. So the caller gets `Stored` at the
     OBJECT's id, which is the form every `Hereditary` obligation wants. -/
-theorem readObject_id (id : String) (now : Nat) (e : Env) (o : Object)
+theorem readObject_id (id : ServerModel.Ident) (now : Nat) (e : Env) (o : Object)
     (h : (readObject id now e).1 = some o) : o.id = id := by
   rw [readObject_fst] at h
   cases hf : e.state.objects.find? (fun x => x.id == id) with
@@ -688,7 +688,7 @@ theorem readObject_id (id : String) (now : Nat) (e : Env) (o : Object)
       exact (Lookup.project_id o₀ now).trans
         (eq_of_beq (by simpa using List.find?_some hf))
 
-theorem readObject_stored (id : String) (now : Nat) (e : Env) (o : Object)
+theorem readObject_stored (id : ServerModel.Ident) (now : Nat) (e : Env) (o : Object)
     (h : (readObject id now e).1 = some o) : Stored e.state o.id := by
   rw [readObject_id id now e o h]
   rw [readObject_fst] at h
@@ -706,7 +706,7 @@ theorem readObject_stored (id : String) (now : Nat) (e : Env) (o : Object)
     was gone, and it is missing because the state can no longer hold
     it. -/
 theorem writesGood_afterReadObject {α} {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
@@ -727,7 +727,7 @@ theorem writesGood_afterReadObject {α} {e : Env} (hq : Hereditary g e.state)
 /-- The promise-only face of the combinator, for the handlers that
     never look at the task. Same read, weaker hypothesis. -/
 theorem writesGood_afterReadObjectP {α} {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ o, g.promise o.id o.promise = true → NotDue now o.promise →
@@ -738,7 +738,7 @@ theorem writesGood_afterReadObjectP {α} {e : Env} (hq : Hereditary g e.state)
 
 /-- What the task read hands back is what `readObject` would have, when
     it hands back anything at all. -/
-theorem readTaskObject_fst_some {id : String} {now : Nat} {e : Env} {u : Object}
+theorem readTaskObject_fst_some {id : ServerModel.Ident} {now : Nat} {e : Env} {u : Object}
     (h : (readTaskObject id now e).1 = some u) : (readObject id now e).1 = some u := by
   revert h
   unfold readTaskObject
@@ -752,7 +752,7 @@ theorem readTaskObject_fst_some {id : String} {now : Nat} {e : Env} {u : Object}
       · rw [if_neg hto]; intro hh; simp [pure] at hh
 
 theorem writesGood_readTaskObject {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat) :
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (readTaskObject id now) := by
   unfold readTaskObject
   refine writesGood_bind' _ _ _ _ (writesGood_getObject _ _ _) ?_
@@ -767,7 +767,7 @@ theorem writesGood_readTaskObject {e : Env} (hq : Hereditary g e.state)
     covers two ways of getting there, no row and no task, which is why
     that hypothesis is unconditional. -/
 theorem writesGood_afterReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : WritesGood g e (f none))
     (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
@@ -782,7 +782,7 @@ theorem writesGood_afterReadTaskObject {α} {e : Env} (hq : Hereditary g e.state
         (readObject_notDue id now e u h') (readObject_stored id now e u h')
 
 theorem writesGood_afterMatReadTaskObject {α} {e : Env} (hq : Hereditary g e.state)
-    (b : Bool) (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (b : Bool) (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : WritesGood g e (f none))
     (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
@@ -802,7 +802,7 @@ theorem writesGood_afterMatReadTaskObject {α} {e : Env} (hq : Hereditary g e.st
 /-- Same, through `withMat` — which is how the internal steps read.
     `touchObject` is `withMat true`, `viewObject` is `withMat false`. -/
 theorem writesGood_afterMatReadObject {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ o, QObj g o = true → NotDue now o.promise → Stored e.state o.id →
@@ -825,7 +825,7 @@ theorem writesGood_afterMatReadObject {α} {e : Env} (hq : Hereditary g e.state)
         (readObject_stored id now { e with mat := b } o h)
 
 theorem writesGood_afterMatReadObjectP {α} {e : Env} (hq : Hereditary g e.state) (b : Bool)
-    (hs : PerStore g e.state = true) (id : String) (now : Nat)
+    (hs : PerStore g e.state = true) (id : ServerModel.Ident) (now : Nat)
     (f : Option Object → H α)
     (hnone : e.state.objects.find? (·.id == id) = none → WritesGood g e (f none))
     (hsome : ∀ o, g.promise o.id o.promise = true → NotDue now o.promise →

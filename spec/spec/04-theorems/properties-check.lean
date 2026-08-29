@@ -90,34 +90,34 @@ def witnesses (ws : List (List (Step × Nat))) (p : AbstractModel.ServerState �
 /-! ### Closing the alphabet's blind spots -/
 
 def covInternal : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "i", timeoutAt := 1000, param := {}, tags := [] }), 100),
-    (.api (.promiseRegisterListener { awaited := "i", address := "https://l" }), 110),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 120),
-    (.api (.promiseRegisterCallback { awaited := "i", awaiter := "x" }), 130) ]
+  [ (.api (.promiseCreate { id := oid "i", timeoutAt := 1000, param := {}, tags := [] }), 100),
+    (.api (.promiseRegisterListener { awaited := oid "i", address := "https://l" }), 110),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 120),
+    (.api (.promiseRegisterCallback { awaited := oid "i", awaiter := oid "x" }), 130) ]
 
 def covListeners : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
-    (.api (.promiseRegisterListener { awaited := "a", address := "https://l1" }), 110),
-    (.api (.promiseRegisterListener { awaited := "a", address := "https://l2" }), 120),
-    (.api (.promiseSettle { id := "a", state := .resolved, value := {} }), 200),
-    (.listener "a" "https://l1", 210),
-    (.listener "a" "https://l2", 220) ]
+  [ (.api (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
+    (.api (.promiseRegisterListener { awaited := oid "a", address := "https://l1" }), 110),
+    (.api (.promiseRegisterListener { awaited := oid "a", address := "https://l2" }), 120),
+    (.api (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
+    (.listener (oid "a") "https://l1", 210),
+    (.listener (oid "a") "https://l2", 220) ]
 
 def covTwoTasks : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
-    (.api (.taskRelease { id := "x", version := 1 }), 120),
-    (.api (.taskRelease { id := "y", version := 1 }), 130),
-    (.taskRetryTimeout "x", 140),
-    (.taskRetryTimeout "y", 150) ]
+  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
+    (.api (.taskRelease { id := oid "x", version := 1 }), 120),
+    (.api (.taskRelease { id := oid "y", version := 1 }), 130),
+    (.taskRetryTimeout (oid "x"), 140),
+    (.taskRetryTimeout (oid "y"), 150) ]
 
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
     task is what exercises `well_formed_task_halted_is_cleared`. -/
 def covHalt : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := "h", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
-    (.api (.taskHalt { id := "h" }), 110),
-    (.api (.taskContinue { id := "h" }), 120) ]
+  [ (.api (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "h", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
+    (.api (.taskHalt { id := oid "h" }), 110),
+    (.api (.taskContinue { id := oid "h" }), 120) ]
 
 def battery : List (List (Step × Nat)) :=
   [wLag, b1, b2, b3, b4, b5, b6, covInternal, covListeners, covTwoTasks, covHalt]
@@ -151,10 +151,10 @@ def carrier : AbstractModel.PromiseObject :=
     timeoutAt := 100, createdAt := 10 }
 
 def onePromise (p : AbstractModel.PromiseObject) : AbstractModel.ServerState :=
-  { objects := [{ id := "a", promise := p }] }
+  { objects := [{ id := oid "a", promise := p }] }
 
 def oneTask (t : AbstractModel.TaskObject) : AbstractModel.ServerState :=
-  { objects := [{ id := "a", promise := carrier, task := some t }] }
+  { objects := [{ id := oid "a", promise := carrier, task := some t }] }
 
 def oneSchedule (c : ServerModel.Schedule) : AbstractModel.ServerState :=
   { schedules := [c] }
@@ -167,8 +167,8 @@ def mutants : List (String × Bool) :=
   let T : AbstractModel.TaskObject := { state := .pending, version := 1, retryTimeoutAt := some 0 }
   let obj : AbstractModel.PromiseObject → Option AbstractModel.TaskObject →
               AbstractModel.ServerState :=
-    fun p t => { objects := [{ id := "a", promise := p, task := t }] }
-  let C : Schedule := { id := "c", cron := "*", promiseId := "p", promiseTimeout := 1,
+    fun p t => { objects := [{ id := oid "a", promise := p, task := t }] }
+  let C : Schedule := { id := oid "c", cron := "*", promiseId := oid "p", promiseTimeout := 1,
                         promiseParam := {}, promiseTags := [], nextRunAt := 50, createdAt := 10 }
   [ ("well_formed_promise_created_at_lte_timeout_at",
        well_formed_promise_created_at_lte_timeout_at 0 (onePromise { P with createdAt := 500 })),
@@ -189,13 +189,13 @@ def mutants : List (String × Bool) :=
     ("well_formed_promise_timedout_is_server_owned",
        well_formed_promise_timedout_is_server_owned 0 (onePromise { P with state := .rejectedTimedout, settledAt := some 50 })),
     ("well_formed_promise_callbacks_unique",
-       well_formed_promise_callbacks_unique 0 (onePromise { P with callbacks := ["x","x"] })),
+       well_formed_promise_callbacks_unique 0 (onePromise { P with callbacks := [oid "x", oid "x"] })),
     ("well_formed_promise_listeners_unique",
        well_formed_promise_listeners_unique 0 (onePromise { P with listeners := ["u","u"] })),
     ("well_formed_promise_obligations_require_external",
-       well_formed_promise_obligations_require_external 0 (onePromise { P with tags := [], callbacks := ["x"] })),
+       well_formed_promise_obligations_require_external 0 (onePromise { P with tags := [], callbacks := [oid "x"] })),
     ("well_formed_promise_awaiter_is_not_self",
-       well_formed_promise_awaiter_is_not_self 0 (onePromise { P with callbacks := ["a"] })),
+       well_formed_promise_awaiter_is_not_self 0 (onePromise { P with callbacks := [oid "a"] })),
     ("well_formed_promise_created_at_lte_now",
        well_formed_promise_created_at_lte_now 5 (onePromise P)),
     ("well_formed_promise_settled_at_lte_now",
@@ -215,9 +215,9 @@ def mutants : List (String × Bool) :=
     ("well_formed_task_halted_is_cleared",
        well_formed_task_halted_is_cleared 0 (oneTask { T with state := .halted, pid := some "w" })),
     ("well_formed_task_suspended_has_no_resumes",
-       well_formed_task_suspended_has_no_resumes 0 (oneTask { T with state := .suspended, resumes := ["b"] })),
+       well_formed_task_suspended_has_no_resumes 0 (oneTask { T with state := .suspended, resumes := [oid "b"] })),
     ("well_formed_task_resumes_unique",
-       well_formed_task_resumes_unique 0 (oneTask { T with resumes := ["b","b"] })),
+       well_formed_task_resumes_unique 0 (oneTask { T with resumes := [oid "b", oid "b"] })),
     ("well_formed_schedule_promise_tags_not_timer_targeted",
        well_formed_schedule_promise_tags_not_timer_targeted 0 (oneSchedule { C with promiseTags := [("resonate:timer","true"), ("resonate:target","w")] })),
     ("well_formed_schedule_created_at_lte_next_run_at",
@@ -247,31 +247,31 @@ def mutants : List (String × Bool) :=
        consistent_settled_promise_has_fulfilled_task 0
          (obj { P with state := .resolved, settledAt := some 20 } (some T))),
     ("consistent_callback_awaiter_is_targeted",
-       consistent_callback_awaiter_is_targeted 0 (obj { P with callbacks := ["z"] } none)),
+       consistent_callback_awaiter_is_targeted 0 (obj { P with callbacks := [oid "z"] } none)),
     ("consistent_listener_addresses_deliverable",
        consistent_listener_addresses_deliverable 0
          (obj { P with listeners := ["not-an-address"] } none)),
     ("consistent_outbox_execute_names_existing_task",
-       consistent_outbox_execute_names_existing_task 0 { outbox := [{ address := "w", message := .execute "ghost" 0 }] }),
+       consistent_outbox_execute_names_existing_task 0 { outbox := [{ address := "w", message := .execute (oid "ghost") 0 }] }),
     ("consistent_outbox_never_ahead",
        consistent_outbox_never_ahead 0
-         { objects := [{ id := "a", promise := carrier, task := some T }],
-           outbox := [{ address := "w", message := .execute "a" 9 }] }),
+         { objects := [{ id := oid "a", promise := carrier, task := some T }],
+           outbox := [{ address := "w", message := .execute (oid "a") 9 }] }),
     ("consistent_outbox_execute_address_is_target_tag",
        consistent_outbox_execute_address_is_target_tag 0
-         { objects := [{ id := "a", promise := { P with tags := [("resonate:target","w")] } }],
-           outbox := [{ address := "wrong", message := .execute "a" 0 }] }),
+         { objects := [{ id := oid "a", promise := { P with tags := [("resonate:target","w")] } }],
+           outbox := [{ address := "wrong", message := .execute (oid "a") 0 }] }),
     ("consistent_outbox_unblock_names_settled_promise",
        consistent_outbox_unblock_names_settled_promise 0
-         { objects := [{ id := "a", promise := P }],
-           outbox := [{ address := "https://l", message := .unblock (P.toRecord "a") }] }),
+         { objects := [{ id := oid "a", promise := P }],
+           outbox := [{ address := "https://l", message := .unblock (P.toRecord (oid "a")) }] }),
     ("consistent_outbox_unblock_address_deliverable",
        consistent_outbox_unblock_address_deliverable 0
-         { objects := [{ id := "a", promise := { P with state := .resolved, settledAt := some 20 } }],
+         { objects := [{ id := oid "a", promise := { P with state := .resolved, settledAt := some 20 } }],
            outbox := [{ address := "nope",
                         message := .unblock
                           (({ P with state := .resolved, settledAt := some 20 }
-                              : AbstractModel.PromiseObject).toRecord "a") }] }),
+                              : AbstractModel.PromiseObject).toRecord (oid "a")) }] }),
     ("consistent_settled_task_promise_settled",
        consistent_settled_task_promise_settled 0
          (obj P (some { T with state := .fulfilled, retryTimeoutAt := none }))),
@@ -280,11 +280,11 @@ def mutants : List (String × Bool) :=
          (obj P (some { T with state := .suspended, retryTimeoutAt := none }))),
     ("well_formed_store_object_ids_unique",
        well_formed_store_object_ids_unique 0
-         { objects := [{ id := "a", promise := P }, { id := "a", promise := P }] }),
+         { objects := [{ id := oid "a", promise := P }, { id := oid "a", promise := P }] }),
     ("well_formed_store_schedule_ids_unique",
        well_formed_store_schedule_ids_unique 0 { schedules := [C, C] }),
     ("well_formed_store_outbox_keys_unique",
-       well_formed_store_outbox_keys_unique 0 { outbox := [{ address := "w", message := .execute "a" 1 }, { address := "w", message := .execute "a" 2 }] }) ]
+       well_formed_store_outbox_keys_unique 0 { outbox := [{ address := "w", message := .execute (oid "a") 1 }, { address := "w", message := .execute (oid "a") 2 }] }) ]
 
 /-- Every catalogue entry rejects its violator. A property that cannot
     fail is not a property. -/
@@ -376,7 +376,7 @@ open AbstractModel.Properties (well_formed_task_ttl_positive
 /-- `ttl = 0` is accepted: the task is acquired with `leaseTimeoutAt = now`,
     a lease already expired at the instant it was granted. -/
 def wGapTtlZero : List (Step × Nat) :=
-  [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
+  [ (.api (.taskCreate { pid := "p", ttl := 0, action := { id := oid "x", timeoutAt := 9000, param := {}, tags := tgtTags } }), 100) ]
 
 theorem gap_task_ttl_positive_is_violable :
     (trace wGapTtlZero).any (fun (n, s) => !well_formed_task_ttl_positive n s) = true := by decide
@@ -386,8 +386,8 @@ theorem gap_task_ttl_positive_is_violable :
 def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
 def wGapEmptyTarget : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
-    (.taskRetryTimeout "y", 110) ]
+  [ (.api (.promiseCreate { id := oid "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
+    (.taskRetryTimeout (oid "y"), 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
     (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide
@@ -408,7 +408,7 @@ theorem gap_empty_target_reaches_the_outbox :
 def lateDelayTags : ServerModel.Tags := [("resonate:target", "w"), ("resonate:delay", "5000")]
 
 def wGapLateDelay : List (Step × Nat) :=
-  [ (.api (.promiseCreate { id := "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
+  [ (.api (.promiseCreate { id := oid "z", timeoutAt := 200, param := {}, tags := lateDelayTags }), 100) ]
 
 theorem gap_promise_delay_before_deadline_is_violable :
     (trace wGapLateDelay).any (fun (n, s) => !well_formed_promise_delay_before_deadline n s) = true := by decide

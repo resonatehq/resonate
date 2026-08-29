@@ -57,6 +57,43 @@ namespace TraceCheck
 
 open ServerModel AbstractModel Abstraction Equivalence
 
+/-! ## Ids on the wire
+
+The specification never turns an `Ident` into a string — inside it, an id
+is a pair, and the only question asked of its halves is whether two ids
+share an origin. The checker is the edge, so the rendering lives here:
+`origin:suffix`, with exactly one colon, and a bare origin when the
+suffix is empty. `parse` is its inverse, structurally recursive over
+`toList` in the house style so nothing here is opaque to the kernel. -/
+
+def _root_.ServerModel.Ident.render (i : ServerModel.Ident) : String :=
+  if i.suffix.isEmpty then i.origin else i.origin ++ ":" ++ i.suffix
+
+private def splitColon : List Char → List Char × List Char
+  | []          => ([], [])
+  | ':' :: rest => ([], rest)
+  | c :: cs     => let (o, r) := splitColon cs; (c :: o, r)
+
+/-- An id with no colon is its own origin, which is what makes `parse`
+    the inverse of `render` on every id `render` can produce. -/
+def _root_.ServerModel.Ident.parse (s : String) : ServerModel.Ident :=
+  let (o, r) := splitColon s.toList
+  { origin := o.asString, suffix := r.asString }
+
+instance : ToString ServerModel.Ident := ⟨ServerModel.Ident.render⟩
+
+/-- Fixture ids. The hand-written scripts in this tree -- the battery,
+    the instants sweep, the transcribed trace -- all live in one origin,
+    because the same-origin door refuses an awaits-edge that leaves it.
+    They name the suffix and let this supply the origin. -/
+def oid (suffix : String) : ServerModel.Ident := { origin := "o", suffix }
+
+/-- The outbox key is a sum now, so canonicalisation needs a string for
+    it too — only to order the list, never to decide equality. -/
+def _root_.ServerModel.OutboxKey.render : ServerModel.OutboxKey → String
+  | .execute id       => "execute " ++ id.render
+  | .notify id addr   => "notify " ++ id.render ++ " " ++ addr
+
 /-! ## Canonicalisation -/
 
 private def insertBy {α} (key : α → String) (x : α) : List α → List α
@@ -73,15 +110,15 @@ private def pad (n : Nat) : String :=
 
 def canon (s : ServerState) : ServerState :=
   { s with
-      objects          := sortBy (·.id) s.objects |>.map fun o =>
+      objects          := sortBy (·.id.render) s.objects |>.map fun o =>
                             { o with
                                 promise := { o.promise with
-                                             callbacks := sortBy id o.promise.callbacks
+                                             callbacks := sortBy ServerModel.Ident.render o.promise.callbacks
                                              listeners := sortBy id o.promise.listeners }
                                 task := o.task.map fun t =>
-                                          { t with resumes := sortBy id t.resumes } }
-      schedules        := sortBy (·.id) s.schedules
-      outbox           := sortBy (·.key) s.outbox }
+                                          { t with resumes := sortBy ServerModel.Ident.render t.resumes } }
+      schedules        := sortBy (·.id.render) s.schedules
+      outbox           := sortBy (ServerModel.OutboxKey.render ·.key) s.outbox }
 
 /-! ## Internal steps, as their own type
 
@@ -97,12 +134,12 @@ disappears, and every function over internal steps is an exhaustive match. Addin
 constructor here breaks `affects` until someone says what it reaches. -/
 
 inductive InternalStep
-  | promiseTimeout   (id : String)
-  | listener         (id address : String)
-  | callback         (id awaiter : String)
-  | taskLeaseTimeout (id : String)
-  | taskRetryTimeout (id : String)
-  | scheduleTimeout  (id : String)
+  | promiseTimeout   (id : Ident)
+  | listener         (id : Ident) (address : String)
+  | callback         (id awaiter : Ident)
+  | taskLeaseTimeout (id : Ident)
+  | taskRetryTimeout (id : Ident)
+  | scheduleTimeout  (id : Ident)
   deriving Repr, DecidableEq
 
 /-- Six now, not five, and the shapes changed. The concrete machine
@@ -208,27 +245,43 @@ where firing it earlier would have emitted an execute. If a snapshot
 channel is ever added, `touches` must widen to cover everything the
 snapshot observes, or the reduction becomes unsound for it. -/
 
-def touches : Request → List String
-  | .promiseGet r              => [r.id]
-  | .promiseCreate r           => [r.id]
-  | .promiseSettle r           => [r.id]
-  | .promiseRegisterCallback r => [r.awaited, r.awaiter]
-  | .promiseRegisterListener r => [r.awaited]
+/-- What a request reads, or an internal step reaches.
+
+    These were strings: a schedule was folded into the same list under a
+    `"sched:"` prefix, and the wildcard was the literal `"*"`. Both were
+    encodings that a sufficiently unlucky id could spell. They are
+    constructors now, so a schedule can never be mistaken for the
+    promise of the same name, and `all` is not a value any id can
+    take. -/
+inductive Reach
+  | obj      (id : Ident)
+  | schedule (id : Ident)
+  | all
+  deriving Repr, DecidableEq
+
+instance : BEq Reach := instBEqOfDecidableEq
+
+def touches : Request → List Reach
+  | .promiseGet r              => [.obj r.id]
+  | .promiseCreate r           => [.obj r.id]
+  | .promiseSettle r           => [.obj r.id]
+  | .promiseRegisterCallback r => [.obj r.awaited, .obj r.awaiter]
+  | .promiseRegisterListener r => [.obj r.awaited]
   | .promiseSearch _           => []
-  | .scheduleGet r             => ["sched:" ++ r.id]
-  | .scheduleCreate r          => ["sched:" ++ r.id, r.promiseId]
-  | .scheduleDelete r          => ["sched:" ++ r.id]
+  | .scheduleGet r             => [.schedule r.id]
+  | .scheduleCreate r          => [.schedule r.id, .obj r.promiseId]
+  | .scheduleDelete r          => [.schedule r.id]
   | .scheduleSearch _          => []
-  | .taskGet r                 => [r.id]
-  | .taskCreate r              => [r.action.id]
-  | .taskAcquire r             => [r.id]
-  | .taskFence r               => [r.id, r.action.targetId]
-  | .taskHeartbeat r           => r.tasks.map (·.id)
-  | .taskSuspend r             => r.id :: r.actions.map (·.awaited)
-  | .taskFulfill r             => [r.id]
-  | .taskRelease r             => [r.id]
-  | .taskHalt r                => [r.id]
-  | .taskContinue r            => [r.id]
+  | .taskGet r                 => [.obj r.id]
+  | .taskCreate r              => [.obj r.action.id]
+  | .taskAcquire r             => [.obj r.id]
+  | .taskFence r               => [.obj r.id, .obj r.action.targetId]
+  | .taskHeartbeat r           => r.tasks.map (.obj ·.id)
+  | .taskSuspend r             => .obj r.id :: r.actions.map (.obj ·.awaited)
+  | .taskFulfill r             => [.obj r.id]
+  | .taskRelease r             => [.obj r.id]
+  | .taskHalt r                => [.obj r.id]
+  | .taskContinue r            => [.obj r.id]
   | .taskSearch _              => []
 
 /-- What firing this internal step can AFFECT, which is not the same as the object it
@@ -240,17 +293,18 @@ def touches : Request → List String
     trace REFUTED.
 
     Schedule timeouts create promises whose ids come from `expand`, so
-    there is no cheap bound on what they reach: they are marked `"*"` and
+    there is no cheap bound on what they reach: they are marked `.all` and
     treated as always relevant. Conservative, and schedules are rare in a
     trace. -/
-def affects (s : ServerState) : InternalStep → List String
+def affects (s : ServerState) : InternalStep → List Reach
   | .promiseTimeout id =>
-      id :: ((s.objects.filter (·.id == id)).flatMap (·.promise.callbacks))
-  | .listener id _         => [id]
-  | .callback id awaiter   => [id, awaiter]
-  | .taskLeaseTimeout id   => [id]
-  | .taskRetryTimeout id   => [id]
-  | .scheduleTimeout _     => ["*"]
+      .obj id :: ((s.objects.filter (·.id == id)).flatMap
+                    (·.promise.callbacks.map (.obj ·)))
+  | .listener id _         => [.obj id]
+  | .callback id awaiter   => [.obj id, .obj awaiter]
+  | .taskLeaseTimeout id   => [.obj id]
+  | .taskRetryTimeout id   => [.obj id]
+  | .scheduleTimeout _     => [.all]
 
 /-- The internal steps that could bear on this request — the CONE, closed
     transitively. Start from what the request reads; repeatedly pull in
@@ -260,13 +314,13 @@ def affects (s : ServerState) : InternalStep → List String
     set already mentions `x`. -/
 partial def relevantInternalSteps (req : Request) (s : ServerState) (now : Nat) : List InternalStep :=
   let enabled := enabledInternalSteps s now
-  let rec grow (fuel : Nat) (want : List String) : List String :=
+  let rec grow (fuel : Nat) (want : List Reach) : List Reach :=
     match fuel with
     | 0 => want
     | fuel + 1 =>
       let hit := enabled.filter fun t =>
         let a := affects s t
-        a.contains "*" || a.any (want.contains ·)
+        a.contains .all || a.any (want.contains ·)
       let want' := hit.foldl (init := want) fun acc t =>
         (affects s t).foldl (init := acc) fun acc' o =>
           if acc'.contains o then acc' else acc' ++ [o]
@@ -274,7 +328,7 @@ partial def relevantInternalSteps (req : Request) (s : ServerState) (now : Nat) 
   let want := grow 32 (touches req)
   enabled.filter fun t =>
     let a := affects s t
-    a.contains "*" || a.any (want.contains ·)
+    a.contains .all || a.any (want.contains ·)
 
 /-- A candidate: a state the machine could be in, the internal steps that
     would have taken it there, and the canonical form CACHED. The cache

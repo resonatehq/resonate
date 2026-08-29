@@ -162,6 +162,7 @@ end Equivalence
 namespace Abstraction
 
 open Equivalence
+open ServerModel (Ident)
 
 /-- One step of a run. `api` is a client request; the six named for what
     they do are the steps the server takes on its own initiative; `idle`
@@ -177,12 +178,12 @@ open Equivalence
     existed to translate between the two vocabularies. -/
 inductive Step
   | api              (rq : Request)
-  | promiseTimeout   (id : String)
-  | listener         (id address : String)
-  | callback         (id awaiter : String)
-  | taskLeaseTimeout (id : String)
-  | taskRetryTimeout (id : String)
-  | scheduleTimeout  (id : String)
+  | promiseTimeout   (id : Ident)
+  | listener         (id : Ident) (address : String)
+  | callback         (id awaiter : Ident)
+  | taskLeaseTimeout (id : Ident)
+  | taskRetryTimeout (id : Ident)
+  | scheduleTimeout  (id : Ident)
   | idle
   deriving Repr
 

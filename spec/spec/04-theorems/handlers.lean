@@ -151,6 +151,7 @@ theorem writesGood_promiseRegisterCallback
     WritesGood g e (promiseRegisterCallback req now) := by
   unfold promiseRegisterCallback
   wg_guard
+  wg_guard
   refine writesGood_afterReadObjectP hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro pa hpa _ hsto
@@ -254,6 +255,7 @@ theorem writesGood_taskFence (req : ServerModel.TaskFenceReq) (now : Nat) :
     WritesGood g e (taskFence req now) := by
   unfold taskFence
   wg_guard
+  wg_guard
   refine writesGood_afterReadTaskObject hq hs _ _ _ (writesGood_pure _ _ _) ?_
   intro p hp _ _
   dsimp only
@@ -312,7 +314,7 @@ theorem writesGood_checkAwaited (now : Nat) :
         wg_trivial
 
 /-- The one list recursion that writes a promise per element. -/
-theorem writesGood_registerAwaited (awaiter : String) (now : Nat) :
+theorem writesGood_registerAwaited (awaiter : ServerModel.Ident) (now : Nat) :
     ∀ acts, WritesGood g e (registerAwaited awaiter now acts)
   | [] => by rw [registerAwaited]; exact writesGood_pure _ _ _
   | a :: rest => by
@@ -330,6 +332,7 @@ theorem writesGood_registerAwaited (awaiter : String) (now : Nat) :
 theorem writesGood_taskSuspend (req : ServerModel.TaskSuspendReq) (now : Nat) :
     WritesGood g e (taskSuspend req now) := by
   unfold taskSuspend
+  wg_guard
   wg_guard
   wg_guard
   wg_guard
@@ -462,14 +465,14 @@ These read through `withMat`, so they take the `withMat` combinators.
 the difference is invisible to this argument — which is the formal
 content of "the read discipline is not a protocol decision". -/
 
-theorem writesGood_processPromiseTimeout (id : String) (now : Nat) :
+theorem writesGood_processPromiseTimeout (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processPromiseTimeout id now) := by
   unfold Internal.processPromiseTimeout touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro p hp _ _; exact writesGood_pure _ _ _
 
-theorem writesGood_processListener (id : String) (address : String) (now : Nat) :
+theorem writesGood_processListener (id : ServerModel.Ident) (address : String) (now : Nat) :
     WritesGood g e (Internal.processListener id address now) := by
   unfold Internal.processListener touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
@@ -482,7 +485,7 @@ theorem writesGood_processListener (id : String) (address : String) (now : Nat) 
       (writesGood_setPromise _ _ _ _ (hq.dropListener _ p.promise _ hsto (by simpa using hns) hp))
       (writesGood_setMessage _ _ _ _)
 
-theorem writesGood_resumeOne (awaited awaiter : String) (now : Nat) :
+theorem writesGood_resumeOne (awaited awaiter : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.resumeOne awaited awaiter now) := by
   unfold Internal.resumeOne touchTaskObject
   refine writesGood_afterMatReadTaskObject hq true hs _ _ _
@@ -504,7 +507,7 @@ theorem writesGood_resumeOne (awaited awaiter : String) (now : Nat) :
            exact writesGood_setTask _ _ _ _
              (hq.tAddResume t _ (by simp [hst]) (by simp [hst]) (by simpa using hc) ht))
 
-theorem writesGood_processCallback (id : String) (awaiter : String) (now : Nat) :
+theorem writesGood_processCallback (id : ServerModel.Ident) (awaiter : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processCallback id awaiter now) := by
   unfold Internal.processCallback touchObject
   refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
@@ -517,7 +520,7 @@ theorem writesGood_processCallback (id : String) (awaiter : String) (now : Nat) 
       (writesGood_setPromise _ _ _ _ (hq.dropCallback _ p.promise _ hsto (by simpa using hns) hp))
       (writesGood_resumeOne hq hs _ _ _)
 
-theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
+theorem writesGood_processLeaseTimeout (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processLeaseTimeout id now) := by
   unfold Internal.processLeaseTimeout viewTaskObject
   refine writesGood_afterMatReadTaskObject hq false hs _ _ _
@@ -534,7 +537,7 @@ theorem writesGood_processLeaseTimeout (id : String) (now : Nat) :
       refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
       exact writesGood_setTask _ _ _ _ (hq.tRepend t _ hgt)
 
-theorem writesGood_processRetryTimeout (id : String) (now : Nat) :
+theorem writesGood_processRetryTimeout (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processRetryTimeout id now) := by
   unfold Internal.processRetryTimeout viewTaskObject
   refine writesGood_afterMatReadTaskObject hq false hs _ _ _
@@ -567,7 +570,7 @@ theorem writesGood_fireAll (c : ServerModel.Schedule) :
       exact writesGood_bind' _ _ _ _ (writesGood_fireOccurrence hq hs c t)
         (writesGood_fireAll c ts)
 
-theorem writesGood_processSchedule (id : String) (now : Nat) :
+theorem writesGood_processSchedule (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processSchedule id now) := by
   unfold Internal.processSchedule
   refine writesGood_bind' _ _ _ _ (writesGood_getSchedule _ _ _) ?_

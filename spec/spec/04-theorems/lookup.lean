@@ -188,7 +188,7 @@ theorem view_absorb (t : TaskObject) (p : PromiseObject) {n n' : Nat} (h : n ≤
 
 /-! ### 2. Keyed-list lemmas -/
 
-theorem find?_filter_ne {α} (idOf : α → String) (a b : String) (l : List α)
+theorem find?_filter_ne {α κ} [BEq κ] [LawfulBEq κ] (idOf : α → κ) (a b : κ) (l : List α)
     (h : (a == b) = false) :
     (l.filter (fun y => idOf y != a)).find? (fun y => idOf y == b)
       = l.find? (fun y => idOf y == b) := by
@@ -207,7 +207,7 @@ theorem find?_filter_ne {α} (idOf : α → String) (a b : String) (l : List α)
         · simp [hxb]
 
 /-- Lookup through the keyed upsert used by every setter. -/
-theorem find?_upsert {α} (idOf : α → String) (x : α) (l : List α) (b : String) :
+theorem find?_upsert {α κ} [BEq κ] [LawfulBEq κ] (idOf : α → κ) (x : α) (l : List α) (b : κ) :
     ((x :: l.filter (fun y => idOf y != idOf x)).find? (fun y => idOf y == b))
       = if (idOf x == b) = true then some x
         else l.find? (fun y => idOf y == b) := by
@@ -226,7 +226,7 @@ theorem find?_upsert {α} (idOf : α → String) (x : α) (l : List α) (b : Str
 /-! ### 3. The invariant and its monotonicity -/
 
 /-- Projected-promise lookup. -/
-def pLook (n : Nat) (s : ServerState) (id : String) : Option PromiseObject :=
+def pLook (n : Nat) (s : ServerState) (id : ServerModel.Ident) : Option PromiseObject :=
   (s.promise? id).map (·.project n)
 
 /-- Fact T as an `Option`-level combinator — named so that statements
@@ -237,10 +237,10 @@ def applyView (t : TaskObject) : Option PromiseObject → TaskObject
 
 /-- Viewed-task lookup — defined THROUGH `pLook`, so that anything
     preserving `pLook` and the raw task find preserves it. -/
-def tLook (n : Nat) (s : ServerState) (id : String) : Option TaskObject :=
+def tLook (n : Nat) (s : ServerState) (id : ServerModel.Ident) : Option TaskObject :=
   (s.task? id).map fun t => applyView t (pLook n s id)
 
-def sLook (s : ServerState) (id : String) : Option ServerModel.Schedule :=
+def sLook (s : ServerState) (id : ServerModel.Ident) : Option ServerModel.Schedule :=
   s.schedules.find? (·.id == id)
 
 /-- THE INVARIANT: agreement on every lookup through the view. -/
@@ -262,14 +262,14 @@ theorem REq.trans {n : Nat} {a b c : ServerState}
   ⟨fun id => (h1.1 id).trans (h2.1 id), fun id => (h1.2.1 id).trans (h2.2.1 id),
    fun id => (h1.2.2 id).trans (h2.2.2 id)⟩
 
-theorem pLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : String) :
+theorem pLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : ServerModel.Ident) :
     pLook n' s id = (pLook n s id).map (·.project n') := by
   unfold pLook
   cases s.promise? id with
   | none => rfl
   | some p => simp [Option.map, project_absorb p h]
 
-theorem tLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : String) :
+theorem tLook_mono {n n' : Nat} (h : n ≤ n') (s : ServerState) (id : ServerModel.Ident) :
     tLook n' s id = (tLook n s id).map fun tv => applyView tv (pLook n' s id) := by
   unfold tLook
   cases hf : s.task? id with

@@ -80,7 +80,7 @@ structure HRel (R : PromiseObject → PromiseObject → Bool)
     (Rf : PromiseObject → Bool) : Prop where
   refl         : ∀ p, R p p = true
   project      : ∀ p₀ p (n : Nat), R p₀ p = true → R p₀ (p.project n) = true
-  addCallback  : ∀ p₀ p (c : String), R p₀ p = true → R p₀ (p.addCallback c) = true
+  addCallback  : ∀ p₀ p (c : ServerModel.Ident), R p₀ p = true → R p₀ (p.addCallback c) = true
   addListener  : ∀ p₀ p (c : String), R p₀ p = true → R p₀ (p.addListener c) = true
   settle       : ∀ p₀ p (st : ServerModel.PromiseState) (v : ServerModel.Value) (t : Nat),
                    st.settable = true → p.state = .pending → t < p.timeoutAt →
@@ -88,7 +88,7 @@ structure HRel (R : PromiseObject → PromiseObject → Bool)
                    R p₀ { p with state := st, value := v, settledAt := some t } = true
   dropListener : ∀ p₀ p (c : String), p.state ≠ .pending → R p₀ p = true →
                    R p₀ { p with listeners := p.listeners.filter (· != c) } = true
-  dropCallback : ∀ p₀ p (c : String), p.state ≠ .pending → R p₀ p = true →
+  dropCallback : ∀ p₀ p (c : ServerModel.Ident), p.state ≠ .pending → R p₀ p = true →
                    R p₀ { p with callbacks := p.callbacks.filter (· != c) } = true
   freshLive    : ∀ (param : ServerModel.Value) (tags : ServerModel.Tags)
                    (timeoutAt createdAt : Nat), createdAt < timeoutAt →
@@ -101,11 +101,11 @@ structure HRel (R : PromiseObject → PromiseObject → Bool)
                         timeoutAt := timeoutAt, createdAt := timeoutAt,
                         settledAt := some timeoutAt } = true
 
-theorem promise?_none_of_find?_none {a : ServerState} {id : String}
+theorem promise?_none_of_find?_none {a : ServerState} {id : ServerModel.Ident}
     (h : a.objects.find? (·.id == id) = none) : a.promise? id = none := by
   unfold ServerState.promise?; rw [h]; rfl
 
-theorem find?_none_of_promise?_none {a : ServerState} {id : String}
+theorem find?_none_of_promise?_none {a : ServerState} {id : ServerModel.Ident}
     (h : a.promise? id = none) : a.objects.find? (·.id == id) = none := by
   unfold ServerState.promise? at h
   cases hfo : a.objects.find? (·.id == id) with
@@ -117,7 +117,7 @@ theorem find?_none_of_promise?_none {a : ServerState} {id : String}
     carries the id: the promise itself no longer knows where it is
     filed. -/
 def relPred (R : PromiseObject → PromiseObject → Bool) (Rf : PromiseObject → Bool)
-    (a : ServerState) (id : String) (x : PromiseObject) : Bool :=
+    (a : ServerState) (id : ServerModel.Ident) (x : PromiseObject) : Bool :=
   match a.promise? id with
   | none   => Rf x
   | some p => R p x
@@ -507,10 +507,10 @@ promise created during the step has an empty ledger, and nothing in the
 same step adds to it, because every add goes through a read and a read
 of a newborn returns nothing. -/
 
-theorem subsetOf_refl (xs : List String) : Properties.subsetOf xs xs = true :=
+theorem subsetOf_refl {α} [BEq α] [LawfulBEq α] (xs : List α) : Properties.subsetOf xs xs = true :=
   List.all_eq_true.mpr (fun z hz => by simpa using hz)
 
-theorem subsetOf_append (xs ys : List String) (c : String)
+theorem subsetOf_append {α} [BEq α] [LawfulBEq α] (xs ys : List α) (c : α)
     (h : Properties.subsetOf xs ys = true) :
     Properties.subsetOf xs (ys ++ [c]) = true := by
   refine List.all_eq_true.mpr (fun z hz => ?_)

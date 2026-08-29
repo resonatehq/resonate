@@ -78,6 +78,17 @@ The three tag shapes every corpus in this directory is built from. -/
 
 The three tag shapes every corpus in this directory is built from. -/
 
+/-- Fixture ids.
+
+    Every script in this directory lives in one origin. That is not
+    decoration: the same-origin door refuses an awaits-edge that leaves
+    its origin, so a script whose callback crossed origins would be
+    answering 400 at the registration rather than exercising the path it
+    was written for. Fixing the origin here lets each script name only
+    the suffix, and makes the single-origin assumption visible in one
+    place instead of implied in two hundred literals. -/
+def oid (suffix : String) : ServerModel.Ident := { origin := "o", suffix }
+
 def extTags   : ServerModel.Tags := [("resonate:external", "true")]
 def tgtTags   : ServerModel.Tags := [("resonate:target", "w1")]
 def timerTags : ServerModel.Tags := [("resonate:timer", "true")]
