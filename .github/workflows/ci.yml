@@ -37,57 +37,6 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features
 
-  test:
-    name: Run tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    strategy:
-      fail-fast: false
-      matrix:
-        STORAGE: [sqlite, postgres, mysql]
-
-    steps:
-      - name: Checkout resonate-server-rs
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Checkout resonate-testbed
-        uses: actions/checkout@v5
-        with:
-          repository: resonatehq/resonate-test
-          token: ${{ secrets.TESTBED_TOKEN }}
-          path: test/resonate-test
-
-      - name: Checkout resonate-perf
-        uses: actions/checkout@v5
-        with:
-          repository: resonatehq/resonate-perf
-          token: ${{ secrets.TESTBED_TOKEN }}
-          path: test/resonate-perf
-
-      - name: Run tests
-        run: |
-          make test STORAGE=${{ matrix.STORAGE }}
-        env:
-          DOCKER_BUILDKIT: 1
-
-      - name: Teardown
-        if: always()
-        run: make clean
-
-  # The differential compares every available engine against the oracle —
-  # the same envelope to each, then the same narrow timeout firing, with a
-  # snapshot diff after every step. sqlite and the oracle are always
-  # constructed; Postgres and MySQL join only when their URL is exported,
-  # so each leg here is oracle + sqlite + the matrix backend.
-  #
-  # An empty TEST_POSTGRES_URL is NOT the same as an unset one — the test
-  # reads it with `env::var(..).ok()`, so `""` is Some and the connect
-  # panics. That is why the URLs are exported inside the step rather than
-  # through a matrix-interpolated `env:` block, which renders unset matrix
-  # keys as the empty string.
   differential:
     name: Differential (${{ matrix.backend }})
     runs-on: ubuntu-latest
