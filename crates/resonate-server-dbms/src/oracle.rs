@@ -1,4 +1,10 @@
-use std::collections::{HashMap, HashSet};
+// BTreeMap/BTreeSet, not Hash*: every traversal of oracle state is ordered by
+// key. These maps back the differential's request generator and its `preload`
+// response, and `HashMap` iteration order is randomized per process — so a
+// seeded run did not reproduce a trajectory, and an unsorted `preload` differed
+// from the engines' `ORDER BY id ASC` at random. Ordering by construction
+// removes the class; a `.sort()` at each call site only removes the instance.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde_json::{json, Value};
 use validator::Validate;
@@ -35,8 +41,8 @@ struct Promise {
     timeout_at: i64,
     created_at: i64,
     settled_at: Option<i64>,
-    callbacks: HashSet<String>,
-    listeners: HashSet<String>,
+    callbacks: BTreeSet<String>,
+    listeners: BTreeSet<String>,
 }
 
 struct Task {
@@ -44,7 +50,7 @@ struct Task {
     version: i64,
     pid: Option<String>,
     ttl: Option<i64>,
-    resumes: HashSet<String>,
+    resumes: BTreeSet<String>,
 }
 
 struct Schedule {
@@ -80,9 +86,9 @@ struct STimeout {
 // ─── Oracle ───────────────────────────────────────────────────────────────────
 
 pub struct Oracle {
-    promises: HashMap<String, Promise>,
-    tasks: HashMap<String, Task>,
-    schedules: HashMap<String, Schedule>,
+    promises: BTreeMap<String, Promise>,
+    tasks: BTreeMap<String, Task>,
+    schedules: BTreeMap<String, Schedule>,
     p_timeouts: Vec<PTimeout>,
     t_timeouts: Vec<TTimeout>,
     s_timeouts: Vec<STimeout>,
@@ -121,9 +127,9 @@ impl Default for Oracle {
 impl Oracle {
     pub fn new() -> Self {
         Self {
-            promises: HashMap::new(),
-            tasks: HashMap::new(),
-            schedules: HashMap::new(),
+            promises: BTreeMap::new(),
+            tasks: BTreeMap::new(),
+            schedules: BTreeMap::new(),
             p_timeouts: Vec::new(),
             t_timeouts: Vec::new(),
             s_timeouts: Vec::new(),
@@ -382,8 +388,8 @@ impl Oracle {
             timeout_at: r.timeout_at,
             created_at,
             settled_at,
-            callbacks: HashSet::new(),
-            listeners: HashSet::new(),
+            callbacks: BTreeSet::new(),
+            listeners: BTreeSet::new(),
         };
         let record = Self::to_promise_record(now, &r.id, &promise);
         self.promises.insert(r.id.clone(), promise);
@@ -396,7 +402,7 @@ impl Oracle {
                         version: 0,
                         pid: None,
                         ttl: None,
-                        resumes: HashSet::new(),
+                        resumes: BTreeSet::new(),
                     },
                 );
             }
@@ -412,7 +418,7 @@ impl Oracle {
                         version: 0,
                         pid: None,
                         ttl: None,
-                        resumes: HashSet::new(),
+                        resumes: BTreeSet::new(),
                     },
                 );
                 let delay_at = r
@@ -782,7 +788,7 @@ impl Oracle {
                         t.version = new_version;
                         t.pid = Some(r.pid.clone());
                         t.ttl = Some(r.ttl);
-                        t.resumes = HashSet::new();
+                        t.resumes = BTreeSet::new();
                     }
                     self.del_t_timeout(&promise_id);
                     self.set_t_timeout(&promise_id, TTimeoutKind::Lease, now + r.ttl);
@@ -864,8 +870,8 @@ impl Oracle {
             timeout_at: action.timeout_at,
             created_at,
             settled_at,
-            callbacks: HashSet::new(),
-            listeners: HashSet::new(),
+            callbacks: BTreeSet::new(),
+            listeners: BTreeSet::new(),
         };
         let promise_record = Self::to_promise_record(now, &promise_id, &promise);
         self.promises.insert(promise_id.clone(), promise);
@@ -882,7 +888,7 @@ impl Oracle {
                 version: task_version,
                 pid: task_pid,
                 ttl: task_ttl,
-                resumes: HashSet::new(),
+                resumes: BTreeSet::new(),
             },
         );
         if !already_timedout {
@@ -955,7 +961,7 @@ impl Oracle {
             t.version = new_version;
             t.pid = Some(r.pid.clone());
             t.ttl = Some(r.ttl);
-            t.resumes = HashSet::new();
+            t.resumes = BTreeSet::new();
         }
         self.del_t_timeout(&r.id);
         self.set_t_timeout(&r.id, TTimeoutKind::Lease, now + r.ttl);
@@ -1164,7 +1170,7 @@ impl Oracle {
         });
         if has_settled {
             if let Some(t) = self.tasks.get_mut(&r.id) {
-                t.resumes = HashSet::new();
+                t.resumes = BTreeSet::new();
             }
             let preload = self.preload(&r.id);
             return ResponseEnvelope::new(
@@ -1183,7 +1189,7 @@ impl Oracle {
             t.state = TaskState::Suspended;
             t.pid = None;
             t.ttl = None;
-            t.resumes = HashSet::new();
+            t.resumes = BTreeSet::new();
         }
         self.del_t_timeout(&r.id);
         ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
@@ -1284,8 +1290,8 @@ impl Oracle {
                         timeout_at: create_data.timeout_at,
                         created_at,
                         settled_at,
-                        callbacks: HashSet::new(),
-                        listeners: HashSet::new(),
+                        callbacks: BTreeSet::new(),
+                        listeners: BTreeSet::new(),
                     };
                     let record = Self::to_promise_record(now, &create_data.id, &promise);
                     self.promises.insert(create_data.id.clone(), promise);
@@ -1298,7 +1304,7 @@ impl Oracle {
                                     version: 0,
                                     pid: None,
                                     ttl: None,
-                                    resumes: HashSet::new(),
+                                    resumes: BTreeSet::new(),
                                 },
                             );
                         }
@@ -1314,7 +1320,7 @@ impl Oracle {
                                     version: 0,
                                     pid: None,
                                     ttl: None,
-                                    resumes: HashSet::new(),
+                                    resumes: BTreeSet::new(),
                                 },
                             );
                             let delay_at = create_data
@@ -2066,8 +2072,8 @@ impl Oracle {
                         timeout_at,
                         created_at,
                         settled_at,
-                        callbacks: HashSet::new(),
-                        listeners: HashSet::new(),
+                        callbacks: BTreeSet::new(),
+                        listeners: BTreeSet::new(),
                     };
                     self.promises.insert(promise_id.clone(), promise);
                     if already_timedout {
@@ -2079,7 +2085,7 @@ impl Oracle {
                                     version: 0,
                                     pid: None,
                                     ttl: None,
-                                    resumes: HashSet::new(),
+                                    resumes: BTreeSet::new(),
                                 },
                             );
                         }
@@ -2095,7 +2101,7 @@ impl Oracle {
                                     version: 0,
                                     pid: None,
                                     ttl: None,
-                                    resumes: HashSet::new(),
+                                    resumes: BTreeSet::new(),
                                 },
                             );
                             self.set_t_timeout(
@@ -2162,7 +2168,7 @@ impl Oracle {
                 t.state = TaskState::Fulfilled;
                 t.pid = None;
                 t.ttl = None;
-                t.resumes = HashSet::new();
+                t.resumes = BTreeSet::new();
             }
             self.del_t_timeout(promise_id);
             // Remove this task from every promise's callbacks set.
@@ -2459,62 +2465,44 @@ impl Oracle {
 
     // ── Query methods for test generation ────────────────────────────────────
 
-    /// Sorted, like every accessor the generator draws from.
-    ///
-    /// These back the differential's request generator, and `promises` is a
-    /// `HashMap` — whose iteration order Rust randomizes per process. Returning
-    /// it unsorted made the generator pick a different promise on every run, so
-    /// the seeded `fastrand` did not in fact reproduce a trajectory: a failure
-    /// could not be re-run, and a pass said nothing about what a previous pass
-    /// had explored.
+    /// Id order is the map's, and the map is a `BTreeMap` — so every accessor
+    /// the differential's generator draws from is sorted, and the same seed
+    /// walks the same trajectory in every process.
     pub fn all_promise_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.promises.keys().cloned().collect();
-        ids.sort();
-        ids
+        self.promises.keys().cloned().collect()
     }
 
     pub fn pending_promise_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self
-            .promises
+        self.promises
             .iter()
             .filter(|(_, p)| p.state == PromiseState::Pending)
             .map(|(id, _)| id.clone())
-            .collect();
-        ids.sort();
-        ids
+            .collect()
     }
 
     /// Pending promises that may be awaited — see
     /// `resonate_core::types::is_external`. The generator needs these apart
     /// from `pending_promise_ids`, or every callback it plans is refused.
     pub fn external_pending_promise_ids(&self) -> Vec<String> {
-        let mut ids = self
-            .promises
+        self.promises
             .iter()
             .filter(|(_, p)| {
                 p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags)
             })
             .map(|(id, _)| id.clone())
-            .collect::<Vec<String>>();
-        ids.sort();
-        ids
+            .collect()
     }
 
     pub fn tasks_by_state(&self, state: TaskState) -> Vec<(String, i64)> {
-        let mut out: Vec<(String, i64)> = self
-            .tasks
+        self.tasks
             .iter()
             .filter(|(_, t)| t.state == state)
             .map(|(id, t)| (id.clone(), t.version))
-            .collect();
-        out.sort();
-        out
+            .collect()
     }
 
     pub fn schedule_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.schedules.keys().cloned().collect();
-        ids.sort();
-        ids
+        self.schedules.keys().cloned().collect()
     }
 
     pub fn has_tasks_in_state(&self, state: TaskState) -> bool {
@@ -2637,5 +2625,61 @@ impl ResonateEngine for SharedOracle {
 
     fn returns_messages(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod determinism {
+    use super::*;
+    use serde_json::json;
+
+    /// Every accessor the differential's generator draws from, and the
+    /// `preload` it puts in a response, must come back in a fixed order.
+    ///
+    /// This is what makes a seeded run reproducible. The generator plans from
+    /// the oracle, so an unordered traversal here chooses a different request
+    /// in every process — Rust randomizes `HashMap` iteration per process —
+    /// and the seed pins nothing: a failure cannot be re-run, and a pass says
+    /// nothing about what an earlier pass explored. `preload` is worse than
+    /// that: it goes into a response the differential compares elementwise
+    /// against three engines that all say `ORDER BY id ASC`.
+    ///
+    /// Ordering is structural — the state maps are `BTreeMap`/`BTreeSet` — so
+    /// this test fails the moment someone reaches for a `HashMap` again.
+    #[test]
+    fn what_the_generator_reads_is_ordered() {
+        let mut o = Oracle::new();
+        let branch = "o:root";
+        // Insert in an order that is neither sorted nor reverse-sorted, so a
+        // traversal that merely echoes insertion order fails too.
+        for id in ["o:root.m", "o:root.a", "o:root.z", "o:root.c"] {
+            let req = RequestEnvelope {
+                kind: "promise.create".to_string(),
+                head: RequestHead {
+                    corr_id: "t".to_string(),
+                    version: "2026-04-01".to_string(),
+                    auth: None,
+                    debug_time: None,
+                },
+                data: json!({
+                    "id": id,
+                    "timeoutAt": 9_000_000_000_000i64,
+                    "param": {},
+                    "tags": { "resonate:branch": branch },
+                }),
+            };
+            assert_eq!(o.apply(&req).head.status, 200, "create {id}");
+        }
+
+        let sorted = |v: &[String]| v.windows(2).all(|w| w[0] <= w[1]);
+        assert!(sorted(&o.all_promise_ids()), "all_promise_ids");
+        assert!(sorted(&o.pending_promise_ids()), "pending_promise_ids");
+
+        let preload: Vec<String> = o.preload("o:root.a").iter().map(|p| p.id.clone()).collect();
+        assert_eq!(
+            preload,
+            vec!["o:root.c", "o:root.m", "o:root.z"],
+            "preload must match the engines' ORDER BY id ASC"
+        );
     }
 }

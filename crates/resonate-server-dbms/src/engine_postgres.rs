@@ -3920,7 +3920,8 @@ impl PostgresDb<'_> {
         let rows = rt_block_on(
             sqlx::query(
                 "SELECT id, next_run_at FROM schedules
-                 WHERE next_run_at <= $1 AND ($2::text IS NULL OR id = $2)",
+                 WHERE next_run_at <= $1 AND ($2::text IS NULL OR id = $2)
+                 ORDER BY id",
             )
             .bind(time)
             .bind(only)

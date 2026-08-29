@@ -4058,7 +4058,8 @@ impl MysqlDb<'_> {
         let rows = rt_block_on(
             sqlx::query(
                 "SELECT id, next_run_at FROM schedules
-                 WHERE next_run_at <= ? AND (? IS NULL OR id = ?)",
+                 WHERE next_run_at <= ? AND (? IS NULL OR id = ?)
+                 ORDER BY id",
             )
             .bind(time)
             .bind(only)

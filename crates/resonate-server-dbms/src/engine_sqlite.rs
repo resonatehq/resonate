@@ -3451,7 +3451,8 @@ impl<'a> SqliteDb<'a> {
     ) -> StorageResult<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, next_run_at FROM schedules
-             WHERE next_run_at <= ?1 AND (?2 IS NULL OR id = ?2)",
+             WHERE next_run_at <= ?1 AND (?2 IS NULL OR id = ?2)
+             ORDER BY id",
         )?;
         let mut rows = stmt.query(params![time, only])?;
         let mut results = Vec::new();
