@@ -17,6 +17,7 @@ pub mod engine_mysql;
 pub mod engine_port;
 pub mod engine_postgres;
 pub mod engine_sqlite;
+pub mod migrate;
 pub mod oracle;
 
 use resonate_core::types::{PromiseRecord, TaskState};

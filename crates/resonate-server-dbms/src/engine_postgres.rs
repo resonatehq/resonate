@@ -60,8 +60,6 @@ pub struct PostgresEngine {
     debug: bool,
 }
 
-pub const CREATE_SCHEMA_SQL: &str = include_str!("../sql/schema-v0.sql");
-
 /// The promise columns every read projects. `param_headers`/`value_headers` are
 /// `NOT NULL DEFAULT '{}'` here (the catalogue's
 /// `well_formed_promise_pending_has_no_value` compares against `'{}'::jsonb`),
@@ -143,15 +141,23 @@ impl PostgresEngine {
         })
     }
 
-    /// Install the schema, constraints and all.
+    /// Migrate the schema, constraints and all.
     ///
-    /// There is one entry point because there is one schema. The constraints
-    /// are statements in the same file, so a database carrying the tables
-    /// carries the invariants too, and no configuration can start a server
-    /// that enforces fewer of them.
+    /// One entry point, because there is one schema and one mechanism. The
+    /// constraints are statements in the same migration, so a database
+    /// carrying the tables carries the invariants too, and no configuration
+    /// can start a server that enforces fewer of them. An error here stops
+    /// startup: a server whose schema did not migrate must not serve.
     pub async fn init(&self) -> Result<(), sqlx::Error> {
-        sqlx::raw_sql(CREATE_SCHEMA_SQL).execute(&self.pool).await?;
-        Ok(())
+        // The migrator's own bookkeeping table follows `search_path`, so the
+        // schema has to exist before it runs.
+        sqlx::raw_sql("CREATE SCHEMA IF NOT EXISTS resonate")
+            .execute(&self.pool)
+            .await?;
+        sqlx::migrate!("./migrations/postgres")
+            .run(&self.pool)
+            .await
+            .map_err(|e| sqlx::Error::Migrate(Box::new(e)))
     }
 
     /// Run one transition, and hand back what it emitted along with its result.
