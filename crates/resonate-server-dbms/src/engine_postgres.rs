@@ -61,7 +61,6 @@ pub struct PostgresEngine {
 }
 
 pub const CREATE_SCHEMA_SQL: &str = include_str!("../sql/single-table.sql");
-pub const CONSTRAINTS_SQL: &str = include_str!("../sql/single-table-constraints.sql");
 
 /// The promise columns every read projects. `param_headers`/`value_headers` are
 /// `NOT NULL DEFAULT '{}'` here (the catalogue's
@@ -144,21 +143,14 @@ impl PostgresEngine {
         })
     }
 
+    /// Install the schema, constraints and all.
+    ///
+    /// There is one entry point because there is one schema. The constraints
+    /// are statements in the same file, so a database carrying the tables
+    /// carries the invariants too, and no configuration can start a server
+    /// that enforces fewer of them.
     pub async fn init(&self) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(CREATE_SCHEMA_SQL).execute(&self.pool).await?;
-        Ok(())
-    }
-
-    /// Install the schema and then the constraint catalogue, so the database
-    /// enforces every representable entry of the specification.
-    ///
-    /// `skip` names constraints to leave off — the escape hatch for exploring
-    /// which catalogue entries the current server does not yet uphold: install
-    /// everything, see what fires, add it to `skip`, repeat.
-    pub async fn init_with_constraints(&self, skip: &[String]) -> Result<(), sqlx::Error> {
-        self.init().await?;
-        let sql = filter_constraints(CONSTRAINTS_SQL, skip);
-        sqlx::raw_sql(&sql).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -709,6 +701,15 @@ impl PostgresEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
+                        if !resonate_core::types::is_external(&promise.tags) {
+                            tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
+                            return Ok(ResponseEnvelope::error(
+                                kind_str.clone(),
+                                corr_id.clone(),
+                                422,
+                                "Awaited promise is not awaitable",
+                            ));
+                        }
                         tracing::info!(
                             awaited = %r.awaited,
                             address = %r.address,
@@ -2483,23 +2484,6 @@ fn fill(template: &str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-/// Drop every statement that mentions one of the named constraints, so the rest
-/// of the catalogue can still be installed. Statement-level, not line-level:
-/// the catalogue is one `DROP IF EXISTS` plus one `ADD` per constraint.
-fn filter_constraints(sql: &str, skip: &[String]) -> String {
-    if skip.is_empty() {
-        return sql.to_string();
-    }
-    sql.split(';')
-        .filter(|stmt| {
-            !skip
-                .iter()
-                .any(|name| stmt.contains(&format!("CONSTRAINT {}", name)))
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
 /// The half of the settlement cascade that lives on the settling row itself.
 ///
 /// Stands in for `fulfilled_task`, `deleted_ttimeout`, the awaiter-side
@@ -3043,11 +3027,14 @@ impl PostgresDb<'_> {
             WITH locked_promise AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
             ),
+            -- A listener is an obligation, and `external` is where the server
+            -- owes an observation. Refused by the caller with a 422, so nothing
+            -- is written for a promise that may not be awaited.
             linked AS (
               UPDATE promises p SET listeners = p.listeners || $2
               WHERE p.id = $1
                 AND NOT (p.listeners @> ARRAY[$2])
-                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending')
+                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND external)
               RETURNING p.id
             )
             SELECT {cols} FROM locked_promise",

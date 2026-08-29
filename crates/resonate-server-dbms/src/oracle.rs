@@ -621,7 +621,19 @@ impl Oracle {
                     "Awaited promise not found",
                 )
             }
-            Some(p) => p.state == PromiseState::Pending,
+            Some(p) => {
+                // A listener is an obligation, and the server owes an
+                // observation only where someone can be blocked.
+                if !resonate_core::types::is_external(&p.tags) {
+                    return ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        422,
+                        "Awaited promise is not awaitable",
+                    );
+                }
+                p.state == PromiseState::Pending
+            }
         };
         if is_pending {
             if let Some(p) = self.promises.get_mut(&r.awaited) {

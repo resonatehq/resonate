@@ -726,6 +726,15 @@ impl MysqlEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
+                        if !resonate_core::types::is_external(&promise.tags) {
+                            tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
+                            return Ok(ResponseEnvelope::error(
+                                kind_str.clone(),
+                                corr_id.clone(),
+                                422,
+                                "Awaited promise is not awaitable",
+                            ));
+                        }
                         tracing::info!(
                             awaited = %r.awaited,
                             address = %r.address,
@@ -3039,14 +3048,24 @@ impl MysqlDb<'_> {
         address: &str,
     ) -> StorageResult<Option<PromiseRecord>> {
         let row = rt_block_on(
-            sqlx::query("SELECT id, state FROM promises WHERE id = ? FOR UPDATE")
+            sqlx::query("SELECT id, state, tags FROM promises WHERE id = ? FOR UPDATE")
                 .bind(awaited_id)
                 .fetch_optional(self.tx().as_mut()),
         )?;
 
         let promise_state: Option<String> = row.as_ref().map(|r| r.get("state"));
+        // A listener is an obligation, and the server owes an observation only
+        // where someone can be blocked. Refused by the caller with a 422, so
+        // nothing is written here.
+        let awaitable = row.as_ref().is_some_and(|r| {
+            serde_json::from_str::<std::collections::HashMap<String, String>>(
+                &r.get::<String, _>("tags"),
+            )
+            .map(|t| resonate_core::types::is_external(&t))
+            .unwrap_or(false)
+        });
 
-        if promise_state.as_deref() == Some("pending") {
+        if promise_state.as_deref() == Some("pending") && awaitable {
             rt_block_on(
                 sqlx::query("INSERT IGNORE INTO listeners (promise_id, address) VALUES (?, ?)")
                     .bind(awaited_id)

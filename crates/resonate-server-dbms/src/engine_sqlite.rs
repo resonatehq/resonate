@@ -689,6 +689,15 @@ impl SqliteEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
+                        if !resonate_core::types::is_external(&promise.tags) {
+                            tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
+                            return Ok(ResponseEnvelope::error(
+                                kind_str.clone(),
+                                corr_id.clone(),
+                                422,
+                                "Awaited promise is not awaitable",
+                            ));
+                        }
                         tracing::info!(
                             awaited = %r.awaited,
                             address = %r.address,
@@ -2748,7 +2757,10 @@ impl<'a> SqliteDb<'a> {
     ) -> StorageResult<Option<PromiseRecord>> {
         let promise = self.promise_get(awaited_id)?;
         if let Some(ref p) = promise {
-            if p.state == PromiseState::Pending {
+            // A listener is an obligation, and the server owes an observation
+            // only where someone can be blocked. Refused by the caller with a
+            // 422, so nothing is written here.
+            if p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags) {
                 self.conn.execute(
                     "INSERT OR IGNORE INTO listeners (promise_id, address) VALUES (?1, ?2)",
                     params![awaited_id, address],
