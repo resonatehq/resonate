@@ -17,9 +17,9 @@ hypotheses: the implementation is wrong, or the property is. With it,
 the failure is a bug report, and the catalogue is portable.
 
 Still `sorry`. What backs it today is two things at different strengths.
-`holds.lean` proves 31 of the 94 entries outright — every `Valid` trace
+`holds.lean` proves 31 of the 92 entries outright — every `Valid` trace
 from `init`, every schedule, every length, both read disciplines.
-The remaining 63 are backed by `properties-check.lean` and
+The remaining 61 are backed by `properties-check.lean` and
 `properties-step.lean`: 1 464 scripts, both readings, `decide` at build
 time, which `bounded.lean` shows is this same statement with both
 quantifiers made finite.

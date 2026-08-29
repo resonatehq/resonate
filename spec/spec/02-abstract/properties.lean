@@ -89,7 +89,6 @@ Every 400 in the machine, and the property that shadows it:
     promise.settle      state = pending       well_formed_promise_settled_at_iff_not_pending
     promise.settle      state = timedout      well_formed_promise_timedout_is_server_owned
     promise.callback    awaited = awaiter     well_formed_promise_awaiter_is_not_self
-    promise.listener    undeliverable addr    consistent_listener_addresses_deliverable
     task.create         untargeted / timer    consistent_task_iff_kind_task
     task.suspend        no actions            consistent_suspended_task_holds_rung
     task.suspend        self-await            well_formed_promise_awaiter_is_not_self
@@ -386,9 +385,6 @@ def consistent_callback_awaiter_is_targeted (_now : Nat) (s : ServerState) : Boo
     p.callbacks.all fun a =>
       s.objects.any (fun q => q.id == a && q.promise.otype == .runnable)
 
-def consistent_listener_addresses_deliverable (_now : Nat) (s : ServerState) : Bool :=
-  s.promises.all fun p => p.listeners.all addressValid
-
 def consistent_outbox_execute_names_existing_task (_now : Nat) (s : ServerState) : Bool :=
   s.outbox.all fun e =>
     match e.message with
@@ -419,12 +415,6 @@ def consistent_outbox_unblock_names_settled_promise (_now : Nat) (s : ServerStat
     | .unblock r =>
         r.state != .pending
           && s.objects.any (fun o => o.id == r.id && o.promise.state != .pending)
-    | .execute _ _ => true
-
-def consistent_outbox_unblock_address_deliverable (_now : Nat) (s : ServerState) : Bool :=
-  s.outbox.all fun e =>
-    match e.message with
-    | .unblock _   => addressValid e.address
     | .execute _ _ => true
 
 /-- Both of these used to look their promise up and let a MISSING one
@@ -1185,8 +1175,6 @@ def catalogue : List Named :=
       , property := .state consistent_settled_promise_has_fulfilled_task },
     { name := "consistent_callback_awaiter_is_targeted"
       , property := .state consistent_callback_awaiter_is_targeted },
-    { name := "consistent_listener_addresses_deliverable"
-      , property := .state consistent_listener_addresses_deliverable },
     { name := "consistent_outbox_execute_names_existing_task"
       , property := .state consistent_outbox_execute_names_existing_task },
     { name := "consistent_outbox_never_ahead"
@@ -1195,8 +1183,6 @@ def catalogue : List Named :=
       , property := .state consistent_outbox_execute_address_is_target_tag },
     { name := "consistent_outbox_unblock_names_settled_promise"
       , property := .state consistent_outbox_unblock_names_settled_promise },
-    { name := "consistent_outbox_unblock_address_deliverable"
-      , property := .state consistent_outbox_unblock_address_deliverable },
     { name := "consistent_settled_task_promise_settled"
       , property := .state consistent_settled_task_promise_settled },
     { name := "consistent_suspended_task_holds_rung"
@@ -1360,9 +1346,9 @@ property must be shown FALSIFIABLE — that a violator exists and is
 rejected. A gap must be shown REACHED — that this machine actually
 produces a state the constraint forbids. A gap with no witness is
 either already enforced, or a predicate reporting on itself: the
-target gap below was first written with `addressValid`, which every
-ordinary `resonate:target = "w1"` fails, and it "witnessed" a defect
-that was entirely in the predicate.
+target gap below was first written with a URL-shaped address predicate,
+which every ordinary `resonate:target = "w1"` fails, and it "witnessed"
+a defect that was entirely in the predicate.
 
 `04-theorems/properties-check.lean` and `properties-step.lean` carry
 the witnesses; each is `= true` on the NEGATED constraint, so a gap
@@ -1377,14 +1363,12 @@ def well_formed_task_ttl_positive (_now : Nat) (s : ServerState) : Bool :=
 /-- `Tags.has` is `isSome`, so `("resonate:target", "")` carries a
     target that is the empty string. The dispatch sites fall back to
     `getD ""`, so the task is created and its `execute` is enqueued to
-    an address nothing can receive. `addressValid` guards listener
-    addresses only.
+    an address nothing can receive.
 
     Non-emptiness is the whole claim, and deliberately so: a target
     names a WORKER GROUP, not a URL — `resonate:target = "w1"` is the
-    ordinary case throughout the corpus — so `addressValid`, which
-    demands an `http`/`https`/`poll` scheme, is the wrong predicate here
-    and would reject every well-formed targeted promise. -/
+    ordinary case throughout the corpus — and any predicate demanding a
+    scheme here would reject every well-formed targeted promise. -/
 def well_formed_promise_target_is_nonempty (_now : Nat) (s : ServerState) : Bool :=
   s.promises.all fun p =>
     match p.tags.get? "resonate:target" with

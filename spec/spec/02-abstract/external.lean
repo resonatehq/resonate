@@ -84,8 +84,6 @@ def promiseRegisterCallback (req : PromiseRegisterCallbackReq) (now : Nat) :
 
 def promiseRegisterListener (req : PromiseRegisterListenerReq) (now : Nat) :
     H PromiseRegisterListenerRes := do
-  if !ServerModel.addressValid req.address then
-    return { status := 400 }
   match ← readObject req.awaited now with
   | none =>
       return { status := 404 }

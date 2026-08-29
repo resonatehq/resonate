@@ -33,7 +33,7 @@ finding which entries need it was the informative part of the work.
 
 ## What this is not
 
-It is not `valid_implies_legal`. That theorem needs ALL 94 entries; the
+It is not `valid_implies_legal`. That theorem needs ALL 92 entries; the
 count below is what is currently proved. The remainder are still backed
 only by the 1 464-script sweep, which `bounded.lean` shows is the same
 statement with both quantifiers made finite. -/

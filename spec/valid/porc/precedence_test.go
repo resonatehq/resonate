@@ -21,10 +21,6 @@ func TestValidationOutranksExistence(t *testing.T) {
 			func(s *ServerState, d Discipline) Response {
 				return s.PromiseRegisterCallback(d, ghost, ghost, 100)
 			}},
-		{"promise.register_listener with an undeliverable address",
-			func(s *ServerState, d Discipline) Response {
-				return s.PromiseRegisterListener(d, ghost, "nonsense", 100)
-			}},
 		{"task.suspend with an empty awaited list",
 			func(s *ServerState, d Discipline) Response {
 				return s.TaskSuspend(d, ghost, 0, nil, 100)
@@ -69,7 +65,7 @@ func TestWellFormedRequestsStillReport404(t *testing.T) {
 		{"promise.settle to resolved", func(s *ServerState, d Discipline) Response {
 			return s.PromiseSettle(d, ghost, Resolved, nil, 100)
 		}, 404},
-		{"promise.register_listener with a valid address", func(s *ServerState, d Discipline) Response {
+		{"promise.register_listener", func(s *ServerState, d Discipline) Response {
 			return s.PromiseRegisterListener(d, ghost, "poll://any@w1", 100)
 		}, 404},
 		{"task.get", func(s *ServerState, d Discipline) Response {

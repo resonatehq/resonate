@@ -17,10 +17,7 @@
 
    Not carried, and why: the four well_formed_schedule_* properties and
    preserved_schedule_birth_fields_immutable (no schedules in this model);
-   consistent_listener_addresses_deliverable and
-   consistent_outbox_unblock_address_deliverable (addresses are opaque here,
-   there is no scheme to validate); the two *_edge_internal_admissible
-   properties (they quantify over which KIND of step fired, and a next-state
+   the two *_edge_internal_admissible properties (they quantify over which KIND of step fired, and a next-state
    relation checked with [][...]_vars cannot see that);
    well_formed_config_retry_positive (an ASSUME in Requests, checked at
    parse). consistent_new_unblock_carries_stored_record is carried in the

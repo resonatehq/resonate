@@ -172,7 +172,6 @@ theorem writesGood_promiseRegisterListener
     (req : ServerModel.PromiseRegisterListenerReq) (now : Nat) :
     WritesGood g e (promiseRegisterListener req now) := by
   unfold promiseRegisterListener
-  wg_guard
   refine writesGood_afterReadObjectP hq hs _ _ _ (fun _ => ?_) ?_
   · exact writesGood_pure _ _ _
   · intro pa hpa _ hsto

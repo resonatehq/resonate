@@ -52,24 +52,6 @@ def TaskFenceAction.targetId : TaskFenceAction → Ident
   | .create r => r.id
   | .settle r => r.id
 
-def prefixOf : List Char → List Char → Bool
-  | [], _ => true
-  | _, [] => false
-  | c :: cs, d :: ds => c == d && prefixOf cs ds
-
-def afterScheme : List Char → Option (List Char)
-  | ':' :: '/' :: '/' :: rest => some rest
-  | _ :: cs => afterScheme cs
-  | [] => none
-
-def addressValid (a : String) : Bool :=
-  match a.toList with
-  | [] => false
-  | cs =>
-    match afterScheme cs with
-    | none => false
-    | some rest => !rest.isEmpty && !(rest.length + 3 == cs.length)
-
 def parseNat (s : String) : Nat :=
   go s.toList 0
 where

@@ -248,9 +248,6 @@ def mutants : List (String × Bool) :=
          (obj { P with state := .resolved, settledAt := some 20 } (some T))),
     ("consistent_callback_awaiter_is_targeted",
        consistent_callback_awaiter_is_targeted 0 (obj { P with callbacks := [oid "z"] } none)),
-    ("consistent_listener_addresses_deliverable",
-       consistent_listener_addresses_deliverable 0
-         (obj { P with listeners := ["not-an-address"] } none)),
     ("consistent_outbox_execute_names_existing_task",
        consistent_outbox_execute_names_existing_task 0 { outbox := [{ address := "w", message := .execute (oid "ghost") 0 }] }),
     ("consistent_outbox_never_ahead",
@@ -265,13 +262,6 @@ def mutants : List (String × Bool) :=
        consistent_outbox_unblock_names_settled_promise 0
          { objects := [{ id := oid "a", promise := P }],
            outbox := [{ address := "https://l", message := .unblock (P.toRecord (oid "a")) }] }),
-    ("consistent_outbox_unblock_address_deliverable",
-       consistent_outbox_unblock_address_deliverable 0
-         { objects := [{ id := oid "a", promise := { P with state := .resolved, settledAt := some 20 } }],
-           outbox := [{ address := "nope",
-                        message := .unblock
-                          (({ P with state := .resolved, settledAt := some 20 }
-                              : AbstractModel.PromiseObject).toRecord (oid "a")) }] }),
     ("consistent_settled_task_promise_settled",
        consistent_settled_task_promise_settled 0
          (obj P (some { T with state := .fulfilled, retryTimeoutAt := none }))),

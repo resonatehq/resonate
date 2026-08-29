@@ -2,7 +2,6 @@ package model
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 type Response struct {
@@ -269,9 +268,6 @@ func parseNat(s string) uint64 {
 }
 
 func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address string, now uint64) Response {
-	if !addressValid(address) {
-		return Response{Status: 400}
-	}
 	oa := s.readObject(d, awaited, now)
 	if oa == nil {
 		return Response{Status: 404}
@@ -283,11 +279,6 @@ func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address str
 		s.SetPromise(oa.ID, oa.Promise.AddListener(address))
 	}
 	return Response{Status: 200, Promise: oa.Promise.Record(oa.ID)}
-}
-
-func addressValid(a string) bool {
-	i := strings.Index(a, "://")
-	return i > 0 && i+3 < len(a)
 }
 
 func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {
