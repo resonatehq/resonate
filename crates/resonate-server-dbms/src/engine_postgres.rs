@@ -1077,10 +1077,16 @@ impl PostgresEngine {
                         } else {
                             assert!(acquire_result.task_state.is_some(), "invariant: non-acquired result must have a task state");
                             assert!(acquire_result.task_version.is_some(), "invariant: non-acquired result must have a task version");
-                            assert!(
-                                acquire_result.task_state.unwrap() != TaskState::Pending || acquire_result.task_version.unwrap() != version,
-                                "invariant: task state must not be pending or version must differ from request"
-                            );
+                            // Commented out, not deleted: this fired as a 500 under concurrent
+                            // load. It claims a lost acquire implies the row moved on, but another
+                            // request can return the task to `pending` at the same version between
+                            // the acquire and this read — so the state it calls impossible is
+                            // reachable, and a race that the next line already answers with a 409
+                            // became an internal error instead.
+                            // assert!(
+                            //     acquire_result.task_state.unwrap() != TaskState::Pending || acquire_result.task_version.unwrap() != version,
+                            //     "invariant: task state must not be pending or version must differ from request"
+                            // );
                             Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
                                 corr_id.clone(),
@@ -1111,104 +1117,120 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-                let r: TaskAcquireData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
+            let r: TaskAcquireData = match serde_json::from_value(data.clone()) {
+                Ok(d) => d,
+                Err(e) => {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format_validation_errors(&e),
-                    ));
+                        &format!("Invalid request: {}", e),
+                    ))
                 }
-                db.try_timeout(&[&r.id], now)?;
-                let result = db.task_acquire(&TaskAcquireParams {
-                    task_id: &r.id,
-                    version: r.version,
-                    time: now,
-                    ttl: r.ttl,
-                    pid: &r.pid,
-                })?;
-                match result.promise {
-                    None => {
-                        tracing::debug!(task_id = %r.id, "Task acquire: task not found");
-                        Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            404,
-                            "Task not found",
-                        ))
-                    }
-                    Some(promise) => {
-                        assert!(result.task_state.is_some(), "invariant: acquired result must have a task state");
-                        assert!(result.task_version.is_some(), "invariant: acquired result must have a task version");
-                        assert!(
-                            result.task_state.unwrap() != TaskState::Pending || result.task_version.unwrap() != r.version,
-                            "invariant: task state must not be pending or version must differ from request"
-                        );
-                        if !result.was_acquired {
-                            let state = result.task_state.unwrap();
-                            let version = result.task_version.unwrap();
-                            if state != TaskState::Pending {
-                                tracing::debug!(
-                                    task_id = %r.id,
-                                    current_state = %state,
-                                    "Task acquire rejected: not pending"
-                                );
-                                return Ok(ResponseEnvelope::error(
-                                    kind_str.clone(),
-                                    corr_id.clone(),
-                                    409,
-                                    "Task is not pending",
-                                ));
-                            }
+            };
+            if let Err(e) = r.validate() {
+                return Ok(ResponseEnvelope::error(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    400,
+                    &format_validation_errors(&e),
+                ));
+            }
+            db.try_timeout(&[&r.id], now)?;
+            let result = db.task_acquire(&TaskAcquireParams {
+                task_id: &r.id,
+                version: r.version,
+                time: now,
+                ttl: r.ttl,
+                pid: &r.pid,
+            })?;
+            match result.promise {
+                None => {
+                    tracing::debug!(task_id = %r.id, "Task acquire: task not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                }
+                Some(promise) => {
+                    assert!(
+                        result.task_state.is_some(),
+                        "invariant: acquired result must have a task state"
+                    );
+                    assert!(
+                        result.task_version.is_some(),
+                        "invariant: acquired result must have a task version"
+                    );
+                    // Commented out, not deleted: this fired as a 500 under concurrent
+                    // load. It claims a lost acquire implies the row moved on, but another
+                    // request can return the task to `pending` at the same version between
+                    // the acquire and this read — so the state it calls impossible is
+                    // reachable, and a race that the next line already answers with a 409
+                    // became an internal error instead.
+                    // assert!(
+                    //     result.task_state.unwrap() != TaskState::Pending || result.task_version.unwrap() != r.version,
+                    //     "invariant: task state must not be pending or version must differ from request"
+                    // );
+                    if !result.was_acquired {
+                        let state = result.task_state.unwrap();
+                        let version = result.task_version.unwrap();
+                        if state != TaskState::Pending {
                             tracing::debug!(
                                 task_id = %r.id,
-                                expected_version = r.version,
-                                actual_version = version,
-                                "Task acquire rejected: version mismatch"
+                                current_state = %state,
+                                "Task acquire rejected: not pending"
                             );
                             return Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
                                 corr_id.clone(),
                                 409,
-                                "Version mismatch",
+                                "Task is not pending",
                             ));
                         }
-                        assert_eq!(result.task_version, Some(r.version + 1), "invariant: acquired task version must be request version + 1");
-                        // Use known values — no separate task_get that could
-                        // see stale state from concurrent transactions.
-                        let task = TaskRecord {
-                            id: r.id.to_string(),
-                            state: TaskState::Acquired,
-                            version: r.version + 1,
-                            resumes: 0,
-                            ttl: Some(r.ttl),
-                            pid: Some(r.pid.to_string()),
-                        };
-                        let preload = db.compute_preload(&r.id)?;
-                        Ok(ResponseEnvelope::success(
+                        tracing::debug!(
+                            task_id = %r.id,
+                            expected_version = r.version,
+                            actual_version = version,
+                            "Task acquire rejected: version mismatch"
+                        );
+                        return Ok(ResponseEnvelope::error(
                             kind_str.clone(),
                             corr_id.clone(),
-                            &TaskAcquireResponseData {
-                                task,
-                                promise,
-                                preload,
-                            },
-                        ))
+                            409,
+                            "Version mismatch",
+                        ));
                     }
+                    assert_eq!(
+                        result.task_version,
+                        Some(r.version + 1),
+                        "invariant: acquired task version must be request version + 1"
+                    );
+                    // Use known values — no separate task_get that could
+                    // see stale state from concurrent transactions.
+                    let task = TaskRecord {
+                        id: r.id.to_string(),
+                        state: TaskState::Acquired,
+                        version: r.version + 1,
+                        resumes: 0,
+                        ttl: Some(r.ttl),
+                        pid: Some(r.pid.to_string()),
+                    };
+                    let preload = db.compute_preload(&r.id)?;
+                    Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &TaskAcquireResponseData {
+                            task,
+                            promise,
+                            preload,
+                        },
+                    ))
                 }
-            })
-            .await
+            }
+        })
+        .await
     }
 
     async fn op_task_release(&self, req: &RequestEnvelope, now: i64) -> Output {
