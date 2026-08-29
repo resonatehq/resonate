@@ -1,18 +1,5 @@
 namespace ServerModel
 
-/-- An identifier: an origin and a suffix within it.
-
-    On the wire this is one string, `origin:suffix`, with exactly one
-    colon; the suffix may be empty, and an id whose suffix is empty
-    renders as the bare origin. None of that is the specification's
-    business -- parsing and rendering happen at the edge, in the trace
-    codec and in the server. In here an id is a pair, and the only
-    question ever asked of its halves is whether two ids share an
-    origin.
-
-    `DecidableEq` rather than `deriving BEq`: the lookup and frame
-    proofs are stated over `[BEq α] [LawfulBEq α]`, and the instance
-    derived from decidable equality is the lawful one. -/
 structure Ident where
   origin : String
   suffix : String
@@ -20,9 +7,6 @@ structure Ident where
 
 instance : BEq Ident := instBEqOfDecidableEq
 
-/-- Two ids in one origin. The doors that refuse cross-origin work --
-    callback registration, suspension, fencing -- are exactly this
-    comparison, which is why they cost no read. -/
 def Ident.sameOrigin (a b : Ident) : Bool := a.origin == b.origin
 
 abbrev Tags := List (String × String)
@@ -319,19 +303,13 @@ structure ResumeReq where
   awaiter : String
   deriving Repr
 
-/-- Spec artifact for the oracle: a resume never serializes and nobody is
-    listening, but the drain has six distinct outcomes and `H Unit` would
-    leave it testable only by state diffing. An inductive, not a `Nat`:
-    there is no wire format to be compatible with, so name the cases.
-    `expired` vs `fulfilled` is the distinction TIMEOUT ALWAYS WINS
-    legislates -- representable here, invisible in a unit return. -/
 inductive ResumeOutcome
-  | resumed     -- suspended -> pending; execute emitted
-  | buffered    -- awaiter live but not suspended; trigger recorded
-  | duplicate   -- trigger already recorded
-  | expired     -- awaiter past its own deadline; the timeout path owns cleanup
-  | fulfilled   -- awaiter already settled
-  | absent      -- no task, or no promise, for the awaiter
+  | resumed
+  | buffered
+  | duplicate
+  | expired
+  | fulfilled
+  | absent
   deriving Repr, DecidableEq
 
 structure ResumeRes where
