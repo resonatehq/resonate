@@ -2480,7 +2480,15 @@ impl<'a> SqliteDb<'a> {
         Ok((promise_exists, task_exists))
     }
 
-    fn process_callbacks(&self, _promise_id: &str, _time: i64) -> StorageResult<()> {
+    /// Nothing to do, and that is a property of SQLite rather than an omission.
+    ///
+    /// Postgres and MySQL run a statement here so the transition sees callbacks
+    /// a concurrent transaction registered after its own snapshot opened. A
+    /// `SqliteEngine` holds one `Connection` behind a `Mutex`, so no other
+    /// transaction can have committed anything while this one runs — there is
+    /// nothing for a second look to find.
+    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
+        let _ = (promise_id, time);
         Ok(())
     }
 
