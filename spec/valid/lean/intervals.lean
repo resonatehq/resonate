@@ -303,7 +303,7 @@ why it took an empirical hunt to even guess at its truth. -/
     given that its `delTaskTimeout` cannot take a lease timer with it. -/
 theorem retry_invisible {s : ServerState} {id : ServerModel.Ident} {n : Nat}
     (hinv : PendingHasNoLease s) :
-    Visible ((InternalStep.taskRetryTimeout id).step n s) = Visible s := by
+    Visible ((InternalStep.taskRetryTimeout { id := id }).step n s) = Visible s := by
   sorry
 
 /-- **R2 · `Visible` is a congruence for responses.** Nothing a handler

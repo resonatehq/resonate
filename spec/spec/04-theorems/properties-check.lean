@@ -100,16 +100,16 @@ def covListeners : List (Step × Nat) :=
     (.external (.promiseRegisterListener { awaited := oid "a", address := "https://l1" }), 110),
     (.external (.promiseRegisterListener { awaited := oid "a", address := "https://l2" }), 120),
     (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
-    (.internal (.listener (oid "a") "https://l1"), 210),
-    (.internal (.listener (oid "a") "https://l2"), 220) ]
+    (.internal (.listener { awaited := oid "a", address := "https://l1" }), 210),
+    (.internal (.listener { awaited := oid "a", address := "https://l2" }), 220) ]
 
 def covTwoTasks : List (Step × Nat) :=
   [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 5000, param := {}, tags := tgtTags } }), 100),
     (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "y", timeoutAt := 5000, param := {}, tags := tgtTags } }), 110),
     (.external (.taskRelease { id := oid "x", version := 1 }), 120),
     (.external (.taskRelease { id := oid "y", version := 1 }), 130),
-    (.internal (.taskRetryTimeout (oid "x")), 140),
-    (.internal (.taskRetryTimeout (oid "y")), 150) ]
+    (.internal (.taskRetryTimeout { id := oid "x" }), 140),
+    (.internal (.taskRetryTimeout { id := oid "y" }), 150) ]
 
 /-- `b2` halts a task whose own promise has already timed out, so the
     halt 409s and no `.halted` state is ever reached. Halting a LIVE
@@ -388,7 +388,7 @@ def emptyTargetTags : ServerModel.Tags := [("resonate:target", "")]
 
 def wGapEmptyTarget : List (Step × Nat) :=
   [ (.external (.promiseCreate { id := oid "y", timeoutAt := 9000, param := {}, tags := emptyTargetTags }), 100),
-    (.internal (.taskRetryTimeout (oid "y")), 110) ]
+    (.internal (.taskRetryTimeout { id := oid "y" }), 110) ]
 
 theorem gap_promise_target_is_nonempty_is_violable :
     (trace wGapEmptyTarget).any (fun (n, s) => !well_formed_promise_target_is_nonempty n s) = true := by decide

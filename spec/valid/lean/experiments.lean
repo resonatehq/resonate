@@ -39,7 +39,7 @@ def workflow (i : Nat) (t0 t1 : Nat) : List (Step × Nat) :=
   , (.external (.taskAcquire   { id := x, version := 0, pid := "p", ttl := 50 }), t0)
   , (.external (.taskSuspend   { id := x, version := 1, actions := [{ awaited := a, awaiter := x }] }), t0)
   , (.external (.promiseSettle { id := a, state := .resolved, value := {} }), t1)
-  , (.internal (.callback a x), t1)          -- hidden
+  , (.internal (.callback { awaited := a, awaiter := x }), t1)          -- hidden
   , (.external (.taskAcquire   { id := x, version := 1, pid := "p", ttl := 50 }), t1)
   , (.external (.taskFulfill { id := x, version := 2, action := { id := x, state := .resolved, value := {} } }), t1) ]
 
@@ -61,7 +61,7 @@ def fanoutScript (n : Nat) : List (Step × Nat) :=
 def fanoutFiredScript (n : Nat) : List (Step × Nat) :=
   (List.range n).map (fun i =>
       (.external (.promiseCreate { id := oid s!"a{i}", timeoutAt := 20 + i, param := {}, tags := ext }), 10))
-  ++ (List.range n).map (fun i => (.internal (.promiseTimeout (oid s!"a{i}")), 500))
+  ++ (List.range n).map (fun i => (.internal (.promiseTimeout { id := oid s!"a{i}" }), 500))
   ++ [ (.external (.promiseGet { id := oid "a0" }), 500) ]
 
 /-- **Regression.** `a` expires on its own; that expiry defers a resume
@@ -76,8 +76,8 @@ def crossObjectScript : List (Step × Nat) :=
   , (.external (.promiseCreate { id := oid "x", timeoutAt := 100000, param := {}, tags := tgt }), 10)
   , (.external (.taskAcquire   { id := oid "x", version := 0, pid := "p", ttl := 50 }), 10)
   , (.external (.taskSuspend   { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 12)
-  , (.internal (.promiseTimeout (oid "a")), 40)                            -- hidden
-  , (.internal (.callback (oid "a") (oid "x")), 40)      -- hidden
+  , (.internal (.promiseTimeout { id := oid "a" }), 40)                            -- hidden
+  , (.internal (.callback { awaited := oid "a", awaiter := oid "x" }), 40)      -- hidden
   , (.external (.taskGet { id := oid "x" }), 50) ]
 
 /-! ## Running -/

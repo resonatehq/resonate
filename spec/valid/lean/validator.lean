@@ -145,12 +145,12 @@ second copy and an identity coercion back into `Step`; the injection is
     are printed is under a heading that already says these are the
     internal steps. The Go checker prints the same six strings. -/
 def _root_.Abstraction.InternalStep.pretty : InternalStep → String
-  | .promiseTimeout id   => s!"promiseTimeout {id}"
-  | .listener id addr    => s!"listener {id} → {addr}"
-  | .callback id awaiter => s!"callback {id} → {awaiter}"
-  | .taskLeaseTimeout id => s!"taskLeaseTimeout {id}"
-  | .taskRetryTimeout id => s!"taskRetryTimeout {id}"
-  | .scheduleTimeout id  => s!"scheduleTimeout {id}"
+  | .promiseTimeout { id := id }   => s!"promiseTimeout {id}"
+  | .callback { awaited := id, awaiter := awaiter } => s!"callback {id} → {awaiter}"
+  | .listener { awaited := id, address := addr }    => s!"listener {id} → {addr}"
+  | .taskLeaseTimeout { id := id } => s!"taskLeaseTimeout {id}"
+  | .taskRetryTimeout { id := id } => s!"taskRetryTimeout {id}"
+  | .scheduleTimeout { schedule := id }  => s!"scheduleTimeout {id}"
 
 instance : ToString InternalStep := ⟨Abstraction.InternalStep.pretty⟩
 
@@ -177,25 +177,27 @@ conjunct is left out on purpose. -/
 def enabledInternalSteps (s : ServerState) (now : Nat) : List InternalStep :=
   -- r1: a pending promise whose deadline has passed
   (s.objects.filter (fun o => o.promise.state == .pending && o.promise.timeoutAt ≤ now)).map
-      (fun o => .promiseTimeout o.id)
+      (fun o => .promiseTimeout { id := o.id })
   -- r3/r4: obligations on a promise that READS settled, which is Fact P
   -- and why this consults `project` rather than the stored state
   ++ s.objects.flatMap (fun o =>
        if (o.promise.project now).state != .pending then
-         o.promise.listeners.map (InternalStep.listener o.id) else [])
+         o.promise.callbacks.map (fun x => .callback { awaited := o.id, awaiter := x })
+       else [])
   ++ s.objects.flatMap (fun o =>
        if (o.promise.project now).state != .pending then
-         o.promise.callbacks.map (InternalStep.callback o.id) else [])
+         o.promise.listeners.map (fun a => .listener { awaited := o.id, address := a })
+       else [])
   -- r5: an acquired task whose lease has lapsed
   ++ (s.objects.filter (fun o =>
         o.task.any fun t => t.state == .acquired && t.leaseTimeoutAt.getD (now + 1) ≤ now)).map
-       (fun o => .taskLeaseTimeout o.id)
+       (fun o => .taskLeaseTimeout { id := o.id })
   -- r6: a pending task whose dispatch clock is due
   ++ (s.objects.filter (fun o =>
         o.task.any fun t => t.state == .pending && t.retryTimeoutAt.getD (now + 1) ≤ now)).map
-       (fun o => .taskRetryTimeout o.id)
+       (fun o => .taskRetryTimeout { id := o.id })
   -- r7: a schedule due to fire
-  ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout c.id)
+  ++ (s.schedules.filter (·.nextRunAt ≤ now)).map (fun c => .scheduleTimeout { schedule := c.id })
 
 /-! ## Cone of influence
 
@@ -271,14 +273,14 @@ def touches : Request → List Reach
     treated as always relevant. Conservative, and schedules are rare in a
     trace. -/
 def affects (s : ServerState) : InternalStep → List Reach
-  | .promiseTimeout id =>
+  | .promiseTimeout { id := id } =>
       .obj id :: ((s.objects.filter (·.id == id)).flatMap
                     (·.promise.callbacks.map (.obj ·)))
-  | .listener id _         => [.obj id]
-  | .callback id awaiter   => [.obj id, .obj awaiter]
-  | .taskLeaseTimeout id   => [.obj id]
-  | .taskRetryTimeout id   => [.obj id]
-  | .scheduleTimeout _     => [.all]
+  | .callback { awaited := id, awaiter := awaiter }   => [.obj id, .obj awaiter]
+  | .listener { awaited := id, address := _ }         => [.obj id]
+  | .taskLeaseTimeout { id := id }   => [.obj id]
+  | .taskRetryTimeout { id := id }   => [.obj id]
+  | .scheduleTimeout { schedule := _ }     => [.all]
 
 /-- The internal steps that could bear on this request — the CONE, closed
     transitively. Start from what the request reads; repeatedly pull in

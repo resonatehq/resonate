@@ -315,7 +315,7 @@ theorem internal_laws_are_strictly_stronger :
 /-! ### The gap that closed
 
 `monotone_task_retry_rearm_advances` used to live in `gaps`, witnessed
-by a script that fired `.internal (.taskRetryTimeout (oid "x")) 0` — the environment writing a past
+by a script that fired `.internal (.taskRetryTimeout { id := oid "x" }) 0` — the environment writing a past
 instant into the store. There is no such script now: `Step.taskRetryTimeout` names
 only its task, and the next instant comes from
 `Env.config.retryTimeout`, which no step can write. The witness cannot

@@ -71,7 +71,7 @@ them is applied to a row the handler read out of the store; `Stored` is
 what says so, and it turns the birth case of each transformation
 obligation from unprovable into vacuous.
 
-`dropListener` and `dropCallback` carry the drains' own guard: an
+`dropCallback` and `dropListener` carry the drains' own guard: an
 obligation is only ever removed from a promise that is already settled.
 Without it the ledger-direction entries are false at those two
 obligations. -/

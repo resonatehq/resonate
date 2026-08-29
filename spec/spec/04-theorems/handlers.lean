@@ -472,19 +472,6 @@ theorem writesGood_processPromiseTimeout (id : ServerModel.Ident) (now : Nat) :
   · exact writesGood_pure _ _ _
   · intro p hp _ _; exact writesGood_pure _ _ _
 
-theorem writesGood_processListener (id : ServerModel.Ident) (address : String) (now : Nat) :
-    WritesGood g e (Internal.processListener id address now) := by
-  unfold Internal.processListener touchObject
-  refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
-  · exact writesGood_pure _ _ _
-  · intro p hp _ hsto
-    dsimp only
-    refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hns => ?_)
-    refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-    exact writesGood_bind' _ _ _ _
-      (writesGood_setPromise _ _ _ _ (hq.dropListener _ p.promise _ hsto (by simpa using hns) hp))
-      (writesGood_setMessage _ _ _ _)
-
 theorem writesGood_resumeOne (awaited awaiter : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.resumeOne awaited awaiter now) := by
   unfold Internal.resumeOne touchTaskObject
@@ -519,6 +506,19 @@ theorem writesGood_processCallback (id : ServerModel.Ident) (awaiter : ServerMod
     exact writesGood_bind' _ _ _ _
       (writesGood_setPromise _ _ _ _ (hq.dropCallback _ p.promise _ hsto (by simpa using hns) hp))
       (writesGood_resumeOne hq hs _ _ _)
+
+theorem writesGood_processListener (id : ServerModel.Ident) (address : String) (now : Nat) :
+    WritesGood g e (Internal.processListener id address now) := by
+  unfold Internal.processListener touchObject
+  refine writesGood_afterMatReadObjectP hq true hs _ _ _ (fun _ => ?_) ?_
+  · exact writesGood_pure _ _ _
+  · intro p hp _ hsto
+    dsimp only
+    refine writesGood_iteH _ _ _ _ _ (fun _ => writesGood_pure _ _ _) (fun hns => ?_)
+    refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
+    exact writesGood_bind' _ _ _ _
+      (writesGood_setPromise _ _ _ _ (hq.dropListener _ p.promise _ hsto (by simpa using hns) hp))
+      (writesGood_setMessage _ _ _ _)
 
 theorem writesGood_processLeaseTimeout (id : ServerModel.Ident) (now : Nat) :
     WritesGood g e (Internal.processLeaseTimeout id now) := by
@@ -593,12 +593,12 @@ everywhere. A step added without a case here does not compile. -/
 theorem writesGood_handleInternal (st : InternalStep) (now : Nat) :
     WritesGood g e (handleInternal st now) := by
   cases st with
-  | promiseTimeout id   => exact writesGood_processPromiseTimeout hq hs id now
-  | listener id a       => exact writesGood_processListener hq hs id a now
-  | callback id x       => exact writesGood_processCallback hq hs id x now
-  | taskLeaseTimeout id => exact writesGood_processLeaseTimeout hq hs id now
-  | taskRetryTimeout id => exact writesGood_processRetryTimeout hq hs id now
-  | scheduleTimeout id  => exact writesGood_processSchedule hq hs id now
+  | promiseTimeout r   => exact writesGood_processPromiseTimeout hq hs r.id now
+  | callback r         => exact writesGood_processCallback hq hs r.awaited r.awaiter now
+  | listener r         => exact writesGood_processListener hq hs r.awaited r.address now
+  | taskLeaseTimeout r => exact writesGood_processLeaseTimeout hq hs r.id now
+  | taskRetryTimeout r => exact writesGood_processRetryTimeout hq hs r.id now
+  | scheduleTimeout r  => exact writesGood_processSchedule hq hs r.schedule now
 
 theorem writesGood_handle (st : Step) (now : Nat) : WritesGood g e (handle st now) := by
   cases st with

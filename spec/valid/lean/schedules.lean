@@ -132,7 +132,7 @@ def sid : ServerModel.Ident := { origin := "o", suffix := "s" }
 def script (H : CronDiscriminates) : List (Step × Nat) :=
   [ (.external (.scheduleCreate { id := sid, cron := H.cron, promiseId := { origin := "o", suffix := "p" },
                                   promiseTimeout := 1000, promiseParam := {}, promiseTags := [] }), H.t0)
-  , (.internal (.scheduleTimeout sid), H.tg)
+  , (.internal (.scheduleTimeout { schedule := sid }), H.tg)
   , (.external (.scheduleGet { id := sid }), H.t1) ]
 
 def obs (H : CronDiscriminates) : List Observation := recordFrom (script H)

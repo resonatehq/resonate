@@ -2,8 +2,8 @@ import «02-abstract».«external»
 
 /-!  # Internal steps — what the server does on its own initiative
 
-Six steps a background job may fire: the promise timeout, the listener
-drain, the callback drain, the lease timeout, the retry dispatch, and
+Six steps a background job may fire: the promise timeout, the callback
+drain, the listener drain, the lease timeout, the retry dispatch, and
 the schedule. No client asks for these.
 
 They take the FORCED reads — `touchObject` where the step persists what
@@ -19,17 +19,6 @@ open ServerModel (Ident nextCron occurrences expand Schedule)
 
 def processPromiseTimeout (id : Ident) (now : Nat) : H Unit := do
   let _ ← touchObject id now
-
-def processListener (id : Ident) (address : String) (now : Nat) : H Unit := do
-  match ← touchObject id now with
-  | none => pure ()
-  | some o =>
-      if o.promise.state == .pending then
-        pure ()
-      else if o.promise.listeners.contains address then
-        setPromise o.id { o.promise with
-                          listeners := o.promise.listeners.filter (· != address) }
-        setMessage address (.unblock (o.promise.toRecord o.id))
 
 def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
   match ← touchTaskObject awaiter now with
@@ -58,6 +47,17 @@ def processCallback (id : Ident) (awaiter : Ident) (now : Nat) : H Unit := do
         setPromise o.id { o.promise with
                           callbacks := o.promise.callbacks.filter (· != awaiter) }
         resumeOne o.id awaiter now
+
+def processListener (id : Ident) (address : String) (now : Nat) : H Unit := do
+  match ← touchObject id now with
+  | none => pure ()
+  | some o =>
+      if o.promise.state == .pending then
+        pure ()
+      else if o.promise.listeners.contains address then
+        setPromise o.id { o.promise with
+                          listeners := o.promise.listeners.filter (· != address) }
+        setMessage address (.unblock (o.promise.toRecord o.id))
 
 def processLeaseTimeout (id : Ident) (now : Nat) : H Unit := do
   match ← viewTaskObject id now with

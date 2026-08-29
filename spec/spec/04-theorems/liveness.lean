@@ -66,31 +66,31 @@ def taskAt (s : ServerState) (id : ServerModel.Ident) : Option TaskObject :=
 
 def enabledInternal (st : Step) (now : Nat) (s : ServerState) : Bool :=
   match st with
-  | .internal (.promiseTimeout id) =>
+  | .internal (.promiseTimeout { id := id }) =>
       match promiseAt s id with
       | some p => p.otype.awaitable && p.state == .pending && p.timeoutAt ≤ now
       | none   => false
-  | .internal (.listener id addr) =>
-      match promiseAt s id with
-      | some p => (p.project now).state != .pending && p.listeners.contains addr
-      | none   => false
-  | .internal (.callback id x) =>
+  | .internal (.callback { awaited := id, awaiter := x }) =>
       match promiseAt s id with
       | some p => (p.project now).state != .pending && p.callbacks.contains x
       | none   => false
-  | .internal (.taskLeaseTimeout id) =>
+  | .internal (.listener { awaited := id, address := addr }) =>
+      match promiseAt s id with
+      | some p => (p.project now).state != .pending && p.listeners.contains addr
+      | none   => false
+  | .internal (.taskLeaseTimeout { id := id }) =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .acquired && (t.leaseTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .internal (.taskRetryTimeout id) =>
+  | .internal (.taskRetryTimeout { id := id }) =>
       match taskAt s id, promiseAt s id with
       | some t, some p =>
           t.state == .pending && (t.retryTimeoutAt.getD (now + 1)) ≤ now
             && (p.project now).state == .pending
       | _, _ => false
-  | .internal (.scheduleTimeout id) => (s.schedules.find? (·.id == id)).isSome
+  | .internal (.scheduleTimeout { schedule := id }) => (s.schedules.find? (·.id == id)).isSome
   | _ => false
 
 /-! ### The environment's obligations -/
@@ -109,15 +109,15 @@ def WeaklyFairOn (tr : Trace) (family : Step → Bool) : Prop :=
       ∃ u : Nat, t ≤ u ∧ (tr u).req = st
 
 def isSettlementStep : Step → Bool
-  | .internal (.promiseTimeout _) => true
+  | .internal (.promiseTimeout { id := _ }) => true
   | _     => false
 
 def isCallbackStep : Step → Bool
-  | .internal (.callback _ _) => true
+  | .internal (.callback { awaited := _, awaiter := _ }) => true
   | _       => false
 
 def isListenerStep : Step → Bool
-  | .internal (.listener _ _) => true
+  | .internal (.listener { awaited := _, address := _ }) => true
   | _       => false
 
 /-! ### 1. Every external promise eventually settles
@@ -268,11 +268,11 @@ this is a real refutation channel rather than decoration. -/
 def enabledSteps (now : Nat) (s : ServerState) : List Step :=
   s.objects.flatMap fun o =>
     let p := o.promise
-    (if enabledInternal (.internal (.promiseTimeout o.id)) now s then [Step.internal (.promiseTimeout o.id)] else [])
-      ++ p.listeners.map (fun addr => Step.internal (.listener o.id addr))
-      ++ p.callbacks.map (fun x => Step.internal (.callback o.id x))
-      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskLeaseTimeout o.id)) now s then [Step.internal (.taskLeaseTimeout o.id)] else [])
-      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskRetryTimeout o.id)) now s then [Step.internal (.taskRetryTimeout o.id)] else [])
+    (if enabledInternal (.internal (.promiseTimeout { id := o.id })) now s then [Step.internal (.promiseTimeout { id := o.id })] else [])
+      ++ p.callbacks.map (fun x => Step.internal (.callback { awaited := o.id, awaiter := x }))
+      ++ p.listeners.map (fun addr => Step.internal (.listener { awaited := o.id, address := addr }))
+      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskLeaseTimeout { id := o.id })) now s then [Step.internal (.taskLeaseTimeout { id := o.id })] else [])
+      ++ (if o.task.isSome ∧ enabledInternal (.internal (.taskRetryTimeout { id := o.id })) now s then [Step.internal (.taskRetryTimeout { id := o.id })] else [])
 
 def fireAllEnabled (now : Nat) (s : ServerState) : ServerState :=
   (enabledSteps now s).foldl

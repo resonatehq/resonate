@@ -95,7 +95,7 @@ structure PromiseSettleRes where
 structure PromiseRegisterCallbackReq where
   awaited : Ident
   awaiter : Ident
-  deriving Repr
+  deriving Repr, DecidableEq
 
 structure PromiseRegisterCallbackRes where
   status  : Nat
@@ -105,7 +105,7 @@ structure PromiseRegisterCallbackRes where
 structure PromiseRegisterListenerReq where
   awaited : Ident
   address : String
-  deriving Repr
+  deriving Repr, DecidableEq
 
 structure PromiseRegisterListenerRes where
   status  : Nat

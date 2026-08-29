@@ -359,7 +359,7 @@ theorem sneaky_satisfies_the_entry :
 
 theorem one_step_breaks_it :
     Properties.well_formed_promise_deadline_settlement_has_no_value 20
-      (stepOf true (.internal (.promiseTimeout (oid "p"))) 20 sneaky).2 = false := by
+      (stepOf true (.internal (.promiseTimeout { id := oid "p" })) 20 sneaky).2 = false := by
   decide
 
 /-- And the reason `sneaky` never arises: it violates a different

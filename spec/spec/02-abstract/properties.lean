@@ -445,7 +445,7 @@ Two of these say something the object-level reading gets wrong.
 
 `preserved_settled_promise_record` freezes `state`, `value` and
 `settledAt` once a promise is settled. It does NOT freeze the promise:
-the listener and callback internal steps keep removing obligations from settled
+the callback and listener internal steps keep removing obligations from settled
 promises, which is how a wake is discharged. What is frozen is exactly
 `toRecord` — exactly the part a response can carry — so "a settled
 promise never changes again" is true on the wire and false in the store.

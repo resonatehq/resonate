@@ -27,17 +27,17 @@ open Equivalence
 def wLag : List (Step × Nat) :=
   [ (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 250, param := {}, tags := tgtTags } }), 100),
     (.external (.taskGet { id := oid "x" }), 300),
-    (.internal (.taskLeaseTimeout (oid "x")), 300),
-    (.internal (.taskRetryTimeout (oid "x")), 300) ]
+    (.internal (.taskLeaseTimeout { id := oid "x" }), 300),
+    (.internal (.taskRetryTimeout { id := oid "x" }), 300) ]
 
 def b1 : List (Step × Nat) :=
   [ (.external (.promiseCreate { id := oid "a", timeoutAt := 1000, param := {}, tags := extTags }), 100),
     (.external (.taskCreate { pid := "p0", ttl := 100, action := { id := oid "x", timeoutAt := 2000, param := {}, tags := tgtTags } }), 100),
     (.external (.taskSuspend { id := oid "x", version := 1, actions := [{ awaited := oid "a", awaiter := oid "x" }] }), 120),
     (.external (.promiseSettle { id := oid "a", state := .resolved, value := {} }), 200),
-    (.internal (.callback (oid "a") (oid "x")), 200),
+    (.internal (.callback { awaited := oid "a", awaiter := oid "x" }), 200),
     (.external (.taskGet { id := oid "x" }), 210),
-    (.internal (.taskRetryTimeout (oid "x")), 210),
+    (.internal (.taskRetryTimeout { id := oid "x" }), 210),
     (.external (.taskAcquire { id := oid "x", version := 1, pid := "p2", ttl := 50 }), 220),
     (.external (.taskFulfill { id := oid "x", version := 2, action := { id := oid "x", state := .resolved, value := {} } }), 230) ]
 
@@ -87,7 +87,7 @@ def b6 : List (Step × Nat) :=
 
 `.internal (.taskRetryTimeout)` names only its task now — the next fire instant comes from
 `Env.config.retryTimeout`, so there is no instant for a script to
-choose. It used to read `.internal (.taskRetryTimeout (oid "x")) 9000`. -/
+choose. It used to read `.internal (.taskRetryTimeout { id := oid "x" }) 9000`. -/
 
 def kernelsResp : List Step :=
   [ .external (.promiseCreate { id := oid "a", timeoutAt := 250, param := {}, tags := extTags }),
@@ -97,10 +97,10 @@ def kernelsResp : List Step :=
     .external (.promiseGet { id := oid "a" }),
     .external (.taskGet { id := oid "x" }),
     .external (.taskHalt { id := oid "x" }),
-    .internal (.promiseTimeout (oid "a")),
-    .internal (.callback (oid "a") (oid "x")),
-    .internal (.taskLeaseTimeout (oid "x")),
-    .internal (.taskRetryTimeout (oid "x")) ]
+    .internal (.promiseTimeout { id := oid "a" }),
+    .internal (.callback { awaited := oid "a", awaiter := oid "x" }),
+    .internal (.taskLeaseTimeout { id := oid "x" }),
+    .internal (.taskRetryTimeout { id := oid "x" }) ]
 
 def seqsLenA (ks : List Step) : Nat → List (List Step)
   | 0 => [[]]

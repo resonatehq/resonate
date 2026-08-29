@@ -91,13 +91,29 @@ namespace Abstraction
 open Equivalence
 open ServerModel (Ident)
 
+structure PromiseTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure TaskLeaseTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure TaskRetryTimeoutReq where
+  id : Ident
+  deriving Repr, DecidableEq
+
+structure ScheduleTimeoutReq where
+  schedule : Ident
+  deriving Repr, DecidableEq
+
 inductive InternalStep
-  | promiseTimeout   (id : Ident)
-  | listener         (id : Ident) (address : String)
-  | callback         (id awaiter : Ident)
-  | taskLeaseTimeout (id : Ident)
-  | taskRetryTimeout (id : Ident)
-  | scheduleTimeout  (id : Ident)
+  | promiseTimeout   (req : PromiseTimeoutReq)
+  | callback         (req : ServerModel.PromiseRegisterCallbackReq)
+  | listener         (req : ServerModel.PromiseRegisterListenerReq)
+  | taskLeaseTimeout (req : TaskLeaseTimeoutReq)
+  | taskRetryTimeout (req : TaskRetryTimeoutReq)
+  | scheduleTimeout  (req : ScheduleTimeoutReq)
   deriving Repr, DecidableEq
 
 inductive Step
@@ -122,12 +138,12 @@ deriving instance BEq for AbstractModel.ServerState
 
 def handleInternal (st : InternalStep) (now : Nat) : AbstractModel.H Unit :=
   match st with
-  | .promiseTimeout id   => AbstractModel.Internal.processPromiseTimeout id now
-  | .listener id a       => AbstractModel.Internal.processListener id a now
-  | .callback id x       => AbstractModel.Internal.processCallback id x now
-  | .taskLeaseTimeout id => AbstractModel.Internal.processLeaseTimeout id now
-  | .taskRetryTimeout id => AbstractModel.Internal.processRetryTimeout id now
-  | .scheduleTimeout id  => AbstractModel.Internal.processSchedule id now
+  | .promiseTimeout r   => AbstractModel.Internal.processPromiseTimeout r.id now
+  | .callback r         => AbstractModel.Internal.processCallback r.awaited r.awaiter now
+  | .listener r         => AbstractModel.Internal.processListener r.awaited r.address now
+  | .taskLeaseTimeout r => AbstractModel.Internal.processLeaseTimeout r.id now
+  | .taskRetryTimeout r => AbstractModel.Internal.processRetryTimeout r.id now
+  | .scheduleTimeout r  => AbstractModel.Internal.processSchedule r.schedule now
 
 def handle (st : Step) (now : Nat) : AbstractModel.H Response :=
   match st with

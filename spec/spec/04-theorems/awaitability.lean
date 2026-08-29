@@ -75,7 +75,7 @@ private def lateState : ServerState :=
                , { id := idOf "internal", promise := latePromise internalTags } ] }
 
 private def armed (suffix : String) : Bool :=
-  enabledInternal (.internal (.promiseTimeout (idOf suffix))) 100 lateState
+  enabledInternal (.internal (.promiseTimeout { id := idOf suffix })) 100 lateState
 
 theorem arms_a_runnable_deadline : armed "runnable" = true := by rfl
 theorem arms_an_external_deadline : armed "external" = true := by rfl
