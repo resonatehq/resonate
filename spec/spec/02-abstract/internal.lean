@@ -4,7 +4,7 @@ import «02-abstract».«external»
 
 Six steps a background job may fire: the promise timeout, the callback
 drain, the listener drain, the lease timeout, the retry dispatch, and
-the schedule. No client asks for these.
+the schedule.
 
 They take the FORCED reads — `touchObject` where the step persists what
 it projects, `viewObject` where it only needs to look. Neither is
