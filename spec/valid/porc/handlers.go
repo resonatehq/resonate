@@ -286,8 +286,8 @@ func (s *ServerState) PromiseRegisterListener(d Discipline, awaited, address str
 }
 
 func addressValid(a string) bool {
-	return strings.HasPrefix(a, "http://") || strings.HasPrefix(a, "https://") ||
-		(strings.HasPrefix(a, "poll://") && strings.ContainsRune(a, '@'))
+	i := strings.Index(a, "://")
+	return i > 0 && i+3 < len(a)
 }
 
 func (s *ServerState) TaskHalt(d Discipline, id string, now uint64) Response {

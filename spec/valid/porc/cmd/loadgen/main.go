@@ -43,6 +43,9 @@ var (
 	out     = flag.String("out", "run", "output prefix")
 	seed    = flag.Int64("seed", 1, "rng seed")
 	batch   = flag.Int("batch", 4, "operations sharing one debug instant")
+
+	horizon = flag.Uint64("horizon", 900000, "promise timeoutAt, relative to the debug instant")
+	lease   = flag.Uint64("lease", 60000, "task ttl")
 )
 
 type clock struct {
@@ -65,14 +68,19 @@ func main() {
 	flag.Parse()
 	rand.Seed(*seed)
 
-	if err := post(*url, "debug.start", map[string]any{}, nil); err != nil {
+	var hello json.RawMessage
+	if err := post(*url, "debug.start", map[string]any{}, &hello); err != nil {
 		fmt.Fprintln(os.Stderr, "loadgen: debug.start failed:", err)
 		fmt.Fprintln(os.Stderr, "         start the server with RESONATE_DEBUG=true")
 		os.Exit(2)
 	}
 	_ = post(*url, "debug.reset", map[string]any{}, nil)
 
-	clk := &clock{now: 1000}
+	base := serverNow(hello, 0)
+	if base == 0 {
+		base = 1000
+	}
+	clk := &clock{now: base}
 	var (
 		mu     sync.Mutex
 		events []event
@@ -94,6 +102,12 @@ func main() {
 
 				op, kind := nextOp(r, cid, int(i))
 				now := clk.next(*batch)
+				if _, ok := op["timeoutAt"]; ok {
+					op["timeoutAt"] = now + *horizon
+				}
+				if _, ok := op["ttl"]; ok {
+					op["ttl"] = *lease
+				}
 				op["__now"] = now
 
 				call := time.Now().UnixNano()
@@ -107,7 +121,8 @@ func main() {
 				delete(op, "__now")
 				reqJSON, _ := json.Marshal(op)
 				mu.Lock()
-				events = append(events, event{Kind: kind, Now: now, Req: reqJSON,
+
+				events = append(events, event{Kind: kind, Now: serverNow(res, now), Req: reqJSON,
 					Res: res, Call: call, Return: ret, Client: cid})
 				mu.Unlock()
 			}
@@ -192,6 +207,19 @@ func nextOp(r *rand.Rand, cid, i int) (map[string]any, string) {
 	default:
 		return map[string]any{"awaited": a, "address": "poll://any@w1"}, "promise.register_listener"
 	}
+}
+
+func serverNow(res json.RawMessage, fallback uint64) uint64 {
+	var env struct {
+		Head map[string]any `json:"head"`
+	}
+	if json.Unmarshal(res, &env) != nil {
+		return fallback
+	}
+	if n, ok := env.Head["resonate:debug_time"].(float64); ok {
+		return uint64(n)
+	}
+	return fallback
 }
 
 func post(url, kind string, data map[string]any, out *json.RawMessage) error {

@@ -159,12 +159,40 @@ def prefixOf : List Char → List Char → Bool
   | _, [] => false
   | c :: cs, d :: ds => c == d && prefixOf cs ds
 
-/-- A deliverable listener address: `http(s)://…`, or `poll://…` carrying an
-    `@group` (e.g. `poll://any@default` — a bare `poll://default` names no
-    group and could never be routed). -/
+/-- The remainder after the first `://`, if there is one. Structural on the
+    list, so it reduces under `decide` like everything else here. -/
+def afterScheme : List Char → Option (List Char)
+  | ':' :: '/' :: '/' :: rest => some rest
+  | _ :: cs => afterScheme cs
+  | [] => none
+
+/-- A deliverable listener address: `scheme://rest` for ANY scheme, with a
+    non-empty scheme and a non-empty remainder.
+
+    This used to name a closed set — `http(s)://…` and `poll://…@group` — and
+    that was the specification owning a list it has no reason to own. A
+    transport is named by its scheme, and adding a transport is not a protocol
+    change: an implementation routing `echod://bundle` or `bash://docker/image`
+    is not thereby non-conformant, and a checker that refuses those refutes
+    conformant implementations. What the predicate is *for* is rejecting an
+    address that could never be routed at all — no scheme, or nothing after it.
+    Whether a well-formed address is actually deliverable is the router's
+    business, not the model's.
+
+    The relaxation is monotone: every address admitted before is admitted now,
+    so any state invariant quantifying over `addressValid` (`properties.lean`
+    listeners/unblock) is weakened, never strengthened. -/
 def addressValid (a : String) : Bool :=
-  prefixOf "http://".toList a.toList || prefixOf "https://".toList a.toList ||
-  (prefixOf "poll://".toList a.toList && a.toList.contains '@')
+  match a.toList with
+  | [] => false
+  | cs =>
+    match afterScheme cs with
+    | none => false
+    -- `afterScheme` dropped `k` characters then the three of `://`, so
+    -- `cs.length = k + 3 + rest.length`. The scheme is non-empty exactly when
+    -- that is a strict inequality, which `==` on `Nat` decides without
+    -- reaching for a `Prop`.
+    | some rest => !rest.isEmpty && !(rest.length + 3 == cs.length)
 
 /-- Total decimal parse (digits fold left; a malformed tag yields a
     garbage number rather than a panic — tags are client-supplied, and
