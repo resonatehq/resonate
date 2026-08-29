@@ -179,29 +179,30 @@ impl PostgresEngine {
     /// empty list, so a message is never emitted twice for one attempt that
     /// did not commit. That is the atomicity the port promises, which an
     /// outbox got for free by being a table.
-    async fn transact<F, T>(
-        &self,
-        f: F,
-        serializable: bool,
-    ) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
+    async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
         F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        let max_retries: u32 = if serializable { 1 } else { 0 };
+        // One retry, unconditionally, as MySQL does. A serialization failure
+        // means the transaction aborted with nothing committed — the emissions
+        // above are dropped with it — so re-running the closure from scratch
+        // is safe, and `promise_create` raises this error itself precisely to
+        // ask for that. It used to be gated on a `serializable` flag that
+        // every one of the seven call sites passed `false`, so the retry never
+        // ran and the request the code asked to retry became a 503 instead.
+        const MAX_RETRIES: u32 = 1;
 
         let mut f = f;
-        for attempt in 0..=max_retries {
+        for attempt in 0..=MAX_RETRIES {
             #[cfg(feature = "concurrency-stress")]
             tokio::task::yield_now().await;
 
-            let mut tx = self.pool.begin().await.map_err(StorageError::from)?;
-            if serializable {
-                sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                    .execute(tx.as_mut())
-                    .await
-                    .map_err(StorageError::from)?;
-            }
+            // READ COMMITTED, the connection default, and what the
+            // single-round-trip CTEs are written against: they take their own
+            // row locks with `FOR UPDATE` rather than relying on the isolation
+            // level to serialize them.
+            let tx = self.pool.begin().await.map_err(StorageError::from)?;
 
             let task_retry_timeout = self.task_retry_timeout;
             let preload_limit = self.preload_limit;
@@ -233,7 +234,7 @@ impl PostgresEngine {
             let result = match result {
                 Ok(v) => v,
                 Err(StorageError::Serialization) => {
-                    if attempt < max_retries {
+                    if attempt < MAX_RETRIES {
                         tracing::warn!(
                             attempt = attempt + 1,
                             "Serialization failure (40001) in query, retrying"
@@ -254,7 +255,7 @@ impl PostgresEngine {
                         .as_database_error()
                         .and_then(|dbe| dbe.code().map(|c| c.to_string()));
                     if pg_err.as_deref() == Some("40001") || pg_err.as_deref() == Some("40P01") {
-                        if attempt < max_retries {
+                        if attempt < MAX_RETRIES {
                             continue;
                         }
                         return Err(StorageError::Serialization);
@@ -275,7 +276,7 @@ impl PostgresEngine {
     where
         F: FnMut(&PostgresDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
     {
-        match self.transact(f, false).await {
+        match self.transact(f).await {
             Ok((response, messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
@@ -308,7 +309,7 @@ impl PostgresEngine {
         F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.transact(f, false).await.map(|(v, _, _)| v)
+        self.transact(f).await.map(|(v, _, _)| v)
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -2202,28 +2203,26 @@ impl PostgresEngine {
     // ============================================================================
 
     async fn op_debug_reset(&self, req: &RequestEnvelope) -> Output {
-        Output::response(
-            match self.transact(move |db| db.debug_reset(), false).await {
-                Ok(((), _, _)) => {
-                    tracing::warn!("Debug reset: all data cleared");
-                    ResponseEnvelope::new(
-                        req.kind.clone(),
-                        req.head.corr_id.clone(),
-                        200,
-                        Value::Object(serde_json::Map::new()),
-                    )
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "Debug reset failed");
-                    ResponseEnvelope::error(
-                        req.kind.clone(),
-                        req.head.corr_id.clone(),
-                        500,
-                        &format!("Reset failed: {}", e),
-                    )
-                }
-            },
-        )
+        Output::response(match self.transact(move |db| db.debug_reset()).await {
+            Ok(((), _, _)) => {
+                tracing::warn!("Debug reset: all data cleared");
+                ResponseEnvelope::new(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    200,
+                    Value::Object(serde_json::Map::new()),
+                )
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Debug reset failed");
+                ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    500,
+                    &format!("Reset failed: {}", e),
+                )
+            }
+        })
     }
 
     async fn op_debug_snap(&self, req: &RequestEnvelope) -> Output {
@@ -2271,7 +2270,7 @@ impl PostgresEngine {
         }
 
         match self
-            .transact(move |db| process_all_timeouts(db, time).map(|_| ()), false)
+            .transact(move |db| process_all_timeouts(db, time).map(|_| ()))
             .await
         {
             Ok(((), messages, timeouts)) => Output {
@@ -4324,8 +4323,7 @@ impl ResonateEngine for PostgresEngine {
     }
 
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
-        self.transact(move |db| process_all_timeouts(db, now), false)
-            .await
+        self.transact(move |db| process_all_timeouts(db, now)).await
     }
 
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
@@ -4346,14 +4344,13 @@ impl PostgresEngine {
     async fn fire(&self, timeout: Timeout, now: i64) -> Output {
         let swept = match timeout {
             Timeout::ScheduleDue { schedule_id } => {
-                self.transact(
-                    move |db| process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ()),
-                    false,
-                )
+                self.transact(move |db| {
+                    process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ())
+                })
                 .await
             }
             other => {
-                self.transact(move |db| db.process_timeouts(now, Some(&other)), false)
+                self.transact(move |db| db.process_timeouts(now, Some(&other)))
                     .await
             }
         };
