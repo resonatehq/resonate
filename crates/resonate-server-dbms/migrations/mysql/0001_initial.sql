@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS promises (
   origin_id VARCHAR(255) GENERATED ALWAYS AS (SUBSTRING_INDEX(id, ':', 1)) STORED,
   parent_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:parent"') STORED,
   branch_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:branch"') STORED,
-  timer BOOLEAN GENERATED ALWAYS AS (COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
+  is_timer BOOLEAN GENERATED ALWAYS AS (COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
   settled_at BIGINT,

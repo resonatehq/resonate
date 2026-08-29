@@ -153,6 +153,19 @@ pub struct SqliteConfig {
     /// Path to SQLite database file
     #[serde(default = "default_db_path")]
     pub path: String,
+
+    /// How many branch siblings a task response may carry.
+    #[serde(default = "default_preload_limit")]
+    pub preload_limit: u32,
+
+    /// Apply pending migrations to an existing database.
+    ///
+    /// An empty database is always created. Beyond that, a schema behind the
+    /// binary is a deployment decision, not a startup default: without this
+    /// the server refuses to start and names what is pending, rather than
+    /// running DDL nobody asked for on a restart.
+    #[serde(default)]
+    pub migrate: bool,
 }
 
 fn default_db_path() -> String {
@@ -163,6 +176,8 @@ impl Default for SqliteConfig {
     fn default() -> Self {
         Self {
             path: default_db_path(),
+            preload_limit: default_preload_limit(),
+            migrate: false,
         }
     }
 }
@@ -176,9 +191,21 @@ pub struct PostgresConfig {
     /// Connection pool size
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+
+    /// How many branch siblings a task response may carry.
+    #[serde(default = "default_preload_limit")]
+    pub preload_limit: u32,
+
+    /// Apply pending migrations to an existing database. See `SqliteConfig`.
+    #[serde(default)]
+    pub migrate: bool,
 }
 
 fn default_pool_size() -> u32 {
+    10
+}
+
+fn default_preload_limit() -> u32 {
     10
 }
 
@@ -187,6 +214,8 @@ impl Default for PostgresConfig {
         Self {
             url: None,
             pool_size: default_pool_size(),
+            preload_limit: default_preload_limit(),
+            migrate: false,
         }
     }
 }
@@ -197,6 +226,14 @@ pub struct MysqlConfig {
     pub url: Option<String>,
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+
+    /// How many branch siblings a task response may carry.
+    #[serde(default = "default_preload_limit")]
+    pub preload_limit: u32,
+
+    /// Apply pending migrations to an existing database. See `SqliteConfig`.
+    #[serde(default)]
+    pub migrate: bool,
 }
 
 impl Default for MysqlConfig {
@@ -204,6 +241,8 @@ impl Default for MysqlConfig {
         Self {
             url: None,
             pool_size: default_pool_size(),
+            preload_limit: default_preload_limit(),
+            migrate: false,
         }
     }
 }

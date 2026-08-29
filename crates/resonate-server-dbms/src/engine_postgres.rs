@@ -56,6 +56,7 @@ use std::cell::{RefCell, UnsafeCell};
 pub struct PostgresEngine {
     pool: PgPool,
     task_retry_timeout: i64,
+    preload_limit: u32,
     /// Whether `debug.*` operations are permitted at all.
     debug: bool,
 }
@@ -120,6 +121,7 @@ impl PostgresEngine {
         url: &str,
         pool_size: u32,
         task_retry_timeout: i64,
+        preload_limit: u32,
         debug: bool,
     ) -> Result<Self, sqlx::Error> {
         let pool = sqlx::postgres::PgPoolOptions::new()
@@ -137,6 +139,7 @@ impl PostgresEngine {
         Ok(Self {
             pool,
             task_retry_timeout,
+            preload_limit,
             debug,
         })
     }
@@ -148,13 +151,22 @@ impl PostgresEngine {
     /// carrying the tables carries the invariants too, and no configuration
     /// can start a server that enforces fewer of them. An error here stops
     /// startup: a server whose schema did not migrate must not serve.
-    pub async fn init(&self) -> Result<(), sqlx::Error> {
+    pub async fn init(&self, migrate: bool) -> Result<(), sqlx::Error> {
         // The migrator's own bookkeeping table follows `search_path`, so the
         // schema has to exist before it runs.
         sqlx::raw_sql("CREATE SCHEMA IF NOT EXISTS resonate")
             .execute(&self.pool)
             .await?;
-        sqlx::migrate!("./migrations/postgres")
+        let migrator = sqlx::migrate!("./migrations/postgres");
+        // COUNT over a table that may not exist yet: a missing table is an
+        // empty database, which is the always-create case.
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        crate::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
+            .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
+        migrator
             .run(&self.pool)
             .await
             .map_err(|e| sqlx::Error::Migrate(Box::new(e)))
@@ -192,10 +204,12 @@ impl PostgresEngine {
             }
 
             let task_retry_timeout = self.task_retry_timeout;
+            let preload_limit = self.preload_limit;
             let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
                 let db = PostgresDb {
                     tx: UnsafeCell::new(tx),
                     task_retry_timeout,
+                    preload_limit,
                     emitted: RefCell::new(Vec::new()),
                     armed: RefCell::new(Vec::new()),
                 };
@@ -974,11 +988,10 @@ impl PostgresEngine {
                         ttl: if task_state == TaskState::Fulfilled { None } else { Some(r.ttl) },
                         pid: if task_state == TaskState::Fulfilled { None } else { Some(r.pid.to_string()) },
                     };
-                    let preload = if task_state == TaskState::Acquired {
-                        db.compute_preload(action_id)?
-                    } else {
-                        vec![]
-                    };
+                    // Every branch computes it: preload is branch-scoped, not
+                    // lifecycle-scoped, so a fulfilled task's siblings are as
+                    // real as an acquired one's.
+                    let preload = db.compute_preload(action_id)?;
                     return Ok(ResponseEnvelope::success(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -1008,7 +1021,7 @@ impl PostgresEngine {
                                     pid: None,
                                 },
                                 promise: res.promise,
-                                preload: vec![],
+                                preload: db.compute_preload(action_id)?,
                             },
                         ))
                     }
@@ -1057,7 +1070,7 @@ impl PostgresEngine {
                                         pid: None,
                                     },
                                     promise,
-                                    preload: vec![],
+                                    preload: db.compute_preload(action_id)?,
                                 },
                             ))
                         } else {
@@ -2286,6 +2299,7 @@ impl PostgresEngine {
 struct PostgresDb<'a> {
     tx: UnsafeCell<sqlx::Transaction<'a, sqlx::Postgres>>,
     task_retry_timeout: i64,
+    preload_limit: u32,
     /// What this transition has emitted so far. See `engine_sqlite.rs`
     /// — same reasoning, and the same reason it is not in a return type.
     emitted: RefCell<Vec<Outgoing>>,
@@ -2965,7 +2979,12 @@ impl PostgresDb<'_> {
                 lease_timeout_at = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.lease_timeout_at END,
                 ttl        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.ttl END,
                 pid        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.pid END,
-                resumes    = CASE WHEN p.task_state IN ('pending', 'acquired')
+                -- 'suspended' too: the row is being woken in this same
+                -- statement, so the pre-update state is what this CASE sees,
+                -- and a woken awaiter records the resume that woke it — which
+                -- is what SQLite and MySQL do by marking the callback ready
+                -- after their resume UPDATE.
+                resumes    = CASE WHEN p.task_state IN ('pending', 'acquired', 'suspended')
                                     AND NOT (p.resumes @> ARRAY[$1])
                                   THEN p.resumes || $1 ELSE p.resumes END
               WHERE p.id = $2
@@ -3420,9 +3439,11 @@ impl PostgresDb<'_> {
             FROM task_data td
             WHERE p.id = td.id AND p.task_version = td.version
               AND p.task_state = 'acquired' AND p.pid = $4
-            -- TODO (carried over from the multi-table backend): also require the
-            -- promise to be live, so a heartbeat on a task whose promise already
-            -- timed out is a no-op:  AND p.state = 'pending' AND p.timeout_at > $3
+            -- The promise-liveness guard: a heartbeat on a task whose promise
+            -- is pending-but-expired is a no-op. This is the one operation
+            -- that does not sweep first, so without it the lease would be
+            -- extended in the window before the wheel reaches the row.
+              AND (p.state != 'pending' OR p.timeout_at > $3)
             RETURNING p.id, p.lease_timeout_at
         ",
             )
@@ -3767,9 +3788,10 @@ impl PostgresDb<'_> {
                 "SELECT {P_COLS} FROM promises
                  WHERE branch_id = (SELECT branch_id FROM promises WHERE id = $1)
                    AND branch_id IS NOT NULL AND id <> $1
-                 ORDER BY id ASC"
+                 ORDER BY id ASC LIMIT $2"
             ))
             .bind(promise_id)
+            .bind(self.preload_limit as i64)
             .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows.iter().map(row_to_promise).collect())

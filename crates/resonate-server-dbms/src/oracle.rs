@@ -86,6 +86,9 @@ struct STimeout {
 // ─── Oracle ───────────────────────────────────────────────────────────────────
 
 pub struct Oracle {
+    /// How many branch siblings a task response may carry — the storage
+    /// configs' `preload_limit`, so the model truncates where the engines do.
+    preload_limit: u32,
     promises: BTreeMap<String, Promise>,
     tasks: BTreeMap<String, Task>,
     schedules: BTreeMap<String, Schedule>,
@@ -125,8 +128,15 @@ impl Default for Oracle {
 }
 
 impl Oracle {
+    /// The same default the storage configs carry, so a model built without
+    /// an explicit limit compares against an engine built without one.
     pub fn new() -> Self {
+        Self::with_preload_limit(10)
+    }
+
+    pub fn with_preload_limit(preload_limit: u32) -> Self {
         Self {
+            preload_limit,
             promises: BTreeMap::new(),
             tasks: BTreeMap::new(),
             schedules: BTreeMap::new(),
@@ -556,10 +566,15 @@ impl Oracle {
             }
         } else if !awaited_pending && awaiter_pending {
             // Direct resume: awaited already settled.
-            // Only Suspended awaiters need to be woken up. Pending/Acquired/Halted awaiters
-            // are already running; the caller sees the settled promise in the response.
-            // SQLite inserts no ready-callback entry in this path, so we must not touch
-            // t.resumes here — get_resumes would return 0 for all non-Suspended awaiters.
+            //
+            // A Suspended awaiter is woken; a Pending or Acquired one is
+            // already running and only records the resume. Either way the
+            // resume IS recorded — SQLite marks the callback ready after
+            // flipping the task to pending (`engine_sqlite.rs`, the
+            // INSERT ... ready = true that follows the resume UPDATE), so a
+            // woken awaiter carries one. This comment used to claim the
+            // opposite and skip the insert for the Suspended case, which put
+            // the model one resume behind SQLite and MySQL.
             let task_state = self.tasks.get(&r.awaiter).map(|t| t.state);
             let version = self.tasks.get(&r.awaiter).map(|t| t.version).unwrap_or(0);
             let addr = self
@@ -570,6 +585,7 @@ impl Oracle {
                 Some(TaskState::Suspended) => {
                     if let Some(t) = self.tasks.get_mut(&r.awaiter) {
                         t.state = TaskState::Pending;
+                        t.resumes.insert(r.awaited.clone());
                     }
                     self.set_t_timeout(&r.awaiter, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
                     if let Some(addr) = addr {
@@ -1459,11 +1475,22 @@ impl Oracle {
             Err(e) => return e,
         };
         for task_ref in &r.tasks {
+            // A heartbeat on a task whose promise has already passed its
+            // deadline is a no-op. `task.heartbeat` is the one operation that
+            // does not sweep first, so without this the lease of a task whose
+            // promise is pending-but-expired would be extended in the window
+            // before the wheel reaches it.
+            let promise_live = self
+                .promises
+                .get(&task_ref.id)
+                .map(|p| p.state != PromiseState::Pending || p.timeout_at > now)
+                .unwrap_or(false);
             let ttl = self
                 .tasks
                 .get(&task_ref.id)
                 .filter(|t| {
-                    t.state == TaskState::Acquired
+                    promise_live
+                        && t.state == TaskState::Acquired
                         && t.version == task_ref.version
                         && t.pid.as_deref() == Some(&r.pid)
                 })
@@ -2319,6 +2346,7 @@ impl Oracle {
                         .unwrap_or(false)
             })
             .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .take(self.preload_limit as usize)
             .collect()
     }
 
@@ -2553,6 +2581,10 @@ pub struct SharedOracle(Mutex<Oracle>);
 impl SharedOracle {
     pub fn new() -> Self {
         Self(Mutex::new(Oracle::new()))
+    }
+
+    pub fn with_preload_limit(preload_limit: u32) -> Self {
+        Self(Mutex::new(Oracle::with_preload_limit(preload_limit)))
     }
 
     /// Borrow the model directly, for tests that inspect or seed its state.

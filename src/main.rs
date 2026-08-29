@@ -182,11 +182,16 @@ async fn run_server(config: Config) -> Result<(), String> {
             let pool_size = config.storage.postgres.pool_size;
             tracing::info!("Using PostgreSQL backend");
             tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg =
-                PostgresEngine::connect(url, pool_size, config.tasks.retry_timeout, config.debug)
-                    .await
-                    .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
-            pg.init()
+            let pg = PostgresEngine::connect(
+                url,
+                pool_size,
+                config.tasks.retry_timeout,
+                config.storage.postgres.preload_limit,
+                config.debug,
+            )
+            .await
+            .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
+            pg.init(config.storage.postgres.migrate)
                 .await
                 .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
             tracing::info!("PostgreSQL initialized");
@@ -196,12 +201,17 @@ async fn run_server(config: Config) -> Result<(), String> {
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();
             let pool_size = config.storage.mysql.pool_size;
-            let mysql =
-                MysqlEngine::connect(url, pool_size, config.tasks.retry_timeout, config.debug)
-                    .await
-                    .map_err(|e| format!("MySQL connection failed: {e}"))?;
+            let mysql = MysqlEngine::connect(
+                url,
+                pool_size,
+                config.tasks.retry_timeout,
+                config.storage.mysql.preload_limit,
+                config.debug,
+            )
+            .await
+            .map_err(|e| format!("MySQL connection failed: {e}"))?;
             mysql
-                .init()
+                .init(config.storage.mysql.migrate)
                 .await
                 .map_err(|e| format!("MySQL init failed: {e}"))?;
             Arc::new(mysql)
@@ -210,8 +220,14 @@ async fn run_server(config: Config) -> Result<(), String> {
         _ => {
             let path = &config.storage.sqlite.path;
             tracing::info!(path = %path, "Using SQLite backend");
-            let sqlite = SqliteEngine::open(path, config.tasks.retry_timeout, config.debug)
-                .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
+            let sqlite = SqliteEngine::open(
+                path,
+                config.tasks.retry_timeout,
+                config.storage.sqlite.preload_limit,
+                config.storage.sqlite.migrate,
+                config.debug,
+            )
+            .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
             tracing::info!("SQLite initialized");
             Arc::new(sqlite)
         }

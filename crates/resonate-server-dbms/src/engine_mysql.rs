@@ -48,6 +48,7 @@ use resonate_core::util;
 pub struct MysqlEngine {
     pool: MySqlPool,
     task_retry_timeout: i64,
+    preload_limit: u32,
     /// Whether `debug.*` operations are permitted at all.
     debug: bool,
 }
@@ -57,6 +58,7 @@ impl MysqlEngine {
         url: &str,
         pool_size: u32,
         task_retry_timeout: i64,
+        preload_limit: u32,
         debug: bool,
     ) -> Result<Self, sqlx::Error> {
         // Use READ COMMITTED so every statement sees the latest committed row version.
@@ -78,14 +80,24 @@ impl MysqlEngine {
         Ok(Self {
             pool,
             task_retry_timeout,
+            preload_limit,
             debug,
         })
     }
 
     /// Migrate the schema. An error stops startup: a server whose schema did
     /// not migrate must not serve.
-    pub async fn init(&self) -> Result<(), sqlx::Error> {
-        sqlx::migrate!("./migrations/mysql")
+    pub async fn init(&self, migrate: bool) -> Result<(), sqlx::Error> {
+        let migrator = sqlx::migrate!("./migrations/mysql");
+        // COUNT over a table that may not exist yet: a missing table is an
+        // empty database, which is the always-create case.
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        crate::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
+            .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
+        migrator
             .run(&self.pool)
             .await
             .map_err(|e| sqlx::Error::Migrate(Box::new(e)))
@@ -112,10 +124,12 @@ impl MysqlEngine {
             let tx = self.pool.begin().await.map_err(StorageError::from)?;
 
             let task_retry_timeout = self.task_retry_timeout;
+            let preload_limit = self.preload_limit;
             let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
                 let db = MysqlDb {
                     tx: UnsafeCell::new(tx),
                     task_retry_timeout,
+                    preload_limit,
                     emitted: RefCell::new(Vec::new()),
                     armed: RefCell::new(Vec::new()),
                 };
@@ -909,11 +923,10 @@ impl MysqlEngine {
                         ttl: if task_state == TaskState::Fulfilled { None } else { Some(r.ttl) },
                         pid: if task_state == TaskState::Fulfilled { None } else { Some(r.pid.to_string()) },
                     };
-                    let preload = if task_state == TaskState::Acquired {
-                        db.compute_preload(action_id)?
-                    } else {
-                        vec![]
-                    };
+                    // Every branch computes it: preload is branch-scoped, not
+                    // lifecycle-scoped, so a fulfilled task's siblings are as
+                    // real as an acquired one's.
+                    let preload = db.compute_preload(action_id)?;
                     return Ok(ResponseEnvelope::success(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -943,7 +956,7 @@ impl MysqlEngine {
                                     pid: None,
                                 },
                                 promise: res.promise,
-                                preload: vec![],
+                                preload: db.compute_preload(action_id)?,
                             },
                         ))
                     }
@@ -992,7 +1005,7 @@ impl MysqlEngine {
                                         pid: None,
                                     },
                                     promise,
-                                    preload: vec![],
+                                    preload: db.compute_preload(action_id)?,
                                 },
                             ))
                         } else {
@@ -2224,6 +2237,7 @@ impl MysqlEngine {
 struct MysqlDb<'a> {
     tx: UnsafeCell<sqlx::Transaction<'a, sqlx::MySql>>,
     task_retry_timeout: i64,
+    preload_limit: u32,
     /// What this transition has emitted so far. See `engine_sqlite.rs`.
     emitted: RefCell<Vec<Outgoing>>,
     /// What deadlines this transition armed or moved. A hint; see
@@ -2642,7 +2656,7 @@ impl MysqlDb<'_> {
         // Find which of the given promises are expired and still pending
         let expired_rows = {
             let sql = format!(
-                "SELECT id FROM promises WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ?",
+                "SELECT id FROM promises WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ? ORDER BY id",
                 ph(n)
             );
             let mut q = sqlx::query(&sql);
@@ -2667,7 +2681,7 @@ impl MysqlDb<'_> {
         {
             let sql = format!(
                 "UPDATE promises
-                 SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END,
+                 SET state = CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
                      settled_at = timeout_at
                  WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ?",
                 ph(m)
@@ -3498,7 +3512,7 @@ impl MysqlDb<'_> {
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
                  AND NOT (COALESCE(tags->>'$.\"resonate:scope\"', '') = 'global' \
                           OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true' \
-                          OR target IS NOT NULL OR timer)",
+                          OR target IS NOT NULL OR is_timer)",
                 placeholders
             );
             let mut q = sqlx::query(&sql);
@@ -3832,10 +3846,11 @@ impl MysqlDb<'_> {
         let rows = rt_block_on(
             sqlx::query(
                 "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
-                 FROM promises WHERE branch_id = ? AND id != ? ORDER BY id ASC",
+                 FROM promises WHERE branch_id = ? AND id != ? ORDER BY id ASC LIMIT ?",
             )
             .bind(&branch)
             .bind(promise_id)
+            .bind(self.preload_limit as i64)
             .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows.iter().map(row_to_promise).collect())
@@ -4183,7 +4198,8 @@ impl MysqlDb<'_> {
                 sqlx::query(
                     "SELECT id FROM promises
                      WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?
-                       AND (? IS NULL OR id = ?)",
+                       AND (? IS NULL OR id = ?)
+                     ORDER BY id",
                 )
                 .bind(time)
                 .bind(id)
@@ -4203,7 +4219,7 @@ impl MysqlDb<'_> {
             {
                 let sql = format!(
                     "UPDATE promises
-                     SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END,
+                     SET state = CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
                          settled_at = timeout_at
                      WHERE id IN ({})",
                     ph(n)
@@ -4226,7 +4242,8 @@ impl MysqlDb<'_> {
                 sqlx::query(
                     "SELECT id FROM promises
                      WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= ?
-                       AND (? IS NULL OR id = ?)",
+                       AND (? IS NULL OR id = ?)
+                     ORDER BY id",
                 )
                 .bind(time)
                 .bind(id)
@@ -4270,7 +4287,8 @@ impl MysqlDb<'_> {
                 sqlx::query(
                     "SELECT id FROM promises
                      WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= ?
-                       AND (? IS NULL OR id = ?)",
+                       AND (? IS NULL OR id = ?)
+                     ORDER BY id",
                 )
                 .bind(time)
                 .bind(id)

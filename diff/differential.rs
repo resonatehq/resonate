@@ -45,6 +45,9 @@ use resonate_server_dbms::{
 use serde_json::{json, Value};
 
 const TASK_RETRY_TIMEOUT_MS: i64 = 30_000;
+/// Every backend gets the same limit, or `preload` would differ by
+/// construction rather than by behaviour. The storage configs' default.
+const PRELOAD_LIMIT: u32 = 10;
 // Fixed epoch anchor; all test times are offsets from here (ms).
 const T0: i64 = 1_000_000_000;
 // Fake worker URL — passes is_valid_address but no actual delivery attempted.
@@ -230,10 +233,11 @@ fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
 async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
-    let sqlite =
-        Arc::new(SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, true).expect("sqlite open"))
-            as Backend;
-    let oracle = Arc::new(SharedOracle::new());
+    let sqlite = Arc::new(
+        SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true, true)
+            .expect("sqlite open"),
+    ) as Backend;
+    let oracle = Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT));
 
     // Postgres and MySQL are opt-in via env vars.
     let pg_url = std::env::var("TEST_POSTGRES_URL").ok();
@@ -249,10 +253,10 @@ async fn differential_random() {
 
     let pg_backend: Option<Backend> = match pg_url {
         Some(url) => {
-            let pg = PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, true)
+            let pg = PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
                 .await
                 .expect("postgres connect");
-            pg.init().await.expect("postgres schema init");
+            pg.init(true).await.expect("postgres schema init");
             Some(Arc::new(pg) as Backend)
         }
         None => {
@@ -263,10 +267,10 @@ async fn differential_random() {
 
     let my_backend: Option<Backend> = match my_url {
         Some(url) => {
-            let my = MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, true)
+            let my = MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
                 .await
                 .expect("mysql connect");
-            my.init().await.expect("mysql schema init");
+            my.init(true).await.expect("mysql schema init");
             Some(Arc::new(my) as Backend)
         }
         None => {
@@ -755,9 +759,12 @@ fn assert_resps_agree(results: &[(String, i32, Value)], ctx: &str) {
     let all_statuses: Vec<(&str, i32)> = results.iter().map(|(n, s, _)| (n.as_str(), *s)).collect();
     let statuses_agree = all_statuses.windows(2).all(|w| w[0].1 == w[1].1);
     if !statuses_agree {
-        let detail: String = all_statuses
+        // The body too, not just the code: an error response carries the reason
+        // in `data`, and on a 500 that reason is the only thing that says which
+        // constraint or driver error produced it.
+        let detail: String = results
             .iter()
-            .map(|(n, s)| format!("  {n}={s}"))
+            .map(|(n, s, d)| format!("  {n}={s} {d}"))
             .collect::<Vec<_>>()
             .join("\n");
         panic!("{ctx}: status mismatch\n{detail}");

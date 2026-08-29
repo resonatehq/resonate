@@ -76,7 +76,7 @@ fn parse_task_state(s: &str) -> TaskState {
 /// here; everything that describes the tables lives in `migrations/sqlite`.
 /// A migration error is returned, not logged: a server whose schema did not
 /// migrate must not serve.
-pub fn init_db(conn: &mut Connection) -> rusqlite::Result<()> {
+pub fn init_db(conn: &mut Connection, migrate: bool) -> rusqlite::Result<()> {
     conn.execute_batch(
         "
         PRAGMA journal_mode = WAL;
@@ -85,7 +85,7 @@ pub fn init_db(conn: &mut Connection) -> rusqlite::Result<()> {
         PRAGMA synchronous = NORMAL;
         ",
     )?;
-    crate::migrate::run_rusqlite(conn, &MIGRATOR)?;
+    crate::migrate::run_rusqlite(conn, &MIGRATOR, migrate)?;
     Ok(())
 }
 
@@ -96,16 +96,24 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite")
 pub struct SqliteEngine {
     conn: Arc<Mutex<Connection>>,
     task_retry_timeout: i64,
+    preload_limit: u32,
     debug: bool,
 }
 
 impl SqliteEngine {
-    pub fn open(path: &str, task_retry_timeout: i64, debug: bool) -> rusqlite::Result<Self> {
+    pub fn open(
+        path: &str,
+        task_retry_timeout: i64,
+        preload_limit: u32,
+        migrate: bool,
+        debug: bool,
+    ) -> rusqlite::Result<Self> {
         let mut conn = Connection::open(path)?;
-        init_db(&mut conn)?;
+        init_db(&mut conn, migrate)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             task_retry_timeout,
+            preload_limit,
             debug,
         })
     }
@@ -128,6 +136,7 @@ impl SqliteEngine {
         let mut f = f;
         let conn = Arc::clone(&self.conn);
         let task_retry_timeout = self.task_retry_timeout;
+        let preload_limit = self.preload_limit;
         tokio::task::block_in_place(|| {
             // Use unwrap_or_else to recover from poisoned mutex (a prior panic
             // while holding the lock). The connection itself is still valid.
@@ -136,6 +145,7 @@ impl SqliteEngine {
             let db = SqliteDb {
                 conn: &tx,
                 task_retry_timeout,
+                preload_limit,
                 emitted: RefCell::new(Vec::new()),
                 armed: RefCell::new(Vec::new()),
             };
@@ -189,11 +199,13 @@ impl SqliteEngine {
         let mut f = f;
         let conn = Arc::clone(&self.conn);
         let task_retry_timeout = self.task_retry_timeout;
+        let preload_limit = self.preload_limit;
         tokio::task::block_in_place(|| {
             let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
             let db = SqliteDb {
                 conn: &conn,
                 task_retry_timeout,
+                preload_limit,
                 emitted: RefCell::new(Vec::new()),
                 armed: RefCell::new(Vec::new()),
             };
@@ -878,11 +890,10 @@ impl SqliteEngine {
                         ttl: if task_state == TaskState::Fulfilled { None } else { Some(r.ttl) },
                         pid: if task_state == TaskState::Fulfilled { None } else { Some(r.pid.to_string()) },
                     };
-                    let preload = if task_state == TaskState::Acquired {
-                        db.compute_preload(action_id)?
-                    } else {
-                        vec![]
-                    };
+                    // Every branch computes it: preload is branch-scoped, not
+                    // lifecycle-scoped, so a fulfilled task's siblings are as
+                    // real as an acquired one's.
+                    let preload = db.compute_preload(action_id)?;
                     return Ok(ResponseEnvelope::success(
                         kind_str.clone(),
                         corr_id.clone(),
@@ -912,7 +923,7 @@ impl SqliteEngine {
                                     pid: None,
                                 },
                                 promise: res.promise,
-                                preload: vec![],
+                                preload: db.compute_preload(action_id)?,
                             },
                         ))
                     }
@@ -961,7 +972,7 @@ impl SqliteEngine {
                                         pid: None,
                                     },
                                     promise,
-                                    preload: vec![],
+                                    preload: db.compute_preload(action_id)?,
                                 },
                             ))
                         } else {
@@ -2186,6 +2197,7 @@ impl SqliteEngine {
 struct SqliteDb<'a> {
     conn: &'a rusqlite::Connection,
     task_retry_timeout: i64,
+    preload_limit: u32,
     /// What this transition has emitted so far.
     ///
     /// `RefCell` because every operation takes `&SqliteDb` — an emission is a
@@ -2457,9 +2469,10 @@ impl<'a> SqliteDb<'a> {
         let ids_json = serde_json::to_string(ids).unwrap();
         // Find expired promises from the ID set
         let mut stmt = self.conn.prepare(
-            "SELECT id, timer, timeout_at FROM promises
+            "SELECT id, is_timer, timeout_at FROM promises
              WHERE id IN (SELECT value FROM json_each(?1))
-               AND state = 'pending' AND timeout_at <= ?2",
+               AND state = 'pending' AND timeout_at <= ?2
+             ORDER BY id",
         )?;
         let expired: Vec<(String, bool, i64)> = {
             let mut rows = stmt.query(params![ids_json, time])?;
@@ -2476,8 +2489,8 @@ impl<'a> SqliteDb<'a> {
 
         // Settle each expired promise
         let mut fulfilled_ids = Vec::new();
-        for (id, timer, timeout_at) in &expired {
-            let new_state = if *timer {
+        for (id, is_timer, timeout_at) in &expired {
+            let new_state = if *is_timer {
                 "resolved"
             } else {
                 "rejected_timedout"
@@ -2974,15 +2987,18 @@ impl<'a> SqliteDb<'a> {
             // Push the lease out only if the task is acquired at the right
             // version by the right pid. The two EXISTS subqueries against
             // `tasks` are now three predicates on the row being updated.
-            // TODO: also guard that the promise is still active
-            // (`state = 'pending' AND timeout_at > ?1`), so heartbeats on tasks
-            // whose promise has already timed out are no-ops.
+            // The last predicate is the promise-liveness guard: a heartbeat on
+            // a task whose promise is pending-but-expired is a no-op. This is
+            // the one operation that does not sweep first, so without it the
+            // lease would be extended in the window before the wheel reaches
+            // the row.
             // RETURNING, because the new deadline is `?1 + ttl` and `ttl` is
             // a column: the caller cannot compute what was written without
             // reading it. The one statement here that needs the row back.
             let mut stmt = self.conn.prepare(
                 "UPDATE promises SET lease_timeout_at = ?1 + ttl
                  WHERE id = ?2 AND pid = ?3 AND task_version = ?4 AND task_state = 'acquired'
+                   AND (state != 'pending' OR timeout_at > ?1)
                  RETURNING lease_timeout_at",
             )?;
             let mut rows = stmt.query(params![time, task_id, pid, version])?;
@@ -3265,9 +3281,9 @@ impl<'a> SqliteDb<'a> {
         };
         let mut stmt = self.conn.prepare(
             "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
-             FROM promises WHERE branch_id = ?1 AND id != ?2 ORDER BY id ASC",
+             FROM promises WHERE branch_id = ?1 AND id != ?2 ORDER BY id ASC LIMIT ?3",
         )?;
-        let mut rows = stmt.query(params![branch, promise_id])?;
+        let mut rows = stmt.query(params![branch, promise_id, self.preload_limit])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
             results.push(row_to_promise(row)?);
@@ -3561,7 +3577,8 @@ impl<'a> SqliteDb<'a> {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
                      WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
-                       AND (?2 IS NULL OR id = ?2)",
+                       AND (?2 IS NULL OR id = ?2)
+                     ORDER BY id",
                 )?;
                 let mut rows = stmt.query(params![time, id])?;
                 let mut r = Vec::new();
@@ -3576,7 +3593,7 @@ impl<'a> SqliteDb<'a> {
         let mut fulfilled_ids = Vec::new();
         for id in &expired_ids {
             self.conn.execute(
-                "UPDATE promises SET state = CASE WHEN timer THEN 'resolved' ELSE 'rejected_timedout' END, settled_at = timeout_at WHERE id = ?1 AND state = 'pending'",
+                "UPDATE promises SET state = CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END, settled_at = timeout_at WHERE id = ?1 AND state = 'pending'",
                 params![id],
             )?;
         }
@@ -3608,7 +3625,8 @@ impl<'a> SqliteDb<'a> {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
                      WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= ?1
-                       AND (?2 IS NULL OR id = ?2)",
+                       AND (?2 IS NULL OR id = ?2)
+                     ORDER BY id",
                 )?;
                 let mut rows = stmt.query(params![time, id])?;
                 let mut r = Vec::new();
@@ -3637,7 +3655,8 @@ impl<'a> SqliteDb<'a> {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
                      WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= ?1
-                       AND (?2 IS NULL OR id = ?2)",
+                       AND (?2 IS NULL OR id = ?2)
+                     ORDER BY id",
                 )?;
                 let mut rows = stmt.query(params![time, id])?;
                 let mut r = Vec::new();
